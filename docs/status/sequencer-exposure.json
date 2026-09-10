@@ -4287,6 +4287,73 @@
           "rationale": "docs/status/agent-capabilities.json is unchanged. Manifest surfaces are classified in the ledger as descriptor admissions precisely because publishing a description admits no caller."
         }
       }
+    },
+    {
+      "id": "nested-trimmed-groove-chase",
+      "title": "Groove-chased notes survive a trimmed nested placement",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "588515e2-d977-4581-9a0b-138057a6f6ef",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "tools/scripts/negative_capability_check.py",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "docs/guides/timeline-sdk.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "groove_timing_reach"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.hpp",
+          "needles": [
+            "groove_pad_left"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_compiler.cpp",
+          "needles": [
+            "pad_left"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "trimmed_groove_chase_project"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Lowering a trimmed nested placement is engine-internal; no installed SDK type, header or entry point changes, and the groove pad is computed and consumed entirely inside the compiler."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes; the fix alters which notes an existing compile emits, not how a compile is invoked or reported."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the existing operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal and a note-loss defect beneath controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed; the groove reach is an internal supremum with no authored surface."
+        }
+      }
     }
   ],
   "tombstones": []

@@ -34,6 +34,20 @@ struct LoweredClip {
     timeline::ItemId context_sequence_id;
     // Owner-sequence tick corresponding to `clip.start()` after flattening.
     timebase::TickPosition context_start;
+    // Ticks of note content retained OUTSIDE this clip's audible window, so a
+    // groove that pulls a note across a trim edge still has that note to pull.
+    //
+    // Note offsets on a padded clip are measured from
+    // `clip.start() - groove_pad_left`, not from `clip.start()`. `context_start`
+    // deliberately keeps naming the owner tick of `clip.start()` itself, because
+    // registered content and chord lookups anchor on it and must not move.
+    //
+    // Both are zero unless the leaf was trimmed by its nesting AND its owner's
+    // groove actually displaces, so an untrimmed or feel-free leaf lowers to the
+    // same clip it always did. Only note content is padded: automation lanes are
+    // not groove-displaced, so they stay anchored to the unpadded window.
+    std::int64_t groove_pad_left = 0;
+    std::int64_t groove_pad_right = 0;
 };
 
 class SequenceContentLowerer {

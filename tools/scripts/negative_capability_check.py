@@ -381,7 +381,7 @@ def run_selftest() -> int:
         document = json.loads(original_allowlist)
 
         # Dropping a known refusal must name it again.
-        for dropped in ("TrimmedGrooveUnsupported", "TrimmedRegisteredContentUnsupported"):
+        for dropped in ("NestedGainSinkUnsupported", "TrimmedRegisteredContentUnsupported"):
             trimmed = {
                 "refusals": [
                     entry for entry in document["refusals"] if entry["code"] != dropped

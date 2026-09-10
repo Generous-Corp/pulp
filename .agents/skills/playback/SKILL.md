@@ -777,8 +777,10 @@ owner-sequence onset. Move note-on/off by one shared displacement, intersect the
 pair with the owning clip's half-open window, scale velocity half-up with
 saturation, then subdivide the retained span for ratchets. Nested leaves carry
 their owner sequence and source onset through lowering; never compose parent and
-child groove. A trimmed nested MIDI leaf with authored groove is refused as
-`TrimmedGrooveUnsupported` until source-window chase semantics are specified.
+child groove. A trimmed nested MIDI leaf with authored groove selects over a window widened
+by `groove_timing_reach`, so a note just outside a retained edge is still
+available to be chased back in at its full authored length; whether it actually
+sounds is decided afterwards by the clamp to the retained window.
 
 **Adding a `CompileContextKind` is a data change, with one trap.** Both
 `CompileInvalidationIndex::build()` and the `CompileContextSubscriptions` bitset
@@ -1283,6 +1285,37 @@ case too, since dropping points past the window end is the mirror failure.
 The retained window is half-open in child-local ticks: points before it set
 what sounds on entry, points at or after `left_trim + target_duration` are
 never reached and must not be emitted.
+
+## A feel-free groove pads nothing observable, so do not test the reach short-circuit
+
+`groove_timing_reach()` returns a supremum, not an estimate: swing's
+displacement map is piecewise linear with its extremum exactly at the pair
+midpoint, a step table adds its widest authored offset, and the two compose
+additively. It short-circuits to zero when a groove `states_no_feel()` or its
+`timing_strength()` is zero.
+
+That short-circuit is a **cost guard, not a behavioural one, and no black-box
+fixture can make it fail** — a `confirm_failure.sh` cycle over it correctly
+returns NOT CONFIRMED. The reason is the sounding clamp in
+`program_compiler.cpp`: a note the pad newly admits lies entirely outside
+`clip.start()`, and a groove that displaces nothing has nothing to carry it back
+inside, so `sounding_end <= sounding_start` and the note is dropped as
+zero-length. The right edge behaves the same way. Padding a window whose groove
+moves nothing therefore changes compiled output by exactly nothing, by
+construction.
+
+That was measured, not argued: with the strength-zero clause deleted and a probe
+note planted squarely in the pad region, every feel-free assertion still passed,
+while the same note was plainly visible under an authored groove. Keep the
+clause — padding a window that provably needs none is waste — but do not claim
+it is covered, and do not add a fixture that appears to cover it. Demanding
+coverage for a branch with no observable behaviour is a category error, and the
+usual way it gets "satisfied" is by quietly weakening a neighbouring assertion.
+
+The pad is invisible to *most* notes for a second reason worth knowing: the
+lowerer measures `clipped_note.start` from the **padded** window and the
+compiler subtracts `pad_left` back off, so the arithmetic cancels. Only a note
+the pad newly admits reads differently.
 
 ## The program wire refuses what it cannot represent
 
