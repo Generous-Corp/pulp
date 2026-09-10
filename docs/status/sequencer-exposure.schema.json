@@ -6,8 +6,8 @@
   "additionalProperties": false,
   "required": ["schema_version", "ledger_id", "audit", "rows", "tombstones"],
   "properties": {
-    "schema_version": { "const": 1 },
-    "ledger_id": { "const": "dev.pulp.sequencer-exposure@1" },
+    "schema_version": { "const": 2 },
+    "ledger_id": { "const": "dev.pulp.sequencer-exposure@2" },
     "audit": { "$ref": "#/$defs/audit" },
     "rows": {
       "type": "array",
@@ -118,6 +118,38 @@
         }
       }
     },
+    "authority": {
+      "description": "The authority an exposed surface admits a caller under. Distinct from docs/status/authority-navigation.json, which records which ledger is authoritative for a subject; this records what a caller is allowed to do once admitted. The profile, quota, and refusal vocabulary is owned by tools/timeline/src/writer_profile.cpp, and the checker validates this descriptor against that source rather than against a transcription of it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["admission", "writer_profile", "bounds", "refusal_codes"],
+      "properties": {
+        "admission": {
+          "description": "in_process: the caller links the surface directly and holds whatever the API grants, with no boundary admitting it. registered_writer: the boundary registers a document writer under a named profile. read_only: the operation cannot mutate a document. descriptor: the surface publishes a description and admits no caller.",
+          "enum": ["in_process", "registered_writer", "read_only", "descriptor"]
+        },
+        "writer_profile": {
+          "description": "The profile name the boundary registers the writer under, or null when no writer is registered. Validated against writer_profile_by_name.",
+          "type": ["string", "null"]
+        },
+        "bounds": {
+          "description": "The registered writer's retained-byte ceilings, or null when no writer is registered. A null ceiling inside the object means unquotaed, matching how the boundaries publish it.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["max_transaction_retained_bytes", "max_session_retained_bytes"],
+          "properties": {
+            "max_transaction_retained_bytes": { "type": ["integer", "null"], "minimum": 0 },
+            "max_session_retained_bytes": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        },
+        "refusal_codes": {
+          "description": "Conflict codes this surface can refuse an admitted caller with. Validated against conflict_code_name.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "surface": {
       "type": "object",
       "additionalProperties": false,
@@ -136,7 +168,8 @@
         "evidence": {
           "type": "array",
           "items": { "$ref": "#/$defs/evidence" }
-        }
+        },
+        "authority": { "$ref": "#/$defs/authority" }
       },
       "allOf": [
         {
@@ -161,7 +194,7 @@
             "required": ["disposition"]
           },
           "then": {
-            "required": ["evidence"],
+            "required": ["evidence", "authority"],
             "properties": {
               "evidence": { "minItems": 1 }
             }
