@@ -2288,6 +2288,42 @@ covered by that test — when adding a build step to any workflow, give it an
 explicit count or route it through `tools/ci/governed-build.sh` (mandatory
 anyway for legs that can resolve to the shared self-hosted Macs).
 
+### A hosted macOS lane has ~39 GiB of disk, and ENOSPC arrives with no diagnostic
+
+A GitHub-hosted `macos-15` runner presents a 320 GiB volume of which the image
+already consumes ~262 GiB, leaving roughly **39 GiB free** — measured from
+`example-validation`'s `df -h .`, which one full example build takes from 39 GiB
+down to 23 GiB. That is the real budget for every hosted macOS lane, and it has
+nothing to do with the 200+ GiB free on the self-hosted Studios.
+
+Two things make this bite, and neither shows up as a normal failure:
+
+1. **Sanitizer and coverage lanes are the ones that exceed it.** A Debug build
+   of the test tree is dominated by *executables*, not by debug info: over 1,500
+   test binaries at ~35 MiB each, since each one statically links the whole SDK.
+   On Apple the DWARF stays in the `.o`/`.a` files (an executable carries only a
+   debug map in `__LINKEDIT`, and `otool -l` on one shows no `__DWARF` segment),
+   so a full Debug tree's objects and archives together are only a few hundred
+   MiB. **Reaching for `-gline-tables-only` to save space here therefore buys
+   almost nothing** — the size is duplicated instrumented code. Deleting
+   `_deps/*-build` is the same trap: those measure ~170 MiB, because the bulk of
+   `_deps` is `*-src` and CI keeps sources in the shared
+   `~/Library/Caches/Pulp/fetchcontent-src` outside the build tree entirely.
+   What actually helps is not keeping two build trees alive at once.
+
+2. **ENOSPC surfaces as a runner-internal error, not a build error.** The
+   runner fails writing its own `_diag` page and then `event.json`, so the log's
+   last real content is whatever test happened to be running. Nothing in it says
+   "disk". Lanes that print `df` before and after their heavy steps are the only
+   ones where the next exhaustion is self-diagnosing — worth adding when you
+   touch a hosted macOS lane.
+
+The reclaim step in `coverage.yml` and the ASan job is the standard remedy: the
+hosted image ships **nine** Xcode bundles, and removing the eight inactive ones
+(plus `brew cleanup --prune=all`) takes free space from ~39 GiB to ~76 GiB. Keep
+its `runner.environment == 'github-hosted'` guard — without it the same step
+would delete Xcode off a self-hosted Studio.
+
 ### `shipyard pr` can leave YOUR build dir at Debug — and a later "successful" build can be stale
 
 The local validation backend builds Debug in the editing checkout. That is
