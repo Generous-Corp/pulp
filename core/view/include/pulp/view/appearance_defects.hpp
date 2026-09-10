@@ -30,15 +30,18 @@ enum class AppearanceDefectKind {
     /// `stroke_text`) share pixels. These are drawn by a command stream, not
     /// by a layout node, so no box-based check can see them.
     canvas_text_overlap,
-    /// A clipping container is on screen with area of its own, and every
-    /// piece of text beneath it is clipped away — the user sees an empty
-    /// panel. The signature is exact: N text runs in the subtree, all N
-    /// clipped, N >= 1. A scroll frame showing some of its rows measures at
-    /// least one and is not this; a frame scrolled entirely past its text
-    /// measures none and is, which is honest, because that frame is blank to
-    /// look at. This is the one defect the collision detectors are
-    /// structurally unable to see: text that never lands anywhere produces no
-    /// pair to compare and no box to outgrow, so the report reads clean.
+    /// A visible clipping container holds text and shows none of it — the
+    /// viewer sees an empty panel. The signature is exact: N text runs in the
+    /// subtree, all N clipped away, N >= 1. A scroll frame showing some of its
+    /// rows measures at least one and is not this; a frame scrolled entirely
+    /// past its text measures none and is, which is honest, because that frame
+    /// is blank to look at. The container's own box may be collapsed to zero
+    /// area, which is the same defect wearing a different geometry — a
+    /// container closed on purpose is marked invisible instead, and the walk
+    /// records that as an invisible skip without ever opening a clip scope.
+    /// This is the one defect the collision detectors are structurally unable
+    /// to see: text that never lands anywhere produces no pair to compare and
+    /// no box to outgrow, so the report reads clean.
     container_paints_no_text,
 };
 

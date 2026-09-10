@@ -528,10 +528,11 @@ std::string AppearanceFinding::describe() const {
     os.precision(1);
     os << to_string(kind) << ": ";
     if (kind == AppearanceDefectKind::container_paints_no_text) {
-        os << a_id << " is on screen at " << rect_str(a_rect)
-           << " but all " << clipped_runs
-           << " of its text runs are clipped away (e.g. \"" << a_text
-           << "\"); its clip is " << rect_str(b_rect);
+        const bool collapsed = a_rect.width <= 0.0f || a_rect.height <= 0.0f;
+        os << a_id << " is visible at " << rect_str(a_rect)
+           << (collapsed ? " (collapsed to no area) " : " ") << "but all "
+           << clipped_runs << " of its text runs are clipped away (e.g. \""
+           << a_text << "\"); its clip is " << rect_str(b_rect);
     } else if (kind == AppearanceDefectKind::painted_wider_than_box) {
         os << a_id << " \"" << a_text << "\" paints " << painted_width
            << "px of ink outside its " << box_width << "px box by "
@@ -581,9 +582,13 @@ AppearanceReport detect_appearance_defects(const View& root,
         std::vector<bool> qualifies(scopes.size(), false);
         for (std::size_t i = 0; i < scopes.size(); ++i) {
             const auto& scope = scopes[i];
-            qualifies[i] = scope.clipped > 0 && scope.measured == 0 &&
-                           scope.box.width > 0.0f && scope.box.height > 0.0f &&
-                           scope.clip.width > 0.0f && scope.clip.height > 0.0f;
+            // No area requirement on the container. A panel that collapsed to
+            // zero height over its own contents is the same defect wearing a
+            // different geometry, and excluding it excludes the case that
+            // motivates the detector. A container closed on purpose is marked
+            // invisible instead, which the walk records as an invisible skip and
+            // never opens a scope for, so it cannot arrive here.
+            qualifies[i] = scope.clipped > 0 && scope.measured == 0;
         }
         for (std::size_t i = 0; i < scopes.size(); ++i) {
             if (!qualifies[i]) continue;

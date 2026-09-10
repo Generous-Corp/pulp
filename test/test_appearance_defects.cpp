@@ -622,3 +622,60 @@ TEST_CASE("one unreachable container is enough to withdraw a clean verdict",
     REQUIRE(control.coverage.text_runs_measured == 8);
     REQUIRE(control.coverage.trustworthy());
 }
+
+TEST_CASE("a container collapsed over its own text is reported",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 1280, 900});
+
+    // The shape a real collapsed panel takes: the frame keeps its width, loses
+    // its height, and clips away everything it holds. Its box has no area, so a
+    // detector that insists on a non-degenerate container misses exactly this.
+    auto* panel = add_clipper(root, "settings_body", {0, 200, 486, 0});
+    add_label(*panel, "opt_a", "Theme", {0, 0, 200, 20});
+    add_label(*panel, "opt_b", "Grid density", {0, 40, 200, 20});
+    add_label(*panel, "opt_c", "Peak hold", {0, 80, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 1);
+
+    const auto& f = *std::find_if(
+        report.findings.begin(), report.findings.end(), [](const AppearanceFinding& x) {
+            return x.kind == AppearanceDefectKind::container_paints_no_text;
+        });
+    REQUIRE(f.a_id == "settings_body");
+    REQUIRE(f.clipped_runs == 3);
+    // The description names the collapse, so the geometry is not left to be
+    // inferred from a rectangle printed with a zero in it.
+    REQUIRE(f.describe().find("collapsed to no area") != std::string::npos);
+
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 3);
+    REQUIRE_FALSE(report.coverage.trustworthy());
+}
+
+TEST_CASE("a panel closed by hiding it is not an empty container",
+          "[appearance][layout]") {
+    View root;
+    root.set_bounds({0, 0, 1280, 900});
+
+    add_label(root, "title", "Spectrum", {12, 12, 200, 20});
+
+    // A container closed the ordinary way. Hiding it is what separates a panel
+    // that is shut from one that is broken, and the walk must read it that way:
+    // its text is an invisible skip, not a clipped one, and no scope opens over
+    // it. Without this the detector would call every closed menu a defect.
+    auto* panel = add_clipper(root, "menu", {0, 200, 486, 0});
+    panel->set_visible(false);
+    add_label(*panel, "item_a", "Theme", {0, 0, 200, 20});
+    add_label(*panel, "item_b", "Grid density", {0, 40, 200, 20});
+
+    const auto report = detect_appearance_defects(root);
+
+    INFO(report.to_string());
+    REQUIRE(count_kind(report, AppearanceDefectKind::container_paints_no_text) == 0);
+    REQUIRE(report.coverage.skipped_clipped == 0);
+    REQUIRE(report.coverage.skipped_invisible == 2);
+    REQUIRE(report.coverage.skipped_clipped_in_empty_container == 0);
+}
