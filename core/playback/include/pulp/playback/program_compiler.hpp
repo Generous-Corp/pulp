@@ -170,6 +170,22 @@ enum class CompileErrorCode : std::uint8_t {
     // need a partial ramp the clip model cannot express. Refuse until the
     // window envelope has a representation of its own.
     NestedPlacementFadeUnsupported,
+    // A nested child track is frozen. Freeze substitutes a sealed rendered
+    // artifact for everything the track would otherwise play, which is why the
+    // top-level walk returns Freeze content and discards the arrangement. The
+    // nested walk has no such substitution: it descends into the child's clips,
+    // so honouring the freeze would mean emitting the artifact in place of
+    // material the walk is already reading, and ignoring it would play the very
+    // arrangement the author froze. Refuse until a flattened leaf can carry
+    // rendered media standing in for a whole child track.
+    NestedFrozenTrackUnsupported,
+    // A nested child track has a take lane selected. An active lane substitutes
+    // its comped takes for the arrangement, exactly as freeze substitutes an
+    // artifact, and the nested walk reads the arrangement instead. Playing the
+    // arrangement would sound the take the author deselected, so the selection
+    // is refused rather than silently inverted. Dormant lanes do not refuse:
+    // an unselected lane changes nothing at either level.
+    NestedActiveTakeUnsupported,
 };
 
 struct CompileError {

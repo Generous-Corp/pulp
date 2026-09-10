@@ -2,8 +2,10 @@
 #include <pulp/playback/program_wire.hpp>
 #include "../core/playback/src/sequence_content_lowerer.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <span>
 #include <utility>
 
 TEST_CASE("Nested notes compile like a hand-flattened track and fan out dirty children") {
@@ -782,6 +784,74 @@ TEST_CASE("Nested MIDI reads exactly its owning sequence groove") {
     REQUIRE(root_events[0].tick == TickPosition{200});
     REQUIRE(root_events[0].velocity == 0xffff);
     REQUIRE(root_events[1].tick == TickPosition{440});
+}
+
+TEST_CASE("A nested child that is record-armed or holds an unselected take lowers unchanged") {
+    // Neither state reaches lowered output at either level: begin_track reads
+    // freeze and the ACTIVE lane, and never record-arm or the lane list. Both
+    // used to refuse, so a document that already compiled correctly was
+    // rejected for carrying intent that changes nothing.
+    const auto plain = compile(shared(nested_child_state_project({})));
+    const auto plain_events = plain->find_track({3})->arrangement_note_events();
+    REQUIRE(plain_events.size() == 2);
+
+    const auto armed = compile(shared(nested_child_state_project({.record_armed = true})));
+    const auto dormant = compile(shared(nested_child_state_project({.dormant_take_lane = true})));
+    const auto both = compile(
+        shared(nested_child_state_project({.record_armed = true, .dormant_take_lane = true})));
+
+    // NoteProgramEvent compares by every field, so this is identity of sample,
+    // tick, clip, note, velocity, pitch, channel and kind — not just position.
+    const auto identical = [&](std::span<const NoteProgramEvent> events) {
+        return std::equal(events.begin(), events.end(), plain_events.begin(), plain_events.end());
+    };
+    REQUIRE(identical(armed->find_track({3})->arrangement_note_events()));
+    REQUIRE(identical(dormant->find_track({3})->arrangement_note_events()));
+    REQUIRE(identical(both->find_track({3})->arrangement_note_events()));
+}
+
+TEST_CASE("A nested frozen child refuses with the code that names the freeze") {
+    // The negative control for the case above. Freeze substitutes a rendered
+    // artifact for the arrangement, and the nested walk reads the arrangement,
+    // so compiling would play exactly the material the author froze.
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = shared(nested_child_state_project({.frozen = true}));
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    REQUIRE(compiler.submit(std::move(request)));
+    REQUIRE(compiler.status().has_error);
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::NestedFrozenTrackUnsupported);
+    REQUIRE(compiler.status().last_error.item == ItemId{11});
+    REQUIRE_FALSE(store.has_value());
+}
+
+TEST_CASE("A nested child with a SELECTED take lane refuses where a dormant one does not") {
+    // The same lane and the same take as the dormant case above; only the
+    // selection differs. That is what separates this refusal from a blanket
+    // one over take lanes, and it is why the fixture authors a real take
+    // rather than an empty lane.
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = shared(
+        nested_child_state_project({.dormant_take_lane = true, .active_take_lane = true}));
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    REQUIRE(compiler.submit(std::move(request)));
+    REQUIRE(compiler.status().has_error);
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+    REQUIRE(compiler.status().last_error.item == ItemId{11});
+    REQUIRE_FALSE(store.has_value());
 }
 
 TEST_CASE("A trimmed nested MIDI leaf with authored groove lowers like the untrimmed one") {

@@ -103,6 +103,10 @@ std::string_view compile_error_code_name(playback::CompileErrorCode code) noexce
         return "NestedGainSinkUnsupported";
     case playback::CompileErrorCode::NestedPlacementFadeUnsupported:
         return "NestedPlacementFadeUnsupported";
+    case playback::CompileErrorCode::NestedFrozenTrackUnsupported:
+        return "NestedFrozenTrackUnsupported";
+    case playback::CompileErrorCode::NestedActiveTakeUnsupported:
+        return "NestedActiveTakeUnsupported";
     }
     return "InvalidRequest";
 }
