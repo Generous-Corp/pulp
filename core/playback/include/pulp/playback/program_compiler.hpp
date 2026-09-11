@@ -164,11 +164,14 @@ enum class CompileErrorCode : std::uint8_t {
     // events no renderer scales by clip gain. Refuse rather than fold a child
     // fader into a value nothing will read.
     NestedGainSinkUnsupported,
-    // A SequenceRef placement carries a fade. That fade is one envelope over
-    // the whole nested window, while a flattened leaf can only carry a fade
-    // measured from its own edge, so a leaf lying inside the fade region would
-    // need a partial ramp the clip model cannot express. Refuse until the
-    // window envelope has a representation of its own.
+    // A SequenceRef placement's fade had nowhere to land. The envelope itself
+    // composes: it travels beside each flattened leaf as the ramp it is, and
+    // the leaf is read at its own position within it. But a fade is a
+    // time-varying gain, so it needs the sink a static gain needs, and the leaf
+    // kinds that have none are the same ones NestedGainSinkUnsupported names.
+    // Refuse rather than play such a leaf at full level through an envelope the
+    // author wrote. Only a leaf a ramp actually reaches refuses; one lying
+    // wholly past a ramp reads unity and compiles.
     NestedPlacementFadeUnsupported,
     // A nested child track is frozen. Freeze substitutes a sealed rendered
     // artifact for everything the track would otherwise play, which is why the
