@@ -1278,7 +1278,16 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                 combo->on_mouse_event(me);
             }
 
-            self.rootView->simulate_hover(pt);
+            // Hover delivery, including the JS `pointermove` a scripted UI
+            // binds its cursor decision to. This used to be a bare
+            // `simulate_hover`, which raises the hover flags and calls
+            // `on_hover_move` but runs no JavaScript — so a scripted UI never
+            // saw a buttonless move and only revised its cursor once a button
+            // went down. The cursor is resolved below, AFTER this, so the value
+            // published is the one the handler just set.
+            pulp::view::deliver_hover_move(
+                *self.rootView, pt,
+                modifiers_from_ns_flags(event.modifierFlags));
 
             // Remember where the pointer is so the frame path can re-resolve
             // the cursor after the content under it moves.
@@ -1795,19 +1804,6 @@ public:
             view_.frameClock = &frame_clock_;
             view_.framePump = &frame_pump_;
             [window_ setContentView:view_];
-
-            // The CPU host backs the floating inspector
-            // window. Its PulpView tracking area carries NSTrackingMouseMoved,
-            // but a tracking area only fans -mouseMoved: out to its owner when
-            // the window itself accepts mouse-moved events; NSWindow defaults
-            // that flag to NO. The main GPU canvas window happened to get moves
-            // anyway (primary key window, continuous run-loop pump), so the
-            // shared -mouseMoved: -> rootView->simulate_hover(pt) path that
-            // drives View::on_hover_move() (and thus the ToolStrip's per-button
-            // tooltip) never fired for the secondary inspector window. Opting
-            // the window into mouse-moved delivery makes hover reach the strip
-            // so the "Select (V)" / "Text (T)" tooltips paint live.
-            [window_ setAcceptsMouseMovedEvents:YES];
 
             delegate_ = [[PulpWindowDelegate alloc] init];
             // Role drives the close policy (see

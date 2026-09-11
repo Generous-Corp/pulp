@@ -1040,6 +1040,72 @@ decode_chord_scale_lane(const JsonValue* value, MemberPolicy detail_policy,
         runtime::Ok(std::move(created).value()));
 }
 
+// A null lane value is the pre-lane shape: the sequence predates the member
+// and decodes as an empty lane. Everything else is validated exactly, and the
+// ordering the model requires is the model's to judge: a document whose
+// intensity statements are out of order is rejected rather than silently
+// sorted into a different performance.
+runtime::Result<DynamicsLane, PersistenceError>
+decode_dynamics_lane(const JsonValue* value, DecodeContext& context, std::string lane_path) {
+    if (!value) {
+        auto empty = DynamicsLane::create({});
+        if (!empty)
+            return model_fail<DynamicsLane>(empty.error(), std::move(lane_path));
+        return runtime::Result<DynamicsLane, PersistenceError>(
+            runtime::Ok(std::move(empty).value()));
+    }
+    const auto& limits = context.limits;
+    auto& counts = context.counts;
+    if (value->array.size() >
+        limits.max_dynamics_events - std::min(counts.dynamics_events, limits.max_dynamics_events))
+        return fail<DynamicsLane>(PersistenceErrorCode::LimitExceeded, lane_path, value->begin,
+                                  counts.dynamics_events + value->array.size(),
+                                  limits.max_dynamics_events);
+    counts.dynamics_events += value->array.size();
+    std::vector<DynamicsEvent> events;
+    events.reserve(value->array.size());
+    for (std::size_t index = 0; index < value->array.size(); ++index) {
+        const auto& encoded = value->array[index];
+        const auto item_path = lane_path + "/" + std::to_string(index);
+        auto intensity_bits = required(encoded, "intensity_bits", item_path);
+        auto interpolation = string_field(encoded, "interpolation", item_path);
+        auto position = required(encoded, "position", item_path);
+        if (!intensity_bits || !interpolation || !position)
+            return fail<DynamicsLane>(PersistenceErrorCode::MissingField, item_path);
+        auto decoded_bits =
+            parse_canonical_u64_string(*intensity_bits.value(), item_path + "/intensity_bits");
+        if (!decoded_bits)
+            return runtime::Err(decoded_bits.error());
+        if (decoded_bits.value() > std::numeric_limits<std::uint32_t>::max())
+            return fail<DynamicsLane>(PersistenceErrorCode::InvalidNumber,
+                                      item_path + "/intensity_bits");
+        auto decoded_position =
+            parse_canonical_i64_string(*position.value(), item_path + "/position");
+        if (!decoded_position)
+            return runtime::Err(decoded_position.error());
+        AutomationInterpolation decoded_interpolation;
+        if (interpolation.value() == "hold")
+            decoded_interpolation = AutomationInterpolation::Hold;
+        else if (interpolation.value() == "continuous")
+            decoded_interpolation = AutomationInterpolation::Continuous;
+        else
+            return fail<DynamicsLane>(PersistenceErrorCode::InvalidSchema,
+                                      item_path + "/interpolation");
+        // The bit pattern is decoded as written; whether it names a finite
+        // intensity inside [0, 1] is the model's rule, applied by the factory
+        // below rather than duplicated here.
+        events.push_back(DynamicsEvent{
+            timebase::TickPosition{decoded_position.value()},
+            std::bit_cast<float>(static_cast<std::uint32_t>(decoded_bits.value())),
+            decoded_interpolation});
+    }
+    auto created = DynamicsLane::create(std::move(events));
+    if (!created)
+        return model_fail<DynamicsLane>(created.error(), lane_path);
+    return runtime::Result<DynamicsLane, PersistenceError>(
+        runtime::Ok(std::move(created).value()));
+}
+
 // A null groove value is the pre-groove shape: the sequence predates the field
 // and decodes as the groove that states no feel.
 //
@@ -1154,9 +1220,15 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         sequence_schema_policy.requires_chord_scale_lane(structural.value().version);
     const auto* groove = data->find("groove");
     const auto requires_groove = sequence_schema_policy.requires_groove(structural.value().version);
+    const auto* dynamics_lane = data->find("dynamics_lane");
+    const auto requires_dynamics_lane =
+        sequence_schema_policy.requires_dynamics_lane(structural.value().version);
     if (!id || !name || !tracks || !musical || !absolute ||
         tracks.value()->kind != JsonValue::Kind::Array || (!requires_chord_lane && chord_lane) ||
         (requires_chord_lane && (!chord_lane || chord_lane->kind != JsonValue::Kind::Array)) ||
+        (!requires_dynamics_lane && dynamics_lane) ||
+        (requires_dynamics_lane &&
+         (!dynamics_lane || dynamics_lane->kind != JsonValue::Kind::Array)) ||
         (!requires_groove && groove) ||
         (requires_groove && (!groove || groove->kind != JsonValue::Kind::Object)) ||
         (sequence_schema_policy.requires_scenes(structural.value().version) !=
@@ -1202,6 +1274,10 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         context, path + "/data/chord_scale_lane");
     if (!decoded_lane)
         return runtime::Err(decoded_lane.error());
+    auto decoded_dynamics =
+        decode_dynamics_lane(dynamics_lane, context, path + "/data/dynamics_lane");
+    if (!decoded_dynamics)
+        return runtime::Err(decoded_dynamics.error());
     auto decoded_groove = decode_groove(groove, context, path + "/data/groove");
     if (!decoded_groove)
         return runtime::Err(decoded_groove.error());
@@ -1275,6 +1351,7 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         .markers = std::move(decoded_markers),
         .regions = std::move(decoded_regions),
         .chord_scale_lane = std::move(decoded_lane).value(),
+        .dynamics_lane = std::move(decoded_dynamics).value(),
         .groove = std::move(decoded_groove).value(),
         .scenes = std::move(decoded_scenes),
         .track_order = std::move(decoded_track_order),
