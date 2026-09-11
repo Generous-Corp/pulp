@@ -28,7 +28,9 @@ const instance = (id: string) => ({
 function mutate(): void {
     const commitUpdate = PulpHostConfig.commitUpdate as
         (...args: unknown[]) => void;
-    commitUpdate(instance('a'), null, 'view', { opacity: 0 }, { opacity: 1 }, null);
+    // A width change is geometric, so it always marks the tree dirty. Do not
+    // swap this for a paint-only prop: those are deliberately suppressed.
+    commitUpdate(instance('a'), null, 'view', { width: 10 }, { width: 20 }, null);
 }
 
 function updateText(oldProps: Record<string, unknown>,
@@ -499,5 +501,96 @@ describe('host-config materialized metadata', () => {
         } finally {
             host.Element = oldElement;
         }
+    });
+
+    // A pointer crossing a hover target rewrites a tint and a cursor. Without
+    // a gate that commit re-applies captured metadata across the whole
+    // document, once per pointer sample of a drag.
+    //
+    // `resetAfterCommit` also re-applies when the hook identity itself
+    // changed, so installing a fresh spy arms one unconditional application.
+    // Every test here drains that with a priming call before it counts.
+    function armSpy(): { count: () => number } {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+        const resetAfterCommit = PulpHostConfig.resetAfterCommit as
+            ((c: unknown) => void) | undefined;
+        resetAfterCommit?.({});
+        // CONTROL: the priming call must itself have applied. If it did not,
+        // the spy was never installed and every count below is vacuous.
+        expect(applications).toBe(1);
+        applications = 0;
+        return { count: () => applications };
+    }
+
+    it('does not re-apply metadata for a paint-only commit', () => {
+        const spy = armSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+        const resetAfterCommit = PulpHostConfig.resetAfterCommit as
+            ((c: unknown) => void) | undefined;
+
+        commitUpdate(instance('a'), null, 'view',
+            { style: { cursor: 'default' } },
+            { style: { cursor: 'pointer' } }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(0);
+
+        commitUpdate(instance('a'), null, 'view',
+            { background: '#111', boxShadow: 'none' },
+            { background: '#222', boxShadow: '0 0 2px #000' }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(0);
+
+        // CONTROL: a geometric change on the same instrument must still
+        // re-apply. If this reads 0 the spy is broken, not the gate.
+        commitUpdate(instance('a'), null, 'view',
+            { width: 10 }, { width: 20 }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(1);
+    });
+
+    // prop-applier-paint.ts also owns `border` and `borderWidth`, which carry
+    // a width. Module membership must never be mistaken for paint-only.
+    it('re-applies metadata when a border width changes', () => {
+        const spy = armSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+        const resetAfterCommit = PulpHostConfig.resetAfterCommit as
+            ((c: unknown) => void) | undefined;
+
+        commitUpdate(instance('a'), null, 'view',
+            { borderWidth: 1 }, { borderWidth: 4 }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(1);
+
+        // A colour-only border change is safe and must be suppressed.
+        commitUpdate(instance('a'), null, 'view',
+            { borderColor: '#111' }, { borderColor: '#222' }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(1);
+    });
+
+    // `opacity` and `color` are written by the captured-metadata pass itself.
+    // Suppressing their commits would leave React's value standing until some
+    // later structural commit restored the captured one — a flicker, not a
+    // saving. They must take the ordinary path however cheap they look.
+    it('re-applies metadata for channels the metadata pass owns', () => {
+        const spy = armSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+        const resetAfterCommit = PulpHostConfig.resetAfterCommit as
+            ((c: unknown) => void) | undefined;
+
+        commitUpdate(instance('a'), null, 'view',
+            { opacity: 0.5 }, { opacity: 1 }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(1);
+
+        commitUpdate(instance('a'), null, 'view',
+            { color: '#111' }, { color: '#222' }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(2);
     });
 });

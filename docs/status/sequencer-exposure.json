@@ -4356,6 +4356,63 @@
       }
     },
     {
+      "id": "nested-trimmed-audio-leaf-fade",
+      "title": "A trim that cuts an audio leaf's own fade shortens the fade instead of refusing",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "8b6831cf-d83c-4567-9123-41d57f900d41",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "re-anchors the fade to the new edge"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "Nested trimming shortens an audio leaf's own fade to the new edge"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "a trim that cuts a conformed source, so each"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The fade a nested leaf carries was already written through the existing public ClipPlaybackProperties fade_in_duration and fade_out_duration. Lifting the refusal changes which value the lowerer computes for an audio leaf, not what the SDK declares, and it removes no CompileErrorCode member. Claiming an installed-SDK surface would advertise a type that did not change."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. A trimmed nested placement that previously failed to compile now compiles; the invocation and the reporting are identical either way."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal beneath the clip-fade controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The shortened fade is computed inside the compiler and surfaces only through the clip property an author already wrote."
+        }
+      }
+    },
+    {
       "id": "nested-substitution-state-refusal-split",
       "title": "Nested child track states split by whether they substitute content",
       "classification": "engine_internal",
