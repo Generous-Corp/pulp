@@ -634,6 +634,30 @@ TEST_CASE("standalone local key monitor dismisses a semantic popup through its o
         "globalThis.__pulpPopupDefaultState__.options[1]."
         "getAttribute('data-pulp-popup-active') === 'true'")
                 .getWithDefault<bool>(false));
+
+    // The attribute above is bookkeeping; these are the pixels. Moving the
+    // highlight must also MOVE it: the row that lost focus has to stop
+    // painting a background, not merely stop claiming one. The popup
+    // deactivates a row by assigning its captured base background, which is
+    // the empty string for an unstyled row, so this is the assertion that
+    // fails when an empty CSS colour is treated as "no change" instead of
+    // "remove the declaration".
+    const auto row_view = [&](int i) -> View* {
+        auto id = engine.evaluate("globalThis.__pulpPopupDefaultState__"
+                                  ".options[" + std::to_string(i) + "]._id")
+                      .getWithDefault<std::string>("");
+        REQUIRE_FALSE(id.empty());
+        return bridge.widget(id);
+    };
+    auto* row0 = row_view(0);
+    auto* row1 = row_view(1);
+    REQUIRE(row0 != nullptr);
+    REQUIRE(row1 != nullptr);
+    // Positive control: the highlight is a painted background at all, so a
+    // failure below is a stuck highlight rather than a popup that never
+    // painted one.
+    REQUIRE(row1->has_background_color());
+    REQUIRE_FALSE(row0->has_background_color());
     REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::enter));
     REQUIRE(engine.evaluate(
         "selected === 'B' && trigger.textContent === 'B' && popup === null && "

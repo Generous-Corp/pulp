@@ -160,6 +160,43 @@ if(APPLE AND NOT PULP_IOS)
     )
     catch_discover_tests(pulp-test-mac-hover-cursor-stationary)
 endif()
+
+if(APPLE AND NOT PULP_IOS)
+    # Whether a person SEES the cursor change while hovering. The stationary
+    # cases above drive the frame-path refresh on a windowless view and assert
+    # what the resolver computed; AppKit runs its own cursor pass and can reset
+    # that answer before it reaches the screen, so those cases pass whether or
+    # not hover works on a real window. These put the shipping view class in a
+    # live NSWindow, move the pointer with real CGEvents and no button held,
+    # pump the run loop, and read the cursor AppKit settled on.
+    #
+    # Requires a window-server session, Accessibility trust for synthetic
+    # pointer events, and an IDLE machine -- it drives the real pointer, so a
+    # human using the mouse corrupts the reading. Each case skips loudly when
+    # the session cannot support it rather than reporting a pass it did not
+    # measure. Labelled "validation" so it stays off the required headless gate,
+    # and "human-input" to mark that it takes over the pointer.
+    add_executable(pulp-test-mac-hover-cursor-live
+        test_mac_hover_cursor_live.mm
+    )
+    target_link_libraries(pulp-test-mac-hover-cursor-live PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+        "-framework ApplicationServices"
+    )
+    # Pull the host archive member; the cases message the class but reference
+    # no C++ symbol from the .mm.
+    target_link_options(pulp-test-mac-hover-cursor-live PRIVATE
+        "LINKER:-u,_OBJC_CLASS_$_PulpView"
+    )
+    catch_discover_tests(pulp-test-mac-hover-cursor-live
+        # RUN_SERIAL must precede LABELS: LABELS is a list property and would
+        # otherwise swallow "RUN_SERIAL;TRUE" as two more labels, letting these
+        # cases run concurrently and fight over the one system pointer.
+        PROPERTIES RUN_SERIAL TRUE
+                   LABELS "validation;mac;cursor;human-input")
+endif()
 if(APPLE AND NOT PULP_IOS)
     # The cursor a window host applies on a BUTTONLESS hover, when the region
     # under the pointer decides its cursor in a pointer-move handler — the
