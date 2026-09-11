@@ -16,6 +16,7 @@ struct SequenceSchemaVersionPolicy {
     std::uint32_t track_order_introduced_version;
     std::uint32_t chord_detail_introduced_version;
     std::uint32_t section_role_introduced_version;
+    std::uint32_t dynamics_lane_introduced_version;
 
     // Markers and regions entered the sequence schema together, so one predicate
     // governs both arrays: a version that carries either must carry both.
@@ -49,13 +50,17 @@ struct SequenceSchemaVersionPolicy {
     [[nodiscard]] constexpr bool requires_section_role(std::uint32_t version) const noexcept {
         return version >= section_role_introduced_version;
     }
+
+    [[nodiscard]] constexpr bool requires_dynamics_lane(std::uint32_t version) const noexcept {
+        return version >= dynamics_lane_introduced_version;
+    }
 };
 
 // Chord detail and section roles entered the schema in the same version. They
 // are separate predicates rather than one because they govern different arrays
 // and a later version may move only one of them.
 inline constexpr SequenceSchemaVersionPolicy sequence_schema_policy{
-    "pulp.timeline.sequence", 1, 7, 2, 3, 4, 5, 6, 7, 7,
+    "pulp.timeline.sequence", 1, 8, 2, 3, 4, 5, 6, 7, 7, 8,
 };
 static_assert(sequence_schema_policy.oldest_readable_version > 0 &&
               sequence_schema_policy.oldest_readable_version <=
@@ -114,6 +119,16 @@ static_assert(sequence_schema_policy.chord_detail_introduced_version >
                   sequence_schema_policy.section_role_introduced_version - 1) &&
               sequence_schema_policy.requires_section_role(
                   sequence_schema_policy.section_role_introduced_version));
+static_assert(sequence_schema_policy.dynamics_lane_introduced_version >
+                  sequence_schema_policy.chord_detail_introduced_version &&
+              sequence_schema_policy.dynamics_lane_introduced_version >
+                  sequence_schema_policy.section_role_introduced_version &&
+              sequence_schema_policy.dynamics_lane_introduced_version <=
+                  sequence_schema_policy.current_version &&
+              !sequence_schema_policy.requires_dynamics_lane(
+                  sequence_schema_policy.dynamics_lane_introduced_version - 1) &&
+              sequence_schema_policy.requires_dynamics_lane(
+                  sequence_schema_policy.dynamics_lane_introduced_version));
 
 // The groove a sequence carries when it states no feel, in canonical field
 // order. The upgrade that introduces the field writes exactly this, and the
@@ -122,5 +137,11 @@ static_assert(sequence_schema_policy.chord_detail_introduced_version >
 inline constexpr std::string_view kStraightGrooveJson =
     "{\"name\":\"\",\"step\":\"0\",\"steps\":[],\"swing_denominator\":\"2\",\"swing_grid\":\"0\","
     "\"swing_numerator\":\"1\",\"timing_strength\":1000,\"velocity_strength\":1000}";
+
+// The dynamics lane a sequence carries when it states no intensity. The
+// upgrade that introduces the member writes exactly this, and the matching
+// downgrade erases exactly this and refuses anything else, for the same reason
+// the groove above is stated once.
+inline constexpr std::string_view kEmptyDynamicsLaneJson = "[]";
 
 } // namespace pulp::timeline::detail
