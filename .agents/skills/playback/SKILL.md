@@ -1411,3 +1411,26 @@ One fixture trap: prove a dormant lane inert with a lane holding a **real**
 take against a declared project asset. An empty lane is trivially inert and
 proves nothing, and `TakeLane::create` imposes no non-empty requirement, so
 the weak fixture compiles and looks like evidence.
+
+## `CompilerStatus` says how much of a compile was incremental, so do not time it
+
+`CompilerStatus::active_tracks_completed` is partitioned by
+`active_tracks_recompiled` and `active_tracks_reused`. A track lands in
+`reused` when the dirty set spared it and its `TrackProgram` was carried over
+from the live program untouched; it lands in `recompiled` when a fresh one was
+built. The two always sum to `active_tracks_completed`, and `take_pending`
+clears all three together through `clear_active_track_counts()` so the
+partition can never describe a previous request.
+
+Read those counters when you need to know an edit stayed incremental. The
+tempting alternative — assert the compile finished quickly — measures the host
+as much as the compiler, and a one-track edit that silently started rebuilding
+the whole sequence still fits inside a generous millisecond ceiling on a fast
+machine while blowing a tight one on a busy machine. The counters are exact
+everywhere.
+
+Two things force a *reused*-looking track back onto the recompile side, so
+expect them rather than treating them as a lost optimisation:
+`requires_generation_refresh` (offline Stretch artifacts whose publication
+provenance is generation-specific) and any capacity refusal, which fails the
+whole request instead of completing the track.
