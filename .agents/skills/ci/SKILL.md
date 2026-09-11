@@ -8287,3 +8287,31 @@ assertion. Move the claim into the test as something invariant to host speed —
 a ratio between two same-run measurements at different input sizes, or a count
 of the work actually done — and drop the env var. Prove it by repeating the
 job's own step under load and reporting the pass count, not by one green run.
+
+## A contract test that is not a ctest has exactly one lane, and that lane is a `paths:` filter
+
+`tools/scripts/test_ci_throughput_workflows.py` polices `test/cmake/*.cmake`: it
+asserts every `PROCESSORS 8` registration is classified into one of the known
+weighted-suite sets. It is **not** registered as a ctest, so the required `macos`
+gate never runs it. Its only lane is `.github/workflows/workflow-lint.yml`, which
+is `paths:`-filtered — and that filter listed 188 `tools/scripts` entries and zero
+`test/cmake` ones. So the one contract policing `test/cmake` could not run when
+`test/cmake` changed, and stayed red on `main` through every PR that added a
+suite. `test/cmake/**` is now in both the `pull_request:` and `push:` blocks.
+
+The general shape: when a check lives only in a path-filtered workflow, its
+filter must cover **what it reads**, not only where it lives. Grep the filter for
+the directory the test asserts over before assuming it is enforced. A check whose
+inputs are outside its own trigger is indistinguishable from a check that passes.
+
+Two invocation traps when reproducing one of these locally:
+
+- **Run a `tools/scripts` unittest module from inside `tools/scripts`.** Those
+  modules import their siblings bare (`import verify_example_validation_inventory`),
+  so from the repo root you get `ModuleNotFoundError` naming a module that plainly
+  exists — which reads as a broken checkout rather than a wrong cwd.
+- **The class name is not the file name.** `test_ci_throughput_workflows.py` holds
+  `CTestIsolationContractTests`; guessing `TestCiThroughputWorkflows` fails with
+  `AttributeError: module ... has no attribute`. Select by test name instead:
+  `python3 -B -m unittest test_ci_throughput_workflows -k <test_name>`. Use `-B`
+  so a stale `.pyc` cannot survive a break-confirm.
