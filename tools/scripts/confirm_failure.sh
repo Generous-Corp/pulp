@@ -27,6 +27,22 @@
 #                      --build-dir <dir> --target <cmake target> \
 #                      --test <command> [--jobs N] [--object <basename>]
 #
+#   confirm_failure.sh --file <path> --break <sed/perl cmd> \
+#                      --no-build --test <command>
+#
+# --no-build is the lane for a test whose subject is INTERPRETED — a Node
+# `.test.mjs`, a Python test, a shell script. There is no object, archive, or
+# executable between the edited source and the test, so the stale-artifact trap
+# this script exists to defeat cannot arise: a fresh process re-reads the file
+# at import. The compiled lane's binary fingerprint has no analogue there (the
+# interpreter is the same bytes either way), so the evidence that the edit
+# reached the test is the edited file's content hash changing, which is checked
+# in both lanes. Without this lane every interpreted test in the tree is
+# un-negative-controllable by the one instrument the repo mandates for it.
+#
+# --no-build is mutually exclusive with --build-dir/--target/--jobs/--object:
+# a caller must not be able to think a build happened when none did.
+#
 # --object names the source whose object file carries the edited file, for a
 # source the compiler never sees directly. A JS prelude under core/view/js is
 # embedded into web_compat_preludes_gen.cpp at build time, so there is no
@@ -52,6 +68,7 @@ TARGET=""
 TEST_CMD=""
 JOBS=""
 OBJECT=""
+NO_BUILD=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -62,6 +79,7 @@ while [ $# -gt 0 ]; do
         --test)      TEST_CMD="$2"; shift 2 ;;
         --jobs)      JOBS="$2"; shift 2 ;;
         --object)    OBJECT="$2"; shift 2 ;;
+        --no-build)  NO_BUILD=1; shift ;;
         -h|--help)   sed -n '3,40p' "$0"; exit 0 ;;
         *) echo "confirm-failure: unknown argument '$1'" >&2; exit 2 ;;
     esac
@@ -70,12 +88,26 @@ done
 missing=""
 [ -n "$FILE" ]      || missing="$missing --file"
 [ -n "$BREAK_CMD" ] || missing="$missing --break"
-[ -n "$BUILD_DIR" ] || missing="$missing --build-dir"
-[ -n "$TARGET" ]    || missing="$missing --target"
 [ -n "$TEST_CMD" ]  || missing="$missing --test"
+if [ "$NO_BUILD" -eq 0 ]; then
+    [ -n "$BUILD_DIR" ] || missing="$missing --build-dir"
+    [ -n "$TARGET" ]    || missing="$missing --target"
+fi
 if [ -n "$missing" ]; then
     echo "confirm-failure: required argument(s):$missing" >&2
     exit 2
+fi
+
+if [ "$NO_BUILD" -eq 1 ]; then
+    conflict=""
+    [ -z "$BUILD_DIR" ] || conflict="$conflict --build-dir"
+    [ -z "$TARGET" ]    || conflict="$conflict --target"
+    [ -z "$JOBS" ]      || conflict="$conflict --jobs"
+    [ -z "$OBJECT" ]    || conflict="$conflict --object"
+    if [ -n "$conflict" ]; then
+        echo "confirm-failure: --no-build cannot be combined with:$conflict" >&2
+        exit 2
+    fi
 fi
 
 if [ -z "$JOBS" ]; then
@@ -119,6 +151,12 @@ OBJ_BASE="${OBJECT:-$BASE}"
 TEST_BINARY="$(printf '%s' "$TEST_CMD" | awk '{print $1}')"
 
 binary_fingerprint() {
+    # An interpreted test runs through a shared interpreter whose bytes never
+    # change, so fingerprinting it would compare a constant against itself and
+    # report "the edit did not reach the test" for every honest run. The edited
+    # file's own content hash is the evidence in that lane, and it is checked
+    # for both lanes at the break step.
+    [ "$NO_BUILD" -eq 1 ] && { echo "source-is-the-artifact"; return; }
     [ -f "$TEST_BINARY" ] || { echo "absent"; return; }
     if command -v shasum >/dev/null 2>&1; then
         shasum -a 256 "$TEST_BINARY" | awk '{print $1}'
@@ -160,6 +198,7 @@ bump_mtime() {
 # The cost is relink time on the next build, not recompile time — deliberate,
 # and cheap against reporting a verdict about code the test never ran.
 invalidate() {
+    [ "$NO_BUILD" -eq 1 ] && return 0
     rm -f "$TEST_BINARY" 2>/dev/null || true
     find "$BUILD_DIR" \( -name '*.a' -o -name '*.dylib' -o -name '*.so' \) \
         -delete 2>/dev/null || true
@@ -175,6 +214,10 @@ invalidate() {
 # is the check the hand-run loop does not have.
 build_and_verify_recompile() {
     local phase="$1"
+    if [ "$NO_BUILD" -eq 1 ]; then
+        say "$phase: no build step -- the test re-reads $BASE from disk"
+        return 0
+    fi
     if ! cmake --build "$BUILD_DIR" --target "$TARGET" -j "$JOBS" > "$BUILD_LOG" 2>&1; then
         if grep -qE '\berror:' "$BUILD_LOG"; then
             # A break that does not compile still proves the test depends on the
@@ -254,7 +297,8 @@ if [ "$BUILD_STATUS" -eq 0 ]; then
     # The binary must differ from the one the baseline ran. If it does not, the
     # edit never reached what the test executes and any verdict here would be
     # about the old code.
-    if [ "$(binary_fingerprint)" = "$BASELINE_BINARY" ]; then
+    if [ "$NO_BUILD" -eq 0 ] &&
+       [ "$(binary_fingerprint)" = "$BASELINE_BINARY" ]; then
         restore
         die_inconclusive "the test binary is unchanged after breaking $BASE — the
     edit did not reach what the test runs, so no verdict is possible"
