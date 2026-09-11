@@ -59,9 +59,11 @@ NON_DEVICE_WEIGHTED_SUITES = (
 )
 QUALITY_WEIGHTED_SUITES = {
     "agent-capability-manifest-selftest",
+    "agent-capability-rederive-selftest",
     "gpu-dpr-v2-evidence-selftest",
     "gpu-dpr-runner-selftest",
     "gpu-first-visible-external-adapter-selftest",
+    "gpu-first-visible-role-producers-selftest",
 }
 
 def load_workflow(path: pathlib.Path) -> dict:
