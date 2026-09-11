@@ -1351,6 +1351,13 @@ than being folded away — the code names which obstacle it hit:
   its own edge. A leaf lying inside the fade region needs a partial ramp
   `ClipPlaybackProperties` cannot express. An expressiveness limit, not a
   choice between two defensible answers.
+
+  A leaf's *own* fade is the case this is easiest to confuse with, and it is
+  not refused. A fade is measured from the clip's edge and a trim moves that
+  edge, so the retained fade is the authored one minus the trim, clamped to
+  what is left of the clip — an edge-anchored answer, not the same ramp entered
+  part-way through. The placement fade refuses because its envelope has no
+  edge to re-anchor to; a leaf fade always does.
 - `NestedGainSinkUnsupported` — a composed gain lands on the leaf's clip gain,
   and **clip gain only reaches a renderer for media content**. Note, registered
   and opaque leaves compile to events, and nothing scales an event by the gain

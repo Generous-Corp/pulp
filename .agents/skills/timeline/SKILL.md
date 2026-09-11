@@ -156,8 +156,11 @@ different request with an earlier result.
   Playback expands references off the audio thread into immutable root-track
   programs. Stage 1 accepts child note/audio clips and rejects child devices,
   automation, takes, freeze, record-arm state, absolute clips, and non-neutral
-  reference gain/fades. Source windows that intersect child audio fades also
-  fail closed because Stage 1 cannot represent an envelope offset. A complete
+  reference gain/fades. A source window that cuts into a leaf clip's *own*
+  fade shortens that fade to the new clip edge rather than refusing — the
+  answer an unnested clip gives when it is dragged shorter — and a trim that
+  swallows a fade whole leaves none. That is a different thing from a fade on
+  the `SequenceRef` placement, which still refuses. A complete
   nested media clip preserves its `TimeConform` intent, but a source window
   that trims a conforming clip fails with `NestedSequenceUnsupported` until
   playback has a conform-aware source-range mapping. Expansion

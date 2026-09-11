@@ -13,7 +13,7 @@
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
       "status": "live-defect",
-      "reason": "set_clip_sequence_ref composes with the device-chain and automation surfaces, but flattening has nowhere to fold a child device chain, an automation lane, a non-musical anchor, or a trim that cuts a conformed source or a child clip's own fade, so each of those authored combinations refuses instead of playing wrong. Clip and track GAIN no longer refuse here: they compose by multiplying into the flattened leaf, and the cases that composition still cannot answer carry their own codes below. Freeze and an active take lane no longer refuse here either; each now names its own code. Record-arm and unselected take lanes no longer refuse at all, because neither changes what any track lowers to."
+      "reason": "set_clip_sequence_ref composes with the device-chain and automation surfaces, but flattening has nowhere to fold a child device chain, an automation lane, a non-musical anchor, or a trim that cuts a conformed source, so each of those authored combinations refuses instead of playing wrong. Clip and track GAIN no longer refuse here: they compose by multiplying into the flattened leaf, and the cases that composition still cannot answer carry their own codes below. Freeze and an active take lane no longer refuse here either; each now names its own code. Record-arm and unselected take lanes no longer refuse at all, because neither changes what any track lowers to."
     },
     {
       "code": "NestedMixerPanUnsupported",
