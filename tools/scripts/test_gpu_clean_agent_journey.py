@@ -27,6 +27,39 @@ TURN_ID = "87654321-4321-4321-8321-cba987654321"
 NONCE = "a" * 64
 
 
+def installed_native_codex() -> pathlib.Path | None:
+    """First `codex` on PATH that is a native Mach-O executable, or None.
+
+    `shutil.which` returns the first match of any kind, which on a machine with
+    a terminal-integration wrapper is a shell script. `official_codex_identity`
+    requires a native Mach-O, so a wrapper must read as "no installed Codex"
+    rather than as a Codex that fails the trust check.
+    """
+    if sys.platform != "darwin":
+        return None
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        try:
+            resolved = (pathlib.Path(directory) / "codex").resolve(strict=True)
+        except OSError:
+            continue
+        if resolved.name != "codex" or not resolved.is_file():
+            continue
+        if not os.access(resolved, os.X_OK):
+            continue
+        probe = subprocess.run(
+            ["/usr/bin/file", "-b", str(resolved)],
+            capture_output=True, text=True, check=False,
+        )
+        if "Mach-O 64-bit executable" in probe.stdout:
+            return resolved
+    return None
+
+
+INSTALLED_CODEX = installed_native_codex()
+
+
 def run(*argv: str, cwd: pathlib.Path) -> str:
     completed = subprocess.run(argv, cwd=cwd, check=True, capture_output=True, text=True)
     return completed.stdout.strip()
@@ -610,12 +643,37 @@ class CleanAgentHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(trust.TrustError, "codex|Mach-O"):
             trust.official_codex_identity(pathlib.Path(sys.executable).resolve())
 
-    @unittest.skipUnless(
-        sys.platform == "darwin" and shutil.which("codex"),
-        "installed signed Codex is unavailable",
-    )
+    @unittest.skipUnless(sys.platform == "darwin", "Mach-O discovery is macOS-specific")
+    def test_installed_codex_discovery_skips_a_wrapper_script(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            shim = pathlib.Path(raw) / "codex"
+            shim.write_text("#!/bin/bash\nexec /usr/bin/true \"$@\"\n")
+            shim.chmod(0o755)
+            with mock.patch.dict(os.environ, {"PATH": raw}, clear=False):
+                self.assertIsNone(installed_native_codex())
+
+    @unittest.skipUnless(sys.platform == "darwin", "Mach-O discovery is macOS-specific")
+    def test_installed_codex_discovery_finds_the_native_binary_behind_a_shim(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            shim_dir = pathlib.Path(raw) / "shim"
+            real_dir = pathlib.Path(raw) / "real"
+            shim_dir.mkdir()
+            real_dir.mkdir()
+            shim = shim_dir / "codex"
+            shim.write_text("#!/bin/bash\nexec /usr/bin/true \"$@\"\n")
+            shim.chmod(0o755)
+            native = real_dir / "codex"
+            # copy, not copy2: /bin/echo carries SIP chflags that cannot be replayed.
+            shutil.copy("/bin/echo", native)
+            native.chmod(0o755)
+            with mock.patch.dict(
+                os.environ, {"PATH": os.pathsep.join([str(shim_dir), str(real_dir)])}, clear=False
+            ):
+                self.assertEqual(installed_native_codex(), native.resolve())
+
+    @unittest.skipUnless(INSTALLED_CODEX is not None, "installed native Codex is unavailable")
     def test_installed_signed_codex_identity_when_available(self) -> None:
-        identity = trust.official_codex_identity(pathlib.Path(shutil.which("codex")).resolve())
+        identity = trust.official_codex_identity(INSTALLED_CODEX)
         self.assertEqual(identity["team_identifier"], trust.OPENAI_TEAM_ID)
         self.assertEqual(identity["identifier"], "codex")
         self.assertRegex(identity["version"], r"^codex-cli [0-9]+\.[0-9]+\.[0-9]+")
