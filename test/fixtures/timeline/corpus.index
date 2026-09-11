@@ -61,6 +61,7 @@ document v6/sequence-track-order.json
 document v6/track-take-lanes.json
 document v6/sequence-launcher-scenes.json
 document v7/sequence-roles-and-tuning.json
+document v8/sequence-dynamics-lane.json
 
 fragment v4/sequence-before-scenes.json
 
