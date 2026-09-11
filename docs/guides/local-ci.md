@@ -1650,6 +1650,10 @@ disabling overflow. Nothing about either failure is visible without asking.
 | `profile-contract-drift` | A supplied TartCI source profile does not serve the contracted event classes, scope, or post-transform labels, or incorrectly fixes one priority for both classes. |
 | `profile-receipt-drift` | A supplied installed-profile receipt does not bind to the exact supplied source-profile digest. |
 | `source-manifest-drift` | A supplied private desired-fleet manifest disagrees with the Pulp contract or source profile, including its declared `tart_home`. |
+| `host-silent` | A declared fleet host completed no `build.yml` job for `silence_hours` while its siblings completed at least `demand_min_jobs` carrying a label set it is observed to serve. Reported at the level in `hosts.severity`, which ships as `info` (see the per-host census below). |
+| `host-map-broken` | Self-hosted jobs ran in the window and not one runner name matched any declared host prefix. A lane rename, not a silent fleet. Silence is not evaluated while the map cannot identify a host. |
+| `host-silence-degraded` | A jobs read failed or the run walk was cut short, so the window was not fully read and every silence verdict is suppressed rather than reported on evidence that does not support it. |
+| `host-unobserved`, `host-last-served`, `host-serving-inflight`, `host-idle`, `host-map-unmapped` | Census state for the step summary, always `info`. They record what the sweep saw so a would-be verdict can be counted against real traffic before anything pages. |
 
 Label matching is **subset containment**: GitHub dispatches to a runner only if
 it carries *every* label in the array. A lane requesting
@@ -1709,7 +1713,9 @@ wedged, a lane that is slow rather than dead, or a black hole in a `runs-on`
 hard-coded in a workflow rather than driven by a variable. A capacity shortfall
 (labels resolve, queue still grows) is caught only once the queue crosses the
 stall budget above, and only when no runner is live — a lane with one wedged
-runner online and a growing queue still reads healthy. An ephemeral lane whose consuming
+runner online and a growing queue still reads healthy. The per-host census
+below watches the other half of that gap from the other side: not "can these
+labels be served" but "is this HOST still serving". An ephemeral lane whose consuming
 workflow has not run inside the lookback window yields no evidence and is
 reported as a black hole — a false positive that is deliberately biased loud, on
 the grounds that a silent relief valve is what caused this in the first place.
@@ -1733,6 +1739,80 @@ same claim, and the checker no longer conflates them:
   persistent token-scope regression report green hourly and hide a real dead
   lane behind a permissions bug. Fix the token scope, or verify the lane's
   provisioner by hand — do not read it as either verdict.
+
+### A lane can read healthy while a host serves nothing
+
+Every check above is about a **lane**: can this label set be served. None of
+them can answer **is this host still serving**, and those two came apart on m5.
+Its disk filled, its runner stayed registered and `online`, every lane it backs
+kept resolving to a live runner, and m5 quietly served nothing for days. Each
+lane check was correct and the fleet was down a third of its capacity.
+
+The `hosts` block in `runner_topology.json` closes that half. It is a per-host
+census, not a new monitor and not a heartbeat: it reads the same jobs API the
+lane checks already read, and keeps the two fields those throw away,
+`runner_name` and `completed_at`. Host identity is the runner-name prefix,
+because tartci fixes an ephemeral runner's name as
+`<lane>-<supervisor pid>-<boot index>`, so the lane prefix is stable across
+boots while the full name is not. That prefix map is the one reviewed datum;
+everything else the census computes from observation.
+
+```
+silent(host) := observed(host)
+                AND (now - last_served(host)) > silence_hours
+                AND sibling_demand(host, silence_hours) >= demand_min_jobs
+```
+
+**Demand is the clause that makes this survivable.** Silence on its own fires
+every quiet night and gets muted inside a week. Silence beside completed sibling
+jobs carrying a label set this host is observed to serve is a host that could
+have taken work and did not. `sibling_demand` counts only label sets the host
+itself completed jobs for in the window, so m5's `pulp-preamble` traffic, which
+no other host serves, is never demand against m1 or m3.
+
+Four cases are deliberately not verdicts:
+
+- **Bootstrap.** A host with no mapped job at all in the observation window is
+  `host-unobserved`, never silent. A host that has never reported cannot page,
+  and a host decommissioned for a month falls out of observation on its own
+  rather than needing to be un-declared.
+- **In flight.** A host with a job still running has not stopped serving. A job
+  wedged long enough to matter is a different failure with a different owner
+  (the stale-run reaper), so the census reports the state and declines the
+  verdict.
+- **Idle fleet.** Silence under the demand threshold is `host-idle`: nothing this
+  host serves was being served anywhere else either.
+- **An unread window.** If any read failed, or the walk hit its run cap before
+  covering the window, every silence verdict is suppressed and the sweep reports
+  `host-silence-degraded`. This is the same fail-closed discipline the checker
+  already applies to an unreadable runners API.
+
+Two knobs bound the cost. `service_evidence.lookback_hours` is 720h, which is
+right for a lane that fires per release and wrong here: `build.yml` alone holds
+over 16,000 runs, so a 720h per-job walk would cost thousands of API calls every
+hour. The census uses its own `observation_hours` (72h, past a weekend and far
+past `silence_hours`) with a server-side `created>=` filter and pagination
+instead of the 20-run lane cap, plus a `max_runs` ceiling. It walks newest
+first, so the first completed job it sees for a host is already that host's
+last-served time, and it stops as soon as it is past the silence window and
+every declared host has one. Older runs can only lower a maximum that is
+already fixed, so they are never fetched. Only a host with no completion at all
+pays the full walk, which is the one case where the full walk is the evidence,
+and a truncated walk reports degraded rather than guessing.
+
+**It ships in shadow mode.** `hosts.severity` is `info`, so the census reports
+to the step summary and nothing else: no issue, no assignee, no red run. That is
+deliberate, so one week of hourly sweeps can count would-be fires against real
+traffic before anything pages. Promoting it is a reviewed edit of that one value
+to `error` plus a per-host issue step in `runner-topology-check.yml`, and it must
+not happen before the operator notification path has been confirmed to reach a
+human.
+
+The census does not diagnose and does not remediate. It does not read on-host
+disk receipts, does not ssh anywhere, and adds no host-side agent. It reports
+the persistent-registration state for a silent host as the discriminator between
+"powered off" and "up but not serving", which is the m5 shape, and leaves the
+call to an operator.
 
 ### Where it runs, and why
 

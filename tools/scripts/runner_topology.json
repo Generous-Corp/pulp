@@ -68,6 +68,25 @@
     "_why_per_workflow": "Evidence is gathered from the workflows that CONSUME the lane, not from a repo-wide run sweep. On a busy repo the newest 100 runs measured well under an hour of history, so a repo-wide scan would condemn any lane used less often than that — the release lanes fire per release, not per hour. Scoping to the consuming workflow makes 20 runs reach back months for a few API calls, and the scan is lazy: a lane with a live runner costs nothing.",
     "_why_lookback": "720h (30d) covers a normal release cadence with margin. A lane whose consuming workflow has not run at all in the window yields no evidence, which is reported as a black hole — see the honest-limits note in docs/guides/local-ci.md."
   },
+  "hosts": {
+    "_why": "A lane check answers 'can these labels be served'. It cannot answer 'is this HOST still serving', and those came apart on m5: the host stayed registered and online while its disk filled, so every lane it backs kept reading healthy and m5 quietly served nothing for days. Nobody noticed until the queue did. The per-host census below is the missing half: it watches the one artifact that already proves a host served work, the runner_name and completed_at the jobs API reports for every job build.yml dispatched.",
+    "_why_prefix_map": "tartci fixes an ephemeral runner's name as <lane>-<supervisor pid>-<boot index>, so the lane prefix is the host identity and is stable across boots. This map is the one reviewed datum the census needs; everything else it computes from observation. Verified against 6h of live build.yml jobs on 2026-09-11: every self-hosted runner_name observed mapped to exactly one host, zero unmapped.",
+    "silence_hours": 6,
+    "_why_silence_hours": "Long enough that an ordinary quiet stretch, a reboot, or a long single job cannot cross it; short enough that a host which stopped serving is found the same day rather than the same week.",
+    "demand_min_jobs": 5,
+    "_why_demand_min_jobs": "Silence alone is not a fault: an idle night is silence, and a fleet that pages on an idle night gets muted. The verdict needs DEMAND the host could have served and did not, measured as completed jobs on sibling hosts carrying a label set this host is observed to serve. Losing 5 consecutive placements across the whole window is implausible for a healthy host; raise this number rather than muting the rule if JIT races prove otherwise.",
+    "observation_hours": 72,
+    "_why_observation_hours": "service_evidence.lookback_hours is 720h, which is right for a lane that fires per release and wrong here: build.yml alone holds over 16,000 runs and roughly 65 runs per 12h, so a 720h per-job walk would cost thousands of API calls every hour. 72h is bounded, covers a weekend, and is far past silence_hours. The walk is newest-first and exits as soon as every declared host has served inside silence_hours, so a healthy fleet pays a few dozen calls.",
+    "max_runs": 400,
+    "_why_max_runs": "A hard ceiling on the walk so an hourly cron cannot run away. Hitting it BEFORE the window is covered suppresses every silence verdict and reports degraded instead: a truncated window cannot distinguish a silent host from an unread one.",
+    "severity": "info",
+    "_why_severity": "Shadow mode. The census ships reporting to the step summary only (no issue, no assignee, no red run), so one week of hourly sweeps can count would-be fires against real traffic before anything pages. Promoting is a reviewed edit of this one value to \"error\" plus the per-host issue step in the workflow, and must not happen before the operator notification path is confirmed.",
+    "workflow": "build.yml",
+    "_why_workflow": "The fleet's whole macOS build and preamble load runs through build.yml, so it is where every host leaves evidence. Silence is judged on this repo's evidence only: a host also serving other repos' lanes is out of scope, and this rule deliberately does not claim the host is idle, only that it stopped serving pulp.",
+    "m3": {"runner_name_prefixes": ["studio-"]},
+    "m5": {"runner_name_prefixes": ["m5-", "pulp-preamble-m5"]},
+    "m1": {"runner_name_prefixes": ["m1-"]}
+  },
   "must_remain_unset": {
     "variables": [
       "PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON",
