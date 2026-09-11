@@ -471,6 +471,51 @@ this path. A test for it must NOT pre-assign the inline value, or it
 exercises the parseable branch and passes regardless; assert
 `isNaN(parseFloat(el.style.<prop>))` after the leave as a control.
 
+### An empty CSS colour means REMOVE the declaration, not "leave it alone"
+
+The empty string is CSSOM's spelling of removal: `el.style.background = ""`
+deletes the declaration. Both halves of Pulp's colour lane used to read it as
+"nothing to do" instead — `web-compat-style-decl-paint.js` skipped the bridge
+call because `parseCSSColor("")` is falsy, and `style_visual_api.cpp` skipped
+the paint because `hex.empty()`. Two independent no-ops for the same value, so
+fixing either alone changes nothing and reads as "the fix did not work".
+
+The symptom is a colour that will not go away. A dropdown deactivates a row by
+assigning its captured base background, which is `""` for a row that was never
+styled — so every row the highlight visited stayed lit, and the highlight read
+as an accumulating frontier rather than a moving one. The element's own
+bookkeeping stayed correct throughout, which is why an attribute assertion
+(`data-pulp-popup-active`) passed while the pixels were wrong.
+
+`View` already had `clear_background_color()` / `clear_background_gradient()`
+and `has_background_color()`; the bridge simply never called them. Any new
+colour-valued bridge entry point needs the same three-way split — empty
+clears, parseable sets, unparseable is the only no-op — and the test for it
+must assert `has_background_color()` on the view, with the *still-lit* element
+as a positive control so a stuck colour cannot be confused with one that never
+painted. `"transparent"` is NOT a substitute: `css_color.cpp` maps it to
+`rgba(0,0,0,0)`, which paints nothing but still counts as a declaration.
+
+`setTextColor` (`typography_api.cpp`) still drops empty and has no
+`clear_text_color()` primitive, so `@pulp/react`'s documented removal contract
+(`textColor` removed → `setTextColor(id,"")`) is currently inert on the native
+side. Fix that half the same way when it next bites.
+
+### `confirm_failure.sh` cannot verdict a `.js` prelude edit
+
+Preludes are embedded into a generated `build/core/view/web_compat_preludes_gen.cpp`,
+so a `.js` file produces no compile line of its own and the script refuses a
+verdict — INCONCLUSIVE, every time, however real the edit. Prove a prelude
+change by counting the changed text in that generated file instead: break the
+JS, rebuild, confirm the count drops to zero AND the test goes red, restore,
+confirm both come back. The count is the positive control that the edit
+reached the binary at all.
+
+Note also that `core/view/js/web-compat.js` is a monolith that is **not**
+embedded. The embedded lane is the split `web-compat-*.js` set listed above,
+so an edit to the monolith is inert — verify against `PULP_JS_PRELUDES`
+before concluding a JS change had no effect.
+
 ### Canvas2D `textBaseline` initializes to `alphabetic`, not `top`
 
 The Canvas2D initial value for `textBaseline` is `"alphabetic"`: the `y`
