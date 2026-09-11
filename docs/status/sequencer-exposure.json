@@ -4427,7 +4427,16 @@
         "test/test_timeline_nesting_playback.cpp",
         "tools/scripts/negative_capability_allowlist.json",
         "docs/status/sequencer-exposure.json",
-        ".agents/skills/playback/SKILL.md"
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/audio_renderer_internal.hpp",
+        "core/playback/src/offline_stretch_program_compiler.cpp",
+        "core/playback/src/offline_stretch_program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/playback/src/track_audio_program_compiler.cpp",
+        "core/playback/src/track_audio_program_compiler.hpp"
       ],
       "evidence": [
         {
