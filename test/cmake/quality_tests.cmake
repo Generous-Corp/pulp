@@ -508,6 +508,14 @@ if(Python3_Interpreter_FOUND)
         PROCESSORS 8)
     add_test(NAME gpu-first-visible-role-producers-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_role_producers.py")
+    # Five positive roles plus thirty-nine planted negatives, each a sealed
+    # build driving its own subprocess tree. That cost is invisible to the
+    # scheduler at the default single slot, so co-scheduled heavy tests inflate
+    # each other past the suite-wide default timeout on a loaded host. Declare
+    # what the test actually consumes and give it a budget sized to the work.
+    set_tests_properties(gpu-first-visible-role-producers-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
     add_test(NAME gpu-first-visible-trace-producer-overhead-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py")
     add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}
