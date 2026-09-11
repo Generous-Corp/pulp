@@ -6857,3 +6857,33 @@ catch that corruption — it exits 0 on truncated and broken files. Verify an
 emitted classic bundle with `vm.Script`, and an ESM source with a dynamic
 `import()` discriminating on `SyntaxError`; plant a break first and confirm the
 checker rejects it.
+
+**Testing the generator's output, not the generator:** both costs above live in
+the emitted runtime, so a test that only inspects the builder's return string
+cannot see them. `materialized_runtime_commit_cost.test.mjs` generates the
+entry, strips its two `import` lines, and runs the rest verbatim in a
+`vm.createContext` sandbox with React, the native bridge, and
+`__pulpReactDomRegistry__` stubbed — then drives the published
+`__pulpApplyMaterializedImportMetadata__`. Executing it (rather than parsing it)
+is the point: a declaration placed in the wrong function body still parses, and
+`new Function` would accept it too, so only evaluation catches a scope mistake.
+Assert **operation counts**, never wall-clock — the shared index is pinned by
+counting `parentElement` reads through a getter (one per registry node plus one
+per resolved binding; a per-binding rebuild costs `registry × bindings`), and
+the selector memo by counting parse passes at two registry sizes and requiring
+them equal. A wall-clock budget would flake on a shared runner and could not say
+which of the two costs regressed. Pair the counters with one resolution case:
+counters alone stay green if traversal breaks and resolves nothing.
+
+**`confirm_failure.sh` does not apply to these tests.** The script exists to
+defeat a *build* hazard: restoring a source and rebuilding inside the same
+filesystem second leaves make comparing equal mtimes, so the object is judged
+current and the binary keeps the old code — which is why it demands
+`--build-dir`/`--target`, deletes objects, and withholds a verdict until it
+observes a compile line. A `.mjs` has no object and no build step, and each
+`node --test` run reads the source at import in a fresh process, so that hazard
+cannot arise. Break these by editing the generator directly and re-running the
+test. Keep the rest of the discipline, though: witness the break with a
+**before and after** count, not just an after. Patching a name that does not
+exist leaves the count at zero on both sides, the test passes, and that reads
+as "the test does not cover this" — a dead instrument reported as a finding.
