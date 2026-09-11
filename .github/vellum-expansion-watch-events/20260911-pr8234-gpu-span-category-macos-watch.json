@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260911-pr8234-gpu-span-category-macos-watch",
+  "created_at": "2026-09-11T22:40:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The macOS window host emitted its drawable-acquire, submit and present scopes under the \"render\" trace category, so a trace filtered to the gpu capability showed none of the three spans that actually describe GPU work, and a GPU-time question answered from such a trace read as zero rather than as unmeasured. The change re-categorises gpu_acquire, gpu_submit and gpu_present to \"gpu\" and adds a lint that keeps the category and span name from drifting apart again. render-assets-and-backends is crossed only by core/view/platform/mac/window_host_mac.mm, and only by the category string on three existing PULP_TRACE_SCOPE_NAMED call sites: no span is added or removed, no renderer, backend, Skia pin, font, asset, fixture, snapshot or threshold moves, and paint behaviour is untouched. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "trace-span-category-lint",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
