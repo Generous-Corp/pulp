@@ -123,6 +123,17 @@ stack into `pulp-mcp` or parse human output. Keep these surfaces synchronized:
 This subcommand fits the existing CLI-maintenance, Skia GPU build, and routing
 skills; adding a separate GPU-doctor skill would duplicate their ownership.
 
+Keep the gpu-health selftests free of host state. `test_gpu_health_run_attestation.py`
+builds throwaway git repositories and tags revisions with a lightweight
+`git tag <name> <ref>`. A host with `tag.gpgsign` enabled promotes that to a
+signed tag, which aborts with `no tag message?` because the fixture supplies no
+message and has no editor attached, and the resulting red test names no host
+condition. Fixture repositories therefore pin `commit.gpgsign` and
+`tag.gpgsign` false in their own local config. Local configuration outranks
+global, so prove that pinning against a hostile global config file rather than
+the ambient one: a check written against the developer's own config passes
+vacuously on a host that does not sign, which is every CI runner.
+
 ### A3 campaign scripts are acceptance tooling, not shipped CLI verbs
 
 `tools/scripts/gpu_first_visible_a3_campaign.py` and

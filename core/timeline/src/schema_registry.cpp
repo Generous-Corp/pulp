@@ -309,6 +309,7 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
         builtin(std::string(detail::sequence_schema_policy.type_name), SchemaDomain::Document,
                 {{"absolute_duration", SchemaValueKind::Object},
                  {"chord_scale_lane", SchemaValueKind::Array},
+                 {"dynamics_lane", SchemaValueKind::Array},
                  {"groove", SchemaValueKind::Object, true, "pulp.timeline.groove_template"},
                  {"id", SchemaValueKind::U64String},
                  {"markers", SchemaValueKind::Array},
@@ -325,12 +326,14 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     sequence.upgrades.push_back({4, 5, {}, detail::migrate_sequence_v4_to_v5});
     sequence.upgrades.push_back({5, 6, {}, detail::migrate_sequence_v5_to_v6});
     sequence.upgrades.push_back({6, 7, {}, detail::migrate_sequence_v6_to_v7});
+    sequence.upgrades.push_back({7, 8, {}, detail::migrate_sequence_v7_to_v8});
     sequence.downgrades.push_back({2, 1, {}, detail::migrate_sequence_v2_to_v1});
     sequence.downgrades.push_back({3, 2, {}, detail::migrate_sequence_v3_to_v2});
     sequence.downgrades.push_back({4, 3, {}, detail::migrate_sequence_v4_to_v3});
     sequence.downgrades.push_back({5, 4, {}, detail::migrate_sequence_v5_to_v4});
     sequence.downgrades.push_back({6, 5, {}, detail::migrate_sequence_v6_to_v5});
     sequence.downgrades.push_back({7, 6, {}, detail::migrate_sequence_v7_to_v6});
+    sequence.downgrades.push_back({8, 7, {}, detail::migrate_sequence_v8_to_v7});
     schemas.push_back(std::move(sequence));
     schemas.push_back(builtin("pulp.timeline.groove_template", SchemaDomain::Document,
                               {{"name", SchemaValueKind::String},

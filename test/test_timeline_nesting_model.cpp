@@ -279,3 +279,33 @@ TEST_CASE("InsertSequence validates media and accounts for retained payloads") {
     REQUIRE_FALSE(equivalent(Command{InsertSequence{with_harmony}},
                              Command{InsertSequence{without_harmony}}));
 }
+
+// The lowerer's placement-anchor guard names InvalidStructure rather than a
+// capability code because no validly-constructed document can reach it. That
+// claim rests entirely on this rejection, so it is asserted here at the
+// boundary that enforces it rather than left implicit in a comment. Every
+// route to an absolute anchor lands in create_absolute -- the mutators rebuild
+// through it and the data constructor is private -- so covering the factory
+// and both mutator directions covers the invariant.
+TEST_CASE("No construction path produces an absolute-anchored sequence reference") {
+    const SequenceRef reference{{10}, {0}};
+
+    auto direct = Clip::create_absolute({4}, {0}, 24'000, {48'000, 1}, reference);
+    REQUIRE_FALSE(direct);
+    REQUIRE(direct.error().related_item == ItemId{10});
+
+    // Control: the same call with media content succeeds, so the rejection
+    // above is the reference and not the absolute factory refusing everything.
+    auto absolute_media =
+        Clip::create_absolute({5}, {0}, 24'000, {48'000, 1}, MediaRef{{50}, {0}, 24'000});
+    REQUIRE(absolute_media);
+
+    // Re-anchoring a musical reference to absolute time.
+    auto musical_reference = take(Clip::create({6}, {0}, {960}, reference));
+    REQUIRE(musical_reference.time_anchor() == ClipTimeAnchor::Musical);
+    REQUIRE_FALSE(musical_reference.with_time_range(
+        AbsoluteTimeRange{{0}, 24'000, timebase::RationalRate{48'000, 1}}));
+
+    // Swapping a reference into a clip that is already absolute.
+    REQUIRE_FALSE(take(std::move(absolute_media)).with_content(reference));
+}

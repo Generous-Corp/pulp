@@ -890,6 +890,19 @@ storage-only rather than missing bridge wiring: the JS style adapter calls the
 registered bridge functions, and View preserves the values. They have no visual
 effect until raster `background-image: url(...)` paint is wired.
 
+## Non-CSS properties the style adapter accepts
+
+`el.style.hitSlop` is not a CSS property and has no CSS cascade, computed
+value, or percentage basis. The style adapter accepts it anyway because the
+React Native prop of the same name is the only way to grow a control's
+hit-test rect, and a design that reaches for one surface should not be
+forced onto the other. It parses a number, a string of 1-4 numbers using
+the `margin` fill order, or an RN `{top,right,bottom,left}` object, and
+forwards to `setHitSlop`. Object edges are independent — a missing edge is
+`0`, not an inherited one — which is React Native's rule, not the CSS
+shorthand rule; only the string form fills. The catalog entry is
+`rn/hitSlop`, since that is where the semantics are defined.
+
 ## Known buggy-but-supported
 
 1. `css/lineHeight` unitless multiplier (`lineHeight: 1.5`) — silently
@@ -920,6 +933,27 @@ An unparseable `opacity` resolves to the CSS initial value of `1`, never to
 `0`: coercing it to `0` leaves the element laid out, hit-testable and
 clipped exactly as before but painted fully transparent, which reads as the
 element vanishing rather than as a style reset.
+
+## Empty background values remove the declaration
+
+Assigning the empty string to `background-color`, `background-image`, or the
+`background` shorthand **removes** that declaration, per CSSOM. The paint path
+used to treat an empty value as "nothing to parse" and return early, so the last
+colour or gradient stayed on screen with no declaration left to explain it.
+
+This is the `background` sibling of the `opacity` restore above, and it reaches
+the same way: the `:hover` translator snapshots `el.style[prop]` on `mouseenter`
+and assigns it back on `mouseleave`, so an element carrying no inline background
+is restored by assigning `""`. The removal now propagates, and the `background`
+shorthand clears **both** halves it can have set.
+
+`transparent` is not a substitute for removal. It parses to `rgba(0,0,0,0)` — a
+real declaration that happens to be invisible — so it composites as a present
+colour rather than restoring whatever the cascade would otherwise supply.
+
+The `color` half of this contract is **still open**: `setTextColor` drops an
+empty value the same way, and there is no `clear_text_color()` primitive to
+route a removal through, so text colour cannot yet be removed.
 
 ## Shared WidgetBridge lifecycle note
 
