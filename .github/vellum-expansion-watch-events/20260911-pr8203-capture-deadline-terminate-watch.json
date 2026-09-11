@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260911-pr8203-capture-deadline-terminate-watch",
+  "created_at": "2026-09-11T07:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record Pulp-owned browser-capture lifecycle hardening that closes the two windows in which a capture hitting its cleanup deadline removed the ephemeral profile and exited while leaving the Chromium it launched running and reparented to init. terminateBrowser now signals through the live child handle as well as through recorded custody, which reaches a browser whose ownership marker could not be written because cleanup had already removed the profile directory; and releasing a custody slot marks it closed before awaiting, so a child adopted during the handover is signalled synchronously by its adopter. The fail-closed identity model is unchanged: a signal is authorized only while the child handle is unreaped, where POSIX forbids reuse of that pid and therefore of the group id that equals it, so kill(-pid) reaches this child's group or nothing. Ambiguous or mismatched processes and profiles are still preserved rather than reclaimed. This changes no design ingest, no captured output, no rendering, layout or packaging behavior, no accepted expansion boundary, and no Vellum source authority; it only stops a detached helper from outliving the harness that launched it.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/browser_process.test.mjs",
+    "node --test tools/import-design/browser_capture/security.test.mjs",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
