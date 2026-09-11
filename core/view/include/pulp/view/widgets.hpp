@@ -6,6 +6,7 @@
 #include <pulp/view/caret.hpp>
 #include <pulp/view/custom_shader_host.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/hit_metrics.hpp>
 #include <pulp/canvas/attributed_string.hpp>
 #include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/audio_bridge.hpp>
@@ -60,11 +61,11 @@ public:
 
     void set_text(std::string text) {
         if (text == text_) return;
-        // A horizontal, single-line Label with explicit width AND height cannot
-        // move itself or its siblings when only its copy changes. Live
-        // readouts commonly update this kind of Label every pointer sample.
-        // Re-running Yoga for the whole imported tree in that case is pure
-        // work and can consume multiple milliseconds of the input budget.
+        // A horizontal, single-line Label whose laid-out box does not move
+        // when its copy changes cannot move its siblings either, so it does
+        // not need a layout pass. Live readouts update this kind of Label on
+        // every pointer sample; re-running Yoga over the whole imported tree
+        // per sample is pure work and can consume the entire input budget.
         //
         // Keep the conservative path for intrinsic-width, multiline,
         // vertical, attributed, and captured-wrap Labels. Their text can
@@ -81,9 +82,37 @@ public:
         const bool horizontal =
             text_direction_ != canvas::TextDirection::top_to_bottom &&
             text_direction_ != canvas::TextDirection::bottom_to_top;
-        const bool text_geometry_is_fixed =
-            has_explicit_width && has_explicit_height && horizontal && !multi_line_ &&
-            !captured_wrap_fallback_ && !has_attributed_;
+        const bool single_line_simple =
+            horizontal && !multi_line_ && !captured_wrap_fallback_ && !has_attributed_;
+        // Baseline alignment reads this Label's ASCENT, not its height, to
+        // place its siblings: under YGAlignBaseline a row's cross-axis
+        // positions derive from the max baseline of the participating items.
+        // Ascent and line height are independent maxes over the faces the
+        // text resolves (TextShaper::prepare takes max of the base font box
+        // and the shaped box per metric), so new copy can hold the height
+        // constant while moving the ascent -- and then a skipped
+        // invalidate_layout() would leave every sibling stale. An unchanged
+        // height is only a sufficient proof of "nothing can move" when this
+        // Label is not a baseline participant, so decline the fast path when
+        // it is. `align_self` overrides the parent's `align_items`, and
+        // `auto_` means inherit, so both have to be consulted.
+        const View* flex_parent = parent();
+        const bool baseline_aligned =
+            flex().align_self == FlexAlign::baseline ||
+            (flex().align_self == FlexAlign::auto_ && flex_parent != nullptr &&
+             flex_parent->flex().align_items == FlexAlign::baseline);
+        // An explicit width pins the horizontal axis outright. The vertical
+        // axis is pinned either by an explicit height, or -- for a single-line
+        // Label -- by measuring it: a single-line height is one line box, so
+        // it only moves when the new copy resolves a different font (fallback
+        // to a taller family) or a different inherited metric. Probing costs
+        // one shaper prepare() on a short string, which paint() is about to
+        // do anyway and which the measure memo caches; invalidate_layout()
+        // costs a Yoga pass over the whole tree. Probe only when it can pay
+        // off -- an intrinsic-width Label must reflow regardless.
+        const bool probe_height = has_explicit_width && single_line_simple &&
+                                  !has_explicit_height && !baseline_aligned;
+        const float height_before = probe_height ? intrinsic_height() : 0.0f;
         text_ = std::move(text);
         // The text IS the accessible name for a label — the two-arg ctor set it
         // and set_text() did not, so every Label built by the JS bridge
@@ -105,6 +134,10 @@ public:
         // PreText-style shaper cache is keyed by (text, family, size), so the
         // new text simply hits a different cache entry — no algorithm change,
         // just cache-correct re-measurement.
+        const bool text_geometry_is_fixed =
+            has_explicit_width && single_line_simple &&
+            ((has_explicit_height && !baseline_aligned) ||
+             (probe_height && intrinsic_height() == height_before));
         if (!text_geometry_is_fixed) invalidate_layout();
         request_repaint();
     }
@@ -227,6 +260,16 @@ public:
     /// Applies the same text-transform as paint() so measurement matches
     /// what is actually drawn.
     float intrinsic_width() const override;
+
+    /// Widest this label can be if nothing soft-wrapped — CSS max-content.
+    ///
+    /// A soft-wrapping label reports `intrinsic_width() == 0` so its parent's
+    /// width, not the single-line advance, decides where lines break. That
+    /// leaves an auto-width ANCESTOR with no content measurement at all, so
+    /// the shrink-to-fit pass has nothing to hug and the ancestor stretches to
+    /// fill the space it was offered. This reports the unwrapped width for
+    /// exactly that pass.
+    float max_content_width() const;
 
     /// Intrinsic height based on font size and line height.
     /// Walks the inheritance cascade so an unset font_size
@@ -645,6 +688,15 @@ private:
     /// Returns false when this Label opts out of measure caching.
     bool sync_measure_basis() const;
     float compute_intrinsic_width() const;
+    float compute_max_content_width() const;
+    /// Whether paint() will emit one line per `\n` rather than drawing the
+    /// whole string in a single fill_text. Measurement has to agree with
+    /// paint on this or width and height disagree about the same string.
+    /// paint()'s own predicate also admits a usable captured line cache and
+    /// the attributed path; neither belongs here -- the cache check reads a
+    /// laid-out width (measurement cannot depend on the layout it feeds) and
+    /// attributed text is measured on its own branch.
+    bool paints_as_lines() const { return multi_line_ || captured_wrap_fallback_; }
     float compute_intrinsic_height() const;
     float compute_measured_height(float available_width) const;
     mutable MeasureBasis measure_basis_;
@@ -1460,7 +1512,22 @@ public:
     RangeSlider() {
         set_access_role(AccessRole::slider);
         set_focusable(true);
+        // The control paints 16pt on its minor axis, which is comfortable to
+        // look at and uncomfortable to hit. Grow only the hit area to the 44pt
+        // touch target HitMetrics specifies -- (44 - 16) / 2 = 14pt per edge --
+        // so the thumb is grabbable without the box, the layout or the paint
+        // changing. The major axis gets the same 14pt so the thumb is still
+        // grabbable at either travel extreme, where half of it sits outside
+        // the track.
+        const float target = HitMetrics::default_min_target_pt(PointerType::touch);
+        const float slop = std::max(0.0f, (target - kMinorAxisExtent) * 0.5f);
+        set_hit_slop(slop);
     }
+
+    /// The thumb's minor-axis extent at rest, in points. `paint()` derives the
+    /// thumb from this and the constructor sizes the hit slop from it, so the
+    /// two cannot drift.
+    static constexpr float kMinorAxisExtent = 16.0f;
 
     // ── AccessibilityValueInterface (caller's min/max/step units) ────────
     double get_current_value() const override { return value_; }

@@ -53,6 +53,22 @@ void BridgeRegistrars::register_widget_style_interaction_api(WidgetBridge& self)
         return choc::value::Value();
     });
 
+    // setHitSlop(id, top, right, bottom, left) - RN hitSlop. Grows ONLY the
+    // area hit_test() accepts, never the painted box or the Yoga layout, so a
+    // visually small control can present a comfortable touch target. Callers
+    // that want a uniform inset pass the same number four times.
+    register_bridge_function(api, "setHitSlop", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
+        if (!v) return choc::value::Value();
+        const auto top    = static_cast<float>(args.get<double>(1, 0.0));
+        const auto right  = static_cast<float>(args.get<double>(2, top));
+        const auto bottom = static_cast<float>(args.get<double>(3, top));
+        const auto left   = static_cast<float>(args.get<double>(4, right));
+        v->set_hit_slop(top, right, bottom, left);
+        return choc::value::Value();
+    });
+
     // RN backfaceVisibility ("visible"|"hidden"). Stored on the View for
     // plumbing parity with @pulp/react. Pulp's transform model is currently
     // 2D-affine, so this is a no-op for painting today.
