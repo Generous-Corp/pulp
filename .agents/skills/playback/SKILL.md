@@ -1037,11 +1037,18 @@ someone must answer rather than dropping one that is owed: a
 `code == CompileErrorCode::X` comparison, which names a code without
 constructing one.
 
-All three seeded entries are `live-defect` — expression lanes on a clip,
-expression lanes on a trimmed nested clip, and the nested-sequence flattening
-refusals. They are tracked, not resolved. Removing one from the allowlist is
-how you assert the refusal is gone; the gate fails an entry whose raise site no
-longer exists, so a reason cannot outlive its code.
+Every entry carries a `status`: `live-defect` is tracked, not resolved, and
+`intended` says the refusal is the answer. Retiring a refusal is removing its
+raise site and its entry in the same change; the gate fails an entry whose
+raise site no longer exists, so a reason cannot outlive its code. The selftest
+takes the entries it drops from the allowlist document itself rather than from
+a list of its own, so a retirement cannot fail it — a gate that goes red when
+the code improves teaches people to edit the gate. Its synthetic raise and
+`case`-label fixtures do still name enumerators (`MidiExpressionLaneUnsupported`,
+`TrimmedGrooveUnsupported`, `NestedMixerPanUnsupported`) and the header
+fixture splices after `MidiExpressionLaneUnsupported,`; deleting one of those
+members from `CompileErrorCode` fails the selftest loudly and means re-pointing
+the fixture, not weakening it.
 
 ## Dependency floor
 
