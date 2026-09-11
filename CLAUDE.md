@@ -1487,9 +1487,17 @@ tools/scripts/clean_build_cov.sh --yes    # delete (idle-gated; skips an in-flig
 
 It only ever removes dirs named `build-cov` / `build-coverage` or their
 hyphen-suffixed variants such as `build-cov-phase6-gpu` (never
-a source tree or the primary `build/`), scans sibling worktrees by default
-(override with `PULP_WORKTREES_ROOT`), and skips any coverage dir a live build
+a source tree or the primary `build/`), and skips any coverage dir a live build
 process is using. Tested by `tools/scripts/test_clean_build_cov.py`.
+
+It scans **three** roots, because a coverage dir lands in any of them: the
+sibling-worktree root (`PULP_WORKTREES_ROOT`, else this repo's parent), the repo
+itself, and the repo's in-repo agent worktrees under `.claude/worktrees/`. The
+last two are **not** under `PULP_WORKTREES_ROOT` on a host that points it at a
+dedicated volume, as M3 must. Scanning only the first root there reported a
+clean pass over 147.8 GB while 15.6 GB sat in the two roots it could not reach.
+The dry run prints every root it scanned, so coverage is visible rather than
+inferred.
 
 **A full volume now fails fast and says so.** Before configuring or compiling
 anything, `local_diff_cover.sh` checks free space on the volume that holds

@@ -19,10 +19,31 @@ alike in either direction is the failure this check exists to avoid: a stale
 marker that cries wolf gets ignored within a week, and a live one that stays
 silent is the bug itself.
 
+A proven-dead marker is REAPED here, not merely reported. Proof of death is
+already in hand at that point, and the removal branch is unreachable for a live
+build by construction — `kill(pid, 0)` has to have said the owner is gone. The
+alternative, printing "safe to remove" and leaving the file, re-proves the same
+finding on every `gates.sh` and every pre-push in that checkout forever; a
+permanently unclearing advisory is indistinguishable from a passing check, and
+trains readers to skim the section that also carries the live-build warning.
+Reaping also closes a pid-reuse window: an unreaped marker whose pid is
+eventually recycled by an unrelated process starts reading as a live build.
+
+Reaping this marker cannot weaken interrupted-build detection. That is
+`build-dir-sentinel.sh`'s `.pulp-build-incomplete`, a different file in the
+build dir, whose SIGKILL survival is its design; this one lives at the source
+root and answers the opposite question.
+
 Advisory by design. Exits 0 whether or not a build is live; a build in your own
 checkout is a fact to know, not a policy violation, and this must never be the
-reason a push fails. Exit 2 is reserved for a malformed marker, which is a defect
-in the writer rather than a finding about the tree.
+reason a push fails. The non-zero codes are defects rather than findings about
+the tree, and they are the cases where this check could not act on what it saw:
+
+    0  nothing live here, or a live build reported, or a dead marker reaped
+    2  malformed marker (no usable pid) — a defect in the writer. Left in place:
+       it is the evidence, and no liveness claim was ever established about it.
+    3  a dead marker that could not be reaped (read-only tree, permissions).
+       The loop genuinely cannot close, so this must not read as a clean pass.
 """
 
 from __future__ import annotations
@@ -69,6 +90,21 @@ def pid_is_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def reap_marker(marker: Path) -> str | None:
+    """Delete a marker proven dead. Returns None on success, else the reason.
+
+    A concurrent reaper (or a build starting and rewriting it) winning the race
+    is success: the caller wanted the stale file gone, and it is gone.
+    """
+    try:
+        marker.unlink()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        return str(error)
+    return None
 
 
 def describe_age(started_epoch: str) -> str:
@@ -118,12 +154,23 @@ def main() -> int:
         return 2
 
     if not pid_is_alive(pid):
-        # A killed build leaves this behind by construction, so say so plainly
-        # rather than raising an alarm about a build that is already over.
-        print(f"live-build-check: stale marker from pid {pid} "
-              f"(started {fields.get('started_at', 'unknown')}) — that build is "
-              f"gone; safe to remove {marker}")
-        return 0
+        # A killed build leaves this behind by construction. That is not an
+        # alarm about a build already over — it is litter with a proof of death
+        # attached, so clear it here instead of re-deriving the same proof on
+        # every future run. Echo the fields first: the file is about to go, and
+        # what was building is the part worth keeping.
+        summary = (f"pid {pid}, started {fields.get('started_at', 'unknown')}, "
+                   f"command: {fields.get('command', 'unknown')}")
+        error = reap_marker(marker)
+        if error is None:
+            print(f"live-build-check: reaped stale marker ({summary}) — that "
+                  f"build is gone; removed {marker}")
+            return 0
+        print(f"live-build-check: stale marker ({summary}) is dead but could "
+              f"not be removed: {error}", file=sys.stderr)
+        print(f"live-build-check: {marker} will keep being re-reported until "
+              f"it is deleted by hand", file=sys.stderr)
+        return 3
 
     age = describe_age(fields.get("started_epoch", ""))
     print("")

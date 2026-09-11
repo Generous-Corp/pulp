@@ -380,16 +380,31 @@ def run_selftest() -> int:
         original_allowlist = allowlist.read_text(encoding="utf-8")
         document = json.loads(original_allowlist)
 
-        # Dropping a known refusal must name it again.
-        for dropped in ("NestedGainSinkUnsupported", "TrimmedRegisteredContentUnsupported"):
+        # Dropping a known refusal must name it again. The subjects are every
+        # entry the allowlist holds, read from the document rather than
+        # restated here: a snapshot of the allowlist would fail this rule the
+        # day a refusal is retired, which is the codebase improving, and a
+        # gate that fails then teaches people to edit the gate. Exercising
+        # every entry also leaves no selection that could quietly narrow to
+        # nothing, and an empty document is refused outright.
+        subjects = [(entry["code"], entry["file"]) for entry in document["refusals"]]
+        if not subjects:
+            print("selftest found no allowlist entries to drop")
+            return 1
+        for dropped_code, dropped_file in subjects:
             trimmed = {
                 "refusals": [
-                    entry for entry in document["refusals"] if entry["code"] != dropped
+                    entry
+                    for entry in document["refusals"]
+                    if (entry["code"], entry["file"]) != (dropped_code, dropped_file)
                 ]
             }
             allowlist.write_text(json.dumps(trimmed, indent=2) + "\n", encoding="utf-8")
-            if not any(dropped in error and "no entry in" in error for error in verify(root)):
-                print(f"selftest missed the dropped {dropped} entry")
+            if not any(
+                dropped_code in error and dropped_file in error and "no entry in" in error
+                for error in verify(root)
+            ):
+                print(f"selftest missed the dropped {dropped_code}@{dropped_file} entry")
                 return 1
 
         # An entry whose reason went missing must not pass for a written reason.
@@ -419,6 +434,27 @@ def run_selftest() -> int:
         allowlist.write_text(original_allowlist, encoding="utf-8")
         if verify(root):
             print("selftest rejected the restored allowlist")
+            return 1
+
+        # The fixtures below spell these enumerators. Each must still be a
+        # refusal-shaped member, or a fixture that names a code the enum no
+        # longer declares proves nothing: the raise pattern skips an unknown
+        # code, so "the label was not read as a raise" would pass with no
+        # label read at all. Name what went missing rather than let that be.
+        fixture_codes = (
+            "MidiExpressionLaneUnsupported",
+            "TrimmedGrooveUnsupported",
+            "NestedMixerPanUnsupported",
+        )
+        declared = set(refusal_codes(root)[1])
+        missing_codes = [code for code in fixture_codes if code not in declared]
+        if missing_codes:
+            print(
+                "selftest fixtures name "
+                + ", ".join(missing_codes)
+                + ", which CompileErrorCode no longer declares as a refusal; "
+                "re-point the fixture at a member it does declare"
+            )
             return 1
 
         synthetic = root / "core/playback/src/selftest_refusal.cpp"

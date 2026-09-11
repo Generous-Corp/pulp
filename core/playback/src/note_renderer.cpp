@@ -31,6 +31,7 @@ bool ArrangementNoteRenderer::prepare(std::size_t maximum_events_per_block) {
     pending_flush_ = false;
     state_overflow_ = false;
     has_block_index_ = false;
+    has_stream_pass_ = false;
     active_counts_.fill(0);
     return true;
 }
@@ -79,6 +80,9 @@ void ArrangementNoteRenderer::reset() noexcept {
     state_overflow_ = false;
     has_block_index_ = false;
     has_latched_shift_ = false;
+    has_stream_pass_ = false;
+    last_stream_pass_ = 0;
+    last_stream_epoch_ = 0;
     latched_shift_ = {};
     last_block_index_ = 0;
     dropped_events_ = 0;
@@ -226,6 +230,10 @@ ArrangementNoteRenderer::process_shifted(const PlaybackProgramBlock& block,
     has_block_index_ = true;
     if (pending_flush_ || view.adoption == ShellAdoptionResult::Adopted ||
         block_sequence_reset || transport.reset_requested) {
+        // Everything sounding is released here, so the stream's place in the
+        // loop is no longer carried and the next range's discontinuity is served
+        // on its own terms.
+        has_stream_pass_ = false;
         if (!flush(0)) {
             result.code = NoteRenderCode::OutputOverflow;
             result.emitted_events = static_cast<std::uint32_t>(output_.size());
@@ -236,6 +244,7 @@ ArrangementNoteRenderer::process_shifted(const PlaybackProgramBlock& block,
     }
 
     if (!transport.is_playing) {
+        has_stream_pass_ = false;
         if (!flush(0))
             result.code = NoteRenderCode::OutputOverflow;
         result.emitted_events = static_cast<std::uint32_t>(output_.size());
@@ -247,84 +256,120 @@ ArrangementNoteRenderer::process_shifted(const PlaybackProgramBlock& block,
     const auto events = view.program->arrangement_note_events();
     const auto modifiers = view.program->note_modifiers();
     std::int64_t last_cursor = 0;
+    // A compensated stream reaches the loop point before the transport does: its
+    // window is read `shift` samples early, so the wrap it must honour is the
+    // stream's and not the transport's. Resolved once per block, and only when
+    // something actually compensates, so an uncompensated or scrubbing stream
+    // pays no tempo-map conversion at all.
+    const bool loop_bounds_reads =
+        shift.compensating() && transport.loop.enabled && !transport.scrubbing;
+    const auto loop_start_samples =
+        loop_bounds_reads ? transport.tempo_map->ticks_to_samples(transport.loop.start)
+                          : timebase::SamplePosition{};
+    const auto loop_end_samples =
+        loop_bounds_reads ? transport.tempo_map->ticks_to_samples(transport.loop.end)
+                          : timebase::SamplePosition{};
     for (std::uint8_t range_index = 0; range_index < transport.range_count; ++range_index) {
         const auto& range = transport.ranges[range_index];
-        if (range.discontinuity && !flush(range.sample_offset))
-            break;
-        // Constant for the whole range: the pass only changes at a wrap, and a
-        // wrap always starts a new range. A note's on and its off therefore
-        // resolve against the same pass, so the gate can never admit one
-        // without the other and leave a note hanging.
+        // The pass a run belongs to. Without read-ahead it is constant for the
+        // range, because a transport wrap always starts a new one. Read-ahead can
+        // move it inside the range, and each run then resolves its own modifiers
+        // against its own pass; a note whose off lies past the loop point is
+        // released by the wrap flush below, exactly as a transport wrap releases
+        // it, so the gate still cannot leave one hanging.
         const auto pass_index = transport.scrubbing ? 0 : range.loop_pass_index;
 
-        const auto refuse_compensation = [&](NoteRenderCode code) noexcept {
+        if (!range_admits_event_compensation(range, shift)) {
             (void)flush(range.sample_offset);
             update_carry_state(transport, last_cursor);
-            result.code = code;
+            result.code = NoteRenderCode::CompensationUnsupported;
             result.emitted_events = static_cast<std::uint32_t>(output_.size());
             result.dropped_events = dropped_events_;
             return result;
-        };
-        if (!range_admits_event_compensation(range, shift))
-            return refuse_compensation(NoteRenderCode::CompensationUnsupported);
-        // An enabled loop bounds how far ahead this pass may legally read. The
-        // tempo-map conversion is skipped entirely when nothing compensates, so
-        // an uncompensated stream pays no per-range cost for the guard.
-        if (shift.compensating() && transport.loop.enabled && !transport.scrubbing &&
-            !loop_admits_event_compensation(
-                range, shift, transport.tempo_map->ticks_to_samples(transport.loop.end)))
-            return refuse_compensation(NoteRenderCode::CompensationLoopWrapUnsupported);
+        }
         // Per range, never per block: a block that straddles a loop wrap carries
         // two monotonic ranges, and the second one's window must be shifted from
         // its own origin or the wrap replays the pre-wrap events.
-        const auto compensated_start = shifted_range_origin(range, shift);
-        const auto search_sample =
-            range.host_beat_mapping
-                ? transport.tempo_map->ticks_to_samples(range.timeline_tick_start)
-                : compensated_start;
-        const auto mapped_end_sample =
-            range.host_beat_mapping ? transport.tempo_map->ticks_to_samples(range.timeline_tick_end)
-                                    : compensated_start;
-        auto cursor =
-            std::lower_bound(events.begin(), events.end(), search_sample,
-                             [](const NoteProgramEvent& event, timebase::SamplePosition sample) {
-                                 return event.sample < sample;
-                             });
-        last_cursor = static_cast<std::int64_t>(cursor - events.begin());
-        for (; cursor != events.end(); ++cursor) {
-            std::uint32_t local_offset = 0;
-            if (range.host_beat_mapping) {
-                if (cursor->sample > mapped_end_sample)
-                    break;
-                if (!host_mapped_output_offset_for_tick(range, cursor->tick, local_offset))
-                    continue;
-            } else {
-                if (!detail::note_event_offset_in_range(cursor->sample, compensated_start,
-                                                        range.frame_count, local_offset)) {
-                    if (cursor->sample >= compensated_start)
-                        break;
-                    continue;
-                }
-            }
-            // Pure arithmetic over the immutable program: no allocation, no
-            // stored draw state, and no dependence on how many events were
-            // considered before this one.
-            if (!modifiers.empty()) {
-                const auto* modifier = find_note_modifier(modifiers, cursor->note_id);
-                if (modifier != nullptr &&
-                    !timeline::note_modifier_sounds(modifier->modifier, modifier->draw_key,
-                                                    pass_index)) {
-                    last_cursor = static_cast<std::int64_t>((cursor - events.begin()) + 1);
-                    continue;
-                }
-            }
-            const auto block_offset = range.sample_offset + local_offset;
-            if (!emit(*cursor, block_offset)) {
-                if (!state_overflow_)
-                    pending_flush_ = true;
+        const auto plan = loop_bounds_reads ? plan_compensated_read(range, shift,
+                                                                    loop_start_samples,
+                                                                    loop_end_samples)
+                                            : plan_compensated_read(range, shift);
+        // The transport's discontinuity is a stream discontinuity only when the
+        // stream has not already served this wrap by reading ahead through it.
+        // Serving it twice would release the post-wrap notes read-ahead started.
+        // Outside the compensated looping case nothing runs ahead, so every
+        // discontinuity — a scrub-window restart included — still releases.
+        const auto stream_pass = pass_index + plan.segments[0].pass_offset;
+        const bool stream_discontinuity =
+            range.discontinuity &&
+            (!loop_bounds_reads || !has_stream_pass_ || stream_pass != last_stream_pass_ ||
+             range.playback_epoch != last_stream_epoch_);
+        has_stream_pass_ = loop_bounds_reads;
+        last_stream_pass_ = stream_pass + (plan.wraps_inside_range ? 1u : 0u);
+        last_stream_epoch_ = range.playback_epoch;
+        if (stream_discontinuity && !flush(range.sample_offset))
+            break;
+
+        for (std::uint8_t segment_index = 0; segment_index < plan.segment_count; ++segment_index) {
+            const auto& segment = plan.segments[segment_index];
+            // The loop point falls here. Release what the earlier pass left
+            // sounding before the post-wrap run starts, which is what the
+            // transport's own wrap does a shift later.
+            if (segment_index != 0 && !flush(range.sample_offset + segment.range_offset))
                 break;
+            const auto segment_pass = pass_index + segment.pass_offset;
+            const auto search_sample =
+                range.host_beat_mapping
+                    ? transport.tempo_map->ticks_to_samples(range.timeline_tick_start)
+                    : segment.document_start;
+            const auto mapped_end_sample =
+                range.host_beat_mapping
+                    ? transport.tempo_map->ticks_to_samples(range.timeline_tick_end)
+                    : segment.document_start;
+            auto cursor =
+                std::lower_bound(events.begin(), events.end(), search_sample,
+                                 [](const NoteProgramEvent& event, timebase::SamplePosition sample) {
+                                     return event.sample < sample;
+                                 });
+            last_cursor = static_cast<std::int64_t>(cursor - events.begin());
+            for (; cursor != events.end(); ++cursor) {
+                std::uint32_t local_offset = 0;
+                if (range.host_beat_mapping) {
+                    if (cursor->sample > mapped_end_sample)
+                        break;
+                    if (!host_mapped_output_offset_for_tick(range, cursor->tick, local_offset))
+                        continue;
+                } else {
+                    if (!detail::note_event_offset_in_range(cursor->sample, segment.document_start,
+                                                            segment.frame_count, local_offset)) {
+                        if (cursor->sample >= segment.document_start)
+                            break;
+                        continue;
+                    }
+                }
+                // Pure arithmetic over the immutable program: no allocation, no
+                // stored draw state, and no dependence on how many events were
+                // considered before this one.
+                if (!modifiers.empty()) {
+                    const auto* modifier = find_note_modifier(modifiers, cursor->note_id);
+                    if (modifier != nullptr &&
+                        !timeline::note_modifier_sounds(modifier->modifier, modifier->draw_key,
+                                                        segment_pass)) {
+                        last_cursor = static_cast<std::int64_t>((cursor - events.begin()) + 1);
+                        continue;
+                    }
+                }
+                const auto block_offset =
+                    range.sample_offset + segment.range_offset + local_offset;
+                if (!emit(*cursor, block_offset)) {
+                    if (!state_overflow_)
+                        pending_flush_ = true;
+                    break;
+                }
+                last_cursor = static_cast<std::int64_t>((cursor - events.begin()) + 1);
             }
-            last_cursor = static_cast<std::int64_t>((cursor - events.begin()) + 1);
+            if (pending_flush_)
+                break;
         }
         if (pending_flush_)
             break;

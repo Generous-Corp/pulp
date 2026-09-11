@@ -4249,10 +4249,31 @@ qm set "$VMID" \
 ```
 
 A host running a supervisor from before that change never writes it, so *every*
-clone it creates is permanently unreapable — the reaper reports and never mutates
-them, the pool cannot allocate around them, and no amount of restarting resolves
-it. Deleting the stale clones by hand only buys one cycle; the next clone is born
-just as unreapable.
+clone it creates is permanently unreapable
+
+**This failure is silent, and that is the dangerous part.** The reaper still runs
+on its timer, still exits 0, and still reports success — it simply classifies
+every clone as unreclaimable and moves on. "0 orphans reclaimed" is
+indistinguishable from "0 orphans existed", so the detector reads healthy
+precisely when it has stopped working. Nothing in its exit code, its timer state,
+or a `systemctl status` distinguishes the two.
+
+Never accept the reaper's quiet run as evidence that no orphans exist. Pair it
+with a positive control that must return non-zero — count the clones it actually
+considered, not the ones it removed:
+
+```bash
+journalctl -u pulp-ephemeral-reap.service --since '-1h' --no-pager \
+  | grep -cE 'SKIP|REAP|WOULD REAP'     # control: 0 here means it saw nothing at all
+qm list | grep -c pulp-ci-ephemeral     # ground truth: how many clones exist
+```
+
+A reaper reporting success while `qm list` shows stopped clones accumulating is
+the signature of this bug, not of a healthy pool.
+
+The reaper only ever reports these clones, the pool cannot allocate around them,
+and no amount of restarting resolves it. Deleting the stale clones by hand buys
+exactly one cycle; the next clone is born just as unreapable.
 
 Confirm which side is stale before clearing anything:
 
