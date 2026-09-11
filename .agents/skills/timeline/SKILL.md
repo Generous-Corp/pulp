@@ -159,8 +159,13 @@ different request with an earlier result.
   reference gain/fades. A source window that cuts into a leaf clip's *own*
   fade shortens that fade to the new clip edge rather than refusing — the
   answer an unnested clip gives when it is dragged shorter — and a trim that
-  swallows a fade whole leaves none. That is a different thing from a fade on
-  the `SequenceRef` placement, which still refuses. A complete
+  swallows a fade whole leaves none. A fade authored on the `SequenceRef`
+  placement itself is a different mechanism: flattening records that ramp as a
+  window of fade progress in owner-timeline ticks, and every leaf the window
+  reaches evaluates its own position inside it, so one ramp composes across the
+  leaves flattening cut it into and multiplies with each leaf's own fade. It
+  refuses only when a ramp actually reaches a leaf whose content no renderer
+  scales by clip gain, because dropping that ramp would be silently wrong. A complete
   nested media clip preserves its `TimeConform` intent, but a source window
   that trims a conforming clip fails with `NestedSequenceUnsupported` until
   playback has a conform-aware source-range mapping. Expansion
@@ -1466,6 +1471,19 @@ is a malformed gesture** (the front-end never resolved it) and belongs in the
 lowerer; **an id that is well-formed but absent from the document** is the
 reducer's `MissingItem`. An `std::optional` destination left empty is neither —
 it is a request for last position.
+
+### `Clip::create` re-validates the fades against the duration it is given
+
+`valid_playback_properties` rejects a fade longer than the clip's duration, and
+`Clip::create` runs it, so rebuilding an existing clip with a *shorter* duration
+fails with `InvalidStructure` even though every field was copied verbatim from a
+clip the document already accepted. Trimming code that carries
+`playback_properties()` across unchanged is the shape that hits this: the
+failure names the structure, not the fade, so it reads like a malformed clip.
+
+Clamp or zero the fade durations before `create` when the new duration is
+smaller, and keep the ramp's real extent somewhere else if a caller still needs
+it — a trimmed placement should enter its fade part way up, not restart it.
 
 ### A negative control on a compound condition can exercise half of it
 
