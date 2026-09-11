@@ -74,7 +74,8 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     request.dirty.all = true;
     REQUIRE(compiler.submit(request));
     REQUIRE(compiler.status().has_error);
-    REQUIRE(compiler.status().last_error.code == CompileErrorCode::NestedSequenceUnsupported);
+    REQUIRE(compiler.status().last_error.code ==
+            CompileErrorCode::NestedDeviceChainUnsupported);
     REQUIRE_FALSE(store.has_value());
 
     PlaybackProgramStore budget_store;
@@ -671,7 +672,7 @@ TEST_CASE("Nested conforming audio refuses partial source windows") {
             REQUIRE(compiler.submit(std::move(request)));
             REQUIRE(compiler.status().has_error);
             REQUIRE(compiler.status().last_error.code ==
-                    CompileErrorCode::NestedSequenceUnsupported);
+                    CompileErrorCode::NestedConformedTrimUnsupported);
             REQUIRE(compiler.status().last_error.item == ItemId{12});
             REQUIRE_FALSE(store.has_value());
         }
@@ -1921,3 +1922,93 @@ TEST_CASE("Trimming a nested clip shortens its fades and keeps their shape") {
     REQUIRE(playback.fade_shape == ClipFadeShape::EqualPower);
 }
 
+
+// The refusal codes are the diagnostic. A device chain and an automation lane
+// are unrelated constructs that need unrelated things to become playable, so a
+// document carrying one must not be told the same thing as a document carrying
+// the other. Asserting the two codes differ is the assertion that survives:
+// a later collapse back to one umbrella code fails here even if both
+// individual expectations were updated to match it.
+TEST_CASE("Nested child processing names the construct that blocks flattening") {
+    const auto refusal = [](NestedChildProcessing processing) {
+        PlaybackProgramStore store;
+        InlineExecutor executor;
+        PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+        ProgramCompileRequest request;
+        request.project = shared(nested_child_processing_project(processing));
+        request.sequence_id = {2};
+        request.tempo_map = map_120();
+        request.sample_rate = request.tempo_map->sample_rate();
+        request.document_revision = 1;
+        request.dirty.all = true;
+        REQUIRE(compiler.submit(std::move(request)));
+        REQUIRE(compiler.status().has_error);
+        REQUIRE_FALSE(store.has_value());
+        return compiler.status().last_error;
+    };
+
+    const auto device = refusal({.device_chain = true, .automation_lane = false});
+    REQUIRE(device.code == CompileErrorCode::NestedDeviceChainUnsupported);
+    // The child track, not the clip: the chain is the track's, and an author
+    // fixing this moves or removes processing on that track.
+    REQUIRE(device.item == ItemId{11});
+
+    const auto automation = refusal({.device_chain = false, .automation_lane = true});
+    REQUIRE(automation.code == CompileErrorCode::NestedAutomationLaneUnsupported);
+    REQUIRE(automation.item == ItemId{11});
+
+    REQUIRE(device.code != automation.code);
+
+    // A document carrying both is still refused, and reports one of the two
+    // rather than a third code standing for the pair.
+    const auto both = refusal({.device_chain = true, .automation_lane = true});
+    REQUIRE((both.code == CompileErrorCode::NestedDeviceChainUnsupported ||
+             both.code == CompileErrorCode::NestedAutomationLaneUnsupported));
+
+    // Neither construct present compiles, so the refusals above are caused by
+    // the construct under test and not by the shape of the fixture. The child's
+    // single note arrives as its on/off pair at the position the nesting gives
+    // it: the reference starts at tick 480 and the note sits 120 ticks into the
+    // child clip, for 240 ticks.
+    auto clean = compile(shared(nested_child_processing_project({})));
+    const auto events = clean->find_track({3})->arrangement_note_events();
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].tick == TickPosition{600});
+    REQUIRE(events[1].tick == TickPosition{840});
+}
+
+// A leaf whose position is defined in samples cannot be placed on the musical
+// timeline the nesting reaches it through. Distinct from the anchor guard on
+// the SequenceRef placement itself, which Clip::create_absolute makes
+// unreachable; this one a document can genuinely author.
+TEST_CASE("Nested absolute leaf is refused by its own code") {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'c'));
+    constexpr std::uint64_t kFrames = 24'000;
+    auto absolute_leaf = take(Clip::create_absolute({12}, {0}, kFrames, {48'000, 1},
+                                                    MediaRef{{50}, {0}, kFrames}));
+    REQUIRE(absolute_leaf.time_anchor() == ClipTimeAnchor::Absolute);
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {track(11, {absolute_leaf})}));
+    auto root = take(Sequence::create(
+        {2}, "root", std::nullopt, {track(3, {nested_clip(4, 10, 0, kTicksPerQuarter)})}));
+    auto project = take(Project::create(
+        ProjectInput{{1}, "nested absolute leaf", 100, {2},
+                     {{50, "source", kFrames, {48'000, 1}, hash}}, {root, child}}));
+
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = shared(std::move(project));
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    REQUIRE(compiler.submit(std::move(request)));
+    REQUIRE(compiler.status().has_error);
+    REQUIRE(compiler.status().last_error.code ==
+            CompileErrorCode::NestedAbsoluteChildUnsupported);
+    REQUIRE(compiler.status().last_error.item == ItemId{12});
+    REQUIRE_FALSE(store.has_value());
+}

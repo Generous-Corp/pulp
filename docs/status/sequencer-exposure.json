@@ -4509,7 +4509,7 @@
         {
           "path": "tools/scripts/negative_capability_allowlist.json",
           "needles": [
-            "a trim that cuts a conformed source, so each"
+            "NestedConformedTrimUnsupported"
           ]
         }
       ],
@@ -5022,6 +5022,149 @@
           "owner": "sequencer-control-closure",
           "dependencies": [
             "event-stream-pdc-contract"
+          ]
+        }
+      }
+    },
+    {
+      "id": "nested-sequence-refusal-split",
+      "title": "Nested SequenceRef refusals split from one umbrella code into per-cause codes",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "bdb0eb23-6178-4a06-8c4b-ee5026e52442",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "tools/timeline/src/timeline_agent.cpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/timeline_view/src/arranger_view.cpp",
+        "docs/guides/timeline-sdk.md",
+        "test/test_timeline_arranger_view.cpp",
+        "test/test_timeline_nesting_model.cpp",
+        "test/timeline_nesting_test_support.hpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        },
+        {
+          "path": "tools/timeline/src/timeline_agent.cpp",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Nothing starts or stops working here. One CompileErrorCode member that named five unrelated causes becomes four members that each name one, and two guards unreachable through any validly-constructed Project are retargeted to the existing InvalidStructure. The enum is already public and the new members are appended, so no installed header gains a type and no declared capability changes; claiming an installed-SDK surface would advertise a capability this change does not add.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "`pulp seq` neither gained nor lost a command. A refusal that reached the CLI as the string NestedSequenceUnsupported now reaches it as the specific cause, which is a more precise diagnostic on an existing path rather than a new offline capability.",
+          "evidence": [
+            {
+              "kind": "cli_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The MCP timeline tools read the same wire name from compile_error_code_name, so they report the narrower cause automatically. No tool, argument, or result field changes shape.",
+          "evidence": [
+            {
+              "kind": "mcp_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "No live control is added or removed. A document that compiled before still compiles, and a document that refused still refuses on exactly the same conditions; only the reported code differs, so nothing becomes controllable at runtime.",
+          "evidence": [
+            {
+              "kind": "other",
+              "path": "core/playback/src/sequence_content_lowerer.cpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is declared or withdrawn. The refusals remain refusals and the allowlist carries one row per cause instead of one row covering five, which records why each stands without asserting an agent-visible capability.",
+          "evidence": [
+            {
+              "kind": "other",
+              "path": "tools/scripts/negative_capability_allowlist.json",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
           ]
         }
       }
