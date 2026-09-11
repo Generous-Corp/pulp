@@ -933,3 +933,44 @@ warning from `tools/check-docs.sh`. That warning is correct and unfixable from
 `modules.yaml`, whose entries are validated against `core/<name>/` existing;
 adding a row would convert a warning into a hard failure. `pulp-tracing`,
 `pulp-perfetto` and `pulp-cpp` sit in the same position.
+
+## A heavy selftest in `quality_tests.cmake` must declare `PROCESSORS`
+
+The capability tests (`agent-capability-manifest-check`,
+`agent-capability-manifest-selftest`, `agent-capability-rederive-selftest`)
+share `test/cmake/quality_tests.cmake` with much heavier GPU and role-producer
+selftests. CI runs that suite with `ctest -j8 --timeout 120`, and ctest's
+scheduler charges a test one slot unless `PROCESSORS` says otherwise.
+
+A test that spawns a subprocess tree while declaring the default single slot is
+therefore co-scheduled with seven other tests that may do the same. Each then
+inflates the others, and the ones nearest their budget time out — on a loaded
+host, tests that pass comfortably in isolation fail together in a cohort, on
+unrelated PRs, in varying subsets. The failure looks like flakiness or like a
+break on `main`; it is neither.
+
+When you register a test here:
+
+- Declare `PROCESSORS 8` if it forks, builds, or drives subprocesses.
+  `agent-capability-manifest-selftest` already does.
+- Declare an explicit `TIMEOUT` when the work genuinely exceeds the suite
+  default. `build.yml` sets `--timeout 120` specifically so one hung entry
+  cannot burn the workflow timeout, and its comment directs long tests to set
+  their own. An explicit `TIMEOUT` relaxes no assertion — every negative
+  control still runs and still must refuse.
+- Compare the measured baseline against 120 s, not against zero. On an
+  unloaded Linux runner `agent-capability-rederive-selftest` takes 76.65 s and
+  `gpu-first-visible-role-producers-selftest` 49.07 s. The first has roughly
+  1.6x headroom and the second 2.4x, and both have timed out in the same
+  cohort — so a slot declaration without a budget still leaves the tighter one
+  failing under load.
+- Measure before assuming which part is slow. Profiling a test's phases has
+  repeatedly retired the obvious suspect: an analyzer's per-file `git show`
+  hashing that costs seconds over the real tree ran against a two-file
+  synthetic fixture and accounted for under 1% of runtime, while the true cost
+  was the count of sealed-build invocations.
+
+`RESOURCE_LOCK agent-capability-manifest-source` serializes the three capability
+tests against each other, but it constrains nothing against tests holding a
+different lock — it is a correctness guard for the manifest rewrite, not a
+concurrency budget.
