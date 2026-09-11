@@ -8241,3 +8241,23 @@ shipyard ship --pr <n>
 for this reason, so the auto path no longer runs at all. While it is paused, do
 **not** pass `--workstream-id` — an explicit id still opts in, and a fleet where
 some PRs are managed and most are not is worse than either state alone.
+
+## A perf job's env budgets are assertions, and a tight one makes the job a runner report
+
+`.github/workflows/timeline-hardening.yml` exports its millisecond ceilings as
+env vars for the test step. That makes them look like tuning knobs; they are
+assertions, and each needs the same justification any assertion needs.
+
+An absolute wall-clock ceiling measures `work / host_throughput`. It says
+something about the code only when it sits far enough above the observed time
+that no plausible runner speed can reach it. Measure the headroom before
+adding or keeping one: run the step against a deliberately loaded host (enough
+busy processes to oversubscribe every core) and compare. A ceiling with a
+small multiple of headroom will flip roughly with runner load, and the flake
+looks exactly like a real regression.
+
+When headroom is thin, the fix is not a bigger number and not a deleted
+assertion. Move the claim into the test as something invariant to host speed —
+a ratio between two same-run measurements at different input sizes, or a count
+of the work actually done — and drop the env var. Prove it by repeating the
+job's own step under load and reporting the pass count, not by one green run.
