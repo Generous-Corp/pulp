@@ -170,12 +170,20 @@ bite:
   (`NoteRenderCode::CompensationUnsupported`). That range locates events by
   authored tick against the host's beat window, so a document-sample shift has
   nowhere to land, and converting it to ticks is what the unit rule forbids.
-- **Reading ahead past an enabled loop's end refuses**
-  (`NoteRenderCode::CompensationLoopWrapUnsupported`). What belongs in that
-  window is the content after the wrap, not the document positions past the loop
-  point; wrap-aware read-ahead is a separate mechanism that does not exist yet,
-  so the crossing fails closed rather than playing events the pass never reaches.
-  The guard is skipped entirely when nothing compensates.
+- **Reading ahead past an enabled loop's end folds back to the post-wrap
+  content.** What belongs in that window is what the musician hears when those
+  frames reach the device, which is the content after the wrap and not the
+  document positions past the loop point. `plan_compensated_read()` splits the
+  window at the loop point into at most two runs — the loop length is never
+  shorter than the maximum block, so one window crosses at most once — and each
+  run carries the loop pass it belongs to, so note modifiers resolve against the
+  right pass. The renderer releases what was sounding at the *stream's* wrap,
+  which arrives a shift before the transport's, and then suppresses the
+  transport's own discontinuity for a wrap the read-ahead already served:
+  serving it twice would cut the post-wrap notes read-ahead had already started.
+  The suppression is scoped to the compensated, looping, non-scrubbing case, so
+  a scrub-window restart still releases. The whole path is skipped — including
+  the loop's tempo-map conversion — when nothing compensates.
 - **An event-to-audio device contributes nothing to the shift.** The graph's own
   delay compensation already aligns its audio output against every sibling
   branch; adding it again pulls the stream early by exactly the amount the graph
