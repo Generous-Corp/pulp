@@ -1,0 +1,149 @@
+name: SCENE3D (advisory)
+
+permissions:
+  contents: read
+
+# The native no-JS 3D scene/glTF renderer is built behind PULP_ENABLE_SCENE3D,
+# which defaults OFF (CMakeLists.txt). Nothing in .github/workflows/ or
+# .shipyard/config.toml ever turned it ON, so every test gated behind it -- the
+# Renderer3D Catch2 suites and the scene3d contract/preflight/sidecar
+# registrations -- was registered nowhere and ran nowhere. A green required
+# `macos` gate said nothing about them.
+#
+# This lane is the missing coverage: path-filtered, ADVISORY (a red informs, it
+# does not block a merge), and scoped to exactly the gated surface. It is
+# deliberately NOT on `merge_group`: an advisory lane must not add latency to
+# the queue.
+#
+# Runner choice mirrors intel-portability.yml -- the stable GitHub-hosted
+# `macos-15`, free for public repos. Dawn is not built from source here: it
+# arrives prebuilt inside the pinned Skia chrome/m153 asset, so a hosted runner
+# pays a download rather than a toolchain build.
+#
+# This runner has no representative GPU, so the Catch2 cases that need a real
+# adapter report Skipped rather than Passed. That honesty is load-bearing: the
+# same cases used to call SUCCEED() on capability absence, which ctest reported
+# as a pass, and a lane built on that would have reported green for work it
+# never did.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'core/scene/**'
+      - 'core/render/**'
+      - 'tools/scene3d/**'
+      - 'test/test_scene3d*'
+      - 'test/test_renderer3d*'
+      - 'test/cmake/scene3d*'
+      - 'test/cmake/renderer3d*'
+      - 'test/fixtures/scene3d/**'
+      - '.github/workflows/scene3d-advisory.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: scene3d-advisory-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scene3d-build-test:
+    name: SCENE3D build + test (advisory)
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      BUILD_DIR: build-scene3d
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Install ccache + ninja
+        run: |
+          brew install ccache ninja || {
+            brew update
+            brew install ccache ninja
+          }
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Fetch prebuilt Skia (macOS)
+        # PULP_ENABLE_GPU=ON pulls in core/render, and FindSkia.cmake needs
+        # external/skia-build/build/mac-gpu/lib/Release/libskia.a. The
+        # LFS-declared Skia binaries are not committed, so a fresh checkout has
+        # only headers and Configure fails the PULP_HAS_SKIA gate. Same step
+        # nightly-full-build.yml uses.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py darwin-arm64 \
+            --cache-root "${PULP_SKIA_CACHE_ROOT:-$HOME/.cache/pulp/skia}" \
+            --cache-lock-timeout "${PULP_SKIA_CACHE_LOCK_TIMEOUT_SECS:-300}"
+
+      - name: Configure (SCENE3D ON)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B "${BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_ENABLE_GPU=ON \
+            -DPULP_ENABLE_SCENE3D=ON \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF
+
+      - name: Build the gated targets
+        shell: bash
+        # Only the binaries the selected tests invoke, not the whole tree: the
+        # rest of the suite is already covered by the required `macos` gate.
+        # A target missing from this list fails loudly -- ctest reports its
+        # tests Not Run -- rather than silently shrinking the selection.
+        run: |
+          set -euo pipefail
+          cmake --build "${BUILD_DIR}" -j"$(sysctl -n hw.ncpu)" \
+            --target pulp-test-renderer3d \
+                     pulp-test-scene3d-renderer-characterization \
+                     pulp-renderer3d-probe \
+                     pulp-scene3d-inspect \
+                     pulp-scene3d-inspect-native \
+                     pulp-scene3d-bake-preflight \
+                     pulp-scene3d-sidecar
+
+      - name: Test (SCENE3D surface)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `ctest -R` is case-SENSITIVE. A lowercase-only 'renderer3d|scene3d'
+          # selects 144 tests and silently drops the ~61 capitalized Catch2 case
+          # names, so the character classes are not cosmetic.
+          select='[Rr]enderer3[Dd]|[Ss]cene3[Dd]'
+
+          # Both native-slice-handoff tests read
+          # planning/threejs-webgpu-gltf-bake-plan.md. `planning` is a PRIVATE
+          # submodule and no workflow in this repo checks submodules out, so
+          # they cannot pass on any hosted runner. The positive contract names
+          # the plan file in its ctest arguments; the negative contract reaches
+          # it through verify_native_slice_handoff_contract.py, which hardcodes
+          # the path -- so excluding only the obvious one leaves a permanent red.
+          exclude='scene3d-native-slice-handoff-contract|scene3d-native-slice-handoff-negative-contract'
+
+          # A selection that matches nothing exits 0 and reads as a pass, which
+          # is the exact failure this lane exists to end. --no-tests=error makes
+          # an empty selection a failure, and the floor check makes a SHRUNKEN
+          # one a failure too -- neither is covered by the other.
+          found=$(ctest --test-dir "${BUILD_DIR}" -N -R "${select}" \
+                    --exclude-regex "${exclude}" | awk '/^Total Tests:/{print $3}')
+          echo "selected ${found} tests"
+          if [ "${found}" -lt 150 ]; then
+            echo "::error::SCENE3D selection collapsed to ${found} tests (expected ~203)." >&2
+            exit 1
+          fi
+
+          ctest --test-dir "${BUILD_DIR}" --output-on-failure \
+            --no-tests=error \
+            --repeat until-pass:2 \
+            -C Release -LE "validation|slow|performance|bench|quality-lab" \
+            -R "${select}" \
+            --exclude-regex "${exclude}" \
+            -j"$(sysctl -n hw.ncpu)" --timeout 300
