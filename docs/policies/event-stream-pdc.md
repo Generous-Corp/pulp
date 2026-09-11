@@ -164,13 +164,32 @@ document-sample origin for a sample-domain shift to land on, and converting the
 shift to ticks is what the unit rule forbids. That combination fails closed with
 a typed process code rather than scheduling against an undefined quantity.
 
-**Reading ahead past an enabled loop's end is refused, not approximated.** Near
-a loop end the shifted window wants the content from *after* the wrap; the
-document positions past the loop point are events this pass will never reach.
-Wrap-aware read-ahead is a distinct mechanism and is not implemented, so a
-compensating shift whose window would cross the loop end fails closed with
-`CompensationLoopWrapUnsupported` rather than playing the wrong events. An
-uncompensated stream is unaffected, and the guard costs it no per-range work.
+**Reading ahead past an enabled loop's end folds back to the post-wrap
+content.** Near a loop end the shifted window wants the content from *after* the
+wrap; the document positions past the loop point are events this pass will never
+reach. The window is therefore planned against the loop rather than refused by
+it: `plan_compensated_read()` folds the shifted origin into the loop and splits
+the window at the loop point into at most two runs, each carrying the loop pass
+it belongs to so a note modifier resolves against the pass that will actually
+sound it. At most two, because `MasterTransport::validate_loop` already rejects
+a loop shorter than the maximum block, so one window crosses the loop point at
+most once.
+
+The wrap moves with the stream, not with the transport. The renderer releases
+what the earlier pass left sounding at the *stream's* wrap, which arrives a
+shift before the transport reaches the same loop point, and it then suppresses
+the transport's own discontinuity for a wrap the read-ahead already served.
+Serving that wrap twice would cut the post-wrap notes read-ahead had already
+started — the audible failure this suppression exists to prevent. The
+suppression is scoped to the compensating, looping, non-scrubbing case, so a
+scrub-window restart, a seek, and an adoption all still release exactly as
+before. An uncompensated stream takes none of this path, including the loop's
+tempo-map conversion.
+
+The non-chase rule still applies to the shifted window: a compensated pass that
+begins mid-loop does not chase an onset that precedes its own origin, so the
+first pass after a start can be missing a note the following passes sound. That
+is the same rule a seek obeys, applied to the window compensation moved.
 
 ### Live input
 
@@ -226,8 +245,6 @@ scheduled stream is identical between the two.
   that legitimately vary their latency, for a condition Pulp cannot currently
   observe. It is also why the dynamic-latency acceptance test drives a synthetic
   latency source rather than a real backend.
-- **Wrap-aware read-ahead.** A compensating shift refuses at a loop end instead
-  of reading the post-wrap content.
 
 ## Acceptance
 
@@ -235,8 +252,8 @@ The behaviour above is covered by `test/test_playback_event_pdc.cpp` (shift
 accumulation and range checking, saturation, tempo change inside a shifted
 window, block-boundary crossing at several partitions, loop-wrap crossing,
 the hold-until-stop relatch, whole-span versus small-block equivalence, the
-loop-end read-ahead refusal with its uncompensated control, and the host-beat
-refusal with its control) and
+loop-end read-ahead fold with its uncompensated control and its per-segment
+plan coverage, and the host-beat refusal with its control) and
 `test/test_timeline_event_pdc_admission.cpp` (control-thread discovery, the
 unanswerable and out-of-range refusals, the live-input refusal with controls on
 both axes, an admitted chain as the positive control, and a synthetic device
@@ -257,4 +274,9 @@ each breaking the code in the direction of a specific bug:
    acceptance tests fail.
 2. Making an event-to-audio device contribute its latency to the shift — the
    proposal's original formula — must make the exclusion test above fail.
+3. Making the wrap-aware plan stop folding — returning the unbounded single-run
+   plan for a looping compensated read — must make the loop-end fold test fail.
+   The control matters because the un-folded window still renders and still
+   returns `Ok`; what it plays is the document past the loop point, which only a
+   positive assertion about the post-wrap content can tell apart from correct.
 

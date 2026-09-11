@@ -154,6 +154,8 @@ TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
+SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
+NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 
 BASE="${PULP_PREPUSH_BASE:-origin/main}"
 
@@ -493,6 +495,35 @@ if [ -f "$YOGA_ORACLE_PIN" ]; then
         0) ;;
         1) echo "[pre-push] yoga-oracle lockstep: the compat oracle no longer describes the pinned Yoga — run \`python3 tools/scripts/check_yoga_oracle_pin.py\` for both values." >&2; fail=1 ;;
         *) echo "[pre-push] check_yoga_oracle_pin: internal error" >&2 ;;
+    esac
+fi
+
+# Sequencer cross-surface exposure ledger — docs/status/sequencer-exposure.json
+# records which sequencer capability reaches which surface. CI enforces it, so a
+# malformed row or a released row whose evidence has been deleted surfaced only
+# after the push. Base-aware, matching the CI invocation, so the append-only
+# history and tombstone rules apply rather than a weaker subset. The slowest
+# gate here (~20s): it resolves released evidence out of git, which is what
+# catches evidence that no longer exists.
+if [ -f "$SEQ_EXPOSURE" ]; then
+    run_gate_captured "$PYTHON" "$SEQ_EXPOSURE" --base "$BASE"
+    case $? in
+        0) ;;
+        1) echo "[pre-push] sequencer-exposure ledger: the ledger is invalid or a delivery slice is unclassified — run \`python3 tools/scripts/sequencer_exposure_check.py --base $BASE\` for the offending row(s)." >&2; fail=1 ;;
+        *) echo "[pre-push] sequencer_exposure_check: internal error" >&2 ;;
+    esac
+fi
+
+# Negative-capability registry — a construct a user can author that the playback
+# compiler refuses must carry a written reason and an owner, and an allowlist
+# entry whose raise site is gone fails so the reasons cannot outlive the code.
+# Whole-tree, sub-second. Previously reachable only from a full ctest run.
+if [ -f "$NEG_CAPABILITY" ]; then
+    run_gate_captured "$PYTHON" "$NEG_CAPABILITY" --repo-root "$ROOT"
+    case $? in
+        0) ;;
+        1) echo "[pre-push] negative-capability registry: an authorable compile refusal lacks a reason, or an allowlist entry has no raise site — run \`python3 tools/scripts/negative_capability_check.py\` for details." >&2; fail=1 ;;
+        *) echo "[pre-push] negative_capability_check: internal error" >&2 ;;
     esac
 fi
 

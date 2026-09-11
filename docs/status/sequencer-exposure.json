@@ -4518,6 +4518,97 @@
       }
     },
     {
+      "id": "nested-placement-fade-envelope",
+      "title": "A SequenceRef placement's fade composes over its flattened leaves as a progress window",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "5d2f9a41-7c08-4be6-9f3a-08b1e6c42d97",
+      "owned_paths": [
+        "core/playback/src/placement_fade.hpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/clip_fade_envelope.hpp",
+        "core/playback/src/audio_renderer.cpp",
+        "core/playback/include/pulp/playback/audio_renderer.hpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/audio_renderer_internal.hpp",
+        "core/playback/src/offline_stretch_program_compiler.cpp",
+        "core/playback/src/offline_stretch_program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/playback/src/track_audio_program_compiler.cpp",
+        "core/playback/src/track_audio_program_compiler.hpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/placement_fade.hpp",
+          "needles": [
+            "LoweredPlacementFade",
+            "silent_tick"
+          ]
+        },
+        {
+          "path": "core/playback/src/clip_fade_envelope.hpp",
+          "needles": [
+            "placement_fade_gain",
+            "window of fade PROGRESS"
+          ]
+        },
+        {
+          "path": "core/playback/include/pulp/playback/audio_renderer.hpp",
+          "needles": [
+            "ClipPlacementFadeSegment",
+            "ClipPlacementFadeProgram"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "append_placement_fades",
+            "span_reaches"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "A placement fade composes over the leaves it was flattened into"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "window of fade progress"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The envelope is produced by flattening and can never be authored, so it belongs to the compiled program rather than the document. It rides on AudioClipRendererProgram, which is a compiled-output type an SDK consumer reads rather than writes, and ClipPlaybackProperties is deliberately untouched: adding a partial ramp there would declare an authoring surface that nothing may write. No schema version moves and no serialized form changes."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. A faded nested placement that previously refused to compile now compiles, through the same clip fade properties `pulp seq` already writes."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal beneath the clip-fade controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The composed envelope is computed inside the compiler and is reachable only through the clip fade an author already wrote on the placement."
+        }
+      }
+    },
+    {
       "id": "nested-substitution-state-refusal-split",
       "title": "Nested child track states split by whether they substitute content",
       "classification": "engine_internal",
@@ -4761,6 +4852,158 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "No design-time capability is registered or removed. The counters are compiler output read through the existing status type."
+        }
+      }
+    },
+    {
+      "id": "event-pdc-wrap-aware-read-ahead",
+      "title": "Compensated read-ahead folds at a loop point instead of refusing to cross it",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "7b4d2a10-63c5-4f8e-9a21-0d5f8e6c14b3",
+      "owned_paths": [
+        "core/playback/include/pulp/playback/event_compensation.hpp",
+        "core/playback/include/pulp/playback/note_renderer.hpp",
+        "core/playback/src/note_renderer.cpp",
+        "core/host/include/pulp/host/timeline_graph_binding.hpp",
+        "core/host/src/timeline_graph_binding.cpp",
+        "test/test_playback_event_pdc.cpp",
+        "docs/policies/event-stream-pdc.md",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/hosting/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/event_compensation.hpp",
+          "needles": [
+            "struct CompensatedReadSegment",
+            "struct CompensatedReadPlan",
+            "plan_compensated_read"
+          ]
+        },
+        {
+          "path": "core/playback/src/note_renderer.cpp",
+          "needles": [
+            "plan_compensated_read",
+            "stream_discontinuity",
+            "loop_bounds_reads"
+          ]
+        },
+        {
+          "path": "core/host/src/timeline_graph_binding.cpp",
+          "needles": [
+            "EventCompensationUnsupported"
+          ]
+        },
+        {
+          "path": "core/host/include/pulp/host/timeline_graph_binding.hpp",
+          "needles": [
+            "is folded to the post-wrap content and plays"
+          ]
+        },
+        {
+          "path": "test/test_playback_event_pdc.cpp",
+          "needles": [
+            "a shift is applied per transport range, and folds its read-ahead at a loop end",
+            "a compensated read is planned against the loop it runs into"
+          ]
+        },
+        {
+          "path": "docs/policies/event-stream-pdc.md",
+          "needles": [
+            "folds back to the post-wrap"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "plan_compensated_read"
+          ]
+        },
+        {
+          "path": ".agents/skills/hosting/SKILL.md",
+          "needles": [
+            "is folded to the post-wrap content and plays"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The fold is a pure function on an installed header: plan_compensated_read() returns the at-most-two runs a compensated window resolves to, each carrying its loop pass, so a host outside Pulp can compute the same plan the engine schedules from without pushing a block through the renderer. The retired NoteRenderCode::CompensationLoopWrapUnsupported enumerator is removed from the same installed enum, because the case it refused now works; leaving it would tell an implementer to handle a refusal nothing can emit. That removal is source-breaking only for a caller that named the enumerator, and no in-tree caller does after this change.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/event_compensation.hpp",
+              "needles": [
+                "struct CompensatedReadPlan",
+                "plan_compensated_read",
+                "wraps_inside_range"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/note_renderer.hpp",
+              "needles": [
+                "CompensationUnsupported",
+                "folded back to the post-wrap content"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_playback_event_pdc.cpp",
+              "needles": [
+                "a compensated read is planned against the loop it runs into"
+              ]
+            },
+            {
+              "kind": "doc",
+              "path": "docs/policies/event-stream-pdc.md",
+              "needles": [
+                "folds back to the post-wrap"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "No `pulp seq` verb reports or sets a device chain's event latency, so there is no CLI surface on which a compensated window's loop fold is observable. The fold changes what a non-zero shift schedules; every chain the CLI can build still resolves to a zero shift, so a CLI projection would report a constant. Owner: the sequencer control closure lane, gated on event-to-event execution landing first.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema exposes no event-latency or compensation operation, so the fold has no MCP projection for the same reason as the CLI surface. Owner: the sequencer control closure lane.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "The fold removes a per-block refusal that a live surface could previously have surfaced as a loop-end failure; it adds no control a musician sets. A live surface still cannot read or set event-domain latency, and live input into a compensated chain remains refused, so there is no live control to project here. Owner: the sequencer control closure lane.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "event-stream-pdc-contract"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises event-chain compensation, and this slice does not make one advertisable: it removes a refusal inside a path whose shift is still structurally zero for every chain Pulp can execute. Advertising loop-correct read-ahead would claim an executable event-device chain that does not exist. Owner: the sequencer control closure lane.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
         }
       }
     }
