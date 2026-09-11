@@ -4522,6 +4522,56 @@
           ]
         }
       }
+    },
+    {
+      "id": "negative-capability-selftest-derivation",
+      "title": "Negative-capability selftest derives its subjects from the allowlist it guards",
+      "classification": "ci_test_only",
+      "delivery_state": "pending",
+      "claim_id": "negative-capability-selftest-derivation-20260911",
+      "owned_paths": [
+        "tools/scripts/negative_capability_check.py",
+        ".agents/skills/playback/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "tools/scripts/negative_capability_check.py",
+          "needles": [
+            "subjects = [(entry[\"code\"], entry[\"file\"]) for entry in document[\"refusals\"]]",
+            "selftest found no allowlist entries to drop",
+            "which CompileErrorCode no longer declares as a refusal"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "takes the entries it drops from the allowlist document itself",
+            "fails the selftest loudly and means re-pointing"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The selftest is repository CI policy over playback's own refusal allowlist and installs no SDK header, target or symbol; the set of refusals a compiled plugin can meet is unchanged."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No offline Timeline command gains, loses or changes behaviour; the selftest runs at CI time over source and the allowlist document."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation is added or altered; the selftest is not reachable as an MCP tool."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Deriving the selftest's subjects from the document it guards creates no product capability, grant or policy projection."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The selftest describes no authoring capability an agent manifest could carry; it only proves the gate still detects a dropped allowlist entry once a refusal is retired."
+        }
+      }
     }
   ],
   "tombstones": []
