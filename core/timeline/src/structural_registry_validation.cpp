@@ -84,6 +84,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField sequence_fields[] = {
         {"absolute_duration", SchemaValueKind::Object},
         {"chord_scale_lane", SchemaValueKind::Array},
+        {"dynamics_lane", SchemaValueKind::Array},
         {"groove", SchemaValueKind::Object, true, "pulp.timeline.groove_template"},
         {"id", SchemaValueKind::U64String},
         {"markers", SchemaValueKind::Array},
