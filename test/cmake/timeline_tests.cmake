@@ -175,7 +175,9 @@ if(PULP_BENCHMARK)
         SOURCES test_timeline_scale.cpp
         LIBRARIES pulp::playback
         LABELS performance
-        TIMEOUT 120
+        # The growth cases run each scale operation at two sizes, several
+        # rounds, so the suite costs a few times what a single-size pass did.
+        TIMEOUT 900
         COMPILE_DEFINITIONS
             $<$<BOOL:${PULP_TIMELINE_SCALE_SANITIZED}>:PULP_TEST_WITH_SANITIZER=1>)
 endif()
@@ -287,6 +289,14 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
     pulp_add_test_suite(pulp-test-timeline-agent
         SOURCES test_timeline_agent.cpp
         LIBRARIES pulp::tool-timeline pulp::audio pulp::timeline)
+    # The render verb's side of the offline-render contract: its output must
+    # equal a direct library render, and every renderer outcome must reach the
+    # caller as its own message. Separate from the agent suite because it
+    # reaches into the tool's internals and links the host graph.
+    pulp_add_test_suite(pulp-test-timeline-cli-offline-render
+        SOURCES test_timeline_cli_offline_render.cpp
+        LIBRARIES pulp::tool-timeline pulp::host pulp::playback pulp::audio pulp::timeline
+            pulp::runtime)
 endif()
 # The chord/scale context lane plus the compile-context subscription contract
 # it carries: the document type, its schema migrations, and the read side that

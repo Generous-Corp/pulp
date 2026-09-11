@@ -825,10 +825,13 @@ class CleanAgentHarnessTests(unittest.TestCase):
             self.assertEqual(identity["revision"], revision)
             self.assertEqual(identity["document"]["sha256"], trust.sha256_bytes(b"canonical\n"))
             (root / "untracked.txt").write_text("planted", encoding="utf-8")
-            with self.assertRaisesRegex(trust.TrustError, "completely clean"):
+            with self.assertRaisesRegex(
+                trust.TrustError, "completely clean"
+            ) as planted:
                 trust.git_repository_identity(
                     root, expected_repository="danielraffel/pulp-planning"
                 )
+            self.assertIn("untracked.txt", str(planted.exception))
             allowed = trust.git_repository_identity(
                 root,
                 expected_repository="danielraffel/pulp-planning",
@@ -836,12 +839,18 @@ class CleanAgentHarnessTests(unittest.TestCase):
             )
             self.assertTrue(allowed["clean"])
             (root / "other.txt").write_text("not allowed", encoding="utf-8")
-            with self.assertRaisesRegex(trust.TrustError, "completely clean"):
+            with self.assertRaisesRegex(
+                trust.TrustError, "completely clean"
+            ) as forbidden:
                 trust.git_repository_identity(
                     root,
                     expected_repository="danielraffel/pulp-planning",
                     allowed_untracked=(root / "untracked.txt",),
                 )
+            # The allowed entry is stripped before the summary is built, so a
+            # reader sees only what actually has to be cleaned up.
+            self.assertIn("other.txt", str(forbidden.exception))
+            self.assertNotIn("untracked.txt", str(forbidden.exception))
 
     def test_git_provenance_uses_only_exact_event_base_when_origin_main_is_absent(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
