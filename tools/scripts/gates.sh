@@ -30,6 +30,10 @@
 #     with no double-counts, and its ignore list mirrors diff_cover_excludes)
 #   - framework-neutrality (Pulp's own source names no other framework, and
 #     adopts none of their class names into its API)
+#   - sequencer-exposure (the cross-surface exposure ledger stays schema-valid,
+#     its released evidence still resolves, and removed rows keep tombstones)
+#   - negative-capability (every authorable playback-compile refusal carries a
+#     written reason and an owner, and no allowlist entry outlives its raise)
 #
 # Does NOT run:
 #   - local diff-coverage (slow — builds the cov target, hits ring crate
@@ -101,6 +105,8 @@ UNBOUNDED_WAIT_LINT="$ROOT/tools/scripts/unbounded_wait_lint.py"
 FORCED_RESTORE_LINT="$ROOT/tools/scripts/forced_restore_lint.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
 SHIPYARD_WATCHDOG_TEST="$ROOT/tools/scripts/test_shipyard_pr_watchdog.py"
+SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
+NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -609,6 +615,41 @@ if [ -f "$FORCED_RESTORE_LINT" ]; then
     echo "" >&2
     echo "▸ forced-restore lint (a forced worktree restore declares what it repairs)" >&2
     if ! "$PYTHON" "$FORCED_RESTORE_LINT"; then
+        fail=1
+    fi
+fi
+
+# ── 17. sequencer-exposure ledger ──────────────────────────────────────────
+# The ledger at docs/status/sequencer-exposure.json is the record of which
+# sequencer capability reaches which surface. It is enforced in CI, so a bad row
+# was previously found ~20 minutes after the push rather than before it. Runs
+# base-aware so the append-only history and tombstone rules apply, matching the
+# CI invocation exactly rather than a weaker subset.
+#
+# Cost: this is the most expensive gate here (~20s). It resolves every released
+# row's evidence out of git, which is hundreds of short git invocations, and
+# that read is the point — it is what catches a row citing evidence that no
+# longer exists. Still three orders of magnitude cheaper than the CI roundtrip
+# it replaces.
+if [ -f "$SEQ_EXPOSURE" ]; then
+    echo "" >&2
+    echo "▸ sequencer-exposure ledger (schema, evidence, append-only tombstones)" >&2
+    if ! "$PYTHON" "$SEQ_EXPOSURE" --base "$BASE"; then
+        fail=1
+    fi
+fi
+
+# ── 18. negative-capability registry ───────────────────────────────────────
+# A negative capability is a construct a user can author that the playback
+# compiler then refuses; authoring one is worse than the feature not existing.
+# The registry makes adding one cost a written reason and an owner, and fails on
+# an entry whose raise site is gone so the reasons cannot outlive the code.
+# Whole-tree and sub-second. A ctest covers this, which means it was only
+# reachable from a full build — this puts it in the fast local lane too.
+if [ -f "$NEG_CAPABILITY" ]; then
+    echo "" >&2
+    echo "▸ negative-capability registry (an authorable refusal carries a reason)" >&2
+    if ! "$PYTHON" "$NEG_CAPABILITY" --repo-root "$ROOT"; then
         fail=1
     fi
 fi
