@@ -116,7 +116,6 @@ enum class CompileErrorCode : std::uint8_t {
     CompilerAlreadyBound,
     AudioProgramInvalid,
     AutomationProgramInvalid,
-    NestedSequenceUnsupported,
     ExpansionBudgetExceeded,
     NoteProgramCapacityExceeded,
     OfflineStretchFailed,
@@ -189,6 +188,42 @@ enum class CompileErrorCode : std::uint8_t {
     // is refused rather than silently inverted. Dormant lanes do not refuse:
     // an unselected lane changes nothing at either level.
     NestedActiveTakeUnsupported,
+    // A nested child track carries a device chain. A device is bound to the
+    // track it processes, and flattening dissolves the child track entirely:
+    // its clips become leaves on the parent, whose own chain already serves
+    // every other clip there. Running the child's devices over the parent
+    // would process unrelated material, and dropping them would play the
+    // child dry, so the chain is refused. Lifting it needs a sub-bus a
+    // flattened group can keep its own processing on, not a wider flatten.
+    NestedDeviceChainUnsupported,
+    // A nested child track carries automation lanes. A lane is a curve over
+    // the track's own timeline, and the flattened leaf has nowhere to hold a
+    // curve: ClipPlaybackProperties::gain_linear is a scalar, so even the one
+    // lane that could compose has no time-varying sink. Refuse rather than
+    // freeze a moving value at a single point. A per-clip automation sink is
+    // the missing construct; the pan and MIDI-gain lanes are not waiting on
+    // it, because they have no destination at any level and can only ever be
+    // declared intended.
+    NestedAutomationLaneUnsupported,
+    // A nested SequenceRef trims a media leaf whose content conforms to the
+    // timeline. Both conform kinds break differently under a partial view.
+    // Resample maps source to timeline by tick phase, while the nested trim
+    // path advances a raw source-frame offset from elapsed samples, so a left
+    // trim starts the clip at the wrong audio. Stretch keys its rendered
+    // artifact to the clip's own authored tick range, and a trimmed window is
+    // not that range. Refuse until the renderer owns a conform-aware
+    // source-range mapping and a windowed stretch artifact.
+    NestedConformedTrimUnsupported,
+    // A leaf clip inside a nested sequence is absolute-anchored while the
+    // nesting that reaches it is musical. Flattening has to place that leaf on
+    // the owner's musical timeline, but its position is defined in samples and
+    // must stay fixed as tempo moves, so the result would have to be musical
+    // and absolute at once. The lowered program has no such hybrid domain to
+    // write. Distinct from the placement guard above, which a SequenceRef clip
+    // cannot reach: this one a document can genuinely author. What it waits on
+    // is a product decision about whether nesting re-anchors such a leaf or
+    // preserves it, not only a renderer construct.
+    NestedAbsoluteChildUnsupported,
 };
 
 struct CompileError {

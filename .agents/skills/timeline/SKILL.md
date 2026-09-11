@@ -167,8 +167,14 @@ different request with an earlier result.
   refuses only when a ramp actually reaches a leaf whose content no renderer
   scales by clip gain, because dropping that ramp would be silently wrong. A complete
   nested media clip preserves its `TimeConform` intent, but a source window
-  that trims a conforming clip fails with `NestedSequenceUnsupported` until
-  playback has a conform-aware source-range mapping. Expansion
+  that trims a conforming clip fails with `NestedConformedTrimUnsupported`
+  until playback has a conform-aware source-range mapping, and a trimmed
+  `Stretch` clip additionally needs a windowed artifact. A nested child track
+  carrying a device chain or an automation lane fails with
+  `NestedDeviceChainUnsupported` or `NestedAutomationLaneUnsupported`, and an
+  absolute-anchored leaf inside a nested sequence fails with
+  `NestedAbsoluteChildUnsupported`; each names its own cause rather than
+  sharing one umbrella code. Expansion
   is bounded by `ProgramCompileRequest::max_expanded_note_events` and
   `ProgramCompileRequest::max_expanded_clips` across materialized clips,
   reference traversal, and reused track programs. The independent
