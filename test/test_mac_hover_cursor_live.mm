@@ -53,6 +53,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/view/hover_cursor.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/view.hpp>
 
 #include <memory>
@@ -109,6 +111,8 @@ const char* cursor_name(NSCursor* c) {
     if (c == [NSCursor IBeamCursor]) return "IBeam";
     if (c == [NSCursor pointingHandCursor]) return "pointingHand";
     if (c == [NSCursor crosshairCursor]) return "crosshair";
+    if (c == [NSCursor openHandCursor]) return "openHand";
+    if (c == [NSCursor closedHandCursor]) return "closedHand";
     return "other";
 }
 
@@ -262,6 +266,41 @@ NSUInteger g_button_events = 0;
 NSUInteger g_cursor_update_calls = 0;
 NSUInteger g_mouse_moved_calls = 0;
 
+
+// One region covering the whole view, asking for an open hand while nothing is
+// pressed and switching to a closed hand from its own press handler. This is
+// what makes the two paths distinguishable: the host resolves a hover from the
+// hit-tested view BEFORE any handler runs, and resolves a press from the
+// captured view AFTER, so a correct host must show two different cursors here
+// at one single point.
+class GrabView : public StubView {
+public:
+    int presses = 0;
+    void on_mouse_down(pulp::view::Point) override {
+        presses++;
+        set_cursor(pulp::view::View::CursorStyle::grabbing);
+    }
+};
+
+struct GrabRoot {
+    StubView root;
+    GrabView* grabber = nullptr;
+    float w_ = 0, h_ = 0;
+
+    explicit GrabRoot(float w, float h) : w_(w), h_(h) {
+        auto g = std::make_unique<GrabView>();
+        g->set_cursor(pulp::view::View::CursorStyle::grab);
+        grabber = g.get();
+        root.add_child(std::move(g));
+        apply();
+    }
+
+    void apply() {
+        root.set_bounds({0, 0, w_, h_});
+        grabber->set_bounds({0, 0, w_, h_});
+    }
+};
+
 }  // namespace
 
 // The shipping view class, instrumented only to count button events.
@@ -387,13 +426,20 @@ TEST_CASE("the split fixture declares two different cursors before AppKit is inv
 
 // Synthesizes the callback AppKit makes during its cursor pass, at a chosen
 // content-local point, and returns the cursor the host actually applied.
+// The hover and the press readings below are only comparable if they name the
+// same Pulp point, so both go through this one conversion. Pulp's root space is
+// top-left origin; the NSView's is bottom-left.
+static NSPoint pulp_point_in_window(NSView* v, CGFloat lx, CGFloat ly) {
+    return [v convertPoint:NSMakePoint(lx, v.bounds.size.height - ly) toView:nil];
+}
+
 // Synthetic posted moves do not drive AppKit's cursor pass (see the file
 // header), so this invokes the entry point directly and then reads the applied
 // cursor -- still a screen-level readback, not the resolver's return value.
 static NSCursor* applied_cursor_for_cursor_pass(NSWindow* w, NSView* v,
                                                 CGFloat lx, CGFloat ly) {
     [[NSCursor arrowCursor] set];  // so a no-op host is visibly a no-op
-    NSPoint win = [v convertPoint:NSMakePoint(lx, v.bounds.size.height - ly) toView:nil];
+    NSPoint win = pulp_point_in_window(v, lx, ly);
     // NSEventTypeCursorUpdate is not constructible via mouseEventWithType:
     // (AppKit rejects it); the handler reads only locationInWindow.
     NSEvent* e = [NSEvent mouseEventWithType:NSEventTypeMouseMoved
@@ -500,4 +546,133 @@ TEST_CASE("the cursor-pass measurement reports a host with an inert cursor pass"
     // The defect this whole file exists to catch: the cursor does not change.
     CHECK(left == right);
     CHECK(left == [NSCursor arrowCursor]);
+}
+
+// ---------------------------------------------------------------------------
+// Hover versus press.
+//
+// Everything above measures the cursor a person sees with NO button held. That
+// is one of two paths, and they are not the same code: the hover pass answers
+// from the view under the pointer as hit-testing found it, while a press
+// answers from the view the press was captured on, after its handler ran. A
+// control whose handler switches its own cursor -- the ordinary open-hand to
+// closed-hand of a drag -- therefore shows one cursor on hover and a different
+// one on press, at one single point.
+//
+// That divergence is the thing worth measuring, because it is how "the cursor
+// changes when I click but not when I hover" happens: the press path publishes
+// unconditionally at every pointer phase, so it keeps working while the hover
+// pass is broken, and the defect hides behind a control that still feels alive
+// under the finger.
+//
+// Both readings here are +[NSCursor currentCursor] after invoking the shipping
+// host's own entry point, and each carries the button count AppKit's view saw,
+// so a passing case has named which path it exercised rather than assuming it.
+
+static NSCursor* applied_cursor_for_press(NSWindow* w, NSView* v,
+                                          CGFloat lx, CGFloat ly) {
+    [[NSCursor arrowCursor] set];  // so a host that publishes nothing is visible
+    NSPoint win = pulp_point_in_window(v, lx, ly);
+    const auto make = [&](NSEventType type, NSInteger clicks) {
+        return [NSEvent mouseEventWithType:type
+                                  location:win
+                             modifierFlags:0
+                                 timestamp:[[NSProcessInfo processInfo] systemUptime]
+                              windowNumber:[w windowNumber]
+                                   context:nil
+                               eventNumber:0
+                                clickCount:clicks
+                                  pressure:1.0];
+    };
+    [(id)v mouseDown:make(NSEventTypeLeftMouseDown, 1)];
+    NSCursor* applied = [NSCursor currentCursor];
+    // Leave the host un-captured; a view left mid-drag poisons any later case.
+    [(id)v mouseUp:make(NSEventTypeLeftMouseUp, 1)];
+    return applied;
+}
+
+TEST_CASE("the press fixture switches its own cursor, before AppKit is involved",
+          "[mac][cursor][press][live][issue-8121]") {
+    // Fixture control. If the scene does not actually declare two cursors, both
+    // readings in the case below collapse to one value and that reads exactly
+    // like a host that ignores the press -- the false FAIL this guards against.
+    GrabRoot scene(kW, kH);
+    const pulp::view::Point p{kW * 0.5f, kH * 0.5f};
+
+    REQUIRE(pulp::view::hover_cursor_at(scene.root, p)
+            == pulp::view::View::CursorStyle::grab);
+    REQUIRE(pulp::view::deliver_mouse_down(scene.root, scene.root.hit_test(p), p, 0));
+    REQUIRE(scene.grabber->presses == 1);
+    REQUIRE(scene.grabber->cursor() == pulp::view::View::CursorStyle::grabbing);
+}
+
+TEST_CASE("hover and press put different cursors on screen at one point",
+          "[mac][cursor][press][hover][live][issue-8121]") {
+    ensure_app();
+    if (!live_window_session_available())
+        SKIP("no window-server session with Accessibility trust and an observable cursor");
+    Class cls = NSClassFromString(@"PulpView");
+    if (cls == nil) SKIP("PulpView is not registered in this binary");
+
+    GrabRoot scene(kW, kH);
+    CursorProofPulpView* view =
+        [[CursorProofPulpView alloc] initWithFrame:NSMakeRect(0, 0, kW, kH)];
+    view.rootView = &scene.root;
+    NSWindow* w = present(view);
+    scene.apply();
+
+    // Scaffolding controls: without these the cursor readings say nothing.
+    REQUIRE(view.rootView == &scene.root);
+    REQUIRE(view.rootView->hit_test({kW * 0.5f, kH * 0.5f}) == scene.grabber);
+
+    g_button_events = 0;
+    NSCursor* hovered = applied_cursor_for_cursor_pass(w, view, kW * 0.5, kH * 0.5);
+    const NSUInteger buttons_during_hover = g_button_events;
+
+    g_button_events = 0;
+    NSCursor* pressed = applied_cursor_for_press(w, view, kW * 0.5, kH * 0.5);
+    const NSUInteger buttons_during_press = g_button_events;
+    dismiss(w, view);
+
+    INFO("hover: " << cursor_name(hovered) << "  press: " << cursor_name(pressed));
+    // Which path each reading came from, asserted from the view's own vantage
+    // rather than from the fact that the test meant to drive one of them.
+    CHECK(buttons_during_hover == 0);
+    CHECK(buttons_during_press > 0);
+
+    CHECK(hovered == [NSCursor openHandCursor]);
+    CHECK(pressed == [NSCursor closedHandCursor]);
+    CHECK(hovered != pressed);
+    CHECK(scene.grabber->presses == 1);
+}
+
+TEST_CASE("a target that does not switch shows the same cursor on both paths",
+          "[mac][cursor][press][hover][live][negative-control][issue-8121]") {
+    // Negative control for the case above. "Hover and press differ" is only
+    // evidence about the fixture if the press path is otherwise capable of
+    // agreeing with hover -- a press path that published its own unrelated
+    // value, or nothing at all, would also produce a difference.
+    ensure_app();
+    if (!live_window_session_available())
+        SKIP("no window-server session with Accessibility trust and an observable cursor");
+    Class cls = NSClassFromString(@"PulpView");
+    if (cls == nil) SKIP("PulpView is not registered in this binary");
+
+    SplitRoot scene(kW, kH);
+    CursorProofPulpView* view =
+        [[CursorProofPulpView alloc] initWithFrame:NSMakeRect(0, 0, kW, kH)];
+    view.rootView = &scene.root;
+    NSWindow* w = present(view);
+    scene.apply();
+
+    REQUIRE(view.rootView->hit_test({kW * 0.25f, kH * 0.5f}) == scene.left);
+
+    NSCursor* hovered = applied_cursor_for_cursor_pass(w, view, kW * 0.25, kH * 0.5);
+    NSCursor* pressed = applied_cursor_for_press(w, view, kW * 0.25, kH * 0.5);
+    dismiss(w, view);
+
+    INFO("hover: " << cursor_name(hovered) << "  press: " << cursor_name(pressed));
+    CHECK(hovered == [NSCursor pointingHandCursor]);
+    CHECK(pressed == [NSCursor pointingHandCursor]);
+    CHECK(hovered == pressed);
 }
