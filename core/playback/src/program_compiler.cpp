@@ -60,10 +60,10 @@ std::uint16_t groove_velocity(std::uint16_t authored, std::int32_t per_mille) no
         std::min<std::uint64_t>(scaled, std::numeric_limits<std::uint16_t>::max()));
 }
 
-// Ceiling on controller values one program may carry. Expansion is bounded
-// everywhere else in the compiler for the same reason: a pathological document
-// must fail with a named code rather than make compilation unbounded.
-constexpr std::size_t max_controller_events = 1u << 20;
+// Ceiling on controller values one track may carry, shared with the program
+// wire so a decoded track never claims more than a compiled one holds. Bounded
+// so a pathological document fails with a named code rather than unboundedly.
+constexpr std::size_t max_controller_events = kMaximumControllerEventsPerTrack;
 
 void merge_track_policy_deltas(std::vector<TrackCompilePolicy>& retained,
                                const std::vector<TrackCompilePolicy>& incoming) {

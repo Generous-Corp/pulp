@@ -3122,6 +3122,109 @@
       }
     },
     {
+      "id": "program-wire-controller-section",
+      "title": "Controller and expression events carried across the program wire",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "8e6c5d65-a0db-41b8-ba15-741e8cc376e6",
+      "owned_paths": [
+        "core/playback/include/pulp/playback/program_wire.hpp",
+        "core/playback/src/program_wire.cpp",
+        "core/playback/include/pulp/playback/program.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "test/test_playback_program_wire.cpp",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_wire.hpp",
+          "needles": [
+            "ControllerRanges = 10",
+            "ControllerEvents = 11",
+            "struct ProgramWireControllerEventRecord",
+            "kProgramWireControllerMinReaderVersion",
+            "MalformedControllerEvent"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_wire.cpp",
+          "needles": [
+            "appended_in_version_3",
+            "carries_controllers",
+            "controller_events_for"
+          ]
+        },
+        {
+          "path": "test/test_playback_program_wire.cpp",
+          "needles": [
+            "carries a track's controller events across the boundary",
+            "preserves controller order exactly, ties included",
+            "carries a chased controller origin",
+            "rejects malformed controller records",
+            "a version 3 reader accepts a version 2 payload"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_wire.hpp",
+              "needles": [
+                "struct ProgramWireControllerRangeRecord",
+                "struct ProgramWireControllerEventRecord",
+                "controller_events_for",
+                "kProgramWireControllerMinReaderVersion"
+              ]
+            }
+          ],
+          "rationale": "This closes the in-process-only caveat midi-expression-playback records: that released row's own dispositions are frozen at its merge, so the closure is recorded here rather than by editing it. encode_program_wire() no longer refuses a controller-bearing program; ProgramWireErrorCode::ControllerEventsUnsupported is retired because the case it refused works. Version 3 of the wire appends two sections after the nine version 2 wrote and changes no existing record: ControllerRanges holds one (first, count) range per track and ControllerEvents holds each ControllerProgramEvent field by field, the full MidiLaneAddress, the clip, lane and point identity, and the authored-or-chased origin, in the program's own sequence with no re-sort, so a consumer across a process or plugin boundary reads exactly what TrackProgram::arrangement_controller_events() held, ties at one sample and tick included. The compatibility rule is per payload: a program with no controller events writes min_reader_version 2 and flags both sections optional, so every version 2 reader still renders it exactly; a program with any controller event writes min_reader_version 3 and marks them required, so a version 2 reader refuses at the header with UnsupportedVersion and never renders the notes with the expression silently gone. A version 3 reader accepts a version 2 payload with the sections absent and empty. The decoder bounds a track's controller count by the compiler's own per-track ceiling (kMaximumControllerEventsPerTrack, refused as InvalidLimits before any range walk) and refuses an out-of-width address or a zero identity with MalformedControllerEvent, judged by the document model's own midi_lane_address_well_formed. Forge Sequencer and Forge Modular consume this through the installed header in the process that encodes or decodes; the bytes are what cross the boundary. Admission is in-process because the header is what a caller links, and refusal_codes stays empty because that field names registered-writer conflict codes, not wire decode codes, which live in ProgramWireErrorCode.",
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "No `pulp seq` operation publishes or inspects a program wire payload, and the controller-lane authoring gap midi-expression-playback records for this surface is unchanged by carrying the events on the wire. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "midi-expression-playback"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema exposes no controller-lane operation and no program wire publication; the wire section changes what an in-process consumer can carry, not what MCP offers. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "midi-expression-playback"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A live timeline authority is absent for the sequencer generally. The wire section is the transport such a control lane would publish over, so this row is a dependency of that closure rather than a step of it. Owner: NW-D, and only where that source is Pulp-owned.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "midi-expression-playback"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises controller playback or program wire publication. Owner: NW-D, which closes the capability surface once the runtime operations it would advertise are executable.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "midi-expression-playback"
+          ]
+        }
+      }
+    },
+    {
       "id": "nested-sequence-gain-composition",
       "title": "Nested SequenceRef gain composition with a documented precedence model",
       "classification": "engine_internal",
@@ -4520,6 +4623,56 @@
           "dependencies": [
             "nested-substitution-state-refusal-split"
           ]
+        }
+      }
+    },
+    {
+      "id": "negative-capability-selftest-derivation",
+      "title": "Negative-capability selftest derives its subjects from the allowlist it guards",
+      "classification": "ci_test_only",
+      "delivery_state": "pending",
+      "claim_id": "negative-capability-selftest-derivation-20260911",
+      "owned_paths": [
+        "tools/scripts/negative_capability_check.py",
+        ".agents/skills/playback/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "tools/scripts/negative_capability_check.py",
+          "needles": [
+            "subjects = [(entry[\"code\"], entry[\"file\"]) for entry in document[\"refusals\"]]",
+            "selftest found no allowlist entries to drop",
+            "which CompileErrorCode no longer declares as a refusal"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "takes the entries it drops from the allowlist document itself",
+            "fails the selftest loudly and means re-pointing"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The selftest is repository CI policy over playback's own refusal allowlist and installs no SDK header, target or symbol; the set of refusals a compiled plugin can meet is unchanged."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No offline Timeline command gains, loses or changes behaviour; the selftest runs at CI time over source and the allowlist document."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation is added or altered; the selftest is not reachable as an MCP tool."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Deriving the selftest's subjects from the document it guards creates no product capability, grant or policy projection."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The selftest describes no authoring capability an agent manifest could carry; it only proves the gate still detects a dropped allowlist entry once a refusal is retired."
         }
       }
     },
