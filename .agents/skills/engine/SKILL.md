@@ -565,8 +565,8 @@ buffer.
 
 ### CSS-shim gap fills — translator vs. bridge contract
 
-Three classes of "silent drop" recur in `web-compat-style-decl.js`. When
-adding a CSS property, walk all three before declaring done:
+Four classes of "silent drop" recur in `web-compat-style-decl.js`. When
+adding a style property, walk all four before declaring done:
 
 1. **Missing `case "X":`** — the property is nowhere in the switch, so
    `el.style.X = ...` writes to `_props[X]` and never reaches the
@@ -592,6 +592,18 @@ adding a CSS property, walk all three before declaring done:
    `packages/pulp-react/src/prop-applier.ts` (`_normalizeFontWeight`)
    for parity with React-Native style objects — both paths must
    emit the same numeric weight.
+
+4. **Not a CSS property at all** — React Native contributes style keys
+   CSS never had (`hitSlop`). The shim still has to carry them,
+   because the RN-style object and `el.style.X` are the same surface
+   to a consumer, and the three-class walk above applies unchanged.
+   The extra cost is that there is no CSS shorthand to inherit from,
+   so `packages/pulp-react/src/prop-applier-paint.ts` has to accept
+   BOTH the RN forms (a number, or `{top,right,bottom,left}`) and the
+   CSS-shorthand form a designer will reach for anyway
+   (`hitSlop: '12px 2px'`), and normalize to the four-value bridge
+   call. Emitting the number form only is the silent half-fix: the
+   object form then writes `[object Object]` into one edge.
 
 **`__cssProperties__` array gotcha:** properties also need an entry in
 the `__cssProperties__` array near the bottom of
@@ -722,6 +734,52 @@ must not silently cancel its independent compatibility `mousedown`. Level 1
 (`stopPropagation`) still allows remaining same-target listeners; level 2
 (`stopImmediatePropagation`) does not.
 
+### The popup owner claims from the click, not from focus — and must ignore its own clicks
+
+`__pulpPopupDefaultHandle__` (in `web-compat-document.js`) is the default
+keyboard/dismiss state machine for any `aria-haspopup` trigger. It can only
+answer ArrowUp/ArrowDown/Enter/Escape for a menu it has taken ownership of, and
+it paints the row highlight from exactly one place — `paint()`, the sole writer
+of `data-pulp-popup-active` and of the highlight background. If ownership never
+happens, both the navigation and the highlight are silently absent, and they
+fail together: one cause, two symptoms.
+
+Two traps around that ownership:
+
+- **A keydown path alone is not ownership.** The owner's keydown branch needs
+  `triggerFrom(document.activeElement)`, and `document.activeElement` is written
+  only by `Element.prototype.focus`. A native mouse click never runs one, so on
+  the real user path that branch is dead. Ownership on that path has to come
+  from the pointer/click the user actually made. A test that calls
+  `trigger.focus()` in setup hand-satisfies the one condition the mouse path
+  cannot, so it passes over a defect a user still sees — if a popup test focuses
+  the trigger, it is not covering the mouse-opened case.
+- **The menu does not exist yet when the click arrives.** The app's own click
+  handler creates the popup, and a host that defers dispatch plus a reconciler
+  that commits a tick later mean a single synchronous `activate()` inspects a
+  DOM with no popup and gives up. Re-offer across a few frames instead of
+  deciding once.
+- **The owner clicks things itself** — a trigger to commit or close, an option
+  to mirror a keyboard open onto the app's handler. Once element clicks are
+  offered to the owner, those come back in as if a user had pressed the control,
+  and a close reads as an open. Wrap owner-issued clicks in a counter and return
+  at the *very top* of the handler while it is non-zero: above the stale-state
+  sweep, not merely inside each branch. The sweep runs first, sees a popup the
+  app has already removed, and dismisses the state the in-flight branch still
+  needs to hand focus back to its trigger.
+
+Restoring a row's background is its own trap: `parseCSSColor("")` returns null
+and `_applyPaintProp` silently drops it, so assigning the empty string leaves
+the highlight on every visited row, while `"transparent"` parses to `#00000000`
+and paints a transparent fill *over* a background that came from a non-script
+source. Remove the property and clear the native background instead
+(`getBackground` / `clearBackground` on the style bridge).
+
+Note that `__pulpActivateMaterializedElement__` invokes the React callback
+directly and never enters `Element.prototype._dispatchEvent`, so a fixture that
+opens a menu through it gets a menu no popup owner has claimed. Drive the
+production line (`__dispatch__(el._id, "click", …)`) when the fixture is meant
+to stand in for a user's mouse.
 ### A popup's keyboard cursor seeds from the marked selection, not an edge
 
 `web-compat-document.js`'s semantic popup default opens a `role="listbox"` /
