@@ -1,5 +1,7 @@
 #include <pulp/timeline_agent_view/agent_view.hpp>
 
+#include "timeline_perf_test_helpers.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -16,6 +18,7 @@
 #include <vector>
 
 using namespace pulp;
+using namespace pulp::test::timeline_perf;
 
 namespace {
 
@@ -136,41 +139,6 @@ std::size_t census_omissions(const timeline::ProjectSnapshotCounts& c) {
            c.automation_points + c.take_lanes + c.takes + c.take_comp_segments + c.markers +
            c.regions + c.scenes + c.slots + c.chord_scale_events + c.groove_steps +
            c.midi_lanes + c.midi_lane_points;
-}
-
-bool strict_performance() {
-    const auto* value = std::getenv("PULP_PERF_STRICT");
-    return value && value[0] && value[0] != '0';
-}
-
-std::optional<std::chrono::milliseconds> performance_budget(const char* name) {
-    const auto* value = std::getenv(name);
-    if (!value || !value[0]) {
-        INFO("missing performance budget: " << name);
-        REQUIRE_FALSE(strict_performance());
-        return std::nullopt;
-    }
-
-    const std::string_view text(value);
-    std::chrono::milliseconds::rep milliseconds = 0;
-    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), milliseconds);
-    INFO("invalid performance budget " << name << '=' << text);
-    REQUIRE(parsed.ec == std::errc{});
-    REQUIRE(parsed.ptr == text.data() + text.size());
-    REQUIRE(milliseconds > 0);
-    return std::chrono::milliseconds(milliseconds);
-}
-
-template <class Rep, class Period>
-void enforce_performance_budget(const char* name,
-                                std::chrono::duration<Rep, Period> elapsed) {
-    const auto budget = performance_budget(name);
-    if (!budget)
-        return;
-    INFO(name << " elapsed_us="
-              << std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()
-              << " budget_ms=" << budget->count());
-    REQUIRE(elapsed <= *budget);
 }
 
 } // namespace

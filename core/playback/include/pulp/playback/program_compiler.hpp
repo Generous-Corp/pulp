@@ -220,6 +220,33 @@ struct CompilerStatus {
     // the instance's latest successful publication.
     std::uint64_t latest_submitted_epoch = 0;
     std::uint64_t latest_published_epoch = 0;
+    /// Partition of `active_tracks_completed` for the request currently being
+    /// compiled, or for the last one if the compiler is idle. A track is
+    /// `reused` when the dirty set spared it and its program was carried over
+    /// from the live program untouched; it is `recompiled` when a fresh
+    /// TrackProgram was built for it. The two always sum to
+    /// `active_tracks_completed`.
+    ///
+    /// This is the direct measure of how much work an incremental compile did.
+    /// Callers that need to know an edit stayed incremental should read these
+    /// rather than infer it from how long the compile took, which measures the
+    /// host as much as the compiler.
+    std::uint64_t active_tracks_recompiled = 0;
+    std::uint64_t active_tracks_reused = 0;
+
+    /// Clear the three track counters together, so the partition can never be
+    /// left describing a previous request.
+    void clear_active_track_counts() {
+        active_tracks_completed = 0;
+        active_tracks_recompiled = 0;
+        active_tracks_reused = 0;
+    }
+
+    /// Record one finished track on whichever side of the partition it fell.
+    void count_track_completed(bool reused) {
+        ++active_tracks_completed;
+        ++(reused ? active_tracks_reused : active_tracks_recompiled);
+    }
 };
 
 struct PlaybackProgramCompilerCore;
