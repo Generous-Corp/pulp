@@ -1467,6 +1467,35 @@
       "domain": "Command",
       "flags": [
         {
+          "kind": "Array",
+          "name": "expected",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "replacement",
+          "required": true,
+          "schema_field": "replacement",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:set-dynamics-lane",
+      "schema_type": "pulp.timeline.command.set_dynamics_lane",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
           "kind": "Object",
           "name": "expected",
           "ref": "pulp.timeline.groove_template",
