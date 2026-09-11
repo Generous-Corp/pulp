@@ -573,8 +573,12 @@ static bool flex_alignment_moves_lone_item(const FlexStyle& style) {
     switch (style.align_items) {
         case FlexAlign::center:
         case FlexAlign::end:
-        case FlexAlign::baseline:
             return true;
+        // A lone item's own baseline is the line's maximum baseline, so
+        // baseline alignment leaves it flush with cross-start exactly as
+        // flex-start would. It gets no slot for the same reason `start` and
+        // `stretch` get none.
+        case FlexAlign::baseline:
         case FlexAlign::start:
         case FlexAlign::stretch:
         case FlexAlign::auto_:
