@@ -55,6 +55,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
+    # Measured at 76.65 s on an unloaded Linux runner, against a suite-wide
+    # default of 120 s. That 1.6x headroom is consumed by co-scheduling on a
+    # loaded host, which is how a test that passes in isolation times out in a
+    # cohort. The slot declaration alone does not restore the budget.
+    set_tests_properties(agent-capability-rederive-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
     # The rederive self-test deliberately rewrites the manifest script's two
     # generated counters before restoring them. Keep readers from observing
     # that temporary state while retaining parallelism for unrelated tests.
