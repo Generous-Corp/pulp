@@ -185,3 +185,87 @@ test('parses a selector once per scan rather than once per candidate node', () =
   assert.equal(large, small,
     `selector re-parsed per node: ${small} passes at 20 nodes, ${large} at 200`);
 });
+
+// Captured-state resolution runs one selector per state on every React commit
+// and takes the first that answers, so every state ahead of the live one costs
+// a scan that match-tests the whole registry before returning null. These cases
+// pin that a miss is paid once per mutation epoch rather than once per commit,
+// and that a runtime with no epoch published declines to cache at all.
+function scanCountingRegistry(count, onTest) {
+  const nodes = [];
+  for (let index = 0; index < count; ++index) {
+    const node = {
+      __pulpId: `n${index}`, id: `n${index}`, _children: [],
+      className: '', parentElement: null,
+      getAttribute: () => null,
+    };
+    Object.defineProperty(node, 'tagName', {
+      get() { onTest(); return 'DIV'; }, configurable: true,
+    });
+    nodes.push(node);
+  }
+  return nodes;
+}
+
+test('a registry miss is rescanned once per mutation epoch, not per commit',
+  () => {
+    let tests = 0;
+    const registryNodes = scanCountingRegistry(50, () => { ++tests; });
+    const sandbox = evaluateEntry({ registryNodes });
+    sandbox.__pulpMaterializedTreeEpoch__ = 1;
+
+    tests = 0;
+    assert.equal(sandbox.__pulpFindMaterializedElement__('span.absent'), null);
+    const firstScan = tests;
+    assert.ok(firstScan > 0, 'no match test observed, so the counter is dead');
+
+    // Ten further commits with no host mutation: the epoch is unchanged, so the
+    // answer cannot have changed and nothing should be rescanned.
+    for (let commit = 0; commit < 10; ++commit) {
+      assert.equal(sandbox.__pulpFindMaterializedElement__('span.absent'), null);
+    }
+    assert.equal(tests, firstScan,
+      `miss rescanned without a mutation: ${tests} tests vs ${firstScan}`);
+
+    // A host mutation bumps the epoch, and the answer must be recomputed --
+    // a cache that never invalidates is a stale answer, not a cheap one.
+    sandbox.__pulpMaterializedTreeEpoch__ = 2;
+    assert.equal(sandbox.__pulpFindMaterializedElement__('span.absent'), null);
+    assert.equal(tests, firstScan * 2,
+      'a bumped epoch did not invalidate the retained miss');
+  });
+
+test('declines to cache a miss when no mutation epoch is published', () => {
+  // A plain importer runtime with no @pulp/react host has nothing to invalidate
+  // a retained miss, so it must keep scanning rather than answer from a cache
+  // it can never clear.
+  let tests = 0;
+  const registryNodes = scanCountingRegistry(20, () => { ++tests; });
+  const sandbox = evaluateEntry({ registryNodes });
+  assert.equal(sandbox.__pulpMaterializedTreeEpoch__, undefined,
+    'fixture published an epoch, so this case proves nothing');
+
+  tests = 0;
+  assert.equal(sandbox.__pulpFindMaterializedElement__('span.absent'), null);
+  const firstScan = tests;
+  assert.ok(firstScan > 0, 'no match test observed, so the counter is dead');
+  assert.equal(sandbox.__pulpFindMaterializedElement__('span.absent'), null);
+  assert.equal(tests, firstScan * 2,
+    'a miss was cached with no epoch to invalidate it');
+});
+
+test('a positive match is not served from the miss cache', () => {
+  // Only negative answers are retained. A node that once matched can have its
+  // attributes rewritten, so the hit path must stay live.
+  const node = {
+    tagName: 'SPAN', __pulpId: 'hit', id: 'hit', _children: [],
+    className: 'live', parentElement: null, getAttribute: () => null,
+  };
+  const sandbox = evaluateEntry({ registryNodes: [node] });
+  sandbox.__pulpMaterializedTreeEpoch__ = 1;
+
+  assert.equal(sandbox.__pulpFindMaterializedElement__('span.live'), node);
+  node.className = 'changed';
+  assert.equal(sandbox.__pulpFindMaterializedElement__('span.live'), null,
+    'a stale hit was served after the node stopped matching');
+});
