@@ -2917,10 +2917,10 @@ lane (model + compile context) is genuinely small and can land on its own;
 `DynamicsLane` deliberately did exactly that, and its serialization is a separate
 piece of work for this reason.
 
-## A new `Command` alternative has four fail-closed sites and two silent ones
+## A new `Command` alternative has six fail-closed sites and two silent ones
 
-Appending an alternative to the `Command` variant will not compile until four
-places agree, which is the good half:
+Appending an alternative to the `Command` variant will not compile, or will not
+pass, until six places agree — which is the good half:
 
 - `command_authority_of<T>()` in `document_session.hpp` — its final `else` is a
   `static_assert(detail::unclassified_command_v<T>, …)` that is unconditionally
@@ -2933,7 +2933,18 @@ places agree, which is the good half:
   together with its `STATIC_REQUIRE(alternatives == N)`;
 - the equality and retained-size switches in `command.cpp`, which are two
   separate `if constexpr` chains — a command added to one and not the other
-  compiles and misreports its own size.
+  compiles and misreports its own size;
+- the alphabetical `expected` name list in `test_timeline_schema_registry.cpp`,
+  whose `static_assert` is against `variant_size_v<Command>` — so it binds even
+  though it is a hand-written list;
+- the `encoded` envelope list in `test_timeline_command_persistence.cpp`, which
+  decodes one fixture per alternative and is *index-keyed*: append only, or
+  every `holds_alternative` assertion after the insertion point renumbers.
+
+`test_timeline_agent.cpp` counts `"x-pulp-domain":"Command"` occurrences in the
+emitted schema against the same `variant_size_v<Command>`, so it follows the
+registry automatically and needs no edit — but it turns a missed *registration*
+into a red test rather than a silent gap.
 
 The two that fail **silently** are the decode arm in
 `serialize_command_decode.cpp` and the registration in `schema_registry.cpp`.

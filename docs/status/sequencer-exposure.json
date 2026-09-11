@@ -5048,7 +5048,14 @@
         "test/test_timeline_dynamics_lane.cpp",
         "test/test_timeline_writer_capabilities.cpp",
         "docs/status/sequencer-exposure.json",
-        ".agents/skills/timeline/SKILL.md"
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "test/test_timeline_schema_registry.cpp",
+        "test/test_timeline_command_persistence.cpp"
       ],
       "evidence": [
         {
@@ -5100,6 +5107,19 @@
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
             "alternatives == 48"
+          ]
+        },
+        {
+          "path": "test/test_timeline_command_persistence.cpp",
+          "needles": [
+            "pulp.timeline.command.set_dynamics_lane",
+            "std::holds_alternative<SetDynamicsLane>(commands[47])"
+          ]
+        },
+        {
+          "path": "test/test_timeline_schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.set_dynamics_lane"
           ]
         }
       ],
