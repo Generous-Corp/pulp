@@ -75,6 +75,8 @@ struct ProjectSnapshotCounts {
     std::size_t slots = 0;
     /// Number of chord/scale context events.
     std::size_t chord_scale_events = 0;
+    /// Number of dynamics context events.
+    std::size_t dynamics_events = 0;
     /// Number of groove-template steps.
     std::size_t groove_steps = 0;
     /// Number of controller/expression lanes across MIDI-content clips.
