@@ -915,16 +915,18 @@
         },
         "offline_timeline_cli": {
           "disposition": "gap",
-          "rationale": "The CLI can persist and inspect the lane but has no typed dynamics-lane mutation command.",
+          "rationale": "The lane does not round-trip. It is absent from the sequence encoder, from every decoder, and from the sequence schema, so a save silently drops it (#8216). The CLI can therefore neither persist nor inspect the lane, and has no typed dynamics-lane mutation command.",
           "dependencies": [
+            "timeline-dynamics-lane-persistence",
             "offline-timeline-dynamics-command"
           ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
-          "rationale": "The MCP command vocabulary has no typed dynamics-lane mutation.",
+          "rationale": "The MCP command vocabulary has no typed dynamics-lane mutation, and the lane does not round-trip through the sequence schema (#8216), so a mutation would not survive a save.",
           "dependencies": [
+            "timeline-dynamics-lane-persistence",
             "offline-timeline-dynamics-command"
           ],
           "owner": "timeline-cli-mcp"
@@ -940,7 +942,7 @@
         },
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
-          "rationale": "A persisted dynamics lane is timeline state, not a design-time algorithm capability."
+          "rationale": "A sequence-owned dynamics lane is timeline state, not a design-time algorithm capability."
         }
       }
     },
