@@ -14,6 +14,10 @@ function CSSStyleDeclaration(el) {
     // so the two paths converge on `View::active_overlay_` without
     // double-claim/double-release surprises.
     this._autoOverlayClaimed = false;
+    // Consume value last sent with that claim, so a change of it (the author
+    // adding/removing data-overlay while the CSS shape already claimed)
+    // re-claims instead of silently keeping the stale value.
+    this._autoOverlayConsume = false;
     // Raw string last APPLIED per property, used to skip a write that would
     // reproduce the state the widget is already in. Keyed on the raw
     // (pre-var-resolution) string because that is what the caller supplies and
@@ -39,9 +43,11 @@ var _PULP_AUTO_OVERLAY_Z_INDEX_THRESHOLD = 10;
 // `data-overlay` hint changes. Conservative by design: opt-in only
 // when the CSS shape strongly signals a popover (position:absolute +
 // high z-index) OR the author explicitly hints `data-overlay="true"`.
-// Mirrors what the @pulp/react prop-applier does for `<View overlay>`
-// — both paths call `claimOverlay` / `releaseOverlay` on the same
-// bridge so the single `View::active_overlay_` slot stays consistent.
+// Shares the `claimOverlay` / `releaseOverlay` bridge with the
+// @pulp/react prop-applier's `<View overlay>` prop, so the single
+// `View::active_overlay_` slot stays consistent across both paths.
+// The two do NOT agree on outside-click consumption, deliberately:
+// see the `consume` note below.
 CSSStyleDeclaration.prototype._reevaluateOverlay = function() {
     var el = this._el;
     if (!el || !el._nativeCreated) return;
@@ -66,12 +72,26 @@ CSSStyleDeclaration.prototype._reevaluateOverlay = function() {
 
     var shouldClaim = hinted || shapeClaim;
 
-    if (shouldClaim && !this._autoOverlayClaimed) {
-        if (typeof claimOverlay === "function") claimOverlay(el._id);
+    // Consume the dismissing press only on the EXPLICIT author opt-in.
+    // `data-overlay="true"` is a direct statement that the element is a
+    // popover — the same statement @pulp/react's `<View overlay>` prop makes,
+    // and that path passes consume=true, so matching it here closes a fork
+    // where identical intent behaved differently depending on which authoring
+    // surface expressed it. The CSS-shape branch stays click-through because
+    // it is an inference, not a statement: a false positive that consumed
+    // would swallow a real click outright, whereas a false positive that
+    // clicks through merely closes something that should not have claimed.
+    var consume = hinted;
+
+    if (shouldClaim && (!this._autoOverlayClaimed ||
+                        this._autoOverlayConsume !== consume)) {
+        if (typeof claimOverlay === "function") claimOverlay(el._id, consume);
         this._autoOverlayClaimed = true;
+        this._autoOverlayConsume = consume;
     } else if (!shouldClaim && this._autoOverlayClaimed) {
         if (typeof releaseOverlay === "function") releaseOverlay(el._id);
         this._autoOverlayClaimed = false;
+        this._autoOverlayConsume = false;
     }
 };
 
