@@ -1328,7 +1328,7 @@ loop, so a fixture passing no tempo points is refused for that reason first —
 an encode-refusal test in a suite without a tempo fixture will pass for the
 wrong reason.
 
-## Nested gain composes by multiplying; pan and a placement fade cannot
+## Nested gain composes by multiplying; a placement fade rides beside the leaf; pan does neither
 
 `sequence_content_lowerer.cpp` flattens a `SequenceRef` into leaf clips on the
 referring track, so anything the child track owned has to find a home on a leaf
@@ -1340,24 +1340,62 @@ float the leaf authored rather than a rounded near-miss, and an equality
 assertion on the composed value is measuring composition rather than rounding
 when the fixture uses powers of two.
 
-Three neighbouring cases have no such home and keep their own refusal rather
-than being folded away — the code names which obstacle it hit:
+A **placement fade** composes too, but it cannot fold, and the difference is
+the whole design. A product of gains is a gain; a ramp is time-varying, and two
+ramps of different shapes reduce to no third shape. So the placement's envelope
+travels *beside* the leaf instead of inside it: `LoweredClip::placement_fades`
+carries every enclosing ramp in owner-timeline ticks, `audio_renderer.cpp`
+converts them to clip-relative frames as
+`AudioClipRendererProgram::placement_fade`, and `clip_fade_envelope.hpp`
+multiplies them into the leaf's own envelope. Nesting a level deeper appends;
+nothing collapses.
+
+Four things about that carrier are load-bearing, and each is a way to get it
+subtly wrong:
+
+- **It stores a window of fade PROGRESS, not a pair of endpoint gains.** A
+  shape is a pure reparameterization of progress, so the slice of a ramp one
+  leaf covers must be read by applying the shape to the progress that leaf
+  actually spans. Storing the gain at each end and ramping linearly between
+  them lands both edges exactly and bends the wrong way everywhere in between —
+  right for `Linear`, wrong for every `EqualPower` fade. That error measures
+  close and sounds wrong.
+- **A segment names its ends by what they read, not which way it points.**
+  `silent_frame` is where the ramp is zero, `open_frame` where it is unity, so
+  a fade-out is a fade-in with the ends exchanged and there is no direction
+  flag to get backwards. Past the open end the segment is skipped; past the
+  silent end it returns zero.
+- **A ramp end routinely falls outside the leaf that carries it.** Flattening
+  cuts a nested window at clip boundaries and never at a ramp edge, so one leaf
+  can begin inside the placement's fade-in and end outside it, and a single
+  leaf can sit under four multiplicative ramps across two shapes: its own fade
+  in and out, plus the placement's head and tail. Keeping the whole ramp and
+  evaluating the position — rather than renormalizing per leaf — is what makes
+  two neighbouring leaves read the same gain at the frame they share.
+- **The second envelope is guarded on presence.** `detail::clip_envelope` has a
+  call site in `realtime_stretch_renderer.cpp` that runs *once per output
+  sample*, which is why progress is narrowed to `float` before the shape lookup
+  there (pinning `EqualPower` to `sinf`). `placement_fade` is null for every
+  clip that was not nested under a faded placement, so the ordinary clip pays
+  one predictable branch and no extra transcendental. Do not add an unguarded
+  second `fade_gain` call.
+
+An inner placement's own fades are **lifted out of the clip** at
+`sequence_content_lowerer.cpp`'s nested-`SequenceRef` branch: the re-placed
+`nested_clip` is built with its fade durations zeroed and the authored,
+untrimmed ramp recorded instead. That is not an optimization. The clip carries
+the *trimmed* window, `Clip::create` runs `valid_playback_properties`, and a
+fade wider than its clip is rejected — so leaving the fades on the clip turns a
+trimmed faded nesting into `InvalidStructure` before the walk ever reaches it.
+Reading the ramp off the untrimmed extent is also the musically correct answer:
+a trimmed placement enters its fade part way up.
+
+Two neighbouring cases keep their own refusal rather than being folded away —
+the code names which obstacle it hit:
 
 - `NestedMixerPanUnsupported` — a clip carries no stereo placement at all, and
   the parent track's single pan also serves everything else on that track.
   Unlike gain there is no sink for *any* content kind.
-- `NestedPlacementFadeUnsupported` — a fade on the `SequenceRef` placement is
-  one envelope across the whole nested window, while a leaf can only fade from
-  its own edge. A leaf lying inside the fade region needs a partial ramp
-  `ClipPlaybackProperties` cannot express. An expressiveness limit, not a
-  choice between two defensible answers.
-
-  A leaf's *own* fade is the case this is easiest to confuse with, and it is
-  not refused. A fade is measured from the clip's edge and a trim moves that
-  edge, so the retained fade is the authored one minus the trim, clamped to
-  what is left of the clip — an edge-anchored answer, not the same ramp entered
-  part-way through. The placement fade refuses because its envelope has no
-  edge to re-anchor to; a leaf fade always does.
 - `NestedGainSinkUnsupported` — a composed gain lands on the leaf's clip gain,
   and **clip gain only reaches a renderer for media content**. Note, registered
   and opaque leaves compile to events, and nothing scales an event by the gain
@@ -1365,9 +1403,27 @@ than being folded away — the code names which obstacle it hit:
   it silently. This is the easy thing to get wrong: the composition looks
   correct in the lowerer and is simply never read.
 
+`NestedPlacementFadeUnsupported` still exists and asks that **same sink
+question** about the envelope. A fade is a time-varying gain, so a placement
+fade over a note, registered or opaque leaf has nowhere to land either, and it
+refuses rather than playing that leaf at full level through an envelope the
+author wrote. It is scoped to the leaves a ramp actually *reaches*: a note leaf
+lying wholly past the ramp reads unity and compiles fine. When that refusal
+fires it names the leaf, not the placement — which is the tell that it is the
+sink case and not the old whole-envelope refusal it replaced.
+
+A leaf's **own** fade is the case this is all easiest to confuse with, and it
+behaves differently on purpose. A leaf fade is measured from the clip's edge
+and a trim moves that edge, so the retained fade is the authored one minus the
+trim, clamped to what is left of the clip — edge-anchored, not the same ramp
+entered part-way through. A placement ramp does the opposite: it keeps its
+authored edges and the leaf is read at whatever progress its position implies.
+Both are right; they answer different questions.
+
 So a nested child holding notes still refuses a fader, and the fixture that
 proves it must use media content to see composition at all. Read the composed
-value through `TrackProgram::audio_program()->clips()[n].gain_linear`.
+value through `TrackProgram::audio_program()->clips()[n].gain_linear`, and the
+ramps through the same clip's `placement_fade`.
 
 ## A nested child-track state refuses only if it *substitutes* content
 
