@@ -4,6 +4,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/inspector.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
 
@@ -616,4 +617,101 @@ TEST_CASE("ScrollView::hit_test follows the popover's painted extent beyond 500p
     // a click that lands on its painted box regardless of the distance.
     ScrollPopoverFixture f(-600, 25);
     REQUIRE(f.sv.hit_test({25, 650}) == f.popover);
+}
+
+TEST_CASE("a scrolled descendant's absolute bounds follow the scroll offset",
+          "[scrollview][geometry][inspector]") {
+    // ScrollView::paint_all translates children by (-scroll_x, -scroll_y), so a
+    // walk that sums only bounds() reports where the row WOULD sit if nothing
+    // were scrolled. Every appearance/overlap detector built on absolute_bounds
+    // then judges only the first viewport-worth of a long panel and calls the
+    // rest clean by never looking at it.
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 200, 100});
+
+    auto row_owner = std::make_unique<View>();
+    auto* row = row_owner.get();
+    row->set_position(View::Position::absolute);
+    row->set_left(0.0f);
+    row->set_top(400.0f);
+    row->flex().preferred_width = 200.0f;
+    row->flex().preferred_height = 20.0f;
+    scroll.add_child(std::move(row_owner));
+    scroll.layout_children();
+
+    const auto unscrolled = ViewInspector::absolute_bounds(*row);
+    REQUIRE(unscrolled.y == Catch::Approx(400.0f).margin(0.5f));
+    REQUIRE_FALSE(scroll.applies_child_paint_offset());
+
+    scroll.set_scroll(0.0f, 200.0f);
+    REQUIRE(scroll.scroll_y() == Catch::Approx(200.0f).margin(0.5f));
+    REQUIRE(scroll.applies_child_paint_offset());
+
+    // The row is now painted 200px higher. Its absolute position must say so —
+    // 400 - 200 = 200.
+    const auto scrolled = ViewInspector::absolute_bounds(*row);
+    CHECK(scrolled.y == Catch::Approx(200.0f).margin(0.5f));
+    CHECK(scrolled.y < unscrolled.y);
+
+    // And it must track further scrolling rather than staying pinned. 320 is the
+    // bottom of the 420px content in a 100px viewport, which brings the row to
+    // 400 - 320 = 80 — inside the viewport, where a detector can finally see it.
+    scroll.set_scroll(0.0f, 320.0f);
+    REQUIRE(scroll.scroll_y() == Catch::Approx(320.0f).margin(0.5f));
+    const auto deeper = ViewInspector::absolute_bounds(*row);
+    CHECK(deeper.y == Catch::Approx(80.0f).margin(0.5f));
+    CHECK(deeper.y < scrolled.y);
+}
+
+TEST_CASE("a sticky child's absolute bounds stay pinned as the content scrolls",
+          "[scrollview][geometry][inspector][sticky]") {
+    // ScrollView::paint_all makes two passes: ordinary children under
+    // translate(-scroll_x, -scroll_y), sticky children under
+    // translate(-scroll_x, 0) so they stay pinned. A bounds walk that applies
+    // the scrolled offset to every child reports a pinned header far above the
+    // viewport while it is painting in place, and an appearance detector then
+    // calls the one element that never moves off-screen off-screen.
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 200, 100});
+
+    auto header_owner = std::make_unique<View>();
+    auto* header = header_owner.get();
+    header->set_position(View::Position::sticky);
+    header->flex().preferred_width = 200.0f;
+    header->flex().preferred_height = 30.0f;
+    scroll.add_child(std::move(header_owner));
+
+    auto row_owner = std::make_unique<View>();
+    auto* row = row_owner.get();
+    row->set_position(View::Position::absolute);
+    row->set_left(0.0f);
+    row->set_top(400.0f);
+    // Wider than the 200px viewport so there is horizontal scroll to ride.
+    row->flex().preferred_width = 400.0f;
+    row->flex().preferred_height = 20.0f;
+    scroll.add_child(std::move(row_owner));
+    scroll.layout_children();
+
+    const auto header_unscrolled = ViewInspector::absolute_bounds(*header);
+
+    scroll.set_scroll(0.0f, 200.0f);
+    REQUIRE(scroll.scroll_y() == Catch::Approx(200.0f).margin(0.5f));
+
+    // The sticky header paints in the same place it did before the scroll.
+    const auto header_scrolled = ViewInspector::absolute_bounds(*header);
+    CHECK(header_scrolled.y == Catch::Approx(header_unscrolled.y).margin(0.5f));
+
+    // Control: in the SAME container, at the SAME scroll offset, an ordinary
+    // child does move. Without this the assertion above would also pass if the
+    // walk had simply stopped applying any offset at all.
+    const auto row_scrolled = ViewInspector::absolute_bounds(*row);
+    CHECK(row_scrolled.y == Catch::Approx(200.0f).margin(0.5f));
+
+    // Horizontal scrolling is NOT pinned — a sticky child rides it like any
+    // other, because paint_all translates it by -scroll_x in both passes.
+    scroll.set_scroll(40.0f, 200.0f);
+    REQUIRE(scroll.scroll_x() == Catch::Approx(40.0f).margin(0.5f));
+    const auto header_x = ViewInspector::absolute_bounds(*header);
+    CHECK(header_x.x == Catch::Approx(header_unscrolled.x - 40.0f).margin(0.5f));
+    CHECK(header_x.y == Catch::Approx(header_unscrolled.y).margin(0.5f));
 }

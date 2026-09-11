@@ -3915,6 +3915,24 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   expires, and writes the resolved browser build to stderr as a
   `[browser-capture]` line before any page work, so a failed capture already
   names both the Chrome and the stalled call.
+- **Prove a capture deadline reaped the BROWSER, not just the profile.**
+  Removing the profile directory is the easy half, and it is the half a cleanup
+  test naturally asserts. The launched Chromium is a detached process *group*,
+  so it survives the runtime's `process.exit` and is re-parented to init, where
+  nothing will ever reap it — a green "profile removed" assertion sits happily
+  on top of a permanent leak. Cleanup that fires mid-launch is the sharp case:
+  the ownership marker lives inside the profile, so removing the profile
+  guarantees custody is never recorded, and any teardown gated on recorded
+  custody degrades to a silent no-op exactly when it is needed. Two rules
+  follow. A launch abandoned before custody exists must still be terminated
+  through the live child handle: while the handle is unreaped POSIX will not
+  reuse that pid, and since a group's id is its leader's pid, no other group can
+  come to bear the number either — which is what makes `kill(-pid)` safe there,
+  with no await permitted between the `exitCode` check and the signal. And the
+  test must assert the **process is gone**, not the directory: sample `ps` with
+  a positive control in the same sample, because BSD `pgrep -fc` prints 0 both
+  when nothing matched and when the pattern was wrong, and the second one reads
+  exactly like a pass.
 - The semantic report is evidence, not permission to promote visual controls.
   Only explicit source contracts such as `data-pulp-role` may become native
   interaction overlays in a later stage.
@@ -6801,3 +6819,41 @@ Note the **Swift** emitter (`design_swift_codegen.cpp`) is a deliberate fourth
 lowering that shares only `resolve_design_ir_native` and re-derives the rest, so
 "all native lanes share X" is false for it. Plan for two full sharers (runtime +
 C++ baker), one partial (native-JS), and one non-sharer (Swift).
+
+## The materialized runtime pays its metadata cost on EVERY React commit
+
+`materialized_runtime_entry.mjs` reapplies import metadata from
+`resetAfterCommit` — every commit, not just mount. Two shapes inside it are
+therefore multiplied by the commit rate, and both read as "fine" in isolation:
+
+- `materializedNodeAtPath` used to rebuild its whole root/registry index per
+  **binding**, so one application cost O(bindings × registry).
+- `materializedMatches` re-parsed its selector text per **candidate node**, so
+  one registry scan cost regex work proportional to the node count rather than
+  to the selector vocabulary.
+
+Neither is visible at small registry sizes. A UI change that mounts a large
+always-present hidden subtree (a settings panel kept in the tree so keyboard
+traversal can reach it) triples the registry and turns both into a per-commit
+tax — which surfaces as unrelated-looking jank in whatever gesture happens to
+commit most often (a slider drag), not in the feature that grew the tree.
+
+The index is deliberately rebuilt once per application rather than cached
+across commits: a retained index resolves stale paths after any reparent. The
+selector parse memo has no such concern — a parse is a pure function of the
+selector text.
+
+**Guarding a change here:** `materializedMatches` is reachable from nearly every
+metadata binding, yet hard-breaking it leaves the dropdown arrow-traversal and
+settings cases GREEN. The case that actually catches it is *every native
+dropdown dismisses by Escape and outside press*. Run that one, not just the
+arrow cases, whenever this function changes.
+
+**Editing the file at all:** the runtime is returned as a single template
+literal (`const entry = \`…\`; return entry;`), so a regex in the source needs
+doubled backslashes (`\\[` emits `\[`), and a bare backtick or `${` anywhere in
+that region silently corrupts the emitted bundle. `node --check` does **not**
+catch that corruption — it exits 0 on truncated and broken files. Verify an
+emitted classic bundle with `vm.Script`, and an ESM source with a dynamic
+`import()` discriminating on `SyntaxError`; plant a break first and confirm the
+checker rejects it.

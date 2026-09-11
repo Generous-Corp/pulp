@@ -354,7 +354,17 @@ struct PublishState {
 struct Coordinator::State {
     mutable std::mutex mtx;
     pulp::view::FrameClock* clock = nullptr;
+    // Expires when the bound clock is destroyed. The coordinator is a
+    // process-wide singleton and outlives any clock that binds to it, so the
+    // raw pointer above is only safe to dereference while this is unexpired.
+    std::weak_ptr<const void> clock_alive;
     int clock_sub_id = 0;
+
+    /// The bound clock, or nullptr if none is bound or the bound one has
+    /// already been destroyed. Every read of `clock` must go through this.
+    pulp::view::FrameClock* live_clock() const {
+        return clock_alive.expired() ? nullptr : clock;
+    }
     bool tracing_enabled = false;
     bool firehose = false;
     std::map<int, Sink> sinks;
@@ -387,6 +397,7 @@ void Coordinator::bind(pulp::view::FrameClock& clock) {
     unbind();
     std::lock_guard<std::mutex> lock(state_->mtx);
     state_->clock = &clock;
+    state_->clock_alive = clock.liveness_token();
     state_->clock_sub_id = clock.subscribe([this](float dt) {
         on_tick(dt);
         return true;
@@ -396,19 +407,25 @@ void Coordinator::bind(pulp::view::FrameClock& clock) {
 void Coordinator::unbind() {
     pulp::view::FrameClock* clock = nullptr;
     int sub_id = 0;
+    bool alive = false;
     {
         std::lock_guard<std::mutex> lock(state_->mtx);
         clock = state_->clock;
         sub_id = state_->clock_sub_id;
+        alive = !state_->clock_alive.expired();
         state_->clock = nullptr;
+        state_->clock_alive.reset();
         state_->clock_sub_id = 0;
     }
-    if (clock && sub_id) clock->unsubscribe(sub_id);
+    // A clock that went out of scope while still bound leaves `clock`
+    // dangling. Dropping the subscription then is both impossible and
+    // unnecessary — the subscriber list died with the clock.
+    if (clock && sub_id && alive) clock->unsubscribe(sub_id);
 }
 
 bool Coordinator::is_bound() const noexcept {
     std::lock_guard<std::mutex> lock(state_->mtx);
-    return state_->clock != nullptr;
+    return state_->live_clock() != nullptr;
 }
 
 int Coordinator::add_sink(Sink sink) {
@@ -560,9 +577,9 @@ void Coordinator::on_tick(float dt) {
     const bool cost_enabled = cost.enabled();
     if (cost_enabled) {
         const double t_cost =
-            state_->clock ? static_cast<double>(state_->clock->time()) : 0.0;
+            state_->live_clock() ? static_cast<double>(state_->live_clock()->time()) : 0.0;
         const std::uint64_t f_cost =
-            state_->clock ? state_->clock->frame() : 0;
+            state_->live_clock() ? state_->live_clock()->frame() : 0;
         cost.note_tick_begin(f_cost, t_cost);
     }
 
@@ -584,9 +601,9 @@ void Coordinator::on_tick(float dt) {
         if (!have_traces && !cost_enabled) return;
 
         const double t_now =
-            state_->clock ? static_cast<double>(state_->clock->time()) : 0.0;
+            state_->live_clock() ? static_cast<double>(state_->live_clock()->time()) : 0.0;
         const std::uint64_t f_now =
-            state_->clock ? state_->clock->frame() : 0;
+            state_->live_clock() ? state_->live_clock()->frame() : 0;
 
         if (!have_traces) {
             // Skip sampler-driven trace work; cost emission still
@@ -743,9 +760,9 @@ void Coordinator::publish_internal(std::string view_name,
         if (!state_->firehose) return;
 
         const double t_now =
-            state_->clock ? static_cast<double>(state_->clock->time()) : 0.0;
+            state_->live_clock() ? static_cast<double>(state_->live_clock()->time()) : 0.0;
         const std::uint64_t f_now =
-            state_->clock ? state_->clock->frame() : 0;
+            state_->live_clock() ? state_->live_clock()->frame() : 0;
 
         const PublishKey key{view_name, metric_name};
         auto& pstate = state_->publish_states[key];
@@ -841,9 +858,9 @@ void Coordinator::dispatch_input_event(SampleEvent e) {
         // opt-in (an `InputRecorder` was constructed); requiring both
         // would be a footgun for "record an interaction without
         // sampler-driven traces."
-        if (state_->clock) {
-            e.t_seconds = static_cast<double>(state_->clock->time());
-            e.frame = state_->clock->frame();
+        if (auto* clock = state_->live_clock()) {
+            e.t_seconds = static_cast<double>(clock->time());
+            e.frame = clock->frame();
         }
         for (const auto& [sid, sink] : state_->sinks) {
             (void)sid;

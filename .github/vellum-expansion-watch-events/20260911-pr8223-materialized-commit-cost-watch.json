@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260911-pr8223-materialized-commit-cost-watch",
+  "created_at": "2026-09-11T12:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record a Pulp-owned cost reduction in the materialized runtime's import-metadata reapplication, which runs from resetAfterCommit on every React commit. Two shapes scaled with the registry rather than with the work: materializedNodeAtPath rebuilt its root and registry index once per binding, giving O(bindings x registry) per commit, and materializedMatches re-parsed its selector text once per candidate node. Neither is visible at a small registry, and a downstream change that mounts a large always-present hidden subtree turns both into a per-commit tax that surfaces as interaction jank. The index is now built once per metadata application and passed down, and selector parses are memoized by selector text. The index is deliberately not cached across applications: it is a pure projection of the registry snapshot, and a retained index would resolve stale paths after any reparent, while every binding within one application reads the same snapshot. Resolution order, match semantics, and the emitted result are unchanged; this alters no design ingest, no captured output, no rendering or layout behavior, no packaging boundary, no accepted expansion boundary, and no Vellum source authority.",
+  "tests": [
+    "Spectr-native-n1-test \"[arrow-traversal],[arrow-nav]\"",
+    "Spectr-native-n1-test \"[dismissal],[modal-dismissal]\"",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -3,22 +3,43 @@
 #include "timeline_agent_internal.hpp"
 
 #include <pulp/audio/audio_file.hpp>
-#include <pulp/audio/buffer.hpp>
 #include <pulp/host/signal_graph_runtime.hpp>
 #include <pulp/host/timeline_graph_binding.hpp>
 #include <pulp/host/timeline_offline_graph.hpp>
-#include <pulp/playback/audio_renderer.hpp>
-#include <pulp/playback/transport.hpp>
+#include <pulp/host/timeline_offline_renderer.hpp>
 #include <pulp/timeline/serialize.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <limits>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
 namespace pulp::tools::timeline {
+namespace {
+
+// The offline renderer bounds a render by a half-open tick region. The verb's
+// budget is a frame count, so it is carried to the smallest tick that covers the
+// whole budget: rounding up can only ever lengthen the region, and truncating a
+// bounce is the failure this must not produce.
+std::optional<timebase::TickPosition> covering_tick(const timebase::CompiledTempoMap& tempo_map,
+                                                    std::uint64_t frames) {
+    constexpr auto ceiling = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    if (static_cast<long double>(frames) >= ceiling)
+        return std::nullopt;
+    const auto ticks = tempo_map.fractional_samples_to_ticks(static_cast<long double>(frames));
+    if (!std::isfinite(ticks))
+        return std::nullopt;
+    const auto rounded = std::ceil(ticks);
+    if (rounded < 0.0L || rounded >= ceiling)
+        return std::nullopt;
+    return timebase::TickPosition{static_cast<std::int64_t>(rounded)};
+}
+
+} // namespace
 
 OperationResult render(const ProjectSource& project, const std::filesystem::path& output,
                        std::uint32_t sample_rate) {
@@ -61,18 +82,6 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
     if (frames > detail::kMaxRenderPcmBytes / bytes_per_frame)
         return detail::failure("render", "sequence exceeds the in-memory render budget");
 
-    pulp::audio::AudioFileData rendered;
-    rendered.sample_rate = sample_rate;
-    try {
-        rendered.channels.reserve(channels);
-        for (std::uint32_t channel = 0; channel < channels; ++channel)
-            rendered.channels.emplace_back(static_cast<std::size_t>(frames));
-    } catch (const std::bad_alloc&) {
-        return detail::failure("render", "could not allocate the in-memory render buffer");
-    } catch (const std::length_error&) {
-        return detail::failure("render", "could not allocate the in-memory render buffer");
-    }
-
     constexpr std::uint32_t block_size = 512;
     host::SignalGraph graph;
     host::TimelineGraphPlaybackBinding binding(graph, compiled.value()->store);
@@ -80,63 +89,59 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
     if (!topology)
         return detail::failure("render", "render graph topology error " +
                                              std::to_string(static_cast<unsigned>(topology.code)));
-    // A program with no tracks renders silence. Preparing an empty binding would
-    // be rejected as an under-specified request, so the graph stays out of the
-    // way and the zero-filled buffer is written as it always was.
-    const bool routed = !topology.routes.empty();
-    std::vector<float> silence;
-    std::vector<const float*> silence_data;
-    if (routed) {
-        host::TimelineGraphBindingConfig binding_config;
-        binding_config.audio_channels = channels;
-        const auto admission =
-            binding.prepare(*program, topology.routes, binding_config,
-                            static_cast<double>(sample_rate), static_cast<int>(block_size));
-        if (!admission)
-            return detail::failure("render",
-                                   "render graph admission error " +
-                                       std::to_string(static_cast<unsigned>(admission.code)));
+
+    pulp::audio::AudioFileData rendered;
+    rendered.sample_rate = sample_rate;
+    if (topology.routes.empty()) {
+        // A program with no tracks renders silence. The offline renderer refuses
+        // an empty route span as an under-specified request, so the graph stays
+        // out of the way and the zero-filled buffer is written as it always was.
         try {
-            silence.assign(static_cast<std::size_t>(channels) * block_size, 0.0f);
-            silence_data.reserve(channels);
+            rendered.channels.assign(channels,
+                                     std::vector<float>(static_cast<std::size_t>(frames), 0.0f));
         } catch (const std::bad_alloc&) {
-            return detail::failure("render", "could not allocate the render graph input buffer");
+            return detail::failure("render", "could not allocate the in-memory render buffer");
+        } catch (const std::length_error&) {
+            return detail::failure("render", "could not allocate the in-memory render buffer");
         }
-        for (std::uint32_t channel = 0; channel < channels; ++channel)
-            silence_data.push_back(silence.data() + static_cast<std::size_t>(channel) * block_size);
+    } else {
+        const auto end_tick = covering_tick(*compiled.value()->tempo_map, frames);
+        if (!end_tick)
+            return detail::failure("render", "sequence duration is empty or too large");
+
+        host::TimelineOfflineRenderConfig config;
+        config.sample_rate = static_cast<double>(sample_rate);
+        config.block_frames = static_cast<int>(block_size);
+        config.output_channels = static_cast<int>(channels);
+        config.max_output_frames = detail::kMaxRenderPcmBytes / bytes_per_frame;
+        // The binding's own note capacity, not the renderer's smaller default, so
+        // a dense arrangement keeps the admission headroom this verb always had.
+        config.maximum_note_events_per_track_per_block =
+            host::TimelineGraphBindingConfig{}.maximum_note_events_per_track_per_block;
+
+        host::TimelineOfflineRenderOptions options;
+        options.start_tick = timebase::TickPosition{0};
+        options.end_tick = *end_tick;
+        // The verb exposes no tail, so the output ends exactly at the sequence
+        // end. A ringing delay or reverb is cut there, as it has always been.
+        options.tail_frames = 0;
+
+        host::TimelineOfflineRenderResult result;
+        try {
+            result = host::render_timeline_offline(graph, binding, *program, topology.routes,
+                                                   config, options);
+        } catch (const std::bad_alloc&) {
+            return detail::failure("render", "could not allocate the in-memory render buffer");
+        } catch (const std::length_error&) {
+            return detail::failure("render", "could not allocate the in-memory render buffer");
+        }
+        if (!result)
+            return detail::failure("render", detail::offline_render_message(result));
+        rendered = std::move(result.audio);
     }
 
-    playback::MasterTransport transport;
-    if (transport.prepare(*compiled.value()->tempo_map,
-                          {.max_buffer_size = block_size, .initially_playing = true}) !=
-        playback::TransportError::None)
-        return detail::failure("render", "transport preparation failed");
-    std::uint64_t offset = 0;
-    std::vector<float*> channel_data;
-    channel_data.reserve(channels);
-    while (offset < frames) {
-        const auto count =
-            static_cast<std::uint32_t>(std::min<std::uint64_t>(block_size, frames - offset));
-        playback::TransportSnapshot snapshot;
-        if (transport.begin_block(count, snapshot) != playback::TransportError::None)
-            return detail::failure("render", "transport block failed");
-        channel_data.clear();
-        for (auto& channel : rendered.channels)
-            channel_data.push_back(channel.data() + offset);
-        pulp::audio::BufferView<float> block(channel_data.data(), channels, count);
-        auto block_program = compiled.value()->store.read();
-        if (!block_program)
-            return detail::failure("render", "compiled program disappeared");
-        if (routed) {
-            const pulp::audio::BufferView<const float> input(silence_data.data(), channels, count);
-            const auto result = binding.process(block, input, snapshot);
-            if (!result)
-                return detail::failure("render",
-                                       "render graph process error " +
-                                           std::to_string(static_cast<unsigned>(result.code)));
-        }
-        offset += count;
-    }
+    const auto rendered_frames =
+        rendered.channels.empty() ? std::size_t{0} : rendered.channels.front().size();
     const auto written = detail::write_wav_atomic(output, rendered);
     if (written == detail::AtomicWriteOutcome::NotReplaced)
         return detail::failure("render", "could not write output WAV", output_utf8);
@@ -147,7 +152,7 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
             "durability is uncertain",
             output_utf8);
     return {0, "{\"channels\":" + std::to_string(channels) + ",\"frames\":\"" +
-                   std::to_string(frames) +
+                   std::to_string(rendered_frames) +
                    "\",\"ok\":true,\"output\":" +
                    pulp::timeline::quote_json_string(output_utf8) +
                    ",\"sample_rate\":" + std::to_string(sample_rate) + "}"};

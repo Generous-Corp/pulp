@@ -1793,6 +1793,148 @@ TEST_CASE("restyling a shaping input re-measures the label",
     }
 }
 
+// An auto-width ancestor of a soft-wrapping label hugs the label's text.
+//
+// A wrapping Label reports intrinsic_width() == 0 on purpose, so its parent's
+// width -- not the single-line advance -- decides where its lines break. That
+// left a shrink-to-fit ANCESTOR with no content measurement at all: Yoga
+// offered the label the whole available width as an upper bound (AtMost) and
+// the measure callback echoed the offer straight back, so the ancestor
+// stretched to fill. CSS resolves an AtMost offer to min(max-content,
+// available), which is what max_content_width() supplies.
+TEST_CASE("an auto-width parent hugs a wrapping label's text",
+          "[view][widget][label][layout]") {
+    auto hug_width = [](bool wrapping) {
+        View root;
+        root.set_bounds({0, 0, 600, 200});
+        root.flex().direction = FlexDirection::column;
+
+        auto owned_box = std::make_unique<View>();
+        View* box = owned_box.get();
+        // Shrink-to-fit: the cross axis must not stretch this to the parent.
+        box->flex().align_self = FlexAlign::start;
+        auto owned_label = std::make_unique<Label>("COPY");
+        Label* label = owned_label.get();
+        label->set_multi_line(wrapping);
+        box->add_child(std::move(owned_label));
+        root.add_child(std::move(owned_box));
+
+        root.layout_children();
+        return std::pair{box->bounds().width, label->max_content_width()};
+    };
+
+    // Control: a non-wrapping label already hugged, and its own text is the
+    // width it hugs to. Without this, the wrapping case below could pass
+    // against a box that is narrow for some unrelated reason.
+    auto [tight_box, tight_text] = hug_width(false);
+    REQUIRE(tight_text > 0.0f);
+    CHECK(tight_box < 600.0f);
+    CHECK_THAT(tight_box, WithinAbs(tight_text, 1.0f));
+
+    // The regression: the same text, soft-wrapping, must hug the same width
+    // rather than filling the 600 pt row.
+    auto [wrap_box, wrap_text] = hug_width(true);
+    REQUIRE(wrap_text > 0.0f);
+    CHECK(wrap_box < 600.0f);
+    CHECK_THAT(wrap_box, WithinAbs(wrap_text, 1.0f));
+}
+
+// max_content_width() is the UNWRAPPED width, and a hard break caps it.
+//
+// An explicit newline always breaks, so a string carrying one is never as wide
+// as its full advance -- reserving that much would over-size every ancestor
+// that hugs it.
+TEST_CASE("max-content width is the widest hard-break segment when the label "
+          "paints as lines",
+          "[view][widget][label]") {
+    Label one_line("COPY FAILED");
+    Label two_lines("COPY\nFAILED");
+    Label widest_segment("FAILED");
+    // The segmenting only applies to a label whose paint() emits one line per
+    // `\n`. A single-line label draws the whole string in one fill_text, and
+    // the case below this one pins that opposite contract.
+    two_lines.set_multi_line(true);
+
+    const float single = one_line.max_content_width();
+    const float segment = widest_segment.max_content_width();
+    // Control: both reference strings measure something, so an equality below
+    // cannot be two labels that each measured nothing at all.
+    REQUIRE(single > 0.0f);
+    REQUIRE(segment > 0.0f);
+    REQUIRE(segment < single);
+
+    // Exactly the widest segment -- not the sum of the segments, and not the
+    // whole string measured as one run. Either of those over-reserves, which
+    // is the failure this guards.
+    CHECK_THAT(two_lines.max_content_width(), WithinAbs(segment, 0.01f));
+}
+
+TEST_CASE("a single-line label does not break on a newline when measuring width",
+          "[view][widget][label]") {
+    // `multi_line_ == false` means paint() draws the WHOLE string in one
+    // fill_text call -- `\n` is just another character in the run, not a
+    // break. Measuring it as segments reserves less than paint draws, so the
+    // text clips, and it splits the two axes against each other:
+    // intrinsic_height() returns the one-line metric for exactly this case.
+    Label hidden_newline("COPY\nFAILED");
+    Label widest_segment("FAILED");
+    hidden_newline.set_multi_line(false);
+    widest_segment.set_multi_line(false);
+
+    const float measured = hidden_newline.intrinsic_width();
+    const float segment = widest_segment.intrinsic_width();
+    // Control: neither label measured nothing, so the strict inequality below
+    // cannot be satisfied by two zeros or by one collapsed measurement.
+    REQUIRE(measured > 0.0f);
+    REQUIRE(segment > 0.0f);
+    CHECK(measured > segment);
+
+    // Cross-check against what paint actually draws rather than restating the
+    // measure path's own assumption: painted_text_extents() runs the painter's
+    // shaping independently of layout.
+    const auto painted = hidden_newline.painted_text_extents(10000.0f);
+    const auto painted_segment = widest_segment.painted_text_extents(10000.0f);
+    REQUIRE(painted.measured);
+    REQUIRE(painted_segment.measured);
+    // The oracle's own two facts, with no measure-path value involved: paint
+    // emits ONE line, and draws it wider than the widest `\n` segment. A
+    // painter that broke on `\n` could satisfy neither.
+    CHECK(painted.line_count == 1);
+    CHECK(painted.width > painted_segment.width);
+
+    // The measure path treats the run the same way, exactly: shaping
+    // "COPY\nFAILED" is shaping "COPYFAILED" -- the newline contributes no
+    // advance, and nothing is dropped around it.
+    //
+    // Paint reads ~2.8 pt wider here because fill_text gives the `\n` a small
+    // advance the shaper gives zero. That measure-vs-paint gap predates the
+    // max-content split and is not what this case guards, so it is asserted as
+    // a direction above rather than an equality.
+    Label without_newline("COPYFAILED");
+    without_newline.set_multi_line(false);
+    REQUIRE(without_newline.intrinsic_width() > 0.0f);
+    CHECK_THAT(measured, WithinAbs(without_newline.intrinsic_width(), 0.01f));
+    CHECK_THAT(hidden_newline.max_content_width(), WithinAbs(measured, 0.01f));
+}
+
+// A non-wrapping label's max-content width IS its intrinsic width. They are
+// the same measurement, and the memoized one must not drift from the fresh
+// one.
+TEST_CASE("max-content width matches intrinsic width when not wrapping",
+          "[view][widget][label]") {
+    Label label("Spectrum metaphor");
+    const float intrinsic = label.intrinsic_width();
+    REQUIRE(intrinsic > 0.0f);
+    CHECK_THAT(label.max_content_width(), WithinAbs(intrinsic, 0.01f));
+
+    // Wrapping does not change the text, so the unwrapped width is unchanged
+    // even though intrinsic_width() now deliberately reports zero.
+    label.set_multi_line(true);
+    CHECK(label.intrinsic_width() == 0.0f);
+    CHECK_THAT(label.max_content_width(), WithinAbs(intrinsic, 0.01f));
+}
+
+
 TEST_CASE("Label starts text at the content edge whether or not its cached "
           "line layout is usable",
           "[view][widget][label-cache][alignment][padding]") {

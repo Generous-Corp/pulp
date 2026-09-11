@@ -60,10 +60,10 @@ std::uint16_t groove_velocity(std::uint16_t authored, std::int32_t per_mille) no
         std::min<std::uint64_t>(scaled, std::numeric_limits<std::uint16_t>::max()));
 }
 
-// Ceiling on controller values one program may carry. Expansion is bounded
-// everywhere else in the compiler for the same reason: a pathological document
-// must fail with a named code rather than make compilation unbounded.
-constexpr std::size_t max_controller_events = 1u << 20;
+// Ceiling on controller values one track may carry, shared with the program
+// wire so a decoded track never claims more than a compiled one holds. Bounded
+// so a pathological document fails with a named code rather than unboundedly.
+constexpr std::size_t max_controller_events = kMaximumControllerEventsPerTrack;
 
 void merge_track_policy_deltas(std::vector<TrackCompilePolicy>& retained,
                                const std::vector<TrackCompilePolicy>& incoming) {
@@ -247,7 +247,7 @@ struct PlaybackProgramCompilerCore
 
     std::unique_ptr<QueuedCompileRequest> take_pending() {
         std::lock_guard lock(mutex);
-        status.active_tracks_completed = 0;
+        status.clear_active_track_counts();
         if (pending) {
             active_track_policies = std::move(pending->policy_delta);
             active_policy_project_id = pending->policy_project_id;
@@ -256,9 +256,9 @@ struct PlaybackProgramCompilerCore
         return std::move(pending);
     }
 
-    void track_completed() {
+    void track_completed(bool reused) {
         std::lock_guard lock(mutex);
-        ++status.active_tracks_completed;
+        status.count_track_completed(reused);
     }
 
     void finish(bool published, std::uint64_t revision, ProgramGeneration generation,
@@ -483,7 +483,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     return fail({CompileErrorCode::NoteProgramCapacityExceeded, track.id(),
                                  request_->document_revision});
                 tracks_.push_back(*old);
-                core_->track_completed();
+                core_->track_completed(true);
                 ++track_index_;
                 ++work;
                 continue;
@@ -604,7 +604,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     const auto status = audio_compiler_.step(
                         clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
                         request_->audio_limits, lowered_clip.source_frame_offset,
-                        request_->document_revision, generation_, core_->offline_stretch_cache);
+                        lowered_clip.placement_fades, request_->document_revision, generation_,
+                        core_->offline_stretch_cache);
                     ++work;
                     if (status == detail::TrackAudioClipCompileStatus::Failed) {
                         const auto detail = audio_compiler_.error();
@@ -1005,7 +1006,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 sequence_bookkeeping_.generated_id_start(),
                 sequence_bookkeeping_.generated_id_count(), current_arrangement_production_,
                 mixer)));
-            core_->track_completed();
+            core_->track_completed(false);
             current_clip_ids_.clear();
             current_note_events_.clear();
             current_controller_events_.clear();

@@ -78,6 +78,14 @@ def main() -> int:
             stale_bin = cwd / "stale-install" / "bin"
             stale_bin.mkdir(parents=True)
             shutil.copy2(bindir / "pulp-mcp", stale_bin / "pulp-mcp")
+            # The installed server finds its shared libraries through an RPATH
+            # of @executable_path/../lib ($ORIGIN/../lib on ELF), so a copy
+            # taken out of the prefix needs the same sibling layout. Without
+            # it the loader aborts before the contract under test runs, and
+            # only on a configuration that actually links a shared runtime.
+            install_lib = bindir.parent / "lib"
+            if install_lib.is_dir():
+                (cwd / "stale-install" / "lib").symlink_to(install_lib)
             stale_evidence = dict(cpp_evidence)
             stale_evidence["schema"] = "pulp.gpu-health-result.v1"
             stale_evidence["version"] = 1

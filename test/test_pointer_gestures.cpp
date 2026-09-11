@@ -19,11 +19,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/view/gesture.hpp>
+#include <pulp/view/motion.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -655,4 +658,108 @@ TEST_CASE("a simulated drag hands its device to the recognizers on the chain",
     REQUIRE(recorded->ids.size() == 5);
     for (int id : recorded->ids) CHECK(id == 9);
     for (PointerType t : recorded->types) CHECK(t == PointerType::pen);
+}
+
+
+// ── Re-entrant dispatch ─────────────────────────────────────────────────────
+//
+// A recognizer callback is user code, and user code is allowed to feed the
+// arbiter another pointer event — a tap handler that dismisses a popover and
+// synthesises a release, a drag callback that rebuilds the view tree. That
+// re-entry runs the whole session pipeline again underneath the outer frame:
+// it can clear and refill the candidate vector, and it can erase the session
+// outright. The outer frame has to survive both.
+
+namespace {
+
+struct ReentrantHost final : View {
+    View* root_for_reentry = nullptr;
+    MouseEvent reentry_event;
+    int reentries_remaining = 0;
+    int reentries_performed = 0;
+
+    void reenter() {
+        if (reentries_remaining <= 0 || !root_for_reentry) return;
+        --reentries_remaining;
+        ++reentries_performed;
+        root_for_reentry->dispatch_gesture_pointer_event(reentry_event);
+    }
+};
+
+ReentrantHost& add_reentrant_host(View& root) {
+    auto child = std::make_unique<ReentrantHost>();
+    auto* host = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+    host->root_for_reentry = &root;
+    return *host;
+}
+
+void arm_reentry_on_recognition(ReentrantHost& host, MouseEvent reentry) {
+    host.reentry_event = reentry;
+    host.reentries_remaining = 1;
+
+    auto tap = std::make_unique<TapRecognizer>(1);
+    auto reenter = [&host](GestureRecognizer&) { host.reenter(); };
+    // The recognition callbacks all run from `dispatch_pending_callbacks()`,
+    // which the arbiter calls while still walking the session's candidates.
+    tap->on_began = reenter;
+    tap->on_ended = reenter;
+    host.add_gesture_recognizer(std::move(tap));
+}
+
+}  // namespace
+
+TEST_CASE("a recognizer callback may end its own session re-entrantly",
+          "[view][input][gesture][reentrancy]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto& host = add_reentrant_host(root);
+
+    // A release erases the session from the arbiter's map.
+    arm_reentry_on_recognition(host,
+                               phase_event({100, 100}, MousePhase::release));
+
+    root.dispatch_gesture_pointer_event(phase_event({100, 100}, MousePhase::press));
+    root.dispatch_gesture_pointer_event(phase_event({100, 100}, MousePhase::release));
+
+    // Control: without this the case would also pass on a build where the
+    // recognizer never recognised, and so would prove nothing about re-entry.
+    REQUIRE(host.reentries_performed == 1);
+}
+
+TEST_CASE("a recognizer callback may restart its own session re-entrantly",
+          "[view][input][gesture][reentrancy]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto& host = add_reentrant_host(root);
+
+    // A press on the same pointer id clears and refills the candidate vector.
+    arm_reentry_on_recognition(host,
+                               phase_event({100, 100}, MousePhase::press));
+
+    root.dispatch_gesture_pointer_event(phase_event({100, 100}, MousePhase::press));
+    root.dispatch_gesture_pointer_event(phase_event({100, 100}, MousePhase::release));
+
+    REQUIRE(host.reentries_performed == 1);
+}
+
+// A FrameClock is routinely a stack or member object, while the motion
+// coordinator is a process-wide singleton that outlives it. Binding a clock
+// that then goes out of scope must not leave the coordinator holding a pointer
+// it will later dereference.
+TEST_CASE("the motion coordinator survives a bound clock going out of scope",
+          "[view][motion][lifetime]") {
+    auto& coordinator = pulp::view::motion::Coordinator::instance();
+    coordinator.reset();
+
+    {
+        FrameClock clock;
+        coordinator.bind(clock);
+        REQUIRE(coordinator.is_bound());
+    }
+
+    CHECK_FALSE(coordinator.is_bound());
+    coordinator.unbind();
+    coordinator.reset();
 }
