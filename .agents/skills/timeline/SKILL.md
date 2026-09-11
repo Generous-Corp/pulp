@@ -3144,13 +3144,34 @@ renderer. `test/test_timeline_agent.cpp` holds that oracle in its sample-exact
 `WithinAbs` assertions on rendered PCM. **If one of those moves, the render
 path changed audio** — treat it as a regression, not as a threshold to widen.
 
-Only the render call was swapped. The CLI keeps its own transport and block
-loop, so frame counts stay frame-addressed and no tick conversion enters the
-path — which is why the in-memory budget check and the emitted JSON are
-unchanged. Preserve that split if you extend the command; routing the loop
-through the offline renderer instead would make the CLI's frame arithmetic
-tick-derived, and a saturating conversion turns an absurd request into a
-plausible bounce.
+The block loop went the same way. The CLI hands the whole render to
+`render_timeline_offline()` rather than driving its own `MasterTransport`, so
+the frame budget it computes has to enter the renderer's tick domain. Carry it
+to the *smallest tick that covers* the budget —
+`ceil(fractional_samples_to_ticks(frames))` — and reject a derivation that is
+not finite or does not fit an `int64_t` rather than letting a saturating
+conversion turn an absurd request into a plausible bounce. Rounding up can only
+lengthen the region; rounding down silently shortens the bounce, which is the
+one failure a bounce must not have. The in-memory budget check still speaks
+frames, and the emitted JSON reports the frames actually rendered rather than
+the frames requested.
+
+Two things do not come across by default and have to be carried deliberately:
+
+- **A program with no routes never reaches the renderer.**
+  `render_timeline_offline()` refuses an empty route span as `InvalidProgram`,
+  which is the right answer for a library, so the verb keeps its own early path
+  that writes a zero-filled buffer. Do not relax the library to accommodate it.
+- **The two configs disagree on note capacity.**
+  `TimelineOfflineRenderConfig` caps note events per track per block at 256
+  where `TimelineGraphBindingConfig` allows 1024, and the renderer copies its
+  own value into the binding config it builds. Pass the binding's value
+  explicitly, as the verb does; accepting the renderer's default turns a dense
+  arrangement into a `BindingRejected` on a project that used to render.
+
+`TimelineOfflineRenderCode` is the verb's failure vocabulary now, so map every
+enumerator to its own message with no `default:` branch — a `default:` makes a
+newly added code arrive as an existing sentence instead of as a compile error.
 
 ## A nested-trim fixture proves a widened selection window only with a note wholly outside the cut
 
