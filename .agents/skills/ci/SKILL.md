@@ -343,6 +343,32 @@ identity fields, because doing so costs ~25s per push. A green gate means "you
 did not forget", not "the pins are correct"; the `check` command above is what
 proves the latter.
 
+### `gates.sh` and the pre-push hook are two lists, not one
+
+`gates.sh` describes itself as running the gates `.githooks/pre-push` runs, and
+that is no longer true in either direction — the hook does not invoke
+`gates.sh`, and each has gates the other lacks (`framework_neutrality_check.py`
+is in `gates.sh` only). So adding a gate to one adds it to neither the other nor
+the push path. **Wire a new local gate into both files, and check the other list
+rather than assuming it inherits.**
+
+The sequencer registries are wired into both:
+
+- **`sequencer_exposure_check.py`** — the cross-surface exposure ledger at
+  `docs/status/sequencer-exposure.json`. Run base-aware, matching the CI
+  invocation, so the append-only history and tombstone rules apply; dropping
+  `--base` silently checks a weaker subset. This is the **slowest gate in the
+  local lane (~20s)**, and the cost is inherent rather than accidental: it
+  resolves every released row's evidence out of git, hundreds of short git
+  invocations, which is exactly what catches a row citing evidence that has
+  since been deleted. Do not "optimize" it by skipping that read.
+- **`negative_capability_check.py`** — the compile-refusal registry. Whole-tree
+  and sub-second. A ctest already covered it, which meant it was only reachable
+  from a full build; the local lane now fails in under a second instead.
+
+A `--repo-root` is required for the refusal registry; it defaults to a path two
+levels up from the script, which is not the worktree when the hook runs.
+
 ### A changed-path preamble needs exact trees, not full repository history
 
 Do not set the `build.yml` `classify` checkout back to `fetch-depth: 0`. GitHub
