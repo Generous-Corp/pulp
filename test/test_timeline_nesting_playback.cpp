@@ -1332,19 +1332,7 @@ TEST_CASE("Nested mixer state with no composition rule keeps its own refusal") {
     const auto ramp = unit_ramp();
     const auto assets = pool({{{50}, audio_data({ramp})}});
 
-    // A placement fade is one envelope over the whole nested window, and a leaf
-    // can only fade from its own edge, so it stays refused under its own code
-    // even though the media leaf beneath it could carry a gain perfectly well.
-    const NestedGainStages faded_placement{
-        {.gain_linear = 1.0f, .fade_in_duration = static_cast<std::uint64_t>(kTicksPerQuarter / 2)},
-        TrackMixer{},
-        {}};
-    const auto fade_error =
-        compile_error_with_assets(nested_gain_project(faded_placement, ramp.size()), assets);
-    REQUIRE(fade_error.code == CompileErrorCode::NestedPlacementFadeUnsupported);
-    REQUIRE(fade_error.item == ItemId{4});
-
-    // Pan over the very same media leaf: the sink that accepts gain has no
+    // Pan over a media leaf: the sink that accepts gain has no
     // stereo placement to accept a balance.
     const NestedGainStages panned{{}, TrackMixer{1.0f, -0.5f}, {}};
     const auto pan_error =
@@ -1352,13 +1340,357 @@ TEST_CASE("Nested mixer state with no composition rule keeps its own refusal") {
     REQUIRE(pan_error.code == CompileErrorCode::NestedMixerPanUnsupported);
     REQUIRE(pan_error.item == ItemId{11});
 
-    // The positive control for both: identical fixtures with those two stages
-    // neutral compile, so the refusals above are naming the state they claim to
-    // and not simply rejecting every media placement.
+    // The positive control: an identical fixture with that stage neutral
+    // compiles, so the refusal above is naming the state it claims to and not
+    // simply rejecting every media placement.
     CompiledFixture allowed(shared(nested_gain_project({{}, TrackMixer{}, {}}, ramp.size())),
                             map_120(), assets);
     auto program = allowed.store.read();
     REQUIRE(program->find_track({3})->audio_program()->clips().size() == 1);
+}
+
+namespace {
+
+ClipPlaybackProperties fade_properties(std::int64_t fade_in, std::int64_t fade_out,
+                                       ClipFadeShape shape = ClipFadeShape::Linear) {
+    return {.gain_linear = 1.0f,
+            .fade_in_duration = static_cast<std::uint64_t>(fade_in),
+            .fade_out_duration = static_cast<std::uint64_t>(fade_out),
+            .fade_shape = shape};
+}
+
+// One media leaf under one placement on track 3. `split_leaf` cuts the child's
+// media in two adjacent halves that read the same source frames the single leaf
+// reads, so a case can put a ramp edge inside the second half and still compare
+// against the undivided answer.
+Project placement_fade_project(ClipPlaybackProperties placement_playback,
+                               ClipPlaybackProperties leaf_playback, std::size_t frame_count,
+                               bool split_leaf = false) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    std::vector<Clip> child_clips;
+    if (split_leaf) {
+        const auto half = frame_count / 2;
+        child_clips.push_back(musical_media_clip(12, 0, kTicksPerQuarter / 2, 50, half,
+                                                 leaf_playback, TimeConform::None, 0));
+        child_clips.push_back(musical_media_clip(13, kTicksPerQuarter / 2, kTicksPerQuarter / 2, 50,
+                                                 half, leaf_playback, TimeConform::None, half));
+    } else {
+        child_clips.push_back(
+            musical_media_clip(12, 0, kTicksPerQuarter, 50, frame_count, leaf_playback));
+    }
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {track(11, std::move(child_clips))}));
+    auto placement = take(Clip::create({4}, {kTicksPerQuarter}, {kTicksPerQuarter},
+                                       SequenceRef{{10}, {0}}, placement_playback));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "placement fade";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {{50, "ramp", frame_count, {48'000, 1}, hash}};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+// The same media sitting directly on the root track at the same ticks, carrying
+// the fade the placement above carried. A ramp covering exactly one whole leaf
+// has to read like that fade authored on the leaf itself.
+std::shared_ptr<const Project> hand_flattened_fade_project(ClipPlaybackProperties playback,
+                                                           std::size_t frame_count) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto media =
+        musical_media_clip(4, kTicksPerQuarter, kTicksPerQuarter, 50, frame_count, playback);
+    return project_with_tracks({track(3, {media})}, {{50, "ramp", frame_count, {48'000, 1}, hash}});
+}
+
+// One media leaf reached through two placements, each carrying its own ramp, so
+// composition has to happen once per level rather than once overall.
+// `outer_duration` shorter than a quarter trims the inner placement, which is
+// how an inner ramp comes to be longer than the window that survives.
+Project doubly_nested_fade_project(ClipPlaybackProperties outer, ClipPlaybackProperties inner,
+                                   std::size_t frame_count,
+                                   std::int64_t outer_duration = kTicksPerQuarter) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto leaf_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, frame_count);
+    auto leaf = take(
+        Sequence::create({10}, "leaf", TickDuration{kTicksPerQuarter}, {track(11, {leaf_media})}));
+    auto inner_placement =
+        take(Clip::create({22}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}, inner));
+    auto middle = take(Sequence::create({20}, "middle", TickDuration{kTicksPerQuarter},
+                                        {track(21, {inner_placement})}));
+    auto outer_placement = take(
+        Clip::create({4}, {kTicksPerQuarter}, {outer_duration}, SequenceRef{{20}, {0}}, outer));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {outer_placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "doubly nested fade";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {{50, "ramp", frame_count, {48'000, 1}, hash}};
+    input.sequences = {root, middle, leaf};
+    return take(Project::create(std::move(input)));
+}
+
+// A child sequence holding one MIDI clip under a placement that carries a head
+// ramp. `note_clip_start` decides whether the ramp reaches the clip at all.
+Project faded_note_placement_project(std::int64_t fade_in, std::int64_t note_clip_start) {
+    auto child_clip = take(Clip::create(
+        {12}, {note_clip_start}, {kTicksPerQuarter - note_clip_start}, note_content(13, 0, 240)));
+    auto child = take(
+        Sequence::create({10}, "child", TickDuration{kTicksPerQuarter}, {track(11, {child_clip})}));
+    auto placement = take(Clip::create({4}, {kTicksPerQuarter}, {kTicksPerQuarter},
+                                       SequenceRef{{10}, {0}}, fade_properties(fade_in, 0)));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "faded note placement";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+// The whole placement window, so no case can pass by rendering a stretch of it
+// that happens to sit outside every ramp.
+constexpr std::uint32_t kPlacementFrames = 24'000;
+constexpr std::int64_t kPlacementStart = 24'000;
+
+std::vector<float> render_placement(const Project& project,
+                                    const std::shared_ptr<const DecodedAudioAssetPool>& assets) {
+    CompiledFixture compiled(shared(project), map_120(), assets);
+    auto program = compiled.store.read();
+    REQUIRE(program);
+    Output output(1, kPlacementFrames);
+    REQUIRE(ArrangementAudioRenderer::process(*program,
+                                              snapshot(*program, kPlacementFrames, kPlacementStart),
+                                              output.view()) == AudioRenderStatus::Rendered);
+    return output.storage[0];
+}
+
+std::vector<float> render_placement(const std::shared_ptr<const Project>& project,
+                                    const std::shared_ptr<const DecodedAudioAssetPool>& assets) {
+    return render_placement(*project, assets);
+}
+
+double worst_difference(const std::vector<float>& left, const std::vector<float>& right) {
+    REQUIRE(left.size() == right.size());
+    double worst = 0.0;
+    for (std::size_t frame = 0; frame < left.size(); ++frame)
+        worst = std::max(
+            worst, std::abs(static_cast<double>(left[frame]) - static_cast<double>(right[frame])));
+    return worst;
+}
+
+double peak(const std::vector<float>& samples) {
+    double worst = 0.0;
+    for (const auto sample : samples)
+        worst = std::max(worst, std::abs(static_cast<double>(sample)));
+    return worst;
+}
+
+// A placement ramp reads progress through a double and an authored fade reads
+// it through a float, so two renders that agree can still land a unit apart in
+// the last place. This margin is far above that and roughly 120 dB below the
+// difference any of the controls below has to show.
+constexpr double kSameRender = 1.0e-6;
+constexpr double kDifferentRender = 1.0e-3;
+
+} // namespace
+
+TEST_CASE("A placement fade composes over the leaves it was flattened into") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    constexpr auto kHalf = kTicksPerQuarter / 2;
+
+    struct Geometry {
+        const char* label;
+        std::int64_t fade_in;
+        std::int64_t fade_out;
+        ClipFadeShape shape;
+    };
+    const std::array geometries{
+        Geometry{"head ramp, shaped", kHalf, 0, ClipFadeShape::EqualPower},
+        Geometry{"head ramp, linear", kHalf, 0, ClipFadeShape::Linear},
+        Geometry{"tail ramp, shaped", 0, kHalf, ClipFadeShape::EqualPower},
+        Geometry{"tail ramp, linear", 0, kHalf, ClipFadeShape::Linear},
+        Geometry{"both ends, shaped", kHalf, kHalf, ClipFadeShape::EqualPower},
+    };
+
+    const auto dry =
+        render_placement(hand_flattened_fade_project(fade_properties(0, 0), ramp.size()), assets);
+    REQUIRE(peak(dry) > 0.1);
+
+    for (const auto& geometry : geometries) {
+        INFO(geometry.label);
+        const auto authored = fade_properties(geometry.fade_in, geometry.fade_out, geometry.shape);
+        const auto nested =
+            render_placement(placement_fade_project(authored, {}, ramp.size()), assets);
+        const auto flattened =
+            render_placement(hand_flattened_fade_project(authored, ramp.size()), assets);
+
+        // The ramp the placement carried and the same ramp authored on the leaf
+        // are the same ramp, so they have to read the same.
+        REQUIRE(worst_difference(nested, flattened) <= kSameRender);
+        // Without this the equality above would pass on two buffers the fade
+        // had never touched.
+        REQUIRE(worst_difference(nested, dry) > kDifferentRender);
+        REQUIRE(peak(nested) > 0.1);
+
+        if (geometry.shape == ClipFadeShape::EqualPower) {
+            // The discriminating control. Carrying the ramp as a pair of
+            // endpoint gains and interpolating between them lands on precisely
+            // the linear answer, agreeing at both edges and bending the wrong
+            // way in between, so the shaped result must differ from it.
+            const auto endpoint_lerp = render_placement(
+                hand_flattened_fade_project(
+                    fade_properties(geometry.fade_in, geometry.fade_out, ClipFadeShape::Linear),
+                    ramp.size()),
+                assets);
+            REQUIRE(worst_difference(nested, endpoint_lerp) > kDifferentRender);
+        }
+    }
+}
+
+TEST_CASE("A placement fade multiplies with the leaf's own fade") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    constexpr auto kHalf = kTicksPerQuarter / 2;
+    constexpr auto kQuartered = kTicksPerQuarter / 4;
+
+    // Shapes deliberately differ, and both ends of both fades are authored, so
+    // one leaf sits under four ramps at once and no single shape can stand in
+    // for their product.
+    const auto placement = fade_properties(kHalf, kHalf, ClipFadeShape::EqualPower);
+    const auto leaf = fade_properties(kQuartered, kQuartered, ClipFadeShape::Linear);
+
+    const auto neither = render_placement(placement_fade_project({}, {}, ramp.size()), assets);
+    const auto placement_only =
+        render_placement(placement_fade_project(placement, {}, ramp.size()), assets);
+    const auto leaf_only = render_placement(placement_fade_project({}, leaf, ramp.size()), assets);
+    const auto both =
+        render_placement(placement_fade_project(placement, leaf, ramp.size()), assets);
+
+    // Each ramp scales the signal, so applying both scales it by the product:
+    // both x neither has to equal placement_only x leaf_only sample for sample.
+    std::vector<float> product_of_renders(neither.size());
+    std::vector<float> render_of_product(neither.size());
+    for (std::size_t frame = 0; frame < neither.size(); ++frame) {
+        product_of_renders[frame] = placement_only[frame] * leaf_only[frame];
+        render_of_product[frame] = both[frame] * neither[frame];
+    }
+    REQUIRE(worst_difference(product_of_renders, render_of_product) <= kSameRender);
+
+    // The controls that make that identity say something. A placement ramp that
+    // replaced the leaf's fade would read like the placement alone; one that
+    // was dropped would read like the leaf alone.
+    REQUIRE(worst_difference(both, placement_only) > kDifferentRender);
+    REQUIRE(worst_difference(both, leaf_only) > kDifferentRender);
+    REQUIRE(peak(both) > 0.1);
+}
+
+TEST_CASE("A placement fade reads the same across a boundary the flattening cut") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    // Three quarters of the window at each end, so the head ramp opens inside
+    // the second leaf, the tail ramp opens inside the first, and each leaf
+    // straddles an edge nothing clipped it at.
+    const auto placement = fade_properties(3 * kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4,
+                                           ClipFadeShape::EqualPower);
+
+    CompiledFixture split(shared(placement_fade_project(placement, {}, ramp.size(), true)),
+                          map_120(), assets);
+    auto split_program = split.store.read();
+    REQUIRE(split_program->find_track({3})->audio_program()->clips().size() == 2);
+    CompiledFixture whole(shared(placement_fade_project(placement, {}, ramp.size(), false)),
+                          map_120(), assets);
+    REQUIRE(whole.store.read()->find_track({3})->audio_program()->clips().size() == 1);
+
+    const auto cut =
+        render_placement(placement_fade_project(placement, {}, ramp.size(), true), assets);
+    const auto uncut =
+        render_placement(placement_fade_project(placement, {}, ramp.size(), false), assets);
+    // Where the flattening happened to cut the child is not audible: the gain
+    // is a function of the position, so the two leaves read the same number at
+    // the frame they share.
+    REQUIRE(worst_difference(cut, uncut) <= kSameRender);
+    // Without this the equality would hold on two renders no ramp reached.
+    const auto dry = render_placement(placement_fade_project({}, {}, ramp.size(), true), assets);
+    REQUIRE(worst_difference(cut, dry) > kDifferentRender);
+    REQUIRE(peak(cut) > 0.1);
+}
+
+TEST_CASE("Placement fades compose once per level of nesting") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    const auto outer = fade_properties(kTicksPerQuarter / 2, 0, ClipFadeShape::EqualPower);
+    const auto inner = fade_properties(kTicksPerQuarter / 4, 0, ClipFadeShape::Linear);
+
+    const auto neither = render_placement(doubly_nested_fade_project({}, {}, ramp.size()), assets);
+    const auto outer_only =
+        render_placement(doubly_nested_fade_project(outer, {}, ramp.size()), assets);
+    const auto inner_only =
+        render_placement(doubly_nested_fade_project({}, inner, ramp.size()), assets);
+    const auto both =
+        render_placement(doubly_nested_fade_project(outer, inner, ramp.size()), assets);
+
+    std::vector<float> product_of_renders(neither.size());
+    std::vector<float> render_of_product(neither.size());
+    for (std::size_t frame = 0; frame < neither.size(); ++frame) {
+        product_of_renders[frame] = outer_only[frame] * inner_only[frame];
+        render_of_product[frame] = both[frame] * neither[frame];
+    }
+    REQUIRE(worst_difference(product_of_renders, render_of_product) <= kSameRender);
+    REQUIRE(worst_difference(both, outer_only) > kDifferentRender);
+    REQUIRE(worst_difference(both, inner_only) > kDifferentRender);
+    REQUIRE(peak(both) > 0.1);
+}
+
+TEST_CASE("A trimmed inner placement keeps the ramp its untrimmed extent authored") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    // The outer placement keeps a quarter of the window the inner ramp covers
+    // half of, so the ramp is longer than the clip that survives the trim and
+    // has to travel beside the leaf rather than on it.
+    const auto inner = fade_properties(kTicksPerQuarter / 2, 0, ClipFadeShape::EqualPower);
+    constexpr auto kKept = kTicksPerQuarter / 4;
+
+    CompiledFixture trimmed(shared(doubly_nested_fade_project({}, inner, ramp.size(), kKept)),
+                            map_120(), assets);
+    auto program = trimmed.store.read();
+    REQUIRE(program->find_track({3})->audio_program()->clips().size() == 1);
+
+    Output faded(1, 6'000);
+    REQUIRE(ArrangementAudioRenderer::process(*program, snapshot(*program, 6'000, kPlacementStart),
+                                              faded.view()) == AudioRenderStatus::Rendered);
+    CompiledFixture plain(shared(doubly_nested_fade_project({}, {}, ramp.size(), kKept)), map_120(),
+                          assets);
+    auto plain_program = plain.store.read();
+    Output dry(1, 6'000);
+    REQUIRE(ArrangementAudioRenderer::process(*plain_program,
+                                              snapshot(*plain_program, 6'000, kPlacementStart),
+                                              dry.view()) == AudioRenderStatus::Rendered);
+
+    // The retained window opens at the ramp's silent end, so it starts from
+    // nothing and reaches halfway up the ramp rather than jumping in part-way.
+    REQUIRE(std::abs(static_cast<double>(faded.storage[0][0])) < 1.0e-7);
+    REQUIRE(std::abs(static_cast<double>(dry.storage[0][0])) > 1.0e-7);
+    REQUIRE(worst_difference(faded.storage[0], dry.storage[0]) > kDifferentRender);
+    REQUIRE(peak(dry.storage[0]) > 0.01);
+}
+
+TEST_CASE("A placement fade refuses only the leaves its ramp reaches") {
+    // A note clip is not a sink for a clip gain, so a ramp landing on one has
+    // nowhere to go and says so rather than playing at full level.
+    const auto reached = compile_error_for(faded_note_placement_project(kTicksPerQuarter / 2, 0));
+    REQUIRE(reached.code == CompileErrorCode::NestedPlacementFadeUnsupported);
+    REQUIRE(reached.item == ItemId{12});
+
+    // The same placement over a clip that begins after the ramp is fully open
+    // reads unity for its whole length, so there is nothing to refuse.
+    auto program =
+        compile(shared(faded_note_placement_project(kTicksPerQuarter / 4, kTicksPerQuarter / 2)));
+    REQUIRE_FALSE(program->find_track({3})->arrangement_note_events().empty());
 }
 
 namespace {

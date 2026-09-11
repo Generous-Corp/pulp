@@ -769,6 +769,36 @@ TEST_CASE("many-track linking and validation advance in charged work units") {
         REQUIRE(program->tracks()[i - 1]->id() < program->tracks()[i]->id());
 }
 
+TEST_CASE("compiler status partitions completed tracks into recompiled and reused",
+          "[issue-8178]") {
+    PlaybackProgramStore store;
+    DeferredCompileExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    const auto project = make_many_track_project(8);
+    const auto map = tempo_map();
+
+    REQUIRE(compiler.submit(request(project, map, 1, {.all = true})));
+    drain(executor, compiler);
+    auto status = compiler.status();
+    REQUIRE(status.active_tracks_completed == 8);
+    REQUIRE(status.active_tracks_recompiled == 8);
+    REQUIRE(status.active_tracks_reused == 0);
+
+    REQUIRE(compiler.submit(request(project, map, 2, {.all = false, .tracks = {{12}}})));
+    drain(executor, compiler);
+    status = compiler.status();
+    REQUIRE(status.active_tracks_completed == 8);
+    REQUIRE(status.active_tracks_recompiled == 1);
+    REQUIRE(status.active_tracks_reused == 7);
+
+    REQUIRE(compiler.submit(request(project, map, 3, {.all = false, .tracks = {{12}, {15}}})));
+    drain(executor, compiler);
+    status = compiler.status();
+    REQUIRE(status.active_tracks_completed == 8);
+    REQUIRE(status.active_tracks_recompiled == 2);
+    REQUIRE(status.active_tracks_reused == 6);
+}
+
 TEST_CASE("one store binds exactly one compiler publisher core") {
     PlaybackProgramStore store;
     DeferredCompileExecutor first_executor;

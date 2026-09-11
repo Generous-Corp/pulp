@@ -78,13 +78,21 @@ jobs:
 
       - name: Enforce scale, replay, and paging budgets
         env:
-          # Milliseconds; these advisory-lane ceilings are reviewed like code.
+          # Milliseconds. An absolute ceiling measures work divided by host
+          # throughput, so it is only admissible where it sits far enough above
+          # the observed time that no plausible runner speed can reach it. The
+          # ceilings kept here were each measured against a heavily loaded
+          # host and still had several times the headroom they needed.
+          #
+          # Project load, note compile, and per-edit compile latency did not:
+          # they sat within a small multiple of their observed time, so the job
+          # reported how busy the runner was. Those are asserted in the test
+          # itself now -- load and note compile as scale-free growth exponents
+          # measured at two input sizes in the same run, and incremental compile
+          # as the exact count of tracks recompiled versus reused, which is the
+          # property the latency budget stood in for.
           PULP_PERF_STRICT: '1'
-          PULP_TIMELINE_LOAD_BUDGET_MS: '2000'
           PULP_TIMELINE_COLD_COMPILE_BUDGET_MS: '2000'
-          PULP_TIMELINE_EDIT_BATCH_BUDGET_MS: '1000'
-          PULP_TIMELINE_EDIT_MAX_BUDGET_MS: '30'
-          PULP_TIMELINE_NOTE_COMPILE_BUDGET_MS: '20000'
           PULP_TIMELINE_AUTOMATION_COMPILE_BUDGET_MS: '20000'
           PULP_TIMELINE_N_WRITER_BUDGET_MS: '5000'
           PULP_TIMELINE_DEEP_UNDO_BUDGET_MS: '5000'
