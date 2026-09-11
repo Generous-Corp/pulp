@@ -554,6 +554,35 @@ void     yoga_layout_reset_stats() {
     g_layout_max_nodes.store(0, std::memory_order_relaxed);
 }
 
+// Whether a container's own alignment can actually displace a lone item on
+// its line. `justify-content: space-between` resolves to flex-start for a
+// single item, and `align-items: stretch` / `flex-start` leave the cross axis
+// at the leading edge, so neither moves anything and neither is a reason to
+// give a container's bare text a box of its own.
+static bool flex_alignment_moves_lone_item(const FlexStyle& style) {
+    switch (style.justify_content) {
+        case FlexJustify::center:
+        case FlexJustify::end_:
+        case FlexJustify::space_around:
+        case FlexJustify::space_evenly:
+            return true;
+        case FlexJustify::start:
+        case FlexJustify::space_between:
+            break;
+    }
+    switch (style.align_items) {
+        case FlexAlign::center:
+        case FlexAlign::end:
+        case FlexAlign::baseline:
+            return true;
+        case FlexAlign::start:
+        case FlexAlign::stretch:
+        case FlexAlign::auto_:
+            break;
+    }
+    return false;
+}
+
 static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
                                YGConfigRef config, bool& wants_subpixel,
                                float viewport_width, float viewport_height) {
@@ -619,20 +648,34 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
     YGNodeSetContext(node, &view);
 
     auto children = ordered_visible_children(view);
-    bool has_managed_children = !children.empty() && view.layout_mode() != LayoutMode::grid &&
-                                !view.owns_child_layout();
+    const bool lays_out_own_children =
+        view.layout_mode() == LayoutMode::grid || view.owns_child_layout();
+    bool has_managed_children = !children.empty() && !lays_out_own_children;
 
-    // A Label that also has element children needs CSS's anonymous inline box:
-    // its own text must take a slot on the flex line rather than being painted
-    // at the same content origin its first child lays out from. Cleared on
-    // every pass so a Label that loses its children (or its text) stops
-    // reporting a stale slot.
+    // CSS wraps a container's bare text in an anonymous item that takes a slot
+    // on the flex line. Reserving that slot is what lets the container's own
+    // text be sized and positioned by layout instead of painted at the content
+    // origin, and it is needed in two cases: alongside element children, so the
+    // text does not lay out on top of the first one; and alone, so
+    // `justify-content` / `align-items` have something to distribute. Cleared
+    // on every pass so a Label that loses its children, its text, or its
+    // alignment stops reporting a stale slot.
     auto* text_owner = dynamic_cast<Label*>(&view);
     if (text_owner) text_owner->clear_own_text_box();
+    const bool owns_text = text_owner != nullptr && !text_owner->text().empty();
+    // A browser capture records each line rectangle relative to the owning
+    // element's content box, so the distribution the browser performed is
+    // already inside the line's own left/top. Resolving it a second time here
+    // would offset the line by the sum of both, so a captured Label keeps
+    // painting from its capture.
+    const bool text_alone_needs_a_slot =
+        owns_text && !has_managed_children && !lays_out_own_children &&
+        flex_alignment_moves_lone_item(view.flex()) &&
+        text_owner->cached_line_boxes().empty();
     const bool wants_anonymous_text_box =
-        has_managed_children && text_owner != nullptr && !text_owner->text().empty();
+        owns_text && (has_managed_children || text_alone_needs_a_slot);
 
-    if (!has_managed_children) {
+    if (!has_managed_children && !wants_anonymous_text_box) {
         const auto intrinsic = sanitize_yoga_measurement(
             view.intrinsic_width(), view.intrinsic_height());
         if (intrinsic.width > 0 || intrinsic.height > 0 || intrinsic.rejected_non_finite) {
@@ -649,10 +692,8 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
                 YGNodeSetBaselineFunc(node, yoga_baseline);
             }
         }
-    }
-
-    if (!has_managed_children)
         return;
+    }
 
     uint32_t insert_at = 0;
     if (wants_anonymous_text_box) {
@@ -664,6 +705,12 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
         YGNodeSetContext(ygText, &view);
         YGNodeSetMeasureFunc(ygText, yoga_measure);
         YGNodeSetBaselineFunc(ygText, yoga_baseline);
+        // CSS gives the anonymous item the initial `flex: 0 1 auto`, so it
+        // compresses rather than overflowing when the line is too narrow for
+        // the text. Yoga's own default for a fresh node is a shrink factor of
+        // zero, which would let a long string spill past a fixed-width
+        // container that used to wrap or ellipsize inside it.
+        YGNodeStyleSetFlexShrink(ygText, 1.0f);
         YGNodeInsertChild(node, ygText, insert_at++);
     }
 

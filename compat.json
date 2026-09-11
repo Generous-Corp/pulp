@@ -1973,9 +1973,10 @@
       ],
       "tests": [
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]",
-        "test/test_widget_bridge.cpp [issue-1434] (setFlex justify_content: left/right/stretch/normal stay unsupported (direction-dep + arch))"
+        "test/test_widget_bridge.cpp [issue-1434] (setFlex justify_content: left/right/stretch/normal stay unsupported (direction-dep + arch))",
+        "test/test_widget_bridge_flex_text_children.cpp [view][bridge][flex][anonymous-text] (justify_content distributes a container's own bare text, not only its element children)"
       ],
-      "notes": "FlexJustify enum: {start, center, end_, space_between, space_around, space_evenly}. pulp #1434 Tier 1 (PR-B): NO new direction-context-dependent aliases were added. Codex P1 on PR #1853 (two findings): 'left'/'right' are NOT aliased because their CSS semantics depend on flex-direction (column containers have both behave as 'start'); 'stretch' and 'normal' are NOT aliased because FlexJustify has no stretch equivalent. The dispatcher's default branch sets FlexJustify::start so unknown values fall through safely. All four are documented in unsupportedValues with rationale; pinned by [issue-1434].",
+      "notes": "FlexJustify enum: {start, center, end_, space_between, space_around, space_evenly}. pulp #1434 Tier 1 (PR-B): NO new direction-context-dependent aliases were added. Codex P1 on PR #1853 (two findings): 'left'/'right' are NOT aliased because their CSS semantics depend on flex-direction (column containers have both behave as 'start'); 'stretch' and 'normal' are NOT aliased because FlexJustify has no stretch equivalent. The dispatcher's default branch sets FlexJustify::start so unknown values fall through safely. All four are documented in unsupportedValues with rationale; pinned by [issue-1434]. Applies to a container's own bare text as well as to its element children: a Label whose text has no element siblings gets CSS's anonymous item on the flex line, so justify_content moves that text on the main axis. The exception is a Label carrying browser-captured line boxes, whose rectangles already encode the distribution the browser resolved and which therefore keep painting from their capture.",
       "issue": ""
     },
     "css/left": {
