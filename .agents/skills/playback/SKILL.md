@@ -1351,6 +1351,13 @@ than being folded away — the code names which obstacle it hit:
   its own edge. A leaf lying inside the fade region needs a partial ramp
   `ClipPlaybackProperties` cannot express. An expressiveness limit, not a
   choice between two defensible answers.
+
+  A leaf's *own* fade is the case this is easiest to confuse with, and it is
+  not refused. A fade is measured from the clip's edge and a trim moves that
+  edge, so the retained fade is the authored one minus the trim, clamped to
+  what is left of the clip — an edge-anchored answer, not the same ramp entered
+  part-way through. The placement fade refuses because its envelope has no
+  edge to re-anchor to; a leaf fade always does.
 - `NestedGainSinkUnsupported` — a composed gain lands on the leaf's clip gain,
   and **clip gain only reaches a renderer for media content**. Note, registered
   and opaque leaves compile to events, and nothing scales an event by the gain
@@ -1361,3 +1368,46 @@ than being folded away — the code names which obstacle it hit:
 So a nested child holding notes still refuses a fader, and the fixture that
 proves it must use media content to see composition at all. Read the composed
 value through `TrackProgram::audio_program()->clips()[n].gain_linear`.
+
+## A nested child-track state refuses only if it *substitutes* content
+
+Four track states look alike in the document and split cleanly once you ask
+what reads them. `begin_track` handles a **top-level** track and substitutes:
+`freeze()` calls `output.clear()` and returns `Freeze`; a valid
+`active_take_lane_id()` clears and returns `ActiveTake`. Both discard the
+arrangement and stand something else in its place. The **nested** walk does no
+such thing — `step_reference` descends straight into `track.clips()` and never
+calls `begin_track` at all.
+
+That asymmetry is the whole rule. A nested frozen or comped track would play
+precisely the arrangement its author replaced, so each refuses under its own
+name: `NestedFrozenTrackUnsupported` and `NestedActiveTakeUnsupported`. They
+do not share a code, because the construct that would lift them is the same
+one but the reason a reader hits them is not — and a shared code sends you to
+the wrong half of the document.
+
+`record_armed()` and the bare `take_lanes()` list are read by **neither** path,
+and refusing them rejected documents that already compiled correctly. Three
+independent places corroborate this before you trust it:
+
+- each appears exactly once in all of `core/playback` — in the guard that used
+  to refuse it, and nowhere else;
+- `sequence_preflight.cpp` resolves media for `freeze->media` and
+  `active_take_lane->comp_segments()` only, so a dormant lane is never even
+  resolved to an asset;
+- the CLI's own duration walk (`timeline_playback.cpp`) skips a track for
+  `freeze() || active_take_lane_id().valid()` and consults neither of the
+  other two.
+
+So when you are deciding whether a new child-track state may nest, do not ask
+whether it is "set". Ask whether anything substitutes on it. If the state only
+records intent — arm, an unselected lane — the nested walk lowers the same
+clips it would have lowered without it, and the test that proves so should
+assert **whole-event identity** (`NoteProgramEvent`'s `operator<=>` is
+defaulted, so `std::equal` over the spans compares every field) rather than
+merely that no error came back.
+
+One fixture trap: prove a dormant lane inert with a lane holding a **real**
+take against a declared project asset. An empty lane is trivially inert and
+proves nothing, and `TakeLane::create` imposes no non-empty requirement, so
+the weak fixture compiles and looks like evidence.

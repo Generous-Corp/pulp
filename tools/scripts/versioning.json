@@ -40,6 +40,7 @@
         "tools/scripts/build_combined_installer.sh",
         "tools/scripts/sdk_provenance.py",
         "tools/scripts/release_product_matrix.json",
+        "packages/pulp-react/src/**",
         "tools/import-design/CMakeLists.txt",
         "tools/import-design/**/*.cpp",
         "tools/import-design/**/*.hpp",
@@ -58,7 +59,8 @@
         "core/**/src/**",
         "core/**/js/**",
         "core/**/platform/**",
-        "inspect/src/**"
+        "inspect/src/**",
+        "packages/pulp-react/src/**"
       ],
       "changelog": "CHANGELOG.md"
     },
