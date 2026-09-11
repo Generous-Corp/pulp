@@ -186,6 +186,60 @@ function isHoverEvent(eventName: string): boolean {
     );
 }
 
+/// The WidgetBridge only ever dispatches `mouseenter` / `mouseleave` for
+/// hover (see `registerHover` in `widget_bridge/event_api.cpp`, which
+/// installs `on_hover_enter` / `on_hover_leave` lambdas hard-coded to
+/// those two names). React's pointer-event spelling therefore has no
+/// native dispatch of its own: an `onPointerEnter` prop registered under
+/// `pointerenter` is never called, silently, because `registerHover`
+/// succeeds and the listener installs — it just listens for a name the
+/// C++ side never emits. Map the pointer spelling onto the name the
+/// bridge actually dispatches. The DOM path already does the equivalent
+/// in `core/view/js/web-compat-element-events.js`, which fires both
+/// synthetic events off the single native `mouseenter`.
+function nativeHoverNameFor(eventName: string): string {
+    if (eventName === 'pointerenter') return 'mouseenter';
+    if (eventName === 'pointerleave') return 'mouseleave';
+    return eventName;
+}
+
+/// React event names that share one native hover dispatch, in the order
+/// their handlers run. A node may carry both spellings (`onMouseEnter`
+/// and `onPointerEnter`); the bridge's listener table is replace-only,
+/// so registering each under the native name directly would drop one.
+/// Fan out from a single native listener instead.
+function hoverAliasesFor(nativeName: string): string[] {
+    if (nativeName === 'mouseenter') return ['mouseenter', 'pointerenter'];
+    if (nativeName === 'mouseleave') return ['mouseleave', 'pointerleave'];
+    return [nativeName];
+}
+
+/// Install one native hover listener that invokes every React handler
+/// registered for the spellings that share it. Returns the aggregate
+/// propagation decision (the strongest stop wins) so a handler on either
+/// spelling can still halt the native ancestor walk.
+function installHoverFanout(id: string, nativeName: string): void {
+    const aliases = hoverAliasesFor(nativeName);
+    const registry = eventCallbackRegistry();
+    if (!aliases.some((alias) => registry.has(`${id}:${alias}`))) {
+        call('on', id, nativeName, () => ({ __pulpEventPropagation: 0 }));
+        return;
+    }
+    call('on', id, nativeName, (...rawArgs: unknown[]) => {
+        let propagation = 0;
+        for (const alias of aliases) {
+            const callback = eventCallbackRegistry().get(`${id}:${alias}`);
+            if (!callback) continue;
+            const result = callback(...rawArgs) as
+                { __pulpEventPropagation?: number } | undefined;
+            const code = typeof result?.__pulpEventPropagation === 'number'
+                ? result.__pulpEventPropagation : 0;
+            if (code > propagation) propagation = code;
+        }
+        return { __pulpEventPropagation: propagation };
+    });
+}
+
 /// Pointer events the bridge gates behind registerPointer(id).
 /// onPointerDown / onPointerUp / onPointerCancel / onPointerMove map
 /// to the bridge's `on_pointer_event` callback path; without
@@ -253,6 +307,11 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
         // its prop disappears. This is intentionally different from leaving
         // the old closure registered: dynamic imported controls frequently
         // change ownership while a menu/modal mounts or unmounts.
+        if (isHoverEvent(eventName)) {
+            // Re-arm the fan-out so the sibling spelling, if any, survives.
+            installHoverFanout(id, nativeHoverNameFor(eventName));
+            return;
+        }
         call('on', id, eventName, () => ({ __pulpEventPropagation: 0 }));
         return;
     }
@@ -319,6 +378,11 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
         };
     };
     eventCallbackRegistry().set(`${id}:${eventName}`, callback);
+    if (isHoverEvent(eventName)) {
+        // Both hover spellings route through one native dispatch name.
+        installHoverFanout(id, nativeHoverNameFor(eventName));
+        return;
+    }
     call('on', id, eventName, callback);
 }
 
