@@ -160,3 +160,18 @@ if(APPLE AND NOT PULP_IOS)
     )
     catch_discover_tests(pulp-test-mac-hover-cursor-stationary)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # PULP_TEST_POINTER_DRAG spelling contract. The drive it feeds needs a real
+    # NSWindow, hit-test, and display link, so the parse is the only part a
+    # portable test can pin — and it is where a typo turns an unattended
+    # measurement into a silently idle window. Links pulp::view because the
+    # parser is defined beside its consumer in window_host_mac.mm.
+    add_executable(pulp-test-mac-test-pointer-drag
+        test_mac_test_pointer_drag.cpp
+    )
+    target_link_libraries(pulp-test-mac-test-pointer-drag PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+    )
+    catch_discover_tests(pulp-test-mac-test-pointer-drag)
+endif()
