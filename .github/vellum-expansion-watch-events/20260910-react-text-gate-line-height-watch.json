@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260910-react-text-gate-line-height-watch",
+  "created_at": "2026-09-11T04:20:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "isFixedTextOnlyUpdate is the host-config gate that lets a text-only prop change skip a full re-apply. It only recognised a node whose height was pinned outright, so an element sized by a fixed line-height -- the ordinary shape for a single-line label -- fell through the gate and paid a full re-apply on every text change, which is exactly the per-keystroke cost the gate exists to avoid. The gate now also accepts a fixed line height: hasFixedLineHeight() takes a positive number or a bare/px string and deliberately rejects percentages, `normal` and zero, because none of those pin a box height. Two escapes keep it honest. TEXT_DELEGATING (button, Button, TextEditor) is excluded because those types hand their text to a child label, so the parent's own line height does not determine the measured box; and hasLineClamp() (lineClamp, WebkitLineClamp, webkitLineClamp) excludes clamped text, where the box is multi-line and a line height no longer fixes it. whiteSpace must still be nowrap and the width must still be fixed, so wrapping text is unaffected. render-assets-and-backends is crossed only because packages/pulp-react/** sits under its selector. No renderer, backend, GPU surface, font, asset or Skia pin changes; no fixture, snapshot or threshold moves. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-react-host-config-materialized-metadata",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

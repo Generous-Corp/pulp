@@ -159,8 +159,13 @@ different request with an earlier result.
   reference gain/fades. A source window that cuts into a leaf clip's *own*
   fade shortens that fade to the new clip edge rather than refusing — the
   answer an unnested clip gives when it is dragged shorter — and a trim that
-  swallows a fade whole leaves none. That is a different thing from a fade on
-  the `SequenceRef` placement, which still refuses. A complete
+  swallows a fade whole leaves none. A fade authored on the `SequenceRef`
+  placement itself is a different mechanism: flattening records that ramp as a
+  window of fade progress in owner-timeline ticks, and every leaf the window
+  reaches evaluates its own position inside it, so one ramp composes across the
+  leaves flattening cut it into and multiplies with each leaf's own fade. It
+  refuses only when a ramp actually reaches a leaf whose content no renderer
+  scales by clip gain, because dropping that ramp would be silently wrong. A complete
   nested media clip preserves its `TimeConform` intent, but a source window
   that trims a conforming clip fails with `NestedSequenceUnsupported` until
   playback has a conform-aware source-range mapping. Expansion
@@ -1466,6 +1471,19 @@ is a malformed gesture** (the front-end never resolved it) and belongs in the
 lowerer; **an id that is well-formed but absent from the document** is the
 reducer's `MissingItem`. An `std::optional` destination left empty is neither —
 it is a request for last position.
+
+### `Clip::create` re-validates the fades against the duration it is given
+
+`valid_playback_properties` rejects a fade longer than the clip's duration, and
+`Clip::create` runs it, so rebuilding an existing clip with a *shorter* duration
+fails with `InvalidStructure` even though every field was copied verbatim from a
+clip the document already accepted. Trimming code that carries
+`playback_properties()` across unchanged is the shape that hits this: the
+failure names the structure, not the fade, so it reads like a malformed clip.
+
+Clamp or zero the fade durations before `create` when the new duration is
+smaller, and keep the ramp's real extent somewhere else if a caller still needs
+it — a trimmed placement should enter its fade part way up, not restart it.
 
 ### A negative control on a compound condition can exercise half of it
 
@@ -3126,13 +3144,34 @@ renderer. `test/test_timeline_agent.cpp` holds that oracle in its sample-exact
 `WithinAbs` assertions on rendered PCM. **If one of those moves, the render
 path changed audio** — treat it as a regression, not as a threshold to widen.
 
-Only the render call was swapped. The CLI keeps its own transport and block
-loop, so frame counts stay frame-addressed and no tick conversion enters the
-path — which is why the in-memory budget check and the emitted JSON are
-unchanged. Preserve that split if you extend the command; routing the loop
-through the offline renderer instead would make the CLI's frame arithmetic
-tick-derived, and a saturating conversion turns an absurd request into a
-plausible bounce.
+The block loop went the same way. The CLI hands the whole render to
+`render_timeline_offline()` rather than driving its own `MasterTransport`, so
+the frame budget it computes has to enter the renderer's tick domain. Carry it
+to the *smallest tick that covers* the budget —
+`ceil(fractional_samples_to_ticks(frames))` — and reject a derivation that is
+not finite or does not fit an `int64_t` rather than letting a saturating
+conversion turn an absurd request into a plausible bounce. Rounding up can only
+lengthen the region; rounding down silently shortens the bounce, which is the
+one failure a bounce must not have. The in-memory budget check still speaks
+frames, and the emitted JSON reports the frames actually rendered rather than
+the frames requested.
+
+Two things do not come across by default and have to be carried deliberately:
+
+- **A program with no routes never reaches the renderer.**
+  `render_timeline_offline()` refuses an empty route span as `InvalidProgram`,
+  which is the right answer for a library, so the verb keeps its own early path
+  that writes a zero-filled buffer. Do not relax the library to accommodate it.
+- **The two configs disagree on note capacity.**
+  `TimelineOfflineRenderConfig` caps note events per track per block at 256
+  where `TimelineGraphBindingConfig` allows 1024, and the renderer copies its
+  own value into the binding config it builds. Pass the binding's value
+  explicitly, as the verb does; accepting the renderer's default turns a dense
+  arrangement into a `BindingRejected` on a project that used to render.
+
+`TimelineOfflineRenderCode` is the verb's failure vocabulary now, so map every
+enumerator to its own message with no `default:` branch — a `default:` makes a
+newly added code arrive as an existing sentence instead of as a compile error.
 
 ## A nested-trim fixture proves a widened selection window only with a note wholly outside the cut
 
@@ -3188,3 +3227,41 @@ Prefer a named state struct over positional bools when a fixture starts
 carrying several of these. `nested_child_state_project(NestedChildState)` reads
 as the document it authors, and adding a state later cannot silently re-target
 an existing call the way appending another `bool` parameter can.
+
+## A scale test asserts growth or work done, not a wall-clock ceiling
+
+`test/test_timeline_scale.cpp` runs the largest arrangements Pulp supports, so
+it is the natural place to reach for a millisecond budget — and the wrong one.
+An absolute ceiling measures `work / host_throughput`, so on a shared or
+oversubscribed runner it reports how busy the host was. It is admissible only
+where the ceiling sits far enough above the observed time that no plausible
+host can reach it; a ceiling within a small multiple of the observed time is a
+coin flip, and raising it until it stops flipping deletes the assertion in
+slow motion.
+
+`test/timeline_perf_test_helpers.hpp` carries the two alternatives, shared with
+`test_timeline_agent_view.cpp`:
+
+- `measure_growth` / `require_growth_within` run one operation at two input
+  sizes in the same process and assert the exponent `k` in `time ~ size^k`.
+  Host throughput appears in both terms and cancels. This also catches
+  accidental `O(N^2)`, which a fixed ceiling cannot distinguish from a slow
+  runner. Growth ceilings are source constants, not workflow env vars, so they
+  hold in every lane.
+- Where the quantity being timed is a proxy for a countable one, count it
+  instead. Per-edit compile latency stood in for "a one-track edit stays a
+  one-track compile"; the compiler's recompiled/reused counters state that
+  directly and run unconditionally rather than only under `PULP_PERF_STRICT`.
+
+Measure growth in **processor time**, via `cpu_now()`, never wall time. Wall
+time also counts the intervals the operation spent descheduled, and the larger
+size is exposed to more of them, so contention biases the exponent upward —
+the one direction the assertion cares about. Under heavy CPU contention the
+same operations read 1.43-1.51 by wall clock against a 1.40 ceiling and
+0.91-1.17 by processor time. Keep `measure` single-threaded and stateless
+between calls, or process time stops being the operation's own time and a
+later round measures a warmed cache.
+
+The growth cases run each operation at two sizes for several rounds, so the
+suite costs several times a single-size pass — `timeline_tests.cmake` gives
+`pulp-test-timeline-scale` a correspondingly long `TIMEOUT`.

@@ -362,6 +362,13 @@ The timeline binding builds on this to schedule compensated event streams; the
 contract, including why an event-to-audio device contributes nothing to the
 shift, is `docs/policies/event-stream-pdc.md`.
 
+`TimelineGraphProcessCode::EventCompensationUnsupported` has exactly one cause:
+a transport range that locates events by host beat, which gives a
+document-sample shift no origin to land on. It once had a second — a read-ahead
+that ran past an enabled loop's end — and that case no longer fails: the window
+is folded to the post-wrap content and plays. So a refusal here IS evidence of a
+host-beat range, and a loop-end crossing is not a reason to expect one.
+
 ### Timeline-owned built-in devices stay document-authoritative
 
 `PluginFormat::BuiltIn` is the host-only identity for pathless Pulp devices. Its

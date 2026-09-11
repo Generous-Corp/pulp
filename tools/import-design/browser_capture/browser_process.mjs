@@ -172,6 +172,61 @@ async function terminateOwnedBrowserPid(
   return !processGroupExists(pid);
 }
 
+// The only authorization available before the guardian records custody: with
+// no ownership marker and no recorded identity hash to recheck yet, the
+// unreaped handle is the one thing still naming this process. POSIX does not
+// reuse a child's pid until its parent waits, and `exitCode === null` is
+// exactly "not yet waited for", so at that check the number still names our
+// child, running or zombie. Nothing may await between the check and the
+// signal; the reap and the exitCode assignment land together.
+//
+// The negated pid is authorized by a narrower argument than it looks. The
+// handle does not pin the GROUP — a group outlives its leader, and the zombie
+// pins only the leader's pid. What holds is that a group's id is its leader's
+// pid, so while the handle holds that number no OTHER group can come to bear
+// it: kill(-pid) reaches this child's group or nothing, never a stranger's.
+// Detached spawn makes the child that leader; before its setsid lands it leads
+// no group at all, which is the ESRCH the catch below falls back from. Both
+// halves are POSIX rather than Darwin behaviour, so they hold on Linux too.
+// Windows has no group: there this reaches the direct child only, and tearing
+// the browser's process tree down remains taskkill /T's job.
+function signalOwnedChildGroup(child, signal) {
+  if (!child || child.exitCode !== null) return false;
+  if (process.platform === "win32") {
+    try { child.kill(signal); } catch {}
+    return true;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    // A detached child whose setsid has not landed yet leads no group.
+    try { child.kill(signal); } catch {}
+  }
+  return true;
+}
+
+// Terminate a child this process spawned and still holds, whatever the
+// guardian did or did not record. Without it a capture torn down between spawn
+// and custody returns having removed the profile while the launched group runs
+// on under init.
+async function terminateOwnedChildHandle(child) {
+  if (!child || child.exitCode !== null) return;
+  if (!processGroupExists(child.pid)) return;
+  if (!signalOwnedChildGroup(child, "SIGTERM")) return;
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline && child.exitCode === null &&
+      processGroupExists(child.pid)) {
+    await delay(25);
+  }
+  if (!processGroupExists(child.pid)) return;
+  if (!signalOwnedChildGroup(child, "SIGKILL")) return;
+  const killDeadline = Date.now() + 1000;
+  while (Date.now() < killDeadline && child.exitCode === null &&
+      processGroupExists(child.pid)) {
+    await delay(25);
+  }
+}
+
 async function writeOwnershipMarker(profileDir, browserPid, browserIdentity) {
   const ownerIdentity = await browserProcessIdentity(process.pid);
   if (!ownerIdentity || !browserIdentity) {
@@ -472,7 +527,35 @@ export async function terminateBrowser(child) {
     await terminateOwnedBrowserPid(
       child.pid, custody.expectedIdentityHash, custody.profileDir);
   }
+  // Custody is absent for a launch torn down before the guardian recorded one,
+  // and the guardian can fail after recording one. Either way the live handle
+  // is still an identity, so neither case may return with the group running.
+  await terminateOwnedChildHandle(child);
   await Promise.race([exited, delay(1000)]);
+}
+
+// A capture's cleanup terminates whatever browser it has been handed, but a
+// launch already in flight can hand one over afterwards, and the deadline path
+// exits the runtime as soon as cleanup returns. Custody makes the handover
+// total: releasing closes the slot before it awaits anything, so a child that
+// arrives later is signalled by its adopter, synchronously, leaving no await
+// for the runtime to exit through.
+export function createBrowserCustody() {
+  let adopted = null;
+  let released = false;
+  return {
+    adopt(child) {
+      adopted = child;
+      if (released) signalOwnedChildGroup(child, "SIGKILL");
+    },
+    get child() {
+      return adopted;
+    },
+    async release() {
+      released = true;
+      await terminateBrowser(adopted);
+    },
+  };
 }
 
 export async function createEmptyProfile(profileArg) {

@@ -22,10 +22,10 @@ import {
   serveDenyProxy,
 } from "./security.mjs";
 import {
+  createBrowserCustody,
   createEmptyProfile,
   launchBrowser,
   pageTarget,
-  terminateBrowser,
 } from "./browser_process.mjs";
 import {
   captureStableScreenshot,
@@ -981,14 +981,14 @@ async function runProbe(options) {
     options.values.get("--profile-dir"));
   const progress = createCaptureProgress("browser-launch");
   let launched;
-  let browserChild;
+  const browserCustody = createBrowserCustody();
   let cdp;
   let browser;
   let cleanupPromise;
   const cleanup = () => {
     cleanupPromise ??= (async () => {
       cdp?.close();
-      await terminateBrowser(browserChild);
+      await browserCustody.release();
       await rm(profileDir, {
         force: true,
         recursive: true,
@@ -1012,9 +1012,7 @@ async function runProbe(options) {
   try {
     launched = await launchBrowser(
       browserPath, profileDir, timeoutMs,
-      (child) => {
-        browserChild = child;
-      });
+      (child) => browserCustody.adopt(child));
     const target = await pageTarget(launched.endpoint.port, timeoutMs);
     cdp = new Cdp(target.webSocketDebuggerUrl, timeoutMs, progress);
     await cdp.open();
@@ -1105,14 +1103,14 @@ async function runCapture(options) {
   let server;
   let denyProxy;
   let launched;
-  let browserChild;
+  const browserCustody = createBrowserCustody();
   let cdp;
   let browser;
   let cleanupPromise;
   const cleanup = () => {
     cleanupPromise ??= (async () => {
       cdp?.close();
-      await terminateBrowser(browserChild);
+      await browserCustody.release();
       await denyProxy?.close();
       await server?.close();
       await rm(profileDir, {
@@ -1144,9 +1142,7 @@ async function runCapture(options) {
     progress.enterPhase("browser-launch");
     launched = await launchBrowser(
       browserPath, profileDir, timeoutMs,
-      (child) => {
-        browserChild = child;
-      },
+      (child) => browserCustody.adopt(child),
       denyProxy
         ? [
             "--disable-quic",

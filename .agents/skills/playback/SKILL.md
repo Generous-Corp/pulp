@@ -170,12 +170,20 @@ bite:
   (`NoteRenderCode::CompensationUnsupported`). That range locates events by
   authored tick against the host's beat window, so a document-sample shift has
   nowhere to land, and converting it to ticks is what the unit rule forbids.
-- **Reading ahead past an enabled loop's end refuses**
-  (`NoteRenderCode::CompensationLoopWrapUnsupported`). What belongs in that
-  window is the content after the wrap, not the document positions past the loop
-  point; wrap-aware read-ahead is a separate mechanism that does not exist yet,
-  so the crossing fails closed rather than playing events the pass never reaches.
-  The guard is skipped entirely when nothing compensates.
+- **Reading ahead past an enabled loop's end folds back to the post-wrap
+  content.** What belongs in that window is what the musician hears when those
+  frames reach the device, which is the content after the wrap and not the
+  document positions past the loop point. `plan_compensated_read()` splits the
+  window at the loop point into at most two runs — the loop length is never
+  shorter than the maximum block, so one window crosses at most once — and each
+  run carries the loop pass it belongs to, so note modifiers resolve against the
+  right pass. The renderer releases what was sounding at the *stream's* wrap,
+  which arrives a shift before the transport's, and then suppresses the
+  transport's own discontinuity for a wrap the read-ahead already served:
+  serving it twice would cut the post-wrap notes read-ahead had already started.
+  The suppression is scoped to the compensated, looping, non-scrubbing case, so
+  a scrub-window restart still releases. The whole path is skipped — including
+  the loop's tempo-map conversion — when nothing compensates.
 - **An event-to-audio device contributes nothing to the shift.** The graph's own
   delay compensation already aligns its audio output against every sibling
   branch; adding it again pulls the stream early by exactly the amount the graph
@@ -933,7 +941,13 @@ Things worth knowing before changing it:
 - **Version growth is additive by section, not by version bump.** An unknown
   section marked `kProgramWireSectionOptional` is skipped; an unknown section
   without it is rejected. Bump `min_reader_version` only when an older reader
-  would *misread* the bytes, not when it would merely miss data.
+  would *misread* the bytes, not when it would merely miss data — and decide
+  "merely" per payload, not per format: the controller sections are optional
+  on a payload that carries none and required, with the floor raised, on one
+  that carries any, because missing expression is a musical loss and not a
+  cosmetic one. Do not solve a new section by widening an existing record; a
+  wider record moves every older reader's stride and forces the floor up for
+  every payload, controller-free ones included.
 - **The byte golden is the guard that matters.** An encoder and a decoder that
   are wrong in the same direction still round-trip; only the pinned digest in
   `test/test_playback_program_wire.cpp` catches a reordered field. If you change
@@ -1031,11 +1045,18 @@ someone must answer rather than dropping one that is owed: a
 `code == CompileErrorCode::X` comparison, which names a code without
 constructing one.
 
-All three seeded entries are `live-defect` — expression lanes on a clip,
-expression lanes on a trimmed nested clip, and the nested-sequence flattening
-refusals. They are tracked, not resolved. Removing one from the allowlist is
-how you assert the refusal is gone; the gate fails an entry whose raise site no
-longer exists, so a reason cannot outlive its code.
+Every entry carries a `status`: `live-defect` is tracked, not resolved, and
+`intended` says the refusal is the answer. Retiring a refusal is removing its
+raise site and its entry in the same change; the gate fails an entry whose
+raise site no longer exists, so a reason cannot outlive its code. The selftest
+takes the entries it drops from the allowlist document itself rather than from
+a list of its own, so a retirement cannot fail it — a gate that goes red when
+the code improves teaches people to edit the gate. Its synthetic raise and
+`case`-label fixtures do still name enumerators (`MidiExpressionLaneUnsupported`,
+`TrimmedGrooveUnsupported`, `NestedMixerPanUnsupported`) and the header
+fixture splices after `MidiExpressionLaneUnsupported,`; deleting one of those
+members from `CompileErrorCode` fails the selftest loudly and means re-pointing
+the fixture, not weakening it.
 
 ## Dependency floor
 
@@ -1319,16 +1340,65 @@ the pad newly admits reads differently.
 
 ## The program wire refuses what it cannot represent
 
-`program_wire_encoded_size` rejects programs it has no section for — audio
-programs, and now any program carrying controller events
-(`ControllerEventsUnsupported`). A controller value is not safe to ignore, so
-the wire fails closed rather than returning a copy that plays the notes with
-the expression gone. Note the tempo-point check fires *before* the per-track
-loop, so a fixture passing no tempo points is refused for that reason first —
-an encode-refusal test in a suite without a tempo fixture will pass for the
-wrong reason.
+`program_wire_encoded_size` rejects programs it has no section for — an audio
+program (`AudioProgramUnsupported`), a non-default production declaration. A
+value that is not safe to ignore fails closed rather than returning a copy
+that plays thinner than the program meant. Note the tempo-point check fires
+*before* the per-track loop, so a fixture passing no tempo points is refused
+for that reason first — an encode-refusal test in a suite without a tempo
+fixture will pass for the wrong reason.
 
-## Nested gain composes by multiplying; pan and a placement fade cannot
+Controller events are no longer on that list. Wire version 3 carries them in
+two appended sections (`ControllerRanges`, one `(first, count)` per track, and
+`ControllerEvents`, one `ProgramWireControllerEventRecord` per
+`ControllerProgramEvent`), and `ControllerEventsUnsupported` is retired
+because the case it refused works — a retirement earned by the round trip, not
+by moving an assertion. Things to know before touching it:
+
+- **Order is carried verbatim, not re-derived.** The encoder copies
+  `arrangement_controller_events()` in the program's sequence and the decoder
+  preserves it; `program_wire_matches` compares position for position, so a
+  swapped tied pair is a mismatch. The wire does not enforce
+  `controller_program_event_less` order on decode — see the finding below.
+- **The reader floor is per payload, not per build.** `kProgramWireVersion` is
+  3 for every payload; `min_reader_version` is 2 when the program carries no
+  controller events (both appended sections flagged optional, so a version 2
+  reader skips them and renders exactly the program) and 3 when it carries any
+  (sections required, so a version 2 reader refuses at the header). Both are
+  functions of the counts, which is what keeps one program at one encoding.
+  The one outcome the format never produces is a floor of 2 over a non-empty
+  controller section — that is an older reader silently dropping expression,
+  the loss the old refusal existed to prevent. In the other direction a
+  version 3 reader accepts a version 2 payload with the sections absent, gated
+  on `header.version < 3`; the same bytes stamped 3 are a non-canonical payload
+  and refuse with `MissingSection`.
+- **No version 2 record changed.** The ranges live in their own section
+  rather than as two more fields on `ProgramWireTrackRecord`, precisely so a
+  version 2 reader's stride over every section it knows is what it was. The
+  `sizeof` asserts in `program_wire.hpp` are the honest diff: two new lines,
+  every existing value unchanged.
+- **Decode bounds and refusals.** A range's `count` is judged against
+  `kProgramWireMaximumControllerEventsPerTrack` — the compiler's own
+  `kMaximumControllerEventsPerTrack` in `program.hpp`, shared so the two cannot
+  drift — *before* its range check, so a corrupted count is `InvalidLimits`
+  rather than a walk. An address wider than four bits or a zero clip, lane or
+  point identity is `MalformedControllerEvent`, judged by
+  `timeline::midi_lane_address_well_formed` rather than a second rule. An
+  origin outside the enum is `InvalidEnum`. Each is covered by a resealed
+  corrupt-and-restore case in `test_playback_program_wire.cpp`.
+- **Finding, not fixed here: the compiler does not sort controller events.**
+  `program.hpp` documents `arrangement_controller_events()` as being in
+  `controller_program_event_less` order, but `program_compiler.cpp` has no
+  controller sort stage (notes have `SortTrackNotes`; controllers are pushed
+  clip by clip, lane by lane, point by point) and nothing in `core/` calls the
+  comparator. Two lanes on one clip therefore emit lane-major, not time-major.
+  The order *is* total over distinct events — `MidiContent::create` makes point
+  ids unique within a content and addresses unique across its lanes — so the
+  wire has one sequence to preserve and preserves it; a consumer that needs
+  time order must sort, and a decoder that enforced sorted order would refuse
+  every multi-lane program the compiler emits today.
+
+## Nested gain composes by multiplying; a placement fade rides beside the leaf; pan does neither
 
 `sequence_content_lowerer.cpp` flattens a `SequenceRef` into leaf clips on the
 referring track, so anything the child track owned has to find a home on a leaf
@@ -1340,24 +1410,62 @@ float the leaf authored rather than a rounded near-miss, and an equality
 assertion on the composed value is measuring composition rather than rounding
 when the fixture uses powers of two.
 
-Three neighbouring cases have no such home and keep their own refusal rather
-than being folded away — the code names which obstacle it hit:
+A **placement fade** composes too, but it cannot fold, and the difference is
+the whole design. A product of gains is a gain; a ramp is time-varying, and two
+ramps of different shapes reduce to no third shape. So the placement's envelope
+travels *beside* the leaf instead of inside it: `LoweredClip::placement_fades`
+carries every enclosing ramp in owner-timeline ticks, `audio_renderer.cpp`
+converts them to clip-relative frames as
+`AudioClipRendererProgram::placement_fade`, and `clip_fade_envelope.hpp`
+multiplies them into the leaf's own envelope. Nesting a level deeper appends;
+nothing collapses.
+
+Four things about that carrier are load-bearing, and each is a way to get it
+subtly wrong:
+
+- **It stores a window of fade PROGRESS, not a pair of endpoint gains.** A
+  shape is a pure reparameterization of progress, so the slice of a ramp one
+  leaf covers must be read by applying the shape to the progress that leaf
+  actually spans. Storing the gain at each end and ramping linearly between
+  them lands both edges exactly and bends the wrong way everywhere in between —
+  right for `Linear`, wrong for every `EqualPower` fade. That error measures
+  close and sounds wrong.
+- **A segment names its ends by what they read, not which way it points.**
+  `silent_frame` is where the ramp is zero, `open_frame` where it is unity, so
+  a fade-out is a fade-in with the ends exchanged and there is no direction
+  flag to get backwards. Past the open end the segment is skipped; past the
+  silent end it returns zero.
+- **A ramp end routinely falls outside the leaf that carries it.** Flattening
+  cuts a nested window at clip boundaries and never at a ramp edge, so one leaf
+  can begin inside the placement's fade-in and end outside it, and a single
+  leaf can sit under four multiplicative ramps across two shapes: its own fade
+  in and out, plus the placement's head and tail. Keeping the whole ramp and
+  evaluating the position — rather than renormalizing per leaf — is what makes
+  two neighbouring leaves read the same gain at the frame they share.
+- **The second envelope is guarded on presence.** `detail::clip_envelope` has a
+  call site in `realtime_stretch_renderer.cpp` that runs *once per output
+  sample*, which is why progress is narrowed to `float` before the shape lookup
+  there (pinning `EqualPower` to `sinf`). `placement_fade` is null for every
+  clip that was not nested under a faded placement, so the ordinary clip pays
+  one predictable branch and no extra transcendental. Do not add an unguarded
+  second `fade_gain` call.
+
+An inner placement's own fades are **lifted out of the clip** at
+`sequence_content_lowerer.cpp`'s nested-`SequenceRef` branch: the re-placed
+`nested_clip` is built with its fade durations zeroed and the authored,
+untrimmed ramp recorded instead. That is not an optimization. The clip carries
+the *trimmed* window, `Clip::create` runs `valid_playback_properties`, and a
+fade wider than its clip is rejected — so leaving the fades on the clip turns a
+trimmed faded nesting into `InvalidStructure` before the walk ever reaches it.
+Reading the ramp off the untrimmed extent is also the musically correct answer:
+a trimmed placement enters its fade part way up.
+
+Two neighbouring cases keep their own refusal rather than being folded away —
+the code names which obstacle it hit:
 
 - `NestedMixerPanUnsupported` — a clip carries no stereo placement at all, and
   the parent track's single pan also serves everything else on that track.
   Unlike gain there is no sink for *any* content kind.
-- `NestedPlacementFadeUnsupported` — a fade on the `SequenceRef` placement is
-  one envelope across the whole nested window, while a leaf can only fade from
-  its own edge. A leaf lying inside the fade region needs a partial ramp
-  `ClipPlaybackProperties` cannot express. An expressiveness limit, not a
-  choice between two defensible answers.
-
-  A leaf's *own* fade is the case this is easiest to confuse with, and it is
-  not refused. A fade is measured from the clip's edge and a trim moves that
-  edge, so the retained fade is the authored one minus the trim, clamped to
-  what is left of the clip — an edge-anchored answer, not the same ramp entered
-  part-way through. The placement fade refuses because its envelope has no
-  edge to re-anchor to; a leaf fade always does.
 - `NestedGainSinkUnsupported` — a composed gain lands on the leaf's clip gain,
   and **clip gain only reaches a renderer for media content**. Note, registered
   and opaque leaves compile to events, and nothing scales an event by the gain
@@ -1365,9 +1473,27 @@ than being folded away — the code names which obstacle it hit:
   it silently. This is the easy thing to get wrong: the composition looks
   correct in the lowerer and is simply never read.
 
+`NestedPlacementFadeUnsupported` still exists and asks that **same sink
+question** about the envelope. A fade is a time-varying gain, so a placement
+fade over a note, registered or opaque leaf has nowhere to land either, and it
+refuses rather than playing that leaf at full level through an envelope the
+author wrote. It is scoped to the leaves a ramp actually *reaches*: a note leaf
+lying wholly past the ramp reads unity and compiles fine. When that refusal
+fires it names the leaf, not the placement — which is the tell that it is the
+sink case and not the old whole-envelope refusal it replaced.
+
+A leaf's **own** fade is the case this is all easiest to confuse with, and it
+behaves differently on purpose. A leaf fade is measured from the clip's edge
+and a trim moves that edge, so the retained fade is the authored one minus the
+trim, clamped to what is left of the clip — edge-anchored, not the same ramp
+entered part-way through. A placement ramp does the opposite: it keeps its
+authored edges and the leaf is read at whatever progress its position implies.
+Both are right; they answer different questions.
+
 So a nested child holding notes still refuses a fader, and the fixture that
 proves it must use media content to see composition at all. Read the composed
-value through `TrackProgram::audio_program()->clips()[n].gain_linear`.
+value through `TrackProgram::audio_program()->clips()[n].gain_linear`, and the
+ramps through the same clip's `placement_fade`.
 
 ## A nested child-track state refuses only if it *substitutes* content
 
@@ -1411,3 +1537,26 @@ One fixture trap: prove a dormant lane inert with a lane holding a **real**
 take against a declared project asset. An empty lane is trivially inert and
 proves nothing, and `TakeLane::create` imposes no non-empty requirement, so
 the weak fixture compiles and looks like evidence.
+
+## `CompilerStatus` says how much of a compile was incremental, so do not time it
+
+`CompilerStatus::active_tracks_completed` is partitioned by
+`active_tracks_recompiled` and `active_tracks_reused`. A track lands in
+`reused` when the dirty set spared it and its `TrackProgram` was carried over
+from the live program untouched; it lands in `recompiled` when a fresh one was
+built. The two always sum to `active_tracks_completed`, and `take_pending`
+clears all three together through `clear_active_track_counts()` so the
+partition can never describe a previous request.
+
+Read those counters when you need to know an edit stayed incremental. The
+tempting alternative — assert the compile finished quickly — measures the host
+as much as the compiler, and a one-track edit that silently started rebuilding
+the whole sequence still fits inside a generous millisecond ceiling on a fast
+machine while blowing a tight one on a busy machine. The counters are exact
+everywhere.
+
+Two things force a *reused*-looking track back onto the recompile side, so
+expect them rather than treating them as a lost optimisation:
+`requires_generation_refresh` (offline Stretch artifacts whose publication
+provenance is generation-specific) and any capacity refusal, which fails the
+whole request instead of completing the track.
