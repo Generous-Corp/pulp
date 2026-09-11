@@ -2,13 +2,6 @@
   "$comment": "Refusals the playback compiler raises against constructs a user can author. An entry records who owns the refusal and why it stands; it is not a claim that the refusal is correct. status=live-defect means the document is authorable today and unplayable, and the refusal is a placeholder for work that has not happened; status=intended means the refusal is the answer. Enforced by tools/scripts/negative_capability_check.py.",
   "refusals": [
     {
-      "code": "TrimmedGrooveUnsupported",
-      "file": "core/playback/src/sequence_content_lowerer.cpp",
-      "owner": "playback",
-      "status": "live-defect",
-      "reason": "A nested MIDI leaf with authored groove refuses when SequenceRef trimming changes its source window, because groove displacement can move events across either retained boundary and the compiler has no defined chase, clip or discard rule; the refusal stands until source-window groove inheritance is specified."
-    },
-    {
       "code": "TrimmedRegisteredContentUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
@@ -20,28 +13,42 @@
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
       "status": "live-defect",
-      "reason": "set_clip_sequence_ref composes with set_track_freeze and the take, automation and device-chain surfaces, but flattening has nowhere to fold a child device chain, an automation lane, takes, freeze, record-arm, a non-musical anchor, or a trim that cuts a conformed source or a child clip's own fade, so each of those authored combinations refuses instead of playing wrong. Clip and track GAIN no longer refuse here: they compose by multiplying into the flattened leaf, and the cases that composition still cannot answer carry their own codes below."
+      "reason": "set_clip_sequence_ref composes with the device-chain and automation surfaces, but flattening has nowhere to fold a child device chain, an automation lane, a non-musical anchor, or a trim that cuts a conformed source, so each of those authored combinations refuses instead of playing wrong. Clip and track GAIN no longer refuse here: they compose by multiplying into the flattened leaf, and the cases that composition still cannot answer carry their own codes below. Freeze and an active take lane no longer refuse here either; each now names its own code. Record-arm and unselected take lanes no longer refuse at all, because neither changes what any track lowers to."
     },
     {
       "code": "NestedMixerPanUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
-      "status": "live-defect",
-      "reason": "set_track_mixer authors a stereo balance on a track that a SequenceRef then nests. Flattening folds the child into the parent track, a clip carries no pan of its own, and the parent's single pan also serves every other clip on that track, so the child's balance can be neither written anywhere nor dropped without silently centring the child. Unlike gain there is no sink for any content kind; the refusal stands until a flattened leaf can carry its own stereo placement."
+      "status": "intended",
+      "reason": "set_track_mixer authors a stereo balance on a track that a SequenceRef then nests. Flattening folds the child into the parent track, a clip carries no pan of its own, and the parent's single pan also serves every other clip on that track, so the child's balance can be neither written anywhere nor dropped without silently centring the child. Unlike gain there is no sink for any content kind. The refusal is the answer rather than a placeholder: declining to flatten is correct while a flattened leaf has nowhere to carry its own stereo placement. Flip this back to live-defect when ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp gains a pan or balance field, because that field is the missing sink and its arrival is the checkable condition."
     },
     {
       "code": "NestedGainSinkUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
-      "status": "live-defect",
-      "reason": "A nested gain composes by multiplying into the flattened leaf's clip gain, which only reaches a renderer for media content; note, registered and opaque leaves compile to events and no renderer scales an event by the gain of the clip that carried it. Folding a child fader into one would discard it with nothing to read the loss from, so the compile refuses and names the leaf. The refusal stands until event rendering has a defined response to clip gain, which is a product question about velocity and level, not a lowering detail."
+      "status": "intended",
+      "reason": "A nested gain composes by multiplying into the flattened leaf's clip gain, which only reaches a renderer for media content; note, registered and opaque leaves compile to events and no renderer scales an event by the gain of the clip that carried it. Folding a child fader into one would discard it with nothing to read the loss from, so the compile refuses and names the leaf. The refusal is the answer rather than a placeholder: what a clip gain should mean for an event is a product question about velocity versus level, not a lowering detail. Flip this back to live-defect when a MIDI or registered leaf gains a defined output-gain sink, an event renderer that reads ClipPlaybackProperties::gain_linear, because that sink is the checkable condition."
     },
     {
       "code": "NestedPlacementFadeUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
+      "status": "intended",
+      "reason": "set_clip_playback_properties authors a fade on the SequenceRef placement itself. That fade now composes: the ramp travels beside each flattened leaf in owner-timeline ticks as a window of fade progress, the renderer reads the leaf's position within it, and nesting one level deeper appends another ramp rather than folding two into one. What remains refused is the same sink question NestedGainSinkUnsupported asks about a static gain. A fade is a time-varying gain, and note, registered and opaque leaves compile to events that no renderer scales by the gain of the clip that carried them, so a fade over one of those leaves would have nowhere to land; the refusal names the leaf instead of playing it at full level through an envelope the author wrote. It is scoped to the leaves a ramp actually reaches — a leaf lying wholly past a ramp reads unity and does not refuse. The refusal is the answer rather than a placeholder, for the reason the gain case gives: what a clip gain should mean for an event is a product question about velocity versus level, not a lowering detail. Flip this back to live-defect when a MIDI or registered leaf gains a defined output-gain sink, an event renderer that reads ClipPlaybackProperties::gain_linear, because that sink is the checkable condition and it is the same one the gain refusal waits on."
+    },
+    {
+      "code": "NestedFrozenTrackUnsupported",
+      "file": "core/playback/src/sequence_content_lowerer.cpp",
+      "owner": "playback",
       "status": "live-defect",
-      "reason": "set_clip_playback_properties authors a fade on the SequenceRef placement itself. That fade is one envelope across the whole nested window, while a flattened leaf can only carry a fade measured from its own edge, so a leaf lying inside the fade region would need a partial ramp starting and ending part way up that ClipPlaybackProperties cannot express. This is an expressiveness limit rather than a choice between two defensible answers; the refusal stands until the window envelope has a representation of its own."
+      "reason": "set_track_freeze seals a rendered artifact over a track and a SequenceRef then nests that track. Freeze is a substitution: SequenceContentLowerer::begin_track returns Freeze content and discards the arrangement, so the artifact is what a top-level frozen track plays. The nested walk descends into the child's clips and has no substitution step, so it would play the arrangement the author froze — quietly undoing the freeze rather than failing. Refusing names the track instead. Flip this to intended, or retire it, when a flattened leaf can carry rendered media standing in for a whole child track: a LoweredClip content kind that holds a TrackFreeze artifact is the missing construct and its arrival is the checkable condition."
+    },
+    {
+      "code": "NestedActiveTakeUnsupported",
+      "file": "core/playback/src/sequence_content_lowerer.cpp",
+      "owner": "playback",
+      "status": "live-defect",
+      "reason": "set_active_take_lane selects a comp lane on a track a SequenceRef then nests. Selection is the same substitution freeze performs: begin_track returns ActiveTake content built from the lane's comp segments and discards the arrangement. The nested walk reads the arrangement, so honouring the nesting would sound exactly the material the author deselected. The refusal is scoped to a SELECTED lane; an unselected lane is inert at both levels and does not refuse. Flip this when a flattened leaf can carry comped take segments, the same missing construct freeze needs."
     }
   ]
 }

@@ -1,5 +1,7 @@
 #pragma once // Private playback implementation detail.
 
+#include "placement_fade.hpp"
+
 #include <pulp/playback/program_compiler.hpp>
 
 #include <cstdint>
@@ -34,6 +36,31 @@ struct LoweredClip {
     timeline::ItemId context_sequence_id;
     // Owner-sequence tick corresponding to `clip.start()` after flattening.
     timebase::TickPosition context_start;
+    // Ticks of note content retained OUTSIDE this clip's audible window, so a
+    // groove that pulls a note across a trim edge still has that note to pull.
+    //
+    // Note offsets on a padded clip are measured from
+    // `clip.start() - groove_pad_left`, not from `clip.start()`. `context_start`
+    // deliberately keeps naming the owner tick of `clip.start()` itself, because
+    // registered content and chord lookups anchor on it and must not move.
+    //
+    // Both are zero unless the leaf was trimmed by its nesting AND its owner's
+    // groove actually displaces, so an untrimmed or feel-free leaf lowers to the
+    // same clip it always did. Only note content is padded: automation lanes are
+    // not groove-displaced, so they stay anchored to the unpadded window.
+    std::int64_t groove_pad_left = 0;
+    std::int64_t groove_pad_right = 0;
+    // Every enclosing placement's fade, in this track's tick coordinates, from
+    // outermost to innermost. Empty for a clip no faded placement encloses,
+    // which is every clip that was not nested and most that were.
+    //
+    // A fade does not fold into the leaf the way gain does. Gain composes into
+    // one scalar the leaf can carry in its own `gain_linear`; a fade is
+    // time-varying, so a leaf covering part of one needs the ramp itself and
+    // its own position within it, and two ramps of different shapes do not
+    // reduce to a third. Hence a list travelling beside the clip rather than
+    // extra fields inside it.
+    std::vector<LoweredPlacementFade> placement_fades;
 };
 
 class SequenceContentLowerer {

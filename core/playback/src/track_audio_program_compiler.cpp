@@ -9,12 +9,12 @@ TrackAudioClipCompileStatus TrackAudioProgramCompiler::step(
     const timeline::Clip& clip, const timeline::Project& project,
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits, double source_frame_offset,
-    std::uint64_t document_revision, std::uint64_t program_generation,
-    OfflineStretchArtifactCache& artifact_cache) noexcept {
+    const std::vector<LoweredPlacementFade>& placement_fades, std::uint64_t document_revision,
+    std::uint64_t program_generation, OfflineStretchArtifactCache& artifact_cache) noexcept {
     if (clip.time_conform() == timeline::TimeConform::Stretch) {
         const auto status = offline_stretch_.step(
-            clip, project, tempo_map, assets, limits, source_frame_offset, document_revision,
-            program_generation, artifact_cache, converters_);
+            clip, project, tempo_map, assets, limits, source_frame_offset, placement_fades,
+            document_revision, program_generation, artifact_cache, converters_);
         if (status == OfflineStretchProgramCompileStatus::Progress)
             return TrackAudioClipCompileStatus::Progress;
         if (status == OfflineStretchProgramCompileStatus::Failed) {
@@ -32,8 +32,9 @@ TrackAudioClipCompileStatus TrackAudioProgramCompiler::step(
         return TrackAudioClipCompileStatus::Failed;
     }
     if (!*prepared) return TrackAudioClipCompileStatus::Progress;
-    auto compiled = compile_audio_clip_program_cached(
-        clip, project, tempo_map, assets, limits, converters_, source_frame_offset);
+    auto compiled = compile_audio_clip_program_cached(clip, project, tempo_map, assets, limits,
+                                                      converters_, source_frame_offset,
+                                                      placement_fades);
     if (!compiled) {
         error_ = {compiled.error(), OfflineStretchErrorCode::None};
         return TrackAudioClipCompileStatus::Failed;

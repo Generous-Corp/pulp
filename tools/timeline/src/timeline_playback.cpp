@@ -1,5 +1,6 @@
 #include "timeline_agent_internal.hpp"
 
+#include <pulp/host/timeline_offline_renderer.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 
 #include <algorithm>
@@ -62,6 +63,32 @@ std::uint64_t render_frame_count(const pulp::timeline::Sequence& sequence,
         }
     }
     return frames;
+}
+
+std::string offline_render_message(const host::TimelineOfflineRenderResult& result) {
+    switch (result.code) {
+    case host::TimelineOfflineRenderCode::Ok:
+        return "render completed";
+    case host::TimelineOfflineRenderCode::InvalidRange:
+        return "render region is empty or outside the tempo map's sample range";
+    case host::TimelineOfflineRenderCode::InvalidLimits:
+        return "render limits rejected the request: channels, block size, or the output-frame "
+               "ceiling";
+    case host::TimelineOfflineRenderCode::SampleRateMismatch:
+        return "render sample rate disagrees with the compiled tempo map";
+    case host::TimelineOfflineRenderCode::InvalidProgram:
+        return "compiled program has no tracks or no audio routes to render";
+    case host::TimelineOfflineRenderCode::BindingRejected:
+        return "render graph admission error " +
+               std::to_string(static_cast<unsigned>(result.admission.code));
+    case host::TimelineOfflineRenderCode::TransportRejected:
+        return "transport rejected the render, error " +
+               std::to_string(static_cast<unsigned>(result.transport_error));
+    case host::TimelineOfflineRenderCode::ProcessFailed:
+        return "render graph process error " +
+               std::to_string(static_cast<unsigned>(result.process.code));
+    }
+    return "render failed for an unrecognized reason";
 }
 
 std::string compile_error_message(const playback::CompileError& error) {

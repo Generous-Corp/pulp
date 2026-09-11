@@ -1,5 +1,7 @@
 #include "sequence_content_lowerer.hpp"
 
+#include <pulp/timebase/quantize.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -23,6 +25,76 @@ namespace {
 bool consumes_clip_gain(const timeline::ClipContent& content) noexcept {
     return std::holds_alternative<timeline::MediaRef>(content) ||
            std::holds_alternative<timeline::EmptyContent>(content);
+}
+
+/// Appends `placement`'s own fade ramps, translated into owner-timeline ticks.
+///
+/// `translation` carries a tick of the coordinate space the placement was
+/// authored in to the flattened timeline; it is zero at the compile root and
+/// the leaf's re-placement offset at every level below, which is a pure
+/// translation because flattening moves a window without scaling it.
+///
+/// The ramps are read off the placement's untrimmed extent on purpose. A
+/// trimmed placement enters its fade part way up, and that is exactly the fact
+/// the window carries — clamping the ramp to the surviving window instead would
+/// re-anchor it to a new edge and sound the fade the author did not write.
+void append_placement_fades(std::vector<LoweredPlacementFade>& spans,
+                            const timeline::Clip& placement, std::int64_t translation) {
+    const auto playback = placement.playback_properties();
+    const auto duration = static_cast<std::uint64_t>(placement.duration().value);
+    const auto shape = playback.fade_shape;
+    const auto shift = timebase::TickDuration{translation};
+    const auto start = placement.start() + shift;
+    const auto end = placement.end() + shift;
+    if (const auto head = std::min(playback.fade_in_duration, duration); head != 0)
+        spans.push_back(
+            {start, start + timebase::TickDuration{static_cast<std::int64_t>(head)}, shape});
+    if (const auto tail = std::min(playback.fade_out_duration, duration); tail != 0)
+        spans.push_back(
+            {end, end - timebase::TickDuration{static_cast<std::int64_t>(tail)}, shape});
+}
+
+/// Whether `span` changes what a clip occupying `[start, end)` sounds.
+///
+/// A ramp the clip sits entirely past reads unity everywhere the clip plays, so
+/// carrying it would cost a division per sample to multiply by one. A clip on
+/// the silent side is a different matter and is kept: there the ramp is what
+/// makes it quiet.
+bool span_reaches(const LoweredPlacementFade& span, timebase::TickPosition start,
+                  timebase::TickPosition end) noexcept {
+    return span.open_tick > span.silent_tick ? start < span.open_tick : end > span.open_tick;
+}
+
+/// The greatest number of ticks `GrooveTemplate::apply_timing` can move any
+/// position under `groove`.
+///
+/// Swing warps a position toward its pair's pivot, so the extreme displacement
+/// is the pivot's own distance from the grid line, and it is attained exactly at
+/// the pair midpoint. That is why one evaluation there reads the supremum rather
+/// than a sample of it. A per-step table adds at most its widest authored
+/// offset, and the two compose additively.
+///
+/// Timing strength scales both terms and never magnifies, so the unscaled sum
+/// still bounds the scaled result; strength is consulted only for the degenerate
+/// zero, where the groove provably moves nothing at all.
+///
+/// The result is a supremum, not an estimate: a selection window widened by this
+/// many ticks cannot miss a note the groove would have pulled into view.
+std::int64_t groove_timing_reach(const timeline::GrooveTemplate& groove) noexcept {
+    if (groove.states_no_feel() || groove.timing_strength() == 0)
+        return 0;
+    std::int64_t reach = 0;
+    if (const auto grid = groove.swing_grid(); grid.value != 0) {
+        const auto extreme = timebase::swing_displacement(timebase::TickPosition{grid.value}, grid,
+                                                          groove.swing());
+        reach = extreme.value < 0 ? -extreme.value : extreme.value;
+    }
+    std::int64_t widest_step = 0;
+    for (const auto& step : groove.steps()) {
+        const auto offset = step.timing_offset.value;
+        widest_step = std::max(widest_step, offset < 0 ? -offset : offset);
+    }
+    return reach + widest_step;
 }
 
 } // namespace
@@ -51,10 +123,24 @@ bool consumes_clip_gain(const timeline::ClipContent& content) noexcept {
 ///  * **Pan** (`NestedMixerPanUnsupported`) — a clip has no stereo placement of
 ///    its own, and the parent track's single pan also serves whatever else that
 ///    track holds. There is no value to write it into.
-///  * **A placement fade** (`NestedPlacementFadeUnsupported`) — one envelope
-///    over the whole nested window, while a leaf can only fade from its own
-///    edge. A leaf inside the fade region needs a partial ramp the clip model
-///    cannot express.
+///  * **A placement fade over a leaf that consumes no clip gain**
+///    (`NestedPlacementFadeUnsupported`) — the fade does compose, but only
+///    where something reads it. A fade is a time-varying gain, so it needs the
+///    sink static gain needs, and note, registered and opaque leaves compile to
+///    events no renderer scales by the gain of the clip that carried them.
+///
+/// The fade over a leaf that *does* consume clip gain composes, and it does so
+/// without folding: a placement fade travels beside the leaf as the ramp it
+/// is, in owner-timeline ticks, and the renderer reads the leaf's position
+/// within it. Gain can fold because a product of scalars is a scalar; a ramp is
+/// time-varying, and two ramps of different shapes do not reduce to a third, so
+/// the leaf carries the list. Nesting one level deeper appends to it.
+///
+/// A leaf's *own* fade is a different thing again and composes multiplicatively
+/// with the above: a trim that cuts into it re-anchors the fade to the new edge
+/// and shortens it by the trim, the same answer an unnested clip gives when it
+/// is dragged shorter. The placement ramp keeps its own edges instead, which is
+/// why a trimmed placement enters its fade part way up.
 ///
 /// And a composed gain that has nowhere to land is refused rather than dropped
 /// (`NestedGainSinkUnsupported`): see `consumes_clip_gain`.
@@ -165,7 +251,7 @@ class SequenceContentLowerer::Impl {
         auto appended = append(std::move(sentinel).value(), clip.id());
         if (appended.error)
             return appended;
-        push_reference(clip, *reference, 1, 1.0f);
+        push_reference(clip, *reference, 1, 1.0f, {}, clip, 0);
         return {};
     }
 
@@ -184,6 +270,11 @@ class SequenceContentLowerer::Impl {
         // The fader of the child track currently being walked, set once when
         // the walk enters it.
         float track_gain = 1.0f;
+        // Every enclosing placement's fade ramps, this frame's own included,
+        // already carried into the owner timeline's ticks. Each level appends;
+        // nothing folds, because ramps of different shapes have no common
+        // shape to fold into.
+        std::vector<LoweredPlacementFade> placement_fades;
     };
 
     struct PendingLeaf {
@@ -195,6 +286,10 @@ class SequenceContentLowerer::Impl {
         timebase::TickDuration target_duration;
         std::int64_t left_trim = 0;
         std::int64_t right_trim = 0;
+        // Ticks of content kept beyond each cut edge so the owner's groove has
+        // something to pull inward. Never wider than the trim it sits behind.
+        std::int64_t pad_left = 0;
+        std::int64_t pad_right = 0;
         std::size_t note_index = 0;
         std::vector<timeline::NoteEvent> clipped_notes;
         timeline::ItemId context_sequence_id;
@@ -202,18 +297,23 @@ class SequenceContentLowerer::Impl {
         // Exactly 1.0f when the nesting is transparent, which is the value that
         // makes composition a no-op rather than a rounding event.
         float composed_gain = 1.0f;
+        // The enclosing ramps that reach this leaf, in owner-timeline ticks.
+        std::vector<LoweredPlacementFade> placement_fades;
     };
 
     StepResult append(timeline::Clip clip, timeline::ItemId source,
                       double source_frame_offset = 0.0, timeline::ItemId context_sequence_id = {},
-                      std::optional<timebase::TickPosition> context_start = std::nullopt) {
+                      std::optional<timebase::TickPosition> context_start = std::nullopt,
+                      std::int64_t groove_pad_left = 0, std::int64_t groove_pad_right = 0,
+                      std::vector<LoweredPlacementFade> placement_fades = {}) {
         if (expanded_clips_ >= max_expanded_clips_)
             return {.error =
                         SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded, source}};
         ++expanded_clips_;
         const auto authored_start = context_start.value_or(clip.start());
-        output_->push_back(
-            {std::move(clip), source_frame_offset, context_sequence_id, authored_start});
+        output_->push_back({std::move(clip), source_frame_offset, context_sequence_id,
+                            authored_start, groove_pad_left, groove_pad_right,
+                            std::move(placement_fades)});
         return {};
     }
 
@@ -233,18 +333,14 @@ class SequenceContentLowerer::Impl {
             return SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
                                          placement.id()};
         const auto playback = placement.playback_properties();
-        // A placement fade is one envelope over the whole nested window. A
-        // flattened leaf can only carry a fade measured from its own edge, so a
-        // leaf lying inside that region would need a partial ramp — starting
-        // part-way up and ending part-way up — which ClipPlaybackProperties
-        // cannot express at all. This is an expressiveness limit, not a choice
-        // between two defensible answers, so it stays refused.
-        if (playback.fade_in_duration != 0 || playback.fade_out_duration != 0)
-            return SequenceLoweringError{CompileErrorCode::NestedPlacementFadeUnsupported,
-                                         placement.id()};
-        // Gain, by contrast, composes into the flattened leaves; the class
-        // comment states the precedence rule. Only the values that cannot
-        // enter a product at all are rejected here.
+        // A placement fade travels beside the leaves as a ramp rather than
+        // entering them, so nothing about the envelope itself is refused here;
+        // the one case with nowhere to land is caught per leaf, where the
+        // content that would have to read it is known.
+        //
+        // Gain composes into the flattened leaves instead; the class comment
+        // states the precedence rule. Only the values that cannot enter a
+        // product at all are rejected here.
         if (!std::isfinite(playback.gain_linear) || playback.gain_linear < 0.0f)
             return SequenceLoweringError{CompileErrorCode::InvalidStructure, placement.id()};
         if (!project_.find_sequence(reference.sequence_id))
@@ -255,12 +351,21 @@ class SequenceContentLowerer::Impl {
         return std::nullopt;
     }
 
+    /// `authored_placement` is the placement as written, before any trim this
+    /// walk applied to it, and `translation` carries its ticks into the owner
+    /// timeline. The two are separate from `placement` because the clip pushed
+    /// onto the stack is the trimmed, re-placed one whose fades have already
+    /// been lifted out of it and into the ramp list.
     void push_reference(const timeline::Clip& placement, const timeline::SequenceRef& reference,
-                        std::size_t depth, float inherited_gain) {
+                        std::size_t depth, float inherited_gain,
+                        std::vector<LoweredPlacementFade> placement_fades,
+                        const timeline::Clip& authored_placement, std::int64_t translation) {
+        append_placement_fades(placement_fades, authored_placement, translation);
         auto& frame = frames_.emplace_back(ReferenceFrame{
             placement, reference, project_.find_sequence(reference.sequence_id),
             reference.source_start + timebase::TickDuration{placement.duration().value}, depth});
         frame.inherited_gain = inherited_gain * placement.playback_properties().gain_linear;
+        frame.placement_fades = std::move(placement_fades);
     }
 
     StepResult step_reference() {
@@ -271,11 +376,28 @@ class SequenceContentLowerer::Impl {
         }
         const auto& track = frame.sequence->tracks()[frame.track_index];
         if (frame.clip_index == 0) {
-            if (!track.device_chain().empty() || !track.automation_lanes().empty() ||
-                !track.take_lanes().empty() || track.freeze() ||
-                track.active_take_lane_id().valid() || track.record_armed())
+            if (!track.device_chain().empty() || !track.automation_lanes().empty())
                 return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
                                                        track.id()}};
+            // Freeze and an active take lane are the two states that replace a
+            // track's arrangement with something else. begin_track honours that
+            // replacement by returning Freeze or ActiveTake content and
+            // discarding the clips; this walk descends into the clips instead,
+            // so it would play precisely the material the author replaced. Each
+            // names its own code rather than sharing a generic one, because the
+            // construct that would lift it differs.
+            if (track.freeze())
+                return {.error = SequenceLoweringError{
+                            CompileErrorCode::NestedFrozenTrackUnsupported, track.id()}};
+            if (track.active_take_lane_id().valid())
+                return {.error = SequenceLoweringError{CompileErrorCode::NestedActiveTakeUnsupported,
+                                                       track.id()}};
+            // Record-arm and unselected take lanes are deliberately absent from
+            // the refusals above. Neither reaches lowered output at either
+            // level: begin_track consults freeze and the active lane and never
+            // reads record-arm or the lane list, so a nested track carrying
+            // them lowers to the same clips as one without. Refusing them
+            // rejected documents that already compile correctly.
             const auto mixer = track.mixer();
             // Pan has no sink. Flattening folds the child into the parent
             // track, and the parent's single pan also serves whatever else that
@@ -324,43 +446,36 @@ class SequenceContentLowerer::Impl {
             (left_trim != 0 || right_trim != 0))
             return {.error = SequenceLoweringError{
                         CompileErrorCode::TrimmedRegisteredContentUnsupported, child.id()}};
-        if (std::holds_alternative<timeline::MediaRef>(child.content())) {
-            // A conforming clip maps its complete authored source span onto its
-            // musical placement. The legacy nested-trim path below advances a
-            // raw source-frame offset from elapsed timeline samples, which is
-            // only valid for TimeConform::None. Refuse a partial view until the
-            // renderer owns a conform-aware source-range mapping; otherwise a
-            // nested tempo-ramped clip can silently start at the wrong audio.
-            if (child.time_conform() != timeline::TimeConform::None &&
-                (left_trim != 0 || right_trim != 0))
-                return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
-                                                       child.id()}};
-            const auto playback = child.playback_properties();
-            const auto retained_start = static_cast<std::uint64_t>(left_trim);
-            const auto retained_end =
-                static_cast<std::uint64_t>(child.duration().value - right_trim);
-            const auto child_duration = static_cast<std::uint64_t>(child.duration().value);
-            const bool cuts_fade_in =
-                playback.fade_in_duration > 0 && retained_start < playback.fade_in_duration &&
-                !(retained_start == 0 && retained_end >= playback.fade_in_duration);
-            const auto fade_out_start = child_duration - playback.fade_out_duration;
-            const bool cuts_fade_out =
-                playback.fade_out_duration > 0 && retained_end > fade_out_start &&
-                !(retained_end == child_duration && retained_start <= fade_out_start);
-            if (cuts_fade_in || cuts_fade_out)
-                return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
-                                                       child.id()}};
-        }
+        // A conforming clip maps its complete authored source span onto its
+        // musical placement. The legacy nested-trim path below advances a raw
+        // source-frame offset from elapsed timeline samples, which is only
+        // valid for TimeConform::None. Refuse a partial view until the renderer
+        // owns a conform-aware source-range mapping; otherwise a nested
+        // tempo-ramped clip can silently start at the wrong audio.
+        if (std::holds_alternative<timeline::MediaRef>(child.content()) &&
+            child.time_conform() != timeline::TimeConform::None &&
+            (left_trim != 0 || right_trim != 0))
+            return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
+                                                   child.id()}};
 
         if (const auto* nested = std::get_if<timeline::SequenceRef>(&child.content())) {
             if (nested->source_start.value > std::numeric_limits<std::int64_t>::max() - left_trim)
                 return {.error =
                             SequenceLoweringError{CompileErrorCode::InvalidStructure, child.id()}};
+            // The inner placement's own fades are lifted out of the clip and
+            // into the ramp list, which is the only place they can survive a
+            // trim intact: the clip carries the trimmed window, and a fade
+            // wider than that window is not a clip a document can hold, so
+            // leaving them here would reject a nesting that renders perfectly
+            // well. Its gain stays, because gain does fold.
+            auto nested_playback = child.playback_properties();
+            nested_playback.fade_in_duration = 0;
+            nested_playback.fade_out_duration = 0;
             auto nested_clip = timeline::Clip::create(
                 child.id(), target_start, target_duration,
                 timeline::SequenceRef{nested->sequence_id,
                                       nested->source_start + timebase::TickDuration{left_trim}},
-                child.playback_properties());
+                nested_playback);
             if (!nested_clip)
                 return {.error =
                             SequenceLoweringError{CompileErrorCode::InvalidStructure, child.id()}};
@@ -370,17 +485,48 @@ class SequenceContentLowerer::Impl {
                 return {.error = error};
             if (auto charged = charge_reference(child.id()); charged.error)
                 return charged;
-            push_reference(nested_clip.value(), reference, depth, composed_gain);
+            push_reference(nested_clip.value(), reference, depth, composed_gain,
+                           frame.placement_fades, child, target_start.value - clipped_start.value);
             return {};
         }
 
         if (composed_gain != 1.0f && !consumes_clip_gain(child.content()))
             return {.error = SequenceLoweringError{CompileErrorCode::NestedGainSinkUnsupported,
                                                    child.id()}};
+        // Only the ramps this leaf lies within travel with it. One the leaf
+        // sits wholly past reads unity for its whole extent, and a leaf that
+        // never meets a ramp is a leaf that need not know one exists.
+        std::vector<LoweredPlacementFade> leaf_fades;
+        for (const auto& span : frame.placement_fades)
+            if (span_reaches(span, target_start, target_start + target_duration))
+                leaf_fades.push_back(span);
+        // A fade is a time-varying gain, so it needs the sink a static gain
+        // needs, and the content kinds that have none are the same ones.
+        // Refusing is the whole point: the alternative is a document that
+        // compiles, plays the note leaf at full level through a fade the
+        // author wrote, and reports nothing.
+        if (!leaf_fades.empty() && !consumes_clip_gain(child.content()))
+            return {.error = SequenceLoweringError{CompileErrorCode::NestedPlacementFadeUnsupported,
+                                                   child.id()}};
         if (next_generated_id_ == 0 ||
             next_generated_id_ == std::numeric_limits<std::uint64_t>::max())
             return {.error = SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded,
                                                    child.id()}};
+        // A trimmed note leaf keeps a little content beyond each cut edge, so a
+        // groove that pulls a note inward across that edge still has the note to
+        // pull. Padding past the child's own extent would select nothing — the
+        // child holds no note outside itself — so the reach is capped by the
+        // trim, which also keeps the widened window inside the child and
+        // therefore free of overflow. An untrimmed edge pads by zero for the
+        // same reason, and a groove that states no feel reaches zero, so both
+        // cases lower to exactly the clip they lowered to before.
+        std::int64_t pad_left = 0;
+        std::int64_t pad_right = 0;
+        if (std::holds_alternative<timeline::MidiContent>(child.content())) {
+            const auto reach = groove_timing_reach(frame.sequence->groove());
+            pad_left = std::min(reach, left_trim);
+            pad_right = std::min(reach, right_trim);
+        }
         pending_leaf_ = PendingLeaf{
             child,
             timeline::ItemId{next_generated_id_++},
@@ -390,10 +536,13 @@ class SequenceContentLowerer::Impl {
             target_duration,
             left_trim,
             right_trim,
+            pad_left,
+            pad_right,
             0,
             {},
             frame.sequence->id(),
             composed_gain,
+            std::move(leaf_fades),
         };
         if (!std::holds_alternative<timeline::MidiContent>(child.content()))
             return finish_pending_leaf();
@@ -421,8 +570,14 @@ class SequenceContentLowerer::Impl {
         if (note_start > std::numeric_limits<std::int64_t>::max() - note.duration.value)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, note.id}};
         const auto note_end = note_start + note.duration.value;
-        const auto audible_start = std::max(note_start, pending.clipped_start.value);
-        const auto audible_end = std::min(note_end, pending.clipped_end.value);
+        // Selection runs over the padded window, but the note still rebases onto
+        // the padded anchor, so a retained note keeps its true distance from the
+        // cut edge. Whether it actually sounds is decided later, after the groove
+        // has moved it and the compiler has clamped it to the audible window.
+        const auto window_start = pending.clipped_start.value - pending.pad_left;
+        const auto window_end = pending.clipped_end.value + pending.pad_right;
+        const auto audible_start = std::max(note_start, window_start);
+        const auto audible_end = std::min(note_end, window_end);
         if (audible_end <= audible_start)
             return {};
         if (expanded_note_events_ > max_expanded_note_events_ ||
@@ -431,7 +586,7 @@ class SequenceContentLowerer::Impl {
                                                    pending.child.id()}};
         expanded_note_events_ += 2;
         auto clipped_note = note;
-        clipped_note.start = timebase::TickPosition{audible_start - pending.clipped_start.value};
+        clipped_note.start = timebase::TickPosition{audible_start - window_start};
         clipped_note.duration = timebase::TickDuration{audible_end - audible_start};
         pending.clipped_notes.push_back(clipped_note);
         return {};
@@ -447,10 +602,6 @@ class SequenceContentLowerer::Impl {
             if (!owner)
                 return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                        pending.context_sequence_id}};
-            if ((pending.left_trim != 0 || pending.right_trim != 0) &&
-                !owner->groove().states_no_feel())
-                return {.error = SequenceLoweringError{CompileErrorCode::TrimmedGrooveUnsupported,
-                                                       pending.child.id()}};
             // A nested note clip keeps its modifiers and its authored seed.
             // Rebuilding with the notes alone would leave the notes sounding
             // unconditionally inside a SequenceRef while they honour their
@@ -566,6 +717,12 @@ class SequenceContentLowerer::Impl {
             source_frame_offset = static_cast<double>(source_position);
         }
         auto playback = pending.child.playback_properties();
+        // A fade is measured from the clip's own edge, and a trim moves that
+        // edge, so the retained fade is the authored one minus the trim rather
+        // than the same ramp viewed part-way through. That is the ordinary
+        // answer for a clip dragged shorter, and it keeps a nested leaf and a
+        // hand-flattened one identical. A trim that swallows the whole fade
+        // leaves none, and neither fade may outlast the clip that carries it.
         playback.fade_in_duration =
             pending.left_trim >= static_cast<std::int64_t>(playback.fade_in_duration)
                 ? 0
@@ -594,7 +751,8 @@ class SequenceContentLowerer::Impl {
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                    pending.child.id()}};
         return append(std::move(flattened).value(), pending.child.id(), source_frame_offset,
-                      pending.context_sequence_id, pending.clipped_start);
+                      pending.context_sequence_id, pending.clipped_start, pending.pad_left,
+                      pending.pad_right, std::move(pending.placement_fades));
     }
 
     const timeline::Project& project_;

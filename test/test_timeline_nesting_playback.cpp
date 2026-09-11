@@ -2,8 +2,10 @@
 #include <pulp/playback/program_wire.hpp>
 #include "../core/playback/src/sequence_content_lowerer.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <span>
 #include <utility>
 
 TEST_CASE("Nested notes compile like a hand-flattened track and fan out dirty children") {
@@ -191,54 +193,6 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     REQUIRE(invalid_note_compiler.submit(request));
     REQUIRE(invalid_note_compiler.status().has_error);
     REQUIRE(invalid_note_compiler.status().last_error.code == CompileErrorCode::InvalidStructure);
-
-    std::vector<float> audio(24'000, 1.0f);
-    const auto audio_data_value = audio_data({audio});
-    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
-    auto faded_media =
-        musical_media_clip(12, 0, kTicksPerQuarter, 50, audio.size(),
-                           {.gain_linear = 1.0f,
-                            .fade_in_duration = static_cast<std::uint64_t>(kTicksPerQuarter / 2)});
-    auto faded_child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
-                                             {track(11, {faded_media})}));
-    auto faded_root = take(Sequence::create(
-        {2}, "root", std::nullopt,
-        {track(3, {nested_clip(4, 10, 0, 3 * kTicksPerQuarter / 4, kTicksPerQuarter / 4)})}));
-    ProjectInput faded_input;
-    faded_input.id = {1};
-    faded_input.name = "partial fade";
-    faded_input.next_item_id = 100;
-    faded_input.root_sequence_id = {2};
-    faded_input.assets = {{50, "audio", audio.size(), {48'000, 1}, hash}};
-    faded_input.sequences = {faded_root, faded_child};
-    PlaybackProgramStore fade_store;
-    InlineExecutor fade_executor;
-    PlaybackProgramCompiler fade_compiler(fade_store, fade_executor, std::chrono::microseconds(0));
-    request.project = shared(take(Project::create(std::move(faded_input))));
-    request.document_revision = 6;
-    request.audio_assets = pool({{{50}, audio_data_value}});
-    REQUIRE(fade_compiler.submit(request));
-    REQUIRE(fade_compiler.status().has_error);
-    REQUIRE(fade_compiler.status().last_error.code == CompileErrorCode::NestedSequenceUnsupported);
-
-    auto truncated_root = take(Sequence::create(
-        {2}, "root", std::nullopt, {track(3, {nested_clip(4, 10, 0, kTicksPerQuarter / 4, 0)})}));
-    faded_input.id = {1};
-    faded_input.name = "opposite partial fade";
-    faded_input.next_item_id = 100;
-    faded_input.root_sequence_id = {2};
-    faded_input.assets = {{50, "audio", audio.size(), {48'000, 1}, hash}};
-    faded_input.sequences = {truncated_root, faded_child};
-    PlaybackProgramStore truncated_store;
-    InlineExecutor truncated_executor;
-    PlaybackProgramCompiler truncated_compiler(truncated_store, truncated_executor,
-                                               std::chrono::microseconds(0));
-    request.project = shared(take(Project::create(std::move(faded_input))));
-    request.document_revision = 8;
-    REQUIRE(truncated_compiler.submit(request));
-    REQUIRE(truncated_compiler.status().has_error);
-    REQUIRE(truncated_compiler.status().last_error.code ==
-            CompileErrorCode::NestedSequenceUnsupported);
 }
 
 TEST_CASE("Audio clip limits do not cap non-audio sequence expansion") {
@@ -547,6 +501,133 @@ TEST_CASE("Nested audio trimming preserves fractional sample-rate conversion off
     REQUIRE(nested_output.storage == direct_output.storage);
 }
 
+TEST_CASE("Nested trimming shortens an audio leaf's own fade to the new edge") {
+    // A fade belongs to the clip's edge, so a trim that moves the edge shortens
+    // the fade rather than dropping the listener part-way down an unchanged
+    // ramp. Each geometry below is proved the way the rest of this file proves
+    // nesting: compose it, hand-author the flattened clip that already carries
+    // the shortened fade, and require the two render sample-identically.
+    std::vector<float> ramp(24'000);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame)
+        ramp[frame] = static_cast<float>(frame + 1) / static_cast<float>(ramp.size());
+    const auto data = audio_data({ramp});
+    const auto assets = pool({{{50}, data}});
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    constexpr auto kQuarter = kTicksPerQuarter;
+    const auto source_frames = static_cast<std::int64_t>(ramp.size());
+
+    struct Geometry {
+        const char* label;
+        std::uint64_t child_fade_in;
+        std::uint64_t child_fade_out;
+        std::int64_t placement_duration;
+        std::int64_t placement_source_start;
+        std::uint64_t flattened_fade_in;
+        std::uint64_t flattened_fade_out;
+        // A fade the trim did not shorten. Rendering it must disagree with the
+        // nested result, which is what makes the equality below a claim about
+        // the fade rather than one that passes on any two matching buffers.
+        std::uint64_t unshortened_fade_in;
+        std::uint64_t unshortened_fade_out;
+        // The shape rides along untouched, so a shortened fade must still be
+        // evaluated with the curve its author picked rather than reset to the
+        // default on the way through the flattening.
+        ClipFadeShape shape;
+        std::int64_t render_sample;
+    };
+    const std::array geometries{
+        Geometry{"left trim cuts into the fade in", static_cast<std::uint64_t>(kQuarter / 2), 0,
+                 3 * kQuarter / 4, kQuarter / 4, static_cast<std::uint64_t>(kQuarter / 4), 0,
+                 static_cast<std::uint64_t>(kQuarter / 2), 0, ClipFadeShape::EqualPower, 3'000},
+        Geometry{"right trim leaves less clip than fade in",
+                 static_cast<std::uint64_t>(kQuarter / 2), 0, kQuarter / 4, 0,
+                 static_cast<std::uint64_t>(kQuarter / 4), 0, 0, 0, ClipFadeShape::Linear, 3'000},
+        Geometry{"right trim cuts into the fade out", 0, static_cast<std::uint64_t>(kQuarter / 2),
+                 3 * kQuarter / 4, 0, 0, static_cast<std::uint64_t>(kQuarter / 4), 0,
+                 static_cast<std::uint64_t>(kQuarter / 2), ClipFadeShape::EqualPower, 15'000},
+        Geometry{"left trim leaves less clip than fade out", 0,
+                 static_cast<std::uint64_t>(kQuarter / 2), kQuarter / 4, 3 * kQuarter / 4, 0,
+                 static_cast<std::uint64_t>(kQuarter / 4), 0, 0, ClipFadeShape::Linear, 3'000},
+    };
+
+    for (const auto& geometry : geometries) {
+        INFO(geometry.label);
+        auto child_media = musical_media_clip(12, 0, kQuarter, 50, ramp.size(),
+                                              {.gain_linear = 1.0f,
+                                               .fade_in_duration = geometry.child_fade_in,
+                                               .fade_out_duration = geometry.child_fade_out,
+                                               .fade_shape = geometry.shape});
+        auto child = take(Sequence::create({10}, "child", TickDuration{kQuarter},
+                                           {track(11, {child_media})}));
+        auto root = take(Sequence::create({2}, "root", std::nullopt,
+                                          {track(3, {nested_clip(4, 10, 0,
+                                                                 geometry.placement_duration,
+                                                                 geometry.placement_source_start)})}));
+        ProjectInput nested_input;
+        nested_input.id = {1};
+        nested_input.name = "trimmed leaf fade";
+        nested_input.next_item_id = 100;
+        nested_input.root_sequence_id = {2};
+        nested_input.assets = {{50, "ramp", ramp.size(), {48'000, 1}, hash}};
+        nested_input.sequences = {root, child};
+        CompiledFixture nested(shared(take(Project::create(std::move(nested_input)))), map_120(),
+                               assets);
+
+        // The lowerer leaves the media reference alone and carries the trim in
+        // a separate source-frame offset, so the flattened twin advances the
+        // reference instead. Both end up reading the same absolute frames.
+        const auto trim_frames = geometry.placement_source_start * source_frames / kQuarter;
+        const auto flattened_source_count = static_cast<std::uint64_t>(source_frames - trim_frames);
+        const auto build_flat = [&](std::uint64_t fade_in, std::uint64_t fade_out) {
+            auto media = musical_media_clip(
+                4, 0, geometry.placement_duration, 50, flattened_source_count,
+                {.gain_linear = 1.0f,
+                 .fade_in_duration = fade_in,
+                 .fade_out_duration = fade_out,
+                 .fade_shape = geometry.shape},
+                TimeConform::None, static_cast<std::uint64_t>(trim_frames));
+            return project_with_tracks({track(3, {media})},
+                                       {{50, "ramp", ramp.size(), {48'000, 1}, hash}});
+        };
+        CompiledFixture flattened(
+            build_flat(geometry.flattened_fade_in, geometry.flattened_fade_out), map_120(), assets);
+
+        auto nested_program = nested.store.read();
+        auto flattened_program = flattened.store.read();
+        REQUIRE(nested_program);
+        REQUIRE(flattened_program);
+        const auto nested_audio = nested_program->find_track({3})->audio_program()->clips();
+        REQUIRE(nested_audio.size() == 1);
+
+        Output nested_output(1, 256);
+        Output flattened_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *nested_program, snapshot(*nested_program, 256, geometry.render_sample),
+                    nested_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *flattened_program, snapshot(*flattened_program, 256, geometry.render_sample),
+                    flattened_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(nested_output.storage == flattened_output.storage);
+        // Positive control: both sides carry audio, so the equality above is a
+        // statement about the fade and not about two silent buffers.
+        REQUIRE(nested_output.storage[0][0] != 0.0f);
+
+        if (geometry.unshortened_fade_in != 0 || geometry.unshortened_fade_out != 0) {
+            CompiledFixture unshortened(
+                build_flat(geometry.unshortened_fade_in, geometry.unshortened_fade_out), map_120(),
+                assets);
+            auto unshortened_program = unshortened.store.read();
+            REQUIRE(unshortened_program);
+            Output unshortened_output(1, 256);
+            REQUIRE(ArrangementAudioRenderer::process(
+                        *unshortened_program,
+                        snapshot(*unshortened_program, 256, geometry.render_sample),
+                        unshortened_output.view()) == AudioRenderStatus::Rendered);
+            REQUIRE(unshortened_output.storage != nested_output.storage);
+        }
+    }
+}
+
 TEST_CASE("Nested conforming audio refuses partial source windows") {
     std::vector<float> source(24'000, 1.0f);
     const auto data = audio_data({source});
@@ -664,12 +745,22 @@ NoteModifier certain_ratchet(std::uint64_t note_id, std::uint16_t ratchets) {
     return modifier;
 }
 
-GrooveTemplate one_step_groove(std::int64_t timing_offset, std::int32_t velocity_scale) {
+GrooveTemplate one_step_groove(std::int64_t timing_offset, std::int32_t velocity_scale,
+                               std::int32_t timing_strength = kGrooveUnitScale) {
     GrooveTemplateInput input;
     input.step = TickDuration{100};
     input.steps = {GrooveStep{TickDuration{timing_offset}, velocity_scale}};
+    input.timing_strength = timing_strength;
     return take(GrooveTemplate::create(std::move(input)));
 }
+
+// How the child sequence's groove is authored. `no_table` states no feel at all;
+// `zero_strength` carries a real one-entry table whose offsets are scaled to
+// nothing. Both displace no material, so both must lower to precisely the window
+// the cut describes. They are kept distinct because they are different shapes of
+// the same answer — no feel by absence, no feel by scale — and lowering must not
+// depend on which shape arrives.
+enum class ChaseGroove { authored, no_table, zero_strength };
 
 Project nested_groove_project(bool trim_child = false) {
     auto child_clip = take(Clip::create({12}, {0}, {960}, note_content(13)));
@@ -702,6 +793,59 @@ Project nested_groove_project(bool trim_child = false) {
     return take(Project::create(std::move(input)));
 }
 
+// A child holding a note that straddles a cut, a note entirely left of it, and
+// one well clear of it. Note 17 (452..466) is the sharpest of the three: it lies
+// wholly outside the window the cut describes, so it can reach the output only
+// through a widened selection, and can sound only if something then displaces it
+// back inside. The cut
+// falls at `source_start`, and the placement moves with the cut, so child tick T
+// lands on root tick 1000 + T no matter where the cut is. That is what makes the
+// variants directly comparable: any difference in the compiled events is a
+// difference the trim caused, which is exactly what must not happen.
+Project trimmed_groove_chase_project(std::int64_t source_start,
+                                     ChaseGroove groove = ChaseGroove::authored) {
+    auto notes = take(MidiContent::create({
+        NoteEvent{{17}, {452}, {14}, 40'000, 64, 0},
+        NoteEvent{{13}, {465}, {100}, 40'000, 64, 0},
+        NoteEvent{{15}, {600}, {100}, 40'000, 64, 0},
+    }));
+    auto child_clip = take(Clip::create({12}, {0}, {960}, std::move(notes)));
+    SequenceInput child_input;
+    child_input.id = {10};
+    child_input.name = "child";
+    child_input.musical_duration = TickDuration{960};
+    child_input.tracks = {track(11, {child_clip})};
+    if (groove == ChaseGroove::authored)
+        child_input.groove = one_step_groove(20, kGrooveUnitScale);
+    else if (groove == ChaseGroove::zero_strength)
+        child_input.groove = one_step_groove(20, kGrooveUnitScale, 0);
+    auto child = take(Sequence::create(std::move(child_input)));
+
+    SequenceInput root_input;
+    root_input.id = {2};
+    root_input.name = "root";
+    root_input.tracks = {
+        track(3, {nested_clip(4, 10, 1000 + source_start, 960 - source_start, source_start)}),
+    };
+    auto root = take(Sequence::create(std::move(root_input)));
+
+    ProjectInput input;
+    input.id = {1};
+    input.name = "trimmed groove chase";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+std::vector<TickPosition> chase_ticks(const Project& project) {
+    const auto program = compile(shared(project));
+    std::vector<TickPosition> ticks;
+    for (const auto& event : program->find_track({3})->arrangement_note_events())
+        ticks.push_back(event.tick);
+    return ticks;
+}
+
 CompileError compile_error_for(const Project& project);
 
 } // namespace
@@ -721,10 +865,172 @@ TEST_CASE("Nested MIDI reads exactly its owning sequence groove") {
     REQUIRE(root_events[1].tick == TickPosition{440});
 }
 
-TEST_CASE("A trimmed nested MIDI leaf with authored groove is explicitly refused") {
-    const auto error = compile_error_for(nested_groove_project(true));
-    REQUIRE(error.code == CompileErrorCode::TrimmedGrooveUnsupported);
-    REQUIRE(error.item == ItemId{12});
+TEST_CASE("A nested child that is record-armed or holds an unselected take lowers unchanged") {
+    // Neither state reaches lowered output at either level: begin_track reads
+    // freeze and the ACTIVE lane, and never record-arm or the lane list. Both
+    // used to refuse, so a document that already compiled correctly was
+    // rejected for carrying intent that changes nothing.
+    const auto plain = compile(shared(nested_child_state_project({})));
+    const auto plain_events = plain->find_track({3})->arrangement_note_events();
+    REQUIRE(plain_events.size() == 2);
+
+    const auto armed = compile(shared(nested_child_state_project({.record_armed = true})));
+    const auto dormant = compile(shared(nested_child_state_project({.dormant_take_lane = true})));
+    const auto both = compile(
+        shared(nested_child_state_project({.record_armed = true, .dormant_take_lane = true})));
+
+    // NoteProgramEvent compares by every field, so this is identity of sample,
+    // tick, clip, note, velocity, pitch, channel and kind — not just position.
+    const auto identical = [&](std::span<const NoteProgramEvent> events) {
+        return std::equal(events.begin(), events.end(), plain_events.begin(), plain_events.end());
+    };
+    REQUIRE(identical(armed->find_track({3})->arrangement_note_events()));
+    REQUIRE(identical(dormant->find_track({3})->arrangement_note_events()));
+    REQUIRE(identical(both->find_track({3})->arrangement_note_events()));
+}
+
+TEST_CASE("A nested frozen child refuses with the code that names the freeze") {
+    // The negative control for the case above. Freeze substitutes a rendered
+    // artifact for the arrangement, and the nested walk reads the arrangement,
+    // so compiling would play exactly the material the author froze.
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = shared(nested_child_state_project({.frozen = true}));
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    REQUIRE(compiler.submit(std::move(request)));
+    REQUIRE(compiler.status().has_error);
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::NestedFrozenTrackUnsupported);
+    REQUIRE(compiler.status().last_error.item == ItemId{11});
+    REQUIRE_FALSE(store.has_value());
+}
+
+TEST_CASE("A nested child with a SELECTED take lane refuses where a dormant one does not") {
+    // The same lane and the same take as the dormant case above; only the
+    // selection differs. That is what separates this refusal from a blanket
+    // one over take lanes, and it is why the fixture authors a real take
+    // rather than an empty lane.
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = shared(
+        nested_child_state_project({.dormant_take_lane = true, .active_take_lane = true}));
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.sample_rate = request.tempo_map->sample_rate();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    REQUIRE(compiler.submit(std::move(request)));
+    REQUIRE(compiler.status().has_error);
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+    REQUIRE(compiler.status().last_error.item == ItemId{11});
+    REQUIRE_FALSE(store.has_value());
+}
+
+TEST_CASE("A trimmed nested MIDI leaf with authored groove lowers like the untrimmed one") {
+    // The trim keeps every note this groove touches, so trimming must change
+    // nothing at all about how they sound. This case used to be refused
+    // outright; it now compiles, and it compiles to the same events.
+    const auto trimmed = compile(shared(nested_groove_project(true)));
+    const auto trimmed_events = trimmed->find_track({3})->arrangement_note_events();
+    const auto untrimmed = compile(shared(nested_groove_project(false)));
+    const auto untrimmed_events = untrimmed->find_track({3})->arrangement_note_events();
+
+    REQUIRE(trimmed_events.size() == 2);
+    REQUIRE(trimmed_events[0].tick == untrimmed_events[0].tick);
+    REQUIRE(trimmed_events[0].tick == TickPosition{620});
+    REQUIRE(trimmed_events[0].velocity == untrimmed_events[0].velocity);
+    REQUIRE(trimmed_events[0].velocity == 20'000);
+    REQUIRE(trimmed_events[1].tick == untrimmed_events[1].tick);
+    REQUIRE(trimmed_events[1].tick == TickPosition{860});
+}
+
+TEST_CASE("A groove chases a note back across a nested trim edge") {
+    // Note 13 is authored at child tick 465, five ticks left of the cut at 470,
+    // and the owner's groove pushes it +20. Reading the groove at the note's own
+    // authored tick puts it at 485 — inside the retained window — so it sounds,
+    // at its full authored length. Selecting first and grooving afterwards would
+    // have shortened it to 95 ticks and started it five ticks late.
+    //
+    // Note 17 is the sharper reading. It runs 452..466, entirely left of the
+    // cut, so the window the cut describes excludes it outright. It reaches the
+    // output only because selection ran over the widened window, and it sounds
+    // only because the groove then carried it to 472. Its presence is therefore
+    // a direct reading of the pad rather than of the clamp that follows.
+    const auto ticks = chase_ticks(trimmed_groove_chase_project(470));
+    REQUIRE(ticks.size() == 6);
+    CHECK(ticks[0] == TickPosition{1472});
+    CHECK(ticks[1] == TickPosition{1485});
+    CHECK(ticks[2] == TickPosition{1486});
+    CHECK(ticks[3] == TickPosition{1585});
+    CHECK(ticks[4] == TickPosition{1620});
+    CHECK(ticks[5] == TickPosition{1720});
+}
+
+TEST_CASE("Nested groove timing does not depend on where the trim edge falls") {
+    // Three different cuts, all retaining both notes, all placed so that a given
+    // child tick lands on a fixed root tick. The groove is read at the note's
+    // authored position rather than at its distance from the cut, so all three
+    // must agree exactly. Cut 470 is the discriminating one: it is the only cut
+    // that falls to the right of note 13, and the only one for which note 17 is
+    // present because the window was widened rather than because the cut
+    // retained it anyway. A selection that ignored the pad would drop note 17 at
+    // 470 alone, and the three would stop agreeing.
+    const auto at_400 = chase_ticks(trimmed_groove_chase_project(400));
+    const auto at_440 = chase_ticks(trimmed_groove_chase_project(440));
+    const auto at_470 = chase_ticks(trimmed_groove_chase_project(470));
+
+    REQUIRE(at_400.size() == 6);
+    CHECK(at_400 == at_440);
+    CHECK(at_400 == at_470);
+    CHECK(at_400[0] == TickPosition{1472});
+}
+
+TEST_CASE("A trimmed nested leaf under a feel-free groove is untouched by chasing") {
+    // A groove that states no feel displaces nothing, so there is nothing to
+    // chase and the leaf must lower to precisely the window the cut describes:
+    // note 13 truncated at the cut, starting there and running to its authored
+    // end, and note 17 absent entirely because the window was never widened.
+    // This is the path every existing nesting takes, and it must not move.
+    const auto ticks = chase_ticks(trimmed_groove_chase_project(470, ChaseGroove::no_table));
+    REQUIRE(ticks.size() == 4);
+    CHECK(ticks[0] == TickPosition{1470});
+    CHECK(ticks[1] == TickPosition{1565});
+    CHECK(ticks[2] == TickPosition{1600});
+    CHECK(ticks[3] == TickPosition{1700});
+}
+
+TEST_CASE("A zero-strength groove table chases nothing across a nested trim edge") {
+    // A groove that is not feel-free by shape: it carries a real one-entry table,
+    // and only its timing strength reduces the displacement to nothing. It must
+    // lower to precisely the window the cut describes and agree with the
+    // no-table groove exactly.
+    //
+    // What this asserts is that agreement, and not coverage of the strength-zero
+    // short-circuit in groove_timing_reach. That short-circuit cannot be
+    // observed from compiled output at all: a note the pad admits lies entirely
+    // left of the retained start, and with nothing to displace it the sounding
+    // clamp reduces it to zero length and drops it. Measured rather than
+    // assumed — with the short-circuit removed, note 17 sits squarely in the
+    // pad region and every assertion below still holds, while the same note is
+    // plainly visible under the authored groove above. It is a cost guard, not
+    // a behavioural one, and no black-box fixture can make it fail.
+    const auto ticks =
+        chase_ticks(trimmed_groove_chase_project(470, ChaseGroove::zero_strength));
+    const auto without_table =
+        chase_ticks(trimmed_groove_chase_project(470, ChaseGroove::no_table));
+    REQUIRE(ticks.size() == 4);
+    CHECK(ticks == without_table);
+    CHECK(ticks[0] == TickPosition{1470});
+    CHECK(ticks[1] == TickPosition{1565});
+    CHECK(ticks[2] == TickPosition{1600});
+    CHECK(ticks[3] == TickPosition{1700});
 }
 
 TEST_CASE("A nested note clip keeps its modifiers and authored seed") {
@@ -1026,19 +1332,7 @@ TEST_CASE("Nested mixer state with no composition rule keeps its own refusal") {
     const auto ramp = unit_ramp();
     const auto assets = pool({{{50}, audio_data({ramp})}});
 
-    // A placement fade is one envelope over the whole nested window, and a leaf
-    // can only fade from its own edge, so it stays refused under its own code
-    // even though the media leaf beneath it could carry a gain perfectly well.
-    const NestedGainStages faded_placement{
-        {.gain_linear = 1.0f, .fade_in_duration = static_cast<std::uint64_t>(kTicksPerQuarter / 2)},
-        TrackMixer{},
-        {}};
-    const auto fade_error =
-        compile_error_with_assets(nested_gain_project(faded_placement, ramp.size()), assets);
-    REQUIRE(fade_error.code == CompileErrorCode::NestedPlacementFadeUnsupported);
-    REQUIRE(fade_error.item == ItemId{4});
-
-    // Pan over the very same media leaf: the sink that accepts gain has no
+    // Pan over a media leaf: the sink that accepts gain has no
     // stereo placement to accept a balance.
     const NestedGainStages panned{{}, TrackMixer{1.0f, -0.5f}, {}};
     const auto pan_error =
@@ -1046,13 +1340,357 @@ TEST_CASE("Nested mixer state with no composition rule keeps its own refusal") {
     REQUIRE(pan_error.code == CompileErrorCode::NestedMixerPanUnsupported);
     REQUIRE(pan_error.item == ItemId{11});
 
-    // The positive control for both: identical fixtures with those two stages
-    // neutral compile, so the refusals above are naming the state they claim to
-    // and not simply rejecting every media placement.
+    // The positive control: an identical fixture with that stage neutral
+    // compiles, so the refusal above is naming the state it claims to and not
+    // simply rejecting every media placement.
     CompiledFixture allowed(shared(nested_gain_project({{}, TrackMixer{}, {}}, ramp.size())),
                             map_120(), assets);
     auto program = allowed.store.read();
     REQUIRE(program->find_track({3})->audio_program()->clips().size() == 1);
+}
+
+namespace {
+
+ClipPlaybackProperties fade_properties(std::int64_t fade_in, std::int64_t fade_out,
+                                       ClipFadeShape shape = ClipFadeShape::Linear) {
+    return {.gain_linear = 1.0f,
+            .fade_in_duration = static_cast<std::uint64_t>(fade_in),
+            .fade_out_duration = static_cast<std::uint64_t>(fade_out),
+            .fade_shape = shape};
+}
+
+// One media leaf under one placement on track 3. `split_leaf` cuts the child's
+// media in two adjacent halves that read the same source frames the single leaf
+// reads, so a case can put a ramp edge inside the second half and still compare
+// against the undivided answer.
+Project placement_fade_project(ClipPlaybackProperties placement_playback,
+                               ClipPlaybackProperties leaf_playback, std::size_t frame_count,
+                               bool split_leaf = false) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    std::vector<Clip> child_clips;
+    if (split_leaf) {
+        const auto half = frame_count / 2;
+        child_clips.push_back(musical_media_clip(12, 0, kTicksPerQuarter / 2, 50, half,
+                                                 leaf_playback, TimeConform::None, 0));
+        child_clips.push_back(musical_media_clip(13, kTicksPerQuarter / 2, kTicksPerQuarter / 2, 50,
+                                                 half, leaf_playback, TimeConform::None, half));
+    } else {
+        child_clips.push_back(
+            musical_media_clip(12, 0, kTicksPerQuarter, 50, frame_count, leaf_playback));
+    }
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {track(11, std::move(child_clips))}));
+    auto placement = take(Clip::create({4}, {kTicksPerQuarter}, {kTicksPerQuarter},
+                                       SequenceRef{{10}, {0}}, placement_playback));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "placement fade";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {{50, "ramp", frame_count, {48'000, 1}, hash}};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+// The same media sitting directly on the root track at the same ticks, carrying
+// the fade the placement above carried. A ramp covering exactly one whole leaf
+// has to read like that fade authored on the leaf itself.
+std::shared_ptr<const Project> hand_flattened_fade_project(ClipPlaybackProperties playback,
+                                                           std::size_t frame_count) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto media =
+        musical_media_clip(4, kTicksPerQuarter, kTicksPerQuarter, 50, frame_count, playback);
+    return project_with_tracks({track(3, {media})}, {{50, "ramp", frame_count, {48'000, 1}, hash}});
+}
+
+// One media leaf reached through two placements, each carrying its own ramp, so
+// composition has to happen once per level rather than once overall.
+// `outer_duration` shorter than a quarter trims the inner placement, which is
+// how an inner ramp comes to be longer than the window that survives.
+Project doubly_nested_fade_project(ClipPlaybackProperties outer, ClipPlaybackProperties inner,
+                                   std::size_t frame_count,
+                                   std::int64_t outer_duration = kTicksPerQuarter) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto leaf_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, frame_count);
+    auto leaf = take(
+        Sequence::create({10}, "leaf", TickDuration{kTicksPerQuarter}, {track(11, {leaf_media})}));
+    auto inner_placement =
+        take(Clip::create({22}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}, inner));
+    auto middle = take(Sequence::create({20}, "middle", TickDuration{kTicksPerQuarter},
+                                        {track(21, {inner_placement})}));
+    auto outer_placement = take(
+        Clip::create({4}, {kTicksPerQuarter}, {outer_duration}, SequenceRef{{20}, {0}}, outer));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {outer_placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "doubly nested fade";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {{50, "ramp", frame_count, {48'000, 1}, hash}};
+    input.sequences = {root, middle, leaf};
+    return take(Project::create(std::move(input)));
+}
+
+// A child sequence holding one MIDI clip under a placement that carries a head
+// ramp. `note_clip_start` decides whether the ramp reaches the clip at all.
+Project faded_note_placement_project(std::int64_t fade_in, std::int64_t note_clip_start) {
+    auto child_clip = take(Clip::create(
+        {12}, {note_clip_start}, {kTicksPerQuarter - note_clip_start}, note_content(13, 0, 240)));
+    auto child = take(
+        Sequence::create({10}, "child", TickDuration{kTicksPerQuarter}, {track(11, {child_clip})}));
+    auto placement = take(Clip::create({4}, {kTicksPerQuarter}, {kTicksPerQuarter},
+                                       SequenceRef{{10}, {0}}, fade_properties(fade_in, 0)));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "faded note placement";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+// The whole placement window, so no case can pass by rendering a stretch of it
+// that happens to sit outside every ramp.
+constexpr std::uint32_t kPlacementFrames = 24'000;
+constexpr std::int64_t kPlacementStart = 24'000;
+
+std::vector<float> render_placement(const Project& project,
+                                    const std::shared_ptr<const DecodedAudioAssetPool>& assets) {
+    CompiledFixture compiled(shared(project), map_120(), assets);
+    auto program = compiled.store.read();
+    REQUIRE(program);
+    Output output(1, kPlacementFrames);
+    REQUIRE(ArrangementAudioRenderer::process(*program,
+                                              snapshot(*program, kPlacementFrames, kPlacementStart),
+                                              output.view()) == AudioRenderStatus::Rendered);
+    return output.storage[0];
+}
+
+std::vector<float> render_placement(const std::shared_ptr<const Project>& project,
+                                    const std::shared_ptr<const DecodedAudioAssetPool>& assets) {
+    return render_placement(*project, assets);
+}
+
+double worst_difference(const std::vector<float>& left, const std::vector<float>& right) {
+    REQUIRE(left.size() == right.size());
+    double worst = 0.0;
+    for (std::size_t frame = 0; frame < left.size(); ++frame)
+        worst = std::max(
+            worst, std::abs(static_cast<double>(left[frame]) - static_cast<double>(right[frame])));
+    return worst;
+}
+
+double peak(const std::vector<float>& samples) {
+    double worst = 0.0;
+    for (const auto sample : samples)
+        worst = std::max(worst, std::abs(static_cast<double>(sample)));
+    return worst;
+}
+
+// A placement ramp reads progress through a double and an authored fade reads
+// it through a float, so two renders that agree can still land a unit apart in
+// the last place. This margin is far above that and roughly 120 dB below the
+// difference any of the controls below has to show.
+constexpr double kSameRender = 1.0e-6;
+constexpr double kDifferentRender = 1.0e-3;
+
+} // namespace
+
+TEST_CASE("A placement fade composes over the leaves it was flattened into") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    constexpr auto kHalf = kTicksPerQuarter / 2;
+
+    struct Geometry {
+        const char* label;
+        std::int64_t fade_in;
+        std::int64_t fade_out;
+        ClipFadeShape shape;
+    };
+    const std::array geometries{
+        Geometry{"head ramp, shaped", kHalf, 0, ClipFadeShape::EqualPower},
+        Geometry{"head ramp, linear", kHalf, 0, ClipFadeShape::Linear},
+        Geometry{"tail ramp, shaped", 0, kHalf, ClipFadeShape::EqualPower},
+        Geometry{"tail ramp, linear", 0, kHalf, ClipFadeShape::Linear},
+        Geometry{"both ends, shaped", kHalf, kHalf, ClipFadeShape::EqualPower},
+    };
+
+    const auto dry =
+        render_placement(hand_flattened_fade_project(fade_properties(0, 0), ramp.size()), assets);
+    REQUIRE(peak(dry) > 0.1);
+
+    for (const auto& geometry : geometries) {
+        INFO(geometry.label);
+        const auto authored = fade_properties(geometry.fade_in, geometry.fade_out, geometry.shape);
+        const auto nested =
+            render_placement(placement_fade_project(authored, {}, ramp.size()), assets);
+        const auto flattened =
+            render_placement(hand_flattened_fade_project(authored, ramp.size()), assets);
+
+        // The ramp the placement carried and the same ramp authored on the leaf
+        // are the same ramp, so they have to read the same.
+        REQUIRE(worst_difference(nested, flattened) <= kSameRender);
+        // Without this the equality above would pass on two buffers the fade
+        // had never touched.
+        REQUIRE(worst_difference(nested, dry) > kDifferentRender);
+        REQUIRE(peak(nested) > 0.1);
+
+        if (geometry.shape == ClipFadeShape::EqualPower) {
+            // The discriminating control. Carrying the ramp as a pair of
+            // endpoint gains and interpolating between them lands on precisely
+            // the linear answer, agreeing at both edges and bending the wrong
+            // way in between, so the shaped result must differ from it.
+            const auto endpoint_lerp = render_placement(
+                hand_flattened_fade_project(
+                    fade_properties(geometry.fade_in, geometry.fade_out, ClipFadeShape::Linear),
+                    ramp.size()),
+                assets);
+            REQUIRE(worst_difference(nested, endpoint_lerp) > kDifferentRender);
+        }
+    }
+}
+
+TEST_CASE("A placement fade multiplies with the leaf's own fade") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    constexpr auto kHalf = kTicksPerQuarter / 2;
+    constexpr auto kQuartered = kTicksPerQuarter / 4;
+
+    // Shapes deliberately differ, and both ends of both fades are authored, so
+    // one leaf sits under four ramps at once and no single shape can stand in
+    // for their product.
+    const auto placement = fade_properties(kHalf, kHalf, ClipFadeShape::EqualPower);
+    const auto leaf = fade_properties(kQuartered, kQuartered, ClipFadeShape::Linear);
+
+    const auto neither = render_placement(placement_fade_project({}, {}, ramp.size()), assets);
+    const auto placement_only =
+        render_placement(placement_fade_project(placement, {}, ramp.size()), assets);
+    const auto leaf_only = render_placement(placement_fade_project({}, leaf, ramp.size()), assets);
+    const auto both =
+        render_placement(placement_fade_project(placement, leaf, ramp.size()), assets);
+
+    // Each ramp scales the signal, so applying both scales it by the product:
+    // both x neither has to equal placement_only x leaf_only sample for sample.
+    std::vector<float> product_of_renders(neither.size());
+    std::vector<float> render_of_product(neither.size());
+    for (std::size_t frame = 0; frame < neither.size(); ++frame) {
+        product_of_renders[frame] = placement_only[frame] * leaf_only[frame];
+        render_of_product[frame] = both[frame] * neither[frame];
+    }
+    REQUIRE(worst_difference(product_of_renders, render_of_product) <= kSameRender);
+
+    // The controls that make that identity say something. A placement ramp that
+    // replaced the leaf's fade would read like the placement alone; one that
+    // was dropped would read like the leaf alone.
+    REQUIRE(worst_difference(both, placement_only) > kDifferentRender);
+    REQUIRE(worst_difference(both, leaf_only) > kDifferentRender);
+    REQUIRE(peak(both) > 0.1);
+}
+
+TEST_CASE("A placement fade reads the same across a boundary the flattening cut") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    // Three quarters of the window at each end, so the head ramp opens inside
+    // the second leaf, the tail ramp opens inside the first, and each leaf
+    // straddles an edge nothing clipped it at.
+    const auto placement = fade_properties(3 * kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4,
+                                           ClipFadeShape::EqualPower);
+
+    CompiledFixture split(shared(placement_fade_project(placement, {}, ramp.size(), true)),
+                          map_120(), assets);
+    auto split_program = split.store.read();
+    REQUIRE(split_program->find_track({3})->audio_program()->clips().size() == 2);
+    CompiledFixture whole(shared(placement_fade_project(placement, {}, ramp.size(), false)),
+                          map_120(), assets);
+    REQUIRE(whole.store.read()->find_track({3})->audio_program()->clips().size() == 1);
+
+    const auto cut =
+        render_placement(placement_fade_project(placement, {}, ramp.size(), true), assets);
+    const auto uncut =
+        render_placement(placement_fade_project(placement, {}, ramp.size(), false), assets);
+    // Where the flattening happened to cut the child is not audible: the gain
+    // is a function of the position, so the two leaves read the same number at
+    // the frame they share.
+    REQUIRE(worst_difference(cut, uncut) <= kSameRender);
+    // Without this the equality would hold on two renders no ramp reached.
+    const auto dry = render_placement(placement_fade_project({}, {}, ramp.size(), true), assets);
+    REQUIRE(worst_difference(cut, dry) > kDifferentRender);
+    REQUIRE(peak(cut) > 0.1);
+}
+
+TEST_CASE("Placement fades compose once per level of nesting") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    const auto outer = fade_properties(kTicksPerQuarter / 2, 0, ClipFadeShape::EqualPower);
+    const auto inner = fade_properties(kTicksPerQuarter / 4, 0, ClipFadeShape::Linear);
+
+    const auto neither = render_placement(doubly_nested_fade_project({}, {}, ramp.size()), assets);
+    const auto outer_only =
+        render_placement(doubly_nested_fade_project(outer, {}, ramp.size()), assets);
+    const auto inner_only =
+        render_placement(doubly_nested_fade_project({}, inner, ramp.size()), assets);
+    const auto both =
+        render_placement(doubly_nested_fade_project(outer, inner, ramp.size()), assets);
+
+    std::vector<float> product_of_renders(neither.size());
+    std::vector<float> render_of_product(neither.size());
+    for (std::size_t frame = 0; frame < neither.size(); ++frame) {
+        product_of_renders[frame] = outer_only[frame] * inner_only[frame];
+        render_of_product[frame] = both[frame] * neither[frame];
+    }
+    REQUIRE(worst_difference(product_of_renders, render_of_product) <= kSameRender);
+    REQUIRE(worst_difference(both, outer_only) > kDifferentRender);
+    REQUIRE(worst_difference(both, inner_only) > kDifferentRender);
+    REQUIRE(peak(both) > 0.1);
+}
+
+TEST_CASE("A trimmed inner placement keeps the ramp its untrimmed extent authored") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    // The outer placement keeps a quarter of the window the inner ramp covers
+    // half of, so the ramp is longer than the clip that survives the trim and
+    // has to travel beside the leaf rather than on it.
+    const auto inner = fade_properties(kTicksPerQuarter / 2, 0, ClipFadeShape::EqualPower);
+    constexpr auto kKept = kTicksPerQuarter / 4;
+
+    CompiledFixture trimmed(shared(doubly_nested_fade_project({}, inner, ramp.size(), kKept)),
+                            map_120(), assets);
+    auto program = trimmed.store.read();
+    REQUIRE(program->find_track({3})->audio_program()->clips().size() == 1);
+
+    Output faded(1, 6'000);
+    REQUIRE(ArrangementAudioRenderer::process(*program, snapshot(*program, 6'000, kPlacementStart),
+                                              faded.view()) == AudioRenderStatus::Rendered);
+    CompiledFixture plain(shared(doubly_nested_fade_project({}, {}, ramp.size(), kKept)), map_120(),
+                          assets);
+    auto plain_program = plain.store.read();
+    Output dry(1, 6'000);
+    REQUIRE(ArrangementAudioRenderer::process(*plain_program,
+                                              snapshot(*plain_program, 6'000, kPlacementStart),
+                                              dry.view()) == AudioRenderStatus::Rendered);
+
+    // The retained window opens at the ramp's silent end, so it starts from
+    // nothing and reaches halfway up the ramp rather than jumping in part-way.
+    REQUIRE(std::abs(static_cast<double>(faded.storage[0][0])) < 1.0e-7);
+    REQUIRE(std::abs(static_cast<double>(dry.storage[0][0])) > 1.0e-7);
+    REQUIRE(worst_difference(faded.storage[0], dry.storage[0]) > kDifferentRender);
+    REQUIRE(peak(dry.storage[0]) > 0.01);
+}
+
+TEST_CASE("A placement fade refuses only the leaves its ramp reaches") {
+    // A note clip is not a sink for a clip gain, so a ramp landing on one has
+    // nowhere to go and says so rather than playing at full level.
+    const auto reached = compile_error_for(faded_note_placement_project(kTicksPerQuarter / 2, 0));
+    REQUIRE(reached.code == CompileErrorCode::NestedPlacementFadeUnsupported);
+    REQUIRE(reached.item == ItemId{12});
+
+    // The same placement over a clip that begins after the ramp is fully open
+    // reads unity for its whole length, so there is nothing to refuse.
+    auto program =
+        compile(shared(faded_note_placement_project(kTicksPerQuarter / 4, kTicksPerQuarter / 2)));
+    REQUIRE_FALSE(program->find_track({3})->arrangement_note_events().empty());
 }
 
 namespace {
@@ -1282,3 +1920,4 @@ TEST_CASE("Trimming a nested clip shortens its fades and keeps their shape") {
     // trimmed to nothing but a fade still fades the way it was authored to.
     REQUIRE(playback.fade_shape == ClipFadeShape::EqualPower);
 }
+

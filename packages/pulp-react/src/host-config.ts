@@ -494,19 +494,65 @@ function hasFixedTextDimension(value: unknown): boolean {
     return match !== null && Number(match[1]) > 0;
 }
 
+/// A fixed `lineHeight` pins a single-line Label's height as firmly as an
+/// explicit `height` does. `whiteSpace: nowrap` puts the native Label in
+/// single-line mode, and a positive line height short-circuits the intrinsic
+/// height calculation before it consults the shaper, so the measured height
+/// depends on neither the string nor its glyphs. A unitless value is a
+/// font-size multiplier, which is equally text-independent here because the
+/// gate already requires every non-text prop -- fontSize included -- to be
+/// unchanged. Percentages are rejected: the typography applier parses `'50%'`
+/// as 50px, and a correctness gate must not rest on that coercion.
+function hasFixedLineHeight(value: unknown): boolean {
+    if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+    if (typeof value !== 'string') return false;
+    const match = value.trim().match(/^([0-9]+(?:\.[0-9]+)?)(?:px)?$/);
+    return match !== null && Number(match[1]) > 0;
+}
+
+/// Types that appear in TEXT_BEARING but do not themselves become a native
+/// Label: their props land on a Row, Panel or TextEditor while the text goes
+/// to a separate caption child. `setLineHeight` is a no-op on a non-Label, so
+/// a fixed `lineHeight` on one of these pins nothing and the caption's height
+/// still follows its glyphs. Add any future delegating type here.
+const TEXT_DELEGATING: Set<Type> = new Set([
+    'button', 'Button', 'TextEditor',
+] as Type[]);
+
+/// A positive line clamp puts the Label back into multi-line mode, and the
+/// clamped height is `lineHeight x min(shaped lines, clamp)` -- text-dependent
+/// again even at a fixed width.
+function hasLineClamp(props: Props): boolean {
+    for (const key of ['lineClamp', 'WebkitLineClamp', 'webkitLineClamp']) {
+        const raw = props[key];
+        const n = typeof raw === 'number' ? raw : Number.parseFloat(String(raw ?? ''));
+        if (Number.isFinite(n) && n > 0) return true;
+    }
+    return false;
+}
+
 /// True when a React commit changes only the copy of a text-bearing native
-/// Label whose geometry is explicitly fixed. In that case Label::set_text()
-/// repaints without invalidating Yoga, and re-applying Chromium-captured
-/// metadata would manufacture a full-tree layout that the native mutation did
-/// not require.
+/// Label whose height cannot move as a result. Re-applying Chromium-captured
+/// metadata for such a commit would manufacture a full-document re-apply that
+/// the native mutation did not require. The native Label still invalidates its
+/// own layout unless both dimensions are explicit; what this gate skips is the
+/// captured-metadata re-apply, not the Yoga pass.
 function isFixedTextOnlyUpdate(type: Type, oldProps: Props, newProps: Props): boolean {
     if (!TEXT_BEARING.has(type)) return false;
     const oldText = asText(oldProps.children) ?? (oldProps.text as string | undefined);
     const newText = asText(newProps.children) ?? (newProps.text as string | undefined);
     if (oldText === newText || newText === undefined) return false;
-    if (!hasFixedTextDimension(newProps.width)
-        || !hasFixedTextDimension(newProps.height)
-        || newProps.whiteSpace !== 'nowrap') return false;
+    if (newProps.whiteSpace !== 'nowrap'
+        || !hasFixedTextDimension(newProps.width)) return false;
+    // Either an explicit height or a fixed line height pins the box
+    // vertically; requiring the former turned the latter into a silent
+    // whole-document re-apply on every keystroke of changing status copy.
+    // The line-height route only holds when this node is itself the native
+    // Label and nothing has put it back into multi-line mode.
+    if (!hasFixedTextDimension(newProps.height)
+        && !(hasFixedLineHeight(newProps.lineHeight)
+            && !TEXT_DELEGATING.has(type)
+            && !hasLineClamp(newProps))) return false;
     const nonTextKeys = new Set([...Object.keys(oldProps), ...Object.keys(newProps)]);
     nonTextKeys.delete('children');
     nonTextKeys.delete('text');
@@ -514,6 +560,60 @@ function isFixedTextOnlyUpdate(type: Type, oldProps: Props, newProps: Props): bo
         if (oldProps[key] !== newProps[key]) return false;
     }
     return true;
+}
+
+/// Prop keys whose value can change without moving a single box.
+///
+/// Curated by hand, never derived from which prop-applier module handles a
+/// key: `prop-applier-paint.ts` also owns `border`, `borderWidth` and the
+/// side shorthands, all of which carry a width and do affect layout.
+///
+/// A key qualifies only when BOTH hold: the native setter repaints without
+/// invalidating Yoga, AND no captured-import binding writes the same channel.
+/// `opacity` and `color` fail the second test — the metadata pass drives
+/// `setOpacity` and `setTextColor` itself, so suppressing the re-apply would
+/// leave React's value standing until some later structural commit put the
+/// captured one back. When in doubt, leave it out: the cost of omission is
+/// the status quo, the cost of a wrong entry is a stale layout or a flicker.
+const PAINT_ONLY_KEYS: ReadonlySet<string> = new Set([
+    // Fill and background (never a border width, never a box size)
+    'background', 'backgroundColor', 'backgroundGradient', 'backgroundImage',
+    'backgroundAttachment', 'backgroundClip', 'backgroundOrigin', 'backgroundRepeat',
+    // Colour-only border and outline properties
+    'borderColor', 'borderTopColor', 'borderRightColor',
+    'borderBottomColor', 'borderLeftColor', 'borderCurve',
+    'outlineColor', 'outlineStyle',
+    // Compositing
+    'boxShadow', 'backdropFilter', 'filter', 'clipPath',
+    'mask', 'maskImage', 'maskSize', 'mixBlendMode', 'isolation',
+    'backfaceVisibility',
+    'shadowColor', 'shadowOffset', 'shadowOpacity', 'shadowRadius',
+    // Input affordances, not geometry
+    'cursor', 'userSelect', 'pointerEvents',
+]);
+
+/// True when every key a React commit changed is provably non-geometric.
+///
+/// A pointer moving across a hover target rewrites a tint and a cursor, and
+/// nothing else. Without this gate that commit marks the materialized tree
+/// dirty, and `resetAfterCommit` re-applies Chromium-captured metadata across
+/// the whole captured document — O(document) work for an O(1) repaint, on
+/// every pointer sample of a drag.
+///
+/// Whitelist, not blacklist: an unrecognised key means "assume geometric" and
+/// the caller falls through to the full re-apply. A key is only skipped when
+/// it appears in PAINT_ONLY_KEYS.
+function isPaintOnlyUpdate(oldProps: Props, newProps: Props): boolean {
+    let changed = 0;
+    const keys = new Set([...Object.keys(oldProps), ...Object.keys(newProps)]);
+    for (const key of keys) {
+        if (Object.is(oldProps[key], newProps[key])) continue;
+        if (!PAINT_ONLY_KEYS.has(key)) return false;
+        changed += 1;
+    }
+    // A commit that changed nothing is not evidence that a repaint is safe;
+    // let it take the ordinary path rather than silently suppressing work.
+    return changed > 0;
 }
 
 // ── HostConfig ──────────────────────────────────────────────────────
@@ -755,7 +855,8 @@ export const PulpHostConfig: HostConfig<
     commitUpdate(instance, _updatePayload, type, oldProps, newProps, _internalHandle) {
         const oldN = normalizeHostProps(type, oldProps as Record<string, unknown>);
         const newN = normalizeHostProps(type, newProps as Record<string, unknown>);
-        if (!isFixedTextOnlyUpdate(type, oldN, newN)) markMaterializedTreeDirty();
+        if (!isFixedTextOnlyUpdate(type, oldN, newN)
+            && !isPaintOnlyUpdate(oldN, newN)) markMaterializedTreeDirty();
         applyChangedProps(instance, oldN, newN);
         instance.props = { ...newN };
         if (instance._dom && typeof instance._dom === 'object') {

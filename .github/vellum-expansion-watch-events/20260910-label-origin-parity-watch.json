@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260910-label-origin-parity-watch",
+  "created_at": "2026-09-10T00:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": ["render-assets-and-backends"],
+  "rationale": "Label started its text from a box-derived origin that paint and measurement disagreed about, so a single-line label sat a fraction of a point off the content edge and a caption clipped against its own ruler. The fix starts the text at the content edge on both axes so the origin one path computes is the origin the other paints, leaving multi-line and explicitly-positioned text unchanged. render-assets-and-backends is crossed by core/view only -- label.cpp carries the origin change and test_widgets_label.cpp adds coverage that fails when the two paths diverge again. No renderer, backend, font, asset or Skia pin changes; no fixture, snapshot or threshold moves. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": ["pulp-test-widgets-label", "vellum-expansion-watch"],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

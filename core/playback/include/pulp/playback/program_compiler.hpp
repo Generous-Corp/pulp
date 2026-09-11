@@ -164,12 +164,31 @@ enum class CompileErrorCode : std::uint8_t {
     // events no renderer scales by clip gain. Refuse rather than fold a child
     // fader into a value nothing will read.
     NestedGainSinkUnsupported,
-    // A SequenceRef placement carries a fade. That fade is one envelope over
-    // the whole nested window, while a flattened leaf can only carry a fade
-    // measured from its own edge, so a leaf lying inside the fade region would
-    // need a partial ramp the clip model cannot express. Refuse until the
-    // window envelope has a representation of its own.
+    // A SequenceRef placement's fade had nowhere to land. The envelope itself
+    // composes: it travels beside each flattened leaf as the ramp it is, and
+    // the leaf is read at its own position within it. But a fade is a
+    // time-varying gain, so it needs the sink a static gain needs, and the leaf
+    // kinds that have none are the same ones NestedGainSinkUnsupported names.
+    // Refuse rather than play such a leaf at full level through an envelope the
+    // author wrote. Only a leaf a ramp actually reaches refuses; one lying
+    // wholly past a ramp reads unity and compiles.
     NestedPlacementFadeUnsupported,
+    // A nested child track is frozen. Freeze substitutes a sealed rendered
+    // artifact for everything the track would otherwise play, which is why the
+    // top-level walk returns Freeze content and discards the arrangement. The
+    // nested walk has no such substitution: it descends into the child's clips,
+    // so honouring the freeze would mean emitting the artifact in place of
+    // material the walk is already reading, and ignoring it would play the very
+    // arrangement the author froze. Refuse until a flattened leaf can carry
+    // rendered media standing in for a whole child track.
+    NestedFrozenTrackUnsupported,
+    // A nested child track has a take lane selected. An active lane substitutes
+    // its comped takes for the arrangement, exactly as freeze substitutes an
+    // artifact, and the nested walk reads the arrangement instead. Playing the
+    // arrangement would sound the take the author deselected, so the selection
+    // is refused rather than silently inverted. Dormant lanes do not refuse:
+    // an unselected lane changes nothing at either level.
+    NestedActiveTakeUnsupported,
 };
 
 struct CompileError {
@@ -204,6 +223,33 @@ struct CompilerStatus {
     // the instance's latest successful publication.
     std::uint64_t latest_submitted_epoch = 0;
     std::uint64_t latest_published_epoch = 0;
+    /// Partition of `active_tracks_completed` for the request currently being
+    /// compiled, or for the last one if the compiler is idle. A track is
+    /// `reused` when the dirty set spared it and its program was carried over
+    /// from the live program untouched; it is `recompiled` when a fresh
+    /// TrackProgram was built for it. The two always sum to
+    /// `active_tracks_completed`.
+    ///
+    /// This is the direct measure of how much work an incremental compile did.
+    /// Callers that need to know an edit stayed incremental should read these
+    /// rather than infer it from how long the compile took, which measures the
+    /// host as much as the compiler.
+    std::uint64_t active_tracks_recompiled = 0;
+    std::uint64_t active_tracks_reused = 0;
+
+    /// Clear the three track counters together, so the partition can never be
+    /// left describing a previous request.
+    void clear_active_track_counts() {
+        active_tracks_completed = 0;
+        active_tracks_recompiled = 0;
+        active_tracks_reused = 0;
+    }
+
+    /// Record one finished track on whichever side of the partition it fell.
+    void count_track_completed(bool reused) {
+        ++active_tracks_completed;
+        ++(reused ? active_tracks_reused : active_tracks_recompiled);
+    }
 };
 
 struct PlaybackProgramCompilerCore;
