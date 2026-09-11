@@ -436,6 +436,27 @@ def run_selftest() -> int:
             print("selftest rejected the restored allowlist")
             return 1
 
+        # The fixtures below spell these enumerators. Each must still be a
+        # refusal-shaped member, or a fixture that names a code the enum no
+        # longer declares proves nothing: the raise pattern skips an unknown
+        # code, so "the label was not read as a raise" would pass with no
+        # label read at all. Name what went missing rather than let that be.
+        fixture_codes = (
+            "MidiExpressionLaneUnsupported",
+            "TrimmedGrooveUnsupported",
+            "NestedMixerPanUnsupported",
+        )
+        declared = set(refusal_codes(root)[1])
+        missing_codes = [code for code in fixture_codes if code not in declared]
+        if missing_codes:
+            print(
+                "selftest fixtures name "
+                + ", ".join(missing_codes)
+                + ", which CompileErrorCode no longer declares as a refusal; "
+                "re-point the fixture at a member it does declare"
+            )
+            return 1
+
         synthetic = root / "core/playback/src/selftest_refusal.cpp"
 
         # A new raise guarded on an authored read is the defect this exists for.
