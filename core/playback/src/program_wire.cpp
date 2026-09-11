@@ -5,6 +5,7 @@
 #include <pulp/playback/track_automation_program.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/timeline/automation_lane.hpp>
+#include <pulp/timeline/midi_lane.hpp>
 #include <pulp/timeline/note_modifier.hpp>
 
 #include <array>
@@ -40,7 +41,7 @@ std::size_t wire_hash(std::uint64_t value, std::size_t mask) noexcept {
 
 /// The known sections, in the ascending id order a canonical payload lays them
 /// out in. Indexing this array is also how the decoder decides an id is known.
-constexpr std::array<ProgramWireSection, 9> kSections{
+constexpr std::array<ProgramWireSection, 11> kSections{
     ProgramWireSection::Program,
     ProgramWireSection::TempoPoints,
     ProgramWireSection::Tracks,
@@ -50,9 +51,20 @@ constexpr std::array<ProgramWireSection, 9> kSections{
     ProgramWireSection::DevicePlacementIds,
     ProgramWireSection::AutomationLanes,
     ProgramWireSection::AutomationSegments,
+    ProgramWireSection::ControllerRanges,
+    ProgramWireSection::ControllerEvents,
 };
 
 constexpr std::size_t kSectionCount = kSections.size();
+
+/// The two sections version 3 appended. A version 2 writer never emitted them,
+/// so a version 2 payload is read with both absent and empty; a version 3
+/// writer always emits both, so a version 3 payload without them is
+/// non-canonical and refused like any other missing section.
+constexpr bool appended_in_version_3(ProgramWireSection section) noexcept {
+    return section == ProgramWireSection::ControllerRanges ||
+           section == ProgramWireSection::ControllerEvents;
+}
 
 /// Byte size of one record in each known section, in kSections order.
 constexpr std::array<std::size_t, kSectionCount> kRecordSizes{
@@ -65,6 +77,8 @@ constexpr std::array<std::size_t, kSectionCount> kRecordSizes{
     sizeof(ProgramWireIdRecord),
     sizeof(ProgramWireAutomationLaneRecord),
     sizeof(ProgramWireAutomationSegmentRecord),
+    sizeof(ProgramWireControllerRangeRecord),
+    sizeof(ProgramWireControllerEventRecord),
 };
 
 /// Where the record counts land while the encoder measures a program, in
@@ -143,10 +157,6 @@ measure(const PlaybackProgram& program,
             return Measured(
                 runtime::Err(Error{Code::AudioProgramUnsupported,
                                    section_id(ProgramWireSection::Tracks), track.id().value}));
-        if (!track.arrangement_controller_events().empty())
-            return Measured(
-                runtime::Err(Error{Code::ControllerEventsUnsupported,
-                                   section_id(ProgramWireSection::Tracks), track.id().value}));
         const auto& production = track.arrangement_production();
         if (production.mode != timeline::ProductionMode::Synchronous ||
             production.reproducibility != timeline::ReproducibilityClass::Deterministic ||
@@ -160,6 +170,12 @@ measure(const PlaybackProgram& program,
         counts[ProgramWireSection::NoteModifiers] += track.note_modifiers().size();
         counts[ProgramWireSection::DevicePlacementIds] +=
             track.ordered_device_placement_ids().size();
+        // One range per track, populated or not, so a reader indexes the
+        // ranges by track without a second lookup; the compiler's own ceiling
+        // bounds the per-track count, so no measure-side refusal is reachable.
+        counts[ProgramWireSection::ControllerRanges] += 1;
+        counts[ProgramWireSection::ControllerEvents] +=
+            track.arrangement_controller_events().size();
 
         const auto* automation = track.automation_program();
         if (!automation)
@@ -335,10 +351,20 @@ SizeResult encode_program_wire(const PlaybackProgram& program,
     const std::size_t directory_at = sizeof(ProgramWireHeader);
     const std::size_t payload_at = directory_at + layout.directory_bytes;
 
+    // Whether an older reader may ignore the controller sections is a property
+    // of this program, not of the format: with nothing in them, skipping them
+    // renders exactly the program meant; with anything in them, skipping them
+    // renders the notes with the expression silently gone, which is the one
+    // outcome the format refuses to make possible. So the flag and the reader
+    // floor move together, and both are fixed by the counts, which keeps one
+    // program at one encoding.
+    const bool carries_controllers = layout.counts[ProgramWireSection::ControllerEvents] != 0;
     for (std::size_t i = 0; i < kSectionCount; ++i) {
         ProgramWireSectionEntry entry;
         entry.id = section_id(kSections[i]);
-        entry.flags = 0;
+        entry.flags = appended_in_version_3(kSections[i]) && !carries_controllers
+                          ? kProgramWireSectionOptional
+                          : 0u;
         entry.offset = layout.offsets[i];
         entry.bytes = layout.bytes[i];
         writer.put(entry, directory_at + i * sizeof(ProgramWireSectionEntry));
@@ -366,6 +392,7 @@ SizeResult encode_program_wire(const PlaybackProgram& program,
     std::size_t placement_cursor = 0;
     std::size_t lane_cursor = 0;
     std::size_t segment_cursor = 0;
+    std::size_t controller_cursor = 0;
 
     const auto tracks = program.tracks();
     for (std::size_t t = 0; t < tracks.size(); ++t) {
@@ -442,6 +469,30 @@ SizeResult encode_program_wire(const PlaybackProgram& program,
             writer.put(ProgramWireIdRecord{id.value},
                        at(ProgramWireSection::DevicePlacementIds, placement_cursor++));
 
+        const auto controllers = track.arrangement_controller_events();
+        writer.put(ProgramWireControllerRangeRecord{static_cast<std::uint32_t>(controller_cursor),
+                                                    static_cast<std::uint32_t>(controllers.size())},
+                   at(ProgramWireSection::ControllerRanges, t));
+        // Copied in the program's own sequence, ties and all. The wire adds no
+        // order of its own, so what a reader gets back is exactly what
+        // arrangement_controller_events() held.
+        for (const auto& event : controllers) {
+            ProgramWireControllerEventRecord record_out;
+            record_out.sample = event.sample.value;
+            record_out.tick = event.tick.value;
+            record_out.clip_id = event.clip_id.value;
+            record_out.lane_id = event.lane_id.value;
+            record_out.point_id = event.point_id.value;
+            record_out.value = event.value;
+            record_out.group = event.address.group;
+            record_out.channel = event.address.channel;
+            record_out.status = event.address.status;
+            record_out.bank = event.address.bank;
+            record_out.index = event.address.index;
+            record_out.origin = static_cast<std::uint8_t>(event.origin);
+            writer.put(record_out, at(ProgramWireSection::ControllerEvents, controller_cursor++));
+        }
+
         for (const auto& lane : lanes) {
             writer.put(lane_record(*lane, static_cast<std::uint32_t>(segment_cursor)),
                        at(ProgramWireSection::AutomationLanes, lane_cursor++));
@@ -462,6 +513,8 @@ SizeResult encode_program_wire(const PlaybackProgram& program,
     }
 
     ProgramWireHeader header;
+    header.min_reader_version = carries_controllers ? kProgramWireControllerMinReaderVersion
+                                                    : kProgramWireMinReaderVersion;
     header.header_bytes = static_cast<std::uint32_t>(sizeof(ProgramWireHeader));
     header.section_count = static_cast<std::uint32_t>(kSectionCount);
     header.payload_bytes = layout.payload_bytes;
@@ -565,9 +618,25 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     }
     if (tiled != header.payload_bytes)
         return ViewResult(runtime::Err(Error{Code::SectionsNotTiled, 0, tiled}));
+    // A writer before version 3 had no controller sections to emit, so their
+    // absence from such a payload is the empty section, not a missing one; a
+    // version 3 writer always emits both, so from it absence is non-canonical.
+    // Either both are present or neither is: a range section without its
+    // events, or events nobody ranges, is a payload no writer produces.
+    const bool controller_sections_may_be_absent = header.version < 3;
     for (std::size_t k = 0; k < kSectionCount; ++k)
-        if (!seen[k])
+        if (!seen[k] && !(appended_in_version_3(kSections[k]) &&
+                          controller_sections_may_be_absent))
             return ViewResult(runtime::Err(Error{Code::MissingSection, section_id(kSections[k])}));
+    if (seen[WireCounts::index_of(ProgramWireSection::ControllerRanges)] !=
+        seen[WireCounts::index_of(ProgramWireSection::ControllerEvents)])
+        return ViewResult(runtime::Err(Error{
+            Code::MissingSection,
+            section_id(seen[WireCounts::index_of(ProgramWireSection::ControllerRanges)]
+                           ? ProgramWireSection::ControllerEvents
+                           : ProgramWireSection::ControllerRanges)}));
+    const bool has_controller_sections =
+        seen[WireCounts::index_of(ProgramWireSection::ControllerRanges)];
     if (noncanonical_section_order)
         return ViewResult(runtime::Err(Error{Code::NonCanonicalSectionOrder,
                                              noncanonical_section_id, noncanonical_previous_id}));
@@ -583,6 +652,13 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     if (count_of(ProgramWireSection::TempoPoints) == 0)
         return ViewResult(runtime::Err(
             Error{Code::BadSectionCardinality, section_id(ProgramWireSection::TempoPoints), 0}));
+    // Exactly one range per track, so the two sections index each other by
+    // position with no lookup a reader could get wrong.
+    if (has_controller_sections &&
+        count_of(ProgramWireSection::ControllerRanges) != count_of(ProgramWireSection::Tracks))
+        return ViewResult(runtime::Err(Error{Code::BadSectionCardinality,
+                                             section_id(ProgramWireSection::ControllerRanges),
+                                             count_of(ProgramWireSection::ControllerRanges)}));
 
     ProgramWireView view;
     view.bytes_ = bytes;
@@ -628,6 +704,14 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         view.automation_segments_ =
             records<ProgramWireAutomationSegmentRecord>(payload, offset, length);
     }
+    if (has_controller_sections) {
+        const auto [range_offset, range_length] = slice(ProgramWireSection::ControllerRanges);
+        view.controller_ranges_ =
+            records<ProgramWireControllerRangeRecord>(payload, range_offset, range_length);
+        const auto [event_offset, event_length] = slice(ProgramWireSection::ControllerEvents);
+        view.controller_events_ =
+            records<ProgramWireControllerEventRecord>(payload, event_offset, event_length);
+    }
 
     const auto& scalars = *view.program_;
     if (scalars.producer_epoch == 0)
@@ -658,6 +742,7 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
     std::uint64_t device_cursor = 0;
     std::uint64_t lane_cursor = 0;
     std::uint64_t segment_cursor = 0;
+    std::uint64_t controller_cursor = 0;
     if (view.tracks_.size() > kProgramWireMaximumTracks)
         return ViewResult(runtime::Err(
             Error{Code::InvalidLimits, section_id(ProgramWireSection::Tracks),
@@ -696,6 +781,22 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         note_modifier_cursor += track.note_modifier_count;
         device_cursor += track.device_placement_count;
         lane_cursor += track.automation_lane_count;
+        if (has_controller_sections) {
+            const auto& range = view.controller_ranges_[t];
+            // The ceiling first: a corrupted count is a typed refusal before
+            // it is a range check, and long before it is a record walk.
+            if (range.count > kProgramWireMaximumControllerEventsPerTrack)
+                return ViewResult(runtime::Err(Error{
+                    Code::InvalidLimits, section_id(ProgramWireSection::ControllerRanges), t}));
+            if (!in_range(range.first, range.count, view.controller_events_.size()))
+                return ViewResult(runtime::Err(Error{
+                    Code::RangeOutOfBounds, section_id(ProgramWireSection::ControllerRanges), t}));
+            if (range.first != controller_cursor)
+                return ViewResult(runtime::Err(
+                    Error{Code::NonCanonicalRangeOwnership,
+                          section_id(ProgramWireSection::ControllerRanges), t}));
+            controller_cursor += range.count;
+        }
         if (track.device_placement_count > scalars.max_device_placements_per_track ||
             track.automation_lane_count > scalars.max_lanes_per_track)
             return ViewResult(runtime::Err(
@@ -799,6 +900,9 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         segment_cursor != view.automation_segments_.size())
         return ViewResult(runtime::Err(
             Error{Code::NonCanonicalRangeOwnership, section_id(ProgramWireSection::Tracks)}));
+    if (controller_cursor != view.controller_events_.size())
+        return ViewResult(runtime::Err(Error{Code::NonCanonicalRangeOwnership,
+                                             section_id(ProgramWireSection::ControllerRanges)}));
 
     for (std::size_t l = 0; l < view.automation_lanes_.size(); ++l) {
         const auto& lane = view.automation_lanes_[l];
@@ -890,6 +994,23 @@ ViewResult ProgramWireDecoder::decode(std::span<const std::byte> bytes) noexcept
         if (!timeline::note_modifier_well_formed(modifier))
             return ViewResult(runtime::Err(Error{
                 Code::MalformedNoteModifier, section_id(ProgramWireSection::NoteModifiers), m}));
+    }
+
+    for (std::size_t c = 0; c < view.controller_events_.size(); ++c) {
+        const auto& record = view.controller_events_[c];
+        if (record.origin > static_cast<std::uint8_t>(ControllerProgramEventOrigin::Chased))
+            return ViewResult(runtime::Err(
+                Error{Code::InvalidEnum, section_id(ProgramWireSection::ControllerEvents), c}));
+        // The address is judged by the document model's own predicate, so the
+        // wire cannot admit a controller the model could never have authored;
+        // the identities are the provenance every event promises to carry.
+        const timeline::MidiLaneAddress address{record.group, record.channel, record.status,
+                                                record.bank, record.index};
+        if (record.clip_id == 0 || record.lane_id == 0 || record.point_id == 0 ||
+            !timeline::midi_lane_address_well_formed(address))
+            return ViewResult(runtime::Err(Error{Code::MalformedControllerEvent,
+                                                 section_id(ProgramWireSection::ControllerEvents),
+                                                 c}));
     }
 
     return ViewResult(runtime::Ok(view));
@@ -1008,6 +1129,28 @@ bool program_wire_matches(const ProgramWireView& view, const PlaybackProgram& pr
         for (std::size_t i = 0; i < placements.size(); ++i)
             if (wire_placements[i].value != placements[i].value)
                 return false;
+
+        // A version 2 payload carries no controller sections, so it matches a
+        // program only if that program has no controller events to carry.
+        const auto controllers = track.arrangement_controller_events();
+        const auto wire_controllers =
+            view.controller_ranges().empty()
+                ? std::span<const ProgramWireControllerEventRecord>{}
+                : view.controller_events_for(view.controller_ranges()[t]);
+        if (wire_controllers.size() != controllers.size())
+            return false;
+        for (std::size_t i = 0; i < controllers.size(); ++i) {
+            const auto& source = controllers[i];
+            const auto& copy = wire_controllers[i];
+            if (copy.sample != source.sample.value || copy.tick != source.tick.value ||
+                copy.clip_id != source.clip_id.value || copy.lane_id != source.lane_id.value ||
+                copy.point_id != source.point_id.value || copy.value != source.value ||
+                copy.group != source.address.group || copy.channel != source.address.channel ||
+                copy.status != source.address.status || copy.bank != source.address.bank ||
+                copy.index != source.address.index ||
+                copy.origin != static_cast<std::uint8_t>(source.origin))
+                return false;
+        }
 
         const auto lanes = automation ? automation->programs()
                                       : std::span<const std::shared_ptr<const AutomationProgram>>{};

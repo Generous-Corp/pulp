@@ -26,6 +26,11 @@ namespace pulp::audio {
 struct AudioFileData;
 }
 
+namespace pulp::host {
+enum class TimelineOfflineRenderCode : std::uint8_t;
+struct TimelineOfflineRenderResult;
+}
+
 namespace pulp::tools::timeline::detail {
 
 constexpr std::uint64_t kMaxAssetWorkingSetBytes = 512ull * 1024 * 1024;
@@ -68,6 +73,12 @@ std::uint64_t render_frame_count(const pulp::timeline::Sequence& sequence,
                                  std::uint32_t sample_rate);
 
 std::string compile_error_message(const playback::CompileError& error);
+
+/// One distinct sentence per offline-render outcome. Every enumerator is named
+/// explicitly so a new code is a compile-time prompt rather than a silent
+/// collapse into a shared string. Ok is mapped too; callers only read the
+/// failure cases.
+std::string offline_render_message(const host::TimelineOfflineRenderResult& result);
 
 enum class AtomicWriteOutcome : std::uint8_t {
     NotReplaced,

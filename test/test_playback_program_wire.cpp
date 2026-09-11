@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -41,6 +42,10 @@ const std::array kTempoPoints{TempoPoint{{0}, 120.0, TempoCurve::LinearInTicks},
 /// Fixed rather than minted, so the byte golden stays deterministic. A real
 /// producer uses program_wire_process_epoch() or its own store-lifetime value.
 constexpr std::uint64_t kEpoch = 0xA11CE'0000'0007ull;
+
+/// Whole-payload digest of the controller-bearing fixture; re-pin it in the
+/// same change as any deliberate layout move, and say so.
+constexpr std::uint64_t kControllerGoldenDigest = 0xbca4b4369875bfddull;
 
 std::shared_ptr<const CompiledTempoMap> wire_tempo_map() {
     return shared_compiled_tempo_map(kTempoPoints, RationalRate{48'000, 1});
@@ -245,6 +250,51 @@ std::shared_ptr<const Project> controller_lane_project(std::vector<MidiExpressio
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
+/// Two controller streams on one clip that both author a point at tick 0, so
+/// the program holds two events at one sample and one tick that differ only
+/// in address. That is the tie `controller_program_event_less` breaks on
+/// address, and the case a round trip has to carry in exactly its stored order.
+std::vector<MidiExpressionLane> tied_controller_lanes() {
+    return {MidiExpressionLane{{21},
+                               MidiLaneAddress{0, 0, 11, 0, 74},
+                               {{{22}, {0}, 0x10}, {{23}, {kTicksPerQuarter * 2}, 0x20}}},
+            MidiExpressionLane{{24},
+                               MidiLaneAddress{0, 0, 11, 0, 1},
+                               {{{25}, {0}, 0x30}, {{26}, {kTicksPerQuarter}, 0x40}}}};
+}
+
+/// A child sequence whose lane authors both of its points before the window a
+/// SequenceRef retains, so the lowerer chases the sounding value to the window
+/// start and the program carries an event whose origin is Chased. The wire has
+/// to carry that origin, and no flat project can produce one.
+std::shared_ptr<const Project> chased_controller_project() {
+    MidiExpressionLane lane{{21},
+                            MidiLaneAddress{0, 0, 11, 0, 74},
+                            {{{22}, {0}, 0x11}, {{23}, {kTicksPerQuarter}, 0x22}}};
+    auto content = take(MidiContent::create(
+        {NoteEvent{{30}, {kTicksPerQuarter * 3}, {kTicksPerQuarter / 2}, 0xffff, 60, 0}}, {}, 0,
+        {std::move(lane)}));
+    auto child_clip =
+        take(Clip::create({20}, {0}, {kTicksPerQuarter * 4}, std::move(content)));
+    auto child = take(Sequence::create({12}, "child", TickDuration{kTicksPerQuarter * 4},
+                                       std::vector<Track>{take(Track::create(
+                                           {11}, "child track", {std::move(child_clip)}))}));
+    // source_start two quarters in: the retained window starts after both
+    // authored points, so the later one is chased to the window start.
+    auto placement = take(Clip::create({4}, {kTicksPerQuarter}, {kTicksPerQuarter * 2},
+                                       SequenceRef{{12}, {kTicksPerQuarter * 2}}));
+    auto root = take(Sequence::create(
+        {2}, "root", std::nullopt,
+        std::vector<Track>{take(Track::create({10}, "expressive", {std::move(placement)}))}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "chased controller";
+    input.next_item_id = 1000;
+    input.root_sequence_id = {2};
+    input.sequences = {std::move(root), std::move(child)};
+    return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
 /// One track playing one audio clip, which is the program shape this version of
 /// the wire deliberately does not represent.
 std::shared_ptr<const Project> audio_project(std::uint64_t frames) {
@@ -389,7 +439,12 @@ encode_project_bytes(std::shared_ptr<const Project> project,
 }
 
 constexpr std::size_t kDirectoryAt = sizeof(ProgramWireHeader);
-constexpr std::size_t kPayloadAt = kDirectoryAt + 9 * sizeof(ProgramWireSectionEntry);
+/// Every section this version writes, controller ranges and events included.
+constexpr std::size_t kSectionCount = 11;
+constexpr std::size_t kPayloadAt = kDirectoryAt + kSectionCount * sizeof(ProgramWireSectionEntry);
+/// The sections a version 2 writer emitted, which is where a version 2 payload's
+/// directory ends.
+constexpr std::size_t kVersion2SectionCount = 9;
 
 /// Rewrites the header's checksum over the current directory and payload, for
 /// tests that mean to corrupt a field rather than the checksum guarding it.
@@ -538,7 +593,9 @@ TEST_CASE("program wire encoding is canonical and byte stable", "[playback][wire
         2 * sizeof(ProgramWireTrackRecord) + 1 * sizeof(ProgramWireIdRecord) +
         8 * sizeof(ProgramWireNoteEventRecord) + 2 * sizeof(ProgramWireNoteModifierRecord) +
         2 * sizeof(ProgramWireIdRecord) + 3 * sizeof(ProgramWireAutomationLaneRecord) +
-        6 * sizeof(ProgramWireAutomationSegmentRecord);
+        6 * sizeof(ProgramWireAutomationSegmentRecord) +
+        2 * sizeof(ProgramWireControllerRangeRecord) +
+        0 * sizeof(ProgramWireControllerEventRecord);
     REQUIRE(fixture.size == counted);
 
     // The header's first bytes are asserted by hand rather than by digest, so
@@ -555,18 +612,21 @@ TEST_CASE("program wire encoding is canonical and byte stable", "[playback][wire
     REQUIRE(header.version == kProgramWireVersion);
     REQUIRE(header.min_reader_version == kProgramWireMinReaderVersion);
     REQUIRE(header.header_bytes == sizeof(ProgramWireHeader));
-    REQUIRE(header.section_count == 9);
+    REQUIRE(header.section_count == kSectionCount);
     REQUIRE(header.payload_bytes == fixture.size - kPayloadAt);
     REQUIRE(header.reserved0 == 0);
     REQUIRE(header.body_checksum == program_wire_checksum(bytes.subspan(kDirectoryAt)));
 
-    // Sections appear in ascending id order and tile the payload exactly.
+    // Sections appear in ascending id order and tile the payload exactly. This
+    // fixture carries no controller events, so the two sections version 3
+    // appended are the only ones flagged optional: a version 2 reader skipping
+    // them renders exactly this program, which is what the flag asserts.
     std::uint64_t tiled = 0;
-    for (std::size_t i = 0; i < 9; ++i) {
+    for (std::size_t i = 0; i < kSectionCount; ++i) {
         ProgramWireSectionEntry entry;
         std::memcpy(&entry, bytes.data() + section_entry_at(i), sizeof(entry));
         REQUIRE(entry.id == i + 1);
-        REQUIRE(entry.flags == 0);
+        REQUIRE(entry.flags == (i < kVersion2SectionCount ? 0u : kProgramWireSectionOptional));
         REQUIRE(entry.offset == tiled);
         REQUIRE(entry.offset % kProgramWireAlignment == 0);
         tiled = entry.offset + entry.bytes;
@@ -613,7 +673,7 @@ TEST_CASE("program wire encoding is canonical and byte stable", "[playback][wire
     REQUIRE(sizeof(ProgramWireAutomationLaneRecord::instance_token) == 8);
     REQUIRE(lane_token_at(canonical.span(), 0) ==
             section_span(canonical.span(), ProgramWireSection::AutomationLanes).first + 16);
-    REQUIRE(program_wire_checksum(canonical.span()) == 0xd4f6b232ebb9d781ull);
+    REQUIRE(program_wire_checksum(canonical.span()) == 0xb542d40c5374bd26ull);
 }
 
 TEST_CASE("program wire rejects a malformed generation header", "[playback][wire]") {
@@ -714,8 +774,8 @@ TEST_CASE("program wire rejects an inconsistent section directory", "[playback][
     gapped.offset += 8;
     with_entries(2, gapped, nullptr, ProgramWireErrorCode::SectionsNotTiled);
 
-    // Dropping a whole record off the last section leaves every entry
-    // individually well formed and the payload short by one record.
+    // Dropping a whole record off a section leaves every entry individually
+    // well formed and the section after it starting one record early.
     auto short_tail = read_entry(8);
     short_tail.bytes -= sizeof(ProgramWireAutomationSegmentRecord);
     with_entries(8, short_tail, nullptr, ProgramWireErrorCode::SectionsNotTiled);
@@ -809,13 +869,13 @@ TEST_CASE("optional unknown sections participate in canonical directory order",
         sizeof(ProgramWireHeader) + header.section_count * sizeof(ProgramWireSectionEntry);
     std::memcpy(expanded.span().data() + sizeof(ProgramWireHeader),
                 fixture.bytes().data() + sizeof(ProgramWireHeader),
-                9 * sizeof(ProgramWireSectionEntry));
+                kSectionCount * sizeof(ProgramWireSectionEntry));
     ProgramWireSectionEntry optional;
     optional.id = 0;
     optional.flags = kProgramWireSectionOptional;
     optional.offset = header.payload_bytes;
     std::memcpy(expanded.span().data() + sizeof(ProgramWireHeader) +
-                    9 * sizeof(ProgramWireSectionEntry),
+                    kSectionCount * sizeof(ProgramWireSectionEntry),
                 &optional, sizeof(optional));
     std::memcpy(expanded.span().data() + expanded_payload_at, fixture.bytes().data() + kPayloadAt,
                 header.payload_bytes);
@@ -825,9 +885,10 @@ TEST_CASE("optional unknown sections participate in canonical directory order",
     REQUIRE_FALSE(descending);
     REQUIRE(descending.error().code == ProgramWireErrorCode::NonCanonicalSectionOrder);
 
-    optional.id = 10;
+    // One past the highest known id, so it is unknown and in ascending order.
+    optional.id = static_cast<std::uint32_t>(ProgramWireSection::ControllerEvents) + 1;
     std::memcpy(expanded.span().data() + sizeof(ProgramWireHeader) +
-                    9 * sizeof(ProgramWireSectionEntry),
+                    kSectionCount * sizeof(ProgramWireSectionEntry),
                 &optional, sizeof(optional));
     header.body_checksum = program_wire_checksum(expanded.span().subspan(sizeof(header)));
     std::memcpy(expanded.span().data(), &header, sizeof(header));
@@ -1034,30 +1095,72 @@ TEST_CASE("program wire encoder refuses what it cannot represent", "[playback][w
     REQUIRE(misread.error().code == ProgramWireErrorCode::MisalignedBuffer);
 }
 
-TEST_CASE("program wire encoder refuses a track carrying controller events", "[playback][wire]") {
-    // The wire has no controller section. Encoding the notes alone would put a
-    // program on the wire whose expression is gone, and nothing downstream
-    // could tell that from a project that authored none, so the encoder refuses
-    // the whole program rather than half-encoding it.
+TEST_CASE("program wire carries a track's controller events across the boundary",
+          "[playback][wire]") {
+    // Encoding the notes alone would put a program on the wire whose expression
+    // is gone, and nothing downstream could tell that from a project that
+    // authored none — which is why a wire without a controller section had to
+    // refuse this program outright. The section exists, so the same program
+    // encodes, and the assertion that matters is that every event comes back
+    // with its address, value, identity and origin: "it encoded" alone would
+    // not prove that loss is gone.
     CompiledProgram with_lane{controller_lane_project({controller_lane()})};
     const auto expressive = with_lane.store.read();
     const auto* expressive_track = expressive->find_track({10});
     REQUIRE(expressive_track != nullptr);
-    REQUIRE_FALSE(expressive_track->arrangement_controller_events().empty());
+    const auto source = expressive_track->arrangement_controller_events();
+    REQUIRE(source.size() == 2);
 
-    auto refused = program_wire_encoded_size(*expressive, kTempoPoints);
-    REQUIRE_FALSE(refused);
-    // Discriminate on the code, not merely on failure. The tempo-map check runs
-    // before the per-track loop, so measuring with points that did not compile
-    // this map refuses for that reason instead and a bare REQUIRE_FALSE would
-    // read as green while proving nothing about controller events.
-    REQUIRE(refused.error().code == ProgramWireErrorCode::ControllerEventsUnsupported);
-    REQUIRE(refused.error().section == static_cast<std::uint32_t>(ProgramWireSection::Tracks));
-    REQUIRE(refused.error().detail == 10);
+    const auto size = take(program_wire_encoded_size(*expressive, kTempoPoints));
+    WireBuffer buffer{size};
+    REQUIRE(take(encode_program_wire(*expressive, kTempoPoints, kEpoch, buffer.span())) == size);
+    auto decoded = decode_program_wire(buffer.span());
+    REQUIRE(decoded);
+    const auto& view = decoded.value();
+    REQUIRE(program_wire_matches(view, *expressive, kTempoPoints, kEpoch));
 
-    // The control the assertion above needs: the same arrangement without the
-    // lane, measured against the same tempo points, encodes. A refusal for any
-    // other reason would otherwise be indistinguishable from the one under test.
+    REQUIRE(view.controller_ranges().size() == view.tracks().size());
+    const auto carried = view.controller_events_for(view.controller_ranges()[0]);
+    REQUIRE(carried.size() == source.size());
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        REQUIRE(carried[i].sample == source[i].sample.value);
+        REQUIRE(carried[i].tick == source[i].tick.value);
+        REQUIRE(carried[i].clip_id == 20);
+        REQUIRE(carried[i].lane_id == 21);
+        REQUIRE(carried[i].point_id == source[i].point_id.value);
+        REQUIRE(carried[i].value == source[i].value);
+        REQUIRE(MidiLaneAddress{carried[i].group, carried[i].channel, carried[i].status,
+                                carried[i].bank, carried[i].index} == source[i].address);
+        REQUIRE(carried[i].origin ==
+                static_cast<std::uint8_t>(ControllerProgramEventOrigin::Authored));
+    }
+    REQUIRE(carried[0].point_id == 22);
+    REQUIRE(carried[1].point_id == 23);
+    REQUIRE(carried[1].value == 0xffff'ffff);
+
+    // A payload that carries expression states that a reader must know how to
+    // read it: the floor moves to 3 and the two sections are required, so a
+    // version 2 reader refuses at the header rather than skipping them and
+    // rendering the notes with the expression silently gone.
+    ProgramWireHeader header;
+    std::memcpy(&header, buffer.span().data(), sizeof(header));
+    REQUIRE(header.version == kProgramWireVersion);
+    REQUIRE(header.min_reader_version == kProgramWireControllerMinReaderVersion);
+    REQUIRE(header.min_reader_version > kProgramWireMinReaderVersion);
+    for (const auto section :
+         {ProgramWireSection::ControllerRanges, ProgramWireSection::ControllerEvents}) {
+        ProgramWireSectionEntry entry;
+        std::memcpy(&entry,
+                    buffer.span().data() + section_entry_at(static_cast<std::size_t>(section) - 1),
+                    sizeof(entry));
+        REQUIRE(entry.id == static_cast<std::uint32_t>(section));
+        REQUIRE(entry.flags == 0);
+    }
+
+    // The control the round trip needs: the same arrangement without the lane,
+    // against the same tempo points, encodes with an empty controller section,
+    // a reader floor of 2, and both appended sections marked optional — so the
+    // populated case above differs from this one in exactly the lane.
     CompiledProgram without_lane{controller_lane_project({})};
     const auto plain = without_lane.store.read();
     const auto* plain_track = plain->find_track({10});
@@ -1065,7 +1168,340 @@ TEST_CASE("program wire encoder refuses a track carrying controller events", "[p
     REQUIRE(plain_track->arrangement_controller_events().empty());
     REQUIRE(plain_track->arrangement_note_events().size() ==
             expressive_track->arrangement_note_events().size());
-    REQUIRE(program_wire_encoded_size(*plain, kTempoPoints));
+    const auto plain_size = take(program_wire_encoded_size(*plain, kTempoPoints));
+    WireBuffer plain_buffer{plain_size};
+    REQUIRE(take(encode_program_wire(*plain, kTempoPoints, kEpoch, plain_buffer.span())) ==
+            plain_size);
+    REQUIRE(size == plain_size + source.size() * sizeof(ProgramWireControllerEventRecord));
+    auto plain_view = decode_program_wire(plain_buffer.span());
+    REQUIRE(plain_view);
+    REQUIRE(plain_view.value().controller_ranges().size() == 1);
+    REQUIRE(plain_view.value().controller_ranges()[0].count == 0);
+    REQUIRE(plain_view.value().controller_events().empty());
+    std::memcpy(&header, plain_buffer.span().data(), sizeof(header));
+    REQUIRE(header.min_reader_version == kProgramWireMinReaderVersion);
+    for (const auto section :
+         {ProgramWireSection::ControllerRanges, ProgramWireSection::ControllerEvents}) {
+        ProgramWireSectionEntry entry;
+        std::memcpy(&entry,
+                    plain_buffer.span().data() +
+                        section_entry_at(static_cast<std::size_t>(section) - 1),
+                    sizeof(entry));
+        REQUIRE(entry.flags == kProgramWireSectionOptional);
+    }
+
+    // And matches() reads the section rather than the note spine alone: the
+    // two programs agree on every other field, so this can only be false
+    // because the controller events differ.
+    REQUIRE_FALSE(program_wire_matches(view, *plain, kTempoPoints, kEpoch));
+    REQUIRE_FALSE(program_wire_matches(plain_view.value(), *expressive, kTempoPoints, kEpoch));
+
+    // A whole-payload digest for the controller-bearing input, the same guard
+    // the controller-free golden gives the rest of the format. No automation
+    // lane means no instance token to normalise.
+    REQUIRE(program_wire_checksum(buffer.span()) == kControllerGoldenDigest);
+}
+
+TEST_CASE("program wire preserves controller order exactly, ties included", "[playback][wire]") {
+    // Two lanes that both author a point at tick 0 give the program two events
+    // at one sample and one tick, distinguishable only by address. The wire
+    // carries the program's sequence verbatim and re-sorts nothing, so what
+    // comes back must be that sequence position for position — including the
+    // tied pair, which is exactly where an order stops being total if two
+    // distinct events could compare equal.
+    CompiledProgram compiled{controller_lane_project(tied_controller_lanes())};
+    const auto program = compiled.store.read();
+    const auto source = program->find_track({10})->arrangement_controller_events();
+    REQUIRE(source.size() == 4);
+
+    // The fixture really contains the tie it claims to: some pair at one
+    // sample and one tick, so the preservation below is measured over a tie
+    // rather than over a sequence with none. The pair is searched for rather
+    // than assumed adjacent, because the compiler emits a track's events lane
+    // by lane, not in time order — the two tick-0 points sit two lanes apart.
+    std::size_t first_tied = source.size();
+    std::size_t second_tied = source.size();
+    for (std::size_t i = 0; i < source.size() && first_tied == source.size(); ++i)
+        for (std::size_t j = i + 1; j < source.size(); ++j)
+            if (source[i].sample == source[j].sample && source[i].tick == source[j].tick) {
+                first_tied = i;
+                second_tied = j;
+                break;
+            }
+    REQUIRE(first_tied < source.size());
+    REQUIRE(source[first_tied].address != source[second_tied].address);
+
+    // The order is total over these events: no two compare equal in both
+    // directions, so a stable round trip has exactly one sequence to preserve.
+    for (std::size_t i = 0; i < source.size(); ++i)
+        for (std::size_t j = 0; j < source.size(); ++j)
+            if (i != j)
+                REQUIRE((controller_program_event_less(source[i], source[j]) ||
+                         controller_program_event_less(source[j], source[i])));
+
+    const auto size = take(program_wire_encoded_size(*program, kTempoPoints));
+    WireBuffer buffer{size};
+    REQUIRE(take(encode_program_wire(*program, kTempoPoints, kEpoch, buffer.span())) == size);
+    auto decoded = decode_program_wire(buffer.span());
+    REQUIRE(decoded);
+    const auto& view = decoded.value();
+    REQUIRE(program_wire_matches(view, *program, kTempoPoints, kEpoch));
+    const auto carried = view.controller_events_for(view.controller_ranges()[0]);
+    REQUIRE(carried.size() == source.size());
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        REQUIRE(carried[i].sample == source[i].sample.value);
+        REQUIRE(carried[i].tick == source[i].tick.value);
+        REQUIRE(carried[i].point_id == source[i].point_id.value);
+        REQUIRE(carried[i].value == source[i].value);
+        REQUIRE(MidiLaneAddress{carried[i].group, carried[i].channel, carried[i].status,
+                                carried[i].bank, carried[i].index} == source[i].address);
+    }
+    // The tied pair specifically came back in its stored positions, and the
+    // two addresses are the only thing that told them apart.
+    REQUIRE(carried[first_tied].sample == carried[second_tied].sample);
+    REQUIRE(carried[first_tied].tick == carried[second_tied].tick);
+    REQUIRE(carried[first_tied].index != carried[second_tied].index);
+    REQUIRE(carried[first_tied].index == source[first_tied].address.index);
+    REQUIRE(carried[second_tied].index == source[second_tied].address.index);
+
+    // Negative control for the preservation claim: swap the tied pair on the
+    // wire and matches() must see it. Same records, same fields, same values;
+    // only the positions changed.
+    const auto [events_at, events_bytes] =
+        section_span(buffer.span(), ProgramWireSection::ControllerEvents);
+    REQUIRE(events_bytes == 4 * sizeof(ProgramWireControllerEventRecord));
+    std::array<std::byte, sizeof(ProgramWireControllerEventRecord)> first{};
+    std::array<std::byte, sizeof(ProgramWireControllerEventRecord)> second{};
+    const auto first_at = events_at + first_tied * sizeof(ProgramWireControllerEventRecord);
+    const auto second_at = events_at + second_tied * sizeof(ProgramWireControllerEventRecord);
+    std::memcpy(first.data(), buffer.span().data() + first_at, first.size());
+    std::memcpy(second.data(), buffer.span().data() + second_at, second.size());
+    std::memcpy(buffer.span().data() + first_at, second.data(), second.size());
+    std::memcpy(buffer.span().data() + second_at, first.data(), first.size());
+    reseal(buffer.span());
+    auto swapped = decode_program_wire(buffer.span());
+    REQUIRE(swapped);
+    REQUIRE_FALSE(program_wire_matches(swapped.value(), *program, kTempoPoints, kEpoch));
+}
+
+TEST_CASE("program wire carries a chased controller origin", "[playback][wire]") {
+    // A flat project can only author an Authored event. The chased origin
+    // exists only after the lowerer trims a nested lane, so a round trip that
+    // never sees one has not proven the origin field is carried at all.
+    CompiledProgram compiled{chased_controller_project()};
+    const auto program = compiled.store.read();
+    const auto* track = program->find_track({10});
+    REQUIRE(track != nullptr);
+    const auto source = track->arrangement_controller_events();
+    REQUIRE(source.size() == 1);
+    REQUIRE(source[0].origin == ControllerProgramEventOrigin::Chased);
+    REQUIRE(source[0].value == 0x22);
+    REQUIRE(source[0].point_id == ItemId{23});
+
+    const auto size = take(program_wire_encoded_size(*program, kTempoPoints));
+    WireBuffer buffer{size};
+    REQUIRE(take(encode_program_wire(*program, kTempoPoints, kEpoch, buffer.span())) == size);
+    auto decoded = decode_program_wire(buffer.span());
+    REQUIRE(decoded);
+    const auto& view = decoded.value();
+    REQUIRE(program_wire_matches(view, *program, kTempoPoints, kEpoch));
+    const auto carried = view.controller_events_for(view.controller_ranges()[0]);
+    REQUIRE(carried.size() == 1);
+    REQUIRE(carried[0].origin == static_cast<std::uint8_t>(ControllerProgramEventOrigin::Chased));
+    REQUIRE(carried[0].point_id == 23);
+    REQUIRE(carried[0].lane_id == 21);
+    REQUIRE(carried[0].value == 0x22);
+    // Chased to the placement's start, which is where the retained window
+    // begins on the root timeline.
+    REQUIRE(carried[0].tick == kTicksPerQuarter);
+}
+
+TEST_CASE("program wire rejects malformed controller records", "[playback][wire]") {
+    CompiledProgram compiled{controller_lane_project({controller_lane()})};
+    const auto program = compiled.store.read();
+    const auto size = take(program_wire_encoded_size(*program, kTempoPoints));
+    WireBuffer buffer{size};
+    REQUIRE(take(encode_program_wire(*program, kTempoPoints, kEpoch, buffer.span())) == size);
+    const auto bytes = buffer.span();
+    REQUIRE(decode_program_wire(bytes));
+
+    // Resealed rather than raw-corrupted: every field below lives in the
+    // checksummed payload, so without re-sealing each case would prove
+    // ChecksumMismatch fires and never reach the check under test. The restore
+    // is the negative control.
+    const auto with_field = [&](std::size_t offset, auto replacement,
+                                ProgramWireErrorCode expected, ProgramWireSection section,
+                                std::uint64_t detail) {
+        decltype(replacement) original{};
+        std::memcpy(&original, bytes.data() + offset, sizeof(replacement));
+        std::memcpy(bytes.data() + offset, &replacement, sizeof(replacement));
+        reseal(bytes);
+        auto rejected = decode_program_wire(bytes);
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == expected);
+        REQUIRE(rejected.error().section == static_cast<std::uint32_t>(section));
+        REQUIRE(rejected.error().detail == detail);
+        std::memcpy(bytes.data() + offset, &original, sizeof(original));
+        reseal(bytes);
+        REQUIRE(decode_program_wire(bytes));
+    };
+
+    const auto [events_at, events_bytes] = section_span(bytes, ProgramWireSection::ControllerEvents);
+    REQUIRE(events_bytes == 2 * sizeof(ProgramWireControllerEventRecord));
+    const auto second_event = events_at + sizeof(ProgramWireControllerEventRecord);
+    with_field(second_event + offsetof(ProgramWireControllerEventRecord, origin), std::uint8_t{2},
+               ProgramWireErrorCode::InvalidEnum, ProgramWireSection::ControllerEvents, 1);
+    // One past the four-bit width the wire gives a group: the model's own
+    // predicate is what refuses it, so a reader never emits it onto a stream.
+    with_field(second_event + offsetof(ProgramWireControllerEventRecord, group), std::uint8_t{16},
+               ProgramWireErrorCode::MalformedControllerEvent,
+               ProgramWireSection::ControllerEvents, 1);
+    with_field(events_at + offsetof(ProgramWireControllerEventRecord, channel), std::uint8_t{16},
+               ProgramWireErrorCode::MalformedControllerEvent,
+               ProgramWireSection::ControllerEvents, 0);
+    with_field(events_at + offsetof(ProgramWireControllerEventRecord, point_id), std::uint64_t{0},
+               ProgramWireErrorCode::MalformedControllerEvent,
+               ProgramWireSection::ControllerEvents, 0);
+    with_field(events_at + offsetof(ProgramWireControllerEventRecord, lane_id), std::uint64_t{0},
+               ProgramWireErrorCode::MalformedControllerEvent,
+               ProgramWireSection::ControllerEvents, 0);
+    // Controls on the predicate's edges: the widest value each field admits
+    // still decodes, so the refusals above are the width and not the change.
+    for (const auto member : {offsetof(ProgramWireControllerEventRecord, group),
+                              offsetof(ProgramWireControllerEventRecord, channel),
+                              offsetof(ProgramWireControllerEventRecord, status)}) {
+        std::uint8_t original = 0;
+        std::memcpy(&original, bytes.data() + events_at + member, sizeof(original));
+        const std::uint8_t widest = midi_lane_address_maximum;
+        std::memcpy(bytes.data() + events_at + member, &widest, sizeof(widest));
+        reseal(bytes);
+        REQUIRE(decode_program_wire(bytes));
+        std::memcpy(bytes.data() + events_at + member, &original, sizeof(original));
+        reseal(bytes);
+    }
+
+    const auto [ranges_at, ranges_bytes] = section_span(bytes, ProgramWireSection::ControllerRanges);
+    REQUIRE(ranges_bytes == 1 * sizeof(ProgramWireControllerRangeRecord));
+    // The ceiling is judged before the range, so a count no compiled program
+    // could hold is a typed limit refusal rather than a bounds failure.
+    with_field(ranges_at + offsetof(ProgramWireControllerRangeRecord, count),
+               static_cast<std::uint32_t>(kProgramWireMaximumControllerEventsPerTrack + 1u),
+               ProgramWireErrorCode::InvalidLimits, ProgramWireSection::ControllerRanges, 0);
+    with_field(ranges_at + offsetof(ProgramWireControllerRangeRecord, count), std::uint32_t{3},
+               ProgramWireErrorCode::RangeOutOfBounds, ProgramWireSection::ControllerRanges, 0);
+    with_field(ranges_at + offsetof(ProgramWireControllerRangeRecord, first), std::uint32_t{1},
+               ProgramWireErrorCode::RangeOutOfBounds, ProgramWireSection::ControllerRanges, 0);
+    // A range that owns fewer events than the section holds leaves records
+    // nobody owns, which is the partition break from the other side.
+    with_field(ranges_at + offsetof(ProgramWireControllerRangeRecord, count), std::uint32_t{1},
+               ProgramWireErrorCode::NonCanonicalRangeOwnership,
+               ProgramWireSection::ControllerRanges, 0);
+    // A range that fits the section but does not start where the previous one
+    // ended is an alias, refused at the track that claims it.
+    ProgramWireControllerRangeRecord original_range;
+    std::memcpy(&original_range, bytes.data() + ranges_at, sizeof(original_range));
+    const ProgramWireControllerRangeRecord aliased{1, 1};
+    std::memcpy(bytes.data() + ranges_at, &aliased, sizeof(aliased));
+    reseal(bytes);
+    auto rejected = decode_program_wire(bytes);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ProgramWireErrorCode::NonCanonicalRangeOwnership);
+    REQUIRE(rejected.error().section ==
+            static_cast<std::uint32_t>(ProgramWireSection::ControllerRanges));
+    REQUIRE(rejected.error().detail == 0);
+    std::memcpy(bytes.data() + ranges_at, &original_range, sizeof(original_range));
+    reseal(bytes);
+    REQUIRE(decode_program_wire(bytes));
+}
+
+TEST_CASE("a version 3 reader accepts a version 2 payload and a version 2 reader is refused "
+          "only what it would misrender",
+          "[playback][wire]") {
+    // The compatibility claim in both directions, measured rather than argued.
+    //
+    // Forward: version 3 changed no version 2 record — every sizeof the format
+    // pins is what it was — and only appended two sections after the nine a
+    // version 2 writer emitted. So a version 2 payload is, byte for byte, this
+    // build's controller-free payload with its directory cut at nine entries
+    // and the appended sections' bytes removed from the payload tail, stamped
+    // version 2. Built that way here, it must decode under this reader, and
+    // must match the program it was encoded from.
+    static_assert(sizeof(ProgramWireTrackRecord) == 112);
+    static_assert(sizeof(ProgramWireAutomationLaneRecord) == 56);
+    EncodedFixture fixture;
+    const auto v3 = fixture.bytes();
+    ProgramWireHeader header;
+    std::memcpy(&header, v3.data(), sizeof(header));
+    REQUIRE(header.section_count == kSectionCount);
+    REQUIRE(header.min_reader_version == kProgramWireMinReaderVersion);
+
+    std::uint64_t appended_bytes = 0;
+    for (std::size_t i = kVersion2SectionCount; i < kSectionCount; ++i) {
+        ProgramWireSectionEntry entry;
+        std::memcpy(&entry, v3.data() + section_entry_at(i), sizeof(entry));
+        REQUIRE(entry.flags == kProgramWireSectionOptional);
+        appended_bytes += entry.bytes;
+    }
+    REQUIRE(appended_bytes == 2 * sizeof(ProgramWireControllerRangeRecord));
+
+    constexpr std::size_t kVersion2PayloadAt =
+        kDirectoryAt + kVersion2SectionCount * sizeof(ProgramWireSectionEntry);
+    const auto v2_payload_bytes = static_cast<std::size_t>(header.payload_bytes - appended_bytes);
+    WireBuffer v2{kVersion2PayloadAt + v2_payload_bytes};
+    std::memcpy(v2.span().data(), v3.data(), kVersion2PayloadAt);
+    std::memcpy(v2.span().data() + kVersion2PayloadAt, v3.data() + kPayloadAt, v2_payload_bytes);
+    ProgramWireHeader v2_header = header;
+    v2_header.version = 2;
+    v2_header.min_reader_version = 2;
+    v2_header.section_count = kVersion2SectionCount;
+    v2_header.payload_bytes = v2_payload_bytes;
+    std::memcpy(v2.span().data(), &v2_header, sizeof(v2_header));
+    reseal(v2.span());
+
+    auto decoded = decode_program_wire(v2.span());
+    REQUIRE(decoded);
+    REQUIRE(decoded.value().header().version == 2);
+    REQUIRE(decoded.value().controller_ranges().empty());
+    REQUIRE(decoded.value().controller_events().empty());
+    REQUIRE(decoded.value().tracks().size() == 2);
+    REQUIRE(decoded.value().automation_lanes().size() == 3);
+    REQUIRE(program_wire_matches(decoded.value(), *fixture.program, kTempoPoints, kEpoch));
+
+    // The tolerance is for what a version 2 writer could not have written, not
+    // a general licence to omit sections: the same bytes stamped version 3 are
+    // a version 3 writer's non-canonical payload and are refused.
+    v2_header.version = 3;
+    std::memcpy(v2.span().data(), &v2_header, sizeof(v2_header));
+    reseal(v2.span());
+    auto noncanonical = decode_program_wire(v2.span());
+    REQUIRE_FALSE(noncanonical);
+    REQUIRE(noncanonical.error().code == ProgramWireErrorCode::MissingSection);
+    REQUIRE(noncanonical.error().section ==
+            static_cast<std::uint32_t>(ProgramWireSection::ControllerRanges));
+
+    // Backward: a version 2 reader given a controller-free version 3 payload
+    // sees a floor it meets and two optional sections it may skip, and renders
+    // this program exactly. Given a controller-bearing one it sees a floor it
+    // does not meet and refuses at the header. The one outcome the format
+    // never produces is a payload an older reader would accept and misrender:
+    // a floor of 2 with anything in the appended sections.
+    CompiledProgram expressive{controller_lane_project({controller_lane()})};
+    const auto program = expressive.store.read();
+    const auto size = take(program_wire_encoded_size(*program, kTempoPoints));
+    WireBuffer carrying{size};
+    REQUIRE(take(encode_program_wire(*program, kTempoPoints, kEpoch, carrying.span())) == size);
+    ProgramWireHeader carrying_header;
+    std::memcpy(&carrying_header, carrying.span().data(), sizeof(carrying_header));
+    constexpr std::uint16_t kVersion2Reader = 2;
+    REQUIRE(carrying_header.min_reader_version > kVersion2Reader);
+    REQUIRE(header.min_reader_version <= kVersion2Reader);
+    // What that older reader does is exactly what this reader does with a
+    // floor above its own version: refuse before touching a section.
+    carrying_header.min_reader_version = static_cast<std::uint16_t>(kProgramWireVersion + 1);
+    std::memcpy(carrying.span().data(), &carrying_header, sizeof(carrying_header));
+    auto refused = decode_program_wire(carrying.span());
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == ProgramWireErrorCode::UnsupportedVersion);
 }
 
 TEST_CASE("program wire carries producer identity alongside the generation", "[playback][wire]") {

@@ -82,6 +82,37 @@ class DecodedAudioAssetPool {
     std::vector<DecodedAudioAsset> assets_;
 };
 
+/// One placement-fade ramp a flattened leaf sits under, in clip-relative frames.
+///
+/// The ends name what the ramp reads rather than which way it points:
+/// `silent_frame` is where its gain is zero and `open_frame` where it is unity,
+/// so a fade in and a fade out are one shape with the ends exchanged. Progress
+/// is `(position - silent_frame) / (open_frame - silent_frame)` clamped to the
+/// unit interval, and the authored shape reparameterizes that progress.
+///
+/// Storing the progress window rather than a pair of endpoint gains is the
+/// point. A leaf covers a sub-interval of the ramp, and a shape is a
+/// reparameterization of progress, so re-applying the shape to the progress the
+/// leaf actually spans is the only reading that agrees with the unflattened
+/// envelope. Ramping between two endpoint gains lands both edges and bends the
+/// wrong way everywhere between them.
+///
+/// Either end may fall outside the leaf. Flattening cuts a nested window at
+/// clip boundaries and never at a ramp edge, so carrying the whole ramp and
+/// evaluating the position is what makes two neighbouring leaves read the same
+/// gain at the frame they share.
+struct ClipPlacementFadeSegment {
+    double silent_frame = 0.0;
+    double open_frame = 0.0;
+    timeline::ClipFadeShape shape = timeline::ClipFadeShape::Linear;
+};
+
+/// Every placement fade one flattened leaf sits under. The ramps multiply, so
+/// their order does not change the result.
+struct ClipPlacementFadeProgram {
+    std::vector<ClipPlacementFadeSegment> segments;
+};
+
 struct AudioClipRendererProgram {
     enum class SourceKind : std::uint8_t { ArrangementClip, TakeCompSegment, FrozenTrack };
     enum class TimeDomain : std::uint8_t { Musical, Absolute };
@@ -114,6 +145,10 @@ struct AudioClipRendererProgram {
     SourceTimeMapping source_time_mapping = SourceTimeMapping::NativeRate;
     std::shared_ptr<const OfflineStretchArtifact> offline_stretch_artifact;
     std::shared_ptr<const OfflineStretchProvenance> offline_stretch_provenance;
+    // Null unless flattening placed this clip under a faded `SequenceRef`, which
+    // is what keeps an ordinary clip's per-sample gain exactly the arithmetic it
+    // always was.
+    std::shared_ptr<const ClipPlacementFadeProgram> placement_fade;
 
     std::int64_t timeline_end() const noexcept;
     bool uses_sample_rate_conversion() const noexcept;
