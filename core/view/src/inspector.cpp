@@ -170,8 +170,12 @@ Rect ViewInspector::absolute_bounds(const View& view) {
     Rect abs = view.bounds();
     const View* current = view.parent();
     while (current) {
-        abs.x += current->bounds().x;
-        abs.y += current->bounds().y;
+        // A container may translate its children's paint on top of its own
+        // origin — a scrolled ScrollView shifts them by (-scroll_x, -scroll_y).
+        // Summing bounds() alone reports the unscrolled position forever.
+        const Point offset = current->child_paint_offset();
+        abs.x += current->bounds().x + offset.x;
+        abs.y += current->bounds().y + offset.y;
         current = current->parent();
     }
     return abs;

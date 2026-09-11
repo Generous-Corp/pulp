@@ -526,10 +526,11 @@ public:
 
     /// paint_all() translates children by (-scroll_x, -scroll_y), so once
     /// scrolled the content no longer sits at a plain bounds offset. Reporting
-    /// true here makes a descendant's bounded request_repaint(Rect) escalate to
-    /// a full repaint instead of invalidating the wrong (unscrolled) root rect.
-    bool applies_child_paint_offset() const override {
-        return scroll_x() != 0.0f || scroll_y() != 0.0f;
+    /// that here makes a descendant's bounded request_repaint(Rect) escalate to
+    /// a full repaint instead of invalidating the wrong (unscrolled) root rect,
+    /// and lets a bounds walk recover the descendant's true painted position.
+    Point child_paint_offset() const override {
+        return Point{-scroll_x(), -scroll_y()};
     }
 
     View* hit_test(Point local_point) override;

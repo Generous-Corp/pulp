@@ -1638,8 +1638,21 @@ public:
     /// bounds-offset walk cannot model — e.g. a scrolled ScrollView. Bounded
     /// invalidation escalates to full when any ancestor reports true, so a
     /// scrolled sub-view never targets the wrong root rect. Default false: a
-    /// flex/grid container positions children at their bounds origin.
-    virtual bool applies_child_paint_offset() const { return false; }
+    /// flex/grid container positions children at their bounds origin, so its
+    /// `child_paint_offset()` is zero and this reports false.
+    virtual bool applies_child_paint_offset() const {
+        const Point offset = child_paint_offset();
+        return offset.x != 0.0f || offset.y != 0.0f;
+    }
+
+    /// The translation this container applies to its CHILDREN's paint, in the
+    /// container's own coordinate space. A scrolled ScrollView returns
+    /// (-scroll_x, -scroll_y); a flex/grid container returns (0, 0) because it
+    /// positions children at their bounds origin. Any walk that converts a
+    /// descendant's bounds into an ancestor's space must accumulate this in
+    /// addition to `bounds()`, or it reports the UNSCROLLED position forever.
+    virtual Point child_paint_offset() const { return Point{0.0f, 0.0f}; }
+
     /// Returns the six affine components in (a,b,c,d,e,f) order; meaningful
     /// only when has_transform_matrix() is true.
     void get_transform_matrix(float& a, float& b, float& c,

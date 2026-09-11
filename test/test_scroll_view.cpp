@@ -4,6 +4,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/inspector.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/canvas/canvas.hpp>
 
@@ -616,4 +617,48 @@ TEST_CASE("ScrollView::hit_test follows the popover's painted extent beyond 500p
     // a click that lands on its painted box regardless of the distance.
     ScrollPopoverFixture f(-600, 25);
     REQUIRE(f.sv.hit_test({25, 650}) == f.popover);
+}
+
+TEST_CASE("a scrolled descendant's absolute bounds follow the scroll offset",
+          "[scrollview][geometry][inspector]") {
+    // ScrollView::paint_all translates children by (-scroll_x, -scroll_y), so a
+    // walk that sums only bounds() reports where the row WOULD sit if nothing
+    // were scrolled. Every appearance/overlap detector built on absolute_bounds
+    // then judges only the first viewport-worth of a long panel and calls the
+    // rest clean by never looking at it.
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 200, 100});
+
+    auto row_owner = std::make_unique<View>();
+    auto* row = row_owner.get();
+    row->set_position(View::Position::absolute);
+    row->set_left(0.0f);
+    row->set_top(400.0f);
+    row->flex().preferred_width = 200.0f;
+    row->flex().preferred_height = 20.0f;
+    scroll.add_child(std::move(row_owner));
+    scroll.layout_children();
+
+    const auto unscrolled = ViewInspector::absolute_bounds(*row);
+    REQUIRE(unscrolled.y == Catch::Approx(400.0f).margin(0.5f));
+    REQUIRE_FALSE(scroll.applies_child_paint_offset());
+
+    scroll.set_scroll(0.0f, 200.0f);
+    REQUIRE(scroll.scroll_y() == Catch::Approx(200.0f).margin(0.5f));
+    REQUIRE(scroll.applies_child_paint_offset());
+
+    // The row is now painted 200px higher. Its absolute position must say so —
+    // 400 - 200 = 200.
+    const auto scrolled = ViewInspector::absolute_bounds(*row);
+    CHECK(scrolled.y == Catch::Approx(200.0f).margin(0.5f));
+    CHECK(scrolled.y < unscrolled.y);
+
+    // And it must track further scrolling rather than staying pinned. 320 is the
+    // bottom of the 420px content in a 100px viewport, which brings the row to
+    // 400 - 320 = 80 — inside the viewport, where a detector can finally see it.
+    scroll.set_scroll(0.0f, 320.0f);
+    REQUIRE(scroll.scroll_y() == Catch::Approx(320.0f).margin(0.5f));
+    const auto deeper = ViewInspector::absolute_bounds(*row);
+    CHECK(deeper.y == Catch::Approx(80.0f).margin(0.5f));
+    CHECK(deeper.y < scrolled.y);
 }
