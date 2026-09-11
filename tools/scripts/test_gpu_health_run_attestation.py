@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -56,6 +57,13 @@ class Fixture:
         run("git", "init", "-q", "-b", "main", cwd=self.repo)
         run("git", "config", "user.name", "GPU Health Test", cwd=self.repo)
         run("git", "config", "user.email", "gpu-health@example.invalid", cwd=self.repo)
+        # A throwaway fixture repository must not inherit the developer's signing
+        # policy. With tag.gpgsign enabled, git promotes a lightweight
+        # `git tag <name> <ref>` to a signed tag, which then aborts with
+        # "no tag message?" because no message is supplied and no editor is
+        # attached; commit.gpgsign likewise fails wherever the key is unusable.
+        run("git", "config", "commit.gpgsign", "false", cwd=self.repo)
+        run("git", "config", "tag.gpgsign", "false", cwd=self.repo)
         (self.repo / "bootstrap.txt").write_text("repository bootstrap\n")
         self.commit("repository bootstrap")
         (self.repo / "implementation.txt").write_text("implementation\n")
@@ -254,6 +262,33 @@ class GpuHealthRunAttestationTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def test_fixture_repository_overrides_host_signing_policy(self) -> None:
+        # The fixture tags revisions with a lightweight `git tag <name> <ref>`.
+        # A host that enables tag signing promotes that to a signed tag, which
+        # aborts with "no tag message?", so the fixture pins the setting locally.
+        # Local configuration outranks global, and this proves that ordering
+        # against a hostile global file rather than the developer's own config,
+        # so the protection is exercised on every host.
+        hostile = Path(self.temp.name) / "hostile-global-gitconfig"
+        hostile.write_text("[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n")
+        environment = dict(os.environ, GIT_CONFIG_GLOBAL=str(hostile),
+                           GIT_CONFIG_SYSTEM=os.devnull)
+        for key in ("commit.gpgsign", "tag.gpgsign"):
+            effective = subprocess.run(
+                ["git", "config", "--get", key], cwd=self.fixture.repo, text=True,
+                env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                check=False)
+            self.assertEqual(effective.stdout.strip(), "false",
+                             f"fixture repository inherited host {key}")
+        tagged = subprocess.run(
+            ["git", "tag", "host-signing-policy-probe", self.fixture.implementation],
+            cwd=self.fixture.repo, text=True, env=environment,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        self.assertEqual(tagged.returncode, 0, tagged.stdout + tagged.stderr)
+        kind = run("git", "cat-file", "-t", "host-signing-policy-probe",
+                   cwd=self.fixture.repo).stdout.strip()
+        self.assertEqual(kind, "commit", "fixture tag was promoted to a signed tag")
 
     def test_protected_authenticated_run_verifies(self) -> None:
         result = self.fixture.verify()

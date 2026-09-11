@@ -55,6 +55,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
+    # Measured at 76.65 s on an unloaded Linux runner, against a suite-wide
+    # default of 120 s. That 1.6x headroom is consumed by co-scheduling on a
+    # loaded host, which is how a test that passes in isolation times out in a
+    # cohort. The slot declaration alone does not restore the budget.
+    set_tests_properties(agent-capability-rederive-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
     # The rederive self-test deliberately rewrites the manifest script's two
     # generated counters before restoring them. Keep readers from observing
     # that temporary state while retaining parallelism for unrelated tests.
@@ -508,6 +515,14 @@ if(Python3_Interpreter_FOUND)
         PROCESSORS 8)
     add_test(NAME gpu-first-visible-role-producers-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_role_producers.py")
+    # Five positive roles plus thirty-nine planted negatives, each a sealed
+    # build driving its own subprocess tree. That cost is invisible to the
+    # scheduler at the default single slot, so co-scheduled heavy tests inflate
+    # each other past the suite-wide default timeout on a loaded host. Declare
+    # what the test actually consumes and give it a budget sized to the work.
+    set_tests_properties(gpu-first-visible-role-producers-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
     add_test(NAME gpu-first-visible-trace-producer-overhead-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py")
     add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}

@@ -364,6 +364,23 @@ NSWindow* create_configured_window(const pulp::view::WindowOptions& options) {
     if (options.min_width > 0 || options.min_height > 0)
         [window setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
 
+    // NSWindow leaves mouse-moved delivery OFF, and -[NSWindow sendEvent:]
+    // DROPS NSEventTypeMouseMoved while it is — the event never reaches the
+    // content view's -mouseMoved:.
+    //
+    // Scope, precisely: this gates the sendEvent: route ONLY. Real pointer
+    // motion over an NSTrackingArea carrying NSTrackingMouseMoved reaches the
+    // area's owner whether or not this flag is set (measured on a live
+    // MacGpuWindowHost with the flag pinned NO). So this is NOT what makes
+    // ordinary hover work — it is what makes a move PUSHED THROUGH sendEvent:
+    // work: a synthesized event, and any window that has no tracking area
+    // covering the point.
+    //
+    // Only the CPU host used to opt in, for no reason anyone recorded. Both
+    // window hosts back onto this factory, so the opt-in belongs here rather
+    // than in one of them.
+    [window setAcceptsMouseMovedEvents:YES];
+
     return window;
 }
 

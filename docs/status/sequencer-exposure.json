@@ -915,16 +915,18 @@
         },
         "offline_timeline_cli": {
           "disposition": "gap",
-          "rationale": "The CLI can persist and inspect the lane but has no typed dynamics-lane mutation command.",
+          "rationale": "The lane does not round-trip. It is absent from the sequence encoder, from every decoder, and from the sequence schema, so a save silently drops it (#8216). The CLI can therefore neither persist nor inspect the lane, and has no typed dynamics-lane mutation command.",
           "dependencies": [
+            "timeline-dynamics-lane-persistence",
             "offline-timeline-dynamics-command"
           ],
           "owner": "timeline-cli-mcp"
         },
         "offline_timeline_mcp": {
           "disposition": "gap",
-          "rationale": "The MCP command vocabulary has no typed dynamics-lane mutation.",
+          "rationale": "The MCP command vocabulary has no typed dynamics-lane mutation, and the lane does not round-trip through the sequence schema (#8216), so a mutation would not survive a save.",
           "dependencies": [
+            "timeline-dynamics-lane-persistence",
             "offline-timeline-dynamics-command"
           ],
           "owner": "timeline-cli-mcp"
@@ -940,7 +942,7 @@
         },
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
-          "rationale": "A persisted dynamics lane is timeline state, not a design-time algorithm capability."
+          "rationale": "A sequence-owned dynamics lane is timeline state, not a design-time algorithm capability."
         }
       }
     },
@@ -3122,6 +3124,109 @@
       }
     },
     {
+      "id": "program-wire-controller-section",
+      "title": "Controller and expression events carried across the program wire",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "8e6c5d65-a0db-41b8-ba15-741e8cc376e6",
+      "owned_paths": [
+        "core/playback/include/pulp/playback/program_wire.hpp",
+        "core/playback/src/program_wire.cpp",
+        "core/playback/include/pulp/playback/program.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "test/test_playback_program_wire.cpp",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_wire.hpp",
+          "needles": [
+            "ControllerRanges = 10",
+            "ControllerEvents = 11",
+            "struct ProgramWireControllerEventRecord",
+            "kProgramWireControllerMinReaderVersion",
+            "MalformedControllerEvent"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_wire.cpp",
+          "needles": [
+            "appended_in_version_3",
+            "carries_controllers",
+            "controller_events_for"
+          ]
+        },
+        {
+          "path": "test/test_playback_program_wire.cpp",
+          "needles": [
+            "carries a track's controller events across the boundary",
+            "preserves controller order exactly, ties included",
+            "carries a chased controller origin",
+            "rejects malformed controller records",
+            "a version 3 reader accepts a version 2 payload"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_wire.hpp",
+              "needles": [
+                "struct ProgramWireControllerRangeRecord",
+                "struct ProgramWireControllerEventRecord",
+                "controller_events_for",
+                "kProgramWireControllerMinReaderVersion"
+              ]
+            }
+          ],
+          "rationale": "This closes the in-process-only caveat midi-expression-playback records: that released row's own dispositions are frozen at its merge, so the closure is recorded here rather than by editing it. encode_program_wire() no longer refuses a controller-bearing program; ProgramWireErrorCode::ControllerEventsUnsupported is retired because the case it refused works. Version 3 of the wire appends two sections after the nine version 2 wrote and changes no existing record: ControllerRanges holds one (first, count) range per track and ControllerEvents holds each ControllerProgramEvent field by field, the full MidiLaneAddress, the clip, lane and point identity, and the authored-or-chased origin, in the program's own sequence with no re-sort, so a consumer across a process or plugin boundary reads exactly what TrackProgram::arrangement_controller_events() held, ties at one sample and tick included. The compatibility rule is per payload: a program with no controller events writes min_reader_version 2 and flags both sections optional, so every version 2 reader still renders it exactly; a program with any controller event writes min_reader_version 3 and marks them required, so a version 2 reader refuses at the header with UnsupportedVersion and never renders the notes with the expression silently gone. A version 3 reader accepts a version 2 payload with the sections absent and empty. The decoder bounds a track's controller count by the compiler's own per-track ceiling (kMaximumControllerEventsPerTrack, refused as InvalidLimits before any range walk) and refuses an out-of-width address or a zero identity with MalformedControllerEvent, judged by the document model's own midi_lane_address_well_formed. Forge Sequencer and Forge Modular consume this through the installed header in the process that encodes or decodes; the bytes are what cross the boundary. Admission is in-process because the header is what a caller links, and refusal_codes stays empty because that field names registered-writer conflict codes, not wire decode codes, which live in ProgramWireErrorCode.",
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "No `pulp seq` operation publishes or inspects a program wire payload, and the controller-lane authoring gap midi-expression-playback records for this surface is unchanged by carrying the events on the wire. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "midi-expression-playback"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema exposes no controller-lane operation and no program wire publication; the wire section changes what an in-process consumer can carry, not what MCP offers. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "midi-expression-playback"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A live timeline authority is absent for the sequencer generally. The wire section is the transport such a control lane would publish over, so this row is a dependency of that closure rather than a step of it. Owner: NW-D, and only where that source is Pulp-owned.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "midi-expression-playback"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises controller playback or program wire publication. Owner: NW-D, which closes the capability surface once the runtime operations it would advertise are executable.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "midi-expression-playback"
+          ]
+        }
+      }
+    },
+    {
       "id": "nested-sequence-gain-composition",
       "title": "Nested SequenceRef gain composition with a documented precedence model",
       "classification": "engine_internal",
@@ -4013,7 +4118,11 @@
         "test/test_timeline_offline_renderer.cpp",
         "docs/status/sequencer-exposure.json",
         ".agents/skills/hosting/SKILL.md",
-        ".agents/skills/timeline/SKILL.md"
+        ".agents/skills/timeline/SKILL.md",
+        "tools/timeline/src/timeline_playback.cpp",
+        "tools/timeline/src/timeline_agent_internal.hpp",
+        "test/test_timeline_cli_offline_render.cpp",
+        "test/cmake/timeline_tests.cmake"
       ],
       "evidence": [
         {
@@ -4027,7 +4136,7 @@
           "path": "tools/timeline/src/timeline_render.cpp",
           "needles": [
             "build_device_free_timeline_graph",
-            "binding.process"
+            "render_timeline_offline"
           ]
         }
       ],
@@ -4098,7 +4207,7 @@
               "path": "tools/timeline/src/timeline_render.cpp",
               "needles": [
                 "build_device_free_timeline_graph",
-                "binding.process"
+                "render_timeline_offline"
               ]
             },
             {
@@ -4114,9 +4223,24 @@
               "needles": [
                 "WithinAbs(0.75f, 1e-7f)"
               ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/timeline/src/timeline_playback.cpp",
+              "needles": [
+                "offline_render_message",
+                "TimelineOfflineRenderCode::BindingRejected"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_cli_offline_render.cpp",
+              "needles": [
+                "render_timeline_offline"
+              ]
             }
           ],
-          "rationale": "pulp render already reached pulp::tools::timeline::render, and that one function is where the render call was swapped, so the CLI renders through the graph binding with no CLI-side change. The evidence that this is a real re-point rather than a refactor is the agent suite's sample-exact assertions: breaking the route-emission loop in the new builder drives seven of them from 0.75 to 0.0, which is the bounce going silent. Those assertions are therefore the regression gate for this row and must never be widened to accommodate a render-path change. Only the render call was replaced: the CLI keeps its own MasterTransport and block loop, so frame counts stay frame-addressed and no tick conversion enters the path. One caveat worth stating rather than leaving to be discovered: the render verb is registered behind PULP_ENABLE_PROJECT_PACKAGE, so a build with project packaging off has no render command at all and this surface is absent there.",
+          "rationale": "pulp render reaches pulp::tools::timeline::render, and that function now calls host::render_timeline_offline rather than driving a MasterTransport and block loop of its own. That hand-rolled loop was a second implementation of the library's offline bounce, and the two were not equivalent: it rendered no tail, so any program whose last event fed a delay, reverb, or release envelope bounced with that tail truncated, while a consumer linking the library got the untruncated result. Two renders of one program could disagree with no error, and only one of them was the tested one. Correcting an earlier statement on this row: it previously recorded that the CLI keeps its own transport and block loop and that no tick conversion enters the path. Both stopped being true with the re-point. The bound is still authoritative in frames via render_frame_count, but it is carried into the library's tick region as ceil(fractional_samples_to_ticks(frames)), which is O(1), monotone, and never truncating. The sequence's own tick duration is deliberately not used: Sequence::duration() is the optional musical duration and is nullopt in every existing CLI render test, so deriving the region from it yields an empty range and fails every one of them. Two limits are load-bearing and set explicitly rather than defaulted. TimelineOfflineRenderConfig::maximum_note_events_per_track_per_block defaults to 256 while the graph binding's is 1024, and the renderer copies its own value into the binding config it builds, so taking the default would silently convert a dense arrangement that renders today into a BindingRejected; the verb passes the binding's value. tail_frames is 0, which reproduces current output exactly, because any non-zero default would change the length of every rendered file; exposing the tail as a verb option is deferred to a slice that may touch the command vocabulary. Every TimelineOfflineRenderCode maps to its own sentence in offline_render_message, so a new code is a compile-time prompt rather than a silent collapse into a shared string. The empty-topology case keeps the CLI's existing early path and still renders silence: the library rejects an empty route span, and it must not be relaxed to accept one. Two caveats worth stating rather than leaving to be discovered. InvalidLimits stays theoretically reachable where frame-to-tick rounding lengthens a region past max_output_frames, for a project within a few frames of the 512 MiB budget at under roughly 8 bpm; that is a fail-closed outcome with its own message, not a truncated bounce. And the render verb is registered behind PULP_ENABLE_PROJECT_PACKAGE, so a build with project packaging off has no render command at all and this surface is absent there.",
           "authority": {
             "admission": "read_only",
             "writer_profile": null,
@@ -4385,7 +4509,7 @@
         {
           "path": "tools/scripts/negative_capability_allowlist.json",
           "needles": [
-            "a trim that cuts a conformed source, so each"
+            "NestedConformedTrimUnsupported"
           ]
         }
       ],
@@ -4409,6 +4533,97 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "No design-time capability is registered or removed. The shortened fade is computed inside the compiler and surfaces only through the clip property an author already wrote."
+        }
+      }
+    },
+    {
+      "id": "nested-placement-fade-envelope",
+      "title": "A SequenceRef placement's fade composes over its flattened leaves as a progress window",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "5d2f9a41-7c08-4be6-9f3a-08b1e6c42d97",
+      "owned_paths": [
+        "core/playback/src/placement_fade.hpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/clip_fade_envelope.hpp",
+        "core/playback/src/audio_renderer.cpp",
+        "core/playback/include/pulp/playback/audio_renderer.hpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/audio_renderer_internal.hpp",
+        "core/playback/src/offline_stretch_program_compiler.cpp",
+        "core/playback/src/offline_stretch_program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/playback/src/track_audio_program_compiler.cpp",
+        "core/playback/src/track_audio_program_compiler.hpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/placement_fade.hpp",
+          "needles": [
+            "LoweredPlacementFade",
+            "silent_tick"
+          ]
+        },
+        {
+          "path": "core/playback/src/clip_fade_envelope.hpp",
+          "needles": [
+            "placement_fade_gain",
+            "window of fade PROGRESS"
+          ]
+        },
+        {
+          "path": "core/playback/include/pulp/playback/audio_renderer.hpp",
+          "needles": [
+            "ClipPlacementFadeSegment",
+            "ClipPlacementFadeProgram"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "append_placement_fades",
+            "span_reaches"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "A placement fade composes over the leaves it was flattened into"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "window of fade progress"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The envelope is produced by flattening and can never be authored, so it belongs to the compiled program rather than the document. It rides on AudioClipRendererProgram, which is a compiled-output type an SDK consumer reads rather than writes, and ClipPlaybackProperties is deliberately untouched: adding a partial ramp there would declare an authoring surface that nothing may write. No schema version moves and no serialized form changes."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. A faded nested placement that previously refused to compile now compiles, through the same clip fade properties `pulp seq` already writes."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal beneath the clip-fade controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The composed envelope is computed inside the compiler and is reachable only through the clip fade an author already wrote on the placement."
         }
       }
     },
@@ -4519,6 +4734,560 @@
           "owner": "sequencer-control-closure",
           "dependencies": [
             "nested-substitution-state-refusal-split"
+          ]
+        }
+      }
+    },
+    {
+      "id": "negative-capability-selftest-derivation",
+      "title": "Negative-capability selftest derives its subjects from the allowlist it guards",
+      "classification": "ci_test_only",
+      "delivery_state": "pending",
+      "claim_id": "negative-capability-selftest-derivation-20260911",
+      "owned_paths": [
+        "tools/scripts/negative_capability_check.py",
+        ".agents/skills/playback/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "tools/scripts/negative_capability_check.py",
+          "needles": [
+            "subjects = [(entry[\"code\"], entry[\"file\"]) for entry in document[\"refusals\"]]",
+            "selftest found no allowlist entries to drop",
+            "which CompileErrorCode no longer declares as a refusal"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "takes the entries it drops from the allowlist document itself",
+            "fails the selftest loudly and means re-pointing"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The selftest is repository CI policy over playback's own refusal allowlist and installs no SDK header, target or symbol; the set of refusals a compiled plugin can meet is unchanged."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No offline Timeline command gains, loses or changes behaviour; the selftest runs at CI time over source and the allowlist document."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation is added or altered; the selftest is not reachable as an MCP tool."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Deriving the selftest's subjects from the document it guards creates no product capability, grant or policy projection."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The selftest describes no authoring capability an agent manifest could carry; it only proves the gate still detects a dropped allowlist entry once a refusal is retired."
+        }
+      }
+    },
+    {
+      "id": "incremental-compile-track-partition",
+      "title": "Compile status reports how many tracks were reused versus recompiled",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "43a88337-4e09-4981-8e55-ba2c62b270b6",
+      "owned_paths": [
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "test/test_playback_program.cpp",
+        "test/test_timeline_scale.cpp",
+        "test/test_timeline_agent_view.cpp",
+        "test/timeline_perf_test_helpers.hpp",
+        "test/cmake/timeline_tests.cmake",
+        ".github/workflows/timeline-hardening.yml",
+        ".agents/skills/timeline/SKILL.md",
+        ".agents/skills/playback/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+          "needles": [
+            "active_tracks_recompiled",
+            "active_tracks_reused",
+            "count_track_completed"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_compiler.cpp",
+          "needles": [
+            "clear_active_track_counts"
+          ]
+        },
+        {
+          "path": "test/test_playback_program.cpp",
+          "needles": [
+            "compiler status partitions completed tracks into recompiled and reused"
+          ]
+        },
+        {
+          "path": "test/timeline_perf_test_helpers.hpp",
+          "needles": [
+            "measure_growth"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "TrackCompileStatus gains two readable counters and the two mutators that keep them consistent with active_tracks_completed, in the installed program_compiler.hpp. An SDK consumer that needs to know an edit stayed incremental can read the partition directly instead of inferring it from elapsed compile time, which measures the host as much as the compiler. The counters are read-only output state; no authoring surface, schema version or serialized form changes.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+              "needles": [
+                "std::uint64_t active_tracks_recompiled",
+                "std::uint64_t active_tracks_reused",
+                "void count_track_completed"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. The partition is in-process compile status and `pulp seq` reports no compile statistics today."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. The counters describe work the compiler already did and change nothing an author can set."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The counters are compiler output read through the existing status type."
+        }
+      }
+    },
+    {
+      "id": "event-pdc-wrap-aware-read-ahead",
+      "title": "Compensated read-ahead folds at a loop point instead of refusing to cross it",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "7b4d2a10-63c5-4f8e-9a21-0d5f8e6c14b3",
+      "owned_paths": [
+        "core/playback/include/pulp/playback/event_compensation.hpp",
+        "core/playback/include/pulp/playback/note_renderer.hpp",
+        "core/playback/src/note_renderer.cpp",
+        "core/host/include/pulp/host/timeline_graph_binding.hpp",
+        "core/host/src/timeline_graph_binding.cpp",
+        "test/test_playback_event_pdc.cpp",
+        "docs/policies/event-stream-pdc.md",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/hosting/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/event_compensation.hpp",
+          "needles": [
+            "struct CompensatedReadSegment",
+            "struct CompensatedReadPlan",
+            "plan_compensated_read"
+          ]
+        },
+        {
+          "path": "core/playback/src/note_renderer.cpp",
+          "needles": [
+            "plan_compensated_read",
+            "stream_discontinuity",
+            "loop_bounds_reads"
+          ]
+        },
+        {
+          "path": "core/host/src/timeline_graph_binding.cpp",
+          "needles": [
+            "EventCompensationUnsupported"
+          ]
+        },
+        {
+          "path": "core/host/include/pulp/host/timeline_graph_binding.hpp",
+          "needles": [
+            "is folded to the post-wrap content and plays"
+          ]
+        },
+        {
+          "path": "test/test_playback_event_pdc.cpp",
+          "needles": [
+            "a shift is applied per transport range, and folds its read-ahead at a loop end",
+            "a compensated read is planned against the loop it runs into"
+          ]
+        },
+        {
+          "path": "docs/policies/event-stream-pdc.md",
+          "needles": [
+            "folds back to the post-wrap"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "plan_compensated_read"
+          ]
+        },
+        {
+          "path": ".agents/skills/hosting/SKILL.md",
+          "needles": [
+            "is folded to the post-wrap content and plays"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The fold is a pure function on an installed header: plan_compensated_read() returns the at-most-two runs a compensated window resolves to, each carrying its loop pass, so a host outside Pulp can compute the same plan the engine schedules from without pushing a block through the renderer. The retired NoteRenderCode::CompensationLoopWrapUnsupported enumerator is removed from the same installed enum, because the case it refused now works; leaving it would tell an implementer to handle a refusal nothing can emit. That removal is source-breaking only for a caller that named the enumerator, and no in-tree caller does after this change.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/event_compensation.hpp",
+              "needles": [
+                "struct CompensatedReadPlan",
+                "plan_compensated_read",
+                "wraps_inside_range"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/note_renderer.hpp",
+              "needles": [
+                "CompensationUnsupported",
+                "folded back to the post-wrap content"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_playback_event_pdc.cpp",
+              "needles": [
+                "a compensated read is planned against the loop it runs into"
+              ]
+            },
+            {
+              "kind": "doc",
+              "path": "docs/policies/event-stream-pdc.md",
+              "needles": [
+                "folds back to the post-wrap"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "No `pulp seq` verb reports or sets a device chain's event latency, so there is no CLI surface on which a compensated window's loop fold is observable. The fold changes what a non-zero shift schedules; every chain the CLI can build still resolves to a zero shift, so a CLI projection would report a constant. Owner: the sequencer control closure lane, gated on event-to-event execution landing first.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema exposes no event-latency or compensation operation, so the fold has no MCP projection for the same reason as the CLI surface. Owner: the sequencer control closure lane.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "The fold removes a per-block refusal that a live surface could previously have surfaced as a loop-end failure; it adds no control a musician sets. A live surface still cannot read or set event-domain latency, and live input into a compensated chain remains refused, so there is no live control to project here. Owner: the sequencer control closure lane.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "event-stream-pdc-contract"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises event-chain compensation, and this slice does not make one advertisable: it removes a refusal inside a path whose shift is still structurally zero for every chain Pulp can execute. Advertising loop-correct read-ahead would claim an executable event-device chain that does not exist. Owner: the sequencer control closure lane.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        }
+      }
+    },
+    {
+      "id": "dynamics-lane-schema-v8-persistence",
+      "title": "Sequence dynamics lane persisted as timeline schema v8",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "bcafbb3e-ea39-4e32-bdb5-c5e3fdbe969a",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/include/pulp/timeline/schema_json.hpp",
+        "core/timeline/include/pulp/timeline/serialize.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/schema_json.cpp",
+        "core/timeline/src/schema_json_preflight.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/sequence_schema_migrations.cpp",
+        "core/timeline/src/sequence_schema_migrations.hpp",
+        "core/timeline/src/sequence_schema_policy.hpp",
+        "core/timeline/src/serialize_decode_context.hpp",
+        "core/timeline/src/serialize_encode.cpp",
+        "core/timeline/src/serialize_project_decode.cpp",
+        "core/timeline/src/snapshot_equivalence.cpp",
+        "core/timeline/src/structural_registry_validation.cpp",
+        "docs/status/sequencer-exposure.json",
+        "test/fixtures/timeline/corpus.index",
+        "test/fixtures/timeline/v8/sequence-dynamics-lane.json",
+        "test/fixtures/timeline/v8/sequence-dynamics-lane.json.expect",
+        "test/test_timeline_context_lane.cpp",
+        "test/test_timeline_dynamics_lane.cpp",
+        "test/test_timeline_groove.cpp",
+        "test/test_timeline_journal.cpp",
+        "test/test_timeline_marker_persistence.cpp",
+        "test/test_timeline_session_persistence.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/src/sequence_schema_migrations.hpp",
+          "needles": [
+            "migrate_sequence_v7_to_v8",
+            "migrate_sequence_v8_to_v7"
+          ]
+        },
+        {
+          "path": "core/timeline/src/sequence_schema_migrations.cpp",
+          "needles": [
+            "dynamics_lane",
+            "states_no_dynamics"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "dynamics_lane"
+          ]
+        },
+        {
+          "path": "test/test_timeline_dynamics_lane.cpp",
+          "needles": [
+            "dynamics lane survives a save and reload byte for byte",
+            "a document whose dynamics lane is malformed is rejected on load"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The dynamics lane now round-trips through the installed timeline serializer. core/timeline/include installs under tools/cmake/PulpInstallRules.cmake's per-subsystem rule, so the v8 encode/decode budget and the per-document dynamics_events count are installed public API, not in-tree detail.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/serialize.hpp",
+              "needles": [
+                "dynamics_events"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/schema_json.hpp",
+              "needles": [
+                "max_dynamics_events"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "Persistence alone adds no typed dynamics-lane mutation command; the CLI can round-trip the lane but cannot author it. This is the same gap p0-15a-dynamics-lane records, carried forward unclosed.",
+          "dependencies": [
+            "offline-timeline-dynamics-command"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "Same single dependency as the CLI surface: both projections are generated from the command vocabulary, which this change does not touch.",
+          "dependencies": [
+            "offline-timeline-dynamics-command"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "A live control additionally requires the document session capability, which is not delivered here.",
+          "dependencies": [
+            "offline-timeline-dynamics-command",
+            "product-a-timeline-document-session"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "A persisted dynamics lane is timeline state, not a design-time algorithm capability."
+        }
+      }
+    },
+    {
+      "id": "nested-sequence-refusal-split",
+      "title": "Nested SequenceRef refusals split from one umbrella code into per-cause codes",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "bdb0eb23-6178-4a06-8c4b-ee5026e52442",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "tools/timeline/src/timeline_agent.cpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/timeline_view/src/arranger_view.cpp",
+        "docs/guides/timeline-sdk.md",
+        "test/test_timeline_arranger_view.cpp",
+        "test/test_timeline_nesting_model.cpp",
+        "test/timeline_nesting_test_support.hpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        },
+        {
+          "path": "tools/timeline/src/timeline_agent.cpp",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Nothing starts or stops working here. One CompileErrorCode member that named five unrelated causes becomes four members that each name one, and two guards unreachable through any validly-constructed Project are retargeted to the existing InvalidStructure. The enum is already public and the new members are appended, so no installed header gains a type and no declared capability changes; claiming an installed-SDK surface would advertise a capability this change does not add.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "`pulp seq` neither gained nor lost a command. A refusal that reached the CLI as the string NestedSequenceUnsupported now reaches it as the specific cause, which is a more precise diagnostic on an existing path rather than a new offline capability.",
+          "evidence": [
+            {
+              "kind": "cli_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The MCP timeline tools read the same wire name from compile_error_code_name, so they report the narrower cause automatically. No tool, argument, or result field changes shape.",
+          "evidence": [
+            {
+              "kind": "mcp_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "No live control is added or removed. A document that compiled before still compiles, and a document that refused still refuses on exactly the same conditions; only the reported code differs, so nothing becomes controllable at runtime.",
+          "evidence": [
+            {
+              "kind": "other",
+              "path": "core/playback/src/sequence_content_lowerer.cpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is declared or withdrawn. The refusals remain refusals and the allowlist carries one row per cause instead of one row covering five, which records why each stands without asserting an agent-visible capability.",
+          "evidence": [
+            {
+              "kind": "other",
+              "path": "tools/scripts/negative_capability_allowlist.json",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
           ]
         }
       }

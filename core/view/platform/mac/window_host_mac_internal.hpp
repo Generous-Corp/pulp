@@ -59,11 +59,17 @@ void configure_window_type(NSWindow* window, const pulp::view::WindowOptions& op
 // Create and configure the NSWindow both window hosts back onto: titled /
 // closable / miniaturizable style (plus resizable when requested),
 // released-when-closed OFF (the host's own strong ref owns the final
-// dealloc), title, multi-window-type configuration, and content min-size.
+// dealloc), title, multi-window-type configuration, content min-size, and
+// mouse-moved delivery — which NSWindow leaves OFF, and while it is off
+// -[NSWindow sendEvent:] drops NSEventTypeMouseMoved. That gates the
+// sendEvent: route only: real pointer motion over a tracking area carrying
+// NSTrackingMouseMoved reaches the area's owner either way. So it is what
+// makes a move PUSHED THROUGH sendEvent: work — a synthesized event, and any
+// point no tracking area covers.
 // The caller then attaches its own content view + delegate and any
-// host-specific tweaks (the CPU host also seeds a dark backgroundColor and
-// accepts mouse-moved events). Returns a +1-owned window (MRC "create"
-// rule) — assign it straight to the owning ivar. Never nil.
+// host-specific tweaks (the CPU host also seeds a dark backgroundColor).
+// Returns a +1-owned window (MRC "create" rule) — assign it straight to the
+// owning ivar. Never nil.
 NSWindow* create_configured_window(const pulp::view::WindowOptions& options);
 
 // Position `window` beside `other_window`: align their tops, try the right
