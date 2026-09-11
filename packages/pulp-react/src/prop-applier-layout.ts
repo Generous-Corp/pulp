@@ -35,6 +35,51 @@ function _coerceMarginLen(tok: string | number): number | string {
     return Number.isFinite(n) ? n : 0;
 }
 
+// Resolve a CSS math function (`calc()` / `min()` / `max()` / `clamp()`)
+// into a value the bridge's dimension parser accepts.
+//
+// The bridge parses a dimension string as `<number><unit>` with the unit
+// drawn from a fixed set, so a math function reaches it as an
+// unparseable token and is dropped without a diagnostic — the element
+// keeps its previous (usually `auto`) dimension. Pulp has no deferred
+// length-resolution layer, so cross-unit arithmetic resolves here at the
+// JS boundary, the same way the CSSStyleDeclaration path resolves it via
+// `resolveCSSLength`. Single-unit expressions keep their unit so the
+// bridge still routes percent and viewport values through its own
+// resolution; mixed-unit expressions collapse to px.
+//
+// Non-math values, and math values that cannot be resolved, pass through
+// untouched so this can never make a working dimension worse.
+function _coerceDimension(value: unknown): unknown {
+    if (typeof value !== 'string') return value;
+    const s = value.trim();
+    if (!(s.startsWith('calc(') || s.startsWith('min(') ||
+          s.startsWith('max(') || s.startsWith('clamp('))) return value;
+
+    const g = globalThis as unknown as Record<string, unknown>;
+    const resolve = g.resolveCSSLength;
+    if (typeof resolve !== 'function') return value;
+
+    let ctx: { viewportW: number; viewportH: number } | undefined;
+    const rootSize = g.getRootSize;
+    if (typeof rootSize === 'function') {
+        const root = (rootSize as () => { width: number; height: number } | null)();
+        if (root && root.width > 0 && root.height > 0) {
+            ctx = { viewportW: root.width, viewportH: root.height };
+        }
+    }
+
+    const parsed = (resolve as (s: string, c?: unknown) => { value: number; unit: string } | null)(s, ctx);
+    if (!parsed || !Number.isFinite(parsed.value)) return value;
+    if (parsed.unit === 'auto') return 'auto';
+    if (parsed.unit === '' || parsed.unit === 'px') return parsed.value;
+    if (parsed.unit === '%' || parsed.unit === 'vw' || parsed.unit === 'vh' ||
+        parsed.unit === 'vmin' || parsed.unit === 'vmax') {
+        return String(parsed.value) + parsed.unit;
+    }
+    return value;
+}
+
 /// Apply a layout/flex/grid/positioning prop. Returns true if handled.
 export function applyLayoutProp(
     id: string,
@@ -208,7 +253,7 @@ export function applyLayoutProp(
         // The bridge's setFlex case for each key inspects the third
         // arg as a string and detects '%' / 'auto' suffix; otherwise
         // it falls back to the numeric path.
-        case 'flexBasis':       call('setFlex', id, 'flex_basis', value as number | string); return true;
+        case 'flexBasis':       call('setFlex', id, 'flex_basis', _coerceDimension(value) as number | string); return true;
         // flexWrap accepts boolean (legacy true/false) or the CSS
         // keyword strings (`"wrap"` /
         // `"wrap-reverse"` / `"nowrap"`). Forward strings verbatim
@@ -223,12 +268,12 @@ export function applyLayoutProp(
             return true;
         }
         case 'order':           call('setFlex', id, 'order', value as number); return true;
-        case 'width':           call('setFlex', id, 'width', value as number | string); return true;
-        case 'height':          call('setFlex', id, 'height', value as number | string); return true;
-        case 'minWidth':        call('setFlex', id, 'min_width', value as number | string); return true;
-        case 'minHeight':       call('setFlex', id, 'min_height', value as number | string); return true;
-        case 'maxWidth':        call('setFlex', id, 'max_width', value as number | string); return true;
-        case 'maxHeight':       call('setFlex', id, 'max_height', value as number | string); return true;
+        case 'width':           call('setFlex', id, 'width', _coerceDimension(value) as number | string); return true;
+        case 'height':          call('setFlex', id, 'height', _coerceDimension(value) as number | string); return true;
+        case 'minWidth':        call('setFlex', id, 'min_width', _coerceDimension(value) as number | string); return true;
+        case 'minHeight':       call('setFlex', id, 'min_height', _coerceDimension(value) as number | string); return true;
+        case 'maxWidth':        call('setFlex', id, 'max_width', _coerceDimension(value) as number | string); return true;
+        case 'maxHeight':       call('setFlex', id, 'max_height', _coerceDimension(value) as number | string); return true;
         case 'alignItems':      call('setFlex', id, 'align_items', value as string); return true;
         case 'alignSelf':       call('setFlex', id, 'align_self', value as string); return true;
         // Multi-line flex cross-axis distribution. Yoga supports it
