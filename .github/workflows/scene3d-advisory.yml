@@ -84,9 +84,17 @@ jobs:
 
       - name: Configure (SCENE3D ON)
         shell: bash
+        # Unix Makefiles, deliberately, not Ninja. The Scene3D boundary
+        # verifiers (verify_scene3d_cmake_boundary.py,
+        # verify_native_renderer_boundary.py) read each target's generated
+        # `link.txt` to prove what it links against. `link.txt` is a Makefiles
+        # artifact; Ninja keeps the same information in build.ninja and writes
+        # no such file, so under Ninja those verifiers report every required
+        # link file missing. Pinning the generator here keeps this lane
+        # measuring the Scene3D boundary rather than the generator.
         run: |
           set -euo pipefail
-          cmake -S . -B "${BUILD_DIR}" -G Ninja \
+          cmake -S . -B "${BUILD_DIR}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_ENABLE_GPU=ON \
             -DPULP_ENABLE_SCENE3D=ON \
@@ -103,6 +111,7 @@ jobs:
           set -euo pipefail
           cmake --build "${BUILD_DIR}" -j"$(sysctl -n hw.ncpu)" \
             --target pulp-test-renderer3d \
+                     pulp-test-scene3d \
                      pulp-test-scene3d-renderer-characterization \
                      pulp-renderer3d-probe \
                      pulp-scene3d-inspect \
