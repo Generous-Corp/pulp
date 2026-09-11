@@ -6875,15 +6875,30 @@ them equal. A wall-clock budget would flake on a shared runner and could not say
 which of the two costs regressed. Pair the counters with one resolution case:
 counters alone stay green if traversal breaks and resolves nothing.
 
-**`confirm_failure.sh` does not apply to these tests.** The script exists to
-defeat a *build* hazard: restoring a source and rebuilding inside the same
-filesystem second leaves make comparing equal mtimes, so the object is judged
-current and the binary keeps the old code — which is why it demands
-`--build-dir`/`--target`, deletes objects, and withholds a verdict until it
-observes a compile line. A `.mjs` has no object and no build step, and each
-`node --test` run reads the source at import in a fresh process, so that hazard
-cannot arise. Break these by editing the generator directly and re-running the
-test. Keep the rest of the discipline, though: witness the break with a
-**before and after** count, not just an after. Patching a name that does not
-exist leaves the count at zero on both sides, the test passes, and that reads
-as "the test does not cover this" — a dead instrument reported as a finding.
+**Negative-control these with `confirm_failure.sh --no-build`.** The script's
+compiled lane exists to defeat a *build* hazard: restoring a source and
+rebuilding inside the same filesystem second leaves make comparing equal mtimes,
+so the object is judged current and the binary keeps the old code — which is why
+that lane demands `--build-dir`/`--target`, deletes objects, and withholds a
+verdict until it observes a compile line. A `.mjs` has no object and no build
+step, and each `node --test` run reads the source at import in a fresh process,
+so that hazard cannot arise. `--no-build` drops the build and binary-fingerprint
+steps and keeps everything that carries the verdict — baseline passes, the break
+changes the file's content hash, the broken run fails, the restore passes — and
+it restores through git, which a hand-kept `.bak` does not:
+
+```sh
+tools/scripts/confirm_failure.sh \
+  --file tools/import-design/jsx-runtime/materialized_runtime_entry.mjs \
+  --break "perl -0pi -e 's/materializedNodeAtPath\(binding, values, pathIndex\)/materializedNodeAtPath(binding, values)/g'" \
+  --no-build \
+  --test "node --test tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs"
+```
+
+It works the same way for the `@pulp/react` vitest suites, whose TypeScript is
+transpiled per run from source. Whichever lane you use, keep the discipline the
+exit code encodes: a break that changes nothing is INCONCLUSIVE (exit 2), not a
+pass. Patching a name that does not exist leaves the count at zero on both
+sides, the test passes, and that reads as "the test does not cover this" — a
+dead instrument reported as a finding. The script refuses that case outright
+rather than letting it read as a verdict.
