@@ -108,6 +108,15 @@ public:
     bool on_key_event(const KeyEvent& event) override;
     bool wants_wheel_scroll() const override;
 
+    /// How far this view can scroll: the amount by which the content extent
+    /// outruns the viewport, or 0 when the rows fit.
+    float max_scroll_y() const;
+
+    /// Whether paint() draws a scrollbar. This is the predicate paint()
+    /// itself branches on, so it cannot drift from what lands on screen:
+    /// "no scrollbar when the content fits" is answerable without a canvas.
+    bool scrollbar_visible() const;
+
 private:
     enum class UpdateResult { unchanged, changed, interrupted };
     struct SelectionUpdate {
@@ -129,7 +138,6 @@ private:
                    std::uint64_t update_generation);
     void position_slot(CellSlot& slot);
     void update_cell_accessibility(CellSlot& slot);
-    float max_scroll_y() const;
     bool scroll_to_item_internal(std::size_t index);
     UpdateResult set_scroll_y_internal(float y, bool request);
     bool apply_pending_scroll_to_item();
@@ -145,7 +153,6 @@ private:
     std::size_t visible_rows() const;
     std::size_t page_cell_delta() const;
 
-    bool scrollbar_visible() const;
     float scrollbar_width() const;
     float scrollbar_thumb_length() const;
     float scrollbar_thumb_y() const;

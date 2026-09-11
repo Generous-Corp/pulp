@@ -1114,12 +1114,16 @@ float ScrollView::max_scroll_y() const {
     return overflow > kOverflowEpsilon ? overflow : 0.0f;
 }
 
+bool ScrollView::vertical_scrollbar_visible() const {
+    return direction_ != Direction::horizontal && max_scroll_y() > 0.0f;
+}
+
+bool ScrollView::horizontal_scrollbar_visible() const {
+    return direction_ != Direction::vertical && max_scroll_x() > 0.0f;
+}
+
 bool ScrollView::wants_wheel_scroll() const {
-    const bool horizontal = direction_ != Direction::vertical &&
-                            max_scroll_x() > 0.0f;
-    const bool vertical = direction_ != Direction::horizontal &&
-                          max_scroll_y() > 0.0f;
-    return horizontal || vertical;
+    return scrollbar_visible();
 }
 
 void ScrollView::clamp_scroll_targets(bool clamp_current) {
@@ -1351,7 +1355,7 @@ void ScrollView::paint(canvas::Canvas& canvas) {
     float width = bar_width_.value();
 
     // Vertical scroll bar
-    if (direction_ != Direction::horizontal && max_scroll_y() > 0.0f) {
+    if (vertical_scrollbar_visible()) {
         float ratio = b.height / content_size_.height;
         float bar_h = std::max(20.0f, b.height * ratio);
         float max_scroll = max_scroll_y();
@@ -1362,7 +1366,7 @@ void ScrollView::paint(canvas::Canvas& canvas) {
     }
 
     // Horizontal scroll bar
-    if (direction_ != Direction::vertical && max_scroll_x() > 0.0f) {
+    if (horizontal_scrollbar_visible()) {
         float ratio = b.width / content_size_.width;
         float bar_w = std::max(20.0f, b.width * ratio);
         float max_scroll = max_scroll_x();
@@ -1386,11 +1390,9 @@ View* ScrollView::hit_test(Point local_point) {
 
     auto b = local_bounds();
     float bar_w = bar_width_.value();
-    bool in_v_bar = direction_ != Direction::horizontal &&
-                    max_scroll_y() > 0.0f &&
+    bool in_v_bar = vertical_scrollbar_visible() &&
                     local_point.x >= b.x + b.width - bar_w - 6;
-    bool in_h_bar = direction_ != Direction::vertical &&
-                    max_scroll_x() > 0.0f &&
+    bool in_h_bar = horizontal_scrollbar_visible() &&
                     local_point.y >= b.y + b.height - bar_w - 6;
     // Scrollbar hits target the ScrollView itself. box_none disables
     // self-targeting; box_only still routes scrollbar interactions to
@@ -1527,13 +1529,11 @@ void ScrollView::on_mouse_event(const MouseEvent& event) {
     float bar_w = bar_width_.value();
 
     // Vertical scrollbar hit zone (right edge)
-    bool in_v_bar = direction_ != Direction::horizontal &&
-                    max_scroll_y() > 0.0f &&
+    bool in_v_bar = vertical_scrollbar_visible() &&
                     event.position.x >= b.x + b.width - bar_w - 6;
 
     // Horizontal scrollbar hit zone (bottom edge)
-    bool in_h_bar = direction_ != Direction::vertical &&
-                    max_scroll_x() > 0.0f &&
+    bool in_h_bar = horizontal_scrollbar_visible() &&
                     event.position.y >= b.y + b.height - bar_w - 6;
 
     if (event.is_down && event.button == MouseButton::left) {

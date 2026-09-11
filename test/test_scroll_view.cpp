@@ -617,3 +617,115 @@ TEST_CASE("ScrollView::hit_test follows the popover's painted extent beyond 500p
     ScrollPopoverFixture f(-600, 25);
     REQUIRE(f.sv.hit_test({25, 650}) == f.popover);
 }
+
+// ── Scrollbar visibility is answerable without painting ──────────────────
+//
+// "No scrollbar when the content fits" is correct by construction — paint()
+// branches on vertical_scrollbar_visible() / horizontal_scrollbar_visible().
+// These cases assert the branch itself, which is the only way to check the
+// behavior offline: bar_opacity() is a hover animation and reads 1.0 on a
+// ScrollView whose content fits, so anything gating on it sees a bar that is
+// never drawn.
+namespace {
+
+/// A ScrollView with an explicit viewport and an explicit content extent —
+/// no flex, no descendants, so the overflow under test is exactly the number
+/// the fixture names. View is non-copyable, so the fixture owns its view.
+struct SizedScroll {
+    ScrollView sv;
+
+    SizedScroll(Size viewport, Size content,
+                ScrollView::Direction direction = ScrollView::Direction::both) {
+        sv.set_direction(direction);
+        sv.set_bounds({0, 0, viewport.width, viewport.height});
+        sv.set_content_size(content);
+    }
+
+    ScrollView* operator->() { return &sv; }
+};
+
+}  // namespace
+
+TEST_CASE("ScrollView paints no scrollbar when the content fits",
+          "[scrollview][scrollbar][visibility]") {
+    // Content strictly smaller than the viewport on both axes.
+    SizedScroll fits({531, 531}, {400, 400});
+
+    CHECK(fits->max_scroll_x() == 0.0f);
+    CHECK(fits->max_scroll_y() == 0.0f);
+    CHECK_FALSE(fits->vertical_scrollbar_visible());
+    CHECK_FALSE(fits->horizontal_scrollbar_visible());
+    CHECK_FALSE(fits->scrollbar_visible());
+
+    // POSITIVE CONTROL, same instrument and same widget: the identical query
+    // on an overflowing ScrollView must report a bar. Without this, "absent"
+    // is indistinguishable from an accessor that is wired to nothing and
+    // returns false for every input.
+    SizedScroll overflows({531, 531}, {1246, 1246});
+    CHECK(overflows->max_scroll_y() == 1246.0f - 531.0f);
+    CHECK(overflows->max_scroll_x() == 1246.0f - 531.0f);
+    CHECK(overflows->vertical_scrollbar_visible());
+    CHECK(overflows->horizontal_scrollbar_visible());
+    CHECK(overflows->scrollbar_visible());
+}
+
+TEST_CASE("ScrollView scrollbar visibility is per axis",
+          "[scrollview][scrollbar][visibility]") {
+    // Overflows vertically only: the horizontal bar must stay absent while
+    // the vertical one is present, so a single-axis answer cannot be faked by
+    // an accessor that reports the same value for both.
+    SizedScroll tall({531, 531}, {400, 1246});
+    CHECK(tall->vertical_scrollbar_visible());
+    CHECK_FALSE(tall->horizontal_scrollbar_visible());
+
+    SizedScroll wide({531, 531}, {1246, 400});
+    CHECK_FALSE(wide->vertical_scrollbar_visible());
+    CHECK(wide->horizontal_scrollbar_visible());
+
+    // A locked direction suppresses the cross-axis bar even under overflow.
+    SizedScroll vertical_only({531, 531}, {1246, 1246},
+                              ScrollView::Direction::vertical);
+    CHECK(vertical_only->vertical_scrollbar_visible());
+    CHECK_FALSE(vertical_only->horizontal_scrollbar_visible());
+
+    SizedScroll horizontal_only({531, 531}, {1246, 1246},
+                                ScrollView::Direction::horizontal);
+    CHECK_FALSE(horizontal_only->vertical_scrollbar_visible());
+    CHECK(horizontal_only->horizontal_scrollbar_visible());
+}
+
+TEST_CASE("ScrollView bar_opacity is not an oracle for scrollbar presence",
+          "[scrollview][scrollbar][visibility]") {
+    // The false oracle this API exists to replace. A ScrollView whose content
+    // fits paints no bar, yet hovering it drives bar_opacity() to 1.0 — a
+    // check gated on opacity reads a scrollbar that is not on screen.
+    SizedScroll fits({531, 531}, {400, 400});
+    REQUIRE_FALSE(fits->scrollbar_visible());
+
+    CHECK(fits->bar_opacity() == 0.0f);  // idle
+    fits->on_mouse_enter();
+    fits->advance_animations(1.0f);      // past the fade duration
+    CHECK(fits->bar_opacity() == 1.0f);  // hovered — and still no bar painted
+
+    // The reading moved, so the accessor is live rather than dead; it simply
+    // measures the wrong thing. scrollbar_visible() is unmoved by hover.
+    CHECK_FALSE(fits->scrollbar_visible());
+}
+
+TEST_CASE("ScrollView scrollbar visibility tracks a resize of the viewport",
+          "[scrollview][scrollbar][visibility]") {
+    // The same widget crosses the threshold in both directions, so the
+    // predicate is proven to be recomputed rather than latched at construction.
+    ScrollView sv;
+    sv.set_direction(ScrollView::Direction::vertical);
+    sv.set_content_size({400, 600});
+
+    sv.set_bounds({0, 0, 400, 300});
+    CHECK(sv.vertical_scrollbar_visible());
+
+    sv.set_bounds({0, 0, 400, 900});
+    CHECK_FALSE(sv.vertical_scrollbar_visible());
+
+    sv.set_bounds({0, 0, 400, 300});
+    CHECK(sv.vertical_scrollbar_visible());
+}

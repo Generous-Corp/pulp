@@ -546,18 +546,44 @@ public:
     bool wants_mouse_input() const override { return true; }
 
     // Animation accessors for testing
+    //
+    // bar_opacity() / bar_width() are the scrollbar's HOVER animation, and they
+    // move whether or not a bar is painted: on_mouse_enter() drives opacity to
+    // 1.0 on any ScrollView the pointer enters, including one whose content
+    // fits. Neither is an oracle for "is a scrollbar on screen" — ask
+    // vertical_scrollbar_visible() / horizontal_scrollbar_visible() for that.
     float bar_opacity() const { return bar_opacity_.value(); }
     float bar_width() const { return bar_width_.value(); }
     float target_scroll_y() const { return target_scroll_y_; }
     void advance_animations(float dt) override;
+
+    /// How far this view can scroll on each axis: the amount by which the
+    /// content extent outruns the viewport, or 0 when the content fits.
+    ///
+    /// Pure functions of content_size() and local_bounds() — they read no
+    /// animation state and paint nothing, so a caller can ask what the view
+    /// would draw without rendering it.
+    float max_scroll_x() const;
+    float max_scroll_y() const;
+
+    /// Whether paint() draws a scrollbar on each axis.
+    ///
+    /// These are the predicates paint() itself branches on, so they cannot
+    /// drift from what lands on screen: "no scrollbar when the content fits"
+    /// is answerable without a canvas, a hover, or a screenshot.
+    bool vertical_scrollbar_visible() const;
+    bool horizontal_scrollbar_visible() const;
+
+    /// Whether paint() draws a scrollbar on either axis.
+    bool scrollbar_visible() const {
+        return vertical_scrollbar_visible() || horizontal_scrollbar_visible();
+    }
 
 private:
     static constexpr float kOverflowEpsilon = 1.0f;
 
     void update_automatic_content_size();
     void clamp_scroll_targets(bool clamp_current = false);
-    float max_scroll_x() const;
-    float max_scroll_y() const;
 
     Direction direction_ = Direction::vertical;
     Size content_size_{0, 0};
