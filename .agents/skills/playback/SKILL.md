@@ -933,7 +933,13 @@ Things worth knowing before changing it:
 - **Version growth is additive by section, not by version bump.** An unknown
   section marked `kProgramWireSectionOptional` is skipped; an unknown section
   without it is rejected. Bump `min_reader_version` only when an older reader
-  would *misread* the bytes, not when it would merely miss data.
+  would *misread* the bytes, not when it would merely miss data — and decide
+  "merely" per payload, not per format: the controller sections are optional
+  on a payload that carries none and required, with the floor raised, on one
+  that carries any, because missing expression is a musical loss and not a
+  cosmetic one. Do not solve a new section by widening an existing record; a
+  wider record moves every older reader's stride and forces the floor up for
+  every payload, controller-free ones included.
 - **The byte golden is the guard that matters.** An encoder and a decoder that
   are wrong in the same direction still round-trip; only the pinned digest in
   `test/test_playback_program_wire.cpp` catches a reordered field. If you change
@@ -1319,14 +1325,63 @@ the pad newly admits reads differently.
 
 ## The program wire refuses what it cannot represent
 
-`program_wire_encoded_size` rejects programs it has no section for — audio
-programs, and now any program carrying controller events
-(`ControllerEventsUnsupported`). A controller value is not safe to ignore, so
-the wire fails closed rather than returning a copy that plays the notes with
-the expression gone. Note the tempo-point check fires *before* the per-track
-loop, so a fixture passing no tempo points is refused for that reason first —
-an encode-refusal test in a suite without a tempo fixture will pass for the
-wrong reason.
+`program_wire_encoded_size` rejects programs it has no section for — an audio
+program (`AudioProgramUnsupported`), a non-default production declaration. A
+value that is not safe to ignore fails closed rather than returning a copy
+that plays thinner than the program meant. Note the tempo-point check fires
+*before* the per-track loop, so a fixture passing no tempo points is refused
+for that reason first — an encode-refusal test in a suite without a tempo
+fixture will pass for the wrong reason.
+
+Controller events are no longer on that list. Wire version 3 carries them in
+two appended sections (`ControllerRanges`, one `(first, count)` per track, and
+`ControllerEvents`, one `ProgramWireControllerEventRecord` per
+`ControllerProgramEvent`), and `ControllerEventsUnsupported` is retired
+because the case it refused works — a retirement earned by the round trip, not
+by moving an assertion. Things to know before touching it:
+
+- **Order is carried verbatim, not re-derived.** The encoder copies
+  `arrangement_controller_events()` in the program's sequence and the decoder
+  preserves it; `program_wire_matches` compares position for position, so a
+  swapped tied pair is a mismatch. The wire does not enforce
+  `controller_program_event_less` order on decode — see the finding below.
+- **The reader floor is per payload, not per build.** `kProgramWireVersion` is
+  3 for every payload; `min_reader_version` is 2 when the program carries no
+  controller events (both appended sections flagged optional, so a version 2
+  reader skips them and renders exactly the program) and 3 when it carries any
+  (sections required, so a version 2 reader refuses at the header). Both are
+  functions of the counts, which is what keeps one program at one encoding.
+  The one outcome the format never produces is a floor of 2 over a non-empty
+  controller section — that is an older reader silently dropping expression,
+  the loss the old refusal existed to prevent. In the other direction a
+  version 3 reader accepts a version 2 payload with the sections absent, gated
+  on `header.version < 3`; the same bytes stamped 3 are a non-canonical payload
+  and refuse with `MissingSection`.
+- **No version 2 record changed.** The ranges live in their own section
+  rather than as two more fields on `ProgramWireTrackRecord`, precisely so a
+  version 2 reader's stride over every section it knows is what it was. The
+  `sizeof` asserts in `program_wire.hpp` are the honest diff: two new lines,
+  every existing value unchanged.
+- **Decode bounds and refusals.** A range's `count` is judged against
+  `kProgramWireMaximumControllerEventsPerTrack` — the compiler's own
+  `kMaximumControllerEventsPerTrack` in `program.hpp`, shared so the two cannot
+  drift — *before* its range check, so a corrupted count is `InvalidLimits`
+  rather than a walk. An address wider than four bits or a zero clip, lane or
+  point identity is `MalformedControllerEvent`, judged by
+  `timeline::midi_lane_address_well_formed` rather than a second rule. An
+  origin outside the enum is `InvalidEnum`. Each is covered by a resealed
+  corrupt-and-restore case in `test_playback_program_wire.cpp`.
+- **Finding, not fixed here: the compiler does not sort controller events.**
+  `program.hpp` documents `arrangement_controller_events()` as being in
+  `controller_program_event_less` order, but `program_compiler.cpp` has no
+  controller sort stage (notes have `SortTrackNotes`; controllers are pushed
+  clip by clip, lane by lane, point by point) and nothing in `core/` calls the
+  comparator. Two lanes on one clip therefore emit lane-major, not time-major.
+  The order *is* total over distinct events — `MidiContent::create` makes point
+  ids unique within a content and addresses unique across its lanes — so the
+  wire has one sequence to preserve and preserves it; a consumer that needs
+  time order must sort, and a decoder that enforced sorted order would refuse
+  every multi-lane program the compiler emits today.
 
 ## Nested gain composes by multiplying; pan and a placement fade cannot
 
