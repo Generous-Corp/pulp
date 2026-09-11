@@ -26,6 +26,45 @@ THREAD_ID = "12345678-1234-4234-8234-123456789abc"
 TURN_ID = "87654321-4321-4321-8321-cba987654321"
 NONCE = "a" * 64
 
+# The trust gate screens the installed agent with this exact `file -b` marker, so
+# the precondition below reuses it verbatim and the two cannot drift apart.
+NATIVE_EXECUTABLE_MARKER = "Mach-O 64-bit executable"
+
+
+def resolve_installed_codex() -> tuple[pathlib.Path | None, str]:
+    """Resolve the installed official Codex binary, or say what is unmet.
+
+    `codex` on PATH is a weaker claim than "the official binary is installed":
+    a wrapper or shim satisfies `shutil.which` while being a shell script, and
+    screening only on PATH presence reports that host condition as a product
+    failure. Only the installation shape is screened here. Code-signing identity,
+    team, and version stay assertions in the caller, so a genuine native binary
+    that fails those checks is a failure and never a skip.
+    """
+    if sys.platform != "darwin":
+        return None, "official Codex identity is macOS-specific"
+    found = shutil.which("codex")
+    if not found:
+        return None, "no `codex` on PATH"
+    resolved = pathlib.Path(found).resolve()
+    try:
+        described = subprocess.run(
+            ["/usr/bin/file", "-b", str(resolved)],
+            check=True, capture_output=True, text=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"cannot classify `codex` at {resolved}: {exc}"
+    if NATIVE_EXECUTABLE_MARKER not in described:
+        return None, (
+            f"`codex` on PATH is not the installed official binary: "
+            f"{resolved} is {described}"
+        )
+    return resolved, ""
+
+
+def announce_skip(reason: str) -> None:
+    """Report an unmet host precondition where a skipped run stays visible."""
+    print(f"SKIP: {reason}", file=sys.stderr, flush=True)
+
 
 def run(*argv: str, cwd: pathlib.Path) -> str:
     completed = subprocess.run(argv, cwd=cwd, check=True, capture_output=True, text=True)
@@ -610,12 +649,42 @@ class CleanAgentHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(trust.TrustError, "codex|Mach-O"):
             trust.official_codex_identity(pathlib.Path(sys.executable).resolve())
 
-    @unittest.skipUnless(
-        sys.platform == "darwin" and shutil.which("codex"),
-        "installed signed Codex is unavailable",
-    )
+    @unittest.skipUnless(sys.platform == "darwin", "Mach-O screening is macOS-specific")
+    def test_installed_codex_precondition_separates_shim_from_native_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw).resolve()
+            shim_dir, native_dir = root / "shim", root / "native"
+            shim_dir.mkdir()
+            native_dir.mkdir()
+
+            shim = shim_dir / "codex"
+            shim.write_text("#!/bin/bash\nexec true\n", encoding="utf-8")
+            shim.chmod(0o755)
+            with mock.patch.dict(os.environ, {"PATH": str(shim_dir)}):
+                resolved, unmet = resolve_installed_codex()
+            self.assertIsNone(resolved, "a shell shim was accepted as the official binary")
+            self.assertIn(str(shim), unmet, "the unmet reason must name the resolved path")
+            self.assertIn("not the installed official binary", unmet)
+            # The screen has to agree with the trust gate standing behind it.
+            with self.assertRaisesRegex(trust.TrustError, "Mach-O"):
+                trust.official_codex_identity(shim)
+
+            # A native binary must be ACCEPTED, so the precondition can never
+            # quietly withdraw this coverage on a host where Codex is installed.
+            native = native_dir / "codex"
+            shutil.copyfile("/bin/ls", native)
+            native.chmod(0o755)
+            with mock.patch.dict(os.environ, {"PATH": str(native_dir)}):
+                resolved, unmet = resolve_installed_codex()
+            self.assertEqual(resolved, native, "a native Mach-O codex was skipped")
+            self.assertEqual(unmet, "")
+
     def test_installed_signed_codex_identity_when_available(self) -> None:
-        identity = trust.official_codex_identity(pathlib.Path(shutil.which("codex")).resolve())
+        resolved, unmet = resolve_installed_codex()
+        if resolved is None:
+            announce_skip(unmet)
+            self.skipTest(unmet)
+        identity = trust.official_codex_identity(resolved)
         self.assertEqual(identity["team_identifier"], trust.OPENAI_TEAM_ID)
         self.assertEqual(identity["identifier"], "codex")
         self.assertRegex(identity["version"], r"^codex-cli [0-9]+\.[0-9]+\.[0-9]+")

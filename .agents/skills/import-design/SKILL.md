@@ -6819,3 +6819,41 @@ Note the **Swift** emitter (`design_swift_codegen.cpp`) is a deliberate fourth
 lowering that shares only `resolve_design_ir_native` and re-derives the rest, so
 "all native lanes share X" is false for it. Plan for two full sharers (runtime +
 C++ baker), one partial (native-JS), and one non-sharer (Swift).
+
+## The materialized runtime pays its metadata cost on EVERY React commit
+
+`materialized_runtime_entry.mjs` reapplies import metadata from
+`resetAfterCommit` — every commit, not just mount. Two shapes inside it are
+therefore multiplied by the commit rate, and both read as "fine" in isolation:
+
+- `materializedNodeAtPath` used to rebuild its whole root/registry index per
+  **binding**, so one application cost O(bindings × registry).
+- `materializedMatches` re-parsed its selector text per **candidate node**, so
+  one registry scan cost regex work proportional to the node count rather than
+  to the selector vocabulary.
+
+Neither is visible at small registry sizes. A UI change that mounts a large
+always-present hidden subtree (a settings panel kept in the tree so keyboard
+traversal can reach it) triples the registry and turns both into a per-commit
+tax — which surfaces as unrelated-looking jank in whatever gesture happens to
+commit most often (a slider drag), not in the feature that grew the tree.
+
+The index is deliberately rebuilt once per application rather than cached
+across commits: a retained index resolves stale paths after any reparent. The
+selector parse memo has no such concern — a parse is a pure function of the
+selector text.
+
+**Guarding a change here:** `materializedMatches` is reachable from nearly every
+metadata binding, yet hard-breaking it leaves the dropdown arrow-traversal and
+settings cases GREEN. The case that actually catches it is *every native
+dropdown dismisses by Escape and outside press*. Run that one, not just the
+arrow cases, whenever this function changes.
+
+**Editing the file at all:** the runtime is returned as a single template
+literal (`const entry = \`…\`; return entry;`), so a regex in the source needs
+doubled backslashes (`\\[` emits `\[`), and a bare backtick or `${` anywhere in
+that region silently corrupts the emitted bundle. `node --check` does **not**
+catch that corruption — it exits 0 on truncated and broken files. Verify an
+emitted classic bundle with `vm.Script`, and an ESM source with a dynamic
+`import()` discriminating on `SyntaxError`; plant a break first and confirm the
+checker rejects it.
