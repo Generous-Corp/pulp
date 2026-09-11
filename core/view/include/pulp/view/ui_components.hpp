@@ -526,10 +526,22 @@ public:
 
     /// paint_all() translates children by (-scroll_x, -scroll_y), so once
     /// scrolled the content no longer sits at a plain bounds offset. Reporting
-    /// that here makes a descendant's bounded request_repaint(Rect) escalate to
-    /// a full repaint instead of invalidating the wrong (unscrolled) root rect,
-    /// and lets a bounds walk recover the descendant's true painted position.
-    Point child_paint_offset() const override {
+    /// true here makes a descendant's bounded request_repaint(Rect) escalate to
+    /// a full repaint instead of invalidating the wrong (unscrolled) root rect.
+    bool applies_child_paint_offset() const override {
+        return scroll_x() != 0.0f || scroll_y() != 0.0f;
+    }
+
+    /// The per-child half of the above, so a bounds walk can recover a
+    /// descendant's true painted position. paint_all() makes TWO passes: an
+    /// ordinary child is drawn under translate(-scroll_x, -scroll_y), while a
+    /// `Position::sticky` child is drawn under translate(-scroll_x, 0) so it
+    /// stays pinned as the content scrolls beneath it. Returning the scrolled
+    /// offset for a sticky child would report it far off-screen while it is
+    /// painting in place.
+    Point child_paint_offset(const View& child) const override {
+        if (child.position() == View::Position::sticky)
+            return Point{-scroll_x(), 0.0f};
         return Point{-scroll_x(), -scroll_y()};
     }
 

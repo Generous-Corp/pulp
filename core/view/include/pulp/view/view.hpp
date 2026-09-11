@@ -1637,21 +1637,26 @@ public:
     /// True when this container translates its CHILDREN's paint in a way a plain
     /// bounds-offset walk cannot model — e.g. a scrolled ScrollView. Bounded
     /// invalidation escalates to full when any ancestor reports true, so a
-    /// scrolled sub-view never targets the wrong root rect. Default false: a
-    /// flex/grid container positions children at their bounds origin, so its
-    /// `child_paint_offset()` is zero and this reports false.
-    virtual bool applies_child_paint_offset() const {
-        const Point offset = child_paint_offset();
-        return offset.x != 0.0f || offset.y != 0.0f;
-    }
+    /// scrolled sub-view never targets the wrong root rect. This is a
+    /// whole-container predicate, deliberately independent of
+    /// `child_paint_offset()`: over-reporting true only costs a wider repaint,
+    /// whereas deriving it from one child's offset would miss a container that
+    /// moves some children and not others.
+    virtual bool applies_child_paint_offset() const { return false; }
 
-    /// The translation this container applies to its CHILDREN's paint, in the
-    /// container's own coordinate space. A scrolled ScrollView returns
-    /// (-scroll_x, -scroll_y); a flex/grid container returns (0, 0) because it
-    /// positions children at their bounds origin. Any walk that converts a
-    /// descendant's bounds into an ancestor's space must accumulate this in
-    /// addition to `bounds()`, or it reports the UNSCROLLED position forever.
-    virtual Point child_paint_offset() const { return Point{0.0f, 0.0f}; }
+    /// The translation this container applies to ONE child's paint, in the
+    /// container's own coordinate space. It takes the child because the answer
+    /// is not uniform: a scrolled ScrollView shifts an ordinary child by
+    /// (-scroll_x, -scroll_y) but pins a `Position::sticky` child vertically,
+    /// so the same container returns two different offsets. A flex/grid
+    /// container returns (0, 0) for every child because it positions them at
+    /// their bounds origin. Any walk that converts a descendant's bounds into
+    /// an ancestor's space must accumulate this in addition to `bounds()`, or
+    /// it reports the UNSCROLLED position forever.
+    virtual Point child_paint_offset(const View& child) const {
+        (void)child;
+        return Point{0.0f, 0.0f};
+    }
 
     /// Returns the six affine components in (a,b,c,d,e,f) order; meaningful
     /// only when has_transform_matrix() is true.
