@@ -3598,8 +3598,13 @@ TEST_CASE("WidgetBridge::clear leaves another editor's open dropdown alone",
     REQUIRE(ComboBox::active_popup_ == combo_a);  // the mirror names the OTHER editor
 
     bridge_b.clear();
-    CHECK_FALSE(combo_b->is_open());  // its own popup is dismissed
-    CHECK(combo_a->is_open());        // the other editor's is untouched
+    // clear() destroys B's widgets, so combo_b is gone and asking IT whether it
+    // is open would read freed memory. Its dismissal is observable on the slot
+    // that outlives it: B's own root no longer names an open popup.
+    CHECK(ComboBox::active_popup_in(root_b) == nullptr);
+    CHECK(root_b.child_count() == 0);
+    CHECK(combo_a->is_open());  // the other editor's is untouched
+    CHECK(ComboBox::active_popup_ == combo_a);  // and still holds the mirror
 
     combo_a->close_active_popup();  // leave the process-global mirror clean
 }

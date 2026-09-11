@@ -299,9 +299,15 @@ private:
         std::vector<Candidate> candidates;
     };
 
-    using SessionMap = std::unordered_map<int, PointerSession>;
+    // Sessions are held by shared_ptr, not by value. A recognizer callback can
+    // re-enter pointer dispatch and erase the very session the outer frame is
+    // still walking; owning the node keeps that frame's reference valid until
+    // it unwinds, and `pointer_id` lookups tell it the session has gone away.
+    using SessionMap = std::unordered_map<int, std::shared_ptr<PointerSession>>;
 
-    PointerSession& start_session(View& root, const MouseEvent& root_event);
+    std::shared_ptr<PointerSession> start_session(View& root,
+                                                  const MouseEvent& root_event);
+    bool session_is_live(const PointerSession& session) const;
     void feed_session(View& root, PointerSession& session,
                       const MouseEvent& root_event,
                       const GestureContext& context);
