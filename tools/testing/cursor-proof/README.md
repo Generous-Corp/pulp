@@ -20,7 +20,14 @@ the shape of the bug these two tools exist to tell apart.
 | proves | the host publishes the right style | a person actually sees it change |
 
 The in-process test is the gate: it runs in CI and fails if the host stops
-publishing. The cross-process probe is the field instrument — point it at a
+publishing. Its `FilterRoot` cases model the shape real editing surfaces have
+— one view whose own hover handler picks crosshair / open hand / left-right
+resize per region and whose press handler flips the open hand closed — and
+drive the host's real `-mouseMoved:` / `-mouseDown:` / `-mouseDragged:` /
+`-mouseUp:` entry points, so "the cursor updates only after a click" and "the
+closed hand lingers after release" both fail it. Each of those assertions was
+confirmed RED→GREEN against a deliberate break of the production mapping or
+publish (`tools/scripts/confirm_failure.sh`). The cross-process probe is the field instrument — point it at a
 shipped build when someone reports "the cursor doesn't change" and it will say
 whether hover is dead while drag still works.
 

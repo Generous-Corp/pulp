@@ -40,8 +40,15 @@
 // WHAT THIS STILL DOES NOT COVER: that AppKit calls -cursorUpdate: for a real
 // physical hover (no automation available here drives it, so that link is
 // argued from the tracking area, not observed); the region BOUNDARY, since only
-// two interior points are sampled; and the DAW-hosted AU/VST3 case, which is a
-// different window and tracking-area situation and is not exercised at all.
+// interior points are sampled; the DAW-hosted AU/VST3 case, which is a
+// different window and tracking-area situation and is not exercised at all;
+// and one known host property that is measured but not judged here: the
+// cursor pass (-cursorUpdate:) resolves from the hit view's cursor slot
+// without first delivering a hover sample, so on a surface that picks its
+// cursor from its own hover handler a pass that runs at a point the pointer
+// has not yet MOVED over publishes the slot's previous value until the next
+// -mouseMoved: lands. The filter-surface cases below therefore sample the pass
+// only at the point the last move landed on.
 //
 // These cases take over the system pointer and need an idle machine; a human
 // or another job moving the mouse corrupts them in both directions, so the
@@ -113,6 +120,7 @@ const char* cursor_name(NSCursor* c) {
     if (c == [NSCursor crosshairCursor]) return "crosshair";
     if (c == [NSCursor openHandCursor]) return "openHand";
     if (c == [NSCursor closedHandCursor]) return "closedHand";
+    if (c == [NSCursor resizeLeftRightCursor]) return "resizeLeftRight";
     return "other";
 }
 
@@ -675,4 +683,288 @@ TEST_CASE("a target that does not switch shows the same cursor on both paths",
     CHECK(hovered == [NSCursor pointingHandCursor]);
     CHECK(pressed == [NSCursor pointingHandCursor]);
     CHECK(hovered == pressed);
+}
+
+// ---------------------------------------------------------------------------
+// A surface that decides its own cursor from where the pointer is INSIDE it.
+//
+// The fixtures above give each region its own view with a fixed style, so the
+// hover pass can answer from hit_test alone. Real editing surfaces are not
+// built that way: a spectrum plot with an inline minimap is ONE view whose
+// hover handler flips its cursor between crosshair (the plot), an open hand
+// (the movable viewport window), a left-right resize (the window's trim
+// handles) and back, and whose press handler flips the open hand to a closed
+// one. Every one of those cursors lives in the same View slot, so a hover
+// path that reads the slot without first delivering the hover sample shows
+// whatever the LAST handler wrote -- which is how a trim cursor comes to
+// appear only after a click, or a closed hand to linger after release.
+//
+// So these cases enter through the host's real -mouseMoved:, which delivers
+// the hover sample (simulate_hover -> on_hover_move) and THEN resolves, rather
+// than through -cursorUpdate:, which resolves from the slot alone. The readback
+// is still the applied +[NSCursor currentCursor]. The sentinel set before each
+// reading is the I-beam, which none of the expected cursors resolve to, so a
+// host that publishes nothing is visible as "IBeam" rather than hiding behind
+// an arrow that a `default` region would legitimately produce.
+
+namespace {
+
+constexpr float kMinimapTop = 220.0f;   // plot above, minimap strip below
+constexpr float kWindowLeft = 120.0f;   // viewport window inside the minimap
+constexpr float kWindowRight = 280.0f;
+constexpr float kTrimWidth = 8.0f;      // resize handles inside each window edge
+
+// The points the cases sample, one per region, all well inside their region so
+// the assertion is about the mapping and not about the boundary.
+constexpr float kPlotX = 200, kPlotY = 100;
+constexpr float kWindowX = 200, kWindowY = 260;
+constexpr float kLeftTrimX = kWindowLeft + kTrimWidth * 0.5f;
+constexpr float kRightTrimX = kWindowRight - kTrimWidth * 0.5f;
+constexpr float kTrackX = 40;
+
+class FilterSurface : public StubView {
+public:
+    int hovers = 0, presses = 0, drags = 0, releases = 0;
+
+    using CS = pulp::view::View::CursorStyle;
+
+    static CS region_cursor(pulp::view::Point local) {
+        if (local.y < kMinimapTop) return CS::crosshair;
+        if (local.x >= kWindowLeft && local.x < kWindowLeft + kTrimWidth) return CS::horizontal_resize;
+        if (local.x >= kWindowRight - kTrimWidth && local.x < kWindowRight) return CS::horizontal_resize;
+        if (local.x >= kWindowLeft && local.x < kWindowRight) return CS::grab;
+        return CS::default_;
+    }
+
+    void on_hover_move(pulp::view::Point local) override {
+        hovers++;
+        if (!dragging_) set_cursor(region_cursor(local));
+    }
+    void on_mouse_down(pulp::view::Point local) override {
+        presses++;
+        dragging_ = true;
+        // Only the movable window grabs; a trim keeps its resize cursor and the
+        // plot keeps its crosshair for the duration of the press.
+        if (region_cursor(local) == CS::grab) set_cursor(CS::grabbing);
+    }
+    void on_mouse_drag(pulp::view::Point) override { drags++; }
+    void on_mouse_up(pulp::view::Point local) override {
+        releases++;
+        dragging_ = false;
+        set_cursor(region_cursor(local));
+    }
+
+private:
+    bool dragging_ = false;
+};
+
+struct FilterRoot {
+    StubView root;
+    FilterSurface* surface = nullptr;
+    float w_ = 0, h_ = 0;
+
+    explicit FilterRoot(float w, float h) : w_(w), h_(h) {
+        auto s = std::make_unique<FilterSurface>();
+        s->set_cursor(FilterSurface::CS::crosshair);
+        surface = s.get();
+        root.add_child(std::move(s));
+        apply();
+    }
+    void apply() {
+        root.set_bounds({0, 0, w_, h_});
+        surface->set_bounds({0, 0, w_, h_});
+    }
+};
+
+NSEvent* synth_mouse_event(NSWindow* w, NSView* v, NSEventType type,
+                           CGFloat lx, CGFloat ly, NSInteger clicks, float pressure) {
+    return [NSEvent mouseEventWithType:type
+                              location:pulp_point_in_window(v, lx, ly)
+                         modifierFlags:0
+                             timestamp:[[NSProcessInfo processInfo] systemUptime]
+                          windowNumber:[w windowNumber]
+                               context:nil
+                           eventNumber:0
+                            clickCount:clicks
+                              pressure:pressure];
+}
+
+// Reset to a sentinel no region resolves to, drive ONE entry point of the
+// shipping host, and read back what AppKit was handed.
+NSCursor* applied_after(NSView* v, SEL entry, NSEvent* e) {
+    [[NSCursor IBeamCursor] set];
+    [(id)v performSelector:entry withObject:e];
+    // A drag sample is held for the next presented frame; deliver it now so
+    // the reading is of the drag's publish, not of the press that preceded it.
+    if (entry == @selector(mouseDragged:)
+        && [v respondsToSelector:@selector(flushCoalescedPointerInput)])
+        [(id)v performSelector:@selector(flushCoalescedPointerInput)];
+    return [NSCursor currentCursor];
+}
+
+NSCursor* applied_after_hover_move(NSWindow* w, NSView* v, CGFloat lx, CGFloat ly) {
+    return applied_after(v, @selector(mouseMoved:),
+                         synth_mouse_event(w, v, NSEventTypeMouseMoved, lx, ly, 0, 0));
+}
+
+}  // namespace
+
+TEST_CASE("the filter-surface fixture resolves each region's cursor before AppKit is involved",
+          "[mac][cursor][hover][press][fixture][issue-8121]") {
+    // Fixture control: if the surface does not actually change its own slot
+    // per region, every live reading below collapses to crosshair and the
+    // cases read like a host that ignores hover -- the false FAIL this guards.
+    using CS = pulp::view::View::CursorStyle;
+    FilterRoot scene(kW, kH);
+    auto hover = [&](float x, float y) {
+        scene.root.simulate_hover({x, y});
+        return pulp::view::hover_cursor_at(scene.root, {x, y});
+    };
+    REQUIRE(scene.root.hit_test({kPlotX, kPlotY}) == scene.surface);
+    CHECK(hover(kPlotX, kPlotY) == CS::crosshair);
+    CHECK(hover(kWindowX, kWindowY) == CS::grab);
+    CHECK(hover(kLeftTrimX, kWindowY) == CS::horizontal_resize);
+    CHECK(hover(kRightTrimX, kWindowY) == CS::horizontal_resize);
+    CHECK(hover(kTrackX, kWindowY) == CS::default_);
+    CHECK(hover(kPlotX, kPlotY) == CS::crosshair);
+
+    // Hover alone must never produce the closed hand.
+    CHECK(hover(kWindowX, kWindowY) == CS::grab);
+    CHECK(scene.surface->presses == 0);
+
+    const pulp::view::Point p{kWindowX, kWindowY};
+    REQUIRE(pulp::view::deliver_mouse_down(scene.root, scene.root.hit_test(p), p, 0));
+    CHECK(scene.surface->cursor() == CS::grabbing);
+    pulp::view::MouseUpHost up_host;
+    pulp::view::deliver_mouse_up(scene.root, scene.surface, p, 0, 1, up_host);
+    CHECK(scene.surface->cursor() == CS::grab);
+    CHECK(scene.surface->presses == 1);
+    CHECK(scene.surface->releases == 1);
+}
+
+TEST_CASE("hover alone puts crosshair, open hand and left-right resize on screen",
+          "[mac][cursor][hover][live][issue-8121]") {
+    ensure_app();
+    if (!live_window_session_available())
+        SKIP("no window-server session with Accessibility trust and an observable cursor");
+    Class cls = NSClassFromString(@"PulpView");
+    if (cls == nil) SKIP("PulpView is not registered in this binary");
+
+    FilterRoot scene(kW, kH);
+    CursorProofPulpView* view =
+        [[CursorProofPulpView alloc] initWithFrame:NSMakeRect(0, 0, kW, kH)];
+    view.rootView = &scene.root;
+    NSWindow* w = present(view);
+    scene.apply();
+
+    REQUIRE(view.rootView->hit_test({kPlotX, kPlotY}) == scene.surface);
+    g_button_events = 0;
+    const int hovers_before = scene.surface->hovers;
+
+    NSCursor* plot = applied_after_hover_move(w, view, kPlotX, kPlotY);
+    NSCursor* window = applied_after_hover_move(w, view, kWindowX, kWindowY);
+    NSCursor* left_trim = applied_after_hover_move(w, view, kLeftTrimX, kWindowY);
+    // Once a move has landed, AppKit's own cursor pass at that same point must
+    // agree with it -- the two hover entry points read one slot. (The pass
+    // reads the slot WITHOUT delivering a hover sample, so this agreement holds
+    // only at the point the last move landed on; see the file header.)
+    NSCursor* left_trim_pass = applied_cursor_for_cursor_pass(w, view, kLeftTrimX, kWindowY);
+    NSCursor* right_trim = applied_after_hover_move(w, view, kRightTrimX, kWindowY);
+    NSCursor* track = applied_after_hover_move(w, view, kTrackX, kWindowY);
+    NSCursor* plot_again = applied_after_hover_move(w, view, kPlotX, kPlotY);
+    dismiss(w, view);
+
+    INFO("plot: " << cursor_name(plot) << "  window: " << cursor_name(window)
+         << "  left trim: " << cursor_name(left_trim)
+         << "  right trim: " << cursor_name(right_trim)
+         << "  track: " << cursor_name(track)
+         << "  plot again: " << cursor_name(plot_again)
+         << "  left trim via cursor pass: " << cursor_name(left_trim_pass));
+
+    // The hover sample reached the surface, and no button was ever involved --
+    // asserted from the view's own vantage, not from what the test meant to do.
+    CHECK(scene.surface->hovers > hovers_before);
+    CHECK(g_button_events == 0);
+    CHECK(scene.surface->presses == 0);
+
+    CHECK(plot == [NSCursor crosshairCursor]);
+    CHECK(window == [NSCursor openHandCursor]);
+    CHECK(window != [NSCursor closedHandCursor]);
+    CHECK(left_trim == [NSCursor resizeLeftRightCursor]);
+    CHECK(right_trim == [NSCursor resizeLeftRightCursor]);
+    CHECK(track == [NSCursor arrowCursor]);
+    CHECK(plot_again == [NSCursor crosshairCursor]);
+    CHECK(left_trim_pass == [NSCursor resizeLeftRightCursor]);
+}
+
+TEST_CASE("the closed hand appears only while a button is held over the viewport",
+          "[mac][cursor][hover][press][live][issue-8121]") {
+    ensure_app();
+    if (!live_window_session_available())
+        SKIP("no window-server session with Accessibility trust and an observable cursor");
+    Class cls = NSClassFromString(@"PulpView");
+    if (cls == nil) SKIP("PulpView is not registered in this binary");
+
+    FilterRoot scene(kW, kH);
+    CursorProofPulpView* view =
+        [[CursorProofPulpView alloc] initWithFrame:NSMakeRect(0, 0, kW, kH)];
+    view.rootView = &scene.root;
+    NSWindow* w = present(view);
+    scene.apply();
+    REQUIRE(view.rootView->hit_test({kWindowX, kWindowY}) == scene.surface);
+
+    // Hover over the window with nothing pressed.
+    g_button_events = 0;
+    NSCursor* hovered = applied_after_hover_move(w, view, kWindowX, kWindowY);
+    const NSUInteger buttons_during_hover = g_button_events;
+
+    // Press. The host publishes the captured target's post-handler
+    // style; AppKit sends no cursor pass while this view owns the drag.
+    g_button_events = 0;
+    NSCursor* pressed = applied_after(
+        view, @selector(mouseDown:),
+        synth_mouse_event(w, view, NSEventTypeLeftMouseDown, kWindowX, kWindowY, 1, 1.0f));
+    const NSUInteger buttons_during_press = g_button_events;
+
+    // Drag, still held. The closed hand must survive the drag publish.
+    g_button_events = 0;
+    NSCursor* dragged = applied_after(
+        view, @selector(mouseDragged:),
+        synth_mouse_event(w, view, NSEventTypeLeftMouseDragged, kWindowX + 30, kWindowY, 1, 1.0f));
+    const NSUInteger buttons_during_drag = g_button_events;
+
+    // Release over the window. The open hand must come back without
+    // waiting for the pointer to move.
+    g_button_events = 0;
+    NSCursor* released = applied_after(
+        view, @selector(mouseUp:),
+        synth_mouse_event(w, view, NSEventTypeLeftMouseUp, kWindowX + 30, kWindowY, 1, 0.0f));
+    const NSUInteger buttons_during_release = g_button_events;
+
+    // A later hover back over the plot is a crosshair again -- the
+    // drag left nothing behind.
+    g_button_events = 0;
+    NSCursor* after = applied_after_hover_move(w, view, kPlotX, kPlotY);
+    const NSUInteger buttons_after = g_button_events;
+    dismiss(w, view);
+
+    INFO("hover: " << cursor_name(hovered) << "  press: " << cursor_name(pressed)
+         << "  drag: " << cursor_name(dragged) << "  release: " << cursor_name(released)
+         << "  hover after: " << cursor_name(after));
+
+    CHECK(buttons_during_hover == 0);
+    CHECK(buttons_during_press > 0);
+    CHECK(buttons_during_drag > 0);
+    CHECK(buttons_during_release > 0);
+    CHECK(buttons_after == 0);
+    CHECK(scene.surface->presses == 1);
+    CHECK(scene.surface->drags == 1);
+    CHECK(scene.surface->releases == 1);
+
+    CHECK(hovered == [NSCursor openHandCursor]);
+    CHECK(pressed == [NSCursor closedHandCursor]);
+    CHECK(dragged == [NSCursor closedHandCursor]);
+    CHECK(released == [NSCursor openHandCursor]);
+    CHECK(after == [NSCursor crosshairCursor]);
+    CHECK(hovered != pressed);
 }
