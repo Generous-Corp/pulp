@@ -921,6 +921,27 @@ An unparseable `opacity` resolves to the CSS initial value of `1`, never to
 clipped exactly as before but painted fully transparent, which reads as the
 element vanishing rather than as a style reset.
 
+## Empty background values remove the declaration
+
+Assigning the empty string to `background-color`, `background-image`, or the
+`background` shorthand **removes** that declaration, per CSSOM. The paint path
+used to treat an empty value as "nothing to parse" and return early, so the last
+colour or gradient stayed on screen with no declaration left to explain it.
+
+This is the `background` sibling of the `opacity` restore above, and it reaches
+the same way: the `:hover` translator snapshots `el.style[prop]` on `mouseenter`
+and assigns it back on `mouseleave`, so an element carrying no inline background
+is restored by assigning `""`. The removal now propagates, and the `background`
+shorthand clears **both** halves it can have set.
+
+`transparent` is not a substitute for removal. It parses to `rgba(0,0,0,0)` — a
+real declaration that happens to be invisible — so it composites as a present
+colour rather than restoring whatever the cascade would otherwise supply.
+
+The `color` half of this contract is **still open**: `setTextColor` drops an
+empty value the same way, and there is no `clear_text_color()` primitive to
+route a removal through, so text colour cannot yet be removed.
+
 ## Shared WidgetBridge lifecycle note
 
 The bridge now has one owner for DOM wheel-event fan-out and restores root

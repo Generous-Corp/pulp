@@ -541,10 +541,11 @@ export interface PulpTimelineScene {
   slots: readonly unknown[];
 }
 
-/** `pulp.timeline.sequence` — domain Document, schema version 7. */
+/** `pulp.timeline.sequence` — domain Document, schema version 8. */
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
   chord_scale_lane: readonly unknown[];
+  dynamics_lane: readonly unknown[];
   groove: PulpTimelineGrooveTemplate;
   id: number | string;
   markers: readonly unknown[];

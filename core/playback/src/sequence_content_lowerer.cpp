@@ -328,10 +328,20 @@ class SequenceContentLowerer::Impl {
     std::optional<SequenceLoweringError> validate_reference(const timeline::Clip& placement,
                                                             const timeline::SequenceRef& reference,
                                                             std::size_t depth) const {
-        if (depth > timeline::kMaxSequenceNestingDepth ||
-            placement.time_anchor() != timeline::ClipTimeAnchor::Musical)
-            return SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
-                                         placement.id()};
+        // Neither guard below is reachable through a validly-constructed
+        // Project, so each names InvalidStructure rather than a capability
+        // code: the document should not exist, which is a stronger statement
+        // than "playback cannot express this yet". They are defensive
+        // backstops kept because this walk builds placements of its own.
+        //
+        // validate_sequence_graph rejects a graph deeper than
+        // kMaxSequenceNestingDepth before a Project can hold it.
+        if (depth > timeline::kMaxSequenceNestingDepth)
+            return SequenceLoweringError{CompileErrorCode::InvalidStructure, placement.id()};
+        // Clip::create_absolute refuses SequenceRef content outright, so a
+        // clip carrying a reference is always musically anchored.
+        if (placement.time_anchor() != timeline::ClipTimeAnchor::Musical)
+            return SequenceLoweringError{CompileErrorCode::InvalidStructure, placement.id()};
         const auto playback = placement.playback_properties();
         // A placement fade travels beside the leaves as a ramp rather than
         // entering them, so nothing about the envelope itself is refused here;
@@ -376,9 +386,16 @@ class SequenceContentLowerer::Impl {
         }
         const auto& track = frame.sequence->tracks()[frame.track_index];
         if (frame.clip_index == 0) {
-            if (!track.device_chain().empty() || !track.automation_lanes().empty())
-                return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
-                                                       track.id()}};
+            // Two unrelated constructs that once shared one code. A device
+            // chain needs a sub-bus to survive flattening; an automation lane
+            // needs a per-clip curve sink. Each names its own code so the
+            // refusal says which construct is missing.
+            if (!track.device_chain().empty())
+                return {.error = SequenceLoweringError{
+                            CompileErrorCode::NestedDeviceChainUnsupported, track.id()}};
+            if (!track.automation_lanes().empty())
+                return {.error = SequenceLoweringError{
+                            CompileErrorCode::NestedAutomationLaneUnsupported, track.id()}};
             // Freeze and an active take lane are the two states that replace a
             // track's arrangement with something else. begin_track honours that
             // replacement by returning Freeze or ActiveTake content and
@@ -423,9 +440,13 @@ class SequenceContentLowerer::Impl {
         const auto& child = track.clips()[frame.clip_index++];
         if (auto charged = charge_reference(child.id()); charged.error)
             return charged;
+        // Unlike the placement guard in validate_reference, this one is
+        // reachable: a leaf clip inside a nested sequence can genuinely be
+        // absolute-anchored, and flattening it onto a musical owner has no
+        // hybrid time domain to write.
         if (child.time_anchor() != timeline::ClipTimeAnchor::Musical)
-            return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
-                                                   child.id()}};
+            return {.error = SequenceLoweringError{
+                        CompileErrorCode::NestedAbsoluteChildUnsupported, child.id()}};
         const auto clipped_start = std::max(child.start(), frame.reference.source_start);
         const auto clipped_end = std::min(child.end(), frame.source_end);
         if (clipped_end <= clipped_start)
@@ -451,12 +472,15 @@ class SequenceContentLowerer::Impl {
         // source-frame offset from elapsed timeline samples, which is only
         // valid for TimeConform::None. Refuse a partial view until the renderer
         // owns a conform-aware source-range mapping; otherwise a nested
-        // tempo-ramped clip can silently start at the wrong audio.
+        // tempo-ramped clip can silently start at the wrong audio. Stretch
+        // fails a second way: its rendered artifact is keyed to the clip's own
+        // authored tick range, and a trimmed window is not that range, so it
+        // additionally needs a windowed artifact.
         if (std::holds_alternative<timeline::MediaRef>(child.content()) &&
             child.time_conform() != timeline::TimeConform::None &&
             (left_trim != 0 || right_trim != 0))
-            return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
-                                                   child.id()}};
+            return {.error = SequenceLoweringError{
+                        CompileErrorCode::NestedConformedTrimUnsupported, child.id()}};
 
         if (const auto* nested = std::get_if<timeline::SequenceRef>(&child.content())) {
             if (nested->source_start.value > std::numeric_limits<std::int64_t>::max() - left_trim)

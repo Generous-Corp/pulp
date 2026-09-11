@@ -67,4 +67,15 @@ runtime::Result<SchemaWriteSuccess, PersistenceError>
 migrate_sequence_v7_to_v6(std::string_view source, BoundedJsonSink& output,
                           const void* context) noexcept;
 
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v7_to_v8(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
+// Refuses when the dynamics lane carries events. A v7 reader has nowhere to
+// put authored intensity, so a downgrade that dropped it would change how the
+// sequence performs while reporting success.
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v8_to_v7(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
 } // namespace pulp::timeline::detail

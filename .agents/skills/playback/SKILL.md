@@ -59,9 +59,24 @@ mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.
 When sequence lowering flattens a complete nested media clip, preserve its
 authored `TimeConform` value. Reject a nested source window that trims a
-`Resample` or `Stretch` clip with `NestedSequenceUnsupported`; advancing a raw
-source-frame offset is valid only for unconformed media and would corrupt the
-authored phase until playback owns a conform-aware source-range mapping.
+`Resample` or `Stretch` clip with `NestedConformedTrimUnsupported`; advancing a
+raw source-frame offset is valid only for unconformed media and would corrupt
+the authored phase until playback owns a conform-aware source-range mapping.
+`Stretch` needs a second thing the mapping alone does not give it: its rendered
+artifact is keyed to the clip's own authored tick range, so a trimmed window
+also needs a windowed artifact.
+
+Each nested refusal names one cause. A child device chain raises
+`NestedDeviceChainUnsupported`, a child automation lane raises
+`NestedAutomationLaneUnsupported`, and an absolute-anchored leaf inside a
+nested sequence raises `NestedAbsoluteChildUnsupported`. Do not reach for one
+code to cover several constructs: the code is what tells an author which
+construct is missing, and a generic one hides that. Two guards in
+`validate_reference` are deliberately not capability codes — a nesting depth
+past `kMaxSequenceNestingDepth` and a non-musical `SequenceRef` placement both
+raise `InvalidStructure`, because `sequence_graph_validation` and
+`Clip::create_absolute` already reject them at construction, so reaching either
+means the document should not exist.
 
 When host beat mapping intentionally makes musical material follow the host
 tempo, keep absolute clips, take-comp segments, and frozen artifacts on

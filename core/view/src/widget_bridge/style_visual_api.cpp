@@ -12,11 +12,17 @@ namespace pulp::view {
 void BridgeRegistrars::register_widget_style_background_color_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
+    // An empty colour is the CSSOM spelling of "remove this declaration"
+    // (`el.style.background = ""`), not "leave the old one alone". Treating it
+    // as a no-op strands whatever colour was painted last, which is how a
+    // moved highlight leaves its old row lit.
     register_bridge_function(api, "setBackground", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &self.root_ : self.style_target(id);
-        if (v && !hex.empty()) v->set_background_color(parse_bridge_css_color(hex));
+        if (!v) return choc::value::Value();
+        if (hex.empty()) v->clear_background_color();
+        else v->set_background_color(parse_bridge_css_color(hex));
         return choc::value::Value();
     });
 }
@@ -82,7 +88,12 @@ void BridgeRegistrars::register_widget_style_background_gradient_api(WidgetBridg
         auto id = args.get<std::string>(0, "");
         auto gradient = args.get<std::string>(1, "");
         auto* v = id.empty() ? &self.root_ : self.widget(id);
-        if (!v || gradient.empty()) return choc::value::Value();
+        if (!v) return choc::value::Value();
+        // Same removal contract as setBackground above.
+        if (gradient.empty()) {
+            v->clear_background_gradient();
+            return choc::value::Value();
+        }
 
         apply_css_background_gradient(*v, gradient, parse_bridge_css_color);
         return choc::value::Value();
