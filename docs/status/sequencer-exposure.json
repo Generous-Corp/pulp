@@ -4518,6 +4518,97 @@
       }
     },
     {
+      "id": "nested-placement-fade-envelope",
+      "title": "A SequenceRef placement's fade composes over its flattened leaves as a progress window",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "5d2f9a41-7c08-4be6-9f3a-08b1e6c42d97",
+      "owned_paths": [
+        "core/playback/src/placement_fade.hpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/clip_fade_envelope.hpp",
+        "core/playback/src/audio_renderer.cpp",
+        "core/playback/include/pulp/playback/audio_renderer.hpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/audio_renderer_internal.hpp",
+        "core/playback/src/offline_stretch_program_compiler.cpp",
+        "core/playback/src/offline_stretch_program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/playback/src/track_audio_program_compiler.cpp",
+        "core/playback/src/track_audio_program_compiler.hpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/placement_fade.hpp",
+          "needles": [
+            "LoweredPlacementFade",
+            "silent_tick"
+          ]
+        },
+        {
+          "path": "core/playback/src/clip_fade_envelope.hpp",
+          "needles": [
+            "placement_fade_gain",
+            "window of fade PROGRESS"
+          ]
+        },
+        {
+          "path": "core/playback/include/pulp/playback/audio_renderer.hpp",
+          "needles": [
+            "ClipPlacementFadeSegment",
+            "ClipPlacementFadeProgram"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "append_placement_fades",
+            "span_reaches"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "A placement fade composes over the leaves it was flattened into"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "window of fade progress"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The envelope is produced by flattening and can never be authored, so it belongs to the compiled program rather than the document. It rides on AudioClipRendererProgram, which is a compiled-output type an SDK consumer reads rather than writes, and ClipPlaybackProperties is deliberately untouched: adding a partial ramp there would declare an authoring surface that nothing may write. No schema version moves and no serialized form changes."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. A faded nested placement that previously refused to compile now compiles, through the same clip fade properties `pulp seq` already writes."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal beneath the clip-fade controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The composed envelope is computed inside the compiler and is reachable only through the clip fade an author already wrote on the placement."
+        }
+      }
+    },
+    {
       "id": "nested-substitution-state-refusal-split",
       "title": "Nested child track states split by whether they substitute content",
       "classification": "engine_internal",
