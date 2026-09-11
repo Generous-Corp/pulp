@@ -156,8 +156,11 @@ different request with an earlier result.
   Playback expands references off the audio thread into immutable root-track
   programs. Stage 1 accepts child note/audio clips and rejects child devices,
   automation, takes, freeze, record-arm state, absolute clips, and non-neutral
-  reference gain/fades. Source windows that intersect child audio fades also
-  fail closed because Stage 1 cannot represent an envelope offset. A complete
+  reference gain/fades. A source window that cuts into a leaf clip's *own*
+  fade shortens that fade to the new clip edge rather than refusing — the
+  answer an unnested clip gives when it is dragged shorter — and a trim that
+  swallows a fade whole leaves none. That is a different thing from a fade on
+  the `SequenceRef` placement, which still refuses. A complete
   nested media clip preserves its `TimeConform` intent, but a source window
   that trims a conforming clip fails with `NestedSequenceUnsupported` until
   playback has a conform-aware source-range mapping. Expansion
@@ -3157,3 +3160,31 @@ show the probe **absent** — a groove that displaces nothing cannot carry it
 back, and the sounding clamp drops it as zero-length. That absence is the
 correct reading, not a missing case to chase; see the playback skill's note on
 why the reach short-circuit cannot be covered.
+
+## Only a *substituting* track state blocks nesting, and a dormant lane must hold a real take to prove it
+
+A Track's four capture-related states divide by whether anything reads them to
+replace the arrangement, not by whether they are set. `freeze` and a valid
+`active_take_lane_id` substitute: the playback lowerer discards the clips and
+emits the sealed artifact or the comp instead. `record_armed` and the
+`take_lanes` list do not — arm is document intent the capture engine reads and
+never acts on during lowering, and an unselected lane is inert document data.
+So a nested child carrying arm or a dormant lane lowers to exactly the clips a
+child without them lowers to, while a nested frozen or comped child refuses
+(`NestedFrozenTrackUnsupported`, `NestedActiveTakeUnsupported`). If you add a
+fifth state, the question to answer is "does anything substitute on this?"
+
+The fixture trap is in the other direction. `TakeLane::create` imposes **no**
+non-empty-takes requirement, so a lane holding zero takes constructs happily —
+and a test that proves dormancy with an empty lane has proved nothing, because
+an empty lane is inert for reasons that have nothing to do with selection. Author
+a lane with a real `Take` against a `MediaAsset` declared in `ProjectInput::assets`
+(`Project::create` validates the reference exists), leave `active_take_lane_id`
+unset, and the claim becomes real: this lane holds usable media and still changes
+nothing. The take needs no decoded audio — nothing resolves a dormant lane to
+media, which is precisely the property under test.
+
+Prefer a named state struct over positional bools when a fixture starts
+carrying several of these. `nested_child_state_project(NestedChildState)` reads
+as the document it authors, and adding a state later cannot silently re-target
+an existing call the way appending another `bool` parameter can.

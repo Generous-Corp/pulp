@@ -516,6 +516,28 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
 // Merge precedence: className rules < inline style < explicit flat
 // props. Later overrides earlier.
 
+/// Non-enumerable flag stamped on prop sets produced by style/className
+/// flattening. Distinguishes DERIVED visual props from author-written ones.
+const DERIVED_STYLE_MARKER = '__pulpDerivedStyle';
+
+/// Visual keys that only ever reach the bridge by being hoisted out of
+/// `style`/`className`. Their absence is meaningful only when both prop
+/// sets came from the same shape.
+function isDerivedVisualKey(key: string): boolean {
+    return (
+        key === 'background' || key === 'backgroundGradient'
+        || key === 'textColor'
+        || key === 'border' || key === 'borderColor' || key === 'borderWidth'
+        || key === 'borderTop' || key === 'borderRight'
+        || key === 'borderBottom' || key === 'borderLeft'
+    );
+}
+
+/// True when `props` was produced by normalizeHostProps' flattening path.
+function isDerivedStyleProps(props: Record<string, unknown>): boolean {
+    return props[DERIVED_STYLE_MARKER] === true;
+}
+
 type ClassRulesProvider = (className: string) => Record<string, unknown> | null;
 
 let _classRulesProvider: ClassRulesProvider | null = null;
@@ -542,6 +564,12 @@ export function normalizeHostProps(
         && typeof rawProps.style === 'object';
     const hasClassName = typeof rawProps.className === 'string'
         && (rawProps.className as string).length > 0;
+    // A render WITHOUT a style/className source yields a differently SHAPED
+    // prop set than one with it: the flattened visual keys (background,
+    // border, textColor) are simply absent rather than removed. The removal
+    // walk in applyChangedProps must not read that absence as a deletion, or
+    // the element is erased instead of restyled. Mark which shape a prop set
+    // came from so the two are separable.
     if (!hasStyle && !hasClassName) return rawProps;
 
     // Use a null-prototype prop map so malformed CSS rules or hostile
@@ -581,6 +609,11 @@ export function normalizeHostProps(
         out[k] = rawProps[k];
     }
 
+    // Non-enumerable so the marker never reaches a bridge setter, a key
+    // walk, or a shallow diff.
+    Object.defineProperty(out, DERIVED_STYLE_MARKER, {
+        value: true, enumerable: false,
+    });
     return out;
 }
 
@@ -691,12 +724,25 @@ export function applyChangedProps(
         mutated = true;
     }
 
+    // Visual props hoisted out of `style`/`className` are DERIVED, not
+    // authored. When a render arrives without its style source — the style
+    // object is omitted, or a className token the class-rules provider
+    // cannot resolve — the derived keys are ABSENT rather than deleted, so
+    // resetting them here erases the element (a chip loses fill, border and
+    // text in one frame and reads as "disappeared on hover"). Only honour a
+    // removal when both prop sets came from the same shape. A genuinely
+    // author-removed style — both sides flattened, key dropped from one —
+    // still resets.
+    const derivedShapeChanged =
+        isDerivedStyleProps(oldProps) && !isDerivedStyleProps(newProps);
+
     // Walk old props — clear anything that disappeared (best-effort —
     // most setters have no inverse; visible/opacity are obvious cases)
     for (const key of Object.keys(oldProps)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;
         if (svgPathStrokeChanged && (key === 'stroke' || key === 'strokeGradient')) continue;
+        if (derivedShapeChanged && isDerivedVisualKey(key)) continue;
         if (!(key in newProps)) {
             if (isEventHandler(key)) {
                 applyEventHandler(id, key, undefined);

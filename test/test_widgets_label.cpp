@@ -1792,3 +1792,71 @@ TEST_CASE("restyling a shaping input re-measures the label",
         CHECK(after != before);
     }
 }
+
+TEST_CASE("Label starts text at the content edge whether or not its cached "
+          "line layout is usable",
+          "[view][widget][label-cache][alignment][padding]") {
+    const auto face = resolved_face_identity("Inter", 400.0f);
+
+    // Same box, same padding, same alignment, same font, same live string.
+    // The only difference is the basis the cached line box was captured
+    // against: one matches the live text, the other was captured while the
+    // string was still truncated, so the cache is correctly rejected and the
+    // label falls back to native painting. Both must start the text at the
+    // same content-box edge.
+    constexpr float kPaddingLeft = 13.0f;
+    const std::string live = "DOWNWARD TILT X";
+
+    auto make = [&](const std::string& basis_text, float cached_left) {
+        auto label = std::make_unique<Label>(basis_text);
+        label->set_font_family("Inter");
+        label->set_font_size(12.0f);
+        label->set_text_align(LabelAlign::left);
+        label->flex().padding_left = kPaddingLeft;
+        label->flex().padding_right = 13.0f;
+        label->flex().padding_top = 4.0f;
+        label->flex().padding_bottom = 4.0f;
+        label->set_bounds({0, 0, 180, 24});
+        label->set_cached_line_boxes(
+            {{cached_left, 4.0f, 90.0f, 16.0f, 0,
+              static_cast<int>(basis_text.size())}},
+            180.0f, face, false);
+        label->set_text(live);
+        return label;
+    };
+
+    auto origin_x = [](Label& label) {
+        RecordingCanvas canvas;
+        label.paint(canvas);
+        const auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        return fills[0].f[0];
+    };
+
+    auto matching = make(live, kPaddingLeft);
+    auto stale = make("DOWNWARD TILT", kPaddingLeft);
+
+    if (face.empty()) {
+        // Without a resolvable face there is no cached basis to match, so both
+        // labels take the native path and the comparison proves nothing.
+        CHECK(matching->cached_line_boxes().empty());
+        return;
+    }
+
+    // Premise, not the property: prove the two labels really are on different
+    // paint paths, so the equality below cannot pass vacuously.
+    //
+    // The matching label honors its captured geometry — shifting the captured
+    // left edge moves its text by exactly that much.
+    auto shifted = make(live, kPaddingLeft + 7.0f);
+    CHECK(origin_x(*shifted) == Catch::Approx(kPaddingLeft + 7.0f));
+    // The stale label ignores its captured geometry — dropping the cache
+    // entirely changes nothing, because it was already painting natively.
+    auto stale_without_cache = make("DOWNWARD TILT", kPaddingLeft);
+    stale_without_cache->clear_cached_line_boxes();
+    CHECK(origin_x(*stale_without_cache) == Catch::Approx(origin_x(*stale)));
+
+    // The property: one content edge, whichever path drew the text.
+    CHECK(origin_x(*matching) == Catch::Approx(kPaddingLeft));
+    CHECK(origin_x(*stale) == Catch::Approx(origin_x(*matching)));
+}
