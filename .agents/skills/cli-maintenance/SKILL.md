@@ -123,6 +123,17 @@ stack into `pulp-mcp` or parse human output. Keep these surfaces synchronized:
 This subcommand fits the existing CLI-maintenance, Skia GPU build, and routing
 skills; adding a separate GPU-doctor skill would duplicate their ownership.
 
+Keep the gpu-health selftests free of host state. `test_gpu_health_run_attestation.py`
+builds throwaway git repositories and tags revisions with a lightweight
+`git tag <name> <ref>`. A host with `tag.gpgsign` enabled promotes that to a
+signed tag, which aborts with `no tag message?` because the fixture supplies no
+message and has no editor attached, and the resulting red test names no host
+condition. Fixture repositories therefore pin `commit.gpgsign` and
+`tag.gpgsign` false in their own local config. Local configuration outranks
+global, so prove that pinning against a hostile global config file rather than
+the ambient one: a check written against the developer's own config passes
+vacuously on a host that does not sign, which is every CI runner.
+
 ### A3 campaign scripts are acceptance tooling, not shipped CLI verbs
 
 `tools/scripts/gpu_first_visible_a3_campaign.py` and
@@ -3071,6 +3082,37 @@ The skip is only as strong as the agreement between the script's wording and the
 CMake property. `tools/scripts/test_minos_registry_absent.py` asserts both ends:
 the scripts really print the phrase, and the CMakeLists really keys its skip on
 it. Extend that test when you add another registry-reading CLI test.
+
+## A CTest case that asserts a clean source tree must lock out the mutators
+
+`cli-gpu-clean-agent-preparer-contract` passes `-DSOURCE_ROOT=${CMAKE_SOURCE_DIR}`,
+so it asserts the **live checkout** is pristine — not a copy, not a fixture. Any
+test that rewrites a tracked file while it runs will therefore be observed by it,
+and the contract refuses with a dirty-tree error that names the *other* test's
+file. The failure lands on the required macOS gate, looks like a defect in the
+contract, and reproduces on no developer machine because it needs `-j` contention
+to widen the window.
+
+Two self-tests deliberately mutate tracked sources and restore them afterwards;
+both hold `RESOURCE_LOCK agent-capability-manifest-source`. A reader of global
+tree state must join that same lock:
+
+```cmake
+set_tests_properties(cli-gpu-clean-agent-preparer-contract PROPERTIES
+    RESOURCE_LOCK "pulp_gpu;agent-capability-manifest-source")
+```
+
+`RESOURCE_LOCK` takes a list, so a test can hold several locks at once — adding
+one does not cost the other. The rule generalizes: **whenever you register a test
+that asserts repository-wide state, give it the mutation lock, and whenever you
+register a test that writes a tracked file, take that lock.** Never resolve this
+by relaxing the cleanliness assertion; the assertion is the point, and the
+scheduler is what was wrong.
+
+The tell that you are looking at this and not at a real dirty checkout: the
+failure is intermittent across unrelated PRs, and a `--repeat until-pass:2` retry
+fails identically about a second later — still inside the same mutation window,
+which is what makes an environmental failure read as deterministic.
 
 ## An MCP tool's exit code is a real signal — do not throw it away
 

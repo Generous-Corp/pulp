@@ -116,7 +116,6 @@ enum class CompileErrorCode : std::uint8_t {
     CompilerAlreadyBound,
     AudioProgramInvalid,
     AutomationProgramInvalid,
-    NestedSequenceUnsupported,
     ExpansionBudgetExceeded,
     NoteProgramCapacityExceeded,
     OfflineStretchFailed,
@@ -164,11 +163,14 @@ enum class CompileErrorCode : std::uint8_t {
     // events no renderer scales by clip gain. Refuse rather than fold a child
     // fader into a value nothing will read.
     NestedGainSinkUnsupported,
-    // A SequenceRef placement carries a fade. That fade is one envelope over
-    // the whole nested window, while a flattened leaf can only carry a fade
-    // measured from its own edge, so a leaf lying inside the fade region would
-    // need a partial ramp the clip model cannot express. Refuse until the
-    // window envelope has a representation of its own.
+    // A SequenceRef placement's fade had nowhere to land. The envelope itself
+    // composes: it travels beside each flattened leaf as the ramp it is, and
+    // the leaf is read at its own position within it. But a fade is a
+    // time-varying gain, so it needs the sink a static gain needs, and the leaf
+    // kinds that have none are the same ones NestedGainSinkUnsupported names.
+    // Refuse rather than play such a leaf at full level through an envelope the
+    // author wrote. Only a leaf a ramp actually reaches refuses; one lying
+    // wholly past a ramp reads unity and compiles.
     NestedPlacementFadeUnsupported,
     // A nested child track is frozen. Freeze substitutes a sealed rendered
     // artifact for everything the track would otherwise play, which is why the
@@ -186,6 +188,42 @@ enum class CompileErrorCode : std::uint8_t {
     // is refused rather than silently inverted. Dormant lanes do not refuse:
     // an unselected lane changes nothing at either level.
     NestedActiveTakeUnsupported,
+    // A nested child track carries a device chain. A device is bound to the
+    // track it processes, and flattening dissolves the child track entirely:
+    // its clips become leaves on the parent, whose own chain already serves
+    // every other clip there. Running the child's devices over the parent
+    // would process unrelated material, and dropping them would play the
+    // child dry, so the chain is refused. Lifting it needs a sub-bus a
+    // flattened group can keep its own processing on, not a wider flatten.
+    NestedDeviceChainUnsupported,
+    // A nested child track carries automation lanes. A lane is a curve over
+    // the track's own timeline, and the flattened leaf has nowhere to hold a
+    // curve: ClipPlaybackProperties::gain_linear is a scalar, so even the one
+    // lane that could compose has no time-varying sink. Refuse rather than
+    // freeze a moving value at a single point. A per-clip automation sink is
+    // the missing construct; the pan and MIDI-gain lanes are not waiting on
+    // it, because they have no destination at any level and can only ever be
+    // declared intended.
+    NestedAutomationLaneUnsupported,
+    // A nested SequenceRef trims a media leaf whose content conforms to the
+    // timeline. Both conform kinds break differently under a partial view.
+    // Resample maps source to timeline by tick phase, while the nested trim
+    // path advances a raw source-frame offset from elapsed samples, so a left
+    // trim starts the clip at the wrong audio. Stretch keys its rendered
+    // artifact to the clip's own authored tick range, and a trimmed window is
+    // not that range. Refuse until the renderer owns a conform-aware
+    // source-range mapping and a windowed stretch artifact.
+    NestedConformedTrimUnsupported,
+    // A leaf clip inside a nested sequence is absolute-anchored while the
+    // nesting that reaches it is musical. Flattening has to place that leaf on
+    // the owner's musical timeline, but its position is defined in samples and
+    // must stay fixed as tempo moves, so the result would have to be musical
+    // and absolute at once. The lowered program has no such hybrid domain to
+    // write. Distinct from the placement guard above, which a SequenceRef clip
+    // cannot reach: this one a document can genuinely author. What it waits on
+    // is a product decision about whether nesting re-anchors such a leaf or
+    // preserves it, not only a renderer construct.
+    NestedAbsoluteChildUnsupported,
 };
 
 struct CompileError {
@@ -220,6 +258,33 @@ struct CompilerStatus {
     // the instance's latest successful publication.
     std::uint64_t latest_submitted_epoch = 0;
     std::uint64_t latest_published_epoch = 0;
+    /// Partition of `active_tracks_completed` for the request currently being
+    /// compiled, or for the last one if the compiler is idle. A track is
+    /// `reused` when the dirty set spared it and its program was carried over
+    /// from the live program untouched; it is `recompiled` when a fresh
+    /// TrackProgram was built for it. The two always sum to
+    /// `active_tracks_completed`.
+    ///
+    /// This is the direct measure of how much work an incremental compile did.
+    /// Callers that need to know an edit stayed incremental should read these
+    /// rather than infer it from how long the compile took, which measures the
+    /// host as much as the compiler.
+    std::uint64_t active_tracks_recompiled = 0;
+    std::uint64_t active_tracks_reused = 0;
+
+    /// Clear the three track counters together, so the partition can never be
+    /// left describing a previous request.
+    void clear_active_track_counts() {
+        active_tracks_completed = 0;
+        active_tracks_recompiled = 0;
+        active_tracks_reused = 0;
+    }
+
+    /// Record one finished track on whichever side of the partition it fell.
+    void count_track_completed(bool reused) {
+        ++active_tracks_completed;
+        ++(reused ? active_tracks_reused : active_tracks_recompiled);
+    }
 };
 
 struct PlaybackProgramCompilerCore;

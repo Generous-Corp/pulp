@@ -1257,6 +1257,14 @@ View* View::hit_test(Point local_point) {
             // The 500px slack is symmetric so popovers that extend in any
             // direction get hit-tested correctly.
             bool in_bounds = child->local_bounds().contains(child_point);
+
+            // hitSlop: a child may accept pointers outside its painted box.
+            // The parent must consult the CHILD's slop here, because a point
+            // that misses the child's bounds never reaches the child's own
+            // hit_test() to be forgiven there.
+            if (!in_bounds && !child->hit_slop().empty())
+                in_bounds = child->hit_bounds().contains(child_point);
+
             if (!in_bounds && child->overflow() == Overflow::visible) {
                 auto lb = child->local_bounds();
                 in_bounds = child_point.x >= lb.x - 500 &&
@@ -1293,7 +1301,9 @@ View* View::hit_test(Point local_point) {
     // here, matching RN's "container is just a layout pass-through" mode.
     if (pointer_events_ == PointerEvents::box_none) return nullptr;
 
-    if (local_bounds().contains(local_point))
+    // hit_bounds() is local_bounds() grown by hit_slop(); with no slop set the
+    // two are identical, so this is the historical bounds check unchanged.
+    if (hit_bounds().contains(local_point))
         return this;
 
     return nullptr;

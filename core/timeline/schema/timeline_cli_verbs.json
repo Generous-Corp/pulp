@@ -2389,6 +2389,13 @@
           "value_type": "json"
         },
         {
+          "kind": "Array",
+          "name": "dynamics-lane",
+          "required": true,
+          "schema_field": "dynamics_lane",
+          "value_type": "json"
+        },
+        {
           "kind": "Object",
           "name": "groove",
           "ref": "pulp.timeline.groove_template",
@@ -2455,7 +2462,7 @@
       ],
       "name": "timeline:sequence",
       "schema_type": "pulp.timeline.sequence",
-      "version": 7
+      "version": 8
     },
     {
       "domain": "Document",

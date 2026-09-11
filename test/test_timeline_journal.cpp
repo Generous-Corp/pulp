@@ -79,6 +79,25 @@ Project make_track_order_project(std::vector<ItemId> authored_order) {
     return std::move(project).value();
 }
 
+// One track holding a note clip, under a sequence that states the given
+// intensity context. Two of these differ only in what the lane says.
+Project make_dynamics_project(std::vector<DynamicsEvent> events) {
+    auto lane = DynamicsLane::create(std::move(events));
+    REQUIRE(lane);
+    auto track = Track::create({4}, "track", {make_note_clip({5}, {6}, 0)});
+    REQUIRE(track);
+    auto sequence =
+        Sequence::create(SequenceInput{.id = {3},
+                                       .name = "sequence",
+                                       .musical_duration = TickDuration{8 * kTicksPerQuarter},
+                                       .tracks = {std::move(track).value()},
+                                       .dynamics_lane = std::move(lane).value()});
+    REQUIRE(sequence);
+    auto project = Project::create({{1}, "project", 9, {3}, {}, {std::move(sequence).value()}});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
 class ProbeJournalSink final : public JournalSink {
   public:
     pulp::runtime::Result<bool, JournalSinkError>
@@ -408,6 +427,30 @@ TEST_CASE("Timeline journal checkpoint equality includes device-chain order") {
     // this arm shares its error object with the StaleRevision arm.
     REQUIRE(rejected.error().expected_revision == rejected.error().current_revision);
     REQUIRE_FALSE(rejected.error().model_error);
+}
+
+TEST_CASE("Timeline journal checkpoint equality includes the dynamics lane") {
+    const auto checkpoint = make_dynamics_project({{{0}, 0.25f}, {{kTicksPerQuarter}, 0.75f}});
+    auto session = std::move(DocumentSession::create(checkpoint)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    REQUIRE(session->submit(writer, std::move(edit)));
+
+    // The same document is still the same document to the guard.
+    auto replayed = session->journal().replay(
+        make_dynamics_project({{{0}, 0.25f}, {{kTicksPerQuarter}, 0.75f}}), {});
+    REQUIRE(replayed);
+
+    // A checkpoint that differs only in its intensity context is a different
+    // document to replay onto, whether the lane says something else or nothing
+    // at all. An oracle blind to the lane would accept both.
+    auto louder = session->journal().replay(
+        make_dynamics_project({{{0}, 0.25f}, {{kTicksPerQuarter}, 1.0f}}), {});
+    REQUIRE_FALSE(louder);
+    REQUIRE(louder.error().code == ConflictCode::CheckpointMismatch);
+    auto silent = session->journal().replay(make_dynamics_project({}), {});
+    REQUIRE_FALSE(silent);
+    REQUIRE(silent.error().code == ConflictCode::CheckpointMismatch);
 }
 
 TEST_CASE("Timeline journal checkpoint equality includes authored track order") {
