@@ -3915,6 +3915,24 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   expires, and writes the resolved browser build to stderr as a
   `[browser-capture]` line before any page work, so a failed capture already
   names both the Chrome and the stalled call.
+- **Prove a capture deadline reaped the BROWSER, not just the profile.**
+  Removing the profile directory is the easy half, and it is the half a cleanup
+  test naturally asserts. The launched Chromium is a detached process *group*,
+  so it survives the runtime's `process.exit` and is re-parented to init, where
+  nothing will ever reap it — a green "profile removed" assertion sits happily
+  on top of a permanent leak. Cleanup that fires mid-launch is the sharp case:
+  the ownership marker lives inside the profile, so removing the profile
+  guarantees custody is never recorded, and any teardown gated on recorded
+  custody degrades to a silent no-op exactly when it is needed. Two rules
+  follow. A launch abandoned before custody exists must still be terminated
+  through the live child handle: while the handle is unreaped POSIX will not
+  reuse that pid, and since a group's id is its leader's pid, no other group can
+  come to bear the number either — which is what makes `kill(-pid)` safe there,
+  with no await permitted between the `exitCode` check and the signal. And the
+  test must assert the **process is gone**, not the directory: sample `ps` with
+  a positive control in the same sample, because BSD `pgrep -fc` prints 0 both
+  when nothing matched and when the pattern was wrong, and the second one reads
+  exactly like a pass.
 - The semantic report is evidence, not permission to promote visual controls.
   Only explicit source contracts such as `data-pulp-role` may become native
   interaction overlays in a later stage.
