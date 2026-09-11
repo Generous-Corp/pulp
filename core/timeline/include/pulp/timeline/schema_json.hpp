@@ -138,6 +138,8 @@ struct DecodeLimits {
     std::size_t max_slots = 1'000'000;
     /// Maximum chord/scale events.
     std::size_t max_chord_scale_events = 1'000'000;
+    /// Maximum intensity events in one dynamics lane payload.
+    std::size_t max_dynamics_events = 1'000'000;
     /// Maximum groove-template steps.
     std::size_t max_groove_steps = 100'000;
     /// Maximum controller/expression lanes across all MIDI content.

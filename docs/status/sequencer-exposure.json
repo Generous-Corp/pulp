@@ -5025,6 +5025,159 @@
           ]
         }
       }
+    },
+    {
+      "id": "offline-timeline-dynamics-command",
+      "title": "Typed dynamics-lane mutation command under an exact-value gate",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "22235f51-952a-44d2-8685-9477a002f84a",
+      "owned_paths": [
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/include/pulp/timeline/compile_context.hpp",
+        "core/timeline/include/pulp/timeline/document_session.hpp",
+        "core/timeline/include/pulp/timeline/schema_json.hpp",
+        "core/timeline/src/command.cpp",
+        "core/timeline/src/schema_json.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/serialize_command_decode.cpp",
+        "core/timeline/src/serialize_decode_context.hpp",
+        "core/timeline/src/serialize_project_decode.cpp",
+        "core/timeline/src/transaction.cpp",
+        "core/timeline/src/transaction_dispatch_internal.hpp",
+        "test/test_timeline_dynamics_lane.cpp",
+        "test/test_timeline_writer_capabilities.cpp",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": [
+            "struct SetDynamicsLane",
+            "DynamicsLane expected;",
+            "DynamicsLane replacement;",
+            "SetDynamicsLane>;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction.cpp",
+          "needles": [
+            "std::get_if<SetDynamicsLane>(&envelope.command)",
+            "ConflictCode::ExpectedValueMismatch",
+            "CompileContextKind::Dynamics"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_dispatch_internal.hpp",
+          "needles": [
+            "SetDynamicsLane>;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.set_dynamics_lane"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_project_decode.cpp",
+          "needles": [
+            "decode_dynamics_lane(const JsonValue",
+            "intensity_bits"
+          ]
+        },
+        {
+          "path": "test/test_timeline_dynamics_lane.cpp",
+          "needles": [
+            "setting the dynamics lane dirties the context kind and nothing else",
+            "the dynamics lane gate refuses a stale expectation and a missing sequence",
+            "a set_dynamics_lane command round trips through its schema envelope",
+            "the dynamics lane command carries annotation authority a writer profile can gate"
+          ]
+        },
+        {
+          "path": "test/test_timeline_writer_capabilities.cpp",
+          "needles": [
+            "alternatives == 48"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "SetDynamicsLane is a public alternative of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp can author a sequence's intensity through the same transaction path every other command uses. The command carries both the lane it expects to find and the lane to install, so reduce_transaction refuses a stale writer with ConflictCode::ExpectedValueMismatch and a vanished sequence with ConflictCode::TargetMissing rather than overwriting a concurrent edit, and the inverse it records is the same command with the two lanes swapped, which makes undo exact rather than reconstructed. Authority is classified through command_authority_of<SetDynamicsLane>() as Annotation/Modify, so a writer profile that denies annotation modification refuses this command while still admitting note edits: the gate is the class-and-intent pair, not a blanket ban. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. This row does not touch the released p0-15a-dynamics-lane row, whose dispositions are frozen at its merge; it records the command half that row named as its open dependency.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/command.hpp",
+              "needles": [
+                "struct SetDynamicsLane",
+                "DynamicsLane expected;",
+                "DynamicsLane replacement;",
+                "SetDynamicsLane>;"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+              "needles": [
+                "std::is_same_v<T, SetDynamicsLane>"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "platform runtime music timebase timeline"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_dynamics_lane.cpp",
+              "needles": [
+                "setting the dynamics lane dirties the context kind and nothing else",
+                "the dynamics lane gate refuses a stale expectation and a missing sequence",
+                "the dynamics lane command carries annotation authority a writer profile can gate"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "The command is registered in the schema registry, so the generated CLI vocabulary carries pulp.timeline.command.set_dynamics_lane and a decoder accepts its envelope. That is not enough to call this surface exposed, and the reason is measured rather than assumed: pulp::tools::timeline::command_apply loads a project from JSON, applies the decoded commands, and returns serialize_project() of the result, while the sequence encoder carries no dynamics lane at all (grep -c dynamics core/timeline/src/serialize_encode.cpp reports 0 against a control of 4 for chord_scale). A CLI caller would therefore apply the mutation and receive a document with the lane gone, which is a worse outcome than a refusal because it looks like it worked. This surface closes when the lane round-trips through the sequence document schema, which is timeline-dynamics-lane-persistence and is deliberately not in this PR: it is a document-format change with a version bump and a migration.",
+          "dependencies": [
+            "timeline-dynamics-lane-persistence"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The MCP verbs are projected from the same schema registry as the CLI and share command_apply, so they inherit exactly the same defect: the mutation applies and is then destroyed by the serialization the same call performs, because the sequence encoder does not carry the lane. The released p0-15a-dynamics-lane row named two dependencies for this surface, timeline-dynamics-lane-persistence and offline-timeline-dynamics-command; this row delivers the second, and the first is still open, so the surface stays a gap rather than being claimed on a half closure.",
+          "dependencies": [
+            "timeline-dynamics-lane-persistence"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live dynamics-lane operation and no executor binding for one. The command is the mutation such a control lane would execute, so this row is a dependency of that closure rather than a step of it; the live surface additionally needs the timeline document session Product A does not yet hold.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "A dynamics-lane mutation is timeline document state, not a design-time algorithm capability an agent manifest advertises, which is the same classification the released p0-15a-dynamics-lane row reached for the lane itself."
+        }
+      }
     }
   ],
   "tombstones": []

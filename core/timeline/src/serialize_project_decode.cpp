@@ -1040,6 +1040,76 @@ decode_chord_scale_lane(const JsonValue* value, MemberPolicy detail_policy,
         runtime::Ok(std::move(created).value()));
 }
 
+// A null value decodes as the lane that states no intensity, mirroring the
+// chord/scale lane's treatment of an absent member.
+//
+// `intensity` travels as the float's bit pattern rather than a decimal literal
+// because this lane is read back through an exact-value gate: a command carries
+// the lane it expects to find, and a decimal round trip that lands one ulp away
+// turns a correct retry into a spurious mismatch. AutomationPoint already
+// carries its value this way for the same reason.
+runtime::Result<DynamicsLane, PersistenceError>
+decode_dynamics_lane(const JsonValue* value, DecodeContext& context, std::string lane_path) {
+    if (!value) {
+        auto empty = DynamicsLane::create({});
+        if (!empty)
+            return model_fail<DynamicsLane>(empty.error(), std::move(lane_path));
+        return runtime::Result<DynamicsLane, PersistenceError>(runtime::Ok(std::move(empty).value()));
+    }
+    const auto& limits = context.limits;
+    if (value->array.size() >
+        limits.max_dynamics_events -
+            std::min(context.dynamics_events, limits.max_dynamics_events))
+        return fail<DynamicsLane>(PersistenceErrorCode::LimitExceeded, lane_path, value->begin,
+                                  context.dynamics_events + value->array.size(),
+                                  limits.max_dynamics_events);
+    context.dynamics_events += value->array.size();
+    std::vector<DynamicsEvent> events;
+    events.reserve(value->array.size());
+    for (std::size_t index = 0; index < value->array.size(); ++index) {
+        const auto& encoded = value->array[index];
+        const auto item_path = lane_path + "/" + std::to_string(index);
+        auto position = required(encoded, "position", item_path);
+        auto intensity_bits = required(encoded, "intensity_bits", item_path);
+        auto interpolation = required(encoded, "interpolation", item_path);
+        if (!position || !intensity_bits || !interpolation ||
+            interpolation.value()->kind != JsonValue::Kind::String)
+            return fail<DynamicsLane>(PersistenceErrorCode::MissingField, item_path);
+        auto decoded_position =
+            parse_canonical_i64_string(*position.value(), item_path + "/position");
+        auto decoded_bits =
+            parse_canonical_u64_string(*intensity_bits.value(), item_path + "/intensity_bits");
+        if (!decoded_position)
+            return runtime::Err(decoded_position.error());
+        if (!decoded_bits)
+            return runtime::Err(decoded_bits.error());
+        // A float carries 32 bits; a wider literal is a different value that
+        // narrowing would quietly turn into a plausible one.
+        if (decoded_bits.value() > std::numeric_limits<std::uint32_t>::max())
+            return fail<DynamicsLane>(PersistenceErrorCode::InvalidNumber,
+                                      item_path + "/intensity_bits");
+        AutomationInterpolation decoded_interpolation;
+        if (interpolation.value()->scalar == "hold")
+            decoded_interpolation = AutomationInterpolation::Hold;
+        else if (interpolation.value()->scalar == "continuous")
+            decoded_interpolation = AutomationInterpolation::Continuous;
+        else
+            return fail<DynamicsLane>(PersistenceErrorCode::InvalidSchema,
+                                      item_path + "/interpolation");
+        events.push_back(DynamicsEvent{
+            timebase::TickPosition{decoded_position.value()},
+            std::bit_cast<float>(static_cast<std::uint32_t>(decoded_bits.value())),
+            decoded_interpolation});
+    }
+    // The model owns every range rule the lane states, including the finite,
+    // in-[0,1] intensity and the strict ordering; restating them here would be
+    // a second copy free to disagree.
+    auto created = DynamicsLane::create(std::move(events));
+    if (!created)
+        return model_fail<DynamicsLane>(created.error(), lane_path);
+    return runtime::Result<DynamicsLane, PersistenceError>(runtime::Ok(std::move(created).value()));
+}
+
 // A null groove value is the pre-groove shape: the sequence predates the field
 // and decodes as the groove that states no feel.
 //

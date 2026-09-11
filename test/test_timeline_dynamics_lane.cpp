@@ -1,9 +1,12 @@
 #include "support/timeline_persistence_test_support.hpp"
 
 #include <pulp/timeline/compile_context.hpp>
+#include <pulp/timeline/document_session.hpp>
+#include <pulp/timeline/transaction.hpp>
 
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <bit>
 #include <cmath>
 
 using Catch::Matchers::WithinAbs;
@@ -158,4 +161,135 @@ TEST_CASE("dynamics lane survives identity remapping and shares storage on copy"
     const auto swapped = sequence->with_dynamics_lane(quiet);
     REQUIRE(swapped.dynamics_lane() == quiet);
     REQUIRE(sequence->dynamics_lane().events().size() == 3);
+}
+
+TEST_CASE("setting the dynamics lane dirties the context kind and nothing else",
+          "[timeline][dynamics-lane][dirty-set]") {
+    const auto project = project_with_dynamics(lane_of({}));
+    const auto replacement = ramp_then_hold();
+
+    Transaction transaction;
+    transaction.id = {{1}, 1};
+    transaction.commands.push_back({{{1}, 1}, SetDynamicsLane{{2}, lane_of({}), replacement}});
+    auto reduced = take(reduce_transaction(project, transaction));
+
+    REQUIRE(reduced.project.find_sequence({2})->dynamics_lane().events().size() == 3);
+    REQUIRE(reduced.dirty.contexts().size() == 1);
+    REQUIRE(reduced.dirty.contexts()[0].owner_sequence == ItemId{2});
+    REQUIRE(reduced.dirty.contexts()[0].kind == CompileContextKind::Dynamics);
+
+    // The companion item names the sequence and no track: a lane's readers are
+    // not its children, so it cannot name them.
+    REQUIRE(reduced.dirty.items().size() == 1);
+    REQUIRE(reduced.dirty.items()[0].owner_sequence == ItemId{2});
+    REQUIRE_FALSE(reduced.dirty.items()[0].owner_track.valid());
+    REQUIRE(reduced.dirty.items()[0].flags == DirtyFlags::Context);
+
+    // The inverse is the same command with the two lanes swapped, so undo
+    // restores the previous lane exactly rather than approximating it.
+    REQUIRE(reduced.inverses.size() == 1);
+    Transaction undo;
+    undo.id = {{1}, 2};
+    undo.commands.push_back({{{1}, 2}, reduced.inverses[0]});
+    auto restored = take(reduce_transaction(reduced.project, undo));
+    REQUIRE(restored.project.find_sequence({2})->dynamics_lane().empty());
+}
+
+TEST_CASE("the dynamics lane gate refuses a stale expectation and a missing sequence",
+          "[timeline][dynamics-lane][dirty-set]") {
+    const auto project = project_with_dynamics(ramp_then_hold());
+    const auto replacement = lane_of({DynamicsEvent{{0}, 0.5f}});
+
+    // A caller that read the lane before someone else changed it is refused
+    // rather than allowed to clobber the version it never saw.
+    Transaction stale;
+    stale.id = {{1}, 1};
+    stale.commands.push_back({{{1}, 1}, SetDynamicsLane{{2}, lane_of({}), replacement}});
+    auto rejected = reduce_transaction(project, stale);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ExpectedValueMismatch);
+    // The refusal leaves the document exactly as it was: a rejected gate is not
+    // a partial write.
+    REQUIRE(project.find_sequence({2})->dynamics_lane() == ramp_then_hold());
+
+    // A command naming a sequence that does not exist is refused, not applied
+    // to whichever sequence happens to be first.
+    Transaction missing;
+    missing.id = {{1}, 2};
+    missing.commands.push_back(
+        {{{1}, 2}, SetDynamicsLane{{99}, ramp_then_hold(), replacement}});
+    auto absent = reduce_transaction(project, missing);
+    REQUIRE_FALSE(absent);
+    REQUIRE(absent.error().code == ConflictCode::TargetMissing);
+}
+
+TEST_CASE("a set_dynamics_lane command round trips through its schema envelope",
+          "[timeline][dynamics-lane][persistence]") {
+    const auto registry = builtins();
+    // Intensity travels as its float bit pattern, so the value a caller read
+    // back is the value the gate compares — 0.25f is 0x3e800000.
+    const auto bits = [](float value) {
+        return std::to_string(static_cast<std::uint64_t>(std::bit_cast<std::uint32_t>(value)));
+    };
+    const std::string encoded =
+        R"({"data":{"expected":[],"replacement":[{"intensity_bits":")" + bits(0.25f) +
+        R"(","interpolation":"continuous","position":"0"},{"intensity_bits":")" + bits(1.0f) +
+        R"(","interpolation":"hold","position":"1920"}],"sequence_id":"2"},)"
+        R"("type_name":"pulp.timeline.command.set_dynamics_lane","version":1})";
+    auto decoded = deserialize_commands("[" + encoded + "]", registry);
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded.value().size() == 1);
+    const auto* command = std::get_if<SetDynamicsLane>(&decoded.value()[0]);
+    REQUIRE(command != nullptr);
+    REQUIRE(command->sequence_id == ItemId{2});
+    REQUIRE(command->expected.empty());
+    REQUIRE(command->replacement.events().size() == 2);
+    REQUIRE(command->replacement.events()[0] ==
+            DynamicsEvent{{0}, 0.25f, AutomationInterpolation::Continuous});
+    REQUIRE(command->replacement.events()[1] ==
+            DynamicsEvent{{1920}, 1.0f, AutomationInterpolation::Hold});
+
+    // The model's rules are enforced at decode, so a command carrying a lane
+    // the model would reject cannot be constructed at all.
+    const std::string unordered =
+        R"({"data":{"expected":[],"replacement":[{"intensity_bits":")" + bits(0.5f) +
+        R"(","interpolation":"hold","position":"1920"},{"intensity_bits":")" + bits(0.5f) +
+        R"(","interpolation":"hold","position":"0"}],"sequence_id":"2"},)"
+        R"("type_name":"pulp.timeline.command.set_dynamics_lane","version":1})";
+    REQUIRE_FALSE(deserialize_commands("[" + unordered + "]", registry));
+
+    const std::string too_loud =
+        R"({"data":{"expected":[],"replacement":[{"intensity_bits":")" + bits(1.5f) +
+        R"(","interpolation":"hold","position":"0"}],"sequence_id":"2"},)"
+        R"("type_name":"pulp.timeline.command.set_dynamics_lane","version":1})";
+    REQUIRE_FALSE(deserialize_commands("[" + too_loud + "]", registry));
+
+    // An unknown interpolation spelling is a refusal rather than a fallback to
+    // whichever member happens to be first in the enum.
+    const std::string bad_curve =
+        R"({"data":{"expected":[],"replacement":[{"intensity_bits":")" + bits(0.5f) +
+        R"(","interpolation":"stepped","position":"0"}],"sequence_id":"2"},)"
+        R"("type_name":"pulp.timeline.command.set_dynamics_lane","version":1})";
+    REQUIRE_FALSE(deserialize_commands("[" + bad_curve + "]", registry));
+}
+
+TEST_CASE("the dynamics lane command carries annotation authority a writer profile can gate",
+          "[timeline][dynamics-lane][capabilities]") {
+    constexpr auto authority = command_authority_of<SetDynamicsLane>();
+    STATIC_REQUIRE(authority.command_class == CommandClass::Annotation);
+    STATIC_REQUIRE(authority.intent == CommandIntent::Modify);
+
+    // Both directions matter: a profile that denies nothing must admit the
+    // command, or the deny case below would pass against a mask that refuses
+    // everything.
+    REQUIRE(allows(unrestricted_capabilities(), authority));
+    const auto denied =
+        deny(unrestricted_capabilities(), CommandClass::Annotation, CommandIntent::Modify);
+    REQUIRE_FALSE(allows(denied, authority));
+
+    // Denying a neighbouring class leaves this command reachable, so the gate
+    // is the authority pair rather than a blanket annotation ban.
+    const auto elsewhere =
+        deny(unrestricted_capabilities(), CommandClass::Note, CommandIntent::Modify);
+    REQUIRE(allows(elsewhere, authority));
 }

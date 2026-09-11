@@ -65,6 +65,7 @@ inline constexpr bool is_note_command_type =
 template <typename T>
 inline constexpr bool is_inline_command_type =
     claimed_by<T, InsertClip, RemoveClip, MoveClip, SetTempoMap, SetMeterMap, CreateAsset,
-               RemoveAsset, SetChordScaleLane, SetGroove, SetClipPlaybackProperties>;
+               RemoveAsset, SetChordScaleLane, SetGroove, SetClipPlaybackProperties,
+               SetDynamicsLane>;
 
 } // namespace pulp::timeline::detail
