@@ -167,8 +167,14 @@ different request with an earlier result.
   refuses only when a ramp actually reaches a leaf whose content no renderer
   scales by clip gain, because dropping that ramp would be silently wrong. A complete
   nested media clip preserves its `TimeConform` intent, but a source window
-  that trims a conforming clip fails with `NestedSequenceUnsupported` until
-  playback has a conform-aware source-range mapping. Expansion
+  that trims a conforming clip fails with `NestedConformedTrimUnsupported`
+  until playback has a conform-aware source-range mapping, and a trimmed
+  `Stretch` clip additionally needs a windowed artifact. A nested child track
+  carrying a device chain or an automation lane fails with
+  `NestedDeviceChainUnsupported` or `NestedAutomationLaneUnsupported`, and an
+  absolute-anchored leaf inside a nested sequence fails with
+  `NestedAbsoluteChildUnsupported`; each names its own cause rather than
+  sharing one umbrella code. Expansion
   is bounded by `ProgramCompileRequest::max_expanded_note_events` and
   `ProgramCompileRequest::max_expanded_clips` across materialized clips,
   reference traversal, and reused track programs. The independent
@@ -424,7 +430,10 @@ different request with an earlier result.
   `serialize_project_decode.cpp` you must also update the schema policy header
   (`current_version` plus an `<field>_introduced_version` predicate),
   `schema_registry.cpp` (declare the field, register BOTH migrations),
-  `structural_registry_validation.cpp`, and `schema_json_preflight.cpp`. Then two
+  `structural_registry_validation.cpp` (its own expected-field list, or the
+  registry self-check fails), `sequence_schema_migrations.{hpp,cpp}` (the
+  `vN_members` list plus BOTH raw-splice migrations), and
+  `schema_json_preflight.cpp`. Then two
   more that no gate points at: **`id_remap.cpp`**, or every copy/paste/import
   quietly resets the field to its default, and **`snapshot_equivalence.cpp`**, or
   the journal-replay checkpoint guard treats documents differing only in that
@@ -432,6 +441,21 @@ different request with an earlier result.
   asserted through `equivalent()` passes even when the field was never persisted.
   Grow the oracle in the same change, and prove a round-trip test fails with the
   encode disabled before trusting it.
+- **A sequence-owned context lane is not persisted just because the model
+  carries it.** `DynamicsLane` shipped with validation, interpolation, compile
+  resolution, and id-remap tests all green while the encoder, every decoder,
+  the preflight, and the schema registry knew nothing about it — a save
+  silently dropped an authored lane. The lane now rides sequence schema v8 as
+  `dynamics_lane` (between `chord_scale_lane` and `groove`), each event as
+  `{"intensity_bits","interpolation","position"}` with the intensity spelled
+  as its IEEE bit pattern the way an automation point spells `value_bits`, so
+  a reload is bit-exact rather than nearest-decimal. The v8→v7 downgrade
+  refuses a lane with any authored event, exactly as the scene, track-order,
+  and chord-detail downgrades refuse. When adding a lane like it, the
+  round-trip test is the one test the feature cannot ship without: assert the
+  reloaded lane `==` the authored one (float bits included) and that a re-save
+  reproduces the first save, then prove that test fails with the encode line
+  removed.
 - **Field order in the canonical JSON is alphabetical, so a new field renumbers
   its neighbours.** `track_order` sorts before `tracks` (`_` < `s`), which moved
   `tracks` from member index 9 to 10 in the preflight walk. A wrong index

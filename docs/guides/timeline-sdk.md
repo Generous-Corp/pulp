@@ -387,8 +387,11 @@ automation, takes, freeze/record state, absolute clips, or when a reference has
 gain/fades. A source window that cuts through a child audio fade also fails
 closed. Complete nested media clips retain their authored time-conform intent;
 a source window that trims a `Resample` or `Stretch` clip fails with
-`NestedSequenceUnsupported` until playback can map that partial conforming
-source range without changing its authored phase.
+`NestedConformedTrimUnsupported` until playback can map that partial conforming
+source range without changing its authored phase. `Resample` and `Stretch` fail
+that guard for different reasons: resample maps source to timeline by tick
+phase while the nested trim path advances a raw source-frame offset, and a
+stretch artifact is keyed to the clip's own authored tick range.
 Set
 `ProgramCompileRequest::max_expanded_note_events` to bound note expansion and
 `ProgramCompileRequest::max_expanded_clips` to bound total clip materialization

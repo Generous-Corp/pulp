@@ -12,7 +12,7 @@
 namespace pulp::playback {
 
 struct SequenceLoweringError {
-    CompileErrorCode code = CompileErrorCode::NestedSequenceUnsupported;
+    CompileErrorCode code = CompileErrorCode::InvalidStructure;
     timeline::ItemId item;
 };
 

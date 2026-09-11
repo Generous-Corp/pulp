@@ -4509,7 +4509,7 @@
         {
           "path": "tools/scripts/negative_capability_allowlist.json",
           "needles": [
-            "a trim that cuts a conformed source, so each"
+            "NestedConformedTrimUnsupported"
           ]
         }
       ],
@@ -5022,6 +5022,272 @@
           "owner": "sequencer-control-closure",
           "dependencies": [
             "event-stream-pdc-contract"
+          ]
+        }
+      }
+    },
+    {
+      "id": "dynamics-lane-schema-v8-persistence",
+      "title": "Sequence dynamics lane persisted as timeline schema v8",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "bcafbb3e-ea39-4e32-bdb5-c5e3fdbe969a",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/include/pulp/timeline/schema_json.hpp",
+        "core/timeline/include/pulp/timeline/serialize.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/schema_json.cpp",
+        "core/timeline/src/schema_json_preflight.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/sequence_schema_migrations.cpp",
+        "core/timeline/src/sequence_schema_migrations.hpp",
+        "core/timeline/src/sequence_schema_policy.hpp",
+        "core/timeline/src/serialize_decode_context.hpp",
+        "core/timeline/src/serialize_encode.cpp",
+        "core/timeline/src/serialize_project_decode.cpp",
+        "core/timeline/src/snapshot_equivalence.cpp",
+        "core/timeline/src/structural_registry_validation.cpp",
+        "docs/status/sequencer-exposure.json",
+        "test/fixtures/timeline/corpus.index",
+        "test/fixtures/timeline/v8/sequence-dynamics-lane.json",
+        "test/fixtures/timeline/v8/sequence-dynamics-lane.json.expect",
+        "test/test_timeline_context_lane.cpp",
+        "test/test_timeline_dynamics_lane.cpp",
+        "test/test_timeline_groove.cpp",
+        "test/test_timeline_journal.cpp",
+        "test/test_timeline_marker_persistence.cpp",
+        "test/test_timeline_session_persistence.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/src/sequence_schema_migrations.hpp",
+          "needles": [
+            "migrate_sequence_v7_to_v8",
+            "migrate_sequence_v8_to_v7"
+          ]
+        },
+        {
+          "path": "core/timeline/src/sequence_schema_migrations.cpp",
+          "needles": [
+            "dynamics_lane",
+            "states_no_dynamics"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "dynamics_lane"
+          ]
+        },
+        {
+          "path": "test/test_timeline_dynamics_lane.cpp",
+          "needles": [
+            "dynamics lane survives a save and reload byte for byte",
+            "a document whose dynamics lane is malformed is rejected on load"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The dynamics lane now round-trips through the installed timeline serializer. core/timeline/include installs under tools/cmake/PulpInstallRules.cmake's per-subsystem rule, so the v8 encode/decode budget and the per-document dynamics_events count are installed public API, not in-tree detail.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/serialize.hpp",
+              "needles": [
+                "dynamics_events"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/schema_json.hpp",
+              "needles": [
+                "max_dynamics_events"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "Persistence alone adds no typed dynamics-lane mutation command; the CLI can round-trip the lane but cannot author it. This is the same gap p0-15a-dynamics-lane records, carried forward unclosed.",
+          "dependencies": [
+            "offline-timeline-dynamics-command"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "Same single dependency as the CLI surface: both projections are generated from the command vocabulary, which this change does not touch.",
+          "dependencies": [
+            "offline-timeline-dynamics-command"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "A live control additionally requires the document session capability, which is not delivered here.",
+          "dependencies": [
+            "offline-timeline-dynamics-command",
+            "product-a-timeline-document-session"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "A persisted dynamics lane is timeline state, not a design-time algorithm capability."
+        }
+      }
+    },
+    {
+      "id": "nested-sequence-refusal-split",
+      "title": "Nested SequenceRef refusals split from one umbrella code into per-cause codes",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "bdb0eb23-6178-4a06-8c4b-ee5026e52442",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "tools/timeline/src/timeline_agent.cpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/timeline_view/src/arranger_view.cpp",
+        "docs/guides/timeline-sdk.md",
+        "test/test_timeline_arranger_view.cpp",
+        "test/test_timeline_nesting_model.cpp",
+        "test/timeline_nesting_test_support.hpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        },
+        {
+          "path": "tools/timeline/src/timeline_agent.cpp",
+          "needles": [
+            "NestedDeviceChainUnsupported",
+            "NestedAutomationLaneUnsupported",
+            "NestedConformedTrimUnsupported",
+            "NestedAbsoluteChildUnsupported"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Nothing starts or stops working here. One CompileErrorCode member that named five unrelated causes becomes four members that each name one, and two guards unreachable through any validly-constructed Project are retargeted to the existing InvalidStructure. The enum is already public and the new members are appended, so no installed header gains a type and no declared capability changes; claiming an installed-SDK surface would advertise a capability this change does not add.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "`pulp seq` neither gained nor lost a command. A refusal that reached the CLI as the string NestedSequenceUnsupported now reaches it as the specific cause, which is a more precise diagnostic on an existing path rather than a new offline capability.",
+          "evidence": [
+            {
+              "kind": "cli_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The MCP timeline tools read the same wire name from compile_error_code_name, so they report the narrower cause automatically. No tool, argument, or result field changes shape.",
+          "evidence": [
+            {
+              "kind": "mcp_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "No live control is added or removed. A document that compiled before still compiles, and a document that refused still refuses on exactly the same conditions; only the reported code differs, so nothing becomes controllable at runtime.",
+          "evidence": [
+            {
+              "kind": "other",
+              "path": "core/playback/src/sequence_content_lowerer.cpp",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is declared or withdrawn. The refusals remain refusals and the allowlist carries one row per cause instead of one row covering five, which records why each stands without asserting an agent-visible capability.",
+          "evidence": [
+            {
+              "kind": "other",
+              "path": "tools/scripts/negative_capability_allowlist.json",
+              "needles": [
+                "NestedDeviceChainUnsupported",
+                "NestedAutomationLaneUnsupported",
+                "NestedConformedTrimUnsupported",
+                "NestedAbsoluteChildUnsupported"
+              ]
+            }
           ]
         }
       }

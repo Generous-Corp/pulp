@@ -5,6 +5,8 @@
 #include "css_color.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <string>
 
 namespace pulp::view {
@@ -12,11 +14,51 @@ namespace pulp::view {
 void BridgeRegistrars::register_widget_style_background_color_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
+    // An empty colour is the CSSOM spelling of "remove this declaration"
+    // (`el.style.background = ""`), not "leave the old one alone". Treating it
+    // as a no-op strands whatever colour was painted last, which is how a
+    // moved highlight leaves its old row lit.
     register_bridge_function(api, "setBackground", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
         auto* v = id.empty() ? &self.root_ : self.style_target(id);
-        if (v && !hex.empty()) v->set_background_color(parse_bridge_css_color(hex));
+        if (!v) return choc::value::Value();
+        if (hex.empty()) v->clear_background_color();
+        else v->set_background_color(parse_bridge_css_color(hex));
+        return choc::value::Value();
+    });
+
+    // A background can reach a widget without passing through the scripted
+    // style object -- a native default, a component's own fill, a value
+    // written before script ran. Script that wants to overlay a temporary
+    // background (a menu highlight, a drag affordance) and then put the
+    // widget back therefore has nothing to read: the inline style is empty
+    // even though the widget is painted. Expose the applied value, and the
+    // unset state as the empty string, so the restore can be exact.
+    register_bridge_function(api, "getBackground", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
+        if (!v || !v->has_background_color())
+            return choc::value::createString("");
+        const auto c = v->background_color();
+        const auto ch = [](float f) {
+            return static_cast<int>(std::lround(std::clamp(f, 0.0f, 1.0f) * 255.0f));
+        };
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "rgba(%d,%d,%d,%.6g)",
+                      ch(c.r), ch(c.g), ch(c.b),
+                      static_cast<double>(std::clamp(c.a, 0.0f, 1.0f)));
+        return choc::value::createString(buf);
+    });
+
+    // The counterpart to that readback: return the widget to having no
+    // background at all. Assigning "transparent" is not the same thing --
+    // it paints a transparent fill over whatever the widget would otherwise
+    // show, which is only equivalent when nothing else contributes one.
+    register_bridge_function(api, "clearBackground", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = id.empty() ? &self.root_ : self.style_target(id);
+        if (v) v->clear_background_color();
         return choc::value::Value();
     });
 }
@@ -82,7 +124,12 @@ void BridgeRegistrars::register_widget_style_background_gradient_api(WidgetBridg
         auto id = args.get<std::string>(0, "");
         auto gradient = args.get<std::string>(1, "");
         auto* v = id.empty() ? &self.root_ : self.widget(id);
-        if (!v || gradient.empty()) return choc::value::Value();
+        if (!v) return choc::value::Value();
+        // Same removal contract as setBackground above.
+        if (gradient.empty()) {
+            v->clear_background_gradient();
+            return choc::value::Value();
+        }
 
         apply_css_background_gradient(*v, gradient, parse_bridge_css_color);
         return choc::value::Value();
