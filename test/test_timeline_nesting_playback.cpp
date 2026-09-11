@@ -193,54 +193,6 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     REQUIRE(invalid_note_compiler.submit(request));
     REQUIRE(invalid_note_compiler.status().has_error);
     REQUIRE(invalid_note_compiler.status().last_error.code == CompileErrorCode::InvalidStructure);
-
-    std::vector<float> audio(24'000, 1.0f);
-    const auto audio_data_value = audio_data({audio});
-    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
-    auto faded_media =
-        musical_media_clip(12, 0, kTicksPerQuarter, 50, audio.size(),
-                           {.gain_linear = 1.0f,
-                            .fade_in_duration = static_cast<std::uint64_t>(kTicksPerQuarter / 2)});
-    auto faded_child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
-                                             {track(11, {faded_media})}));
-    auto faded_root = take(Sequence::create(
-        {2}, "root", std::nullopt,
-        {track(3, {nested_clip(4, 10, 0, 3 * kTicksPerQuarter / 4, kTicksPerQuarter / 4)})}));
-    ProjectInput faded_input;
-    faded_input.id = {1};
-    faded_input.name = "partial fade";
-    faded_input.next_item_id = 100;
-    faded_input.root_sequence_id = {2};
-    faded_input.assets = {{50, "audio", audio.size(), {48'000, 1}, hash}};
-    faded_input.sequences = {faded_root, faded_child};
-    PlaybackProgramStore fade_store;
-    InlineExecutor fade_executor;
-    PlaybackProgramCompiler fade_compiler(fade_store, fade_executor, std::chrono::microseconds(0));
-    request.project = shared(take(Project::create(std::move(faded_input))));
-    request.document_revision = 6;
-    request.audio_assets = pool({{{50}, audio_data_value}});
-    REQUIRE(fade_compiler.submit(request));
-    REQUIRE(fade_compiler.status().has_error);
-    REQUIRE(fade_compiler.status().last_error.code == CompileErrorCode::NestedSequenceUnsupported);
-
-    auto truncated_root = take(Sequence::create(
-        {2}, "root", std::nullopt, {track(3, {nested_clip(4, 10, 0, kTicksPerQuarter / 4, 0)})}));
-    faded_input.id = {1};
-    faded_input.name = "opposite partial fade";
-    faded_input.next_item_id = 100;
-    faded_input.root_sequence_id = {2};
-    faded_input.assets = {{50, "audio", audio.size(), {48'000, 1}, hash}};
-    faded_input.sequences = {truncated_root, faded_child};
-    PlaybackProgramStore truncated_store;
-    InlineExecutor truncated_executor;
-    PlaybackProgramCompiler truncated_compiler(truncated_store, truncated_executor,
-                                               std::chrono::microseconds(0));
-    request.project = shared(take(Project::create(std::move(faded_input))));
-    request.document_revision = 8;
-    REQUIRE(truncated_compiler.submit(request));
-    REQUIRE(truncated_compiler.status().has_error);
-    REQUIRE(truncated_compiler.status().last_error.code ==
-            CompileErrorCode::NestedSequenceUnsupported);
 }
 
 TEST_CASE("Audio clip limits do not cap non-audio sequence expansion") {
@@ -547,6 +499,133 @@ TEST_CASE("Nested audio trimming preserves fractional sample-rate conversion off
     REQUIRE(ArrangementAudioRenderer::process(*direct_program, snapshot(*direct_program, 256, 25),
                                               direct_output.view()) == AudioRenderStatus::Rendered);
     REQUIRE(nested_output.storage == direct_output.storage);
+}
+
+TEST_CASE("Nested trimming shortens an audio leaf's own fade to the new edge") {
+    // A fade belongs to the clip's edge, so a trim that moves the edge shortens
+    // the fade rather than dropping the listener part-way down an unchanged
+    // ramp. Each geometry below is proved the way the rest of this file proves
+    // nesting: compose it, hand-author the flattened clip that already carries
+    // the shortened fade, and require the two render sample-identically.
+    std::vector<float> ramp(24'000);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame)
+        ramp[frame] = static_cast<float>(frame + 1) / static_cast<float>(ramp.size());
+    const auto data = audio_data({ramp});
+    const auto assets = pool({{{50}, data}});
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    constexpr auto kQuarter = kTicksPerQuarter;
+    const auto source_frames = static_cast<std::int64_t>(ramp.size());
+
+    struct Geometry {
+        const char* label;
+        std::uint64_t child_fade_in;
+        std::uint64_t child_fade_out;
+        std::int64_t placement_duration;
+        std::int64_t placement_source_start;
+        std::uint64_t flattened_fade_in;
+        std::uint64_t flattened_fade_out;
+        // A fade the trim did not shorten. Rendering it must disagree with the
+        // nested result, which is what makes the equality below a claim about
+        // the fade rather than one that passes on any two matching buffers.
+        std::uint64_t unshortened_fade_in;
+        std::uint64_t unshortened_fade_out;
+        // The shape rides along untouched, so a shortened fade must still be
+        // evaluated with the curve its author picked rather than reset to the
+        // default on the way through the flattening.
+        ClipFadeShape shape;
+        std::int64_t render_sample;
+    };
+    const std::array geometries{
+        Geometry{"left trim cuts into the fade in", static_cast<std::uint64_t>(kQuarter / 2), 0,
+                 3 * kQuarter / 4, kQuarter / 4, static_cast<std::uint64_t>(kQuarter / 4), 0,
+                 static_cast<std::uint64_t>(kQuarter / 2), 0, ClipFadeShape::EqualPower, 3'000},
+        Geometry{"right trim leaves less clip than fade in",
+                 static_cast<std::uint64_t>(kQuarter / 2), 0, kQuarter / 4, 0,
+                 static_cast<std::uint64_t>(kQuarter / 4), 0, 0, 0, ClipFadeShape::Linear, 3'000},
+        Geometry{"right trim cuts into the fade out", 0, static_cast<std::uint64_t>(kQuarter / 2),
+                 3 * kQuarter / 4, 0, 0, static_cast<std::uint64_t>(kQuarter / 4), 0,
+                 static_cast<std::uint64_t>(kQuarter / 2), ClipFadeShape::EqualPower, 15'000},
+        Geometry{"left trim leaves less clip than fade out", 0,
+                 static_cast<std::uint64_t>(kQuarter / 2), kQuarter / 4, 3 * kQuarter / 4, 0,
+                 static_cast<std::uint64_t>(kQuarter / 4), 0, 0, ClipFadeShape::Linear, 3'000},
+    };
+
+    for (const auto& geometry : geometries) {
+        INFO(geometry.label);
+        auto child_media = musical_media_clip(12, 0, kQuarter, 50, ramp.size(),
+                                              {.gain_linear = 1.0f,
+                                               .fade_in_duration = geometry.child_fade_in,
+                                               .fade_out_duration = geometry.child_fade_out,
+                                               .fade_shape = geometry.shape});
+        auto child = take(Sequence::create({10}, "child", TickDuration{kQuarter},
+                                           {track(11, {child_media})}));
+        auto root = take(Sequence::create({2}, "root", std::nullopt,
+                                          {track(3, {nested_clip(4, 10, 0,
+                                                                 geometry.placement_duration,
+                                                                 geometry.placement_source_start)})}));
+        ProjectInput nested_input;
+        nested_input.id = {1};
+        nested_input.name = "trimmed leaf fade";
+        nested_input.next_item_id = 100;
+        nested_input.root_sequence_id = {2};
+        nested_input.assets = {{50, "ramp", ramp.size(), {48'000, 1}, hash}};
+        nested_input.sequences = {root, child};
+        CompiledFixture nested(shared(take(Project::create(std::move(nested_input)))), map_120(),
+                               assets);
+
+        // The lowerer leaves the media reference alone and carries the trim in
+        // a separate source-frame offset, so the flattened twin advances the
+        // reference instead. Both end up reading the same absolute frames.
+        const auto trim_frames = geometry.placement_source_start * source_frames / kQuarter;
+        const auto flattened_source_count = static_cast<std::uint64_t>(source_frames - trim_frames);
+        const auto build_flat = [&](std::uint64_t fade_in, std::uint64_t fade_out) {
+            auto media = musical_media_clip(
+                4, 0, geometry.placement_duration, 50, flattened_source_count,
+                {.gain_linear = 1.0f,
+                 .fade_in_duration = fade_in,
+                 .fade_out_duration = fade_out,
+                 .fade_shape = geometry.shape},
+                TimeConform::None, static_cast<std::uint64_t>(trim_frames));
+            return project_with_tracks({track(3, {media})},
+                                       {{50, "ramp", ramp.size(), {48'000, 1}, hash}});
+        };
+        CompiledFixture flattened(
+            build_flat(geometry.flattened_fade_in, geometry.flattened_fade_out), map_120(), assets);
+
+        auto nested_program = nested.store.read();
+        auto flattened_program = flattened.store.read();
+        REQUIRE(nested_program);
+        REQUIRE(flattened_program);
+        const auto nested_audio = nested_program->find_track({3})->audio_program()->clips();
+        REQUIRE(nested_audio.size() == 1);
+
+        Output nested_output(1, 256);
+        Output flattened_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *nested_program, snapshot(*nested_program, 256, geometry.render_sample),
+                    nested_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *flattened_program, snapshot(*flattened_program, 256, geometry.render_sample),
+                    flattened_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(nested_output.storage == flattened_output.storage);
+        // Positive control: both sides carry audio, so the equality above is a
+        // statement about the fade and not about two silent buffers.
+        REQUIRE(nested_output.storage[0][0] != 0.0f);
+
+        if (geometry.unshortened_fade_in != 0 || geometry.unshortened_fade_out != 0) {
+            CompiledFixture unshortened(
+                build_flat(geometry.unshortened_fade_in, geometry.unshortened_fade_out), map_120(),
+                assets);
+            auto unshortened_program = unshortened.store.read();
+            REQUIRE(unshortened_program);
+            Output unshortened_output(1, 256);
+            REQUIRE(ArrangementAudioRenderer::process(
+                        *unshortened_program,
+                        snapshot(*unshortened_program, 256, geometry.render_sample),
+                        unshortened_output.view()) == AudioRenderStatus::Rendered);
+            REQUIRE(unshortened_output.storage != nested_output.storage);
+        }
+    }
 }
 
 TEST_CASE("Nested conforming audio refuses partial source windows") {

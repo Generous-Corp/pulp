@@ -90,6 +90,10 @@ std::int64_t groove_timing_reach(const timeline::GrooveTemplate& groove) noexcep
 ///    edge. A leaf inside the fade region needs a partial ramp the clip model
 ///    cannot express.
 ///
+/// A leaf's *own* fade is a different thing and does compose: a trim that cuts
+/// into it re-anchors the fade to the new edge and shortens it by the trim, the
+/// same answer an unnested clip gives when it is dragged shorter.
+///
 /// And a composed gain that has nowhere to land is refused rather than dropped
 /// (`NestedGainSinkUnsupported`): see `consumes_clip_gain`.
 class SequenceContentLowerer::Impl {
@@ -380,33 +384,17 @@ class SequenceContentLowerer::Impl {
             (left_trim != 0 || right_trim != 0))
             return {.error = SequenceLoweringError{
                         CompileErrorCode::TrimmedRegisteredContentUnsupported, child.id()}};
-        if (std::holds_alternative<timeline::MediaRef>(child.content())) {
-            // A conforming clip maps its complete authored source span onto its
-            // musical placement. The legacy nested-trim path below advances a
-            // raw source-frame offset from elapsed timeline samples, which is
-            // only valid for TimeConform::None. Refuse a partial view until the
-            // renderer owns a conform-aware source-range mapping; otherwise a
-            // nested tempo-ramped clip can silently start at the wrong audio.
-            if (child.time_conform() != timeline::TimeConform::None &&
-                (left_trim != 0 || right_trim != 0))
-                return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
-                                                       child.id()}};
-            const auto playback = child.playback_properties();
-            const auto retained_start = static_cast<std::uint64_t>(left_trim);
-            const auto retained_end =
-                static_cast<std::uint64_t>(child.duration().value - right_trim);
-            const auto child_duration = static_cast<std::uint64_t>(child.duration().value);
-            const bool cuts_fade_in =
-                playback.fade_in_duration > 0 && retained_start < playback.fade_in_duration &&
-                !(retained_start == 0 && retained_end >= playback.fade_in_duration);
-            const auto fade_out_start = child_duration - playback.fade_out_duration;
-            const bool cuts_fade_out =
-                playback.fade_out_duration > 0 && retained_end > fade_out_start &&
-                !(retained_end == child_duration && retained_start <= fade_out_start);
-            if (cuts_fade_in || cuts_fade_out)
-                return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
-                                                       child.id()}};
-        }
+        // A conforming clip maps its complete authored source span onto its
+        // musical placement. The legacy nested-trim path below advances a raw
+        // source-frame offset from elapsed timeline samples, which is only
+        // valid for TimeConform::None. Refuse a partial view until the renderer
+        // owns a conform-aware source-range mapping; otherwise a nested
+        // tempo-ramped clip can silently start at the wrong audio.
+        if (std::holds_alternative<timeline::MediaRef>(child.content()) &&
+            child.time_conform() != timeline::TimeConform::None &&
+            (left_trim != 0 || right_trim != 0))
+            return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
+                                                   child.id()}};
 
         if (const auto* nested = std::get_if<timeline::SequenceRef>(&child.content())) {
             if (nested->source_start.value > std::numeric_limits<std::int64_t>::max() - left_trim)
@@ -641,6 +629,12 @@ class SequenceContentLowerer::Impl {
             source_frame_offset = static_cast<double>(source_position);
         }
         auto playback = pending.child.playback_properties();
+        // A fade is measured from the clip's own edge, and a trim moves that
+        // edge, so the retained fade is the authored one minus the trim rather
+        // than the same ramp viewed part-way through. That is the ordinary
+        // answer for a clip dragged shorter, and it keeps a nested leaf and a
+        // hand-flattened one identical. A trim that swallows the whole fade
+        // leaves none, and neither fade may outlast the clip that carries it.
         playback.fade_in_duration =
             pending.left_trim >= static_cast<std::int64_t>(playback.fade_in_duration)
                 ? 0
