@@ -2847,8 +2847,8 @@ without a local Windows compiler, so signature drift surfaces here first.
 
 ### Advisory build-gate: `tracing-build.yml`
 
-`.github/workflows/tracing-build.yml` (advisory, `ubuntu-latest`, NOT a required
-check) is the only lane that builds the opt-in Perfetto tracing configuration
+`.github/workflows/tracing-build.yml` (advisory, NOT a required check) is the
+only lane that builds the opt-in Perfetto tracing configuration
 (`-DPULP_TRACING=ON`). Every other lane builds the default OFF config, so a
 break in the ON path — the Perfetto amalgamation fetch/compile in
 `tools/cmake/PulpTracing.cmake` or the trace macros lighting up in
@@ -2861,8 +2861,51 @@ and hostable on a stock GitHub runner. Watch point: `test_tracing.cpp`'s
 "tracing is off by default" case asserts `kTracingEnabled == false` and is
 designed to fail under ON, so the lane excludes exactly that case (Catch2
 `~"tracing is off by default"`); the other suites are config-agnostic and must
-fully pass under ON. `runs-on` is a hard-coded `ubuntu-latest` — never route it
-to a self-hosted label or add it to branch protection.
+fully pass under ON. The two Linux jobs' `runs-on` is a hard-coded
+`ubuntu-latest` — never route either to a self-hosted label, and never add any
+job in this file to branch protection.
+
+**The third job, `tracing-gpu-macos`, is the exception that needs real
+hardware.** A GPU trace span can only be emitted by a process that has a GPU, so
+on a hosted Linux runner `pulp-test-trace-frame-pipeline` can do nothing but
+self-skip — and a skip is not a pass. That job therefore:
+
+- routes through its OWN dedicated variable,
+  `PULP_TRACING_GPU_MACOS_RUNS_ON_JSON`. Never `PULP_LOCAL_MACOS_RUNS_ON_JSON`
+  (that variable serves the required `macos` gate; borrowing it puts advisory
+  GPU builds on the Studios that gate every merge), and never a
+  `PULP_NAMESPACE_*` variable (contract row `[pulp] #7`). This is the sanctioned
+  "own dedicated `runs-on` var pointing at the local labels" pattern from
+  CLAUDE.md, not a shared-lane reuse.
+- is `if:`-guarded to a no-op until an operator deliberately sets that variable.
+  The `|| '"ubuntu-latest"'` inside its `fromJSON` only keeps the expression
+  well-formed when the variable is unset; the `if:` has already excluded the job
+  by then, so it can never dispatch to a hosted Linux runner.
+- builds through `tools/ci/governed-build.sh` so it takes a governed share of a
+  shared Mac rather than every core, and configures
+  `-DPULP_TRACING=ON -DPULP_ENABLE_GPU=ON` into a separate `build-trace/` dir.
+- stays advisory forever. Do not promote it to a required check.
+
+**Its run step is written to prove PASSED, not SKIPPED** — the reason the job
+exists at all. Catch2 reports `SUCCEED("...skipped")` as a PASS, so a green job
+cannot by itself distinguish "the GPU spans were emitted" from "the test found
+no GPU and congratulated itself". The step therefore asserts three things in
+order, and the order is load-bearing:
+
+1. **A control first.** `grep -c "All tests passed"` must be > 0. If the log is
+   empty or unreadable, every absence below would be the instrument rather than
+   the result, and the step fails here reporting nothing.
+2. **Absence of the three skip markers** the suite can print without touching a
+   GPU span: `no GPU capture backend compiled in`, `GPU frame path unavailable
+   at runtime`, `PULP_TRACING=OFF`.
+3. **An assertion COUNT.** A skipped run records one `SUCCEED`; the real path
+   records eight `REQUIRE`s over the flushed `.pftrace`. The step parses the
+   count out of the Catch2 summary and requires `>= 8`. Absence (step 2) only
+   means something because this count says the run did the work.
+
+If you change `test/test_trace_frame_pipeline.cpp`, re-derive that threshold
+from the REQUIREs on its real ON path — lowering it silently re-admits a
+skipped run as a pass.
 
 ## Governance is declared, and mirrors LIVE state — not aspiration
 

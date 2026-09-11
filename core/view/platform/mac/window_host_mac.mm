@@ -2973,7 +2973,7 @@ private:
             // Drawable acquisition can block independently of paint/submit.
             // Keep it explicit so a long frame's unaccounted parent time is
             // not incorrectly attributed to its child paint span.
-            PULP_TRACE_SCOPE_NAMED("render", "gpu_acquire");
+            PULP_TRACE_SCOPE_NAMED("gpu", "gpu_acquire");
             acquired = gpu_surface_->begin_frame();
         }
         if (!acquired) {
@@ -3058,7 +3058,7 @@ private:
 
         render::FrameOutcome outcome;
         {
-            PULP_TRACE_SCOPE_NAMED("render", "gpu_submit");
+            PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");
             outcome = skia_surface_->end_frame();  // submit Graphite recording
         }
 
@@ -3068,7 +3068,7 @@ private:
         }
 
         {
-            PULP_TRACE_SCOPE_NAMED("render", "gpu_present");
+            PULP_TRACE_SCOPE_NAMED("gpu", "gpu_present");
             gpu_surface_->end_frame();    // present to Metal surface
         }
 
