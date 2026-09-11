@@ -4118,7 +4118,11 @@
         "test/test_timeline_offline_renderer.cpp",
         "docs/status/sequencer-exposure.json",
         ".agents/skills/hosting/SKILL.md",
-        ".agents/skills/timeline/SKILL.md"
+        ".agents/skills/timeline/SKILL.md",
+        "tools/timeline/src/timeline_playback.cpp",
+        "tools/timeline/src/timeline_agent_internal.hpp",
+        "test/test_timeline_cli_offline_render.cpp",
+        "test/cmake/timeline_tests.cmake"
       ],
       "evidence": [
         {
@@ -4132,7 +4136,7 @@
           "path": "tools/timeline/src/timeline_render.cpp",
           "needles": [
             "build_device_free_timeline_graph",
-            "binding.process"
+            "render_timeline_offline"
           ]
         }
       ],
@@ -4203,7 +4207,7 @@
               "path": "tools/timeline/src/timeline_render.cpp",
               "needles": [
                 "build_device_free_timeline_graph",
-                "binding.process"
+                "render_timeline_offline"
               ]
             },
             {
@@ -4219,9 +4223,24 @@
               "needles": [
                 "WithinAbs(0.75f, 1e-7f)"
               ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/timeline/src/timeline_playback.cpp",
+              "needles": [
+                "offline_render_message",
+                "TimelineOfflineRenderCode::BindingRejected"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_cli_offline_render.cpp",
+              "needles": [
+                "render_timeline_offline"
+              ]
             }
           ],
-          "rationale": "pulp render already reached pulp::tools::timeline::render, and that one function is where the render call was swapped, so the CLI renders through the graph binding with no CLI-side change. The evidence that this is a real re-point rather than a refactor is the agent suite's sample-exact assertions: breaking the route-emission loop in the new builder drives seven of them from 0.75 to 0.0, which is the bounce going silent. Those assertions are therefore the regression gate for this row and must never be widened to accommodate a render-path change. Only the render call was replaced: the CLI keeps its own MasterTransport and block loop, so frame counts stay frame-addressed and no tick conversion enters the path. One caveat worth stating rather than leaving to be discovered: the render verb is registered behind PULP_ENABLE_PROJECT_PACKAGE, so a build with project packaging off has no render command at all and this surface is absent there.",
+          "rationale": "pulp render reaches pulp::tools::timeline::render, and that function now calls host::render_timeline_offline rather than driving a MasterTransport and block loop of its own. That hand-rolled loop was a second implementation of the library's offline bounce, and the two were not equivalent: it rendered no tail, so any program whose last event fed a delay, reverb, or release envelope bounced with that tail truncated, while a consumer linking the library got the untruncated result. Two renders of one program could disagree with no error, and only one of them was the tested one. Correcting an earlier statement on this row: it previously recorded that the CLI keeps its own transport and block loop and that no tick conversion enters the path. Both stopped being true with the re-point. The bound is still authoritative in frames via render_frame_count, but it is carried into the library's tick region as ceil(fractional_samples_to_ticks(frames)), which is O(1), monotone, and never truncating. The sequence's own tick duration is deliberately not used: Sequence::duration() is the optional musical duration and is nullopt in every existing CLI render test, so deriving the region from it yields an empty range and fails every one of them. Two limits are load-bearing and set explicitly rather than defaulted. TimelineOfflineRenderConfig::maximum_note_events_per_track_per_block defaults to 256 while the graph binding's is 1024, and the renderer copies its own value into the binding config it builds, so taking the default would silently convert a dense arrangement that renders today into a BindingRejected; the verb passes the binding's value. tail_frames is 0, which reproduces current output exactly, because any non-zero default would change the length of every rendered file; exposing the tail as a verb option is deferred to a slice that may touch the command vocabulary. Every TimelineOfflineRenderCode maps to its own sentence in offline_render_message, so a new code is a compile-time prompt rather than a silent collapse into a shared string. The empty-topology case keeps the CLI's existing early path and still renders silence: the library rejects an empty route span, and it must not be relaxed to accept one. Two caveats worth stating rather than leaving to be discovered. InvalidLimits stays theoretically reachable where frame-to-tick rounding lengthens a region past max_output_frames, for a project within a few frames of the 512 MiB budget at under roughly 8 bpm; that is a fail-closed outcome with its own message, not a truncated bounce. And the render verb is registered behind PULP_ENABLE_PROJECT_PACKAGE, so a build with project packaging off has no render command at all and this surface is absent there.",
           "authority": {
             "admission": "read_only",
             "writer_profile": null,
