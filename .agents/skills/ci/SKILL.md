@@ -1049,6 +1049,16 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   value is knowing which edit invalidated which run instead of debugging a
   two-hour timeout. Distinct from `build-dir-sentinel.sh`, which guards the
   inverse invariant (do not reuse a dirty build dir).
+  **A marker the check proves dead is deleted on the spot, so the dead-build line
+  appears once and then stops.** Do not go delete `.pulp-build-active` by hand
+  because a run mentioned it — if it is still there after a run said "reaped", the
+  owner pid is alive and a build really is running in that tree. The check now
+  exits non-zero only when it could *not* act (`2` malformed marker, `3` could not
+  remove); `gates.sh` prints a one-line note and still does not block, because
+  neither is the pusher's defect. Before this, it printed "safe to remove" and left
+  the file, so the same advisory re-printed on every push forever — a permanently
+  unclearing warning reads exactly like a passing check and gets skimmed, which is
+  how a real line in that section would get missed.
 - **A "hung"/"stuck" `git push` is almost always the pre-push diff-cover BUILD,
   not the network.** When the diff touches a coverage surface (`core/`,
   `tools/cli/`, `tools/scripts/`), `.githooks/pre-push` runs a full local

@@ -535,8 +535,16 @@ fi
 #
 # Advisory on purpose: a build in your own checkout is a fact to know, not a
 # policy violation, and this must never be the reason a push fails.
+#
+# It reaps a marker it proves dead, so the dead-build line appears once and then
+# stops. A non-zero exit is the check saying it could NOT act on what it saw (a
+# malformed marker, or one it could not delete) — still not grounds to block a
+# push, but it must not be swallowed either: a silent `|| true` here would make
+# a permanently stuck marker read exactly like a clean run.
 if [ -f "$LIVE_BUILD_CHECK" ]; then
-    "$PYTHON" "$LIVE_BUILD_CHECK" --quiet-when-idle >&2 || true
+    if ! "$PYTHON" "$LIVE_BUILD_CHECK" --quiet-when-idle >&2; then
+        echo "  (live-build check could not act on the marker above; not blocking)" >&2
+    fi
 fi
 
 # ── 12. conflict-marker guard ──────────────────────────────────────────────

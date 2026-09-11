@@ -40,6 +40,14 @@ function updateText(oldProps: Record<string, unknown>,
     commitUpdate(instance('status'), null, 'span', oldProps, newProps, null);
 }
 
+function updateTypedText(type: string,
+                         oldProps: Record<string, unknown>,
+                         newProps: Record<string, unknown>): void {
+    const commitUpdate = PulpHostConfig.commitUpdate as
+        (...args: unknown[]) => void;
+    commitUpdate(instance('status'), null, type, oldProps, newProps, null);
+}
+
 function reorderSiblings(): void {
     const parent = {
         id: 'p', type: 'view', props: {}, childIds: ['x', 'y'],
@@ -108,6 +116,233 @@ describe('host-config materialized metadata', () => {
 
         expect(applications).toBe(1);
         expect(layouts).toBe(1);
+    });
+
+    // A nowrap label with a fixed line height is pinned vertically just as
+    // firmly as one with an explicit height: nowrap makes the native Label
+    // single-line, and a positive line height is returned verbatim without
+    // consulting the shaper. Demanding an explicit `height` here is what made
+    // a one-word status readout re-apply the whole captured document on every
+    // pointer move.
+    it('does not re-apply for fixed line-height text-only updates', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'BAND 1/64', width: '100%',
+              lineHeight: '14px', whiteSpace: 'nowrap' },
+            { children: 'BAND 2/64', width: '100%',
+              lineHeight: '14px', whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(1);
+    });
+
+    // A unitless line height is a font-size multiplier. It is still
+    // text-independent, because the gate separately requires every non-text
+    // prop -- fontSize included -- to be unchanged.
+    it('accepts a unitless line-height multiplier', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'a', width: 240, fontSize: 10,
+              lineHeight: 1.4, whiteSpace: 'nowrap' },
+            { children: 'b', width: 240, fontSize: 10,
+              lineHeight: 1.4, whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(1);
+    });
+
+    // Without nowrap the label is multi-line, so longer copy adds lines and
+    // grows the box. The vertical pin is not sufficient on its own.
+    it('re-applies when a fixed line height wraps', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'a', width: 240, lineHeight: '14px' },
+            { children: 'a much longer string', width: 240, lineHeight: '14px' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    // A free-width nowrap label grows horizontally with its text, so the
+    // captured geometry really is stale and must be re-applied.
+    it('re-applies when a fixed line height has no fixed width', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'a', lineHeight: '14px', whiteSpace: 'nowrap' },
+            { children: 'bb', lineHeight: '14px', whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    // A percentage line height is rejected deliberately. The typography
+    // applier parses '50%' as 50px, and this gate must not depend on that.
+    it('rejects a percentage line height', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'a', width: 240, lineHeight: '120%', whiteSpace: 'nowrap' },
+            { children: 'b', width: 240, lineHeight: '120%', whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    // button does not become a native Label: its props land on the owning
+    // Row/Panel/TextEditor while the copy goes to a separate caption child, so
+    // setLineHeight never reaches the Label that actually holds the glyphs.
+    it('re-applies for a delegating button whose text lives in a child label', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateTypedText('button',
+            { children: 'a', width: 240, lineHeight: '14px', whiteSpace: 'nowrap' },
+            { children: 'b', width: 240, lineHeight: '14px', whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    // Button does not become a native Label: its props land on the owning
+    // Row/Panel/TextEditor while the copy goes to a separate caption child, so
+    // setLineHeight never reaches the Label that actually holds the glyphs.
+    it('re-applies for a delegating Button whose text lives in a child label', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateTypedText('Button',
+            { children: 'a', width: 240, lineHeight: '14px', whiteSpace: 'nowrap' },
+            { children: 'b', width: 240, lineHeight: '14px', whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    // TextEditor does not become a native Label: its props land on the owning
+    // Row/Panel/TextEditor while the copy goes to a separate caption child, so
+    // setLineHeight never reaches the Label that actually holds the glyphs.
+    it('re-applies for a delegating TextEditor whose text lives in a child label', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateTypedText('TextEditor',
+            { children: 'a', width: 240, lineHeight: '14px', whiteSpace: 'nowrap' },
+            { children: 'b', width: 240, lineHeight: '14px', whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    // A positive clamp puts the Label back into multi-line mode, where the
+    // measured height is lineHeight x min(shaped lines, clamp) -- text-dependent.
+    it('re-applies when a line clamp restores multi-line measurement', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'a', width: 240, lineHeight: '14px',
+              lineClamp: 2, whiteSpace: 'nowrap' },
+            { children: 'b', width: 240, lineHeight: '14px',
+              lineClamp: 2, whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    // line_height_ <= 0 leaves the shaper in charge of the height.
+    it('rejects a zero line height', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'a', width: 240, lineHeight: 0, whiteSpace: 'nowrap' },
+            { children: 'b', width: 240, lineHeight: 0, whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    // 'normal' is the font's own metric, resolved per string by the shaper.
+    it('rejects a normal line height', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'a', width: 240, lineHeight: 'normal', whiteSpace: 'nowrap' },
+            { children: 'b', width: 240, lineHeight: 'normal', whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
+    });
+
+    // Neither vertical pin present: the box is free to grow.
+    it('re-applies when nothing pins the height', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let applications = 0;
+        host.__pulpApplyMaterializedImportMetadata__ = () => ++applications;
+
+        mutate();
+        resetAfterCommit?.({});
+        updateText(
+            { children: 'a', width: 240, whiteSpace: 'nowrap' },
+            { children: 'b', width: 240, whiteSpace: 'nowrap' },
+        );
+        resetAfterCommit?.({});
+
+        expect(applications).toBe(2);
     });
 
     it('re-applies metadata when changed text can affect geometry', () => {
