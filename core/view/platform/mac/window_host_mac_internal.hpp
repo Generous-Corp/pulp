@@ -25,6 +25,53 @@ class ModalOverlay;
 struct WindowOptions;
 }  // namespace pulp::view
 
+// ── Synthetic pointer-drag drive (PULP_TEST_POINTER_DRAG) ─────────────
+//
+// An unattended performance/UX harness needs to move a real pointer over a
+// real control without a human. The GPU window host reads this env var once
+// at construction and, from its display-link tick, injects the described
+// gesture straight into PulpMetalView's AppKit mouse methods.
+//
+// Accepted spellings:
+//
+//   1                      the bands sweep (legacy; any value starting '1')
+//   minimap                three minimap gestures (legacy; exact match)
+//   rect:X0,Y0,X1,Y1,N     drag from (X0,Y0) to (X1,Y1) in N steps
+//   rect:X0,Y0,X1,Y1,N,R   the same gesture repeated R times
+//
+// The rect form's coordinates are NORMALIZED to the window's content view:
+// 0,0 is the TOP-LEFT corner and 1,1 the bottom-right, matching the
+// top-down convention design tooling reports (the host flips y into
+// AppKit's bottom-up space itself). N is the number of drag STEPS, so the
+// gesture emits N+1 events: a mouse-down at the start point, N-1 drags, and
+// a mouse-up at the end point. R defaults to 1; each extra repeat replays
+// the identical gesture after a short settle gap so the control is
+// re-hit-tested from scratch.
+//
+// Anything else — an unparseable field, a coordinate outside [0,1], a
+// non-positive step or repeat count — disables the drive rather than
+// guessing, so a typo cannot silently drag off-window and report a
+// plausible-looking idle trace.
+namespace pulp::view::mac_test_drag {
+
+enum class Mode { disabled, bands, minimap, rect };
+
+struct Spec {
+    Mode mode = Mode::disabled;
+    // Normalized content-view coordinates, TOP-LEFT origin. Only meaningful
+    // when mode == rect.
+    double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
+    int samples = 0;   // drag steps; the gesture emits samples + 1 events
+    int repeats = 1;   // how many times the whole gesture replays
+};
+
+// Parse a PULP_TEST_POINTER_DRAG value. `env` may be null (⇒ disabled).
+// Pure: no AppKit, no globals. Defined in window_host_mac.mm beside the
+// drive that consumes it.
+Spec parse_test_pointer_drag(const char* env);
+
+}  // namespace pulp::view::mac_test_drag
+
 #ifdef __OBJC__
 
 #import <Cocoa/Cocoa.h>

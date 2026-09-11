@@ -29,6 +29,9 @@
 #import <Cocoa/Cocoa.h>
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>   // shared_ptr liveness token for deferred clicks
@@ -1757,6 +1760,94 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // window_host_mac_internal.hpp. Reached here via the file-scope
 // `using namespace pulp::view::mac_geometry` above.
 
+// ── PULP_TEST_POINTER_DRAG parsing ───────────────────────────────────────────
+//
+// Syntax, accepted spellings, and the normalized-coordinate convention are
+// documented on the declaration in window_host_mac_internal.hpp. Kept a free
+// function so it is reachable from a plain Catch2 test: nothing about parsing
+// an env var needs an NSWindow, and the drive it feeds cannot be unit-tested.
+
+namespace pulp::view::mac_test_drag {
+namespace {
+
+// Read one comma-separated field. Advances `cursor` past the delimiter.
+// Returns false on a malformed/absent field or trailing garbage inside it.
+bool take_field(const char*& cursor, double& out, bool& more) {
+    if (*cursor == '\0') return false;
+    char* end = nullptr;
+    errno = 0;
+    const double value = std::strtod(cursor, &end);
+    if (end == cursor || errno == ERANGE || !std::isfinite(value)) return false;
+    if (*end == ',') {
+        more = true;
+        cursor = end + 1;
+    } else if (*end == '\0') {
+        more = false;
+        cursor = end;
+    } else {
+        return false;  // e.g. "0.5x" — refuse rather than accept a prefix
+    }
+    out = value;
+    return true;
+}
+
+bool is_unit(double v) { return v >= 0.0 && v <= 1.0; }
+
+// Whole positive integers only: "180" yes, "180.5" / "0" / "-3" no.
+bool as_count(double v, int max, int& out) {
+    if (!(v >= 1.0 && v <= static_cast<double>(max))) return false;
+    if (v != std::floor(v)) return false;
+    out = static_cast<int>(v);
+    return true;
+}
+
+}  // namespace
+
+Spec parse_test_pointer_drag(const char* env) {
+    Spec spec{};
+    if (env == nullptr) return spec;
+
+    // The two legacy spellings keep their exact historical matching rules:
+    // they anchor every measurement taken before the rect form existed, so
+    // neither the accepted strings nor the sample paths may move.
+    if (std::strcmp(env, "minimap") == 0) {
+        spec.mode = Mode::minimap;
+        return spec;
+    }
+    constexpr char kRectPrefix[] = "rect:";
+    constexpr size_t kRectPrefixLen = sizeof(kRectPrefix) - 1;
+    if (std::strncmp(env, kRectPrefix, kRectPrefixLen) == 0) {
+        const char* cursor = env + kRectPrefixLen;
+        double field[6] = {};
+        bool more = false;
+        size_t count = 0;
+        for (; count < 6; ++count) {
+            if (!take_field(cursor, field[count], more)) return Spec{};
+            if (!more) { ++count; break; }
+        }
+        if (more) return Spec{};             // more than six fields
+        if (count != 5 && count != 6) return Spec{};
+        for (size_t i = 0; i < 4; ++i)
+            if (!is_unit(field[i])) return Spec{};
+        int samples = 0;
+        if (!as_count(field[4], 100000, samples)) return Spec{};
+        int repeats = 1;
+        if (count == 6 && !as_count(field[5], 1000, repeats)) return Spec{};
+        spec.mode = Mode::rect;
+        spec.x0 = field[0];
+        spec.y0 = field[1];
+        spec.x1 = field[2];
+        spec.y1 = field[3];
+        spec.samples = samples;
+        spec.repeats = repeats;
+        return spec;
+    }
+    if (env[0] == '1') spec.mode = Mode::bands;
+    return spec;
+}
+
+}  // namespace pulp::view::mac_test_drag
+
 // ── MacWindowHost (CoreGraphics) ─────────────────────────────────────────────
 
 namespace pulp::view {
@@ -2083,12 +2174,8 @@ public:
             if (const char* env = std::getenv("PULP_PARTIAL_REPAINT")) {
                 partial_repaint_enabled_ = (env[0] == '1');
             }
-            if (const char* env = std::getenv("PULP_TEST_POINTER_DRAG")) {
-                test_pointer_drag_mode_ = std::strcmp(env, "minimap") == 0
-                    ? TestPointerDragMode::minimap
-                    : env[0] == '1' ? TestPointerDragMode::bands
-                                    : TestPointerDragMode::disabled;
-            }
+            test_pointer_drag_ = mac_test_drag::parse_test_pointer_drag(
+                std::getenv("PULP_TEST_POINTER_DRAG"));
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
 
             // Shared NSWindow construction (style, released-when-closed,
@@ -2679,12 +2766,11 @@ private:
     // invoked on main only.
     std::function<void()> idle_callback_;
     std::atomic<bool> has_idle_callback_{false};
-    enum class TestPointerDragMode { disabled, bands, minimap };
-    TestPointerDragMode test_pointer_drag_mode_ = TestPointerDragMode::disabled;
+    mac_test_drag::Spec test_pointer_drag_{};
     int test_pointer_drag_tick_ = 0;
 
     void pump_test_pointer_drag() {
-        if (test_pointer_drag_mode_ == TestPointerDragMode::disabled
+        if (test_pointer_drag_.mode == mac_test_drag::Mode::disabled
             || !window_ || !metal_view_) return;
         constexpr int kWarmupFrames = 45;
         constexpr int kSamples = 180;
@@ -2696,7 +2782,7 @@ private:
         NSPoint location{};
         NSEventType type{};
         int event_number = workload_tick;
-        if (test_pointer_drag_mode_ == TestPointerDragMode::bands) {
+        if (test_pointer_drag_.mode == mac_test_drag::Mode::bands) {
             if (workload_tick > kSamples) return;
             const int sample = std::clamp(workload_tick, 0, kSamples);
             const CGFloat t = static_cast<CGFloat>(sample) / kSamples;
@@ -2706,6 +2792,30 @@ private:
             type = sample == 0 ? NSEventTypeLeftMouseDown
                 : sample == kSamples ? NSEventTypeLeftMouseUp
                                      : NSEventTypeLeftMouseDragged;
+        } else if (test_pointer_drag_.mode == mac_test_drag::Mode::rect) {
+            // Caller-described drag in normalized top-left-origin coordinates.
+            // Layout mirrors the minimap branch: one gesture is
+            // samples + 1 events followed by a settle gap, so a repeated
+            // gesture is hit-tested from scratch each time.
+            const int gesture_samples = test_pointer_drag_.samples;
+            const int gesture_events = gesture_samples + 1;
+            constexpr int kSettleFrames = 8;
+            const int gesture_stride = gesture_events + kSettleFrames;
+            if (workload_tick >= test_pointer_drag_.repeats * gesture_stride) return;
+            const int gesture = workload_tick / gesture_stride;
+            const int sample = workload_tick % gesture_stride;
+            if (sample >= gesture_events) return;
+            const CGFloat t = static_cast<CGFloat>(sample) / gesture_samples;
+            const CGFloat x = test_pointer_drag_.x0
+                + (test_pointer_drag_.x1 - test_pointer_drag_.x0) * t;
+            const CGFloat y = test_pointer_drag_.y0
+                + (test_pointer_drag_.y1 - test_pointer_drag_.y0) * t;
+            // y arrives top-down; AppKit's view space is bottom-up.
+            location = NSMakePoint(x * size.width, (1.0 - y) * size.height);
+            type = sample == 0 ? NSEventTypeLeftMouseDown
+                : sample == gesture_samples ? NSEventTypeLeftMouseUp
+                                            : NSEventTypeLeftMouseDragged;
+            event_number = gesture * 1000 + sample;
         } else {
             // Three equal, independently hit-tested gestures exercise both
             // resize handles and the selected-window pan. The normalized
