@@ -55,6 +55,7 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
+    set_tests_properties(agent-capability-rederive-selftest PROPERTIES PROCESSORS 8)
     # The rederive self-test deliberately rewrites the manifest script's two
     # generated counters before restoring them. Keep readers from observing
     # that temporary state while retaining parallelism for unrelated tests.
@@ -508,6 +509,8 @@ if(Python3_Interpreter_FOUND)
         PROCESSORS 8)
     add_test(NAME gpu-first-visible-role-producers-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_role_producers.py")
+    set_tests_properties(gpu-first-visible-role-producers-selftest PROPERTIES
+        PROCESSORS 8)
     add_test(NAME gpu-first-visible-trace-producer-overhead-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py")
     add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}

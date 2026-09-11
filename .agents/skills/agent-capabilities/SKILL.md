@@ -611,6 +611,27 @@ Only classify a header when the classification is already defensible from a
 written decision. Inventing one to unblock an edit converts a safety gate into
 paperwork.
 
+## The rederive self-test dirties the checkout for its whole run
+
+`test_agent_capability_rederive.py` and `test_agent_capability_manifest.py` both
+rewrite tracked files in place — including `tools/scripts/agent_capability_manifest.py`
+itself — and restore them in a `finally`. Between the write and the restore the
+repository is dirty *by construction*, and under `-j` contention that window is
+the test's entire runtime rather than the fraction of a second it looks like.
+
+That is why these tests hold `RESOURCE_LOCK agent-capability-manifest-source`.
+The lock is not about the two tests colliding with each other; it is about
+excluding anything that **observes** repository-wide state, which today includes
+a CLI contract asserting the source tree is pristine. When you add a test here
+that writes a tracked file, put it in that lock group. When you add one elsewhere
+that reads global tree state, put it there too.
+
+Declare `PROCESSORS` on anything in this family. The manifest self-test already
+does; a sibling that omits it lets ctest schedule eight more tests alongside it,
+which is how a test that runs in under twenty seconds locally reaches the
+inherited 120s timeout on a loaded runner. Declaring the real cost is scheduling
+accuracy, not a loosened budget.
+
 ## A same-size constant edit can be masked by a stale `__pycache__`
 
 `FROZEN_LEGACY_COUNT = 338` to `337`, and one 64-hex digest to another, both
