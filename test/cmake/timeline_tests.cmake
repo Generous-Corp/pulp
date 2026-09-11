@@ -175,7 +175,9 @@ if(PULP_BENCHMARK)
         SOURCES test_timeline_scale.cpp
         LIBRARIES pulp::playback
         LABELS performance
-        TIMEOUT 120
+        # The growth cases run each scale operation at two sizes, several
+        # rounds, so the suite costs a few times what a single-size pass did.
+        TIMEOUT 900
         COMPILE_DEFINITIONS
             $<$<BOOL:${PULP_TIMELINE_SCALE_SANITIZED}>:PULP_TEST_WITH_SANITIZER=1>)
 endif()
