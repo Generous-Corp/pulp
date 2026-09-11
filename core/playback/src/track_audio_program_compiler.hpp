@@ -21,6 +21,7 @@ class TrackAudioProgramCompiler {
     step(const timeline::Clip& clip, const timeline::Project& project,
          const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
          const AudioRendererLimits& limits, double source_frame_offset,
+         const std::vector<LoweredPlacementFade>& placement_fades,
          std::uint64_t document_revision, std::uint64_t program_generation,
          OfflineStretchArtifactCache& artifact_cache) noexcept;
 
