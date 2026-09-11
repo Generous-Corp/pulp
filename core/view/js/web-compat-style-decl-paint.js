@@ -86,6 +86,10 @@ function _applyPaintProp(decl, id, key, resolved, value) {
     switch (key) {
         // Colors
         case "backgroundColor": {
+            // `el.style.backgroundColor = ""` REMOVES the declaration. Pass the
+            // empty value through so the native side can clear; dropping the
+            // call here would strand the last colour on screen.
+            if (!resolved) { setBackground(id, ""); return true; }
             var bgColor = parseCSSColor(resolved);
             if (bgColor) setBackground(id, bgColor);
             return true;
@@ -416,6 +420,12 @@ function _applyPaintProp(decl, id, key, resolved, value) {
         // Background gradient
         case "backgroundImage":
         case "background": {
+            // Removal clears BOTH halves the shorthand can have set.
+            if (!resolved) {
+                setBackgroundGradient(id, "");
+                if (key === "background") setBackground(id, "");
+                return true;
+            }
             if (resolved.indexOf("gradient") >= 0) {
                 setBackgroundGradient(id, _resolveGradientStopColors(resolved));
             } else {

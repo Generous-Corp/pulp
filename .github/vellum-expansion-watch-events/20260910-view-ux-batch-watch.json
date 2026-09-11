@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260910-view-ux-batch-watch",
+  "created_at": "2026-09-10T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Three user-visible interaction defects share one delivery seam and are fixed together. render-assets-and-backends is crossed by core/view only: yoga_layout.cpp stops echoing an AtMost offer back as measured width -- AtMost is an upper bound that CSS resolves to min(max-content, available), so a soft-wrapping label reporting no intrinsic width made every auto-width ANCESTOR stretch instead of hug; the fix asks Label for max_content_width and clamps, leaving the Undefined and Exactly paths byte-identical. label.cpp gains the intrinsic-width accessor that makes that query possible. design-source-ingest is crossed by packages/pulp-react/prop-applier-paint.ts, which resolved hitSlop only for numbers and silently dropped string forms, so an authored touch target smaller than the finger that has to hit it stayed small; strings now resolve through the same dimension path as every other prop. visual-proof-harness is crossed only by ADDED detectors -- a mac platform harness plus hover-cursor delivery coverage -- which assert the cursor actually changes on a stationary hover rather than only on mousedown. No renderer, backend, font, asset or Skia pin changes; no fixture, snapshot or threshold is altered, and no existing detector's expectations move. Registered as watch-only so each family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-hit-slop",
+    "pulp-test-pointer-delivery",
+    "pulp-test-widgets-label",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

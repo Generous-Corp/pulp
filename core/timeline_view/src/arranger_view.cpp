@@ -316,9 +316,10 @@ void ArrangerView::on_mouse_down(view::Point position) {
     if (!created)
         return;
     // An arranger will not author a nested-sequence placement. The program
-    // compiler refuses to lower one whose anchor or playback properties are
-    // anything but the defaults (`NestedSequenceUnsupported`), so a lane click
-    // that produced one could author a document that cannot play. Nesting is a
+    // compiler refuses to lower a child carrying a device chain, an automation
+    // lane, an absolute-anchored leaf, or a trim that cuts a conformed source
+    // (`NestedDeviceChainUnsupported` and its siblings), so a lane click that
+    // produced one could author a document that cannot play. Nesting is a
     // deliberate structural operation, not a side effect of clicking a lane.
     if (is_nested_sequence(*created)) {
         refusals_.push_back(ArrangerRefusal::NestedSequenceContent);
