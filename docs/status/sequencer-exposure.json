@@ -4522,6 +4522,92 @@
           ]
         }
       }
+    },
+    {
+      "id": "incremental-compile-track-partition",
+      "title": "Compile status reports how many tracks were reused versus recompiled",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "43a88337-4e09-4981-8e55-ba2c62b270b6",
+      "owned_paths": [
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "test/test_playback_program.cpp",
+        "test/test_timeline_scale.cpp",
+        "test/test_timeline_agent_view.cpp",
+        "test/timeline_perf_test_helpers.hpp",
+        "test/cmake/timeline_tests.cmake",
+        ".github/workflows/timeline-hardening.yml",
+        ".agents/skills/timeline/SKILL.md",
+        ".agents/skills/playback/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+          "needles": [
+            "active_tracks_recompiled",
+            "active_tracks_reused",
+            "count_track_completed"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_compiler.cpp",
+          "needles": [
+            "clear_active_track_counts"
+          ]
+        },
+        {
+          "path": "test/test_playback_program.cpp",
+          "needles": [
+            "compiler status partitions completed tracks into recompiled and reused"
+          ]
+        },
+        {
+          "path": "test/timeline_perf_test_helpers.hpp",
+          "needles": [
+            "measure_growth"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "TrackCompileStatus gains two readable counters and the two mutators that keep them consistent with active_tracks_completed, in the installed program_compiler.hpp. An SDK consumer that needs to know an edit stayed incremental can read the partition directly instead of inferring it from elapsed compile time, which measures the host as much as the compiler. The counters are read-only output state; no authoring surface, schema version or serialized form changes.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+              "needles": [
+                "std::uint64_t active_tracks_recompiled",
+                "std::uint64_t active_tracks_reused",
+                "void count_track_completed"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. The partition is in-process compile status and `pulp seq` reports no compile statistics today."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. The counters describe work the compiler already did and change nothing an author can set."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The counters are compiler output read through the existing status type."
+        }
+      }
     }
   ],
   "tombstones": []
