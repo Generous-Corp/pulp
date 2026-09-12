@@ -38,25 +38,24 @@ TEST_CASE("Renderer3D hardcoded textured cube renders offscreen", "[render][scen
     REQUIRE_FALSE(result.png.empty());
     REQUIRE(result.success);
 
-    const HeadlessSurface::Rgba rgba{
-        result.rgba,
-        result.width,
-        result.height,
-    };
-    if (is_mac_metal_adapter(result)) {
-        REQUIRE(HeadlessSurface::rgba_fingerprint(rgba) ==
-                kMacMetalHardcodedCubeFingerprint);
-    } else {
-        SUCCEED("Renderer fingerprint golden is scoped to macOS Metal; adapter was "
-                << result.adapter_backend_type << " / " << result.adapter_name);
-    }
-
     auto out = std::filesystem::temp_directory_path() /
         "pulp-renderer3d-hardcoded-cube.png";
     std::ofstream png(out, std::ios::binary);
     png.write(reinterpret_cast<const char*>(result.png.data()),
               static_cast<std::streamsize>(result.png.size()));
     REQUIRE(png.good());
+
+    const HeadlessSurface::Rgba rgba{
+        result.rgba,
+        result.width,
+        result.height,
+    };
+    if (!is_mac_metal_adapter(result)) {
+        SKIP("Renderer fingerprint golden is scoped to macOS Metal; adapter was "
+             << result.adapter_backend_type << " / " << result.adapter_name);
+    }
+    REQUIRE(HeadlessSurface::rgba_fingerprint(rgba) ==
+            kMacMetalHardcodedCubeFingerprint);
 }
 
 TEST_CASE("Renderer3D can request the Dawn fallback adapter for golden probes",
@@ -372,25 +371,24 @@ TEST_CASE("Renderer3D renders official BoxTextured fixture",
     REQUIRE(foreground.max_y < config.height);
     REQUIRE_FALSE(result.png.empty());
 
-    const HeadlessSurface::Rgba rgba{
-        result.rgba,
-        result.width,
-        result.height,
-    };
-    if (is_mac_metal_adapter(result)) {
-        REQUIRE(HeadlessSurface::rgba_fingerprint(rgba) ==
-                kMacMetalBoxTexturedFixtureFingerprint);
-    } else {
-        SUCCEED("Renderer fingerprint golden is scoped to macOS Metal; adapter was "
-                << result.adapter_backend_type << " / " << result.adapter_name);
-    }
-
     auto out = std::filesystem::temp_directory_path() /
         "pulp-renderer3d-box-textured-official.png";
     std::ofstream png(out, std::ios::binary);
     png.write(reinterpret_cast<const char*>(result.png.data()),
               static_cast<std::streamsize>(result.png.size()));
     REQUIRE(png.good());
+
+    const HeadlessSurface::Rgba rgba{
+        result.rgba,
+        result.width,
+        result.height,
+    };
+    if (!is_mac_metal_adapter(result)) {
+        SKIP("Renderer fingerprint golden is scoped to macOS Metal; adapter was "
+             << result.adapter_backend_type << " / " << result.adapter_name);
+    }
+    REQUIRE(HeadlessSurface::rgba_fingerprint(rgba) ==
+            kMacMetalBoxTexturedFixtureFingerprint);
 }
 
 TEST_CASE("DRACO decoder unique-id overload rejects invalid data",
