@@ -203,6 +203,47 @@ NAME_PATTERNS = [
 PATTERNS = [(p, w, "prose") for p, w in PROSE_PATTERNS] + \
            [(p, w, "name") for p, w in NAME_PATTERNS]
 
+# ── PREFILTER ───────────────────────────────────────────────────────────────
+# Running all 19 patterns against all 3M source lines costs ~28 s of CPU, and a
+# ctest ceiling is wall time on a shared runner, so the scan timed out under
+# contention while the repo was clean. Every pattern above, however, can only
+# match text containing a fixed lowercase literal, and a literal test is a C
+# memmem rather than a backtracking search: it rejects ~96 % of files for ~1.9 s
+# total. An alternation over the same patterns is NOT a shortcut — a backtracking
+# engine retries each branch at each position, so it costs the same as the full
+# scan and was measured doing exactly that.
+#
+# Each entry is (pattern source, required literal, probe). The probe is a string
+# its pattern matches; the selftest asserts the pattern matches its own probe and
+# that the literal is present in it. A pattern added without an entry here fails
+# the selftest, so the prefilter cannot silently stop covering a rule — which is
+# the only way this optimisation could weaken the gate.
+PREFILTER = {
+    r"\bjuce\b": ("juce", "ported from JUCE"),
+    r"\biplug2?\b": ("iplug", "ported from iPlug2"),
+    r"\bvstgui\b": ("vstgui", "drawn with VSTGUI"),
+    r"\bhise\b": ("hise", "as HISE does"),
+    r"\bwdl\b": ("wdl", "from WDL"),
+    r"\blook\s*and\s*feel\b": ("feel", "a look and feel object"),
+    r"\bAPVTS\b": ("apvts", "the APVTS holds it"),
+    r"\bdraw(Rotary|Linear)Slider\b": ("slider", "drawRotarySlider(g)"),
+    r"\baddAndMakeVisible\b": ("addandmakevisible", "addAndMakeVisible(child)"),
+    r"\bNormalisableRange\b": ("normalisablerange", "NormalisableRange<float>"),
+    r"\bAbstractFifo\b": ("abstractfifo", "an AbstractFifo cursor"),
+    r"\bExtensionsVisitor\b": ("extensionsvisitor", "an ExtensionsVisitor hook"),
+    r"\bLookAndFeel\w*": ("lookandfeel", "LookAndFeelV4 subclass"),
+    r"\bSafePointer\b": ("safepointer", "a SafePointer to the editor"),
+    r"\bAudioProcessorValueTreeState\b":
+        ("audioprocessor", "AudioProcessorValueTreeState state"),
+    r"\bAudioProcessorEditor\b": ("audioprocessor", "AudioProcessorEditor base"),
+    r"\bValueTree\b": ("valuetree", "a ValueTree node"),
+    r"\bChangeBroadcaster\b": ("changebroadcaster", "a ChangeBroadcaster listener"),
+    r"\bReferenceCountedObject\b":
+        ("referencecountedobject", "a ReferenceCountedObject handle"),
+}
+
+LITERALS = tuple(sorted({lit for lit, _ in PREFILTER.values()}))
+
 # A rename ships with an alias that names the OLD spelling so downstream keeps
 # compiling. That is the one legitimate way a foreign name may appear.
 
@@ -249,6 +290,9 @@ def scan(repo: Path = REPO) -> list[tuple[str, int, str, str, str]]:
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
+                continue
+            lowered = text.lower()
+            if not any(lit in lowered for lit in LITERALS):
                 continue
             for lineno, line in enumerate(text.splitlines(), 1):
                 for pattern, why, kind in PATTERNS:
@@ -357,6 +401,36 @@ def selftest() -> int:
           "docs/guides/coming-from-juce.md": "Moving a JUCE plugin to Pulp\n",
           "docs/reference/licensing.md": "| iPlug2 | zlib-like | attribution |\n"},
          1)
+
+    # The prefilter skips any file containing none of LITERALS, so a pattern
+    # whose matches do not contain one of them would never be reached. Assert
+    # every pattern declares a literal, that the pattern really matches its own
+    # probe, and that the probe really carries the literal — so adding a rule
+    # without a prefilter entry fails here instead of going silently unscanned.
+    missing = [p.pattern for p, _, _ in PATTERNS if p.pattern not in PREFILTER]
+    if missing:
+        failures += 1
+        print(f"[FAIL] pattern(s) with no PREFILTER entry: {missing}")
+    else:
+        print("[ok] every pattern declares a prefilter literal "
+              f"(expect {len(PATTERNS)}); found={len(PATTERNS)}")
+
+    for pattern, _, _ in PATTERNS:
+        literal, probe = PREFILTER[pattern.pattern]
+        if not pattern.search(probe):
+            failures += 1
+            print(f"[FAIL] probe {probe!r} does not match {pattern.pattern!r}")
+        elif literal not in probe.lower():
+            failures += 1
+            print(f"[FAIL] literal {literal!r} absent from probe {probe!r}")
+        elif literal not in LITERALS:
+            failures += 1
+            print(f"[FAIL] literal {literal!r} missing from LITERALS")
+
+    stale = sorted(set(PREFILTER) - {p.pattern for p, _, _ in PATTERNS})
+    if stale:
+        failures += 1
+        print(f"[FAIL] PREFILTER entries for removed pattern(s): {stale}")
 
     print()
     if failures:
