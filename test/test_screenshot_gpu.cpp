@@ -90,8 +90,7 @@ TEST_CASE("render_to_png honors an explicit GPU backend without raster fallback"
     const auto png = render_to_png(root, 64, 64, 1.0f,
                                    ScreenshotBackend::gpu);
     if (png.empty()) {
-        SUCCEED("GPU adapter unavailable on this machine");
-        return;
+        SKIP("GPU adapter unavailable on this machine");
     }
     // Regression guard: screenshot_mac.mm used to accept `gpu` but silently
     // fall through to CoreGraphics. That produced plausible PNGs whose fonts,
@@ -173,8 +172,7 @@ TEST_CASE("capture_view accepts a sparse-but-real UI (content-floor leniency)",
         // sub-element gradients, so the sparse-coverage distinction is only
         // observable on the Skia backend. Skip elsewhere rather than assert a
         // backend limitation.
-        SUCCEED("sparse-content floor is only observable on the Skia raster backend");
-        return;
+        SKIP("sparse-content floor is only observable on the Skia raster backend");
     }
     INFO("sparse capture reason: " << r.reason);
     REQUIRE(r.ok);  // false under the buggy 3-arg call (strict 5% non-background floor)
@@ -201,8 +199,7 @@ TEST_CASE("capture_view accepts a two-color UI", "[view][screenshot][gpu]") {
 
     const CaptureResult r = capture_view_resilient(root, 320, 200, 1.0f);
     if (r.png.empty()) {
-        SUCCEED("no raster backend in this build");
-        return;
+        SKIP("no raster backend in this build");
     }
     const auto stats = analyze_screenshot_content(r.png);
     INFO("two-color capture reason: " << r.reason);
@@ -219,8 +216,7 @@ TEST_CASE("capture_view returns a non-blank native-overlay snapshot instead of r
     auto content = make_capture_tree();
     auto png = render_to_png(*content, 520, 200, 1.0f, ScreenshotBackend::skia);
     if (png.empty()) {
-        SUCCEED("no raster backend in this build — cannot synthesize an overlay snapshot");
-        return;
+        SKIP("no raster backend in this build — cannot synthesize an overlay snapshot");
     }
     View root;
     root.add_child(std::make_unique<SnapshotOverlayView>(std::move(png)));
@@ -240,8 +236,7 @@ TEST_CASE("capture_view refuses an essentially-blank native-overlay snapshot",
     View flat;  // nothing painted but the background fill → one color
     auto blank_png = render_to_png(flat, 64, 64, 1.0f, ScreenshotBackend::skia);
     if (blank_png.empty()) {
-        SUCCEED("no raster backend in this build — cannot synthesize a blank snapshot");
-        return;
+        SKIP("no raster backend in this build — cannot synthesize a blank snapshot");
     }
     View root;
     root.add_child(std::make_unique<SnapshotOverlayView>(std::move(blank_png)));
@@ -254,8 +249,7 @@ TEST_CASE("capture_view refuses an essentially-blank native-overlay snapshot",
 TEST_CASE("capture_view routes a requires_gpu_host tree to the GPU backend",
           "[view][screenshot][gpu]") {
     if (!has_gpu_capture()) {
-        SUCCEED("GPU capture not compiled in (no pulp-render)");
-        return;
+        SKIP("GPU capture not compiled in (no pulp-render)");
     }
     auto root = make_capture_tree();
     root->set_requires_gpu_host(true);  // forces the GPU (HeadlessSurface) path

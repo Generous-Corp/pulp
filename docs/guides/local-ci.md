@@ -1608,6 +1608,34 @@ as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
 `tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
 
+## Whether the gate has a GPU is observed, not assumed
+
+Every GPU case in the suite skips when no adapter is present, which is the right
+behavior on a developer laptop and on the GitHub-hosted runners that carry no
+representative GPU. It also means a green `macos` check reads the same whether
+the self-hosted runner has a working adapter or quietly lost one: the skipped
+cases are the only difference, and nothing fails.
+
+`PULP_REQUIRE_GPU_ADAPTER` is how a lane states that it does have one. It is a
+policy switch, not a device probe. The single case that reads it,
+`A lane that requires a GPU adapter has one`, skips when the variable is unset
+and asserts when it is set: the surface is created, initialized, and its adapter
+must report available, must not be Dawn's Null backend (which validates API
+calls and composites nothing), and must not be a CPU adapter. Set it locally to
+turn a silent GPU skip into a real failure:
+
+```bash
+PULP_REQUIRE_GPU_ADAPTER=1 ctest --test-dir build --output-on-failure \
+  -R '^A lane that requires a GPU adapter has one$'
+```
+
+`build.yml` sets it on the self-hosted macOS leg in a step marked
+`continue-on-error`, so the runner's adapter state shows up in the log without
+the required check depending on an answer nobody has measured yet. Once the
+runs establish that the lane really does render, promote the step by deleting
+that line; if they establish that it does not, the honest fix is to stop calling
+it GPU coverage rather than to keep the skips.
+
 ## Routing contract (checked)
 
 Every `*_RUNS_ON_JSON` repo variable is a **lane**: it names the labels a class
