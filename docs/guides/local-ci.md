@@ -1577,6 +1577,19 @@ publishes that context directly. It becomes terminal with the macOS work and
 does not wait for the combined matrix, a reporter runner, or the jobs API.
 Advisory Linux and Windows legs may therefore continue after queue admission.
 
+Because one job name carries the gate across all three events, that job also
+configures the same way on all three. It assembles its CMake arguments once —
+`-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF` — with no
+`github.event_name` branch adding to the list. A per-event flag would publish a
+differently configured build under the gate's name, and the flag that used to
+sit here, `-DPULP_ENABLE_GPU=OFF` on `workflow_dispatch`, showed exactly what
+that costs: `PULP_TEXT_SHAPING` follows `PULP_ENABLE_GPU`, so Skia went with it,
+`render_to_rgba` returned an empty buffer, and capture-based view tests failed
+for the configuration rather than for the change under test. Since Shipyard's PR
+validation arrives through `workflow_dispatch`, that was the routine path, not a
+fringe one. `tools/scripts/test_workflow_build_dirs.py` pins the single
+assembly line and the absence of any `cmake_args+=` append.
+
 Event-specific bootstrap jobs own `macos` only when classification intentionally
 omits native work or provider/classifier resolution fails closed. When a native
 matrix child exists, the corresponding bootstrap is inactive and uses an
