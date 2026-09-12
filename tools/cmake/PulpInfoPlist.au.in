@@ -6,6 +6,8 @@
     <string>en</string>
     <key>CFBundleExecutable</key>
     <string>@PULP_PLUGIN_NAME@</string>
+    <key>CFBundleIconFile</key>
+    <string>${MACOSX_BUNDLE_ICON_FILE}</string>
     <key>CFBundleIdentifier</key>
     <string>@PULP_BUNDLE_ID@.au</string>
     <key>CFBundleInfoDictionaryVersion</key>

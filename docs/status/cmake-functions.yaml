@@ -103,11 +103,12 @@ functions:
 
   - name: pulp_app_icon
     status: usable
-    summary: Attach app icon assets to a standalone application or generated app bundle target.
+    summary: Attach app icon assets to an application, standalone, or plugin-format bundle target.
     required:
       - target
     optional:
       - SOURCE
+      - ICNS
       - MACOS
       - WINDOWS
       - IOS
