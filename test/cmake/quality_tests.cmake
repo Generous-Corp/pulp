@@ -489,6 +489,13 @@ if(Python3_Interpreter_FOUND)
     # gate on timing alone.
     set_tests_properties(gpu-handoff-provenance-selftest PROPERTIES TIMEOUT 300)
 
+    # The pin-freshness guard runs in tools/scripts/gates.sh, so its own cover
+    # is the only thing standing between a silent parser drift and a guard that
+    # waves every stale pin through. It shipped unregistered, which meant it
+    # existed without ever executing.
+    add_test(NAME gpu-handoff-pin-freshness-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_handoff_pin_freshness.py")
+
     # Closed-schema and semantic negative controls for the shared GPU health
     # envelope. This is intentionally GPU-free so every platform proves the
     # contract even when no real adapter is available.
