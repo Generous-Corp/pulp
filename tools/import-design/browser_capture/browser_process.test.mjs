@@ -14,6 +14,7 @@ import {
   createEmptyProfile,
   launchBrowser,
   recoverStaleBrowserProfiles,
+  resolveOwnedBrowserIdentity,
   terminateBrowser,
 } from "./browser_process.mjs";
 
@@ -439,5 +440,76 @@ test("a browser adopted after custody was released is still terminated",
     } finally {
       try { process.kill(-child.pid, "SIGKILL"); } catch {}
       try { child.kill("SIGKILL"); } catch {}
+    }
+  });
+
+test("launch identity probe waits for a pid that is not yet the browser",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-late-exec");
+    const lateExec = path.join(root, "late-exec.sh");
+    let child = null;
+    try {
+      // Before the exec the pid still carries this wrapper's argv, which owns
+      // no profile — the window a single probe misreads as a violation.
+      await writeFile(lateExec, `#!/bin/sh
+sleep 0.6
+exec /bin/sh -c 'while :; do sleep 1; done' pulp-fake-browser \\
+  "--user-data-dir=$1" --disable-background-networking
+`, "utf8");
+      await chmod(lateExec, 0o700);
+      await createEmptyProfile(profile);
+      child = spawn("/bin/sh", [lateExec, profile],
+        { detached: true, stdio: "ignore" });
+      const identity = await resolveOwnedBrowserIdentity(child, profile, 10000);
+      assert.match(identity, /pulp-fake-browser/);
+      assert.ok(identity.includes(`--user-data-dir=${profile}`));
+    } finally {
+      if (child?.pid) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("launch identity probe still fails closed on a foreign process",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-foreign");
+    let child = null;
+    try {
+      await createEmptyProfile(profile);
+      child = spawn("/bin/sh", ["-c", "while :; do sleep 1; done"],
+        { detached: true, stdio: "ignore" });
+      await assert.rejects(
+        resolveOwnedBrowserIdentity(child, profile, 400),
+        /browser launch identity did not match its owned profile/);
+    } finally {
+      if (child?.pid) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("launch identity probe abandons a child that already exited",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-exited");
+    try {
+      await createEmptyProfile(profile);
+      const child = spawn("/bin/sh", ["-c", "exit 0"], { stdio: "ignore" });
+      await new Promise((resolve) => child.once("exit", resolve));
+      const started = Date.now();
+      await assert.rejects(
+        resolveOwnedBrowserIdentity(child, profile, 15000),
+        /browser exited before its launch identity could be verified/);
+      assert.ok(Date.now() - started < 5000,
+        "an exited child must not consume the probe budget");
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });

@@ -303,12 +303,43 @@ export async function recoverStaleBrowserProfiles(parentDir) {
   return recovered;
 }
 
-async function startBrowserGuardian(child, profileDir) {
+// A just-spawned pid is not immediately identifiable. `/bin/ps` can exceed its
+// own budget on a saturated host and report nothing, and between fork and exec
+// the pid still carries this process's argv, which owns no profile. Both look
+// identical to a real custody violation from a single probe, so probe until the
+// pid identifies as the browser that owns this profile. Still fail closed: a
+// pid that never proves ownership is never guarded.
+const IDENTITY_PROBE_BUDGET_MS = 15000;
+const IDENTITY_PROBE_MIN_INTERVAL_MS = 50;
+const IDENTITY_PROBE_MAX_INTERVAL_MS = 500;
+
+export async function resolveOwnedBrowserIdentity(
+  child, profileDir, budgetMs = IDENTITY_PROBE_BUDGET_MS) {
   if (!child?.pid) throw new Error("browser launched without a process id");
-  const browserIdentity = await browserProcessIdentity(child.pid);
-  if (!browserIdentity || !identityOwnsProfile(browserIdentity, profileDir)) {
-    throw new Error("browser launch identity did not match its owned profile");
+  const deadline = Date.now() + budgetMs;
+  let interval = IDENTITY_PROBE_MIN_INTERVAL_MS;
+  let everReadable = false;
+  for (;;) {
+    const identity = await browserProcessIdentity(child.pid);
+    if (identity) {
+      everReadable = true;
+      if (identityOwnsProfile(identity, profileDir)) return identity;
+    }
+    if (child.exitCode != null || child.signalCode != null) {
+      throw new Error(
+        "browser exited before its launch identity could be verified");
+    }
+    if (Date.now() >= deadline) break;
+    await delay(interval);
+    interval = Math.min(interval * 2, IDENTITY_PROBE_MAX_INTERVAL_MS);
   }
+  throw new Error(everReadable
+    ? "browser launch identity did not match its owned profile"
+    : "browser launch identity could not be read before the probe deadline");
+}
+
+async function startBrowserGuardian(child, profileDir) {
+  const browserIdentity = await resolveOwnedBrowserIdentity(child, profileDir);
   await writeOwnershipMarker(profileDir, child.pid, browserIdentity);
   const custody = {
     guardian: null,
