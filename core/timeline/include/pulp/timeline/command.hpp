@@ -320,8 +320,11 @@ struct SetChordScaleLane {
 /// that authors no intensity carries an empty lane, so `nullopt` would invent a
 /// second meaning for "states nothing yet" that no reader could distinguish.
 struct SetDynamicsLane {
+    /// Sequence whose dynamics lane changes.
     ItemId sequence_id;
+    /// Required current lane content, compared in full.
     DynamicsLane expected;
+    /// Lane content written when the gate matches.
     DynamicsLane replacement;
 };
 
