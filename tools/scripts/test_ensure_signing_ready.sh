@@ -84,6 +84,28 @@ exit 0
 SH
 chmod +x "$SHIMBIN/codesign"
 
+# Installer-signing shims. The Developer ID Installer key is a DIFFERENT key
+# reached through a DIFFERENT tool than codesign, so it needs its own probe.
+cat > "$SHIMBIN/pkgbuild" <<'SH'
+#!/bin/bash
+printf 'pkgbuild %s\n' "$*" >> "${SHIM_LOG:-/dev/null}"
+for a in "$@"; do last="$a"; done
+mkdir -p "$(dirname "$last")"; : > "$last"
+SH
+cat > "$SHIMBIN/productsign" <<'SH'
+#!/bin/bash
+printf 'productsign %s\n' "$*" >> "${SHIM_LOG:-/dev/null}"
+[ "${SHIM_PRODUCTSIGN_FAIL:-0}" = "1" ] && exit 1
+for a in "$@"; do last="$a"; done
+mkdir -p "$(dirname "$last")"; : > "$last"
+SH
+cat > "$SHIMBIN/pkgutil" <<'SH'
+#!/bin/bash
+printf 'pkgutil %s\n' "$*" >> "${SHIM_LOG:-/dev/null}"
+exit 0
+SH
+chmod +x "$SHIMBIN/pkgbuild" "$SHIMBIN/productsign" "$SHIMBIN/pkgutil"
+
 # ── fixtures ──────────────────────────────────────────────────────────────────
 make_secrets() {   # $1 = dir ; writes keychain.env (+ notary.env if $2=with-notary)
   local d="$1"; mkdir -p "$d"
@@ -333,5 +355,35 @@ OUT="$(SHIM_LOG="$LOG" SHIM_UNLOCK_FAIL_PATH="$LEGACY16" \
   || bad "legacy keychain repair failed (rc=$RC)"$'\n'"$OUT"$'\n'"$(cat "$LOG")"
 
 echo ""
+
+# 18. A configured Developer ID Installer identity must be PROVEN usable. A
+#     passing codesign probe says nothing about it: it is a different key
+#     reached through a different tool.
+S="$TMP/s18"; make_secrets "$S"
+echo 'PULP_SIGN_INSTALLER_HASH="CAFEBABE"' >> "$S/keychain.env"
+LOG="$TMP/log18"; RC=0
+OUT="$(SHIM_LOG="$LOG" PATH="$SHIMBIN:$PATH" \
+       PULP_SECRETS_DIR="$S" SHIM_IDENTITY_IN_DEDICATED=1 \
+       env -u PULP_SIGN_KEYCHAIN -u PULP_NOTARY_KEY_PATH \
+       bash "$DOCTOR" --quiet 2>&1)" || RC=$?
+{ [ "$RC" -eq 0 ] && grep -q '^productsign .*CAFEBABE' "$LOG" \
+  && grep -q '^pkgutil --check-signature' "$LOG"; } \
+  && ok "installer identity is probed with productsign and reported READY" \
+  || bad "installer probe did not run / did not report (rc=$RC)"$'\n'"$OUT"$'\n'"$(cat "$LOG")"
+
+# 19. When that key cannot sign without a prompt, the doctor must NOT report
+#     READY. Otherwise the failure lands at packaging time, after every bundle
+#     is already signed, as CSSMERR_CSP_USER_CANCELED.
+S="$TMP/s19"; make_secrets "$S"
+echo 'PULP_SIGN_INSTALLER_HASH="CAFEBABE"' >> "$S/keychain.env"
+LOG="$TMP/log19"; RC=0
+OUT="$(SHIM_LOG="$LOG" SHIM_PRODUCTSIGN_FAIL=1 PATH="$SHIMBIN:$PATH" \
+       PULP_SECRETS_DIR="$S" SHIM_IDENTITY_IN_DEDICATED=1 \
+       env -u PULP_SIGN_KEYCHAIN -u PULP_NOTARY_KEY_PATH \
+       bash "$DOCTOR" --quiet 2>&1)" || RC=$?
+{ [ "$RC" -eq 1 ] && grep -q "installer-signing probe failed" <<<"$OUT"; } \
+  && ok "unusable installer key is NOT READY (fail-closed)" \
+  || bad "doctor reported ready despite an unusable installer key (rc=$RC)"$'\n'"$OUT"
+
 echo "passed: $PASS   failed: $FAIL"
 [ "$FAIL" -eq 0 ]

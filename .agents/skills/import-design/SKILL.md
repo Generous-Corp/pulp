@@ -3933,6 +3933,23 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   a positive control in the same sample, because BSD `pgrep -fc` prints 0 both
   when nothing matched and when the pattern was wrong, and the second one reads
   exactly like a pass.
+- **The launch-identity check needs a deadline, not a single probe.**
+  `startBrowserGuardian` refuses to guard a pid until `/bin/ps` shows it owning
+  this capture's `--user-data-dir`, which is right: a numeric pid is not an
+  identity. But a just-spawned pid does not identify as the browser yet. Two
+  windows produce a false violation. Between fork and exec the pid still
+  carries the launcher's own argv, which owns no profile. And the `ps` helper
+  kills its own read at 3s and returns an empty string, which on a saturated
+  runner is reported as a mismatch rather than as an unread. Both render the
+  same message, `browser launch identity did not match its owned profile`,
+  wrapped in advice to install a browser that is already installed — and both
+  eject a PR from the merge queue with a red required `macos`. Probe to a
+  deadline (`resolveOwnedBrowserIdentity`) instead: keep failing closed, abort
+  at once when the child has exited, and say which of the two happened. A test
+  for this must make the pre-exec argv genuinely not own the profile —
+  `sh -c '... --user-data-dir=X ...'` carries the string in its own argv, so
+  `identityOwnsProfile` matches before any exec and the race is never exercised.
+
 - The semantic report is evidence, not permission to promote visual controls.
   Only explicit source contracts such as `data-pulp-role` may become native
   interaction overlays in a later stage.
@@ -6857,3 +6874,48 @@ catch that corruption — it exits 0 on truncated and broken files. Verify an
 emitted classic bundle with `vm.Script`, and an ESM source with a dynamic
 `import()` discriminating on `SyntaxError`; plant a break first and confirm the
 checker rejects it.
+
+**Testing the generator's output, not the generator:** both costs above live in
+the emitted runtime, so a test that only inspects the builder's return string
+cannot see them. `materialized_runtime_commit_cost.test.mjs` generates the
+entry, strips its two `import` lines, and runs the rest verbatim in a
+`vm.createContext` sandbox with React, the native bridge, and
+`__pulpReactDomRegistry__` stubbed — then drives the published
+`__pulpApplyMaterializedImportMetadata__`. Executing it (rather than parsing it)
+is the point: a declaration placed in the wrong function body still parses, and
+`new Function` would accept it too, so only evaluation catches a scope mistake.
+Assert **operation counts**, never wall-clock — the shared index is pinned by
+counting `parentElement` reads through a getter (one per registry node plus one
+per resolved binding; a per-binding rebuild costs `registry × bindings`), and
+the selector memo by counting parse passes at two registry sizes and requiring
+them equal. A wall-clock budget would flake on a shared runner and could not say
+which of the two costs regressed. Pair the counters with one resolution case:
+counters alone stay green if traversal breaks and resolves nothing.
+
+**Negative-control these with `confirm_failure.sh --no-build`.** The script's
+compiled lane exists to defeat a *build* hazard: restoring a source and
+rebuilding inside the same filesystem second leaves make comparing equal mtimes,
+so the object is judged current and the binary keeps the old code — which is why
+that lane demands `--build-dir`/`--target`, deletes objects, and withholds a
+verdict until it observes a compile line. A `.mjs` has no object and no build
+step, and each `node --test` run reads the source at import in a fresh process,
+so that hazard cannot arise. `--no-build` drops the build and binary-fingerprint
+steps and keeps everything that carries the verdict — baseline passes, the break
+changes the file's content hash, the broken run fails, the restore passes — and
+it restores through git, which a hand-kept `.bak` does not:
+
+```sh
+tools/scripts/confirm_failure.sh \
+  --file tools/import-design/jsx-runtime/materialized_runtime_entry.mjs \
+  --break "perl -0pi -e 's/materializedNodeAtPath\(binding, values, pathIndex\)/materializedNodeAtPath(binding, values)/g'" \
+  --no-build \
+  --test "node --test tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs"
+```
+
+It works the same way for the `@pulp/react` vitest suites, whose TypeScript is
+transpiled per run from source. Whichever lane you use, keep the discipline the
+exit code encodes: a break that changes nothing is INCONCLUSIVE (exit 2), not a
+pass. Patching a name that does not exist leaves the count at zero on both
+sides, the test passes, and that reads as "the test does not cover this" — a
+dead instrument reported as a finding. The script refuses that case outright
+rather than letting it read as a verdict.

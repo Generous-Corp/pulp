@@ -103,6 +103,71 @@ NOMATCH=$( ( cd "$TMP/nomatch" && "$UNDER_TEST" \
   ) >/dev/null 2>&1; echo $? )
 check "a break that changes nothing is INCONCLUSIVE" 2 "$NOMATCH"
 
+# ── The --no-build lane, for a test whose subject is interpreted ────────────
+#
+# A Node/Python/shell test has no object or binary between the edited source and
+# the run, so the compiled lane's build-and-fingerprint evidence cannot apply.
+# Without these cases the lane could regress into one that never fails, which is
+# precisely the shape of instrument this script exists to expose.
+make_script_project() {
+    local root="$1" meaningful="$2"
+    mkdir -p "$root"
+    cat > "$root/value.mjs" <<'EOF'
+export function answer() { return 42; }
+EOF
+    if [ "$meaningful" = "meaningful" ]; then
+        cat > "$root/value.test.mjs" <<'EOF'
+import assert from 'node:assert/strict';
+import { answer } from './value.mjs';
+assert.equal(answer(), 42);
+EOF
+    else
+        # Imports the subject but asserts nothing about it.
+        cat > "$root/value.test.mjs" <<'EOF'
+import { answer } from './value.mjs';
+answer();
+EOF
+    fi
+    ( cd "$root" \
+      && git init -q . \
+      && git config user.email t@example.com \
+      && git config user.name test \
+      && git add -A \
+      && git commit -qm fixture ) >/dev/null 2>&1
+}
+
+run_script_under_test() {
+    local root="$1"
+    ( cd "$root" && "$UNDER_TEST" \
+        --file value.mjs \
+        --break "perl -pi -e 's/return 42;/return 7;/'" \
+        --no-build \
+        --test "node value.test.mjs" ) >/dev/null 2>&1
+    echo $?
+}
+
+if command -v node >/dev/null 2>&1; then
+    make_script_project "$TMP/script-covered" meaningful
+    check "a covering script test is CONFIRMED" 0 \
+        "$(run_script_under_test "$TMP/script-covered")"
+
+    make_script_project "$TMP/script-vacuous" vacuous
+    check "a vacuous script test is NOT CONFIRMED" 1 \
+        "$(run_script_under_test "$TMP/script-vacuous")"
+
+    # --no-build and the build flags describe two different runs. Accepting both
+    # would let a caller read a build into a transcript where none happened.
+    make_script_project "$TMP/script-conflict" meaningful
+    CONFLICT=$( ( cd "$TMP/script-conflict" && "$UNDER_TEST" \
+        --file value.mjs --break "perl -pi -e 's/42/7/'" \
+        --no-build --build-dir build --test "node value.test.mjs" \
+      ) >/dev/null 2>&1; echo $? )
+    check "--no-build with --build-dir is rejected" 2 "$CONFLICT"
+else
+    # A skip is not a pass, so it is reported rather than counted as one.
+    printf '  SKIP script-test lane (no node on PATH)\n'
+fi
+
 # The tree must be left exactly as it was found, whatever the verdict.
 if git -C "$TMP/uncovered" diff --quiet; then
     printf '  ok   the tree is restored after a NOT CONFIRMED run\n'

@@ -501,15 +501,26 @@ painted. `"transparent"` is NOT a substitute: `css_color.cpp` maps it to
 (`textColor` removed → `setTextColor(id,"")`) is currently inert on the native
 side. Fix that half the same way when it next bites.
 
-### `confirm_failure.sh` cannot verdict a `.js` prelude edit
+### `confirm_failure.sh` needs `--object` to verdict a `.js` prelude edit
 
 Preludes are embedded into a generated `build/core/view/web_compat_preludes_gen.cpp`,
-so a `.js` file produces no compile line of its own and the script refuses a
-verdict — INCONCLUSIVE, every time, however real the edit. Prove a prelude
-change by counting the changed text in that generated file instead: break the
-JS, rebuild, confirm the count drops to zero AND the test goes red, restore,
-confirm both come back. The count is the positive control that the edit
-reached the binary at all.
+so a `.js` file produces no compile line of its own. The script verifies a
+recompile by watching for the edited file's object in the build log, so
+without help it sees no evidence and returns INCONCLUSIVE. Point it at the
+generated translation unit instead and it verdicts normally:
+
+```sh
+tools/scripts/confirm_failure.sh \
+  --file core/view/js/web-compat-style-decl.js \
+  --break "perl -0pi -e 's/var consume = hinted;/var consume = false;/'" \
+  --object web_compat_preludes_gen.cpp \
+  --build-dir build --target pulp-test-web-compat-overlay --jobs 6 \
+  --test ./build/test/pulp-test-web-compat-overlay
+```
+
+The `--object` flag is documented in the script's own header for exactly this
+case. Counting the changed text inside the generated file still works as a
+manual positive control, but it is no longer the only route to a verdict.
 
 Note also that `core/view/js/web-compat.js` is a monolith that is **not**
 embedded. The embedded lane is the split `web-compat-*.js` set listed above,
@@ -803,6 +814,34 @@ Two consequences for authors of scripted UI:
 - **This matches the native widget.** `ui_components.cpp`'s `ComboBox::open`
   seeds `hover_index_ = selected_`. The scripted path and the native path now
   agree, so a design that moves between them keeps the same first highlight.
+
+### An omitted bridge argument is a silent `false`, not a default
+
+`claimOverlay(id, consume)` reaches native as
+`args.size() > 1 && args.get<bool>(1, false)` (`event_api.cpp`). A caller that
+passes only the id therefore opts OUT of consuming the dismissing press, with
+no diagnostic anywhere — the call looks complete and the behaviour silently
+differs from a caller that passed `true`. `web-compat-style-decl.js` shipped
+that way for months while `web-compat-document.js` and all three
+`prop-applier-events.ts` sites passed `true`, so the same author intent behaved
+differently depending on which authoring surface expressed it, and a comment
+claiming the two paths matched made the fork read as intentional.
+
+Two rules follow. When you add a bridge argument, grep every call site rather
+than trusting a default to be safe — `args.size() > N` style readers cannot
+distinguish "omitted" from "explicitly false". And when the shim claims to
+mirror another authoring surface, verify that against the surface, not the
+comment: the comment is the thing that goes stale.
+
+The style-decl overlay claim now splits deliberately. `data-overlay="true"` is
+an explicit author statement, identical in intent to `<View overlay>`, so it
+consumes. The CSS-shape heuristic (`position: absolute` + `z-index >= 10`) is
+an inference, so it stays click-through: a false positive that consumed would
+swallow a real click outright, while a false positive that clicks through only
+closes something that should not have claimed. The claimed mode is tracked in
+`_autoOverlayConsume` so adding the hint to an element that already claimed by
+shape re-claims instead of stranding the old mode — `claim_overlay()` is
+idempotent, so the re-claim is safe.
 
 ## ESM support per engine
 

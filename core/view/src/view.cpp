@@ -1448,9 +1448,14 @@ void View::dismiss_active_overlay(View& scope) {
     if (!victim) return;
     state->active_overlay = nullptr;
     if (active_overlay_ == victim) active_overlay_ = nullptr;
-    if (victim->on_overlay_dismissed) {
-        victim->on_overlay_dismissed();
-    }
+    // Copy the callback before invoking it, matching dismiss_claimed_overlay().
+    // `on_overlay_dismissed` is a std::function whose storage lives inside the
+    // victim View, and the callback may synchronously destroy that view (a
+    // React consumer flipping setOpen(false) unmounts the popover). Calling
+    // operator() on the member in place leaves std::function's own `this`
+    // dangling for the remainder of the call.
+    auto dismissed = victim->on_overlay_dismissed;
+    if (dismissed) dismissed();
 }
 
 // Recursively expand a child's painted-bounds contribution

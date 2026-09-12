@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20260912-context-press-overlay-routing",
+  "kind": "change",
+  "created_at": "2026-09-12T05:45:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "The right button had no overlay-aware routing verb, so every native host open-coded it and the click-through fence the left button already had was easy to omit. route_press_to_active_overlay returns an OverlayPressTarget carrying consume_press, which says the overlay claimed the pointer sequence that dismissed it. A host that dismisses the overlay and THEN hit-tests the underlay ignores that flag, and the visible result is that one right-click both closes an open popover and opens a context menu on the control underneath it. route_context_press adds the missing right-button counterpart: it consults the generalized overlay slot first, returns early when consume_press is set so the underlay is never hit-tested, and otherwise dispatches the context menu to the routed overlay target when the press was routed or to root.hit_test when it was not. It reports handled so a host knows not to fall through to the platform's own menu, and overlay_dismissed separately so a host still repaints when a press dismissed an overlay without any view claiming a menu. Those are two genuinely independent facts about one press, which is why the result is a struct rather than a bool. Keeping the decision in core/view rather than in each platform host is the point of the change: it makes the behaviour headlessly testable and gives every host one call to make instead of a rule to remember. Nothing about left-button routing, capture, focus, wheel routing, scroll, or the existing down/drag/up contracts changed, and no existing signature moved. This is Pulp-only. The defect shape is an artifact of how Pulp owns the seam between a native host and a retained view tree: Pulp asks each platform host to synthesise pointer delivery itself, so a routing rule that lives only in prose gets dropped by the next host that implements the phase. A Vellum-native retained UI kernel should own pointer delivery as a single pipeline in which consumption is structurally impossible to ignore, rather than a per-host convention, so this is not a shape Vellum should inherit. There is no named immutable Vellum framework commit being backported here, and this records no Vellum acknowledgement.",
+  "tests": [
+    "pulp-test-overlay-routing",
+    "pulp-test-web-compat-overlay"
+  ],
+  "disposition": "pulp-only"
+}

@@ -326,6 +326,14 @@ pub fn known_commands() -> Vec<&'static str> {
     v
 }
 
+/// Whether `name` is a command the CLI's own surface declares.
+/// A true answer means a failure to run it is never a spelling
+/// problem, so the fuzzy suggester must not be consulted.
+#[must_use]
+pub fn is_known_command(name: &str) -> bool {
+    known_commands().contains(&name)
+}
+
 /// Write the full usage banner. Mirrors the C++ `print_usage()` byte
 /// layout, including the 14-char command column and the blank line
 /// between native commands and delegate commands.

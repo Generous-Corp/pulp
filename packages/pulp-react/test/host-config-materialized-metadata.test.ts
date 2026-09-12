@@ -444,6 +444,51 @@ describe('host-config materialized metadata', () => {
         expect(() => resetAfterCommit?.({})).not.toThrow();
     });
 
+    // The importer's captured-state matcher runs a selector per captured state
+    // on every commit, and a selector that matches nothing reads the whole
+    // registry before answering. The epoch lets it retain that answer until a
+    // mutation could have changed it. The boolean gate cannot serve this:
+    // resetAfterCommit clears it before the importer runtime ever runs.
+    it('publishes a monotonic mutation epoch for the importer runtime', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        mutate();
+        const first = host.__pulpMaterializedTreeEpoch__ as number;
+        expect(typeof first).toBe('number');
+
+        mutate();
+        expect(host.__pulpMaterializedTreeEpoch__ as number).toBeGreaterThan(first);
+    });
+
+    it('does not bump the mutation epoch for a paint-only commit', () => {
+        // This is the whole point: a pointer drag emits these by the hundred,
+        // and each one would otherwise force a full registry rescan per
+        // captured state.
+        const host = globalThis as unknown as Record<string, unknown>;
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+        mutate();
+        const before = host.__pulpMaterializedTreeEpoch__ as number;
+
+        commitUpdate(instance('a'), null, 'view',
+            { backgroundColor: '#111', cursor: 'grab' },
+            { backgroundColor: '#222', cursor: 'grabbing' }, null);
+
+        expect(host.__pulpMaterializedTreeEpoch__ as number).toBe(before);
+    });
+
+    it('bumps the mutation epoch when a structural mutation reorders siblings', () => {
+        // insertBefore's same-parent branch returns without reaching attach, so
+        // a mark placed in the helper would miss it -- and a captured-state
+        // selector that keys off sibling order would answer from a stale miss.
+        const host = globalThis as unknown as Record<string, unknown>;
+        mutate();
+        const before = host.__pulpMaterializedTreeEpoch__ as number;
+
+        reorderSiblings();
+
+        expect(host.__pulpMaterializedTreeEpoch__ as number).toBeGreaterThan(before);
+    });
+
     it('refreshes captured semantic state once per React commit', () => {
         const host = globalThis as unknown as Record<string, unknown>;
         let refreshes = 0;

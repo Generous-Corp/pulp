@@ -441,4 +441,26 @@ struct OverlayPressTarget {
 /// `hit_test`.
 OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt);
 
+/// What a context (right-button) press resolved to.
+struct ContextPressResult {
+    /// A view claimed the context menu, so the host must not fall through to
+    /// the platform's own menu.
+    bool handled = false;
+    /// The press dismissed an open overlay, so the host must repaint even when
+    /// nothing claimed a context menu.
+    bool overlay_dismissed = false;
+};
+
+/// Route a context (right-button) press at `root_pt`, consulting the
+/// generalized overlay slot first.
+///
+/// This is the right-button counterpart of the left-button overlay routing a
+/// host performs around `route_press_to_active_overlay`, and it exists because
+/// honoring `OverlayPressTarget::consume_press` is easy to omit: a host that
+/// forgets it dismisses the overlay and THEN hit-tests the underlay, so one
+/// right-click both closes the popover and opens a context menu on the control
+/// underneath it. Keeping the decision here rather than in each host makes it
+/// headlessly testable and gives every host one call to make.
+ContextPressResult route_context_press(View& root, Point root_pt);
+
 }  // namespace pulp::view

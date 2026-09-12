@@ -533,6 +533,27 @@ function materializedLastDescendantSplit(selector) {
   }
   return split;
 }
+// Misses from the registry scan, keyed by the epoch @pulp/react bumps on every
+// host mutation. A miss is the expensive answer: it reads and match-tests EVERY
+// registry node before returning null, while a hit stops at the first match.
+// Captured-state resolution asks one selector per state and takes the first
+// that answers, so every state ahead of the live one costs a full-registry miss
+// on every React commit.
+//
+// Only negative answers are retained. A node that matched is a live object
+// whose own attributes can be rewritten by a paint-only commit that does not
+// bump the epoch; "nothing in the registry matches this selector" cannot change
+// without the registry or a matched attribute changing, and both bump it.
+//
+// Caching is declined outright when no epoch has been published -- a plain
+// importer runtime with no @pulp/react host, or one running before the first
+// commit. Without a bumping epoch a retained miss would never be invalidated,
+// which is a stale answer rather than a cheap one.
+let materializedFindMissEpoch = null;
+const materializedFindMisses = new Set();
+function materializedFindMissKey(selector, ancestor) {
+  return selector + '\u0000' + (ancestor || '');
+}
 g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
   if (typeof selector !== 'string' || selector.length === 0) return null;
   if (g.document && typeof g.document.querySelector === 'function') {
@@ -540,6 +561,17 @@ g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
     if (browserNode && (!ancestor || materializedClosest(browserNode, ancestor))) {
       return browserNode;
     }
+  }
+  const epoch = g.__pulpMaterializedTreeEpoch__;
+  const cacheable = typeof epoch === 'number';
+  let missKey = '';
+  if (cacheable) {
+    if (epoch !== materializedFindMissEpoch) {
+      materializedFindMisses.clear();
+      materializedFindMissEpoch = epoch;
+    }
+    missKey = materializedFindMissKey(selector, ancestor);
+    if (materializedFindMisses.has(missKey)) return null;
   }
   let targetSelector = selector.trim();
   let effectiveAncestor = ancestor || '';
@@ -566,6 +598,7 @@ g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
         (!effectiveAncestor || materializedClosest(
           directParentSelector ? parent : node, effectiveAncestor))) return node;
   }
+  if (cacheable) materializedFindMisses.add(missKey);
   return null;
 };
 g.__pulpActivateMaterializedElement__ = function (selector, eventName, eventData) {

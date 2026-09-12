@@ -221,3 +221,51 @@ make sure it is enforced somewhere. During the staged rollout,
 promotion to a required context is what turns that signal into enforcement.
 Use a dedicated gating lane for anything that must block before then. "It runs
 nightly" is a backstop, not enforcement.
+
+### A label is not the only way to leave the gate
+
+Labels are the *visible* exit. The quieter one is an **opt-in CMake flag**: a
+test registered inside `if(PULP_ENABLE_<FEATURE>)` does not run on a lane that
+never sets the flag — it is not skipped, it is never registered, so it appears
+in no ctest output at all and no label names it. `PULP_ENABLE_SCENE3D` defaults
+OFF, and for a long time nothing in `.github/workflows/` or
+`.shipyard/config.toml` set it, so the whole Renderer3D and scene3d surface ran
+nowhere while the required gate stayed green. `.github/workflows/scene3d-advisory.yml`
+is the lane that now covers it.
+
+So when you add a test behind an opt-in flag, or add a flag that gates existing
+tests, name the lane that sets it. The one-line check:
+
+```bash
+grep -rn "PULP_ENABLE_<FEATURE>" .github/workflows/ .shipyard/config.toml
+```
+
+Zero hits means zero coverage. Pair it with a flag you know is wired — for
+example `grep -rc "PULP_ENABLE_GPU" .github/workflows/build.yml` returns a
+non-zero count — so that an empty result reads as "not wired" rather than "my
+grep was wrong".
+
+Two more traps worth knowing before you write the lane:
+
+- **`ctest -R` is case-sensitive.** `-R 'renderer3d|scene3d'` selects 144 of the
+  gated tests and silently drops the capitalized Catch2 case names; the
+  character-class form `-R '[Rr]enderer3[Dd]|[Ss]cene3[Dd]'` selects 205. A
+  regex that matches less than you meant still exits 0.
+- **A selection that matches nothing exits 0.** Pass `--no-tests=error`, and
+  assert a floor on the selected count as well — the first catches an empty
+  selection, the second catches one that merely shrank.
+
+### A test whose premise cannot hold in CI
+
+No workflow in this repo checks out submodules
+(`submodules: false` throughout `.github/workflows/`), so the private
+`planning/` submodule is unavailable to every hosted lane by construction. A
+test that reads a file from it can only be excluded, never fixed, on such a
+lane — and the exclusion should say so, because a bare test name in an
+`--exclude-regex` reads as a suppressed failure rather than a structural one.
+
+Check the *transitive* dependency, not just the ctest arguments. Both
+`scene3d-native-slice-handoff-contract` and its negative twin need the plan
+file, but only the first names it in its arguments; the second reaches it
+through a verifier that hardcodes the path. Excluding only the obvious one
+leaves a permanent red.

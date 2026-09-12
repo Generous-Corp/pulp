@@ -1569,10 +1569,13 @@ jobs:
             # reliably on GitHub-hosted Windows runners.
             cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")
           fi
+          # Every event that reaches this job publishes the required `macos`
+          # context, so every event must configure the same way. Turning the GPU
+          # off on one of them posts a differently configured build under the
+          # gate's name: PULP_TEXT_SHAPING follows PULP_ENABLE_GPU, and without
+          # it `render_to_rgba` returns an empty buffer, so capture-based view
+          # tests fail for the configuration rather than for the change.
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            cmake_args+=(-DPULP_ENABLE_GPU=OFF)
-          fi
           cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"
           # Mark the build in-progress; the Build step clears it on success, so a
           # build interrupted/cancelled before completion is detected next run
