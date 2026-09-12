@@ -88,6 +88,11 @@ let materializedRootSignature = '';
 // swapped -- would otherwise wait for the next host mutation to be applied at
 // all, and before this gate existed it simply ran on the following commit.
 let materializedHookApplied: unknown;
+// Monotonic mutation counter published to the importer runtime. It starts at 0
+// and is published on the first mark, so a runtime that reads it before any
+// commit sees `undefined` and declines to cache rather than trusting an epoch
+// that was never advertised.
+let materializedTreeEpoch = 0;
 
 // The marks live on the host-config METHOD boundaries, never inside the
 // attach / attachToRoot / detach helpers those methods usually delegate to.
@@ -99,6 +104,24 @@ let materializedHookApplied: unknown;
 // and the rendered tree all still look correct.
 function markMaterializedTreeDirty(): void {
     materializedTreeDirty = true;
+    // Publish the mutation as a monotonic epoch as well as a boolean.
+    //
+    // The boolean answers "should this commit re-apply metadata" and is
+    // consumed and cleared by resetAfterCommit. Captured-state matching asks a
+    // different question -- "can a selector's previous answer still be true" --
+    // and it is asked from the importer runtime, which cannot see a flag that
+    // resetAfterCommit has already cleared by the time it runs.
+    //
+    // Every structural mutation and every non-paint-only prop change marks the
+    // tree, and a captured-state selector matches on tag, id, class and
+    // attributes -- all of which are prop changes that land here. So a selector
+    // that found nothing at epoch N still finds nothing at epoch N, and the
+    // importer can skip re-scanning the whole registry for it. A paint-only
+    // commit, which is what a pointer drag emits by the hundred, does not bump
+    // the epoch and therefore does not invalidate that answer.
+    materializedTreeEpoch += 1;
+    (globalThis as unknown as Record<string, unknown>)
+        .__pulpMaterializedTreeEpoch__ = materializedTreeEpoch;
 }
 
 let _hc_count = 0;
