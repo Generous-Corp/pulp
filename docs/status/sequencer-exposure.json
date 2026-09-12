@@ -5328,7 +5328,10 @@
             "struct SetDynamicsLane",
             "DynamicsLane expected;",
             "DynamicsLane replacement;",
-            "SetDynamicsLane>;"
+            "SetDynamicsLane>;",
+            "/// Sequence whose dynamics lane changes.",
+            "/// Required current lane content, compared in full.",
+            "/// Lane content written when the gate matches."
           ]
         },
         {
@@ -5404,7 +5407,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "SetDynamicsLane is a public alternative of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp can author a sequence's intensity through the same transaction path every other command uses. The command carries both the lane it expects to find and the lane to install, so reduce_transaction refuses a stale writer with ConflictCode::ExpectedValueMismatch and a vanished sequence with ConflictCode::TargetMissing rather than overwriting a concurrent edit, and the inverse it records is the same command with the two lanes swapped, which makes undo exact rather than reconstructed. Authority is classified through command_authority_of<SetDynamicsLane>() as Annotation/Modify, so a writer profile that denies annotation modification refuses this command while still admitting note edits: the gate is the class-and-intent pair, not a blanket ban. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. This row does not touch the released p0-15a-dynamics-lane row, whose dispositions are frozen at its merge; it records the command half that row named as its open dependency.",
+          "rationale": "SetDynamicsLane is a public alternative of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp can author a sequence's intensity through the same transaction path every other command uses. The command carries both the lane it expects to find and the lane to install, so reduce_transaction refuses a stale writer with ConflictCode::ExpectedValueMismatch and a vanished sequence with ConflictCode::TargetMissing rather than overwriting a concurrent edit, and the inverse it records is the same command with the two lanes swapped, which makes undo exact rather than reconstructed. Authority is classified through command_authority_of<SetDynamicsLane>() as Annotation/Modify, so a writer profile that denies annotation modification refuses this command while still admitting note edits: the gate is the class-and-intent pair, not a blanket ban. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. This row does not touch the released p0-15a-dynamics-lane row, whose dispositions are frozen at its merge; it records the command half that row named as its open dependency. Each public member of SetDynamicsLane carries the Doxygen brief the installed-header API contract requires, so the exhaustive sequencer API-docs check admits the struct without a legacy-baseline entry.",
           "evidence": [
             {
               "kind": "sdk_header",
@@ -5413,7 +5416,10 @@
                 "struct SetDynamicsLane",
                 "DynamicsLane expected;",
                 "DynamicsLane replacement;",
-                "SetDynamicsLane>;"
+                "SetDynamicsLane>;",
+                "/// Sequence whose dynamics lane changes.",
+                "/// Required current lane content, compared in full.",
+                "/// Lane content written when the gate matches."
               ]
             },
             {

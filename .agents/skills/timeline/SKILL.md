@@ -1353,6 +1353,54 @@ neither is ordered the way you would guess:
   match the variant. Appending a new envelope and asserting it at the final index
   is correct.
 
+### A new alternative's *header text* is checked by two more gates, and neither is a compiler
+
+Every guard above is a compile error inside `pulp-timeline`. Two repo gates read
+the header as text instead, fire much later, and fail in ways that do not name
+the command you added.
+
+**Every public member needs its own `///` brief.** `timeline_api_docs_check.py`
+counts a member as documented iff its Doxygen XML carries a non-empty
+`briefdescription` or `detaileddescription`, so one brief above the struct
+documents the struct and none of its fields. Symbols listed in
+`docs/doxygen/sequencer-api-contract-legacy-baseline.json` are grandfathered, and
+a symbol you just added is not in it. **Do not resolve this by adding the new
+symbol to that baseline**: the baseline records contracts that predate the gate,
+so widening it retires the gate instead of satisfying it. Copy the brief style
+from the nearest structural analogue — `SetDeviceState` for a gated replace.
+
+This one bites late, because `api-contracts` is **not a required check**. The PR
+that adds an undocumented member merges green and `main` goes red on every commit
+after it until somebody goes looking. `SetDynamicsLane` landed that way and left
+the check red for days. Run `tools/build-api-docs.sh --contract-only` before
+shipping a header change; it needs no build.
+
+**The sequencer-exposure ledger gate is purely path-based, and it lives inside
+the required "Enforce version & skill sync" check.** Any change to a path a
+ledger row owns — a comment-only change included — must be recorded by a row that
+is `pending` *and* materially changed. Material is exactly `delivery_state`,
+`claim_id`, `owned_paths`, `classification`, `evidence`, `surfaces`
+(`_material_row` in `sequencer_exposure_check.py`); editing a row's `title` does
+nothing. There is no doc-only carve-out and no skip trailer, so `shipyard pr`
+reports skill-sync and version-bump green and the PR still goes red.
+
+Amending the existing pending row is the honest move when that row already claims
+the path and its delivery is unfinished — `validate_transition`'s contract is
+omission prevention, its own wording is "an added **or materially changed**
+pending row", and rows are routinely extended while pending. Evidence needles are
+substrings re-verified against the file on every run, so a needle is a falsifiable
+claim rather than a hash-mover, and prose is allowed: existing rows cite test
+names. Adding a brand-new row to describe a comment fix would be the dishonest
+shape, not the amendment.
+
+**Read the receipt's `comparison_mode` before trusting a local pass.** The anchor
+is `base_tip` (main's tip) when the base is already an ancestor of your head, and
+falls back to `merge_base` when it is not. CI checks out a synthetic merge commit,
+so CI is always `base_tip`; a branch that has not been rebased compares locally
+against the older `merge_base`. The two disagree exactly when another PR has
+materially changed your row on main since you branched — which can make a change
+that is material locally non-material under CI.
+
 ### A `ConflictCode` is a wire ordinal, and adding one changes nothing outside the process
 
 - **Append at the end, never next to the semantic neighbour.**
