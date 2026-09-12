@@ -1063,3 +1063,22 @@ things follow:
   `dlclose` runs freed code.
 
 No-op unless the build is configured `PULP_TRACING=ON`.
+
+## The bundle carries its own icon, and the plist key is what makes it work
+
+`pulp_app_icon(<target>_CLAP ...)` brands `.clap`: it copies the
+`.icns` into `Contents/Resources/` and sets `MACOSX_BUNDLE_ICON_FILE`, which
+CMake substitutes into the bundle's `Info.plist` at generate time.
+
+The load-bearing half is easy to miss. That substitution needs a
+`CFBundleIconFile` key in `tools/cmake/PulpInfoPlist.clap.in` to land in.
+Without it the copy still happens and the property is still set, so nothing
+errors — the bundle just comes out unbranded. If an icon does not appear,
+check the template for the key before suspecting the helper.
+
+Prefer `ICNS` over `SOURCE` for a mark with fine detail. `SOURCE` derives
+every size from one PNG with `sips`, whose Lanczos kernel overshoots on hard
+edges: a feature one or two device pixels wide at 16x16 smears into its
+neighbours and the bundle edge picks up a bright halo. Render each size on
+its own pixel grid and pass the finished `.icns`.
+

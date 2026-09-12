@@ -1,10 +1,22 @@
 # PulpAppIcon.cmake — target-level app icon helper
 #
 # Provides:
-#   pulp_app_icon(<target> SOURCE icon.png [...])
+#   pulp_app_icon(<target> SOURCE icon.png [ICNS icon.icns] [...])
 #
 # Current scope:
-# - macOS: generates a bundled .icns via sips + iconutil
+# - macOS: generates a bundled .icns via sips + iconutil, or bundles the
+#   caller's own .icns when ICNS is given
+#
+# Prefer ICNS when the mark has fine detail. Generation downscales one PNG
+# with sips, whose Lanczos kernel overshoots on a hard edge: a bar one or two
+# device pixels wide at 16px smears, and a tile edge picks up a bright halo.
+# A caller that renders each size on its own pixel grid should pass the
+# finished .icns rather than let it be re-derived.
+#
+# Works on any bundle target, including the plugin format targets that
+# pulp_add_plugin() creates (<target>_VST3 / _AU / _CLAP / _AAX) — those
+# bundles are CFBundles, which honour both MACOSX_PACKAGE_LOCATION and the
+# generate-time MACOSX_BUNDLE_ICON_FILE substitution.
 # - Windows: generates an .ico + .rc via PowerShell/.NET
 # - Android: writes generated launcher PNGs under android/app/src/main/res-generated
 #
@@ -119,7 +131,18 @@ function(_pulp_icon_validate_source target source_path)
     endif()
 endfunction()
 
-function(_pulp_icon_configure_macos target source_path)
+function(_pulp_icon_configure_macos target source_path icns_path)
+    if(icns_path)
+        # The caller owns the asset; bundle it as-is.
+        get_filename_component(_icns_name "${icns_path}" NAME)
+        set_source_files_properties("${icns_path}" PROPERTIES
+            MACOSX_PACKAGE_LOCATION "Resources")
+        target_sources(${target} PRIVATE "${icns_path}")
+        set_target_properties(${target} PROPERTIES
+            MACOSX_BUNDLE_ICON_FILE "${_icns_name}")
+        return()
+    endif()
+
     find_program(_pulp_sips sips)
     find_program(_pulp_iconutil iconutil)
     if(NOT _pulp_sips OR NOT _pulp_iconutil)
@@ -220,7 +243,7 @@ endfunction()
 function(pulp_app_icon target)
     cmake_parse_arguments(ICON
         ""
-        "SOURCE;MACOS;WINDOWS;IOS;ANDROID;LINUX;DEBUG_ICON;RELEASE_ICON"
+        "SOURCE;ICNS;MACOS;WINDOWS;IOS;ANDROID;LINUX;DEBUG_ICON;RELEASE_ICON"
         ""
         ${ARGN}
     )
@@ -244,10 +267,30 @@ function(pulp_app_icon target)
         RELEASE_ICON "${ICON_RELEASE_ICON}"
     )
     _pulp_icon_abs_path(_selected_abs "${CMAKE_CURRENT_SOURCE_DIR}" "${_selected_rel}")
-    _pulp_icon_validate_source(${target} "${_selected_abs}")
+
+    set(_icns_abs "")
+    if(ICON_ICNS)
+        _pulp_icon_abs_path(_icns_abs "${CMAKE_CURRENT_SOURCE_DIR}" "${ICON_ICNS}")
+        if(NOT EXISTS "${_icns_abs}")
+            message(FATAL_ERROR
+                "pulp_app_icon(${target}): ICNS does not exist: ${_icns_abs}")
+        endif()
+        get_filename_component(_icns_ext "${_icns_abs}" EXT)
+        string(TOLOWER "${_icns_ext}" _icns_ext)
+        if(NOT _icns_ext STREQUAL ".icns")
+            message(FATAL_ERROR
+                "pulp_app_icon(${target}): ICNS must be a .icns: ${_icns_abs}")
+        endif()
+    endif()
+
+    # ICNS covers macOS only. Every other platform still needs the PNG, so
+    # validate it unless macOS is all that was asked for.
+    if(NOT _icns_abs OR NOT APPLE OR PULP_IOS OR IOS)
+        _pulp_icon_validate_source(${target} "${_selected_abs}")
+    endif()
 
     if(APPLE AND NOT (PULP_IOS OR IOS))
-        _pulp_icon_configure_macos(${target} "${_selected_abs}")
+        _pulp_icon_configure_macos(${target} "${_selected_abs}" "${_icns_abs}")
     elseif(PULP_IOS OR IOS)
         message(WARNING
             "pulp_app_icon(${target}): iOS app-icon catalog generation is not "
@@ -262,4 +305,7 @@ function(pulp_app_icon target)
     endif()
 
     set_property(TARGET ${target} PROPERTY PULP_APP_ICON_SOURCE "${_selected_abs}")
+    if(_icns_abs)
+        set_property(TARGET ${target} PROPERTY PULP_MACOS_APP_ICNS "${_icns_abs}")
+    endif()
 endfunction()
