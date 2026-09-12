@@ -73,9 +73,35 @@ bool parse_4cc_triplet(const std::string& id, OSType& t, OSType& s, OSType& m) {
     return true;
 }
 
+// Whether this unit exposes AU's own bypass control,
+// `kAudioUnitProperty_BypassEffect` (Global scope, UInt32, read/write).
+//
+// AU keeps bypass OUT of the parameter list: `AudioUnitParameterOptions` has no
+// bypass bit, so no AudioUnitParameterInfo can report one. This property is the
+// only authoritative answer, and an effect that does not implement it answers
+// kAudioUnitErr_InvalidProperty.
+//
+// The out-params are only meaningful when the call succeeds. A failing
+// AudioUnitGetPropertyInfo leaves `size` and `writable` untouched, and units in
+// the wild leave a garbage `writable` behind on that path (a non-boolean 186
+// alongside a 7-byte size has been observed) — so reading `writable` without
+// first checking the status reports a bypass that is not there. Require the
+// success status, the exact UInt32 width, and writability together.
+bool supports_bypass_property(AudioUnit au) {
+    if (!au) return false;
+    UInt32 size = 0;
+    Boolean writable = false;
+    const OSStatus st = AudioUnitGetPropertyInfo(
+        au, kAudioUnitProperty_BypassEffect, kAudioUnitScope_Global, 0,
+        &size, &writable);
+    return st == noErr && size == sizeof(UInt32) && writable;
+}
+
 class AuSlot final : public PluginSlot {
 public:
-    AuSlot(PluginInfo info, AudioUnit au) : info_(std::move(info)), au_(au) {}
+    AuSlot(PluginInfo info, AudioUnit au)
+        : info_(std::move(info)), au_(au),
+          native_bypass_(supports_bypass_property(au)) {}
 
     ~AuSlot() override {
         close_editor_();  // tear the editor down before disposing the unit
@@ -281,8 +307,32 @@ public:
                               static_cast<AudioUnitParameterValue>(normalized_value), 0);
     }
 
-    void set_bypass(bool b) override { bypassed_.store(b, std::memory_order_relaxed); }
+    void set_bypass(bool b) override {
+        bypassed_.store(b, std::memory_order_relaxed);
+        // Mirror onto the unit's own bypass so a hosted plugin is not left
+        // believing it is active while the host wires around it — an AU with an
+        // open editor otherwise shows bypass off while producing no processed
+        // audio. process() still performs the pass-through itself, so the
+        // slot's dry-output guarantee never depends on the plugin honoring the
+        // property it accepted.
+        if (!au_ || !native_bypass_) return;
+        const UInt32 value = b ? 1u : 0u;
+        const OSStatus st = AudioUnitSetProperty(
+            au_, kAudioUnitProperty_BypassEffect, kAudioUnitScope_Global, 0,
+            &value, sizeof(value));
+        if (st != noErr) {
+            runtime::log_warn("AU: BypassEffect write failed (status {})",
+                              static_cast<int>(st));
+        }
+    }
     bool is_bypassed() const override { return bypassed_.load(std::memory_order_relaxed); }
+
+    // AU bypass is a unit property, never a parameter, so `parameters()`
+    // reports no `is_bypass` entry for any AU and this is where the capability
+    // shows up.
+    BypassSurface bypass_surface() const override {
+        return native_bypass_ ? BypassSurface::unit_property : BypassSurface::none;
+    }
 
     std::vector<uint8_t> save_state() const override {
         if (!au_) return {};
@@ -564,6 +614,13 @@ private:
                                 || info.unit == kAudioUnitParameterUnit_Boolean);
             h.flags.rampable    = !h.flags.stepped;
             h.flags.modulatable = false;  // AU has no per-voice mod concept.
+            // `is_bypass` stays false for every AU parameter, deliberately.
+            // AudioUnitParameterOptions has no bypass bit, so nothing here can
+            // report one; AU's bypass is the unit property surfaced through
+            // bypass_surface(). Deriving the flag from a name/range match
+            // instead would flag the eight per-band controls Apple's stock
+            // AUNBandEQ publishes as "Bypass" over boolean [0, 1], none of
+            // which bypass the unit.
             params_.push_back(std::move(h));
         }
     }
@@ -600,6 +657,8 @@ private:
     std::vector<std::uint8_t> abl_storage_;
     int64_t sample_time_   = 0;
     std::atomic<bool> bypassed_{false};
+    // Resolved once at load: the unit implements kAudioUnitProperty_BypassEffect.
+    bool native_bypass_ = false;
 };
 
 }  // namespace

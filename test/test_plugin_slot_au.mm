@@ -10,11 +10,16 @@
 //      process() — the path CI historically could not exercise (PluginSlot
 //      could not load an AU in the test env). Skips honestly when no system AU
 //      is loadable rather than faking a pass.
+//   3. Bypass-surface tests over Apple's stock AUNBandEQ, which is both the
+//      proof that AU bypass is a unit property and the counterexample that
+//      makes a parameter-name heuristic wrong: it publishes eight parameters
+//      named exactly "Bypass" and none of them bypasses the unit.
 #if defined(__APPLE__)
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/scanner.hpp>
+#include <pulp/host/native_handle_visitor.hpp>
 #include <pulp/host/parameter_event_queue.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -67,6 +72,45 @@ std::string first_apple_effect_unique_id() {
 // instrument is reachable wherever the effect above is.
 std::string first_apple_instrument_unique_id() {
     return first_apple_unique_id(kAudioUnitType_MusicDevice);
+}
+
+
+// Reads the unit's own `kAudioUnitProperty_BypassEffect` straight off the
+// hosted AudioUnit. Going through NativeHandleVisitor (rather than a private
+// member) is what makes this a round-trip: the value read back is the one the
+// loader wrote into the plugin, observed through the public escape hatch a host
+// would use.
+class BypassPropertyReader final : public host::NativeHandleVisitor {
+public:
+    void visit_audio_unit(const host::PluginSlot&,
+                          const host::AudioUnitNativeHandle& handle) override {
+        auto au = static_cast<AudioUnit>(handle.component_instance);
+        if (!au) return;
+        UInt32 value = 0;
+        UInt32 size = sizeof(value);
+        if (AudioUnitGetProperty(au, kAudioUnitProperty_BypassEffect,
+                                 kAudioUnitScope_Global, 0, &value, &size) == noErr) {
+            value_ = static_cast<int>(value);
+        }
+    }
+    // -1 when the unit never answered, which no assertion may read as "off".
+    int value() const { return value_; }
+
+private:
+    int value_ = -1;
+};
+
+// Apple's stock multi-band EQ. Ships with macOS, implements
+// kAudioUnitProperty_BypassEffect, and publishes eight per-band parameters
+// named exactly "Bypass".
+std::string apple_nband_eq_unique_id() {
+    AudioComponentDescription want{};
+    want.componentType = kAudioUnitType_Effect;
+    want.componentSubType = 'nbeq';
+    want.componentManufacturer = kAudioUnitManufacturer_Apple;
+    if (!AudioComponentFindNext(nullptr, &want)) return {};
+    return fourcc(want.componentType) + ":" + fourcc(want.componentSubType) + ":" +
+           fourcc(want.componentManufacturer);
 }
 
 }  // namespace
@@ -255,6 +299,154 @@ TEST_CASE("AU host slot renders a real system AudioUnit (A2 integration)",
     }
     REQUIRE(all_finite);
     REQUIRE(slot->is_loaded());
+}
+
+TEST_CASE("AU host slot reports bypass as a unit property and drives it",
+          "[host][au][integration][bypass]") {
+    // AU keeps bypass out of the parameter list entirely: it is
+    // kAudioUnitProperty_BypassEffect, and AudioUnitParameterOptions has no
+    // bypass bit for a loader to read. So `ParamFlags::is_bypass` is false for
+    // every AU parameter by construction, and bypass_surface() is the only
+    // honest answer to "does this plugin have a bypass".
+    const std::string uid = apple_nband_eq_unique_id();
+    if (uid.empty()) {
+        SKIP("Apple AUNBandEQ is not registered in this environment");
+    }
+
+    host::PluginInfo info;
+    info.name = "AUNBandEQ";
+    info.unique_id = uid;
+    info.format = host::PluginFormat::AudioUnit;
+    info.is_effect = true;
+    info.num_inputs = 2;
+    info.num_outputs = 2;
+
+    auto slot = host::PluginSlot::load(info);
+    if (!slot) {
+        SKIP("AUNBandEQ did not load in this environment");
+    }
+    REQUIRE(slot->prepare(48000.0, 512));
+
+    // The capability, read off the unit property.
+    REQUIRE(slot->bypass_surface() == host::BypassSurface::unit_property);
+
+    // The absence, with the control that makes it a finding rather than an
+    // empty measurement: this AU publishes parameters, several of them named
+    // exactly "Bypass" over boolean [0, 1] — the shape a name/range heuristic
+    // matches — and the loader still reports no bypass parameter, because none
+    // of them bypasses the unit. If the name control ever reads zero the
+    // absence below proves nothing and the test says so instead of passing.
+    const auto params = slot->parameters();
+    REQUIRE_FALSE(params.empty());
+    int named_bypass = 0;
+    int flagged_bypass = 0;
+    for (const auto& p : params) {
+        if (p.name == "Bypass") ++named_bypass;
+        if (p.flags.is_bypass) ++flagged_bypass;
+    }
+    REQUIRE(named_bypass > 0);   // control: the tempting-but-wrong signal is present
+    CHECK(flagged_bypass == 0);  // finding: the loader did not guess from it
+
+    // Round-trip: the host toggle must reach the plugin's own bypass control,
+    // observed by reading the property back off the hosted AudioUnit.
+    auto property_value = [&slot]() {
+        BypassPropertyReader reader;
+        slot->accept(reader);
+        return reader.value();
+    };
+
+    REQUIRE(property_value() == 0);  // starts off, and the unit answers at all
+
+    slot->set_bypass(true);
+    CHECK(slot->is_bypassed());
+    CHECK(property_value() == 1);
+
+    slot->set_bypass(false);
+    CHECK_FALSE(slot->is_bypassed());
+    CHECK(property_value() == 0);
+}
+
+TEST_CASE("AU host slot bypass passes input through unchanged",
+          "[host][au][integration][bypass]") {
+    // The slot's output guarantee while bypassed is host-side and identical for
+    // every format, so it holds whether or not the plugin honors the property
+    // the loader just wrote. Drive real audio to prove it rather than trusting
+    // the flag.
+    const std::string uid = apple_nband_eq_unique_id();
+    if (uid.empty()) {
+        SKIP("Apple AUNBandEQ is not registered in this environment");
+    }
+
+    host::PluginInfo info;
+    info.name = "AUNBandEQ";
+    info.unique_id = uid;
+    info.format = host::PluginFormat::AudioUnit;
+    info.is_effect = true;
+    info.num_inputs = 2;
+    info.num_outputs = 2;
+
+    auto slot = host::PluginSlot::load(info);
+    if (!slot) {
+        SKIP("AUNBandEQ did not load in this environment");
+    }
+    REQUIRE(slot->prepare(48000.0, 512));
+
+    constexpr int channels = 2;
+    constexpr int frames = 256;
+    std::vector<float> in0(frames), in1(frames);
+    for (int i = 0; i < frames; ++i) {
+        // A ramp, so a pass-through is distinguishable from a zero fill — a
+        // silent output would satisfy "finite" and "written" but not this.
+        in0[i] = static_cast<float>(i) / frames;
+        in1[i] = -in0[i];
+    }
+    std::vector<float> out0(frames, 0.0f), out1(frames, 0.0f);
+    std::array<const float*, channels> in_ptrs{in0.data(), in1.data()};
+    std::array<float*, channels> out_ptrs{out0.data(), out1.data()};
+    audio::BufferView<const float> input(in_ptrs.data(), channels, frames);
+    audio::BufferView<float> output(out_ptrs.data(), channels, frames);
+    midi::MidiBuffer midi_in, midi_out;
+    host::ParameterEventQueue params;
+
+    // Make the render path audibly different from a wire, so the two legs below
+    // cannot both be satisfied by a transparent EQ. Without this the control
+    // proves only that something was written, not that a different path ran.
+    const auto param_list = slot->parameters();
+    const auto gain = std::find_if(
+        param_list.begin(), param_list.end(),
+        [](const host::HostParamInfo& p) { return p.name == "Global Gain"; });
+    if (gain == param_list.end()) {
+        SKIP("AUNBandEQ exposes no Global Gain parameter to detune the render with");
+    }
+    slot->set_parameter(gain->id, -40.0f);  // plain domain: decibels
+
+    slot->set_bypass(true);
+    slot->process(output, input, midi_in, midi_out, params, frames);
+    for (int i = 0; i < frames; ++i) {
+        if (out0[i] != in0[i] || out1[i] != in1[i]) {
+            FAIL("bypassed slot altered sample " << i);
+        }
+    }
+
+    // Control: with bypass off the same buffers take the render path, which the
+    // gain above makes measurably quieter than its input. That the two legs
+    // disagree is what makes the equality assertion a property of bypass rather
+    // than of a transparent fixture. Compare a settled block, since the unit may
+    // ramp the gain change in.
+    slot->set_bypass(false);
+    double peak = 0.0;
+    for (int block = 0; block < 4; ++block) {
+        std::fill(out0.begin(), out0.end(), 0.0f);
+        std::fill(out1.begin(), out1.end(), 0.0f);
+        slot->process(output, input, midi_in, midi_out, params, frames);
+    }
+    for (int i = 0; i < frames; ++i) {
+        peak = std::max(peak, static_cast<double>(std::abs(out0[i])));
+    }
+    // -40 dB is ~0.01x, so a rendered peak below the input peak by a wide
+    // margin — and not silence, which would also satisfy "not equal to input".
+    CHECK(peak > 0.0);
+    CHECK(peak < 0.5);
 }
 
 #endif  // __APPLE__
