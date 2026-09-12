@@ -752,4 +752,21 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
     return {OverlayPressRouting::dismissed, nullptr, consume_press};
 }
 
+ContextPressResult route_context_press(View& root, Point root_pt) {
+    const auto overlay_press = route_press_to_active_overlay(root, root_pt);
+    if (overlay_press.consume_press) {
+        // The overlay opted to consume the pointer sequence that dismissed it.
+        // Stop before the underlay hit-test: otherwise this one right-click
+        // both closes the popover and opens a context menu on the control
+        // beneath it, which is the same click-through violation the left
+        // button already fences off.
+        return {false, true};
+    }
+    auto* target = overlay_press.routing == OverlayPressRouting::routed
+                       ? overlay_press.target
+                       : root.hit_test(root_pt);
+    return {dispatch_context_menu(root, target, root_pt),
+            overlay_press.routing == OverlayPressRouting::dismissed};
+}
+
 }  // namespace pulp::view
