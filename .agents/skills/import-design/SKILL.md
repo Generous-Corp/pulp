@@ -3933,6 +3933,23 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   a positive control in the same sample, because BSD `pgrep -fc` prints 0 both
   when nothing matched and when the pattern was wrong, and the second one reads
   exactly like a pass.
+- **The launch-identity check needs a deadline, not a single probe.**
+  `startBrowserGuardian` refuses to guard a pid until `/bin/ps` shows it owning
+  this capture's `--user-data-dir`, which is right: a numeric pid is not an
+  identity. But a just-spawned pid does not identify as the browser yet. Two
+  windows produce a false violation. Between fork and exec the pid still
+  carries the launcher's own argv, which owns no profile. And the `ps` helper
+  kills its own read at 3s and returns an empty string, which on a saturated
+  runner is reported as a mismatch rather than as an unread. Both render the
+  same message, `browser launch identity did not match its owned profile`,
+  wrapped in advice to install a browser that is already installed — and both
+  eject a PR from the merge queue with a red required `macos`. Probe to a
+  deadline (`resolveOwnedBrowserIdentity`) instead: keep failing closed, abort
+  at once when the child has exited, and say which of the two happened. A test
+  for this must make the pre-exec argv genuinely not own the profile —
+  `sh -c '... --user-data-dir=X ...'` carries the string in its own argv, so
+  `identityOwnsProfile` matches before any exec and the race is never exercised.
+
 - The semantic report is evidence, not permission to promote visual controls.
   Only explicit source contracts such as `data-pulp-role` may become native
   interaction overlays in a later stage.
