@@ -67,6 +67,21 @@ priority and can strand usable reserved capacity.
 M1 is a deliberate delayed fallback and waits 10 minutes before taking Pulp
 work; that affects latency, not its ability to serve either required class.
 
+**One gate name means one configuration.** The `macos` job publishes the
+required context on pull requests, Shipyard `workflow_dispatch` runs, and merge
+groups alike, so it assembles its CMake arguments once and no `github.event_name`
+branch may append to them. `workflow_dispatch` used to add
+`-DPULP_ENABLE_GPU=OFF`, which is how a *weaker* build came to post under the
+required gate's name on Shipyard's own PR-validation path: `PULP_TEXT_SHAPING`
+follows `PULP_ENABLE_GPU`, Skia goes with it, `render_to_rgba` returns an empty
+buffer and `resolved_face_identity` returns an empty string, so capture- and
+font-dependent view tests fail for the configuration rather than for the diff.
+The tell is the test count: a GPU-off `macos` run reports roughly 19,859 tests
+where a `pull_request` run reports about 20,991. When that gate is red and the
+diff cannot reach the named tests, compare the totals before debugging the diff.
+`tools/scripts/test_workflow_build_dirs.py` pins the single assembly line and
+asserts no `cmake_args+=` append exists.
+
 JIT runners exist in GitHub only while claiming a job, so an empty runner list
 is healthy-idle as well as dead. Conversely, an organization-visible idle
 runner is not proof that Pulp can assign it. Prove service with queue age,
