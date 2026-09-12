@@ -1114,14 +1114,17 @@ fn clap_exit_code(err: &clap::error::Error) -> ExitCode {
             // Pulp Claude plugin. Route them through pulp-cpp when
             // available before falling back to the fuzzy suggester.
             let argv: Vec<String> = std::env::args().skip(1).collect();
-            if let Ok(pulp_rs::fallthrough::Outcome::Delegated(rc)) =
-                pulp_rs::fallthrough::delegate(&argv)
-            {
+            let outcome = pulp_rs::fallthrough::delegate(&argv);
+            if let Ok(pulp_rs::fallthrough::Outcome::Delegated(rc)) = outcome {
                 return ExitCode::from(u8::try_from(rc & 0xff).unwrap_or(1));
             }
+            let delegation_disabled =
+                matches!(outcome, Ok(pulp_rs::fallthrough::Outcome::Disabled));
 
-            // No pulp-cpp on PATH (or fallthrough disabled). Match
-            // the C++ CLI's fuzzy suggester: print "Unknown command:
+            // No pulp-cpp on PATH (or fallthrough disabled). A
+            // command the CLI itself lists gets the missing-delegate
+            // diagnostic below; anything else matches the C++ CLI's
+            // fuzzy suggester: print "Unknown command:
             // …\nDid you mean: pulp <closest>?" so a user who
             // typed `buld` gets pointed at `build`. Falls back to
             // `Run `pulp help` for usage` when no candidate is
@@ -1138,6 +1141,14 @@ fn clap_exit_code(err: &clap::error::Error) -> ExitCode {
                     ExitCode::from(2)
                 },
                 |typed| {
+                    // A command the banner lists is spelled correctly
+                    // by definition, so the fuzzy suggester would
+                    // answer with the very command that just failed.
+                    // Report the unreachable delegate instead.
+                    if help::is_known_command(&typed) {
+                        eprint!("{}", delegate_unavailable_hint(&typed, delegation_disabled));
+                        return ExitCode::from(1);
+                    }
                     let hint = help::suggest_hint(&typed, "pulp", 3);
                     eprint!("{hint}");
                     ExitCode::from(1)
@@ -1153,6 +1164,25 @@ fn clap_exit_code(err: &clap::error::Error) -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// Render the "delegate binary unavailable" diagnostic for a known
+/// command, resolving the sibling path the delegate was expected at.
+fn delegate_unavailable_hint(typed: &str, disabled: bool) -> String {
+    let program = pulp_rs::fallthrough::configured_cpp_binary();
+    // Resolved from the configured name rather than
+    // `install::sibling_cpp_path`, so a `PULP_RS_CPP_BINARY` override
+    // is reported at the path actually probed.
+    let searched = pulp_rs::install::current_executable_path()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(&program)));
+    pulp_rs::fallthrough::delegate_unavailable_hint(
+        typed,
+        "pulp",
+        &program,
+        searched.as_deref(),
+        disabled,
+    )
 }
 
 /// Pluck the typo'd token out of a clap error. clap's public API
