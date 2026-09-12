@@ -243,6 +243,19 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+
+    # GPU span categories: a span named `gpu_*` must be emitted under the `gpu`
+    # category. The trace-SQL GPU queries select `category GLOB 'gpu*'`, so a
+    # `gpu_*` span filed elsewhere is invisible to them rather than merely
+    # mislabelled -- nothing fails, the frame renders, and the flushed trace
+    # looks complete. macOS sat in that state while the Skia surfaces emitted
+    # the same three span names correctly, so only a source-level check covers
+    # both paths: driving the mac window host needs a window server, and a
+    # runtime assertion self-skips on every headless runner.
+    add_test(NAME trace-span-category-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/trace_span_category_lint.py")
+    add_test(NAME trace-span-category-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_span_category_lint.py")
     # macOS ObjC source lists: three hand-maintained lists (the in-tree target,
     # what the SDK installs, what a consumer recompiles per binary) must name the
     # same translation units, or the per-binary ObjC class suffix is dropped and

@@ -16,7 +16,29 @@
     "core/format/",
     "inspect/"
   ],
-  "non_a2t_product_producer_authorities": [],
+  "non_a2t_product_producer_authorities": [
+    {
+      "owner_package": "pulp-view-mac-window-host",
+      "introducing_revision": "ec16c42313a48c59a3ab2efc5d718e1d75c0f771",
+      "introducing_parent": "03d0480d9b640e982ef622067dd0b5628d4b7c15",
+      "introducing_subject": "fix(view): emit macOS window-host GPU spans under the gpu category",
+      "changed_paths": [
+        ".agents/skills/ci/SKILL.md",
+        ".github/workflows/tracing-build.yml",
+        "core/view/platform/mac/window_host_mac.mm",
+        "test/cmake/quality_tests.cmake",
+        "tools/scripts/test_trace_span_category_lint.py",
+        "tools/scripts/trace_span_category_lint.py"
+      ],
+      "added_producer_signatures": {
+        "core/view/platform/mac/window_host_mac.mm": [
+          "PULP_TRACE_SCOPE_NAMED(\"gpu\", \"gpu_acquire\");",
+          "PULP_TRACE_SCOPE_NAMED(\"gpu\", \"gpu_submit\");",
+          "PULP_TRACE_SCOPE_NAMED(\"gpu\", \"gpu_present\");"
+        ]
+      }
+    }
+  ],
   "scope_paths": [
     ".agents/skills/trace-analysis/SKILL.md",
     ".agents/skills/trace-analysis/references/hints_gpu.md",
