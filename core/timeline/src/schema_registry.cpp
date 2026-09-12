@@ -625,6 +625,10 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"expected", SchemaValueKind::Array},
                                {"replacement", SchemaValueKind::Array},
                                {"sequence_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_dynamics_lane", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Array},
+                               {"replacement", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String}}));
     schemas.push_back(
         builtin("pulp.timeline.command.set_groove", SchemaDomain::Command,
                 {{"expected", SchemaValueKind::Object, true, "pulp.timeline.groove_template"},

@@ -473,6 +473,16 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.set_dynamics_lane": Object.freeze({
+    schemaType: "pulp.timeline.command.set_dynamics_lane",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "replacement", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.set_groove": Object.freeze({
     schemaType: "pulp.timeline.command.set_groove",
     domain: "Command",
@@ -876,6 +886,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.set_clip_playback_properties",
   "pulp.timeline.command.set_clip_sequence_ref",
   "pulp.timeline.command.set_device_state",
+  "pulp.timeline.command.set_dynamics_lane",
   "pulp.timeline.command.set_groove",
   "pulp.timeline.command.set_meter_map",
   "pulp.timeline.command.set_note_events",

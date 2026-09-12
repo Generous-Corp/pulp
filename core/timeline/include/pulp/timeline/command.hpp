@@ -314,6 +314,17 @@ struct SetChordScaleLane {
     ChordScaleLane replacement;
 };
 
+/// Replaces a sequence's complete dynamics lane under an exact value gate.
+///
+/// Both lanes are non-optional because the model states no absence: a sequence
+/// that authors no intensity carries an empty lane, so `nullopt` would invent a
+/// second meaning for "states nothing yet" that no reader could distinguish.
+struct SetDynamicsLane {
+    ItemId sequence_id;
+    DynamicsLane expected;
+    DynamicsLane replacement;
+};
+
 /// Inserts a sequence-owned marker identity.
 struct InsertMarker {
     ItemId sequence_id;
@@ -523,7 +534,7 @@ using Command = std::variant<
     RemoveRegion, SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
     InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer, InsertTrack,
     RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents, InsertNotes, RemoveNotes, InsertDevice,
-    RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState>;
+    RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState, SetDynamicsLane>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {
