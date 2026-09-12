@@ -793,6 +793,12 @@ pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES ${_pulp_widget_bridge_test
 pulp_add_test_suite(pulp-test-widget-bridge-capabilities LIBRARIES ${_pulp_widget_bridge_test_libs})
 pulp_add_test_suite(pulp-test-widget-bridge-removal-lifetime
     LIBRARIES ${_pulp_widget_bridge_test_libs})
+# Widget bridge — child ordering. Every createX appends, so a widget that
+# reaches the bridge after its siblings needs insertChild to land where its
+# author put it; covers the reorder, the fail-closed cases, and the View-level
+# move that keeps the child attached instead of rebuilding it.
+pulp_add_test_suite(pulp-test-widget-bridge-child-order
+    LIBRARIES ${_pulp_widget_bridge_test_libs})
 # The View lifecycle contract at the bridge boundary: the retained ScrollView
 # upgrade and the ordinary reparent must fail closed rather than dereference a
 # null removal or strand a destroyed view in the non-owning registries.

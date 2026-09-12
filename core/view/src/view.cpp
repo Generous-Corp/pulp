@@ -857,6 +857,41 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
     invalidate_subtree_caches_up();
 }
 
+bool View::move_child_to_index(View* child, size_t index) {
+    if (!child) return false;
+    // Identity is address AND instance id, matching add_child / remove_child: a
+    // freed child's address can be reused by a replacement under this same
+    // parent, and moving that innocent replacement would be silent corruption.
+    const auto child_id = child->import_binding_instance_id();
+    auto it = std::find_if(children_.begin(), children_.end(),
+                           [child, child_id](const auto& candidate) {
+                               return candidate.get() == child &&
+                                      candidate->import_binding_instance_id() == child_id;
+                           });
+    if (it == children_.end()) return false;
+
+    const auto from = static_cast<size_t>(std::distance(children_.begin(), it));
+    const auto to = std::min(index, children_.size() - 1);
+    if (from == to) return true;
+    // Rotate rather than erase + insert so the other children keep their
+    // relative order, and so no unique_ptr is ever momentarily unowned.
+    if (from < to) {
+        std::rotate(children_.begin() + static_cast<std::ptrdiff_t>(from),
+                    children_.begin() + static_cast<std::ptrdiff_t>(from) + 1,
+                    children_.begin() + static_cast<std::ptrdiff_t>(to) + 1);
+    } else {
+        std::rotate(children_.begin() + static_cast<std::ptrdiff_t>(to),
+                    children_.begin() + static_cast<std::ptrdiff_t>(from),
+                    children_.begin() + static_cast<std::ptrdiff_t>(from) + 1);
+    }
+    // No lifecycle hook runs above, so nothing can re-enter and invalidate the
+    // vector mid-move. Publishing afterwards is what makes the next layout pass
+    // rebuild the Yoga tree in the new order and the next frame re-record the
+    // cached display list.
+    publish_structure_change();
+    return true;
+}
+
 std::unique_ptr<View> View::remove_child(View* child) {
     if (!child) return nullptr;
     // Identity is address AND instance id. The gesture, popup, focus, and

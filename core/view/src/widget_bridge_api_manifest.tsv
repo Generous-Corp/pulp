@@ -86,6 +86,7 @@ nativeSetPointerCapture	events	function	core/view/src/widget_bridge/event_api.cp
 nativeReleasePointerCapture	events	function	core/view/src/widget_bridge/event_api.cpp
 enableInspectClick	events	function	core/view/src/widget_bridge/event_api.cpp
 removeWidget	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
+insertChild	metadata	function	core/view/src/widget_bridge/metadata_api.cpp
 createRow	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createCol	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp
 createModal	widget_factory	function	core/view/src/widget_bridge/factory_api.cpp

@@ -120,6 +120,17 @@ public:
     /// always means "not ours anymore" — never "moved for you".
     std::unique_ptr<View> remove_child(View* child);
 
+    /// Moves an existing child to `index` in this view's child order — the one
+    /// order both layout and paint walk — and returns false when `child` is not
+    /// this view's child. An `index` past the last slot moves the child last.
+    ///
+    /// Ordering is the only thing that changes. The child keeps its parent, its
+    /// propagated hosts, and its focus / drag / popup state, so a reorder never
+    /// runs the attach and detach lifecycle that `remove_child()` followed by
+    /// `add_child()` would — that pair cancels an in-flight drag, closes an open
+    /// popup, and blurs a focused editor inside the moved subtree.
+    bool move_child_to_index(View* child, size_t index);
+
     /// Destroys `owned` at the first moment it is safe to do so.
     ///
     /// A hook may remove the very View whose callback is executing. Dropping
