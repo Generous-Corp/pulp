@@ -240,6 +240,12 @@ constexpr const char* kTextOnlyTextAlignCenter = R"(
 )";
 
 struct InkBox {
+    // Whether `render_to_rgba` produced a buffer. Distinct from `count`, and the
+    // distinction is the whole point: a build without a raw-RGBA capture path
+    // yields no pixels to inspect, which is not the same finding as a capture
+    // that came back with no white ink in it. Folding the two together reports
+    // an unbuilt capability as a layout failure.
+    bool captured = false;
     int count = 0;
     int min_x = std::numeric_limits<int>::max();
     int max_x = -1;
@@ -249,12 +255,15 @@ struct InkBox {
     float centre_y = -1.0f;
 };
 
+constexpr const char* kNoCapture = "raw-RGBA capture unavailable in this build";
+
 // White ink over the black label, in device pixels.
 InkBox measure_white_ink(Harness& h) {
     uint32_t px_w = 0, px_h = 0;
     const auto rgba = render_to_rgba(h.root, 200, 60, 2.0f, &px_w, &px_h);
     InkBox r;
     if (rgba.empty()) return r;
+    r.captured = true;
     for (uint32_t y = 0; y < px_h; ++y) {
         for (uint32_t x = 0; x < px_w; ++x) {
             const size_t i = (static_cast<size_t>(y) * px_w + x) * 4;
@@ -288,6 +297,7 @@ TEST_CASE("justify-content centres a container's own text on the main axis",
     REQUIRE(btn->bounds().width == 136.0f);
 
     auto r = measure_white_ink(h);
+    if (!r.captured) SKIP(kNoCapture);
     REQUIRE(r.count > 0);
     INFO("white ink x [" << r.min_x << ", " << r.max_x << "] centre_x="
          << r.centre_x << "; y [" << r.min_y << ", " << r.max_y
@@ -305,6 +315,7 @@ TEST_CASE("align-items centres a container's own text on the cross axis",
     REQUIRE(btn->bounds().height == 26.0f);
 
     auto r = measure_white_ink(h);
+    if (!r.captured) SKIP(kNoCapture);
     REQUIRE(r.count > 0);
     INFO("white ink y [" << r.min_y << ", " << r.max_y << "] centre_y="
          << r.centre_y << "; x [" << r.min_x << ", " << r.max_x << "]");
@@ -319,6 +330,7 @@ TEST_CASE("justify-content:flex-end packs a container's own text to the end",
     Harness h;
     h.run(kTextOnlyJustifyEnd);
     auto r = measure_white_ink(h);
+    if (!r.captured) SKIP(kNoCapture);
     REQUIRE(r.count > 0);
     INFO("white ink x [" << r.min_x << ", " << r.max_x << "]");
     // The label's trailing edge is device x 272.
@@ -337,6 +349,7 @@ TEST_CASE("a Label with no alignment keeps painting its text at the content orig
     CHECK_FALSE(btn->has_own_text_box());
 
     auto r = measure_white_ink(h);
+    if (!r.captured) SKIP(kNoCapture);
     REQUIRE(r.count > 0);
     INFO("white ink x [" << r.min_x << ", " << r.max_x << "] y [" << r.min_y
          << ", " << r.max_y << "]");
@@ -387,12 +400,18 @@ TEST_CASE("browser-captured line boxes keep their own alignment",
     line.start = 0;
     line.length = 4;  // "COPY"
     boxes.push_back(line);
-    btn->set_cached_line_boxes(
-        boxes, 136.0f,
-        pulp::canvas::resolved_face_identity(
-            btn->effective_font_family(),
-            static_cast<float>(btn->effective_font_weight()),
-            pulp::canvas::FontSlant::Normal));
+    // A cache is only installed when its basis face is verifiable, and a
+    // build with no font backend resolves every family to an empty identity.
+    // The scenario below is then unreachable rather than broken, so guard on
+    // the identity: a cache that stays empty with a face in hand is still a
+    // failure.
+    const auto basis_face = pulp::canvas::resolved_face_identity(
+        btn->effective_font_family(),
+        static_cast<float>(btn->effective_font_weight()),
+        pulp::canvas::FontSlant::Normal);
+    if (basis_face.empty()) SKIP("no resolvable font face in this build");
+
+    btn->set_cached_line_boxes(boxes, 136.0f, basis_face);
     REQUIRE_FALSE(btn->cached_line_boxes().empty());
 
     h.root.layout_children();
@@ -405,6 +424,7 @@ TEST_CASE("text-align still centres a container's own text",
     Harness h;
     h.run(kTextOnlyTextAlignCenter);
     auto r = measure_white_ink(h);
+    if (!r.captured) SKIP(kNoCapture);
     REQUIRE(r.count > 0);
     INFO("white ink x [" << r.min_x << ", " << r.max_x << "] centre_x="
          << r.centre_x);
@@ -419,6 +439,7 @@ TEST_CASE("justify-content centres an element child, not only bare text",
     auto* txt = h.bridge.widget("txt");
     REQUIRE(txt != nullptr);
     auto r = measure_white_ink(h);
+    if (!r.captured) SKIP(kNoCapture);
     REQUIRE(r.count > 0);
     INFO("child bounds x=" << txt->bounds().x << " w=" << txt->bounds().width
          << "; white ink x [" << r.min_x << ", " << r.max_x << "] centre_x="

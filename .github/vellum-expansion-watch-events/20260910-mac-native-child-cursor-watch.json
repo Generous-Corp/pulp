@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260910-mac-native-child-cursor-watch",
+  "created_at": "2026-09-10T00:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": ["render-assets-and-backends"],
+  "rationale": "A macOS tracking area is not occluded by subviews, so a host that attaches a native child view still receives mouseMoved for every pointer position over that child. The host hit-tested its own root and published the arrow cursor unconditionally, wiping the child's cursor on every button-less move -- which is why a pointer only appeared to pick up the right icon after a mouse down, since the drag path publishes the captured cursor and no mouseMoved arrives mid-drag. The fix declines to publish when the point lies inside an attached native child, leaving the cursor owned by whoever actually draws there; the drag and no-child paths are unchanged. render-assets-and-backends is crossed by core/view only -- the three mac host translation units plus an added mac platform test that asserts the cursor changes on a stationary hover rather than only on mousedown. No renderer, backend, font, asset or Skia pin changes; no fixture, snapshot or threshold moves. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": ["pulp-test-mac-native-child-cursor", "vellum-expansion-watch"],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -67,6 +67,21 @@ priority and can strand usable reserved capacity.
 M1 is a deliberate delayed fallback and waits 10 minutes before taking Pulp
 work; that affects latency, not its ability to serve either required class.
 
+**One gate name means one configuration.** The `macos` job publishes the
+required context on pull requests, Shipyard `workflow_dispatch` runs, and merge
+groups alike, so it assembles its CMake arguments once and no `github.event_name`
+branch may append to them. `workflow_dispatch` used to add
+`-DPULP_ENABLE_GPU=OFF`, which is how a *weaker* build came to post under the
+required gate's name on Shipyard's own PR-validation path: `PULP_TEXT_SHAPING`
+follows `PULP_ENABLE_GPU`, Skia goes with it, `render_to_rgba` returns an empty
+buffer and `resolved_face_identity` returns an empty string, so capture- and
+font-dependent view tests fail for the configuration rather than for the diff.
+The tell is the test count: a GPU-off `macos` run reports roughly 19,859 tests
+where a `pull_request` run reports about 20,991. When that gate is red and the
+diff cannot reach the named tests, compare the totals before debugging the diff.
+`tools/scripts/test_workflow_build_dirs.py` pins the single assembly line and
+asserts no `cmake_args+=` append exists.
+
 JIT runners exist in GitHub only while claiming a job, so an empty runner list
 is healthy-idle as well as dead. Conversely, an organization-visible idle
 runner is not proof that Pulp can assign it. Prove service with queue age,
@@ -503,6 +518,52 @@ Four rules before you add or remove the flag:
 Deliberately examples-ON, do not "fix": `examples-validation.yml` (its entire
 purpose) and `nightly-full-build.yml` (whose configure step says so in a
 comment). Shipyard's `[validation.default]` likewise keeps them ON on purpose.
+
+## An opt-in CMake flag hides tests more completely than any label
+
+A `LABELS "slow"` exclusion at least leaves the test visible in a ctest listing.
+A test registered inside `if(PULP_ENABLE_<FEATURE>)` on a lane that never sets
+the flag is not skipped and not excluded — it is never registered, so it appears
+in no output, no label names it, and no count changes when it disappears.
+
+`PULP_ENABLE_SCENE3D` defaults OFF (`CMakeLists.txt`), and for a long time
+nothing in `.github/workflows/` or `.shipyard/config.toml` set it. The whole
+Renderer3D and scene3d surface — 205 tests — ran on no lane at all while the
+required `macos` gate stayed green. `PULP_ENABLE_GPU` defaults ON, which is why
+the neighbouring GPU tests never showed the same hole.
+
+The check is one line, and it needs its control:
+
+```bash
+grep -rn "PULP_ENABLE_SCENE3D" .github/workflows/ .shipyard/config.toml   # 0
+grep -rc "PULP_ENABLE_GPU" .github/workflows/build.yml                    # 2
+```
+
+Without the second line a zero is ambiguous between "not wired" and "bad grep".
+
+`.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
+advisory, `macos-15`, SCENE3D ON, not on `merge_group`. Three things about it
+generalize to any lane you add:
+
+- **`ctest -R` is case-sensitive** and `grep -i` is not, so a regex checked with
+  grep can select far less than you think. `-R 'renderer3d|scene3d'` takes 144
+  tests; `-R '[Rr]enderer3[Dd]|[Ss]cene3[Dd]'` takes 205. The short form exits 0.
+- **An empty selection exits 0.** Pass `--no-tests=error`, *and* assert a floor
+  on the count from `ctest -N`: the flag catches a selection that matched
+  nothing, the floor catches one that merely shrank.
+- **A hosted runner has no representative GPU**, so the lane is only as honest
+  as the tests' capability guards. A guard that calls `SUCCEED()` on absence
+  reports a pass for a case that never ran; `SKIP()` reports Skipped, because
+  `PulpCatch.cmake` sets `SKIP_RETURN_CODE 4` for any suite that does not opt
+  into `SKIP_IS_FAILURE`. Check that before trusting a new lane's green.
+
+**The private `planning/` submodule is unavailable to every hosted lane by
+construction** — `submodules: false` appears throughout `.github/workflows/` and
+`submodules: true|recursive` appears nowhere. A test that reads from it can only
+be excluded, never fixed, on such a lane. Check the *transitive* dependency: of
+the two `scene3d-native-slice-handoff` tests, only one names the plan file in
+its ctest arguments; the other reaches it through a verifier that hardcodes the
+path, so excluding the obvious one alone leaves a permanent red.
 
 ## A test that "fails" on the required gate may only have run out of clock
 
@@ -8330,3 +8391,31 @@ assertion. Move the claim into the test as something invariant to host speed —
 a ratio between two same-run measurements at different input sizes, or a count
 of the work actually done — and drop the env var. Prove it by repeating the
 job's own step under load and reporting the pass count, not by one green run.
+
+## A contract test that is not a ctest has exactly one lane, and that lane is a `paths:` filter
+
+`tools/scripts/test_ci_throughput_workflows.py` polices `test/cmake/*.cmake`: it
+asserts every `PROCESSORS 8` registration is classified into one of the known
+weighted-suite sets. It is **not** registered as a ctest, so the required `macos`
+gate never runs it. Its only lane is `.github/workflows/workflow-lint.yml`, which
+is `paths:`-filtered — and that filter listed 188 `tools/scripts` entries and zero
+`test/cmake` ones. So the one contract policing `test/cmake` could not run when
+`test/cmake` changed, and stayed red on `main` through every PR that added a
+suite. `test/cmake/**` is now in both the `pull_request:` and `push:` blocks.
+
+The general shape: when a check lives only in a path-filtered workflow, its
+filter must cover **what it reads**, not only where it lives. Grep the filter for
+the directory the test asserts over before assuming it is enforced. A check whose
+inputs are outside its own trigger is indistinguishable from a check that passes.
+
+Two invocation traps when reproducing one of these locally:
+
+- **Run a `tools/scripts` unittest module from inside `tools/scripts`.** Those
+  modules import their siblings bare (`import verify_example_validation_inventory`),
+  so from the repo root you get `ModuleNotFoundError` naming a module that plainly
+  exists — which reads as a broken checkout rather than a wrong cwd.
+- **The class name is not the file name.** `test_ci_throughput_workflows.py` holds
+  `CTestIsolationContractTests`; guessing `TestCiThroughputWorkflows` fails with
+  `AttributeError: module ... has no attribute`. Select by test name instead:
+  `python3 -B -m unittest test_ci_throughput_workflows -k <test_name>`. Use `-B`
+  so a stale `.pyc` cannot survive a break-confirm.
