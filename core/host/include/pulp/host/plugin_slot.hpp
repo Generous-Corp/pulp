@@ -36,10 +36,38 @@ struct ParamFlags {
     bool read_only   = false;  // Plugin reports it; host must not write.
     bool hidden      = false;  // Don't show in default UIs (developer/internal).
     bool stepped     = false;  // Discrete int-valued (max_value - min_value + 1 steps).
-    bool is_bypass   = false;  // Plugin's bypass param (special-cased by host).
+    bool is_bypass   = false;  // This parameter IS the plugin's bypass control.
+                               // Only a format whose bypass lives in the
+                               // parameter list can set it — see BypassSurface
+                               // for the formats that carry bypass elsewhere.
     bool rampable    = true;   // Plugin handles per-block linear interpolation.
     bool modulatable = true;   // Plugin accepts per-voice modulation events
                                // (CLAP MOD, etc.) — distinct from automation.
+};
+
+// Where a loaded plugin keeps its own bypass control.
+//
+// `ParamFlags::is_bypass` can only describe a bypass that IS a parameter.
+// VST3 (`kIsBypass`) and CLAP (`CLAP_PARAM_IS_BYPASS`) both are, so for those
+// formats the flagged `parameters()` entry is the whole story. AU keeps bypass
+// off the parameter list entirely, as the unit property
+// `kAudioUnitProperty_BypassEffect`; `AudioUnitParameterOptions` carries no
+// bypass bit at all, so every AU parameter reports `is_bypass == false` and the
+// flag alone cannot answer "does this plugin have a bypass". This enum answers
+// that for every format, so a caller never has to guess from parameter names.
+//
+// Guessing is not a theoretical hazard: Apple's stock AUNBandEQ publishes eight
+// parameters named exactly "Bypass", boolean over [0, 1] — per-band controls,
+// none of them the unit bypass — so a name/range heuristic reports eight bypass
+// parameters for a plugin that has none.
+enum class BypassSurface {
+    none,           // No bypass control is exposed. PluginSlot::set_bypass() is
+                    // emulated entirely host-side.
+    parameter,      // A parameter carries bypass: the `parameters()` entry whose
+                    // `ParamFlags::is_bypass` is set.
+    unit_property,  // A plugin-wide control outside the parameter list carries
+                    // bypass (AU `kAudioUnitProperty_BypassEffect`). No parameter
+                    // reports `is_bypass`, and none stands in for it.
 };
 
 struct HostParamInfo {
@@ -95,9 +123,20 @@ public:
     virtual float get_parameter(uint32_t id) const = 0;
     virtual void set_parameter(uint32_t id, float normalized_value) = 0;
 
-    // Bypass
+    // Bypass.
+    //
+    // `set_bypass()` is a HOST-side control and its output guarantee is the
+    // same for every format: while bypassed the slot passes input through
+    // unchanged, whether or not the plugin has a bypass of its own. Loaders
+    // whose plugin exposes a native bypass also mirror the state onto it, so a
+    // hosted plugin's own bypass state (and its editor) tracks the host's.
+    // Control thread, not the audio thread: mirroring reaches the plugin
+    // through its non-realtime property/parameter API.
     virtual void set_bypass(bool bypassed) = 0;
     virtual bool is_bypassed() const = 0;
+
+    // Where this plugin keeps its own bypass control is reported by
+    // bypass_surface(), declared at the end of the class.
 
     // State (preset save/load)
     virtual std::vector<uint8_t> save_state() const = 0;
@@ -302,6 +341,11 @@ public:
     virtual bool set_hosted_editor_size(uint32_t& /*width*/, uint32_t& /*height*/) {
         return false;
     }
+
+    /// Where this plugin keeps its own bypass control. A loader that cannot tell
+    /// reports `none` rather than guessing; a wrapper slot reports what it wraps.
+    /// Appended last to preserve the existing PluginSlot virtual ordering.
+    virtual BypassSurface bypass_surface() const { return BypassSurface::none; }
 };
 
 } // namespace pulp::host

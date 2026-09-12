@@ -463,6 +463,16 @@ public:
         return bypassed_.load(std::memory_order_relaxed);
     }
 
+    // VST3 and CLAP both carry bypass AS a parameter, so the flagged
+    // `parameters()` entry is the whole answer and there is nothing else to
+    // probe.
+    BypassSurface bypass_surface() const override {
+        for (const auto& p : params_) {
+            if (p.flags.is_bypass) return BypassSurface::parameter;
+        }
+        return BypassSurface::none;
+    }
+
     // True when the plugin exposes a *separate* edit controller (a distinct
     // object from the component). Teardown, state serialization, and
     // connection-point wiring all key off this.

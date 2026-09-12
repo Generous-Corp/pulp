@@ -5551,6 +5551,103 @@
           "rationale": "A dynamics-lane mutation is timeline document state, not a design-time algorithm capability an agent manifest advertises, which is the same classification the released p0-15a-dynamics-lane row reached for the lane itself."
         }
       }
+    },
+    {
+      "id": "au-loader-bypass-surface",
+      "title": "Typed bypass-surface report for a hosted plugin, including AU's unit property",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "a4cecc6a-3d30-4b5c-8752-4ee09d1af1f8",
+      "owned_paths": [
+        ".agents/skills/hosting/SKILL.md",
+        "core/host/include/pulp/host/crossfade_plugin_slot.hpp",
+        "core/host/include/pulp/host/plugin_slot.hpp",
+        "core/host/src/plugin_slot_au.mm",
+        "core/host/src/plugin_slot_clap.cpp",
+        "core/host/src/plugin_slot_vst3.cpp",
+        "core/host/src/signal_graph_prepared_topology_edit.cpp",
+        "test/test_plugin_slot_au.mm",
+        "docs/status/sequencer-exposure.json"
+      ],
+      "evidence": [
+        {
+          "path": "core/host/include/pulp/host/plugin_slot.hpp",
+          "needles": [
+            "enum class BypassSurface",
+            "unit_property,",
+            "virtual BypassSurface bypass_surface() const"
+          ]
+        },
+        {
+          "path": "core/host/src/plugin_slot_au.mm",
+          "needles": [
+            "bool supports_bypass_property(AudioUnit au)",
+            "kAudioUnitProperty_BypassEffect",
+            "BypassSurface::unit_property"
+          ]
+        },
+        {
+          "path": "test/test_plugin_slot_au.mm",
+          "needles": [
+            "AU host slot reports bypass as a unit property and drives it",
+            "AU host slot bypass passes input through unchanged"
+          ]
+        },
+        {
+          "path": ".agents/skills/hosting/SKILL.md",
+          "needles": [
+            "Bypass is a parameter in VST3/CLAP and a unit property in AU",
+            "PluginSlot::bypass_surface()"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "BypassSurface and PluginSlot::bypass_surface() are public installed hosting headers, so a host outside Pulp can ask a loaded plugin where it keeps its bypass instead of inferring it from parameter names. That inference is what the enum exists to prevent: AU keeps bypass in the unit property kAudioUnitProperty_BypassEffect and its parameter descriptors carry no bypass bit, so every AU parameter reports is_bypass == false while Apple's stock AUNBandEQ publishes eight parameters named exactly 'Bypass' that bypass nothing.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/host/include/pulp/host/plugin_slot.hpp",
+              "needles": [
+                "enum class BypassSurface",
+                "virtual BypassSurface bypass_surface() const",
+                "unit_property,"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_plugin_slot_au.mm",
+              "needles": [
+                "host::BypassSurface::unit_property",
+                "named_bypass > 0"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "This reports how a hosted plugin carries its own bypass control. No `pulp seq` operation addresses a hosted plugin's bypass, and this slice adds no timeline verb."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP operation or schema entry is added or changed; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The host-facing control is unchanged: PluginSlot::set_bypass() already existed and keeps the same host-side pass-through guarantee. This slice reports where the plugin's own bypass lives and mirrors the host's state onto it, adding no new live control for a product surface to project."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is advertised. The slice corrects metadata a hosting capability already claimed rather than adding an authorable one."
+        }
+      }
     }
   ],
   "tombstones": []

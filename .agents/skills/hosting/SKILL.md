@@ -1617,6 +1617,46 @@ sample-at-block-start so the offset-(N-1) value wins.
 MixMode::Replace is the default; second Replace edge to the same
 (node, param) is rejected. MixMode::Add sums then clamps.
 
+## Bypass is a parameter in VST3/CLAP and a unit property in AU
+
+`ParamFlags::is_bypass` can only describe a bypass that IS a parameter. VST3
+(`kIsBypass`) and CLAP (`CLAP_PARAM_IS_BYPASS`) both are, so the flagged
+`parameters()` entry is the whole answer there. AU is not: bypass is
+`kAudioUnitProperty_BypassEffect` (Global scope, `UInt32`, read/write), and
+`AudioUnitParameterOptions` has no bypass bit anywhere in it — so every AU
+parameter reports `is_bypass == false`, and reading the flag alone to decide
+whether an AU has a bypass always answers no.
+
+Ask `PluginSlot::bypass_surface()` instead. It returns `BypassSurface::parameter`
+(look for the flagged parameter), `unit_property` (AU: drive `set_bypass()`, which
+mirrors onto the property), or `none`.
+
+**Do not recover the flag from a parameter's name and range.** It reads like the
+obvious fix — a boolean parameter named "Bypass" is exactly the shape
+`state::is_bypass_param` falls back to plugin-side — and it is wrong on a stock
+macOS AU. Apple's AUNBandEQ publishes **eight** parameters named exactly
+"Bypass", boolean over [0, 1], one per band; none of them bypasses the unit, and
+the unit's real bypass is the property. A name match therefore reports eight
+bypass parameters for a plugin that has none.
+
+Two traps when probing the property:
+
+- **`AudioUnitGetPropertyInfo` leaves its out-params untouched when it fails.**
+  A unit that does not implement bypass answers `kAudioUnitErr_InvalidProperty`
+  (-10879) and `writable` keeps whatever was in the variable — units in the wild
+  have been observed leaving a non-boolean `186` behind next to a 7-byte `size`.
+  Reading `writable` without first checking the status invents a bypass.
+  Require `st == noErr`, `size == sizeof(UInt32)`, and `writable` together.
+- **Support splits by component type, not by vendor.** `aufx` and `aumf` get the
+  property from `AUEffectBase`; most `aumu` instruments do not implement it at
+  all (a few do). Probe the instance; do not infer from the type.
+
+`set_bypass()` stays a host-side control with the same output guarantee for every
+format — the slot passes input through while bypassed — and additionally mirrors
+onto the AU property so a hosted plugin is not left believing it is active while
+the host wires around it. The pass-through is still performed host-side, so the
+guarantee never depends on a plugin honoring the property it accepted.
+
 ## Review-found host graph invariants
 
 Keep these host graph invariants covered by tests:
