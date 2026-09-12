@@ -383,24 +383,15 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
   }
 }
 
-struct PulpPluginContextPressResult {
-    bool handled = false;
-    bool overlay_dismissed = false;
-};
-
-PulpPluginContextPressResult pulp_plugin_context_press(
+// Thin null-guard over the portable verb. The routing decision itself —
+// including honoring OverlayPressTarget::consume_press, so a right-click that
+// dismisses a consuming popover cannot ALSO open a context menu on the control
+// underneath — lives in pulp::view::route_context_press, where it is shared and
+// headlessly testable (see test_overlay_routing.cpp).
+pulp::view::ContextPressResult pulp_plugin_context_press(
     pulp::view::View* root, pulp::view::Point point) {
     if (!root) return {};
-    const auto overlay_press = pulp::view::route_press_to_active_overlay(
-        *root, point);
-    auto* target = overlay_press.routing ==
-                           pulp::view::OverlayPressRouting::routed
-                       ? overlay_press.target
-                       : root->hit_test(point);
-    return {
-        pulp::view::dispatch_context_menu(*root, target, point),
-        overlay_press.routing == pulp::view::OverlayPressRouting::dismissed,
-    };
+    return pulp::view::route_context_press(*root, point);
 }
 
 // `event` supplies the modifier flags and click count the drag carries. They
