@@ -375,6 +375,19 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_cmake_manifest_parse.py")
     set_tests_properties(cmake-manifest-parse PROPERTIES TIMEOUT 120)
 
+    # One command, two TIMEOUT budgets. Registering a command twice is fine and
+    # deliberate here -- a second catch_discover_tests() re-registers a tagged
+    # subset under a prefix so a lane can select it by label, and 32 pairs do
+    # that -- but both registrations then run, and the TIGHTER budget is the one
+    # that decides whether the required gate is green. A `foreach` with
+    # string(REPLACE ...) assembles the name from parts, so the duplicate that
+    # cost this is invisible to a grep for the name being added. Reads an
+    # already-configured build, so it sees names no literal search can find.
+    add_test(NAME ctest-duplicate-registration COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_duplicate_registration.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(ctest-duplicate-registration PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test

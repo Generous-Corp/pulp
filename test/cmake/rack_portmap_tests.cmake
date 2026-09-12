@@ -47,7 +47,6 @@ if(Python3_Interpreter_FOUND)
             acid-runtime-gate
             capability-lessons
             capability-verify
-            generate-safety
             knowledge-admission
             recover-subset-font-pdf
             corpus-audit
