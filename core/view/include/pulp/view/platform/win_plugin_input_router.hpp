@@ -30,6 +30,7 @@
 // The rule for anything added here: if it needs `<windows.h>`, it belongs in the
 // host or behind an `InputRouterHost` method — not in this file.
 
+#include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/script_event_dispatch.hpp>
 #include <pulp/view/platform/win_pointer_input.hpp>
@@ -374,6 +375,20 @@ public:
 
     bool on_key(KeyCode key, std::uint16_t modifiers, bool is_down,
                 bool is_repeat) {
+        // Escape first, before the focus gate. A plugin editor returns the
+        // keyboard to the DAW whenever nothing in its tree holds focus — the
+        // ordinary state while a `<View overlay>` popover is open — so an
+        // Escape path placed after the early-out below can never run, and such
+        // a popover had no keyboard dismissal inside a DAW at all. The
+        // ordering (modal, open ComboBox dropdown, generalized overlay) is the
+        // shared policy's, not this host's.
+        if (is_down && key == KeyCode::escape &&
+            route_escape_to_active_overlay(host_.input_root(), modifiers,
+                                           is_repeat) !=
+                OverlayEscapeResult::none) {
+            host_.input_request_repaint();
+            return true;
+        }
         auto* focused = focused_input_under_root(host_.input_root());
         if (!focused) return false;
         if (key == KeyCode::unknown) return false;

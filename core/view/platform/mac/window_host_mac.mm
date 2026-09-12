@@ -6,6 +6,7 @@
 #include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/hover_cursor.hpp>
 #include <pulp/view/pointer_coalescer.hpp>
+#include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/widgets.hpp>
@@ -479,80 +480,52 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
             return;
         }
 
-        // Generalized overlay-click routing for React popovers.
-        // Any View that called `claim_overlay()` (e.g. via @pulp/react's
-        // `<View overlay>` JSX prop) is checked AFTER the ComboBox path
-        // (which stays exact-as-was per regression test in
-        // test_combo_dropdown.cpp [issue-overlay]) and BEFORE the regular
-        // tree hit_test. If the click falls inside the overlay's window
-        // rect we route it directly there so absolutely-positioned popover
-        // children get the click instead of whatever sibling/ancestor view
-        // happens to occupy that pixel.
-        if (auto* overlay = pulp::view::View::active_overlay_) {
-            if (view_is_in_tree(overlay, self.rootView) &&
-                overlay->overlay_contains({pt.x, pt.y})) {
-                // Hit-test inside the overlay subtree so nested buttons /
-                // labels still receive the click.
-                //
-                // Only dispatch when
-                // hit_test returns a real view. If hit_test returns
-                // nullptr, the overlay (or some ancestor in its
-                // subtree) failed the visible / enabled / hit_testable
-                // / pointer_events check; force-dispatching to the
-                // overlay anyway would bypass those guards. Fall
-                // through to the standard hit_test below instead.
-                auto local_to_overlay = to_local(pt, overlay, self.rootView);
-                if (auto* sub = overlay->hit_test(local_to_overlay)) {
-                    // When the
-                    // overlay handles a click, the standard ComboBox
-                    // outside-click notification at the bottom of
-                    // mouseDown: is bypassed via the early return
-                    // below. Run it here so an open ComboBox dropdown
-                    // still closes when the user clicks on a separate
-                    // active overlay.
-                    auto* dragTarget = prepareDragTarget(sub);
-                    if (!dragTarget || !self.rootView) return;
+        // Generalized overlay-click routing for React popovers, decided by
+        // the one shared policy in pulp::view::route_press_to_active_overlay:
+        // after the ComboBox path (which stays exact-as-was per the regression
+        // in test_combo_dropdown.cpp) and before the regular tree hit_test.
+        //
+        // This host used to hand-roll the decision against the process-global
+        // `View::active_overlay_` shim mirror, which reflects the most recent
+        // claim ANYWHERE in the process. With two windows open, a press in one
+        // therefore dismissed the other's popover. The shared verb reads this
+        // root's own interaction slot instead.
+        {
+            const auto overlay_press =
+                pulp::view::route_press_to_active_overlay(*self.rootView, pt);
+            if (overlay_press.routing ==
+                pulp::view::OverlayPressRouting::routed) {
+                // When the overlay handles a click, the standard ComboBox
+                // outside-click notification at the bottom of mouseDown: is
+                // bypassed via the early return below. Run it here so an open
+                // ComboBox dropdown still closes when the user clicks on a
+                // separate active overlay.
+                auto* dragTarget = prepareDragTarget(overlay_press.target);
+                if (!dragTarget || !self.rootView) return;
 
-                    // Same portable delivery as the normal path, but with
-                    // bubble=false: the overlay-click path has historically NOT
-                    // bubbled pointerdown to ancestors (only modern press +
-                    // legacy on_mouse_down reach the overlay subtree). Preserved
-                    // exactly — unifying the bubble here is a separate, flagged
-                    // decision, not part of this behavior-preserving extraction.
-                    if (!pulp::view::deliver_mouse_down(
-                            *self.rootView, dragTarget, pt,
-                            modifiers_from_ns_flags(event.modifierFlags),
-                            static_cast<int>(event.clickCount), /*bubble=*/false)) {
-                        _dragTargetCapture.reset();
-                    }
-                    [self setNeedsDisplay:YES];
-                    return;
-                }
-                // hit_test returned null — the overlay's guards rejected
-                // the click. Don't dispatch and don't release_overlay
-                // (the overlay is still mounted, just not currently
-                // interactive at this position). Fall through to the
-                // standard hit_test path below.
-            } else {
-                // Click landed outside the overlay — auto-release so the
-                // overlay's "dismiss on outside click" semantics work without
-                // every JSX caller needing a global click listener. The next
-                // mount cycle will re-claim if the popover is still open.
-                //
-                // Go through dismiss_active_overlay() (not the
-                // bare release_overlay()) so React state can flip
-                // setOpen(false) via on_overlay_dismissed. Falls through to
-                // Some overlays deliberately suppress the initiating pointer
-                // sequence so dismissing a popup cannot also mutate its
-                // underlay. Others preserve the historical click-through.
-                const bool consumeOutsideClick =
-                    overlay->overlay_consumes_outside_click();
-                overlay->dismiss_claimed_overlay();
-                if (consumeOutsideClick) {
+                // Same portable delivery as the normal path, but with
+                // bubble=false: the overlay-click path has historically NOT
+                // bubbled pointerdown to ancestors (only modern press + legacy
+                // on_mouse_down reach the overlay subtree). Preserved exactly —
+                // unifying the bubble here is a separate, flagged decision.
+                if (!pulp::view::deliver_mouse_down(
+                        *self.rootView, dragTarget, pt,
+                        modifiers_from_ns_flags(event.modifierFlags),
+                        static_cast<int>(event.clickCount), /*bubble=*/false)) {
                     _dragTargetCapture.reset();
-                    [self setNeedsDisplay:YES];
-                    return;
                 }
+                [self setNeedsDisplay:YES];
+                return;
+            }
+            // Some overlays deliberately suppress the initiating pointer
+            // sequence so dismissing a popup cannot also mutate its underlay.
+            // Others preserve the historical click-through, and a
+            // not_hittable result leaves the overlay mounted and falls through
+            // to the standard hit_test below.
+            if (overlay_press.consume_press) {
+                _dragTargetCapture.reset();
+                [self setNeedsDisplay:YES];
+                return;
             }
         }
 
@@ -1105,49 +1078,15 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
                                                        /*is_down=*/true);
 
         if (key == pulp::view::KeyCode::escape && self.rootView) {
-            if (auto* modal = find_topmost_modal(self.rootView)) {
-                pulp::view::KeyEvent ke;
-                ke.key = key;
-                ke.modifiers = mods;
-                ke.is_down = true;
-                ke.is_repeat = event.isARepeat;
-                if (modal->on_key_event(ke)) {
-                    [self startAnimationTimerIfNeeded];
-                    [self setNeedsDisplay:YES];
-                    return;
-                }
-            }
-            // Host-level ESC fallback for an open ComboBox dropdown
-            // whose focus has been stolen by a sibling JS-driven element
-            // (common pattern: React mounts a popover next to the combo,
-            // grabs focus inside it, but the user hits ESC expecting the
-            // dropdown they can still see to close). The ComboBox's own
-            // on_key_event handler only fires when ComboBox owns focus,
-            // so a stolen-focus case wedges the dropdown open with no
-            // keyboard escape route. Close at host level the same way
-            // active_overlay_ does below.
-            if (self.rootView &&
-                pulp::view::ComboBox::active_popup_in(*self.rootView)) {
-                pulp::view::ComboBox::close_active_popup(*self.rootView);
+            // Modal, then open ComboBox dropdown, then the generalized overlay
+            // slot — the whole ordering lives in the shared policy so every
+            // host dismisses the same things in the same order.
+            if (pulp::view::route_escape_to_active_overlay(
+                    *self.rootView, mods, event.isARepeat) !=
+                pulp::view::OverlayEscapeResult::none) {
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
                 return;
-            }
-            // Generic active_overlay_ ESC dismissal. ModalOverlay,
-            // ComboBox, and CallOutBox already have their own ESC handlers
-            // (ComboBox/CallOutBox sit on the focused view and consume their
-            // own KeyCode::escape; modals are handled above). The generic
-            // `<View overlay>` path has no widget-specific ESC owner — wire
-            // it here so React popovers built from active_overlay_ close on
-            // ESC like every other popover surface.
-            if (self.rootView) {
-                auto* overlay = self.rootView->interaction().active_overlay;
-                if (overlay) {
-                    overlay->dismiss_claimed_overlay();
-                    [self startAnimationTimerIfNeeded];
-                    [self setNeedsDisplay:YES];
-                    return;
-                }
             }
         }
 

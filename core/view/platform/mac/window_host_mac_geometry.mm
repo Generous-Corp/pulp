@@ -156,17 +156,6 @@ void request_app_close(NSWindow* window) {
     }
 }
 
-pulp::view::ModalOverlay* find_topmost_modal(pulp::view::View* root) {
-    if (!root || !root->visible()) return nullptr;
-
-    for (size_t i = root->child_count(); i > 0; --i) {
-        if (auto* modal = find_topmost_modal(root->child_at(i - 1)))
-            return modal;
-    }
-
-    return dynamic_cast<pulp::view::ModalOverlay*>(root);
-}
-
 uint16_t modifiers_from_ns_flags(NSEventModifierFlags flags) {
     uint16_t m = 0;
     if (flags & NSEventModifierFlagShift)   m |= pulp::view::kModShift;

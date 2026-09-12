@@ -20,6 +20,7 @@
 #include <pulp/view/platform/ns_role_mapping.hpp>
 #include <pulp/view/accessibility.hpp>
 #include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
+#include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/pointer_dispatch.hpp>  // dispatch_context_menu (no-Skia builds too)
 #import <Cocoa/Cocoa.h>
 // CoreVideo is used unconditionally now: the CPU (CoreGraphics, no-Skia)
@@ -605,6 +606,21 @@ static bool pulp_key_input_focused_under_root(pulp::view::View* root) {
            (fv->accepts_text_input() || fv->accepts_navigation_input());
 }
 
+// Whether this editor should hold the DAW's keyboard right now.
+//
+// Focus is one reason; an open dismissible overlay is the other. A modal, an
+// open dropdown, or a claimed `<View overlay>` popover is an active bounded
+// interaction that owns Escape — and with nothing focused the editor is not
+// first responder, so without this the Escape that closes it never arrives and
+// the popover can only be dismissed with the mouse. The borrow is exactly as
+// long as the overlay is open: -keyDown: re-syncs afterwards, so dismissing it
+// hands the keyboard straight back. Keys the editor does not consume are
+// forwarded to the host, so transport keys keep working meanwhile.
+static bool pulp_editor_should_hold_keyboard(pulp::view::View* root) {
+    if (pulp_key_input_focused_under_root(root)) return true;
+    return root != nullptr && pulp::view::root_has_dismissible_overlay(*root);
+}
+
 static bool pulp_is_navigation_key(pulp::view::KeyCode key,
                                    std::uint16_t modifiers) {
     using K = pulp::view::KeyCode;
@@ -629,13 +645,32 @@ bool pulp_plugin_event_has_private_use_function_character(NSEvent* event) {
 bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) {
   try {
     if (!root) return false;
+    // Escape first, before any focus gate. A plugin editor hands the keyboard
+    // back to the DAW whenever nothing in its tree holds focus — which is the
+    // ordinary state while a `<View overlay>` popover is open — so an Escape
+    // path placed after the early-out below can never run, and such a popover
+    // had no keyboard dismissal inside a DAW at all. The ordering (modal, open
+    // ComboBox dropdown, generalized overlay) is the shared policy's, not this
+    // host's.
+    if (pulp::view::mac_geometry::key_code_from_ns(event.keyCode) ==
+        pulp::view::KeyCode::escape) {
+        if (pulp::view::route_escape_to_active_overlay(
+                *root,
+                pulp::view::mac_geometry::modifiers_from_ns_flags(
+                    event.modifierFlags),
+                event.isARepeat) != pulp::view::OverlayEscapeResult::none) {
+            root->request_repaint();
+            return true;
+        }
+    }
     // Only dispatch to a focused widget that belongs to THIS editor's tree —
     // never another open plugin editor's focused field (focused_input_ is
     // process-global).
     auto* fv = pulp_focus_under_root(root);
     // Only a FOCUSED text field consumes keys in a plugin host. With nothing
-    // focused the editor isn't first responder (acceptsFirstResponder is gated on a
-    // focused field), so the key never reaches here — it stays with the DAW for
+    // focused and no dismissible overlay open the editor isn't first responder
+    // (see pulp_editor_should_hold_keyboard), so the key never reaches here —
+    // it stays with the DAW for
     // transport + Musical Typing. A plugin must NOT route the bare computer keyboard
     // into its own musical typing; that fights the host. (The standalone drives its
     // own QWERTY musical typing through a different window host.)
@@ -774,7 +809,7 @@ static void pulp_plugin_sync_key_focus(NSView* host,
                                        NSResponder*& prior) {
     NSWindow* win = host.window;
     if (!win) return;
-    const bool wants = pulp_key_input_focused_under_root(root);
+    const bool wants = pulp_editor_should_hold_keyboard(root);
     if (wants && win.firstResponder != host) {
         prior = win.firstResponder;
         [win makeFirstResponder:host];
@@ -980,7 +1015,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 - (BOOL)acceptsFirstResponder {
     // Borrow the keyboard only for text entry or an explicitly active bounded
     // navigation interaction. Mere focusability never takes it from the DAW.
-    return pulp_key_input_focused_under_root(self.rootView);
+    return pulp_editor_should_hold_keyboard(self.rootView);
 }
 - (void)syncKeyFocus {
     pulp_plugin_sync_key_focus(self, self.rootView, _priorResponder);
@@ -1763,7 +1798,7 @@ private:
 // Musical Typing) via pulp_plugin_forward_key_to_host in -keyDown:.
 - (BOOL)acceptsFirstResponder {
     // Same bounded text-or-navigation contract as the CPU plugin view.
-    return pulp_key_input_focused_under_root(self.rootView);
+    return pulp_editor_should_hold_keyboard(self.rootView);
 }
 - (void)syncKeyFocus {
     pulp_plugin_sync_key_focus(self, self.rootView, _priorResponder);
