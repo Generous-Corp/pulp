@@ -36,10 +36,22 @@
 
 using namespace pulp::render;
 
+#ifdef PULP_HAS_SKIA
+namespace {
+// An unmet GPU precondition must SKIP out loud, never `return` — Catch2
+// records a bare early return as a PASS, so a runner with no adapter would
+// report this whole file green having asserted nothing about SkiaSurface.
+constexpr const char* kNoGpu =
+    "no GPU compute device available (Skia/Dawn not built, or no adapter)";
+constexpr const char* kNoSkiaSurface =
+    "SkiaSurface unavailable (Graphite context could not be created)";
+}  // namespace
+#endif
+
 TEST_CASE("SkiaSurface requires initialized GpuSurface", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP(kNoGpu);
 
     // Don't initialize GpuSurface — SkiaSurface should fail gracefully
     SkiaSurface::Config config{};
@@ -57,13 +69,13 @@ TEST_CASE("SkiaSurface requires initialized GpuSurface", "[render][skia]") {
 TEST_CASE("SkiaSurface uses shared GpuSurface device", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP(kNoGpu);
 
     GpuSurface::Config gpu_config{};
     gpu_config.width = 400;
     gpu_config.height = 300;
 
-    if (!gpu->initialize(gpu_config)) return;  // no GPU adapter
+    if (!gpu->initialize(gpu_config)) SKIP(kNoGpu);
 
     SkiaSurface::Config config{};
     config.width = 400;
@@ -71,7 +83,7 @@ TEST_CASE("SkiaSurface uses shared GpuSurface device", "[render][skia]") {
     config.scale_factor = 1.0f;
 
     auto skia = SkiaSurface::create(*gpu, config);
-    if (!skia) return;  // Graphite context creation failed
+    if (!skia) SKIP(kNoSkiaSurface);
 
     REQUIRE(skia->is_available());
 #else
@@ -82,20 +94,20 @@ TEST_CASE("SkiaSurface uses shared GpuSurface device", "[render][skia]") {
 TEST_CASE("SkiaSurface offscreen frame cycle", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP(kNoGpu);
 
     GpuSurface::Config gpu_config{};
     gpu_config.width = 200;
     gpu_config.height = 150;
 
-    if (!gpu->initialize(gpu_config)) return;
+    if (!gpu->initialize(gpu_config)) SKIP(kNoGpu);
 
     SkiaSurface::Config config{};
     config.width = 200;
     config.height = 150;
 
     auto skia = SkiaSurface::create(*gpu, config);
-    if (!skia || !skia->is_available()) return;
+    if (!skia || !skia->is_available()) SKIP(kNoSkiaSurface);
 
     // Frame cycle: GpuSurface brackets the frame, SkiaSurface draws
     REQUIRE(gpu->begin_frame());
@@ -117,16 +129,16 @@ TEST_CASE("SkiaSurface offscreen frame cycle", "[render][skia]") {
 TEST_CASE("SkiaSurface multiple frame cycles", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP(kNoGpu);
 
     GpuSurface::Config gpu_config{};
     gpu_config.width = 100;
     gpu_config.height = 100;
 
-    if (!gpu->initialize(gpu_config)) return;
+    if (!gpu->initialize(gpu_config)) SKIP(kNoGpu);
 
     auto skia = SkiaSurface::create(*gpu, {.width = 100, .height = 100});
-    if (!skia || !skia->is_available()) return;
+    if (!skia || !skia->is_available()) SKIP(kNoSkiaSurface);
 
     // Multiple frames — verify no state leaks
     for (int i = 0; i < 5; ++i) {
@@ -280,16 +292,16 @@ TEST_CASE("SkiaCanvas retained stores isolate handles and open layers",
 TEST_CASE("SkiaSurface resize", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP(kNoGpu);
 
     GpuSurface::Config gpu_config{};
     gpu_config.width = 200;
     gpu_config.height = 200;
 
-    if (!gpu->initialize(gpu_config)) return;
+    if (!gpu->initialize(gpu_config)) SKIP(kNoGpu);
 
     auto skia = SkiaSurface::create(*gpu, {.width = 200, .height = 200});
-    if (!skia || !skia->is_available()) return;
+    if (!skia || !skia->is_available()) SKIP(kNoSkiaSurface);
 
     // Resize both GpuSurface and SkiaSurface
     gpu->resize(400, 300);
@@ -1108,16 +1120,16 @@ TEST_CASE("SkpFrameCapture round-trips a GPU-texture-backed embedded image",
     // a GPU image survives the .skp round trip with pixels intact. Requires
     // a live GPU adapter — skips cleanly without one.
     auto gpu = GpuSurface::create_dawn();
-    if (!gpu) return;
+    if (!gpu) SKIP(kNoGpu);
     GpuSurface::Config gpu_config{};
     gpu_config.width = 16;
     gpu_config.height = 16;
-    if (!gpu->initialize(gpu_config)) return;  // no GPU adapter
+    if (!gpu->initialize(gpu_config)) SKIP(kNoGpu);
     if (gpu->adapter_info().backend_type == "Null")
         SKIP("Dawn Null backend cannot produce raster output");
 
     auto skia = SkiaSurface::create(*gpu, {.width = 16, .height = 16});
-    if (!skia || !skia->is_available()) return;
+    if (!skia || !skia->is_available()) SKIP(kNoSkiaSurface);
 
     skgpu::graphite::Context* ctx = skia->graphite_context();
     REQUIRE(ctx != nullptr);
@@ -1132,7 +1144,7 @@ TEST_CASE("SkpFrameCapture round-trips a GPU-texture-backed embedded image",
     SkImageInfo info = SkImageInfo::MakeN32Premul(8, 8);
     sk_sp<SkSurface> gpu_surface =
         SkSurfaces::RenderTarget(recorder.get(), info);
-    if (!gpu_surface) return;  // offscreen GPU target unavailable
+    if (!gpu_surface) SKIP("offscreen Graphite render target unavailable");
     gpu_surface->getCanvas()->clear(SK_ColorGREEN);
     sk_sp<SkImage> gpu_image = gpu_surface->makeImageSnapshot();
     REQUIRE(gpu_image != nullptr);

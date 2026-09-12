@@ -236,6 +236,21 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME canvas-path-flush-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_canvas_path_flush.py")
 
+    # GPU skip-not-pass lint: a GPU case that finds no adapter must report
+    # Catch2's SKIP(), which ctest surfaces as ***Skipped. SUCCEED(), WARN(),
+    # and a bare `return;` all leave the case PASSING, so the suite's pass count
+    # is identical whether the GPU lane ran or the adapter vanished -- the day
+    # the hardware goes away, nothing changes colour. The selftest is the
+    # load-bearing half: it proves the rule tells `if (!gpu) return;` (skip
+    # because the device is missing) from `if (node.gpu_available()) return;`
+    # (skip because it is present), so the gate cannot force a conversion that
+    # would delete a real assertion.
+    add_test(NAME gpu-skip-not-pass-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/check_gpu_skip_not_pass.py"
+        --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME gpu-skip-not-pass-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_gpu_skip_not_pass.py")
+
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
     # -j`, which can exhaust memory / oversubscribe cores on a shared machine.

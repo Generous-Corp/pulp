@@ -13,6 +13,12 @@
 using namespace pulp::gpu_audio;
 
 namespace {
+// A lane with no compute device must SKIP, out loud, and never `return`. Catch2
+// records a bare early return as a PASS, so a GPU-less runner would report this
+// whole file green having asserted nothing about the spectral effects at all.
+constexpr const char* kNoGpu =
+    "no GPU compute device available (Skia/Dawn not built, or no adapter)";
+
 // Magnitude of frame `x` at FFT bin `k`.
 float mag_at(const std::vector<float>& x, uint32_t k) {
     std::vector<std::complex<float>> s(x.size());
@@ -39,7 +45,7 @@ TEST_CASE("GpuSpectralMorph blends two spectra", "[gpu_audio][spectral][gpu]") {
     constexpr uint32_t FFT = 512, KA = 15, KB = 40;
     GpuSpectralMorph m;
     REQUIRE(m.prepare(FFT));
-    if (!m.gpu_available()) return;
+    if (!m.gpu_available()) SKIP(kNoGpu);
 
     std::vector<float> fa(FFT), fb(FFT);
     for (uint32_t i = 0; i < FFT; ++i) {
@@ -70,7 +76,7 @@ TEST_CASE("GpuSpectralMorph blends two spectra", "[gpu_audio][spectral][gpu]") {
 TEST_CASE("GpuSpectralMorph render before capture fails", "[gpu_audio][spectral][gpu]") {
     GpuSpectralMorph m;
     REQUIRE(m.prepare(256));
-    if (!m.gpu_available()) return;
+    if (!m.gpu_available()) SKIP(kNoGpu);
     std::vector<float> out(256, 0.0f);
     REQUIRE_FALSE(m.render(0.5f, out.data()));  // neither endpoint captured
 }
@@ -84,7 +90,7 @@ TEST_CASE("GpuSpectralFreeze and GpuSpectralMorph share one device",
     constexpr uint32_t FFT = 512, HOP = 128, KF = 21, KA = 15, KB = 40;
 
     auto device = pulp::render::GpuCompute::create();
-    if (!device || !device->initialize_standalone()) return;  // no GPU adapter
+    if (!device || !device->initialize_standalone()) SKIP(kNoGpu);
 
     GpuSpectralFreeze fz;
     GpuSpectralMorph mo;

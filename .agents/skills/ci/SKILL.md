@@ -519,6 +519,51 @@ Deliberately examples-ON, do not "fix": `examples-validation.yml` (its entire
 purpose) and `nightly-full-build.yml` (whose configure step says so in a
 comment). Shipyard's `[validation.default]` likewise keeps them ON on purpose.
 
+## A GPU lane that skips everything is indistinguishable from a GPU lane that works
+
+Every GPU case in the native suite skips when no adapter is present, which is
+correct on a developer laptop and on the hosted runners that carry no
+representative GPU. The cost is that a green `macos` check reads identically
+whether the self-hosted runner rendered anything or quietly lost its adapter:
+the skipped cases are the only difference, and nothing fails.
+
+The repo does not know which of those two it is. `test_subtree_cache_gpu.cpp`
+says so in its own comment ("Dawn init succeeding is not proof the adapter
+renders"), and it skips on a near-blank readback for exactly that reason. So
+do not promote a GPU assertion to a required gate on the assumption that the
+Studios have a working Metal adapter; on a wrong guess that reddens every PR
+in the fleet at once.
+
+Two environment switches exist to make the skip falsifiable, one per lane, and
+they are the same idea in two places:
+
+- `PULP_REQUIRE_WEBGPU=1` — the browser/node GPU-audio proof in
+  `web-plugins.yml`. A null adapter becomes a hard failure instead of a
+  named skip.
+- `PULP_REQUIRE_GPU_ADAPTER=1` — the native Catch2 case
+  `A lane that requires a GPU adapter has one` (`test/test_gpu_surface.cpp`).
+  It also rejects Dawn's **Null backend**, which validates API calls and
+  composites nothing, so `AdapterInfo::null_backend` is the discriminator to
+  check rather than `adapter_type` alone (Null can report a CPU adapter type).
+
+Both are a **lane's promise, not a device probe**: read from the environment,
+inert where unset. That is what makes them safe to ship into a repo whose lanes
+have heterogeneous GPU capability.
+
+When the runner's real state is unknown, wire the switch as an **observation**
+first: a step with `continue-on-error: true`, so the answer lands in the log
+while the required check stays independent of it. Promotion is then deleting
+one line, and the same run history tells you whether promoting is honest. (This
+is step-level `continue-on-error` on an ordinary test failure, which GitHub
+covers; it is not the job-level timeout gamble warned about above, where a
+timeout surfaces as *cancelled* rather than *failed*.) `web-plugins.yml`
+already uses the non-gating-probe shape on its Linux leg for the same reason.
+
+The self-hosted macOS leg is selected with `matrix.key == 'macos' &&
+runner.environment == 'self-hosted'`. The second clause matters: when
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` is unset the leg falls back to hosted
+`macos-15`, which has no representative GPU and must not opt in.
+
 ## An opt-in CMake flag hides tests more completely than any label
 
 A `LABELS "slow"` exclusion at least leaves the test visible in a ctest listing.

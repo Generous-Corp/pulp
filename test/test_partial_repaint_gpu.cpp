@@ -101,8 +101,7 @@ TEST_CASE("Persistent-scene mode retains content across a clipped repaint (offsc
           "[gpu][skia][partial-render][issue-6262]") {
     auto f = make_offscreen_fixture(kW, kH);
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — persistent-scene proof skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host — persistent-scene proof skipped.");
     }
 
     REQUIRE(f.skia->set_persistent_scene(true));
@@ -119,8 +118,7 @@ TEST_CASE("Persistent-scene mode retains content across a clipped repaint (offsc
         c.fill_rect(10, 10, 40, 40);  // red marker, top-left
     }, px1, pw, ph);
     if (!ok1) {
-        SUCCEED("GPU readback failed (no adapter) — persistent-scene proof skipped.");
-        return;
+        SKIP("GPU readback failed (no adapter) — persistent-scene proof skipped.");
     }
 
     const uint32_t red1 = count_color(px1, pw, ph, 220, 40, 40);
@@ -130,9 +128,8 @@ TEST_CASE("Persistent-scene mode retains content across a clipped repaint (offsc
     // nothing — a headless runner with no real adapter. Skip rather than assert,
     // matching test_subtree_cache_gpu's guard.
     if (red1 < 100u) {
-        SUCCEED("Offscreen GPU composites nothing (no real adapter) — "
+        SKIP("Offscreen GPU composites nothing (no real adapter) — "
                 "persistent-scene proof skipped.");
-        return;
     }
     REQUIRE(red1 > 1000u);  // the red square painted on the full frame
 
@@ -174,8 +171,7 @@ TEST_CASE("Persistent scene is recreated at the new physical size on a scale cha
     // yields a scene at the new physical dimensions that still composites.
     auto f = make_offscreen_fixture(kW, kH);
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable — scale-change proof skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable — scale-change proof skipped.");
     }
     REQUIRE(f.skia->set_persistent_scene(true));
 
@@ -189,8 +185,7 @@ TEST_CASE("Persistent scene is recreated at the new physical size on a scale cha
         c.fill_rect(10, 10, 40, 40);
     }, px1, pw, ph);
     if (!ok1 || count_color(px1, pw, ph, 220, 40, 40) < 100u) {
-        SUCCEED("No real adapter — scale-change proof skipped.");
-        return;
+        SKIP("No real adapter — scale-change proof skipped.");
     }
     REQUIRE(pw == kW);
     REQUIRE(ph == kH);
