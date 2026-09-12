@@ -38,6 +38,8 @@ class CombinedInstallerTest(unittest.TestCase):
             relocation_capture = tmp / "app-relocation.txt"
             pkg_argv_capture = tmp / "pkgbuild-argv.txt"
             codesign_argv_capture = tmp / "codesign-argv.txt"
+            productbuild_argv_capture = tmp / "productbuild-argv.txt"
+            productsign_argv_capture = tmp / "productsign-argv.txt"
             output = tmp / "out"
 
             self._write_tool(
@@ -114,7 +116,15 @@ class CombinedInstallerTest(unittest.TestCase):
                 '  [[ "$arg" == "--distribution" ]] && want_distribution=1\n'
                 '  last="$arg"\n'
                 'done\n'
+                'printf "%s\\n" "$*" >> "$CAPTURE_PRODUCTBUILD_ARGV"\n'
                 'cp "$distribution" "$CAPTURE_XML"\n'
+                'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
+            )
+            self._write_tool(
+                fake_bin,
+                "productsign",
+                'printf "%s\\n" "$*" >> "$CAPTURE_PRODUCTSIGN_ARGV"\n'
+                'last=""\nfor arg in "$@"; do last="$arg"; done\n'
                 'mkdir -p "$(dirname "$last")"\n: > "$last"\n',
             )
 
@@ -192,6 +202,8 @@ class CombinedInstallerTest(unittest.TestCase):
                 "CAPTURE_APP_RELOCATION": str(relocation_capture),
                 "CAPTURE_PKG_ARGV": str(pkg_argv_capture),
                 "CAPTURE_CODESIGN_ARGV": str(codesign_argv_capture),
+                "CAPTURE_PRODUCTBUILD_ARGV": str(productbuild_argv_capture),
+                "CAPTURE_PRODUCTSIGN_ARGV": str(productsign_argv_capture),
                 "PULP_SIGN_KEYCHAIN": str(tmp / "signing.keychain-db"),
                 "PULP_SIGN_KEYCHAIN_PW": "test-keychain-password",
                 "PULP_SIGN_P12": str(tmp / "signing.p12"),
@@ -231,6 +243,16 @@ class CombinedInstallerTest(unittest.TestCase):
                 if codesign_argv_capture.is_file()
                 else ""
             )
+            self._last_productbuild_argv = (
+                productbuild_argv_capture.read_text()
+                if productbuild_argv_capture.is_file()
+                else ""
+            )
+            self._last_productsign_argv = (
+                productsign_argv_capture.read_text()
+                if productsign_argv_capture.is_file()
+                else ""
+            )
             self._last_plugin_evidence_relocated = all(
                 not list((bundle / "Contents" / "MacOS").glob("*.json"))
                 and len(list((bundle / "Contents" / "Resources" /
@@ -242,6 +264,25 @@ class CombinedInstallerTest(unittest.TestCase):
                 for bundle in plugin_bundles
             ]
             return capture.read_text(), relocation
+
+    def test_the_product_archive_is_signed_by_productsign_not_productbuild(
+        self,
+    ) -> None:
+        """The dedicated signing keychain authorizes the Developer ID Installer
+        key for productsign, not productbuild. `productbuild --sign` is
+        therefore denied and, headless, returns CSSMERR_CSP_USER_CANCELED after
+        every bundle has already been signed."""
+        self._run_installer([("Kick", "au")])
+        self.assertNotIn(
+            "--sign",
+            self._last_productbuild_argv,
+            msg="productbuild must build the product archive UNSIGNED",
+        )
+        self.assertIn(
+            "installer-fixture",
+            self._last_productsign_argv,
+            msg="productsign must sign the archive with the installer identity",
+        )
 
     def test_multi_plugin_packages_are_unique_and_grouped_by_plugin(self) -> None:
         xml, _ = self._run_installer(
