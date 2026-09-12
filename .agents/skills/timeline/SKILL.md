@@ -2941,6 +2941,67 @@ lane (model + compile context) is genuinely small and can land on its own;
 `DynamicsLane` deliberately did exactly that, and its serialization is a separate
 piece of work for this reason.
 
+## A new `Command` alternative has six fail-closed sites and two silent ones
+
+Appending an alternative to the `Command` variant will not compile, or will not
+pass, until six places agree — which is the good half:
+
+- `command_authority_of<T>()` in `document_session.hpp` — its final `else` is a
+  `static_assert(detail::unclassified_command_v<T>, …)` that is unconditionally
+  false, so a missing entry is a hard error rather than a permissive default;
+- one of the `is_*_command_type` lists in `transaction_dispatch_internal.hpp` —
+  `transaction.cpp` asserts the lists claim every alternative *exactly once*, so
+  claiming none and claiming twice both fail (a count-only check could not see
+  the second case, because one double claim and one orphan cancel out);
+- the positional `expected` table in `test_timeline_writer_capabilities.cpp`,
+  together with its `STATIC_REQUIRE(alternatives == N)`;
+- the equality and retained-size switches in `command.cpp`, which are two
+  separate `if constexpr` chains — a command added to one and not the other
+  compiles and misreports its own size;
+- the alphabetical `expected` name list in `test_timeline_schema_registry.cpp`,
+  whose `static_assert` is against `variant_size_v<Command>` — so it binds even
+  though it is a hand-written list;
+- the `encoded` envelope list in `test_timeline_command_persistence.cpp`, which
+  decodes one fixture per alternative and is *index-keyed*: append only, or
+  every `holds_alternative` assertion after the insertion point renumbers.
+
+`test_timeline_agent.cpp` counts `"x-pulp-domain":"Command"` occurrences in the
+emitted schema against the same `variant_size_v<Command>`, so it follows the
+registry automatically and needs no edit — but it turns a missed *registration*
+into a red test rather than a silent gap.
+
+The two that fail **silently** are the decode arm in
+`serialize_command_decode.cpp` and the registration in `schema_registry.cpp`.
+Skip either and the command still builds, still applies in-process, and is
+simply unreachable from every wire surface — the CLI and MCP verbs are
+*generated* from the registry, so an unregistered command produces no verb and
+no error.
+
+Commands are tagged on the wire by string type tag, never by variant index, so
+appending at the end of the variant carries no compatibility obligation. Append
+anyway: it keeps the positional authority table a pure append.
+
+## A command can apply cleanly and still not survive the save
+
+`pulp::tools::timeline::command_apply` — the one entry point behind both the CLI
+and the MCP tool — loads a project from JSON, applies the decoded commands, and
+returns `serialize_project(...)` of the result. So a mutation whose target is
+**not carried by the encoder** is destroyed by the same call that performed it:
+the transaction succeeds, the gate passes, the response JSON simply lacks it.
+
+`DynamicsLane` is the live example. The lane is a public model type, a sequence
+owns it, a command mutates it under an exact-value gate, and none of that is
+enough to call the CLI or MCP surface exposed, because the sequence document
+schema carries no `dynamics_lane` member. When judging a command's reach, check
+the *encoder*, not the command:
+
+```sh
+grep -c dynamics core/timeline/src/serialize_encode.cpp      # the finding
+grep -c chord_scale core/timeline/src/serialize_encode.cpp   # the control
+```
+
+A zero with no control beside it is indistinguishable from a mis-aimed grep.
+
 ## Every "rebuild a Sequence from its parts" site must carry a new lane
 
 `SequenceInput` is populated in several places that reconstruct a sequence rather

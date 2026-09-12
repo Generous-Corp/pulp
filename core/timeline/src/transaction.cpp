@@ -408,6 +408,26 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 SetChordScaleLane{chord->sequence_id, chord->replacement, chord->expected});
             dirty.push_back({chord->sequence_id, {}, chord->sequence_id, DirtyFlags::Context});
             dirty_contexts.push_back({chord->sequence_id, CompileContextKind::ChordScale});
+        } else if (const auto* dynamics = std::get_if<SetDynamicsLane>(&envelope.command)) {
+            if (const auto code = detail::target_error(
+                    project, dynamics->sequence_id,
+                    expected_location(ItemKind::Sequence, project, dynamics->sequence_id)))
+                return fail_target(*code, dynamics->sequence_id);
+            const auto* sequence = project.find_sequence(dynamics->sequence_id);
+            if (!sequence)
+                return fail_target(ConflictCode::TargetMissing, dynamics->sequence_id);
+            if (!(sequence->dynamics_lane() == dynamics->expected))
+                return fail_target(ConflictCode::ExpectedValueMismatch, dynamics->sequence_id);
+            auto next_project = ProjectEditAccess::replace_sequence(
+                project, sequence->with_dynamics_lane(dynamics->replacement));
+            if (!next_project)
+                return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
+            project = std::move(next_project).value();
+            inverses.emplace_back(
+                SetDynamicsLane{dynamics->sequence_id, dynamics->replacement, dynamics->expected});
+            dirty.push_back({dynamics->sequence_id, {}, dynamics->sequence_id, DirtyFlags::Context});
+            dirty_contexts.push_back({dynamics->sequence_id, CompileContextKind::Dynamics});
         } else if (const auto* groove = std::get_if<SetGroove>(&envelope.command)) {
             if (const auto code = detail::target_error(
                     project, groove->sequence_id,
