@@ -525,9 +525,22 @@ cat > "$STAGE/distribution.xml" <<XML
 </installer-gui-script>
 XML
 PKG="$OUT/$NAME-$VERSION.pkg"
+# Build the product archive UNSIGNED, then sign it with productsign.
+#
+# `productbuild --sign` asks Security for the Developer ID Installer private key
+# directly, and the dedicated signing keychain authorizes that key for
+# codesign/security/productsign only. productbuild is therefore denied, and in a
+# headless session the suppressed authorization dialog comes back as
+# `CSSMERR_CSP_USER_CANCELED` (-128) -- "Error signing data." with no mention of
+# the keychain, after every bundle has already been signed. Splitting the step
+# routes the private-key use through productsign, which is authorized, and
+# yields a byte-equivalent signed archive.
+_unsigned_pkg="$STAGE/$NAME-$VERSION-unsigned.pkg"
 productbuild --distribution "$STAGE/distribution.xml" --package-path "$STAGE/comp" \
   ${RESOURCE_ARGS:+--resources "$STAGE/resources"} \
-  --sign "$INST_ID" "$PKG" >/dev/null
+  "$_unsigned_pkg" >/dev/null
+productsign --sign "$INST_ID" "$_unsigned_pkg" "$PKG" >/dev/null
+rm -f "$_unsigned_pkg"
 if [[ "$NOTARIZE" == 1 ]]; then
   _notarized=0
   if [[ -x "$CLI" ]]; then
