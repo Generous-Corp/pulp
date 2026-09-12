@@ -130,6 +130,7 @@ public:
     void set_parameter(uint32_t id, float v) override { new_slot_->set_parameter(id, v); }
     void set_bypass(bool b) override { new_slot_->set_bypass(b); }
     bool is_bypassed() const override { return new_slot_->is_bypassed(); }
+    BypassSurface bypass_surface() const override { return new_slot_->bypass_surface(); }
     std::vector<uint8_t> save_state() const override { return new_slot_->save_state(); }
     bool restore_state(const std::vector<uint8_t>& d) override { return new_slot_->restore_state(d); }
     bool has_editor() const override { return new_slot_->has_editor(); }
