@@ -1080,14 +1080,14 @@ function attach(parent: Instance, child: Instance, index?: number): void {
             // Fallback: remove + recreate. Loses any subtree state.
             if (typeof g.removeWidget === 'function') call('removeWidget', child.id);
             child.onBridge = false;
-            if (parent.onBridge) materialize(parent, child);
+            if (parent.onBridge) materialize(parent, child, insertIdx);
         }
         return;
     }
 
     if (parent.onBridge) {
         // Parent is live; child can land on the bridge immediately.
-        materialize(parent, child);
+        materialize(parent, child, insertIdx);
     } else {
         // Defer until the parent itself reaches the bridge.
         parent.pendingChildren.push({ child, index: insertIdx });
@@ -1103,9 +1103,19 @@ function attachToRoot(container: Container, child: Instance, _index = -1, _befor
 
 /// Emit createX + applyAllProps for a single child whose parent is on
 /// the bridge, then recursively drain the child's pendingChildren.
-function materialize(parent: Instance, child: Instance): void {
+function materialize(parent: Instance, child: Instance, index?: number): void {
     child.inheritedSvgViewBox = svgViewportFor(parent);
-    materializeUnder(parent.id, child);
+    // Every createX call appends, so a child landing anywhere but last has to be
+    // moved into place right after it is created — otherwise a subtree that
+    // mounts late (a re-opened dropdown remounting its rows) comes back in mount
+    // order rather than authored order, and captions detach from their bodies.
+    //
+    // Its authored index doubles as its native index: every earlier sibling in
+    // childIds has already reached the bridge, because attach() materializes
+    // eagerly under a live parent and materializeUnder drains a deferred
+    // parent's queue in authored order.
+    const appendsLast = index === undefined || index >= parent.childIds.length - 1;
+    materializeUnder(parent.id, child, appendsLast ? undefined : index);
 }
 
 function parseSvgViewBox(value: unknown): [number, number] | undefined {
@@ -1153,9 +1163,15 @@ function bindSourceLocation(child: Instance): void {
     call('setSource', child.id, src.fileName, line, col);
 }
 
-function materializeUnder(parentId: string, child: Instance): void {
+function materializeUnder(parentId: string, child: Instance, index?: number): void {
     if (child.onBridge) return;
     createWidget(child.type, child.id, parentId, child.props);
+    // An older native host has no indexed insert and can only append. Ordering
+    // then degrades exactly as it did before this call existed, rather than
+    // throwing, so one renderer bundle still runs on both.
+    if (index !== undefined && index >= 0 && typeof g.insertChild === 'function') {
+        call('insertChild', parentId, child.id, index);
+    }
     // A loose text node wraps by default in CSS (`white-space: normal`), but a
     // native Label defaults to one line and clips mid-word instead. Synthetic
     // text targets have no author style of their own to carry the default in,
@@ -1182,6 +1198,16 @@ function materializeUnder(parentId: string, child: Instance): void {
     if (child.pendingChildren.length > 0) {
         const drained = child.pendingChildren;
         child.pendingChildren = [];
+        // Replay in authored order, not queue order. A deferred subtree can be
+        // reordered (or inserted into) before its parent reaches the bridge, so
+        // the queue records the order the attaches arrived in, not the order the
+        // author wrote. Draining in childIds order makes each create an append
+        // again, which is the one thing the native factory can always do.
+        const authoredOrder = (entry: { child: Instance }): number => {
+            const at = child.childIds.indexOf(entry.child.id);
+            return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+        };
+        drained.sort((a, b) => authoredOrder(a) - authoredOrder(b));
         for (const { child: gc } of drained) {
             gc.inheritedSvgViewBox = svgViewportFor(child);
             materializeUnder(child.id, gc);

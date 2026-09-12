@@ -494,6 +494,47 @@ void BridgeRegistrars::register_metadata_removal_api(WidgetBridge& self) {
         }
         return choc::value::Value();
     });
+
+    // insertChild(parentId, childId, index) -> bool
+    //
+    // Positions a child that already exists. Every createX call appends, so a
+    // widget that reaches the bridge after its siblings lands last no matter
+    // what order its author wrote — visible as a re-opened dropdown whose rows
+    // come back shuffled, because remounting a subtree re-appends it. A renderer
+    // that knows the authored index calls this straight after creating the
+    // widget, and again whenever it reorders keyed siblings.
+    //
+    // Reorder only, never a reparent: a `parentId` that is not the child's own
+    // parent fails closed rather than moving the widget across the tree, so a
+    // stale id cannot silently restructure the UI. An index past the last slot
+    // puts the child last. The child keeps its focus, drag, and popup state --
+    // removing and re-adding it would not.
+    register_bridge_function(api, "insertChild", [&self](choc::javascript::ArgumentList args) {
+        const auto parent_id = args.get<std::string>(0, "");
+        const auto child_id = args.get<std::string>(1, "");
+        const auto raw_index = args.get<double>(2, -1.0);
+        // A missing or negative index is not an instruction to put the child
+        // anywhere in particular, so it fails closed rather than guessing an end.
+        if (std::isnan(raw_index) || raw_index < 0.0)
+            return choc::value::createBool(false);
+
+        View* child = self.widget(child_id);
+        View* parent = self.resolve_parent(parent_id);
+        if (child == nullptr || parent == nullptr || child == parent)
+            return choc::value::createBool(false);
+
+        // A child can sit inside a bridge-inserted layout wrapper (an overflow
+        // box becomes a retained ScrollView around the authored widget), so the
+        // view occupying the parent's slot is not always the widget the caller
+        // named. Walk up to whichever ancestor that slot holds.
+        View* slot = child;
+        while (slot != nullptr && slot->parent() != parent) slot = slot->parent();
+        if (slot == nullptr) return choc::value::createBool(false);
+
+        const auto index = static_cast<size_t>(
+            std::min(raw_index, static_cast<double>(parent->child_count())));
+        return choc::value::createBool(parent->move_child_to_index(slot, index));
+    });
 }
 
 void BridgeRegistrars::register_metadata_source_api(WidgetBridge& self) {

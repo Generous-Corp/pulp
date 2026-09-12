@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260912-widget-bridge-child-ordering-watch",
+  "created_at": "2026-09-12T12:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a Pulp-owned correctness fix in how the widget bridge orders a parent's children. Every native createX call appends, and nothing on the bridge could position an existing child, so the rendered order was the order widgets happened to reach the bridge rather than the order their author wrote. The renderer already knew better: host-config's attach() computed an insert index and kept childIds and the DOM shim in that order, then discarded the index at materialize(), and its insertBefore() reorder branch probed for insertChild and moveWidget, neither of which any native host defined. The observable failure is a subtree that mounts into a parent which kept its other children -- a re-opened dropdown remounts its rows after the siblings that stayed, so captions separate from the descriptions they label. This adds insertChild(parentId, childId, index), which repositions a widget that already exists, backed by View::move_child_to_index. It is purely additive: no existing bridge signature changes, and a renderer bundle running against an older host still mounts, appending exactly as before. It is a reorder and never a reparent -- a parentId that does not own the named child fails closed rather than restructuring the tree -- and reordering does not run the attach/detach lifecycle, so a moved subtree keeps its focus, drag and popup state. Child order is an input to layout and paint, so a rendered tree changes only where it was already wrong; no design ingest, captured output, packaging boundary, accepted expansion boundary, or Vellum source authority is affected.",
+  "tests": [
+    "ctest --test-dir build -R widget-bridge-child-order",
+    "npx vitest run test/host-config-child-order.test.ts (packages/pulp-react)",
+    "tools/scripts/confirm_failure.sh --file packages/pulp-react/src/host-config.ts --no-build ...",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
