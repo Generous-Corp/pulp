@@ -169,3 +169,118 @@ fn unknown_command_does_not_suggest_deferred_commands_silently() {
         "expected suggestion for 'audo' → 'audio', got: {stderr}"
     );
 }
+
+/// A command the banner lists but the C++ delegate owns must report
+/// the unreachable delegate, not a spelling suggestion. Suggesting
+/// `pulp ship` to somebody who just typed `pulp ship` sends them
+/// hunting for a typo that does not exist.
+#[test]
+fn known_delegated_command_reports_missing_delegate_binary() {
+    // Positive control first: with a resolvable delegate the same
+    // invocation dispatches, which proves the diagnostic below comes
+    // from the delegate being absent and not from argument parsing.
+    let control = Command::cargo_bin("pulp")
+        .expect("binary")
+        .args(["ship", "doctor"])
+        .env("PATH", "/bin")
+        .env("PULP_RS_CPP_BINARY", "echo")
+        .env_remove("PULP_RS_FALLTHROUGH")
+        .env_remove("PULP_RS_NO_FALLTHROUGH")
+        .output()
+        .expect("run");
+    let control_stdout = String::from_utf8(control.stdout).expect("utf8");
+    assert!(
+        control_stdout.contains("ship doctor"),
+        "control: a resolvable delegate should receive the argv, got: {control_stdout}"
+    );
+
+    let output = Command::cargo_bin("pulp")
+        .expect("binary")
+        .args(["ship", "doctor"])
+        .env("PATH", "/nonexistent-pulp-delegate-dir")
+        .env_remove("PULP_RS_CPP_BINARY")
+        .env_remove("PULP_RS_FALLTHROUGH")
+        .env_remove("PULP_RS_NO_FALLTHROUGH")
+        .output()
+        .expect("run");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).expect("utf8");
+    assert!(
+        stderr.contains("pulp-cpp"),
+        "expected the missing delegate binary to be named, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("Looked for:"),
+        "expected the probed path to be reported, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("--target pulp-cli"),
+        "expected the source-build remedy, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("pulp upgrade"),
+        "expected the installed-CLI remedy, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Did you mean"),
+        "a correctly spelled command must not reach the fuzzy suggester, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Unknown command"),
+        "`ship` is a listed command and must not be called unknown, got: {stderr}"
+    );
+}
+
+/// Switching delegation off is a different cause from a missing
+/// binary and says so, rather than pointing at a build target that
+/// would not help.
+#[test]
+fn disabled_delegation_names_the_opt_out_env_var() {
+    let output = Command::cargo_bin("pulp")
+        .expect("binary")
+        .args(["ship", "doctor"])
+        .env("PULP_RS_NO_FALLTHROUGH", "1")
+        .env_remove("PULP_RS_FALLTHROUGH")
+        .output()
+        .expect("run");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).expect("utf8");
+    assert!(
+        stderr.contains("PULP_RS_NO_FALLTHROUGH"),
+        "expected the opt-out env var to be named, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Did you mean"),
+        "a correctly spelled command must not reach the fuzzy suggester, got: {stderr}"
+    );
+}
+
+/// The fuzzy suggester still owns genuinely misspelled commands even
+/// when no delegate is reachable — the two paths must not collapse
+/// into one another.
+#[test]
+fn unknown_command_still_suggests_without_a_delegate() {
+    let output = Command::cargo_bin("pulp")
+        .expect("binary")
+        .arg("buld")
+        .env("PATH", "/nonexistent-pulp-delegate-dir")
+        .env_remove("PULP_RS_CPP_BINARY")
+        .env_remove("PULP_RS_FALLTHROUGH")
+        .env_remove("PULP_RS_NO_FALLTHROUGH")
+        .output()
+        .expect("run");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).expect("utf8");
+    assert!(
+        stderr.contains("Unknown command: buld"),
+        "expected the unknown-command line, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("Did you mean: pulp build?"),
+        "expected the fuzzy suggestion to survive, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("pulp-cpp"),
+        "a misspelling is not a delegate problem, got: {stderr}"
+    );
+}
