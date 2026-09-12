@@ -519,6 +519,52 @@ Deliberately examples-ON, do not "fix": `examples-validation.yml` (its entire
 purpose) and `nightly-full-build.yml` (whose configure step says so in a
 comment). Shipyard's `[validation.default]` likewise keeps them ON on purpose.
 
+## An opt-in CMake flag hides tests more completely than any label
+
+A `LABELS "slow"` exclusion at least leaves the test visible in a ctest listing.
+A test registered inside `if(PULP_ENABLE_<FEATURE>)` on a lane that never sets
+the flag is not skipped and not excluded — it is never registered, so it appears
+in no output, no label names it, and no count changes when it disappears.
+
+`PULP_ENABLE_SCENE3D` defaults OFF (`CMakeLists.txt`), and for a long time
+nothing in `.github/workflows/` or `.shipyard/config.toml` set it. The whole
+Renderer3D and scene3d surface — 205 tests — ran on no lane at all while the
+required `macos` gate stayed green. `PULP_ENABLE_GPU` defaults ON, which is why
+the neighbouring GPU tests never showed the same hole.
+
+The check is one line, and it needs its control:
+
+```bash
+grep -rn "PULP_ENABLE_SCENE3D" .github/workflows/ .shipyard/config.toml   # 0
+grep -rc "PULP_ENABLE_GPU" .github/workflows/build.yml                    # 2
+```
+
+Without the second line a zero is ambiguous between "not wired" and "bad grep".
+
+`.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
+advisory, `macos-15`, SCENE3D ON, not on `merge_group`. Three things about it
+generalize to any lane you add:
+
+- **`ctest -R` is case-sensitive** and `grep -i` is not, so a regex checked with
+  grep can select far less than you think. `-R 'renderer3d|scene3d'` takes 144
+  tests; `-R '[Rr]enderer3[Dd]|[Ss]cene3[Dd]'` takes 205. The short form exits 0.
+- **An empty selection exits 0.** Pass `--no-tests=error`, *and* assert a floor
+  on the count from `ctest -N`: the flag catches a selection that matched
+  nothing, the floor catches one that merely shrank.
+- **A hosted runner has no representative GPU**, so the lane is only as honest
+  as the tests' capability guards. A guard that calls `SUCCEED()` on absence
+  reports a pass for a case that never ran; `SKIP()` reports Skipped, because
+  `PulpCatch.cmake` sets `SKIP_RETURN_CODE 4` for any suite that does not opt
+  into `SKIP_IS_FAILURE`. Check that before trusting a new lane's green.
+
+**The private `planning/` submodule is unavailable to every hosted lane by
+construction** — `submodules: false` appears throughout `.github/workflows/` and
+`submodules: true|recursive` appears nowhere. A test that reads from it can only
+be excluded, never fixed, on such a lane. Check the *transitive* dependency: of
+the two `scene3d-native-slice-handoff` tests, only one names the plan file in
+its ctest arguments; the other reaches it through a verifier that hardcodes the
+path, so excluding the obvious one alone leaves a permanent red.
+
 ## A test that "fails" on the required gate may only have run out of clock
 
 Before debugging what a failing gate test *does*, check whether it failed on
