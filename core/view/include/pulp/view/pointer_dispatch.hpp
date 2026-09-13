@@ -6,6 +6,9 @@
 // hosts, which meant they could only be exercised by running a real NSView. They
 // are pure view-tree logic, so they live here and each platform host calls in.
 
+// Re-exported, not used here: this is an installed public header, and a
+// consumer reaching the overlay-dismissal verbs through it keeps compiling.
+// IWYU pragma: export
 #include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/view.hpp>
 
