@@ -271,3 +271,36 @@ and receipt, `check` still reports `OK: every pinned identity matches` at the ne
 source commit, because the pin-refresh commit touches only paths the inventory
 excludes. So the cascade above terminates after exactly one round — a second
 regeneration is not needed, and running one only produces an empty diff.
+
+## The watch-family selectors match PATHS, so a one-line include can demand an event
+
+`tools/scripts/vellum_expansion_watch_check.py` decides which capability
+families a change touches by globbing the changed path list against
+`EXPECTED_SCOPES`. Nothing in that decision reads the diff. So adding
+`#include <array>` to `test/test_browser_capture_tree.cpp` — a portability fix
+that changes no capture behavior at all — matches `test/test_browser_capture*`
+and makes `chromium-authoring-frontend` an affected family, which the trusted
+base executor then requires a watch event to cover.
+
+Two things make this expensive to find late:
+
+- The failing check is **`Trusted base executor`**, which is not one of the five
+  contexts branch protection requires, so a PR can sit `blocked` with that red
+  while every required context is green and nothing names the cause.
+- Its log buries the one useful line, `watch event family coverage differs;
+  affected=[...] covered=[]`, under a full `Updating files:` checkout trace.
+
+Reproduce it locally before pushing, and note that both arguments must be full
+40-character SHAs — a ref name fails with `base: expected full commit SHA`,
+which reads like a broken invocation rather than a real answer:
+
+```bash
+python3 tools/scripts/vellum_expansion_watch_check.py \
+  --repo . --base "$(git rev-parse origin/main)" --head "$(git rev-parse HEAD)"
+```
+
+The event is a new JSON file directly under
+`.github/vellum-expansion-watch-events/`, named exactly for its `event_id`,
+claiming the affected families sorted. Coverage is compared for **equality**,
+not containment: claiming a family the diff does not touch fails the same way
+omitting one does.
