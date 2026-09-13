@@ -95,6 +95,38 @@ class FixtureRepository(unittest.TestCase):
         third = git(self.root, "rev-parse", "HEAD")
         self.assertEqual(self.identity_for("leaf.txt").revision, third)
 
+    def test_identity_from_a_superseded_commit_separates_the_two_tiers(self) -> None:
+        """A commit that a later commit moved past still has an identity.
+
+        This is the shape every commit touching a pinned path produces, and it
+        is the one a reader of a published receipt must be able to resolve: the
+        receipt names the commit its ledger was generated from, so the question
+        is what that commit held, not what HEAD holds now. Only a generator
+        asks the stronger question, and it has to opt in.
+        """
+
+        (self.root / "leaf.txt").write_text("leaf two\n", encoding="utf-8")
+        git(self.root, "add", "leaf.txt")
+        git(self.root, "commit", "--quiet", "-m", "edit leaf")
+
+        historical = provenance.resolve_identity(
+            self.root, self.first_commit, "leaf.txt"
+        )
+        self.assertEqual(historical.revision, self.first_commit)
+        self.assertEqual(
+            historical.object_id,
+            git(self.root, "rev-parse", f"{self.first_commit}:leaf.txt"),
+        )
+        self.assertNotEqual(
+            historical.object_id, git(self.root, "rev-parse", "HEAD:leaf.txt")
+        )
+
+        with self.assertRaises(provenance.ProvenanceError) as caught:
+            provenance.resolve_identity(
+                self.root, self.first_commit, "leaf.txt", require_current=True
+            )
+        self.assertIn("at HEAD", str(caught.exception))
+
     def test_missing_path_fails_closed(self) -> None:
         with self.assertRaises(provenance.ProvenanceError):
             provenance.resolve_identity(self.root, "HEAD", "absent.txt")
@@ -574,6 +606,9 @@ class CheckedInLedger(unittest.TestCase):
         )
         # Naming a reachable commit is not the claim. The claim is that THIS
         # commit produced THESE bytes, so regenerate from it and compare.
+        # Resolving from the receipt's own commit is the provenance question,
+        # so it must not ask whether HEAD still agrees -- a later commit
+        # touching a pinned path does not make the receipt any less true.
         inventory = provenance.canonical_inventory(document)
         try:
             identities = provenance.resolve_inventory_identities(

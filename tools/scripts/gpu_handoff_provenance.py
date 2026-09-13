@@ -214,17 +214,28 @@ def resolve_source_commit(root: pathlib.Path, requested: str) -> str:
     return commit
 
 
-def resolve_identity(root: pathlib.Path, commit: str, path: str) -> Identity:
+def resolve_identity(
+    root: pathlib.Path,
+    commit: str,
+    path: str,
+    require_current: bool = False,
+) -> Identity:
     """Derive one row's identity fields from the single source commit.
 
-    The validator pins each row to HEAD's tree, so an identity whose blob does
-    not match HEAD is rejected no matter how faithfully it describes the source
-    commit. Comparing here turns that into a named refusal instead of drift the
-    caller has to diagnose.
+    What this commit did to this path is a fact about history, so by default
+    the answer is read out of history alone and a later commit cannot change
+    it. That is what a reader asking "did this source commit produce these
+    bytes?" needs, and it stays true however far HEAD moves on.
+
+    ``require_current`` additionally demands that the derived blob still match
+    HEAD. A generator wants that, because an identity that disagrees with HEAD
+    cannot satisfy a currency-checking consumer no matter how faithfully it
+    describes its source commit; raising here names the problem instead of
+    emitting a ledger that fails later.
     """
 
     head_revision = git_output(root, ["rev-parse", "HEAD"])
-    cache_key = (str(root), commit, head_revision, path)
+    cache_key = (str(root), commit, head_revision, path, require_current)
     cached = _IDENTITY_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -235,14 +246,15 @@ def resolve_identity(root: pathlib.Path, commit: str, path: str) -> Identity:
             f"path {path!r} has no commit history at source commit {commit}"
         )
     object_id = git_output(root, ["rev-parse", f"{revision}:{path}"])
-    head_object = git_output(root, ["rev-parse", f"HEAD:{path}"])
-    if object_id != head_object:
-        raise ProvenanceError(
-            f"path {path!r} is {object_id} at its owning revision {revision} but "
-            f"{head_object} at HEAD, so no identity derived from source commit "
-            f"{commit} can satisfy the validator; regenerate with "
-            "--source-commit HEAD"
-        )
+    if require_current:
+        head_object = git_output(root, ["rev-parse", f"HEAD:{path}"])
+        if object_id != head_object:
+            raise ProvenanceError(
+                f"path {path!r} is {object_id} at its owning revision {revision} "
+                f"but {head_object} at HEAD, so no identity derived from source "
+                f"commit {commit} can satisfy a currency-checking consumer; "
+                "regenerate with --source-commit HEAD"
+            )
     object_type = git_output(root, ["cat-file", "-t", object_id])
     if object_type not in OBJECT_TYPES:
         raise ProvenanceError(
@@ -254,14 +266,22 @@ def resolve_identity(root: pathlib.Path, commit: str, path: str) -> Identity:
 
 
 def resolve_inventory_identities(
-    root: pathlib.Path, commit: str, inventory: list[PathRow]
+    root: pathlib.Path,
+    commit: str,
+    inventory: list[PathRow],
+    require_current: bool = False,
 ) -> dict[str, Identity]:
-    """Resolve each distinct path once and reuse it across duplicate rows."""
+    """Resolve each distinct path once and reuse it across duplicate rows.
+
+    ``require_current`` is forwarded unchanged; see ``resolve_identity``.
+    """
 
     identities: dict[str, Identity] = {}
     for row in inventory:
         if row.path not in identities:
-            identities[row.path] = resolve_identity(root, commit, row.path)
+            identities[row.path] = resolve_identity(
+                root, commit, row.path, require_current=require_current
+            )
     return identities
 
 
@@ -463,7 +483,9 @@ def command_check(args: argparse.Namespace) -> int:
     document = load_handoff(args.handoff)
     inventory = canonical_inventory(document)
     commit = resolve_source_commit(args.root, args.source_commit)
-    identities = resolve_inventory_identities(args.root, commit, inventory)
+    identities = resolve_inventory_identities(
+        args.root, commit, inventory, require_current=True
+    )
     drifts = compare_inventory(document, inventory, identities)
     problems = validate_with_catalog(document, args.root, require_current=True)
     command = repair_command(args.handoff, commit)
@@ -529,7 +551,9 @@ def command_write(args: argparse.Namespace) -> int:
             print(f"  {path}", file=sys.stderr)
         return 2
 
-    identities = resolve_inventory_identities(args.root, commit, inventory)
+    identities = resolve_inventory_identities(
+        args.root, commit, inventory, require_current=True
+    )
     updated = apply_identities(document, inventory, identities)
     rendered = serialize_handoff(updated)
 
