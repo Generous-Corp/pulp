@@ -683,8 +683,25 @@ def validate_handoff(document: Any) -> list[str]:
     return problems
 
 
-def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> list[str]:
-    """Bind pinned Pulp paths and deletion candidates to routing and Git facts."""
+def validate_handoff_routing(
+    document: dict[str, Any],
+    root: pathlib.Path,
+    require_current: bool = False,
+) -> list[str]:
+    """Bind pinned Pulp paths and deletion candidates to routing and Git facts.
+
+    Two tiers, because a pin makes two separable claims. PROVENANCE is always
+    checked: the pinned revision is an ancestor, and the object it names still
+    carries the handed-off blob or tree. That is true forever once recorded, so
+    an unrelated commit can never falsify it. CURRENCY is checked only when
+    ``require_current`` is set: the path at HEAD still has the handed-off
+    content and no later commit has taken ownership of it. Currency is a
+    property of the checkout at a moment, so every commit touching a pinned
+    path falsifies it until the ledger is regenerated. Gating a merge on
+    currency makes any edit to a pinned path a two-commit operation and
+    serializes concurrent pull requests; consumers that need "current" ask for
+    it here instead.
+    """
 
     projection_value = document.get("ownership_projection")
     if projection_value != ".github/vellum-ownership.json":
@@ -861,8 +878,6 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
                 ancestor_code != 0
                 or pinned_object != object_id
                 or pinned_type != object_type
-                or head_object != object_id
-                or latest_owner != revision
                 or checkout_dirty
             )
             # Only re-attribute rows that already failed. A green row needs no
@@ -889,6 +904,13 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
                 problems.append(
                     f"handoff entries[{index}].pulp_paths[{row_index}] has stale "
                     "revision/blob/tree identity"
+                )
+            elif require_current and (
+                head_object != object_id or latest_owner != revision
+            ):
+                problems.append(
+                    f"handoff entries[{index}].pulp_paths[{row_index}] pin is not "
+                    "current at HEAD; regenerate"
                 )
             try:
                 if path not in route_owners:
@@ -943,6 +965,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--show", metavar="ID", help="print one recipe as JSON")
     parser.add_argument("--symptom", action="append", default=[], help="select exact symptom tag")
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
+    parser.add_argument(
+        "--require-current",
+        action="store_true",
+        help=(
+            "also require every pinned handoff path to still match HEAD. Off by "
+            "default so an unrelated commit cannot invalidate a recorded pin."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.show and args.symptom:
         print("gpu-recipe-catalog: --show and --symptom are mutually exclusive", file=sys.stderr)
@@ -957,7 +987,11 @@ def main(argv: list[str] | None = None) -> int:
             problems.extend(validate_repository_references(document, ROOT))
             handoff = json.loads(args.handoff.read_text(encoding="utf-8"))
             problems.extend(validate_handoff(handoff))
-            problems.extend(validate_handoff_routing(handoff, ROOT))
+            problems.extend(
+                validate_handoff_routing(
+                    handoff, ROOT, require_current=args.require_current
+                )
+            )
         if problems:
             raise ValueError("\n".join(problems))
     except (OSError, json.JSONDecodeError, ValueError, json_schema_lite.UnsupportedKeyword) as exc:
