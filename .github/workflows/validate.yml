@@ -19,6 +19,10 @@ jobs:
         with:
           lfs: true
 
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
 

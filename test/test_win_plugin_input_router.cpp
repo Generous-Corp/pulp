@@ -757,6 +757,80 @@ TEST_CASE("an open combo consumes only the bounded navigation key set",
     REQUIRE(focused_input_under_root(root) == nullptr);
 }
 
+// ── Escape dismissal ────────────────────────────────────────────────────────
+//
+// A plugin editor hands the keyboard back to the DAW whenever nothing in its
+// tree holds focus — the ordinary state while a `<View overlay>` popover is
+// open. Escape therefore has to run BEFORE the focus gate, or it can never
+// run at all, which is why such a popover had no keyboard dismissal in a DAW.
+
+TEST_CASE("Escape dismisses a claimed overlay with nothing focused",
+          "[win-input-router][overlay][escape]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto owned = std::make_unique<ProbeView>();
+    auto* popover = owned.get();
+    popover->set_bounds({20, 20, 100, 60});
+    root.add_child(std::move(owned));
+    popover->claim_overlay();
+
+    int dismissed = 0;
+    popover->on_overlay_dismissed = [&] { ++dismissed; };
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+    REQUIRE(focused_input_under_root(root) == nullptr);
+
+    REQUIRE(router.on_key(KeyCode::escape, 0, true, false));
+    CHECK(dismissed == 1);
+    CHECK(root.interaction().active_overlay == nullptr);
+    CHECK(host.repaints > 0);
+}
+
+TEST_CASE("Escape with nothing open is still handed back to the host",
+          "[win-input-router][overlay][escape]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto owned = std::make_unique<ProbeView>();
+    owned->set_bounds({20, 20, 100, 60});
+    root.add_child(std::move(owned));
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+
+    REQUIRE_FALSE(router.on_key(KeyCode::escape, 0, true, false));
+}
+
+TEST_CASE("Escape closes an open dropdown before the overlay behind it",
+          "[win-input-router][overlay][escape]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto combo_owned = std::make_unique<ComboBox>();
+    auto* combo = combo_owned.get();
+    combo->set_bounds({0, 0, 120, 24});
+    combo->set_items({"A", "B", "C"});
+    root.add_child(std::move(combo_owned));
+
+    auto over_owned = std::make_unique<ProbeView>();
+    auto* popover = over_owned.get();
+    popover->set_bounds({20, 120, 100, 60});
+    root.add_child(std::move(over_owned));
+    popover->claim_overlay();
+
+    RecordingHost host(root);
+    PluginInputRouter router(host);
+
+    KeyEvent open{.key = KeyCode::enter, .is_down = true};
+    REQUIRE(combo->on_key_event(open));
+    REQUIRE(combo->is_open());
+
+    REQUIRE(router.on_key(KeyCode::escape, 0, true, false));
+    CHECK_FALSE(combo->is_open());
+    CHECK(root.interaction().active_overlay == popover);
+
+    REQUIRE(router.on_key(KeyCode::escape, 0, true, false));
+    CHECK(root.interaction().active_overlay == nullptr);
+}
+
 // ── Teardown ────────────────────────────────────────────────────────────────
 
 TEST_CASE("cancelling with no live gesture is a no-op",

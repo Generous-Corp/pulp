@@ -5,6 +5,7 @@
 #include "timeline_session_store.hpp"
 
 #include <pulp/tools/timeline/agent.hpp>
+#include <pulp/tools/timeline/device_catalog.hpp>
 #include <pulp/tools/timeline/writer_profile.hpp>
 
 #include <pulp/timebase/compiled_tempo_map.hpp>
@@ -446,14 +447,25 @@ std::string handle_timeline_view_diff(const std::string& params_json) {
     return timeline_result(view_diff_timeline_session(*session));
 }
 
+std::string handle_timeline_device_catalog(const std::string& params_json) {
+    // Takes no arguments, but still parses them: a caller that sent a malformed
+    // or non-object payload gets the same refusal the other timeline tools give,
+    // rather than a catalog that answers a request the caller never made.
+    auto arguments = parse_timeline_arguments(params_json);
+    if (!arguments)
+        return timeline_argument_error(arguments.error());
+    return json_tool_payload(pulp::tools::timeline::device_catalog_json());
+}
+
 std::string timeline_view_mcp_tools_json_fragment() {
     // Hand-written rather than generated: the generated timeline catalog is
-    // pinned to exactly the ten document-editing tools, and these three are a
-    // read projection over that document rather than another editing verb.
+    // pinned to exactly the ten document-editing tools, and these four are a
+    // read projection over the document model rather than another editing verb.
     return
         R"JSON({"description":"Project a timeline session's document as a bounded, versioned outline.","inputSchema":{"additionalProperties":false,"properties":{"session_id":{"description":"Session identifier returned by pulp_timeline_project_open.","minLength":1,"type":"string"}},"required":["session_id"],"type":"object"},"name":"pulp_timeline_view_outline"},)JSON"
         R"JSON({"description":"Project one bounded window of clips from a sequence in a timeline session.","inputSchema":{"additionalProperties":false,"properties":{"absolute":{"description":"Read the absolute timebase instead of the musical one.","type":"boolean"},"after":{"description":"Continuation token from a prior page's next field, verbatim.","minLength":1,"type":"string"},"end":{"description":"Exclusive end of the half-open window, in the selected timebase.","type":"integer"},"limit":{"description":"Maximum clips per page. Clamped by the view's own limits.","minimum":1,"type":"integer"},"sequence_id":{"description":"Identifier of the sequence to page through.","minimum":1,"type":"integer"},"session_id":{"description":"Session identifier returned by pulp_timeline_project_open.","minLength":1,"type":"string"},"start":{"description":"Inclusive start of the half-open window, in the selected timebase.","type":"integer"}},"required":["session_id","sequence_id","start","end"],"type":"object"},"name":"pulp_timeline_view_region"},)JSON"
-        R"JSON({"description":"Project the outline diff for a timeline session's most recent applied transaction.","inputSchema":{"additionalProperties":false,"properties":{"session_id":{"description":"Session identifier returned by pulp_timeline_project_open.","minLength":1,"type":"string"}},"required":["session_id"],"type":"object"},"name":"pulp_timeline_view_diff"})JSON";
+        R"JSON({"description":"Project the outline diff for a timeline session's most recent applied transaction.","inputSchema":{"additionalProperties":false,"properties":{"session_id":{"description":"Session identifier returned by pulp_timeline_project_open.","minLength":1,"type":"string"}},"required":["session_id"],"type":"object"},"name":"pulp_timeline_view_diff"},)JSON"
+        R"JSON({"description":"List the built-in Timeline devices a track's device chain may name, with each device's reported latency and the chain bounds admission enforces.","inputSchema":{"additionalProperties":false,"properties":{},"type":"object"},"name":"pulp_timeline_device_catalog"})JSON";
 }
 
 std::optional<std::string> handle_timeline_tool(std::string_view name,
@@ -478,10 +490,11 @@ std::optional<std::string> handle_timeline_tool(std::string_view name,
     static_assert(bindings.size() == kTimelineMcpToolNames.size());
     // The read-projection verbs are bound separately because the generated
     // catalog above is pinned to the ten editing tools it describes.
-    static constexpr std::array<ToolBinding, 3> view_bindings{
+    static constexpr std::array<ToolBinding, 4> view_bindings{
         ToolBinding{"pulp_timeline_view_outline", handle_timeline_view_outline},
         ToolBinding{"pulp_timeline_view_region", handle_timeline_view_region},
         ToolBinding{"pulp_timeline_view_diff", handle_timeline_view_diff},
+        ToolBinding{"pulp_timeline_device_catalog", handle_timeline_device_catalog},
     };
     for (const auto& binding : bindings) {
         if (name == binding.name)

@@ -532,5 +532,74 @@ class CheckedInLedger(unittest.TestCase):
         )
 
 
+
+class TruncatedCheckoutRefusal(unittest.TestCase):
+    """A short history must make the generator refuse, not emit boundary SHAs.
+
+    ``git log -1 --format=%H <commit> -- <path>`` exits 0 on a truncated
+    checkout and answers with the graft boundary. Written through, that is a
+    well-formed SHA pinned to the oldest commit the checkout happens to hold --
+    a correct ledger silently replaced with a wrong one, at exit status 0.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._workspace = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls._workspace.cleanup)
+        base = pathlib.Path(cls._workspace.name)
+        cls.root = base / "truncated"
+        # --no-local is load-bearing: with a local clone Git hardlinks the
+        # source object store and ignores --depth, so the fixture would carry
+        # the full history and every assertion here would be vacuous.
+        git(
+            provenance.ROOT,
+            "clone",
+            "--quiet",
+            "--depth=1",
+            "--no-local",
+            f"file://{provenance.ROOT}",
+            str(cls.root),
+        )
+        cls.handoff = cls.root / "docs/status/gpu-vellum-handoff.yaml"
+
+    def setUp(self) -> None:
+        provenance._BOUNDARY_CACHE.clear()
+        self.assertEqual(git(self.root, "rev-list", "--count", "HEAD"), "1")
+
+    def run_cli(self, *arguments: str) -> tuple[int, str, str]:
+        out = io.StringIO()
+        err = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            exit_code = provenance.main(
+                ["--root", str(self.root), "--handoff", str(self.handoff), *arguments]
+            )
+        return exit_code, out.getvalue(), err.getvalue()
+
+    def test_shallow_write_refuses_and_leaves_the_ledger_byte_identical(self) -> None:
+        before = hashlib.sha256(self.handoff.read_bytes()).hexdigest()
+        exit_code, _, errors = self.run_cli("write")
+        self.assertEqual(exit_code, 2, errors)
+        self.assertIn("history is truncated", errors)
+        self.assertIn("git fetch --unshallow", errors)
+        # The byte comparison is the whole point: an exit code says the tool
+        # reported a problem, only the digest says it did not write first.
+        self.assertEqual(
+            hashlib.sha256(self.handoff.read_bytes()).hexdigest(), before
+        )
+
+    def test_shallow_check_names_the_truncated_checkout(self) -> None:
+        exit_code, _, errors = self.run_cli("check")
+        self.assertEqual(exit_code, 2, errors)
+        self.assertIn("history is truncated", errors)
+        self.assertIn("shallow graft boundary", errors)
+
+    def test_shallow_paths_still_lists_the_inventory(self) -> None:
+        """``paths`` asks no history question and must keep working."""
+
+        exit_code, text, errors = self.run_cli("paths")
+        self.assertEqual(exit_code, 0, errors)
+        self.assertGreater(len(text.split()), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,10 @@ function CSSStyleDeclaration(el) {
     // adding/removing data-overlay while the CSS shape already claimed)
     // re-claims instead of silently keeping the stale value.
     this._autoOverlayConsume = false;
+    // Whether this element is currently marked as an overlay TRIGGER (the
+    // control that opens a popover, not the popover). Tracked so the bridge
+    // call happens only on a transition.
+    this._autoOverlayTrigger = false;
     // Raw string last APPLIED per property, used to skip a write that would
     // reproduce the state the widget is already in. Keyed on the raw
     // (pre-var-resolution) string because that is what the caller supplies and
@@ -71,6 +75,21 @@ CSSStyleDeclaration.prototype._reevaluateOverlay = function() {
                       zVal >= _PULP_AUTO_OVERLAY_Z_INDEX_THRESHOLD);
 
     var shouldClaim = hinted || shapeClaim;
+
+    // `data-overlay-trigger="true"` marks a control that OPENS an overlay — a
+    // dropdown field, a menu button. A press on one while a DIFFERENT overlay
+    // is open means "switch menus", so the native dismissal policy delivers
+    // that press to the trigger instead of spending it on the close, and the
+    // user changes dropdowns in one tap. Never inferred from CSS shape: an
+    // inference that marked ordinary content would make clicking away from a
+    // menu also operate whatever sits under the click.
+    var triggerHint = el._dataset && el._dataset.overlayTrigger;
+    var isTrigger = (triggerHint === "true" || triggerHint === true);
+    if (this._autoOverlayTrigger !== isTrigger) {
+        if (typeof setOverlayTrigger === "function")
+            setOverlayTrigger(el._id, isTrigger);
+        this._autoOverlayTrigger = isTrigger;
+    }
 
     // Consume the dismissing press only on the EXPLICIT author opt-in.
     // `data-overlay="true"` is a direct statement that the element is a

@@ -1,13 +1,13 @@
 # View, accessibility, host scanner, platform audio-device, and host hook tests.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
-# Every platform host that routes a press to an open ComboBox must also
-# consult the generalized overlay slot. The two mechanisms are wired per host,
-# so they can drift silently: the standalone macOS host consulted both while
-# the DAW plugin hosts consulted only the ComboBox one, leaving a React or
-# imported-design popover open forever on an outside click inside a plugin
-# editor. The behaviour itself is covered by pulp-test-overlay-routing; this
-# gate covers whether each host still calls it.
+# The overlay-dismissal policy has one implementation, and every platform host
+# routes through it. Hand-rolled per-host copies drift silently and did: one
+# read the process-global shim mirror so a press in one editor dismissed
+# another's popover, one never honoured outside-click consumption, and the DAW
+# plugin hosts had no Escape path at all. The behaviour itself is covered by
+# pulp-test-overlay-routing; this gate covers whether each host still routes
+# through the shared verbs instead of re-deriving the decision from the slot.
 add_test(NAME overlay-dismissal-wiring
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/../tools/scripts/overlay_dismissal_wiring_guard.py)

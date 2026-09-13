@@ -67,6 +67,21 @@ def is_commit(root: pathlib.Path, revision: str) -> bool:
     ).returncode == 0
 
 
+def event_ref_candidates(event_ref: str) -> list[str]:
+    """Refs to try, most exact first, to reconnect this event's history.
+
+    A `pull_request` event names `refs/pull/<n>/merge`, which exists only while
+    GitHub holds a computed merge commit for an open, non-conflicting pull
+    request. The pull request's `head` ref has no such lifetime and reaches the
+    same provenance commits, so it is the fallback rather than a second guess.
+    """
+    candidates = [event_ref]
+    merge_ref = re.fullmatch(r"refs/pull/(\d+)/merge", event_ref)
+    if merge_ref:
+        candidates.append(f"refs/pull/{merge_ref.group(1)}/head")
+    return candidates
+
+
 def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
     revisions = required_commits(root)
     missing = [revision for revision in revisions if not is_commit(root, revision)]
@@ -82,16 +97,34 @@ def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
         event_ref = os.environ.get("GITHUB_REF", "")
         if not event_ref.startswith("refs/"):
             raise HydrationError("shallow checkout lacks an exact GITHUB_REF to hydrate")
-        completed = subprocess.run(
-            [
-                "git", "fetch", "--no-tags", "--unshallow", remote,
-                f"+{event_ref}:refs/pulp-ci/gpu-provenance/event",
-            ],
-            cwd=root, text=True, capture_output=True, check=False,
-        )
-        if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout).strip()
-            raise HydrationError(f"bounded GPU provenance fetch failed: {detail}")
+        failures = []
+        for candidate in event_ref_candidates(event_ref):
+            completed = subprocess.run(
+                [
+                    "git", "fetch", "--no-tags", "--unshallow", remote,
+                    f"+{candidate}:refs/pulp-ci/gpu-provenance/event",
+                ],
+                cwd=root, text=True, capture_output=True, check=False,
+            )
+            if completed.returncode == 0:
+                break
+            failures.append(f"{candidate}: {(completed.stderr or completed.stdout).strip()}")
+        else:
+            # Every candidate ref was unfetchable. That is a statement about ref
+            # AVAILABILITY, not about the provenance: GitHub deletes
+            # refs/pull/<n>/merge the moment a pull request closes, and leaves it
+            # absent while it recomputes mergeability after a base-branch push, so
+            # a rerun in either window fails here on a repository whose history is
+            # otherwise fine. The two checks below are the actual invariants and
+            # are themselves fail-closed -- a still-shallow repository cannot walk
+            # past its graft, so `merge-base --is-ancestor` reports NOT-an-ancestor
+            # rather than a false yes. Report the transport failure and let those
+            # adjudicate.
+            for failure in failures:
+                print(
+                    f"gpu-provenance-hydration: WARN: bounded fetch failed: {failure}",
+                    file=sys.stderr,
+                )
     unresolved = [revision for revision in revisions if not is_commit(root, revision)]
     if unresolved:
         raise HydrationError(f"GPU provenance commits remain unresolved: {unresolved}")

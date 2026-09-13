@@ -2120,3 +2120,19 @@ or authentication refusal becomes the useless `exited non-zero and said
 nothing`, while naively appending both current events prints the same failure
 twice. Pin both the current paired-event shape and the older item form in the
 stream regression.
+
+## A control whose display value never changes has no inverse, and that is not an offender
+
+`tools/rack/test_param_units.py` sweeps each control's position, renders the
+display value, and inverts it back. `pu.from_display()` returns `None` when the
+map is not invertible — and a map with a zero-width display range is one of
+those: every position renders the same string, so no position can be recovered
+from it. That is a property of the control's declared display map, not a failure
+of the round trip, and counting it as an offender buries the real
+non-invertibility bugs under rows that were never invertible to begin with.
+
+Classify it instead. `has_no_inverse(param)` answers the question from the
+declared map alone, and the sweep tallies those separately from offenders. Keep
+a positive check on the classifier itself — a synthetic flat map whose
+`from_display` must return `None` — or the branch silently swallows every real
+offender the day the predicate goes wrong.

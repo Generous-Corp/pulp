@@ -810,6 +810,32 @@ TEST_CASE("timeline CLI selects a writer profile by name and refuses unknown one
     REQUIRE(capabilities.find(R"({"class":"clip","intents":["create","modify"]})") !=
             std::string::npos);
 
+    // The same object carries what a device chain may name, so a caller
+    // discovers the authoring surface and the device surface in one call.
+    REQUIRE(capabilities.find(R"("device_catalog":)") != std::string::npos);
+    REQUIRE(capabilities.find(R"("binding_key":"pulp.device.event.humanise")") !=
+            std::string::npos);
+    REQUIRE(capabilities.find(R"("domain":"event-to-event")") != std::string::npos);
+    REQUIRE(capabilities.find(R"("binding_key":"pulp.instrument.basic")") != std::string::npos);
+    REQUIRE(capabilities.find(R"("domain":"event-to-audio")") != std::string::npos);
+    // The bounds a caller adds its own latencies against, so a chain that would
+    // be refused is predictable without a round trip.
+    REQUIRE(capabilities.find(R"("max_chain_length":2)") != std::string::npos);
+    REQUIRE(capabilities.find(R"("latency_ceiling_samples":65535)") != std::string::npos);
+    // Control: a device the catalog does not carry is absent from the same
+    // text, so the finds above are reading a catalog rather than matching any
+    // substring of a large JSON blob.
+    REQUIRE(capabilities.find(R"("binding_key":"pulp.device.event.absent")") == std::string::npos);
+
+    // A named profile is the profile alone: the catalog is a property of the
+    // boundary, not of one writer authority.
+    const auto one_profile_path = temp.path() / "one-profile.json";
+    REQUIRE(run_cli(cli + " seq capabilities --writer-profile editor > " +
+                    quote(one_profile_path)) == 0);
+    const auto one_profile = read_text(one_profile_path);
+    REQUIRE(one_profile.find(R"("profile":"editor")") != std::string::npos);
+    REQUIRE(one_profile.find(R"("device_catalog":)") == std::string::npos);
+
     // A proposal writer is refused the removal, by name, and writes nothing.
     const auto refused_out = temp.path() / "refused.json";
     REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(remove_path) +

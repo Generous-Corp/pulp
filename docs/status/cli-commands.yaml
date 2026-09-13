@@ -2095,7 +2095,7 @@ commands:
             kind: option
             description: "proposal, editor (default), or trusted; an unknown name is a usage error"
       - name: capabilities
-        summary: Report the command classes and intents each named writer profile admits
+        summary: "Report the command classes and intents each named writer profile admits; with no --writer-profile the object also carries a device_catalog of every built-in device a track's device chain may name, each device's domain and reported latency, and the chain-length and latency bounds admission enforces"
         args:
           - name: --writer-profile
             kind: option

@@ -2372,3 +2372,38 @@ An empty route set is a valid *build* result — a trackless arrangement renders
 silence — but it must not reach `prepare()`, which rejects it as an
 under-specified request (`TimelineOfflineRenderCode::InvalidProgram` documents
 the same rule). Skip the graph and write the zero-filled buffer instead.
+
+## Who owns a device chain is decided by authorship, never by its length
+
+`resolve_timeline_device_route()` builds every node in an admitted chain and
+generates the routes for all of them, so the route validation in
+`timeline_graph_binding_routes.cpp` has to decide whether a chain is
+resolver-owned before it demands routes from the caller. That test reads one
+thing: whether every placement is `DeviceKind::BuiltIn`. It must not also bound
+the chain length.
+
+Bounding it by length looks harmless and produces a wrong *diagnosis*. An
+over-long all-built-in chain then falls out of resolver ownership back into
+caller-owned validation, which reports the routes the caller never supplied —
+`MissingDevicePlacement` — instead of `UnsupportedDeviceChain`, the refusal the
+resolver actually raises for that shape. The chain is still refused, so every
+test asserting "this is rejected" stays green while the code the caller reads
+to fix it is the wrong one. The length refusal lives in the resolver's own
+`validate_declaration`, and it fires before the fixed-size descriptor array is
+built, so letting an over-long chain reach it cannot overflow anything.
+
+## An event-to-event device reports latency because it may move an attack later
+
+`pulp.device.event.humanise` wraps the existing `pulp::midi::Humanize` kernel
+and reports `kEventHumaniserWindowSamples`. That is not a cost of the
+implementation: a device permitted to move an attack *later* must hold that
+attack for the full width of the window it may move it into, and the reported
+figure is exactly what the event-stream scheduler compensates. Compensation
+shifts the scheduling window; it never rewrites an event's `sample`.
+
+The admitted shape is deliberately one event-to-event device ahead of one
+instrument. Every other declaration is a typed `TimelineGraphAdmissionCode` at
+admission rather than a truncation, and the two bounds a caller needs to predict
+one — `kAdmittedDeviceChainLength` and `event_device_latency_ceiling_samples()`
+— are on the public resolver header so nobody re-declares the ceiling and drifts
+from the constant the graph binding enforces.
