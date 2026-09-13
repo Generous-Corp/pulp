@@ -32,9 +32,13 @@ PULP_BENCHMARK_BINARY_SHA256=$(shasum -a 256 build-sampler-bench/test/pulp-sampl
   > docs/validation/sampler-interpolation/apple-m3-ultra-mac15-14.release.json
 ```
 
-The source bundle hash covers the interpolation policy, sinc kernel, benchmark
-render support, benchmark driver, and its focused CMake owner manifest. It does
-not hash the unrelated application/audio/host test registry. The binary hash
+The source bundle hash covers the interpolation policy, sinc kernel, window
+functions, benchmark render support, benchmark driver, and its focused CMake
+owner manifest. The listing is closed over the `pulp/` headers those files
+include: the verifier walks each bundled header and translation unit, resolves
+every `pulp/` include it reaches, and fails when a reachable header is absent
+from the listing, so a compiler input cannot drift out of the digest unnoticed.
+It does not hash the unrelated application/audio/host test registry. The binary hash
 binds the artifact to the exact executable used for capture. The executable
 exits nonzero if a measured
 P95 exceeds the ratcheted tier budgets. Each of three measurement epochs uses
