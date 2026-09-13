@@ -46,7 +46,9 @@ namespace pulp::timeline {
 enum class CompileContextKind : std::uint8_t {
     ChordScale,
     Groove,
-    /// Reserved. Slot only: no producer, no consumer, no semantics (P0-15).
+    /// Sequence-owned intensity. Authored through the dynamics-lane command and
+    /// readable here by a subscriber; no built-in compiler consumes it, so a
+    /// reader that declares it decides what intensity means for its own output.
     Dynamics,
     /// Reserved, peer-edge. See the acyclicity note above.
     CrossTrackRhythm,

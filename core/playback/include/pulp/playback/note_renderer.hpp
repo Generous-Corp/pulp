@@ -46,11 +46,6 @@ enum class NoteRenderCode : std::uint8_t {
     /// origin to add it to, so the block fails closed rather than scheduling
     /// against a position nothing defined.
     CompensationUnsupported,
-    /// A compensating shift would read past an enabled loop's end. What belongs
-    /// in that window is the content after the wrap, not the document positions
-    /// past the loop point, and wrap-aware read-ahead is not implemented. The
-    /// block fails closed rather than playing events the pass will never reach.
-    CompensationLoopWrapUnsupported,
 };
 
 struct NoteRenderResult {
@@ -76,7 +71,9 @@ struct NoteRenderResult {
 /// loop wrap, and stop reset and release active notes; notes whose onset
 /// precedes the new range are deliberately not chased. With a compensating
 /// shift the non-chase rule applies to the SHIFTED range, so reading ahead does
-/// not turn a seek into a chase.
+/// not turn a seek into a chase, and an enabled loop bounds the read: a window
+/// carried past the loop point is folded back to the post-wrap content rather
+/// than reading document positions this pass never reaches.
 class ArrangementNoteRenderer {
   public:
     /// Bounded logical overlap depth per MIDI channel/pitch. Exceeding it is a
@@ -139,6 +136,13 @@ class ArrangementNoteRenderer {
     bool state_overflow_ = false;
     bool has_block_index_ = false;
     bool has_latched_shift_ = false;
+    /// Where the compensated EVENT STREAM is in the loop, which runs ahead of
+    /// the transport by the shift. A wrap the read-ahead already served must not
+    /// be served a second time when the transport reaches it, or the release
+    /// would cut the post-wrap notes that read-ahead had already started.
+    bool has_stream_pass_ = false;
+    std::uint64_t last_stream_pass_ = 0;
+    std::uint64_t last_stream_epoch_ = 0;
     EventCompensationShift latched_shift_{};
     std::uint64_t last_block_index_ = 0;
     std::uint32_t dropped_events_ = 0;

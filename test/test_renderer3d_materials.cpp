@@ -10,7 +10,7 @@ TEST_CASE("Renderer3D applies transform animation initial pose and defers playba
     static_scene.animations.clear();
     auto static_result = Renderer3D::render_scene_data(static_scene, config);
     if (!static_result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << static_result.error);
         return;
     }
@@ -64,7 +64,7 @@ TEST_CASE("Renderer3D applies rotation and scale animation initial poses",
             auto static_result =
                 Renderer3D::render_scene_data(static_scene, config);
             if (!static_result.gpu_available) {
-                SUCCEED("Dawn/WebGPU unavailable in this environment: "
+                SKIP("Dawn/WebGPU unavailable in this environment: "
                         << static_result.error);
                 return;
             }
@@ -122,7 +122,7 @@ TEST_CASE("Renderer3D reports deferred unsupported glTF feature records",
         make_unsupported_feature_deferred_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -150,7 +150,7 @@ TEST_CASE("Renderer3D reports deferred advanced material extensions",
         make_advanced_material_extension_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -175,7 +175,7 @@ TEST_CASE("Renderer3D applies unlit material shading",
 
     auto lit = Renderer3D::render_scene_data(make_unlit_render_scene(false), config);
     if (!lit.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << lit.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << lit.error);
         return;
     }
     auto unlit = Renderer3D::render_scene_data(make_unlit_render_scene(true), config);
@@ -201,7 +201,7 @@ TEST_CASE("Renderer3D applies alpha-mask material cutoff",
     auto opaque = Renderer3D::render_scene_data(make_alpha_mask_render_scene(false),
                                                 config);
     if (!opaque.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << opaque.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << opaque.error);
         return;
     }
     auto masked = Renderer3D::render_scene_data(make_alpha_mask_render_scene(true),
@@ -233,7 +233,7 @@ TEST_CASE("Renderer3D applies vertex colors",
     auto result = Renderer3D::render_scene_data(make_vertex_color_render_scene(),
                                                 config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -259,7 +259,7 @@ TEST_CASE("Renderer3D applies geometry normals to lighting",
         make_geometry_normal_render_scene(true),
         config);
     if (!front.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << front.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << front.error);
         return;
     }
     auto back = Renderer3D::render_scene_data(
@@ -293,7 +293,7 @@ TEST_CASE("Renderer3D reports deferred normal-map inputs",
         make_normal_texture_deferred_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -324,7 +324,7 @@ TEST_CASE("Renderer3D samples normal material texture",
         make_geometry_normal_render_scene(true),
         config);
     if (!plain.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << plain.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << plain.error);
         return;
     }
     auto normal_mapped = Renderer3D::render_scene_data(
@@ -361,7 +361,7 @@ TEST_CASE("Renderer3D applies normal texture scale",
         make_normal_texture_render_scene(1.0f, true),
         config);
     if (!default_scale.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << default_scale.error);
         return;
     }
@@ -403,7 +403,7 @@ TEST_CASE("Renderer3D derives tangents for normal material texture",
         make_geometry_normal_render_scene(true),
         config);
     if (!plain.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << plain.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << plain.error);
         return;
     }
     auto normal_mapped = Renderer3D::render_scene_data(
@@ -442,7 +442,7 @@ TEST_CASE("Renderer3D reports remaining deferred PBR texture slots",
         make_pbr_texture_slots_deferred_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -484,7 +484,7 @@ TEST_CASE("Renderer3D deferred flags stay aligned with sidecar native gaps",
     auto unsupported_render = Renderer3D::render_scene_data(unsupported_scene,
                                                             config);
     if (!unsupported_render.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << unsupported_render.error);
         return;
     }
@@ -557,7 +557,7 @@ TEST_CASE("Renderer3D applies double-sided material culling",
         make_back_facing_render_scene(false),
         config);
     if (!single_sided.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << single_sided.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << single_sided.error);
         return;
     }
     auto double_sided = Renderer3D::render_scene_data(
@@ -588,7 +588,7 @@ TEST_CASE("Renderer3D applies alpha-blend material state",
     auto opaque = Renderer3D::render_scene_data(make_alpha_blend_render_scene(false),
                                                 config);
     if (!opaque.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << opaque.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << opaque.error);
         return;
     }
     auto blended = Renderer3D::render_scene_data(make_alpha_blend_render_scene(true),
@@ -620,7 +620,7 @@ TEST_CASE("Renderer3D draws opaque primitives before alpha-blend primitives",
         make_alpha_blend_over_opaque_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -660,7 +660,7 @@ TEST_CASE("Renderer3D sorts alpha-blend primitives back to front",
         make_alpha_blend_sorted_layers_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -699,7 +699,7 @@ TEST_CASE("Renderer3D applies emissive material factor",
     auto plain = Renderer3D::render_scene_data(make_emissive_render_scene(false),
                                                config);
     if (!plain.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << plain.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << plain.error);
         return;
     }
     auto emissive = Renderer3D::render_scene_data(make_emissive_render_scene(true),
@@ -733,7 +733,7 @@ TEST_CASE("Renderer3D applies emissive material strength",
         make_emissive_render_scene(true, 1.0f),
         config);
     if (!baseline.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << baseline.error);
         return;
     }
@@ -770,7 +770,7 @@ TEST_CASE("Renderer3D samples emissive material texture",
         make_emissive_texture_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -808,7 +808,7 @@ TEST_CASE("Renderer3D applies emissive texture transform on TEXCOORD_1",
         make_emissive_texture_texcoord1_transform_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -850,7 +850,7 @@ TEST_CASE("Renderer3D applies metallic and roughness material factors",
         make_metallic_roughness_factor_render_scene(0.0f, 0.1f),
         config);
     if (!smooth_dielectric.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " <<
+        SKIP("Dawn/WebGPU unavailable in this environment: " <<
                 smooth_dielectric.error);
         return;
     }
@@ -885,7 +885,7 @@ TEST_CASE("Renderer3D samples metallic-roughness material texture",
         make_metallic_roughness_factor_render_scene(1.0f, 1.0f),
         config);
     if (!factor_only.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " <<
+        SKIP("Dawn/WebGPU unavailable in this environment: " <<
                 factor_only.error);
         return;
     }
@@ -921,7 +921,7 @@ TEST_CASE("Renderer3D applies metallic-roughness texture transform on TEXCOORD_1
         make_metallic_roughness_texcoord1_transform_render_scene(false),
         config);
     if (!untransformed.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << untransformed.error);
         return;
     }
@@ -974,7 +974,7 @@ TEST_CASE("Renderer3D samples occlusion material texture",
         make_metallic_roughness_factor_render_scene(0.0f, 0.1f),
         config);
     if (!plain.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " <<
+        SKIP("Dawn/WebGPU unavailable in this environment: " <<
                 plain.error);
         return;
     }
@@ -1012,7 +1012,7 @@ TEST_CASE("Renderer3D applies occlusion texture strength",
         make_occlusion_texture_render_scene(0.35f),
         config);
     if (!weak.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << weak.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << weak.error);
         return;
     }
     auto full = Renderer3D::render_scene_data(
@@ -1048,7 +1048,7 @@ TEST_CASE("Renderer3D applies occlusion texture transform on TEXCOORD_1",
         make_occlusion_texcoord1_transform_render_scene(false),
         config);
     if (!untransformed.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << untransformed.error);
         return;
     }

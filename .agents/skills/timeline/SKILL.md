@@ -159,11 +159,22 @@ different request with an earlier result.
   reference gain/fades. A source window that cuts into a leaf clip's *own*
   fade shortens that fade to the new clip edge rather than refusing — the
   answer an unnested clip gives when it is dragged shorter — and a trim that
-  swallows a fade whole leaves none. That is a different thing from a fade on
-  the `SequenceRef` placement, which still refuses. A complete
+  swallows a fade whole leaves none. A fade authored on the `SequenceRef`
+  placement itself is a different mechanism: flattening records that ramp as a
+  window of fade progress in owner-timeline ticks, and every leaf the window
+  reaches evaluates its own position inside it, so one ramp composes across the
+  leaves flattening cut it into and multiplies with each leaf's own fade. It
+  refuses only when a ramp actually reaches a leaf whose content no renderer
+  scales by clip gain, because dropping that ramp would be silently wrong. A complete
   nested media clip preserves its `TimeConform` intent, but a source window
-  that trims a conforming clip fails with `NestedSequenceUnsupported` until
-  playback has a conform-aware source-range mapping. Expansion
+  that trims a conforming clip fails with `NestedConformedTrimUnsupported`
+  until playback has a conform-aware source-range mapping, and a trimmed
+  `Stretch` clip additionally needs a windowed artifact. A nested child track
+  carrying a device chain or an automation lane fails with
+  `NestedDeviceChainUnsupported` or `NestedAutomationLaneUnsupported`, and an
+  absolute-anchored leaf inside a nested sequence fails with
+  `NestedAbsoluteChildUnsupported`; each names its own cause rather than
+  sharing one umbrella code. Expansion
   is bounded by `ProgramCompileRequest::max_expanded_note_events` and
   `ProgramCompileRequest::max_expanded_clips` across materialized clips,
   reference traversal, and reused track programs. The independent
@@ -419,7 +430,10 @@ different request with an earlier result.
   `serialize_project_decode.cpp` you must also update the schema policy header
   (`current_version` plus an `<field>_introduced_version` predicate),
   `schema_registry.cpp` (declare the field, register BOTH migrations),
-  `structural_registry_validation.cpp`, and `schema_json_preflight.cpp`. Then two
+  `structural_registry_validation.cpp` (its own expected-field list, or the
+  registry self-check fails), `sequence_schema_migrations.{hpp,cpp}` (the
+  `vN_members` list plus BOTH raw-splice migrations), and
+  `schema_json_preflight.cpp`. Then two
   more that no gate points at: **`id_remap.cpp`**, or every copy/paste/import
   quietly resets the field to its default, and **`snapshot_equivalence.cpp`**, or
   the journal-replay checkpoint guard treats documents differing only in that
@@ -427,6 +441,21 @@ different request with an earlier result.
   asserted through `equivalent()` passes even when the field was never persisted.
   Grow the oracle in the same change, and prove a round-trip test fails with the
   encode disabled before trusting it.
+- **A sequence-owned context lane is not persisted just because the model
+  carries it.** `DynamicsLane` shipped with validation, interpolation, compile
+  resolution, and id-remap tests all green while the encoder, every decoder,
+  the preflight, and the schema registry knew nothing about it — a save
+  silently dropped an authored lane. The lane now rides sequence schema v8 as
+  `dynamics_lane` (between `chord_scale_lane` and `groove`), each event as
+  `{"intensity_bits","interpolation","position"}` with the intensity spelled
+  as its IEEE bit pattern the way an automation point spells `value_bits`, so
+  a reload is bit-exact rather than nearest-decimal. The v8→v7 downgrade
+  refuses a lane with any authored event, exactly as the scene, track-order,
+  and chord-detail downgrades refuse. When adding a lane like it, the
+  round-trip test is the one test the feature cannot ship without: assert the
+  reloaded lane `==` the authored one (float bits included) and that a re-save
+  reproduces the first save, then prove that test fails with the encode line
+  removed.
 - **Field order in the canonical JSON is alphabetical, so a new field renumbers
   its neighbours.** `track_order` sorts before `tracks` (`_` < `s`), which moved
   `tracks` from member index 9 to 10 in the preflight walk. A wrong index
@@ -1324,6 +1353,54 @@ neither is ordered the way you would guess:
   match the variant. Appending a new envelope and asserting it at the final index
   is correct.
 
+### A new alternative's *header text* is checked by two more gates, and neither is a compiler
+
+Every guard above is a compile error inside `pulp-timeline`. Two repo gates read
+the header as text instead, fire much later, and fail in ways that do not name
+the command you added.
+
+**Every public member needs its own `///` brief.** `timeline_api_docs_check.py`
+counts a member as documented iff its Doxygen XML carries a non-empty
+`briefdescription` or `detaileddescription`, so one brief above the struct
+documents the struct and none of its fields. Symbols listed in
+`docs/doxygen/sequencer-api-contract-legacy-baseline.json` are grandfathered, and
+a symbol you just added is not in it. **Do not resolve this by adding the new
+symbol to that baseline**: the baseline records contracts that predate the gate,
+so widening it retires the gate instead of satisfying it. Copy the brief style
+from the nearest structural analogue — `SetDeviceState` for a gated replace.
+
+This one bites late, because `api-contracts` is **not a required check**. The PR
+that adds an undocumented member merges green and `main` goes red on every commit
+after it until somebody goes looking. `SetDynamicsLane` landed that way and left
+the check red for days. Run `tools/build-api-docs.sh --contract-only` before
+shipping a header change; it needs no build.
+
+**The sequencer-exposure ledger gate is purely path-based, and it lives inside
+the required "Enforce version & skill sync" check.** Any change to a path a
+ledger row owns — a comment-only change included — must be recorded by a row that
+is `pending` *and* materially changed. Material is exactly `delivery_state`,
+`claim_id`, `owned_paths`, `classification`, `evidence`, `surfaces`
+(`_material_row` in `sequencer_exposure_check.py`); editing a row's `title` does
+nothing. There is no doc-only carve-out and no skip trailer, so `shipyard pr`
+reports skill-sync and version-bump green and the PR still goes red.
+
+Amending the existing pending row is the honest move when that row already claims
+the path and its delivery is unfinished — `validate_transition`'s contract is
+omission prevention, its own wording is "an added **or materially changed**
+pending row", and rows are routinely extended while pending. Evidence needles are
+substrings re-verified against the file on every run, so a needle is a falsifiable
+claim rather than a hash-mover, and prose is allowed: existing rows cite test
+names. Adding a brand-new row to describe a comment fix would be the dishonest
+shape, not the amendment.
+
+**Read the receipt's `comparison_mode` before trusting a local pass.** The anchor
+is `base_tip` (main's tip) when the base is already an ancestor of your head, and
+falls back to `merge_base` when it is not. CI checks out a synthetic merge commit,
+so CI is always `base_tip`; a branch that has not been rebased compares locally
+against the older `merge_base`. The two disagree exactly when another PR has
+materially changed your row on main since you branched — which can make a change
+that is material locally non-material under CI.
+
 ### A `ConflictCode` is a wire ordinal, and adding one changes nothing outside the process
 
 - **Append at the end, never next to the semantic neighbour.**
@@ -1466,6 +1543,19 @@ is a malformed gesture** (the front-end never resolved it) and belongs in the
 lowerer; **an id that is well-formed but absent from the document** is the
 reducer's `MissingItem`. An `std::optional` destination left empty is neither —
 it is a request for last position.
+
+### `Clip::create` re-validates the fades against the duration it is given
+
+`valid_playback_properties` rejects a fade longer than the clip's duration, and
+`Clip::create` runs it, so rebuilding an existing clip with a *shorter* duration
+fails with `InvalidStructure` even though every field was copied verbatim from a
+clip the document already accepted. Trimming code that carries
+`playback_properties()` across unchanged is the shape that hits this: the
+failure names the structure, not the fade, so it reads like a malformed clip.
+
+Clamp or zero the fade durations before `create` when the new duration is
+smaller, and keep the ramp's real extent somewhere else if a caller still needs
+it — a trimmed placement should enter its fade part way up, not restart it.
 
 ### A negative control on a compound condition can exercise half of it
 
@@ -2899,6 +2989,67 @@ lane (model + compile context) is genuinely small and can land on its own;
 `DynamicsLane` deliberately did exactly that, and its serialization is a separate
 piece of work for this reason.
 
+## A new `Command` alternative has six fail-closed sites and two silent ones
+
+Appending an alternative to the `Command` variant will not compile, or will not
+pass, until six places agree — which is the good half:
+
+- `command_authority_of<T>()` in `document_session.hpp` — its final `else` is a
+  `static_assert(detail::unclassified_command_v<T>, …)` that is unconditionally
+  false, so a missing entry is a hard error rather than a permissive default;
+- one of the `is_*_command_type` lists in `transaction_dispatch_internal.hpp` —
+  `transaction.cpp` asserts the lists claim every alternative *exactly once*, so
+  claiming none and claiming twice both fail (a count-only check could not see
+  the second case, because one double claim and one orphan cancel out);
+- the positional `expected` table in `test_timeline_writer_capabilities.cpp`,
+  together with its `STATIC_REQUIRE(alternatives == N)`;
+- the equality and retained-size switches in `command.cpp`, which are two
+  separate `if constexpr` chains — a command added to one and not the other
+  compiles and misreports its own size;
+- the alphabetical `expected` name list in `test_timeline_schema_registry.cpp`,
+  whose `static_assert` is against `variant_size_v<Command>` — so it binds even
+  though it is a hand-written list;
+- the `encoded` envelope list in `test_timeline_command_persistence.cpp`, which
+  decodes one fixture per alternative and is *index-keyed*: append only, or
+  every `holds_alternative` assertion after the insertion point renumbers.
+
+`test_timeline_agent.cpp` counts `"x-pulp-domain":"Command"` occurrences in the
+emitted schema against the same `variant_size_v<Command>`, so it follows the
+registry automatically and needs no edit — but it turns a missed *registration*
+into a red test rather than a silent gap.
+
+The two that fail **silently** are the decode arm in
+`serialize_command_decode.cpp` and the registration in `schema_registry.cpp`.
+Skip either and the command still builds, still applies in-process, and is
+simply unreachable from every wire surface — the CLI and MCP verbs are
+*generated* from the registry, so an unregistered command produces no verb and
+no error.
+
+Commands are tagged on the wire by string type tag, never by variant index, so
+appending at the end of the variant carries no compatibility obligation. Append
+anyway: it keeps the positional authority table a pure append.
+
+## A command can apply cleanly and still not survive the save
+
+`pulp::tools::timeline::command_apply` — the one entry point behind both the CLI
+and the MCP tool — loads a project from JSON, applies the decoded commands, and
+returns `serialize_project(...)` of the result. So a mutation whose target is
+**not carried by the encoder** is destroyed by the same call that performed it:
+the transaction succeeds, the gate passes, the response JSON simply lacks it.
+
+`DynamicsLane` is the live example. The lane is a public model type, a sequence
+owns it, a command mutates it under an exact-value gate, and none of that is
+enough to call the CLI or MCP surface exposed, because the sequence document
+schema carries no `dynamics_lane` member. When judging a command's reach, check
+the *encoder*, not the command:
+
+```sh
+grep -c dynamics core/timeline/src/serialize_encode.cpp      # the finding
+grep -c chord_scale core/timeline/src/serialize_encode.cpp   # the control
+```
+
+A zero with no control beside it is indistinguishable from a mis-aimed grep.
+
 ## Every "rebuild a Sequence from its parts" site must carry a new lane
 
 `SequenceInput` is populated in several places that reconstruct a sequence rather
@@ -3126,13 +3277,34 @@ renderer. `test/test_timeline_agent.cpp` holds that oracle in its sample-exact
 `WithinAbs` assertions on rendered PCM. **If one of those moves, the render
 path changed audio** — treat it as a regression, not as a threshold to widen.
 
-Only the render call was swapped. The CLI keeps its own transport and block
-loop, so frame counts stay frame-addressed and no tick conversion enters the
-path — which is why the in-memory budget check and the emitted JSON are
-unchanged. Preserve that split if you extend the command; routing the loop
-through the offline renderer instead would make the CLI's frame arithmetic
-tick-derived, and a saturating conversion turns an absurd request into a
-plausible bounce.
+The block loop went the same way. The CLI hands the whole render to
+`render_timeline_offline()` rather than driving its own `MasterTransport`, so
+the frame budget it computes has to enter the renderer's tick domain. Carry it
+to the *smallest tick that covers* the budget —
+`ceil(fractional_samples_to_ticks(frames))` — and reject a derivation that is
+not finite or does not fit an `int64_t` rather than letting a saturating
+conversion turn an absurd request into a plausible bounce. Rounding up can only
+lengthen the region; rounding down silently shortens the bounce, which is the
+one failure a bounce must not have. The in-memory budget check still speaks
+frames, and the emitted JSON reports the frames actually rendered rather than
+the frames requested.
+
+Two things do not come across by default and have to be carried deliberately:
+
+- **A program with no routes never reaches the renderer.**
+  `render_timeline_offline()` refuses an empty route span as `InvalidProgram`,
+  which is the right answer for a library, so the verb keeps its own early path
+  that writes a zero-filled buffer. Do not relax the library to accommodate it.
+- **The two configs disagree on note capacity.**
+  `TimelineOfflineRenderConfig` caps note events per track per block at 256
+  where `TimelineGraphBindingConfig` allows 1024, and the renderer copies its
+  own value into the binding config it builds. Pass the binding's value
+  explicitly, as the verb does; accepting the renderer's default turns a dense
+  arrangement into a `BindingRejected` on a project that used to render.
+
+`TimelineOfflineRenderCode` is the verb's failure vocabulary now, so map every
+enumerator to its own message with no `default:` branch — a `default:` makes a
+newly added code arrive as an existing sentence instead of as a compile error.
 
 ## A nested-trim fixture proves a widened selection window only with a note wholly outside the cut
 
@@ -3188,3 +3360,41 @@ Prefer a named state struct over positional bools when a fixture starts
 carrying several of these. `nested_child_state_project(NestedChildState)` reads
 as the document it authors, and adding a state later cannot silently re-target
 an existing call the way appending another `bool` parameter can.
+
+## A scale test asserts growth or work done, not a wall-clock ceiling
+
+`test/test_timeline_scale.cpp` runs the largest arrangements Pulp supports, so
+it is the natural place to reach for a millisecond budget — and the wrong one.
+An absolute ceiling measures `work / host_throughput`, so on a shared or
+oversubscribed runner it reports how busy the host was. It is admissible only
+where the ceiling sits far enough above the observed time that no plausible
+host can reach it; a ceiling within a small multiple of the observed time is a
+coin flip, and raising it until it stops flipping deletes the assertion in
+slow motion.
+
+`test/timeline_perf_test_helpers.hpp` carries the two alternatives, shared with
+`test_timeline_agent_view.cpp`:
+
+- `measure_growth` / `require_growth_within` run one operation at two input
+  sizes in the same process and assert the exponent `k` in `time ~ size^k`.
+  Host throughput appears in both terms and cancels. This also catches
+  accidental `O(N^2)`, which a fixed ceiling cannot distinguish from a slow
+  runner. Growth ceilings are source constants, not workflow env vars, so they
+  hold in every lane.
+- Where the quantity being timed is a proxy for a countable one, count it
+  instead. Per-edit compile latency stood in for "a one-track edit stays a
+  one-track compile"; the compiler's recompiled/reused counters state that
+  directly and run unconditionally rather than only under `PULP_PERF_STRICT`.
+
+Measure growth in **processor time**, via `cpu_now()`, never wall time. Wall
+time also counts the intervals the operation spent descheduled, and the larger
+size is exposed to more of them, so contention biases the exponent upward —
+the one direction the assertion cares about. Under heavy CPU contention the
+same operations read 1.43-1.51 by wall clock against a 1.40 ceiling and
+0.91-1.17 by processor time. Keep `measure` single-threaded and stateless
+between calls, or process time stops being the operation's own time and a
+later round measures a warmed cache.
+
+The growth cases run each operation at two sizes for several rounds, so the
+suite costs several times a single-size pass — `timeline_tests.cmake` gives
+`pulp-test-timeline-scale` a correspondingly long `TIMEOUT`.

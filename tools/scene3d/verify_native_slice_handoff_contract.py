@@ -79,11 +79,37 @@ def combine_ctest_files(source_files, ctest_file):
     write_text(ctest_file, text)
 
 
+KNOWN_REPO_COORDINATES = (
+    "https://github.com/Generous-Corp/pulp/",
+    "https://github.com/danielraffel/pulp/",
+)
+
+
+def resolve_token(text, token):
+    """Return the spelling of a token this surface actually carries.
+
+    A planted mutation has to delete the coordinate as written, which survives
+    a repository-owner rename only if the owner segment is resolved against the
+    surface rather than assumed.
+    """
+    if token in text:
+        return token
+    for coordinate in KNOWN_REPO_COORDINATES:
+        if not token.startswith(coordinate):
+            continue
+        suffix = token[len(coordinate):]
+        for alternate in KNOWN_REPO_COORDINATES:
+            if alternate != coordinate and alternate + suffix in text:
+                return alternate + suffix
+    return None
+
+
 def remove_doc_token(doc_file, token):
     text = read_text(doc_file)
-    if token not in text:
+    present = resolve_token(text, token)
+    if present is None:
         raise ValueError(f"missing doc token {token}")
-    write_text(doc_file, text.replace(token, "drift-token"))
+    write_text(doc_file, text.replace(present, "drift-token"))
 
 
 def add_plan_token(plan_file, token):

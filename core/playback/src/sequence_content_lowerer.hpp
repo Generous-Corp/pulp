@@ -1,5 +1,7 @@
 #pragma once // Private playback implementation detail.
 
+#include "placement_fade.hpp"
+
 #include <pulp/playback/program_compiler.hpp>
 
 #include <cstdint>
@@ -10,7 +12,7 @@
 namespace pulp::playback {
 
 struct SequenceLoweringError {
-    CompileErrorCode code = CompileErrorCode::NestedSequenceUnsupported;
+    CompileErrorCode code = CompileErrorCode::InvalidStructure;
     timeline::ItemId item;
 };
 
@@ -48,6 +50,17 @@ struct LoweredClip {
     // not groove-displaced, so they stay anchored to the unpadded window.
     std::int64_t groove_pad_left = 0;
     std::int64_t groove_pad_right = 0;
+    // Every enclosing placement's fade, in this track's tick coordinates, from
+    // outermost to innermost. Empty for a clip no faded placement encloses,
+    // which is every clip that was not nested and most that were.
+    //
+    // A fade does not fold into the leaf the way gain does. Gain composes into
+    // one scalar the leaf can carry in its own `gain_linear`; a fade is
+    // time-varying, so a leaf covering part of one needs the ramp itself and
+    // its own position within it, and two ramps of different shapes do not
+    // reduce to a third. Hence a list travelling beside the clip rather than
+    // extra fields inside it.
+    std::vector<LoweredPlacementFade> placement_fades;
 };
 
 class SequenceContentLowerer {

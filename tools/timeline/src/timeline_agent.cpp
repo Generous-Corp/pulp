@@ -73,8 +73,6 @@ std::string_view compile_error_code_name(playback::CompileErrorCode code) noexce
         return "AudioProgramInvalid";
     case playback::CompileErrorCode::AutomationProgramInvalid:
         return "AutomationProgramInvalid";
-    case playback::CompileErrorCode::NestedSequenceUnsupported:
-        return "NestedSequenceUnsupported";
     case playback::CompileErrorCode::ExpansionBudgetExceeded:
         return "ExpansionBudgetExceeded";
     case playback::CompileErrorCode::NoteProgramCapacityExceeded:
@@ -107,6 +105,14 @@ std::string_view compile_error_code_name(playback::CompileErrorCode code) noexce
         return "NestedFrozenTrackUnsupported";
     case playback::CompileErrorCode::NestedActiveTakeUnsupported:
         return "NestedActiveTakeUnsupported";
+    case playback::CompileErrorCode::NestedDeviceChainUnsupported:
+        return "NestedDeviceChainUnsupported";
+    case playback::CompileErrorCode::NestedAutomationLaneUnsupported:
+        return "NestedAutomationLaneUnsupported";
+    case playback::CompileErrorCode::NestedConformedTrimUnsupported:
+        return "NestedConformedTrimUnsupported";
+    case playback::CompileErrorCode::NestedAbsoluteChildUnsupported:
+        return "NestedAbsoluteChildUnsupported";
     }
     return "InvalidRequest";
 }

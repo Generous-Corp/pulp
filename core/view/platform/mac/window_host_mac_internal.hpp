@@ -25,6 +25,53 @@ class ModalOverlay;
 struct WindowOptions;
 }  // namespace pulp::view
 
+// ── Synthetic pointer-drag drive (PULP_TEST_POINTER_DRAG) ─────────────
+//
+// An unattended performance/UX harness needs to move a real pointer over a
+// real control without a human. The GPU window host reads this env var once
+// at construction and, from its display-link tick, injects the described
+// gesture straight into PulpMetalView's AppKit mouse methods.
+//
+// Accepted spellings:
+//
+//   1                      the bands sweep (legacy; any value starting '1')
+//   minimap                three minimap gestures (legacy; exact match)
+//   rect:X0,Y0,X1,Y1,N     drag from (X0,Y0) to (X1,Y1) in N steps
+//   rect:X0,Y0,X1,Y1,N,R   the same gesture repeated R times
+//
+// The rect form's coordinates are NORMALIZED to the window's content view:
+// 0,0 is the TOP-LEFT corner and 1,1 the bottom-right, matching the
+// top-down convention design tooling reports (the host flips y into
+// AppKit's bottom-up space itself). N is the number of drag STEPS, so the
+// gesture emits N+1 events: a mouse-down at the start point, N-1 drags, and
+// a mouse-up at the end point. R defaults to 1; each extra repeat replays
+// the identical gesture after a short settle gap so the control is
+// re-hit-tested from scratch.
+//
+// Anything else — an unparseable field, a coordinate outside [0,1], a
+// non-positive step or repeat count — disables the drive rather than
+// guessing, so a typo cannot silently drag off-window and report a
+// plausible-looking idle trace.
+namespace pulp::view::mac_test_drag {
+
+enum class Mode { disabled, bands, minimap, rect };
+
+struct Spec {
+    Mode mode = Mode::disabled;
+    // Normalized content-view coordinates, TOP-LEFT origin. Only meaningful
+    // when mode == rect.
+    double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
+    int samples = 0;   // drag steps; the gesture emits samples + 1 events
+    int repeats = 1;   // how many times the whole gesture replays
+};
+
+// Parse a PULP_TEST_POINTER_DRAG value. `env` may be null (⇒ disabled).
+// Pure: no AppKit, no globals. Defined in window_host_mac.mm beside the
+// drive that consumes it.
+Spec parse_test_pointer_drag(const char* env);
+
+}  // namespace pulp::view::mac_test_drag
+
 #ifdef __OBJC__
 
 #import <Cocoa/Cocoa.h>
@@ -59,11 +106,17 @@ void configure_window_type(NSWindow* window, const pulp::view::WindowOptions& op
 // Create and configure the NSWindow both window hosts back onto: titled /
 // closable / miniaturizable style (plus resizable when requested),
 // released-when-closed OFF (the host's own strong ref owns the final
-// dealloc), title, multi-window-type configuration, and content min-size.
+// dealloc), title, multi-window-type configuration, content min-size, and
+// mouse-moved delivery — which NSWindow leaves OFF, and while it is off
+// -[NSWindow sendEvent:] drops NSEventTypeMouseMoved. That gates the
+// sendEvent: route only: real pointer motion over a tracking area carrying
+// NSTrackingMouseMoved reaches the area's owner either way. So it is what
+// makes a move PUSHED THROUGH sendEvent: work — a synthesized event, and any
+// point no tracking area covers.
 // The caller then attaches its own content view + delegate and any
-// host-specific tweaks (the CPU host also seeds a dark backgroundColor and
-// accepts mouse-moved events). Returns a +1-owned window (MRC "create"
-// rule) — assign it straight to the owning ivar. Never nil.
+// host-specific tweaks (the CPU host also seeds a dark backgroundColor).
+// Returns a +1-owned window (MRC "create" rule) — assign it straight to the
+// owning ivar. Never nil.
 NSWindow* create_configured_window(const pulp::view::WindowOptions& options);
 
 // Position `window` beside `other_window`: align their tops, try the right
@@ -108,6 +161,18 @@ bool set_child_view_bounds_in_host(NSView* container,
 
 // Detach a child view previously attached via attach_child_view_to_host.
 void detach_child_view_from_host(NSView* container, void* child_view_handle);
+
+// True when a native child view attached via attach_child_view_to_host covers
+// `window_point` (window coordinates). Such a child — a WKWebView, a hosted
+// plug-in editor, any platform control — is NOT in the Pulp View tree and owns
+// its own cursor, but a tracking area is not occluded by subviews, so the host
+// still receives -mouseMoved:/-cursorUpdate: over it. Callers use this to leave
+// the cursor to AppKit there instead of publishing a Pulp-tree answer that
+// would wipe the child's choice on every button-less move. Only direct
+// subviews are considered: attach_child_view_to_host is the sole place Pulp
+// parents anything into a host content view, so every direct subview is a
+// foreign child. Hidden children do not count.
+bool native_child_owns_window_point(NSView* container, NSPoint window_point);
 
 // Mask an attached child view to a visible sub-rectangle expressed in the
 // child's OWN top-left [0,0,frame_w,frame_h] box (Pulp convention), via a

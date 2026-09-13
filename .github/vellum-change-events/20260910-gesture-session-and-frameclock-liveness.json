@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20260910-gesture-session-and-frameclock-liveness",
+  "kind": "change",
+  "created_at": "2026-09-11T04:20:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "Two use-after-free defects in the retained UI kernel, both caused by a holder outliving the object it points at. First, GestureRecognizer stored PointerSession by value in an unordered_map and feed_session walked a reference into that node while invoking recognizer callbacks. A callback that ends or restarts its own session re-enters pointer dispatch and erases or rehashes that node, so the outer frame resumed iterating freed memory. The fix changes SessionMap to hold shared_ptr<PointerSession>, so the outer frame owns the node until it unwinds; feed_session iterates by index and copies each Candidate before the callback rather than holding a reference into a vector the callback may reallocate; and a new private session_is_live() re-checks, after every recognizer callback, that the pointer_id still maps to this exact session before touching it again. fail_conflicting_candidates now collects the doomed (session, candidate) pairs into a local vector first and fails them second, so it never mutates the container it is iterating. Second, motion::Coordinator kept a raw FrameClock* and unsubscribed from it in unbind() and at teardown; a clock that went out of scope first left that pointer dangling and the unsubscribe wrote through it. FrameClock now exposes liveness_token(), a weak_ptr<const void> over a private shared_ptr sentinel, and the Coordinator stores that token beside the pointer and routes every use through live_clock(), which yields nullptr once the clock is gone -- so unbind() skips the unsubscribe and is_bound()/on_tick() degrade to no-ops instead of faulting. The retained UI kernel is touched at core/view/include/pulp/view/frame_clock.hpp, core/view/include/pulp/view/gesture.hpp and core/view/src/gesture.cpp. Both additions are additive: no public signature is removed, no recognizer contract changes, and a session whose callbacks do not re-enter dispatch takes exactly the path it took before. This is Pulp-only. Re-entrancy safety and clock-lifetime safety are real requirements any retained UI kernel has, but the specific shapes here exist because Pulp chose a by-value session map and a process-wide motion coordinator that holds a back-pointer to a clock it does not own. A Vellum-native kernel should derive its own answer from its own ownership model rather than inherit Pulp's shared_ptr-node plus weak-token handshake. There is no named immutable Vellum framework commit to backport against, and this records no Vellum acknowledgement.",
+  "tests": [
+    "pulp-test-pointer-gestures",
+    "pulp-test-widget-bridge"
+  ],
+  "disposition": "pulp-only"
+}

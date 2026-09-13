@@ -10,9 +10,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   browserProcessIdentity,
+  createBrowserCustody,
   createEmptyProfile,
   launchBrowser,
   recoverStaleBrowserProfiles,
+  resolveOwnedBrowserIdentity,
   terminateBrowser,
 } from "./browser_process.mjs";
 
@@ -25,13 +27,31 @@ function processExists(pid) {
   }
 }
 
-async function waitFor(predicate, timeoutMs = 5000) {
+async function waitFor(
+  predicate, timeoutMs = 5000, what = "browser lifecycle condition") {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error("timed out waiting for browser lifecycle condition");
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+// A detached stand-in for a launched browser: its own process group, deaf to
+// the grace signal, so only a completed escalation can remove it.
+async function spawnDetachedStandIn() {
+  const child = spawn(
+    process.execPath,
+    ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 60000);"],
+    { detached: true, stdio: ["ignore", "ignore", "ignore"] });
+  await new Promise((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", reject);
+  });
+  // The assertions below are about a process going away. Prove the probe can
+  // see this one while it is running, or "gone" means only that it never ran.
+  assert.equal(processExists(child.pid), true);
+  return child;
 }
 
 async function processGroupId(pid) {
@@ -380,6 +400,116 @@ test("stale recovery reaches an exact owner beyond 64 unrecoverable profiles",
       if (browser?.pid && processExists(browser.pid)) {
         try { process.kill(-browser.pid, "SIGKILL"); } catch {}
       }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("terminating a launch that never recorded custody closes its group",
+  { skip: process.platform === "win32" }, async () => {
+    const child = await spawnDetachedStandIn();
+    try {
+      // No guardian ever took custody of this child, which is the state every
+      // launch passes through between spawn and the ownership marker. Cleanup
+      // there still owns the process, so it may not return leaving it running.
+      await terminateBrowser(child);
+      await waitFor(
+        () => !processExists(child.pid), 5000,
+        "an uncustodied launch to leave no surviving process");
+      assert.equal(processExists(child.pid), false);
+    } finally {
+      try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      try { child.kill("SIGKILL"); } catch {}
+    }
+  });
+
+test("a browser adopted after custody was released is still terminated",
+  { skip: process.platform === "win32" }, async () => {
+    const custody = createBrowserCustody();
+    // Cleanup runs first and finds nothing, exactly as it does when a deadline
+    // expires while a launch is still in flight.
+    await custody.release();
+    const child = await spawnDetachedStandIn();
+    try {
+      custody.adopt(child);
+      // Released custody signals its late arrival synchronously, so the process
+      // is already condemned before this line can await anything.
+      await waitFor(
+        () => !processExists(child.pid), 5000,
+        "a late-adopted browser to leave no surviving process");
+      assert.equal(processExists(child.pid), false);
+    } finally {
+      try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      try { child.kill("SIGKILL"); } catch {}
+    }
+  });
+
+test("launch identity probe waits for a pid that is not yet the browser",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-late-exec");
+    const lateExec = path.join(root, "late-exec.sh");
+    let child = null;
+    try {
+      // Before the exec the pid still carries this wrapper's argv, which owns
+      // no profile — the window a single probe misreads as a violation.
+      await writeFile(lateExec, `#!/bin/sh
+sleep 0.6
+exec /bin/sh -c 'while :; do sleep 1; done' pulp-fake-browser \\
+  "--user-data-dir=$1" --disable-background-networking
+`, "utf8");
+      await chmod(lateExec, 0o700);
+      await createEmptyProfile(profile);
+      child = spawn("/bin/sh", [lateExec, profile],
+        { detached: true, stdio: "ignore" });
+      const identity = await resolveOwnedBrowserIdentity(child, profile, 10000);
+      assert.match(identity, /pulp-fake-browser/);
+      assert.ok(identity.includes(`--user-data-dir=${profile}`));
+    } finally {
+      if (child?.pid) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("launch identity probe still fails closed on a foreign process",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-foreign");
+    let child = null;
+    try {
+      await createEmptyProfile(profile);
+      child = spawn("/bin/sh", ["-c", "while :; do sleep 1; done"],
+        { detached: true, stdio: "ignore" });
+      await assert.rejects(
+        resolveOwnedBrowserIdentity(child, profile, 400),
+        /browser launch identity did not match its owned profile/);
+    } finally {
+      if (child?.pid) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("launch identity probe abandons a child that already exited",
+  { skip: process.platform === "win32" }, async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-exited");
+    try {
+      await createEmptyProfile(profile);
+      const child = spawn("/bin/sh", ["-c", "exit 0"], { stdio: "ignore" });
+      await new Promise((resolve) => child.once("exit", resolve));
+      const started = Date.now();
+      await assert.rejects(
+        resolveOwnedBrowserIdentity(child, profile, 15000),
+        /browser exited before its launch identity could be verified/);
+      assert.ok(Date.now() - started < 5000,
+        "an exited child must not consume the probe budget");
+    } finally {
       await rm(root, { recursive: true, force: true });
     }
   });

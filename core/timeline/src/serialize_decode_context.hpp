@@ -93,6 +93,10 @@ decode_slot(const JsonValue& value, DecodeContext& context, std::string path);
 runtime::Result<ChordScaleLane, PersistenceError>
 decode_chord_scale_lane(const JsonValue* value, MemberPolicy detail_policy,
                         DecodeContext& context, std::string lane_path);
+// A null value decodes as an empty lane, which is what a pre-lane sequence
+// version means. `lane_path` is the full diagnostic path of the array itself.
+runtime::Result<DynamicsLane, PersistenceError>
+decode_dynamics_lane(const JsonValue* value, DecodeContext& context, std::string lane_path);
 // A null value decodes as the groove that states no feel, which is what a
 // pre-groove sequence version means. `groove_path` is the full diagnostic path
 // of the object itself.

@@ -116,6 +116,7 @@ on:
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
       - '.shipyard/config.toml'
+      - 'test/cmake/**'
   push:
     branches: [main]
     paths:
@@ -216,6 +217,7 @@ on:
       - 'tools/scripts/test_example_validation_paths.py'
       - 'tools/scripts/runner_topology.json'
       - '.shipyard/config.toml'
+      - 'test/cmake/**'
 
 permissions:
   contents: read

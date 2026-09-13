@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260911-css-empty-background-hover-cursor-proof-watch",
+  "created_at": "2026-09-11T15:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Two changes inside core/view. First, an empty CSS background value now removes the declaration as CSSOM requires: web-compat-style-decl-paint.js gated the bridge call on a parsed colour, which is falsy for an empty string, and setBackground / setBackgroundGradient in style_visual_api.cpp early-returned on an empty argument, so whatever colour was painted last stayed on screen (observed as a popup highlight that accumulated instead of moving). Both now route to the existing View::clear_background_color / clear_background_gradient. Second, test-only additions: test_mac_hover_cursor_live.mm reads back the applied NSCursor from a real NSWindow hosting the shipping PulpView to prove hover-driven cursors (crosshair, open hand, left-right resize) reach the screen with no button held and that the closed hand exists only while a button is held, plus a cross-process probe under tools/testing/cursor-proof. render-assets-and-backends is crossed only because core/view/** sits under its selector. No renderer, backend, GPU surface, font, asset or Skia pin changes; no fixture, snapshot or threshold moves; how a frame is painted is unchanged apart from honouring a removed background declaration. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-mac-platform-harness",
+    "pulp-test-mac-hover-cursor-live",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

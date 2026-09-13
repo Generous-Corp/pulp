@@ -693,6 +693,24 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             Command(SetChordScaleLane{sequence.value(), std::move(decoded_expected).value(),
                                       std::move(decoded_replacement).value()}));
     }
+    if (type.value() == "pulp.timeline.command.set_dynamics_lane") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !expected || !replacement ||
+            expected.value()->kind != JsonValue::Kind::Array ||
+            replacement.value()->kind != JsonValue::Kind::Array)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_dynamics_lane(expected.value(), context, data_path + "/expected");
+        auto decoded_replacement =
+            decode_dynamics_lane(replacement.value(), context, data_path + "/replacement");
+        if (!decoded_expected) return runtime::Err(decoded_expected.error());
+        if (!decoded_replacement) return runtime::Err(decoded_replacement.error());
+        return runtime::Ok(
+            Command(SetDynamicsLane{sequence.value(), std::move(decoded_expected).value(),
+                                    std::move(decoded_replacement).value()}));
+    }
     if (type.value() == "pulp.timeline.command.insert_marker") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);
         auto marker = required(command, "marker", data_path);

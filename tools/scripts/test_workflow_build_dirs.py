@@ -106,7 +106,14 @@ class WorkflowBuildDirTests(unittest.TestCase):
                     set(cmd.group("labels").split("|")),
                 )
 
-    def test_build_workflow_shipyard_dispatch_skips_examples_with_gpu_off(self) -> None:
+    def test_build_workflow_configures_the_gate_identically_on_every_event(self) -> None:
+        """The required `macos` context must mean the same build on every event.
+
+        This job publishes that context on pull requests, manual dispatches and
+        merge groups alike. A per-event cmake flag would let one of them post a
+        weaker build under the gate's name, so the argument list is assembled
+        once and no `github.event_name` branch may add to it.
+        """
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn(
@@ -114,15 +121,12 @@ class WorkflowBuildDirTests(unittest.TestCase):
             text,
         )
         self.assertIn(
-            """if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            cmake_args+=(-DPULP_ENABLE_GPU=OFF)
-          fi""",
-            text,
-        )
-        self.assertIn(
             'cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"',
             text,
         )
+        # Control: the assembly line above is present, so a zero here is the
+        # absence of per-event divergence and not a missed search.
+        self.assertNotIn("cmake_args+=", text)
 
     def test_build_workflow_fetches_event_pinned_capability_base(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")

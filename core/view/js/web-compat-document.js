@@ -502,9 +502,11 @@ var document = {
             }
             if (event._stoppedImmediate) break;
         }
-        if (!event.defaultPrevented
-            && typeof globalThis.__pulpPopupDefaultHandle__ === "function")
+        if (!event.defaultPrevented && !event.__pulpPopupOffered
+            && typeof globalThis.__pulpPopupDefaultHandle__ === "function") {
+            event.__pulpPopupOffered = true;
             globalThis.__pulpPopupDefaultHandle__(event);
+        }
         return !event.defaultPrevented;
     }
 };
@@ -612,15 +614,37 @@ globalThis.self = window;
         return popupState.triggerOrdinal >= 0
             ? triggers[popupState.triggerOrdinal] || null : null;
     }
+    // The highlight is an overlay: it has to come off a row as cleanly as it
+    // went on. Assigning the captured base back is not enough on its own --
+    // the style bridge drops a value it cannot parse as a color, so the empty
+    // string is a silent no-op and the highlight stays behind on every row the
+    // selection has visited, smearing instead of moving. Assigning
+    // "transparent" instead is also wrong: it paints a transparent fill over a
+    // background the row may have from somewhere other than its inline style,
+    // blanking rows the app had filled. Restore what was there, and where
+    // nothing was, remove ours.
+    function restoreOptionBackground(option, base) {
+        if (base) {
+            option.style.background = base;
+            option.style.backgroundColor = base;
+            return;
+        }
+        option.style.removeProperty("background");
+        option.style.removeProperty("background-color");
+        if (option._nativeCreated && typeof clearBackground === "function")
+            clearBackground(option._id);
+    }
     function paint() {
         if (!state) return;
         for (var i = 0; i < state.options.length; ++i) {
             var active = i === state.activeIndex;
             state.options[i].setAttribute("data-pulp-popup-active", active ? "true" : "false");
-            var background = active
-                ? "rgba(120,180,255,0.18)" : state.baseBackgrounds[i];
-            state.options[i].style.background = background;
-            state.options[i].style.backgroundColor = background;
+            if (active) {
+                state.options[i].style.background = "rgba(120,180,255,0.18)";
+                state.options[i].style.backgroundColor = "rgba(120,180,255,0.18)";
+            } else {
+                restoreOptionBackground(state.options[i], state.baseBackgrounds[i]);
+            }
         }
         globalThis.__pulpPopupDefaultState__ = state;
     }
@@ -661,13 +685,30 @@ globalThis.self = window;
         return -1;
     }
     function activate(trigger, edge) {
-        if (state) dismiss(false);
         var popup = popupFor(trigger);
         var options = optionsFor(popup);
+        // Resolve the replacement before retiring what is already owned. A
+        // trigger whose menu has just closed still resolves as a trigger, so
+        // dismissing first would drop a live claim on the way to discovering
+        // there is nothing to claim -- and the caller that was closing the
+        // menu then finds nothing left to hand focus back to.
         if (!popup || !options.length) return false;
+        if (state) dismiss(false);
         var baseBackgrounds = [];
-        for (var i = 0; i < options.length; ++i)
-            baseBackgrounds.push(options[i].style.background || "");
+        // An app may author its row fill through either longhand, and only the
+        // one it used reads back -- and it may not have authored it in script
+        // at all, in which case the inline style is empty while the row is
+        // still painted. Ask the widget for its applied background so the
+        // restore returns the row to the app's own appearance rather than
+        // blanking it.
+        for (var i = 0; i < options.length; ++i) {
+            var authored = options[i].style.background
+                || options[i].style.backgroundColor || "";
+            if (!authored && options[i]._nativeCreated
+                && typeof getBackground === "function")
+                authored = getBackground(options[i]._id) || "";
+            baseBackgrounds.push(authored);
+        }
         var hoverHandlers = [];
         var triggerKind = trigger.getAttribute("aria-haspopup");
         var triggerPeers = document.querySelectorAll(
@@ -684,7 +725,7 @@ globalThis.self = window;
         state.onNativeDismiss = function() {
             if (!state || state.popup !== popup) return;
             var liveTrigger = currentTrigger(state);
-            if (liveTrigger) liveTrigger.click();
+            if (liveTrigger) clickSelf(liveTrigger);
             dismiss(false);
         };
         popup.addEventListener("dismiss", state.onNativeDismiss);
@@ -714,8 +755,7 @@ globalThis.self = window;
         for (var i = 0; i < state.options.length; ++i) {
             state.options[i].removeEventListener(
                 "pointerenter", state.hoverHandlers[i]);
-            state.options[i].style.background = state.baseBackgrounds[i];
-            state.options[i].style.backgroundColor = state.baseBackgrounds[i];
+            restoreOptionBackground(state.options[i], state.baseBackgrounds[i]);
             state.options[i].removeAttribute("data-pulp-popup-active");
         }
         state = null;
@@ -730,6 +770,37 @@ globalThis.self = window;
             });
         }
     }
+    // A trigger's own handler is what creates the menu, and it does not
+    // necessarily run before the event that opened it finishes: the standalone
+    // mac host defers its click to the main queue, and a React app commits its
+    // open state on a later tick. Claiming once, synchronously, therefore
+    // inspects a DOM where the popup does not exist yet and silently gives up —
+    // leaving an open menu with no owner, so arrow keys do nothing and the
+    // highlight is never painted. Re-offer the claim across a few frames, and
+    // treat an already-owned popup as done so a pointerdown and its trailing
+    // click cannot fight over the same menu.
+    function claimAfterCommit(trigger, edge, retries) {
+        if (state && state.trigger === trigger
+            && document.body.contains(state.popup)) return;
+        if (activate(trigger, edge)) return;
+        if (retries > 0) {
+            requestAnimationFrame(function() {
+                claimAfterCommit(trigger, edge, retries - 1);
+            });
+            return;
+        }
+        if (state && state.trigger === trigger) dismiss(false);
+    }
+    // This owner clicks a trigger or an option itself to commit, to close, or
+    // to mirror a keyboard open onto the app's own handler. Those are its own
+    // gestures, already accounted for by the branch that issued them; feeding
+    // them back in as if a user had pressed the control makes a close look
+    // like an open.
+    var syntheticClicks = 0;
+    function clickSelf(node) {
+        syntheticClicks++;
+        try { node.click(); } finally { syntheticClicks--; }
+    }
     function outsidePopupTarget(target) {
         return state && !state.popup.contains(target)
             && !state.trigger.contains(target);
@@ -737,7 +808,7 @@ globalThis.self = window;
     function consumeOutsideSequence(event) {
         if (event.type === "pointerdown" && outsidePopupTarget(event.target)) {
             var trigger = currentTrigger(state);
-            if (trigger) trigger.click();
+            if (trigger) clickSelf(trigger);
             dismiss(false);
             suppressOutsideSequence = true;
             if (suppressOutsideTimer) clearTimeout(suppressOutsideTimer);
@@ -761,16 +832,29 @@ globalThis.self = window;
     ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(
         function(type) { document.body.addEventListener(type, consumeOutsideSequence, true); });
     globalThis.__pulpPopupDefaultHandle__ = function(event) {
+        // Nothing dispatched inside this owner's own click is news to it. The
+        // stale-state sweep below must not run either: the branch that issued
+        // the click is mid-gesture and still needs the state it is about to
+        // retire itself, and a menu the app has just closed would otherwise be
+        // swept away before the branch can hand focus back to its trigger.
+        if (syntheticClicks) return;
         if (state && (!document.body.contains(state.trigger)
                       || !document.body.contains(state.popup))) dismiss(false);
         if (event.type === "pointerdown") {
             var pointerTrigger = triggerFrom(event.target);
-            if (pointerTrigger && !optedOut(pointerTrigger)) {
-                requestAnimationFrame(function() {
-                    if (!activate(pointerTrigger, "first")
-                        && state && state.trigger === pointerTrigger) dismiss(false);
-                });
-            }
+            if (pointerTrigger && !optedOut(pointerTrigger))
+                claimAfterCommit(pointerTrigger, "first", 3);
+            return;
+        }
+        // A press and its click are one gesture, and which of the two the app
+        // opens its menu on is the app's choice, not something this owner can
+        // observe. Offer the claim on both; claimAfterCommit is idempotent for
+        // a menu already owned, so the second offer is a no-op rather than a
+        // re-open.
+        if (event.type === "click") {
+            var clickTrigger = triggerFrom(event.target);
+            if (clickTrigger && !optedOut(clickTrigger))
+                claimAfterCommit(clickTrigger, "first", 3);
             return;
         }
         if (event.type === "pointermove") {
@@ -788,7 +872,7 @@ globalThis.self = window;
         if (!state && trigger && !optedOut(trigger)
             && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
             event.preventDefault();
-            trigger.click();
+            clickSelf(trigger);
             var edge = event.key === "ArrowUp" ? "last" : "first";
             if (!activate(trigger, edge))
                 requestAnimationFrame(function() { activate(trigger, edge); });
@@ -798,7 +882,7 @@ globalThis.self = window;
         var count = state.options.length;
         if (event.key === "Escape") {
             event.preventDefault();
-            state.trigger.click();
+            clickSelf(state.trigger);
             dismiss(true);
         } else if (event.key === "ArrowDown" || event.key === "ArrowUp"
                    || event.key === "Home" || event.key === "End") {
@@ -818,7 +902,7 @@ globalThis.self = window;
             // value). Retire ownership while the authored nodes are still
             // attached so cleanup cannot mutate a detached pre-commit tree.
             dismiss(false);
-            option.click();
+            clickSelf(option);
             var replacement = currentTrigger(selectedState);
             if (replacement) replacement.focus();
             requestAnimationFrame(function() {

@@ -173,7 +173,7 @@ TEST_CASE("binding with no session is safe", "[gpu-surface-binding][wah-1]") {
                                             "test");
     host.go_ready(sentinel_surface(1));
     host.go_unavailable();
-    SUCCEED("no crash without a session");
+    SUCCEED("no crash without a session");  // gpu-skip-lint: allow the no-crash outcome IS the assertion
 }
 
 TEST_CASE("the returned subscription is convertible to bool",
@@ -198,7 +198,7 @@ TEST_CASE("the CPU-fallback warning is silent while the surface is pending",
     // No observable side effect to assert beyond "does not treat pending as a
     // failure" — the state check IS the guard the function now applies.
     format::warn_if_unexpected_cpu_fallback(gpu_decision(true), &host);
-    SUCCEED("pending is not reported as a CPU fallback");
+    SUCCEED("pending is not reported as a CPU fallback");  // gpu-skip-lint: allow the silent-warning outcome IS the assertion
 }
 
 TEST_CASE("the CPU-fallback warning ignores a host that never wanted the GPU",
@@ -207,13 +207,13 @@ TEST_CASE("the CPU-fallback warning ignores a host that never wanted the GPU",
     REQUIRE(host.gpu_surface_state() ==
             PluginViewHost::GpuSurfaceState::unavailable);
     format::warn_if_unexpected_cpu_fallback(gpu_decision(false), &host);
-    SUCCEED("an AutoUi editor on a CPU host is not a fallback");
+    SUCCEED("an AutoUi editor on a CPU host is not a fallback");  // gpu-skip-lint: allow the silent-warning outcome IS the assertion
 }
 
 TEST_CASE("the CPU-fallback warning tolerates a null host",
           "[gpu-surface-binding][wah-1]") {
     format::warn_if_unexpected_cpu_fallback(gpu_decision(true), nullptr);
-    SUCCEED("a failed PluginViewHost::create() must not crash the diagnostic");
+    SUCCEED("a failed PluginViewHost::create() must not crash the diagnostic");  // gpu-skip-lint: allow the no-crash outcome IS the assertion
 }
 
 TEST_CASE("a real GPU-init failure reaches the unavailable state",
@@ -223,7 +223,7 @@ TEST_CASE("a real GPU-init failure reaches the unavailable state",
     REQUIRE(host.gpu_surface_state() ==
             PluginViewHost::GpuSurfaceState::unavailable);
     format::warn_if_unexpected_cpu_fallback(gpu_decision(true), &host);
-    SUCCEED("unavailable is the only state in which the warning is true");
+    SUCCEED("unavailable is the only state in which the warning is true");  // gpu-skip-lint: allow the warning-fired outcome IS the assertion
 }
 
 // ── Status normalization ────────────────────────────────────────────────────

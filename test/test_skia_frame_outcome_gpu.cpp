@@ -83,8 +83,7 @@ TEST_CASE("a plain offscreen frame reports offscreen, not failed",
           "[gpu][skia][wah-2]") {
     auto f = make_offscreen_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
     }
 
     REQUIRE(f.gpu->begin_frame());
@@ -110,8 +109,7 @@ TEST_CASE("a captured frame still reaches its output",
     // repaint on the next one.
     auto f = make_offscreen_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
     }
 
     REQUIRE(f.gpu->begin_frame());
@@ -135,12 +133,10 @@ TEST_CASE("a persistent-scene frame reaches its output offscreen",
           "[gpu][skia][wah-2]") {
     auto f = make_offscreen_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
     }
     if (!f.skia->set_persistent_scene(true)) {
-        SUCCEED("Backend cannot retain a scene — persistent-scene outcome skipped.");
-        return;
+        SKIP("Backend cannot retain a scene — persistent-scene outcome skipped.");
     }
 
     REQUIRE(f.gpu->begin_frame());
@@ -161,8 +157,7 @@ TEST_CASE("consecutive frames all reach their output",
     // differently from frame 1. Drive several and require them identical.
     auto f = make_offscreen_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
     }
 
     for (int i = 0; i < 4; ++i) {
@@ -180,8 +175,7 @@ TEST_CASE("a frame abandoned without end_frame does not taint the next one",
           "[gpu][skia][wah-2]") {
     auto f = make_offscreen_fixture();
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
     }
 
     // Begin, capture (which flushes), then abandon without end_frame().
@@ -209,7 +203,7 @@ TEST_CASE("a frame abandoned without end_frame does not taint the next one",
 
 TEST_CASE("SkiaSurface frame-outcome GPU proof requires Skia on Apple",
           "[gpu][skia][wah-2]") {
-    SUCCEED("Not a Skia/Apple build — live frame-outcome proof not applicable.");
+    SKIP("Not a Skia/Apple build — live frame-outcome proof not applicable.");
 }
 
 #endif

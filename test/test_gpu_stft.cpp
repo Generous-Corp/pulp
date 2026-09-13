@@ -11,11 +11,21 @@
 using namespace pulp::gpu_audio;
 using pulp::signal::WindowFunction;
 
+namespace {
+
+// A lane with no compute device must SKIP, out loud, and never `return`: Catch2
+// records a bare early return as a PASS, so a GPU-less runner would report this
+// file green having asserted nothing about GpuStft at all.
+constexpr const char* kNoGpu =
+    "no GPU compute device available (Skia/Dawn not built, or no adapter)";
+
+}  // namespace
+
 TEST_CASE("GpuStft analyze magnitude matches CPU windowed FFT", "[gpu_audio][stft][gpu]") {
     constexpr uint32_t FFT = 512;
     GpuStft st;
     REQUIRE(st.prepare(FFT, WindowFunction::Type::hann));
-    if (!st.gpu_available()) return;
+    if (!st.gpu_available()) SKIP(kNoGpu);
 
     std::vector<float> frame(FFT);
     for (uint32_t i = 0; i < FFT; ++i) frame[i] = std::sin(0.05f * i) + 0.3f * std::cos(0.017f * i);
@@ -41,7 +51,7 @@ TEST_CASE("GpuStft analyze/synthesize overlap-add reconstructs (COLA)", "[gpu_au
     constexpr uint32_t FFT = 256, HOP = 128;  // Hann at 50% overlap → COLA
     GpuStft st;
     REQUIRE(st.prepare(FFT, WindowFunction::Type::hann));
-    if (!st.gpu_available()) return;
+    if (!st.gpu_available()) SKIP(kNoGpu);
 
     constexpr int NF = 12;
     const int L = (NF - 1) * static_cast<int>(HOP) + static_cast<int>(FFT);

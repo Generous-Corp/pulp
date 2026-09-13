@@ -12,6 +12,12 @@
 
 namespace {
 
+// A lane with no compute device must SKIP, out loud: Catch2 records a bare
+// early return as a PASS, so a GPU-less runner would report this file green
+// having asserted nothing about the GPU path at all.
+constexpr const char* kNoGpu =
+    "no GPU compute device available (Skia/Dawn not built, or no adapter)";
+
 // Direct linear convolution reference: y[n] = sum_k ir[k] * x[n-k].
 std::vector<float> direct_convolution(const std::vector<float>& x,
                                       const std::vector<float>& ir) {
@@ -43,7 +49,7 @@ TEST_CASE("GpuConvolver matches direct convolution", "[gpu_audio][convolver][gpu
 
     GpuConvolver node(CH, BS, SR, ir);
     REQUIRE(node.prepare());
-    if (!node.gpu_available()) return;  // headless CI / no adapter → skip GPU path
+    if (!node.gpu_available()) SKIP(kNoGpu);
     REQUIRE(node.fft_size() >= BS + M);
 
     constexpr int NBLK = 8;

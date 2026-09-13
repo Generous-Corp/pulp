@@ -364,6 +364,23 @@ NSWindow* create_configured_window(const pulp::view::WindowOptions& options) {
     if (options.min_width > 0 || options.min_height > 0)
         [window setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
 
+    // NSWindow leaves mouse-moved delivery OFF, and -[NSWindow sendEvent:]
+    // DROPS NSEventTypeMouseMoved while it is — the event never reaches the
+    // content view's -mouseMoved:.
+    //
+    // Scope, precisely: this gates the sendEvent: route ONLY. Real pointer
+    // motion over an NSTrackingArea carrying NSTrackingMouseMoved reaches the
+    // area's owner whether or not this flag is set (measured on a live
+    // MacGpuWindowHost with the flag pinned NO). So this is NOT what makes
+    // ordinary hover work — it is what makes a move PUSHED THROUGH sendEvent:
+    // work: a synthesized event, and any window that has no tracking area
+    // covering the point.
+    //
+    // Only the CPU host used to opt in, for no reason anyone recorded. Both
+    // window hosts back onto this factory, so the opt-in belongs here rather
+    // than in one of them.
+    [window setAcceptsMouseMovedEvents:YES];
+
     return window;
 }
 
@@ -463,6 +480,22 @@ bool set_child_view_bounds_in_host(NSView* container,
 
     [child setFrame:child_view_frame_in_host(container, x, y, width, height)];
     return true;
+}
+
+bool native_child_owns_window_point(NSView* container, NSPoint window_point) {
+    if (!container) {
+        return false;
+    }
+    for (NSView* child in container.subviews) {
+        if (child.isHidden || child.alphaValue <= 0.0) {
+            continue;
+        }
+        const NSPoint in_child = [child convertPoint:window_point fromView:nil];
+        if ([child mouse:in_child inRect:child.bounds]) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void detach_child_view_from_host(NSView* container, void* child_view_handle) {

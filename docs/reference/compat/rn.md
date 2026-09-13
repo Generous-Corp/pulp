@@ -67,6 +67,17 @@ props:
 - `elevation` maps Android Material elevation to a single Pulp
   `BoxShadow` approximation. It preserves the visible shadow intent but
   is not a full Material dual-shadow model.
+- `hitSlop` grows a control's hit-test rect outward without touching
+  its layout or paint, so a visually small knob or toggle can present a
+  comfortable target. It accepts a number, a string of 1-4 numbers that
+  fills the way the `margin` shorthand does (`'12px 2px'` gives 12 top
+  and bottom, 2 left and right), or an object. Object edges are
+  independent and a missing edge is `0`, as in React Native; the
+  shorthand fill applies to the string form only. `el.style.hitSlop`
+  resolves the identical grammar, so the JSX prop and the style shim
+  cannot disagree about the same input. Because slop is invisible to
+  layout, a slop wider than the gap between two controls overlaps their
+  hit rects and the topmost sibling wins.
 - `borderCurve: 'continuous'` switches rounded corners to Pulp's
   continuous-corner approximation; `circular` keeps the standard rounded
   rect path.

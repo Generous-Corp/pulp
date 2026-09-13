@@ -656,14 +656,15 @@ void RotateRecognizer::on_pointer_event(const MouseEvent& event,
     }
 }
 
-GestureArbiter::PointerSession& GestureArbiter::start_session(
+std::shared_ptr<GestureArbiter::PointerSession> GestureArbiter::start_session(
         View& root, const MouseEvent& root_event) {
     const int pointer_id = root_event.pointer_id;
-    auto [it, inserted] = sessions_.emplace(pointer_id, PointerSession{});
-    PointerSession& session = it->second;
-    if (!inserted) {
-        session.candidates.clear();
-    }
+    auto [it, inserted] = sessions_.emplace(pointer_id, nullptr);
+    if (inserted || !it->second)
+        it->second = std::make_shared<PointerSession>();
+    std::shared_ptr<PointerSession> session_ptr = it->second;
+    PointerSession& session = *session_ptr;
+    session.candidates.clear();
     session.pointer_id = pointer_id;
 
     const Point root_pos = root_position_for(root_event);
@@ -679,14 +680,20 @@ GestureArbiter::PointerSession& GestureArbiter::start_session(
         }
         if (view == &root) break;
     }
-    return session;
+    return session_ptr;
+}
+
+bool GestureArbiter::session_is_live(const PointerSession& session) const {
+    auto it = sessions_.find(session.pointer_id);
+    return it != sessions_.end() && it->second.get() == &session;
 }
 
 void GestureArbiter::feed_session(View& root, PointerSession& session,
                                   const MouseEvent& root_event,
                                   const GestureContext& context) {
     const Point root_pos = context.root_position;
-    for (auto& candidate : session.candidates) {
+    for (std::size_t i = 0; i < session.candidates.size(); ++i) {
+        Candidate candidate = session.candidates[i];
         if (!candidate.recognizer || !candidate.owner) continue;
         if (candidate.recognizer->state() == GestureState::failed ||
             candidate.recognizer->state() == GestureState::cancelled) {
@@ -696,6 +703,7 @@ void GestureArbiter::feed_session(View& root, PointerSession& session,
         local_event.position = root_to_local(root_pos, candidate.owner, root);
         local_event.window_position = root_pos;
         candidate.recognizer->on_pointer_event(local_event, context);
+        if (!session_is_live(session)) return;
     }
 }
 
@@ -707,7 +715,8 @@ bool GestureArbiter::active_recognizers_allow(
 
     for (const auto& [unused, active_session] : sessions_) {
         (void)unused;
-        for (const auto& candidate : active_session.candidates) {
+        if (!active_session) continue;
+        for (const auto& candidate : active_session->candidates) {
             if (!candidate.active || !candidate.recognizer) continue;
             if (candidate.recognizer == recognizer) continue;
             if (!views_share_gesture_branch(candidate.owner, pending_candidate.owner))
@@ -717,7 +726,8 @@ bool GestureArbiter::active_recognizers_allow(
         }
     }
 
-    for (const auto& candidate : session.candidates) {
+    for (std::size_t i = 0; i < session.candidates.size(); ++i) {
+        const Candidate candidate = session.candidates[i];
         if (!candidate.active || !candidate.recognizer) continue;
         if (candidate.recognizer == recognizer) continue;
         if (!views_share_gesture_branch(candidate.owner, pending_candidate.owner))
@@ -734,9 +744,13 @@ void GestureArbiter::fail_conflicting_candidates(
     auto* active_recognizer = active_candidate.recognizer;
     if (!active_recognizer) return;
 
+    // Collect first, fail second. `fail()` runs user code that can start or
+    // end a session, which would invalidate a map iterator held across it.
+    std::vector<std::pair<int, std::size_t>> doomed;
     for (auto& [unused, active_session] : sessions_) {
         (void)unused;
-        for (auto& candidate : active_session.candidates) {
+        if (!active_session) continue;
+        for (auto& candidate : active_session->candidates) {
             auto* recognizer = candidate.recognizer;
             if (!recognizer || recognizer == active_recognizer) continue;
             if (candidate.active) continue;
@@ -744,17 +758,33 @@ void GestureArbiter::fail_conflicting_candidates(
                 continue;
             if (!is_terminal(recognizer->state()) &&
                 !recognizer->can_recognize_simultaneously_with(*active_recognizer)) {
-                recognizer->fail();
+                doomed.emplace_back(active_session->pointer_id,
+                                    static_cast<std::size_t>(
+                                        &candidate - active_session->candidates.data()));
             }
         }
+    }
+    // Re-resolve each entry against the live map: an earlier fail() may have
+    // torn its session down, and a recognizer read from a dead session is a
+    // dangling pointer.
+    for (const auto& [pointer_id, index] : doomed) {
+        auto it = sessions_.find(pointer_id);
+        if (it == sessions_.end() || !it->second) continue;
+        auto& candidates = it->second->candidates;
+        if (index >= candidates.size()) continue;
+        auto* recognizer = candidates[index].recognizer;
+        if (!recognizer || recognizer == active_recognizer) continue;
+        if (candidates[index].active) continue;
+        if (!is_terminal(recognizer->state()))
+            recognizer->fail();
     }
 }
 
 void GestureArbiter::resolve_session(PointerSession& session,
                                      const MouseEvent& root_event) {
     auto requirements_satisfied = [&](GestureRecognizer& recognizer) {
-        for (const auto& candidate : session.candidates) {
-            auto* other = candidate.recognizer;
+        for (std::size_t i = 0; i < session.candidates.size(); ++i) {
+            auto* other = session.candidates[i].recognizer;
             if (!other || other == &recognizer) continue;
             if (!recognizer.requires_failure_of(*other)) continue;
             if (other->state() != GestureState::failed)
@@ -763,56 +793,74 @@ void GestureArbiter::resolve_session(PointerSession& session,
         return true;
     };
 
-    for (auto& candidate : session.candidates) {
-        auto* recognizer = candidate.recognizer;
-        if (!recognizer || candidate.active) continue;
+    // Index-based, size re-read each step, liveness re-checked after every
+    // call into user code: a recognizer callback can re-enter dispatch and
+    // both refill this vector and erase the session out from under us.
+    for (std::size_t i = 0; i < session.candidates.size(); ++i) {
+        auto* recognizer = session.candidates[i].recognizer;
+        if (!recognizer || session.candidates[i].active) continue;
         if (!is_recognized(recognizer->state())) continue;
         if (!requirements_satisfied(*recognizer)) continue;
-        if (!active_recognizers_allow(session, candidate)) {
+        if (!active_recognizers_allow(session, session.candidates[i])) {
             recognizer->fail();
+            if (!session_is_live(session)) return;
             continue;
         }
-        candidate.active = true;
-        if (candidate.owner)
-            candidate.owner->set_pointer_capture(root_event.pointer_id);
-        fail_conflicting_candidates(candidate);
+        session.candidates[i].active = true;
+        if (auto* owner = session.candidates[i].owner) {
+            owner->set_pointer_capture(root_event.pointer_id);
+            if (!session_is_live(session)) return;
+            if (i >= session.candidates.size()) return;
+        }
+        fail_conflicting_candidates(session.candidates[i]);
+        if (!session_is_live(session)) return;
     }
 
-    for (auto& candidate : session.candidates) {
-        if (candidate.active && candidate.recognizer)
-            candidate.recognizer->dispatch_pending_callbacks();
-        else if (candidate.recognizer &&
-                 !(is_recognized(candidate.recognizer->state()) &&
-                   !requirements_satisfied(*candidate.recognizer)))
-            candidate.recognizer->clear_pending_callbacks();
+    for (std::size_t i = 0; i < session.candidates.size(); ++i) {
+        auto* recognizer = session.candidates[i].recognizer;
+        if (session.candidates[i].active && recognizer)
+            recognizer->dispatch_pending_callbacks();
+        else if (recognizer &&
+                 !(is_recognized(recognizer->state()) &&
+                   !requirements_satisfied(*recognizer)))
+            recognizer->clear_pending_callbacks();
+        if (!session_is_live(session)) return;
     }
 }
 
 void GestureArbiter::finish_session_if_needed(PointerSession& session,
                                               const MouseEvent& root_event) {
     const bool release = is_release_or_cancel(root_event);
-    for (auto& candidate : session.candidates) {
-        auto* recognizer = candidate.recognizer;
+    for (std::size_t i = 0; i < session.candidates.size(); ++i) {
+        auto* recognizer = session.candidates[i].recognizer;
         if (!recognizer) continue;
-        if (candidate.active && is_terminal(recognizer->state())) {
-            if (candidate.owner)
-                candidate.owner->release_pointer_capture(root_event.pointer_id);
-            candidate.active = false;
+        if (session.candidates[i].active && is_terminal(recognizer->state())) {
+            auto* owner = session.candidates[i].owner;
+            session.candidates[i].active = false;
+            if (owner) {
+                owner->release_pointer_capture(root_event.pointer_id);
+                if (!session_is_live(session)) return;
+            }
         }
     }
 
     if (!release) return;
 
-    for (auto& candidate : session.candidates) {
-        auto* recognizer = candidate.recognizer;
+    for (std::size_t i = 0; i < session.candidates.size(); ++i) {
+        auto* recognizer = session.candidates[i].recognizer;
         if (!recognizer) continue;
-        if (candidate.active && candidate.owner)
-            candidate.owner->release_pointer_capture(root_event.pointer_id);
+        auto* owner = session.candidates[i].owner;
+        const bool was_active = session.candidates[i].active;
+        session.candidates[i].active = false;
+        if (was_active && owner) {
+            owner->release_pointer_capture(root_event.pointer_id);
+            if (!session_is_live(session)) return;
+        }
         if (!is_terminal(recognizer->state()) &&
             !(recognizer->state() == GestureState::possible &&
               recognizer->keep_possible_after_release()))
             recognizer->fail();
-        candidate.active = false;
+        if (!session_is_live(session)) return;
     }
 }
 
@@ -833,9 +881,13 @@ bool GestureArbiter::handle_pointer_event(View& root, const MouseEvent& root_eve
     const bool is_press = is_press_without_session(root_event, has_session);
     if (!is_press && !has_session) return false;
 
-    PointerSession& session = is_press
-        ? start_session(root, root_event)
-        : sessions_.at(root_event.pointer_id);
+    // Owning the node keeps it alive for this whole frame even if a recognizer
+    // callback re-enters dispatch and erases the map entry.
+    std::shared_ptr<PointerSession> session_ptr =
+        is_press ? start_session(root, root_event)
+                 : sessions_.at(root_event.pointer_id);
+    if (!session_ptr) return false;
+    PointerSession& session = *session_ptr;
     if (session.candidates.empty()) {
         if (is_release_or_cancel(root_event))
             sessions_.erase(root_event.pointer_id);
@@ -878,14 +930,18 @@ void GestureArbiter::advance_time(View& root, double timestamp_seconds) {
 
     for (int pointer_id : pointer_ids) {
         auto it = sessions_.find(pointer_id);
-        if (it == sessions_.end()) continue;
-        auto& session = it->second;
+        if (it == sessions_.end() || !it->second) continue;
+        std::shared_ptr<PointerSession> session_ptr = it->second;
+        PointerSession& session = *session_ptr;
         GestureContext context;
         context.timestamp_seconds = timestamp_seconds;
-        for (auto& candidate : session.candidates) {
-            if (!candidate.recognizer) continue;
-            candidate.recognizer->on_time_advanced(context);
+        for (std::size_t i = 0; i < session.candidates.size(); ++i) {
+            auto* recognizer = session.candidates[i].recognizer;
+            if (!recognizer) continue;
+            recognizer->on_time_advanced(context);
+            if (!session_is_live(session)) break;
         }
+        if (!session_is_live(session)) continue;
         MouseEvent synthetic;
         synthetic.pointer_id = pointer_id;
         resolve_session(session, synthetic);
@@ -896,7 +952,8 @@ void GestureArbiter::advance_time(View& root, double timestamp_seconds) {
 bool GestureArbiter::wants_time_updates() const {
     for (const auto& [unused, session] : sessions_) {
         (void)unused;
-        for (const auto& candidate : session.candidates) {
+        if (!session) continue;
+        for (const auto& candidate : session->candidates) {
             if (candidate.recognizer && candidate.recognizer->wants_time_updates())
                 return true;
         }
@@ -905,9 +962,16 @@ bool GestureArbiter::wants_time_updates() const {
 }
 
 void GestureArbiter::reset() {
-    for (auto& [unused, session] : sessions_) {
+    // Detach the map first, then tear the sessions down. The callbacks below
+    // run user code that may start a new session; anything it creates belongs
+    // to the fresh map, not to this teardown.
+    SessionMap sessions;
+    sessions.swap(sessions_);
+    for (auto& [unused, session] : sessions) {
         (void)unused;
-        for (auto& candidate : session.candidates) {
+        if (!session) continue;
+        for (std::size_t i = 0; i < session->candidates.size(); ++i) {
+            auto candidate = session->candidates[i];
             if (!candidate.recognizer) continue;
             if (candidate.active)
                 candidate.recognizer->cancel();
@@ -915,10 +979,9 @@ void GestureArbiter::reset() {
                 candidate.recognizer->fail();
             candidate.recognizer->dispatch_pending_callbacks();
             if (candidate.owner)
-                candidate.owner->release_pointer_capture(session.pointer_id);
+                candidate.owner->release_pointer_capture(session->pointer_id);
         }
     }
-    sessions_.clear();
 }
 
 void GestureArbiter::abandon() noexcept {

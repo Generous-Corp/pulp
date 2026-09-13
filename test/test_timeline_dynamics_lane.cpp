@@ -1,10 +1,16 @@
 #include "support/timeline_persistence_test_support.hpp"
 
 #include <pulp/timeline/compile_context.hpp>
+#include <pulp/timeline/document_session.hpp>
+#include <pulp/timeline/transaction.hpp>
 
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
+#include <string>
+#include <string_view>
 
 using Catch::Matchers::WithinAbs;
 
@@ -158,4 +164,356 @@ TEST_CASE("dynamics lane survives identity remapping and shares storage on copy"
     const auto swapped = sequence->with_dynamics_lane(quiet);
     REQUIRE(swapped.dynamics_lane() == quiet);
     REQUIRE(sequence->dynamics_lane().events().size() == 3);
+}
+
+TEST_CASE("setting the dynamics lane dirties the context kind and nothing else",
+          "[timeline][dynamics-lane][dirty-set]") {
+    const auto project = project_with_dynamics(lane_of({}));
+    const auto replacement = ramp_then_hold();
+
+    Transaction transaction;
+    transaction.id = {{1}, 1};
+    transaction.commands.push_back({{{1}, 1}, SetDynamicsLane{{2}, lane_of({}), replacement}});
+    auto reduced = take(reduce_transaction(project, transaction));
+
+    REQUIRE(reduced.project.find_sequence({2})->dynamics_lane().events().size() == 3);
+    REQUIRE(reduced.dirty.contexts().size() == 1);
+    REQUIRE(reduced.dirty.contexts()[0].owner_sequence == ItemId{2});
+    REQUIRE(reduced.dirty.contexts()[0].kind == CompileContextKind::Dynamics);
+
+    // The companion item names the sequence and no track: a lane's readers are
+    // not its children, so it cannot name them.
+    REQUIRE(reduced.dirty.items().size() == 1);
+    REQUIRE(reduced.dirty.items()[0].owner_sequence == ItemId{2});
+    REQUIRE_FALSE(reduced.dirty.items()[0].owner_track.valid());
+    REQUIRE(reduced.dirty.items()[0].flags == DirtyFlags::Context);
+
+    // The inverse is the same command with the two lanes swapped, so undo
+    // restores the previous lane exactly rather than approximating it.
+    REQUIRE(reduced.inverses.size() == 1);
+    Transaction undo;
+    undo.id = {{1}, 2};
+    undo.commands.push_back({{{1}, 2}, reduced.inverses[0]});
+    auto restored = take(reduce_transaction(reduced.project, undo));
+    REQUIRE(restored.project.find_sequence({2})->dynamics_lane().empty());
+}
+
+TEST_CASE("the dynamics lane gate refuses a stale expectation and a missing sequence",
+          "[timeline][dynamics-lane][dirty-set]") {
+    const auto project = project_with_dynamics(ramp_then_hold());
+    const auto replacement = lane_of({DynamicsEvent{{0}, 0.5f}});
+
+    // A caller that read the lane before someone else changed it is refused
+    // rather than allowed to clobber the version it never saw.
+    Transaction stale;
+    stale.id = {{1}, 1};
+    stale.commands.push_back({{{1}, 1}, SetDynamicsLane{{2}, lane_of({}), replacement}});
+    auto rejected = reduce_transaction(project, stale);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ExpectedValueMismatch);
+    // The refusal leaves the document exactly as it was: a rejected gate is not
+    // a partial write.
+    REQUIRE(project.find_sequence({2})->dynamics_lane() == ramp_then_hold());
+
+    // A command naming a sequence that does not exist is refused, not applied
+    // to whichever sequence happens to be first.
+    Transaction missing;
+    missing.id = {{1}, 2};
+    missing.commands.push_back(
+        {{{1}, 2}, SetDynamicsLane{{99}, ramp_then_hold(), replacement}});
+    auto absent = reduce_transaction(project, missing);
+    REQUIRE_FALSE(absent);
+    REQUIRE(absent.error().code == ConflictCode::TargetMissing);
+}
+
+TEST_CASE("a set_dynamics_lane command round trips through its schema envelope",
+          "[timeline][dynamics-lane][persistence]") {
+    const auto registry = builtins();
+    // Intensity travels as its float bit pattern, so the value a caller read
+    // back is the value the gate compares — 0.25f is 0x3e800000.
+    const auto bits = [](float value) {
+        return std::to_string(static_cast<std::uint64_t>(std::bit_cast<std::uint32_t>(value)));
+    };
+    const std::string encoded =
+        R"({"data":{"expected":[],"replacement":[{"intensity_bits":")" + bits(0.25f) +
+        R"(","interpolation":"continuous","position":"0"},{"intensity_bits":")" + bits(1.0f) +
+        R"(","interpolation":"hold","position":"1920"}],"sequence_id":"2"},)"
+        R"("type_name":"pulp.timeline.command.set_dynamics_lane","version":1})";
+    auto decoded = deserialize_commands("[" + encoded + "]", registry);
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded.value().size() == 1);
+    const auto* command = std::get_if<SetDynamicsLane>(&decoded.value()[0]);
+    REQUIRE(command != nullptr);
+    REQUIRE(command->sequence_id == ItemId{2});
+    REQUIRE(command->expected.empty());
+    REQUIRE(command->replacement.events().size() == 2);
+    REQUIRE(command->replacement.events()[0] ==
+            DynamicsEvent{{0}, 0.25f, AutomationInterpolation::Continuous});
+    REQUIRE(command->replacement.events()[1] ==
+            DynamicsEvent{{1920}, 1.0f, AutomationInterpolation::Hold});
+
+    // The model's rules are enforced at decode, so a command carrying a lane
+    // the model would reject cannot be constructed at all.
+    const std::string unordered =
+        R"({"data":{"expected":[],"replacement":[{"intensity_bits":")" + bits(0.5f) +
+        R"(","interpolation":"hold","position":"1920"},{"intensity_bits":")" + bits(0.5f) +
+        R"(","interpolation":"hold","position":"0"}],"sequence_id":"2"},)"
+        R"("type_name":"pulp.timeline.command.set_dynamics_lane","version":1})";
+    REQUIRE_FALSE(deserialize_commands("[" + unordered + "]", registry));
+
+    const std::string too_loud =
+        R"({"data":{"expected":[],"replacement":[{"intensity_bits":")" + bits(1.5f) +
+        R"(","interpolation":"hold","position":"0"}],"sequence_id":"2"},)"
+        R"("type_name":"pulp.timeline.command.set_dynamics_lane","version":1})";
+    REQUIRE_FALSE(deserialize_commands("[" + too_loud + "]", registry));
+
+    // An unknown interpolation spelling is a refusal rather than a fallback to
+    // whichever member happens to be first in the enum.
+    const std::string bad_curve =
+        R"({"data":{"expected":[],"replacement":[{"intensity_bits":")" + bits(0.5f) +
+        R"(","interpolation":"stepped","position":"0"}],"sequence_id":"2"},)"
+        R"("type_name":"pulp.timeline.command.set_dynamics_lane","version":1})";
+    REQUIRE_FALSE(deserialize_commands("[" + bad_curve + "]", registry));
+}
+
+TEST_CASE("the dynamics lane command carries annotation authority a writer profile can gate",
+          "[timeline][dynamics-lane][capabilities]") {
+    constexpr auto authority = command_authority_of<SetDynamicsLane>();
+    STATIC_REQUIRE(authority.command_class == CommandClass::Annotation);
+    STATIC_REQUIRE(authority.intent == CommandIntent::Modify);
+
+    // Both directions matter: a profile that denies nothing must admit the
+    // command, or the deny case below would pass against a mask that refuses
+    // everything.
+    REQUIRE(allows(unrestricted_capabilities(), authority));
+    const auto denied =
+        deny(unrestricted_capabilities(), CommandClass::Annotation, CommandIntent::Modify);
+    REQUIRE_FALSE(allows(denied, authority));
+
+    // Denying a neighbouring class leaves this command reachable, so the gate
+    // is the authority pair rather than a blanket annotation ban.
+    const auto elsewhere =
+        deny(unrestricted_capabilities(), CommandClass::Note, CommandIntent::Modify);
+    REQUIRE(allows(elsewhere, authority));
+}
+
+TEST_CASE("dynamics lane survives a save and reload byte for byte",
+          "[timeline][dynamics-lane][persistence]") {
+    const auto registry = builtins();
+    // Intensities that are not exactly representable in decimal, so a writer
+    // that rounded through text instead of carrying the bit pattern would come
+    // back different.
+    const auto authored = lane_of({
+        DynamicsEvent{{0}, 0.1f, AutomationInterpolation::Continuous},
+        DynamicsEvent{{1920}, 0.7f, AutomationInterpolation::Hold},
+        DynamicsEvent{{3840}, 1.0f, AutomationInterpolation::Continuous},
+    });
+    const auto original = project_with_dynamics(authored);
+
+    const auto first = take(serialize_project(original, registry));
+    // The lane is written under its own member, between the chord lane and the
+    // groove in canonical order, as the intensity's bit pattern plus the
+    // interpolation that leaves each event.
+    REQUIRE(first.json.find(R"("chord_scale_lane":[],"dynamics_lane":[{"intensity_bits":")") !=
+            std::string::npos);
+    REQUIRE(first.json.find(R"("interpolation":"hold","position":"1920"})") !=
+            std::string::npos);
+    REQUIRE(first.json.find(R"(}],"groove":{)") != std::string::npos);
+
+    const auto restored = take(deserialize_project(first.json, registry));
+    const auto* sequence = restored.find_sequence({2});
+    REQUIRE(sequence != nullptr);
+    // Equality compares every authored value, including the float bits, so a
+    // lossy intensity or a dropped interpolation fails here rather than being
+    // rounded past.
+    REQUIRE(sequence->dynamics_lane() == authored);
+    REQUIRE(sequence->dynamics_lane().events().size() == 3);
+    REQUIRE(sequence->dynamics_lane().events()[1].interpolation == AutomationInterpolation::Hold);
+
+    // A re-save reproduces the first save exactly.
+    REQUIRE(take(serialize_project(restored, registry)).json == first.json);
+
+    // A sequence that states no dynamics writes an empty lane rather than
+    // omitting the member, so the version gate stays a presence test.
+    const auto empty_json = take(serialize_project(project_with_dynamics(lane_of({})), registry));
+    REQUIRE(empty_json.json.find(R"("chord_scale_lane":[],"dynamics_lane":[],"groove":{)") !=
+            std::string::npos);
+    REQUIRE(take(deserialize_project(empty_json.json, registry))
+                .find_sequence({2})
+                ->dynamics_lane()
+                .empty());
+}
+
+TEST_CASE("a document whose dynamics lane is malformed is rejected on load",
+          "[timeline][dynamics-lane][persistence]") {
+    const auto registry = builtins();
+    const auto json = take(serialize_project(project_with_dynamics(ramp_then_hold()), registry)).json;
+    const auto bits_of = [](float value) {
+        return std::to_string(std::bit_cast<std::uint32_t>(value));
+    };
+    const std::string first_event = R"("intensity_bits":")" + bits_of(0.25f) + R"(")";
+    const auto first_at = json.find(first_event);
+    REQUIRE(first_at != std::string::npos);
+
+    // An intensity outside [0, 1] is a model rejection on the way in, not a
+    // clamp: the bit pattern decodes, and the factory refuses the value.
+    auto too_loud = json;
+    too_loud.replace(first_at, first_event.size(),
+                     R"("intensity_bits":")" + bits_of(1.5f) + R"(")");
+    auto rejected = deserialize_project(too_loud, registry);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().model_error.has_value());
+
+    // A NaN has a bit pattern too, and it is refused for the same reason.
+    auto not_a_number = json;
+    not_a_number.replace(first_at, first_event.size(),
+                         R"("intensity_bits":")" + bits_of(std::nanf("")) + R"(")");
+    REQUIRE_FALSE(deserialize_project(not_a_number, registry));
+
+    // A pattern wider than a float is a number the writer could never have
+    // produced, so it is refused before the bits are ever reinterpreted.
+    auto too_wide = json;
+    too_wide.replace(first_at, first_event.size(), R"("intensity_bits":"4294967296")");
+    REQUIRE_FALSE(deserialize_project(too_wide, registry));
+
+    // An interpolation name outside the shared vocabulary is not coerced.
+    auto unknown_curve = json;
+    const auto curve_at = unknown_curve.find(R"("interpolation":"hold")");
+    REQUIRE(curve_at != std::string::npos);
+    unknown_curve.replace(curve_at, std::string_view(R"("interpolation":"hold")").size(),
+                          R"("interpolation":"step")");
+    REQUIRE_FALSE(deserialize_project(unknown_curve, registry));
+
+    // Descending positions would change which intensity is in force where, so
+    // the loader refuses rather than sorting the document into a new
+    // performance.
+    auto descending = json;
+    const auto position_at = descending.find(R"("position":"1920"})");
+    REQUIRE(position_at != std::string::npos);
+    descending.replace(position_at, std::string_view(R"("position":"1920"})").size(),
+                       R"("position":"-960"})");
+    REQUIRE_FALSE(deserialize_project(descending, registry));
+
+    // An event missing a member is a missing field, not a defaulted one.
+    auto partial = json;
+    const auto interpolation_at = partial.find(R"(,"interpolation":"continuous")");
+    REQUIRE(interpolation_at != std::string::npos);
+    partial.erase(interpolation_at, std::string_view(R"(,"interpolation":"continuous")").size());
+    REQUIRE_FALSE(deserialize_project(partial, registry));
+}
+
+TEST_CASE("a pre-dynamics sequence document loads as a sequence with no dynamics",
+          "[timeline][dynamics-lane][migration]") {
+    const auto registry = builtins();
+    const auto current =
+        take(serialize_project(project_with_dynamics(lane_of({})), registry)).json;
+    // A v7 document is the current shape minus the lane member, so strip
+    // exactly that and stamp the version it was written at.
+    auto legacy = current;
+    constexpr std::string_view empty_member = R"("dynamics_lane":[],)";
+    const auto member_at = legacy.find(empty_member);
+    REQUIRE(member_at != std::string::npos);
+    legacy.erase(member_at, empty_member.size());
+    constexpr std::string_view stamp = R"("type_name":"pulp.timeline.sequence","version":8)";
+    const auto stamp_at = legacy.find(stamp);
+    REQUIRE(stamp_at != std::string::npos);
+    legacy.replace(stamp_at, stamp.size(),
+                   R"("type_name":"pulp.timeline.sequence","version":7)");
+
+    const auto decoded = take(deserialize_project(legacy, registry));
+    REQUIRE(decoded.find_sequence({2})->dynamics_lane().empty());
+    // Re-saving lands on the current version with the lane materialized empty.
+    REQUIRE(take(serialize_project(decoded, registry)).json == current);
+
+    // A v7 document that carries the lane is a contradiction rather than a
+    // hint, and a v8 document that omits it is the same contradiction the
+    // other way round. Both the structural preflight and the decoder refuse.
+    auto declared_too_early = current;
+    const auto early_at = declared_too_early.find(stamp);
+    REQUIRE(early_at != std::string::npos);
+    declared_too_early.replace(early_at, stamp.size(),
+                               R"("type_name":"pulp.timeline.sequence","version":7)");
+    auto rejected_early = deserialize_project(declared_too_early, registry);
+    REQUIRE_FALSE(rejected_early);
+    REQUIRE(rejected_early.error().code == PersistenceErrorCode::InvalidSchema);
+
+    auto omitted = current;
+    const auto omitted_at = omitted.find(empty_member);
+    REQUIRE(omitted_at != std::string::npos);
+    omitted.erase(omitted_at, empty_member.size());
+    auto rejected_omitted = deserialize_project(omitted, registry);
+    REQUIRE_FALSE(rejected_omitted);
+    REQUIRE(rejected_omitted.error().code == PersistenceErrorCode::InvalidSchema);
+}
+
+TEST_CASE("sequence v7 upgrades to an empty dynamics lane and downgrades only when empty",
+          "[timeline][dynamics-lane][migration]") {
+    const auto registry = builtins();
+    DecodeLimits limits;
+    const std::string v7 =
+        R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"scenes":[],"track_order":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":7})";
+    const auto v8 = take(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 8, v7, limits));
+    REQUIRE(
+        v8 ==
+        R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"dynamics_lane":[],"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"scenes":[],"track_order":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":8})");
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 8, 7, v8,
+                                  limits)) == v7);
+
+    // The whole chain composes, so a v1 document reaches v8 and back unchanged.
+    const std::string v1 =
+        R"({"data":{"absolute_duration":null,"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":1})";
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 1, 8, v1,
+                                  limits)) == v8);
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 8, 1, v8,
+                                  limits)) == v1);
+
+    // The splice trusts canonical member order, so a reordered payload is
+    // refused rather than spliced into the wrong slot.
+    const std::string reordered_v7 =
+        R"({"data":{"chord_scale_lane":[],"absolute_duration":null,"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"scenes":[],"track_order":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":7})";
+    REQUIRE_FALSE(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 8,
+                                   reordered_v7, limits));
+}
+
+TEST_CASE("downgrading a sequence with authored dynamics is refused",
+          "[timeline][dynamics-lane][migration]") {
+    const auto registry = builtins();
+    DecodeLimits limits;
+
+    // An empty lane is exactly what a v7 reader already understood the document
+    // to say, so it drops cleanly and the upgrade puts back what the downgrade
+    // removed.
+    const auto silent = sequence_envelope(
+        take(serialize_project(project_with_dynamics(lane_of({})), registry)).json);
+    const auto lowered = take(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 8, 7, silent, limits));
+    REQUIRE(lowered.find(R"("dynamics_lane")") == std::string::npos);
+    REQUIRE(lowered.find(R"("type_name":"pulp.timeline.sequence","version":7)") !=
+            std::string::npos);
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 8, lowered,
+                                  limits)) == silent);
+
+    // One authored event is a performance instruction with no v7 spelling. A
+    // v7 reader has nowhere to put it, so writing the document without it
+    // would change how the sequence performs while reporting success. This
+    // refuses even for a single, inaudible-looking event: the doctrine is that
+    // authored data is never dropped quietly, not that loud data is not.
+    const auto whisper = sequence_envelope(
+        take(serialize_project(project_with_dynamics(lane_of({DynamicsEvent{{0}, 0.5f}})),
+                               registry))
+            .json);
+    auto refused =
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 8, 7, whisper, limits);
+    REQUIRE_FALSE(refused);
+    REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
+
+    // The refusal holds across the whole chain: a document that cannot reach
+    // v7 cannot reach anything below it either.
+    const auto authored = sequence_envelope(
+        take(serialize_project(project_with_dynamics(ramp_then_hold()), registry)).json);
+    auto refused_chain =
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 8, 1, authored, limits);
+    REQUIRE_FALSE(refused_chain);
+    REQUIRE(refused_chain.error().code == PersistenceErrorCode::MigrationFailed);
 }

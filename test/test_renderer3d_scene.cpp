@@ -22,7 +22,7 @@ TEST_CASE("Renderer3D renders external glTF buffers and images",
 
     auto result = Renderer3D::render_scene_data(loaded.scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -53,7 +53,7 @@ TEST_CASE("Renderer3D renders a mesh below a child node", "[render][scene3d][gpu
 
     auto result = Renderer3D::render_scene_data(make_child_node_render_scene(), config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -79,7 +79,7 @@ TEST_CASE("Renderer3D applies base-color texture transform metadata",
 
     auto result = Renderer3D::render_scene_data(make_transformed_uv_render_scene(), config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -107,7 +107,7 @@ TEST_CASE("Renderer3D downgrades mipmap sampler state for single-level textures"
         make_mipmap_sampler_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -134,7 +134,7 @@ TEST_CASE("Renderer3D renders multiple same-state SceneData primitives",
     auto result = Renderer3D::render_scene_data(make_multi_primitive_render_scene(),
                                                 config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -162,7 +162,7 @@ TEST_CASE("Renderer3D applies per-primitive material uniforms",
         make_mixed_material_primitive_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -210,7 +210,7 @@ TEST_CASE("Renderer3D reports a feature one SceneData primitive uses",
 
     auto result = Renderer3D::render_scene_data(scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -233,7 +233,7 @@ TEST_CASE("Renderer3D applies directional light color",
         make_directional_light_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -268,7 +268,7 @@ TEST_CASE("Renderer3D applies directional light node transform",
         make_directional_light_direction_render_scene(false),
         config);
     if (!front_lit.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << front_lit.error);
         return;
     }
@@ -314,7 +314,7 @@ TEST_CASE("Renderer3D applies point and spot lights and defers range metadata",
         make_deferred_punctual_light_render_scene(false, false),
         config);
     if (!unlit_punctual.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " <<
+        SKIP("Dawn/WebGPU unavailable in this environment: " <<
                 unlit_punctual.error);
         return;
     }
@@ -396,7 +396,7 @@ TEST_CASE("Renderer3D applies point light range attenuation",
         make_point_light_range_render_scene(1.5f),
         config);
     if (!short_range.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " <<
+        SKIP("Dawn/WebGPU unavailable in this environment: " <<
                 short_range.error);
         return;
     }
@@ -436,7 +436,7 @@ TEST_CASE("Renderer3D applies preserved perspective camera yfov",
         make_perspective_camera_render_scene(false),
         config);
     if (!no_camera.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << no_camera.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << no_camera.error);
         return;
     }
     auto with_camera = Renderer3D::render_scene_data(
@@ -472,7 +472,7 @@ TEST_CASE("Renderer3D reports deferred camera and light node transforms",
         make_transformed_camera_light_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -507,7 +507,7 @@ TEST_CASE("Renderer3D reports non-rigid light node transforms",
 
     auto result = Renderer3D::render_scene_data(scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -528,7 +528,7 @@ TEST_CASE("Renderer3D applies camera node rotation as view basis",
         make_translated_camera_render_scene(-0.25f),
         config);
     if (!translated.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << translated.error);
         return;
     }
@@ -570,7 +570,7 @@ TEST_CASE("Renderer3D applies rigid camera matrix transform as view basis",
         make_matrix_camera_render_scene(false),
         config);
     if (!translated.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << translated.error);
         return;
     }
@@ -613,7 +613,7 @@ TEST_CASE("Renderer3D applies camera node translation as a view offset",
         make_perspective_camera_render_scene(true),
         config);
     if (!centered.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: "
+        SKIP("Dawn/WebGPU unavailable in this environment: "
                 << centered.error);
         return;
     }
@@ -652,7 +652,7 @@ TEST_CASE("Renderer3D applies preserved camera projection metadata",
         make_camera_metadata_render_scene(),
         config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -681,7 +681,7 @@ TEST_CASE("Renderer3D applies preserved camera aspect ratio",
         make_camera_aspect_ratio_render_scene(1.0f),
         config);
     if (!square.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << square.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << square.error);
         return;
     }
     auto wide = Renderer3D::render_scene_data(
@@ -721,7 +721,7 @@ TEST_CASE("Renderer3D applies preserved orthographic camera ymag",
         make_orthographic_camera_render_scene(3.0f),
         config);
     if (!wide.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << wide.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << wide.error);
         return;
     }
     auto narrow = Renderer3D::render_scene_data(

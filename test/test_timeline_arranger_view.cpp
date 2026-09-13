@@ -765,9 +765,10 @@ TEST_CASE("Arranger refuses to author a nested-sequence clip from a lane click",
     configure(view, project, host);
 
     // A nested placement whose anchor or playback properties are anything but
-    // the defaults is refused by the program compiler
-    // (CompileErrorCode::NestedSequenceUnsupported), so an editing surface that
-    // could author one from a lane click could author an unplayable document.
+    // the defaults is refused by the program compiler, which names the missing
+    // construct (CompileErrorCode::NestedAbsoluteChildUnsupported and its
+    // siblings), so an editing surface that could author one from a lane click
+    // could author an unplayable document.
     view.set_clip_factory([](pulp::timebase::TickPosition start) -> std::optional<Clip> {
         auto nested = Clip::create({30}, {start.value}, {kTicksPerQuarter},
                                    SequenceRef{{3}, {0}}, {});

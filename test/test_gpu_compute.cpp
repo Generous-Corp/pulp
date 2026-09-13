@@ -16,6 +16,16 @@
 using namespace pulp::render;
 using namespace pulp::signal;
 
+namespace {
+
+// A lane with no compute device must SKIP, out loud, and never `return` — Catch2
+// records a bare early return as a PASS, so a GPU-less runner would report this
+// whole file green having asserted nothing about GpuCompute at all.
+constexpr const char* kNoGpu =
+    "no GPU compute device available (Skia/Dawn not built, or no adapter)";
+
+}  // namespace
+
 // ── Correctness Tests ───────────────────────────────────────────────────────
 
 TEST_CASE("GpuCompute factory returns non-null", "[render][gpu][compute]") {
@@ -29,7 +39,7 @@ TEST_CASE("GpuCompute factory returns non-null", "[render][gpu][compute]") {
 
 TEST_CASE("GpuCompute standalone initialization", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute) return;
+    if (!compute) SKIP(kNoGpu);
 
     bool ok = compute->initialize_standalone();
     if (!ok) {
@@ -64,7 +74,7 @@ TEST_CASE("GpuCompute rejects a shared Dawn null adapter",
 
 TEST_CASE("GpuCompute magnitude correctness", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 1024;
     std::vector<float> complex_pairs(N * 2);
@@ -93,7 +103,7 @@ TEST_CASE("GpuCompute magnitude correctness", "[render][gpu][compute]") {
 
 TEST_CASE("GpuCompute complex multiply correctness", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 512;
     std::vector<float> a(N * 2), b(N * 2), gpu_result(N * 2);
@@ -114,7 +124,7 @@ TEST_CASE("GpuCompute complex multiply correctness", "[render][gpu][compute]") {
 
 TEST_CASE("GpuCompute batch magnitude", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t bins = 256;
     constexpr uint32_t frames = 4;
@@ -142,7 +152,7 @@ TEST_CASE("GpuCompute batch magnitude", "[render][gpu][compute]") {
 
 TEST_CASE("GpuCompute matches CPU FFT magnitude", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr int fft_size = 1024;
     Fft fft(fft_size);
@@ -180,7 +190,7 @@ TEST_CASE("GpuCompute matches CPU FFT magnitude", "[render][gpu][compute]") {
 
 TEST_CASE("GpuCompute FFT forward magnitude matches CPU", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 1024;
     Fft fft(static_cast<int>(N));
@@ -214,7 +224,7 @@ TEST_CASE("GpuCompute FFT forward magnitude matches CPU", "[render][gpu][compute
 
 TEST_CASE("GpuCompute FFT impulse and DC", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 256;
     std::vector<float> in(N * 2, 0.0f), out(N * 2, 0.0f);
@@ -241,7 +251,7 @@ TEST_CASE("GpuCompute FFT impulse and DC", "[render][gpu][compute]") {
 
 TEST_CASE("GpuCompute FFT round-trip identity", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 512;
     std::vector<float> in(N * 2), fwd(N * 2), back(N * 2);
@@ -259,7 +269,7 @@ TEST_CASE("GpuCompute FFT round-trip identity", "[render][gpu][compute]") {
 TEST_CASE("GpuCompute FFT matches direct DFT (complex, phase-exact)",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr double kPi = 3.14159265358979323846;
     constexpr uint32_t N = 8;
@@ -301,7 +311,7 @@ TEST_CASE("GpuCompute FFT matches direct DFT (complex, phase-exact)",
 
 TEST_CASE("GpuCompute FFT timed reports true GPU compute time", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 1024;
     std::vector<float> in(N * 2), out(N * 2), ref(N * 2);
@@ -332,7 +342,7 @@ TEST_CASE("GpuCompute FFT timed reports true GPU compute time", "[render][gpu][c
 TEST_CASE("GpuCompute multi_convolve_timed matches multi_convolve and reports GPU time",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 2048, NUM_IR = 4;
     std::vector<float> ir_specs(static_cast<size_t>(2) * N * NUM_IR);
@@ -369,7 +379,7 @@ TEST_CASE("GpuCompute multi_convolve_timed matches multi_convolve and reports GP
 TEST_CASE("GpuCompute partitioned FDL matches CPU PartitionedConvolver (mono)",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t BLOCK = 256, N = 2 * BLOCK;  // fft size 512
     constexpr uint32_t IR_LEN = 900;                 // -> 4 partitions
@@ -421,7 +431,7 @@ TEST_CASE("GpuCompute partitioned FDL matches CPU PartitionedConvolver (mono)",
 TEST_CASE("GpuCompute partitioned FDL matches N panned CPU convolvers (multi-IR)",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t BLOCK = 256, N = 2 * BLOCK, NUM_IR = 3, IR_LEN = 700;
     const uint32_t P = (IR_LEN + BLOCK - 1) / BLOCK;
@@ -483,7 +493,7 @@ TEST_CASE("GpuCompute partitioned FDL matches N panned CPU convolvers (multi-IR)
 
 TEST_CASE("GpuCompute FFT rejects non-power-of-two", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
     std::vector<float> in(200, 0.0f), out(200, 0.0f);
     REQUIRE_FALSE(compute->fft_forward(in.data(), out.data(), 100));
     REQUIRE_FALSE(compute->fft_inverse(in.data(), out.data(), 100));
@@ -500,7 +510,7 @@ TEST_CASE("GpuCompute FFT rejects non-power-of-two", "[render][gpu][compute]") {
 
 TEST_CASE("GpuCompute FFT benchmark vs CPU", "[render][gpu][compute][.benchmark]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     const std::vector<uint32_t> sizes = {256, 1024, 4096, 16384, 65536};
     constexpr int iters = 20;
@@ -553,7 +563,7 @@ TEST_CASE("GpuCompute FFT benchmark vs CPU", "[render][gpu][compute][.benchmark]
 TEST_CASE("GpuCompute fused convolve vs 3-call readback cost",
           "[render][gpu][compute][.benchmark]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 4096;
     std::vector<float> ir_spec(N * 2, 0.0f);
@@ -589,7 +599,7 @@ TEST_CASE("GpuCompute fused convolve vs 3-call readback cost",
 
 TEST_CASE("GpuCompute batched convolve matches single", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 256, B = 5;
     std::vector<float> irspec(N * 2);
@@ -623,7 +633,7 @@ TEST_CASE("GpuCompute batched convolve matches single", "[render][gpu][compute]"
 
 TEST_CASE("GpuCompute batched convolve isolates batches", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 128, B = 4;
     std::vector<float> irspec(N * 2);
@@ -649,7 +659,7 @@ TEST_CASE("GpuCompute batched convolve isolates batches", "[render][gpu][compute
 
 TEST_CASE("GpuCompute convolve_batch B=1 equals single convolve", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 512;
     std::vector<float> irspec(N * 2);
@@ -672,7 +682,7 @@ TEST_CASE("GpuCompute convolve_batch B=1 equals single convolve", "[render][gpu]
 TEST_CASE("GpuCompute batched convolve amortizes readback",
           "[render][gpu][compute][.benchmark]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 2048, B = 16;
     std::vector<float> irspec(N * 2, 0.0f);
@@ -706,7 +716,7 @@ TEST_CASE("GpuCompute batched convolve amortizes readback",
 
 TEST_CASE("GpuCompute matmul matches CPU", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t M = 6, K = 4, N = 5;
     std::vector<float> a(M * K), b(K * N), c(M * N, 0.0f), ref(M * N, 0.0f);
@@ -731,7 +741,7 @@ TEST_CASE("GpuCompute matmul matches CPU", "[render][gpu][compute]") {
 TEST_CASE("GpuCompute additive synth produces the requested partials",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 2048;
     constexpr float SR = 48000.0f;
@@ -769,7 +779,7 @@ TEST_CASE("GpuCompute additive synth produces the requested partials",
 TEST_CASE("GpuCompute additive synth matches a CPU reference across workgroup sizes",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr float SR = 48000.0f;
     constexpr double TWO_PI = 6.28318530717958647692;
@@ -848,7 +858,7 @@ TEST_CASE("GpuCompute additive synth matches a CPU reference across workgroup si
 TEST_CASE("GpuCompute modal strike decays and carries mode frequencies",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 8192;
     constexpr float SR = 48000.0f;
@@ -893,7 +903,7 @@ TEST_CASE("GpuCompute modal strike decays and carries mode frequencies",
 TEST_CASE("GpuCompute modal strike matches a CPU reference across workgroup sizes",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr float SR = 48000.0f;
     constexpr double TWO_PI = 6.28318530717958647692;
@@ -967,7 +977,7 @@ TEST_CASE("GpuCompute modal strike matches a CPU reference across workgroup size
 
 TEST_CASE("GpuCompute granular cloud places windowed grains", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t SRCLEN = 4096, N = 2048;
     std::vector<float> source(SRCLEN);
@@ -999,7 +1009,7 @@ TEST_CASE("GpuCompute granular cloud places windowed grains", "[render][gpu][com
 
 TEST_CASE("GpuCompute dense_tanh matches CPU", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t IN = 5, OUT = 4;
     std::vector<float> x(IN), w(OUT * IN), b(OUT), out(OUT, 0.0f), ref(OUT, 0.0f);
@@ -1160,7 +1170,7 @@ std::vector<double> wavenet_ref_single_array(
 TEST_CASE("GpuCompute wavenet_forward matches a scalar reference",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     // Weight blob for 1 array / 1 layer / channels=1 / kernel=1 / ungated:
     // [rechannel Wre][conv Wconv][conv bconv][mixin Wmix]
@@ -1193,7 +1203,7 @@ TEST_CASE("GpuCompute wavenet_forward matches a scalar reference",
 TEST_CASE("GpuCompute wavenet_forward is deterministic across a gated multi-layer net",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     // 1 array, 2 gated dilated layers, channels=4, kernel=3, head_size=4. This
     // exercises the gated (tanh*sigmoid) path, multi-channel conv, dilation
@@ -1233,7 +1243,7 @@ TEST_CASE("GpuCompute wavenet_forward is deterministic across a gated multi-laye
 TEST_CASE("GpuCompute wavenet_forward chains two arrays through the head seed",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     // Two arrays, each channels=1/kernel=1/1 layer/ungated/head_size=1. This is
     // the multi-array topology real .nam WaveNets use, and the one the submission
@@ -1282,7 +1292,7 @@ TEST_CASE("GpuCompute wavenet_forward keeps two instances independent on one dev
     // so instance 0 would have run instance 1's weights — this pins the isolation
     // that lets a stereo plugin share one device instead of one per channel.
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     std::vector<uint32_t> dilations = {1};
     GpuCompute::WavenetLayerArraySpec spec;
@@ -1351,7 +1361,7 @@ TEST_CASE("GpuCompute wavenet_forward matches a scalar reference at 33<=C<=64 "
     // real .nam model runs C<=32/C<=4). This closes the gap: a gated, multi-layer,
     // dilated array with C=48 (Z=96) checked bit-close against the scalar golden.
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     const uint32_t C = 48, K = 3, L = 2, H = 1;
     const bool gated = true;
@@ -1388,7 +1398,7 @@ TEST_CASE("GpuCompute wavenet_forward matches a scalar reference with a "
     // channel cap, gated => Z=128 fully populating the shared zbuf), this pins both
     // the smallest block and the widest channel dimension the shader supports.
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     const uint32_t C = 64, K = 3, L = 2, H = 1;
     const bool gated = true;
@@ -1417,7 +1427,7 @@ TEST_CASE("GpuCompute wavenet_forward matches a scalar reference with a "
 TEST_CASE("GpuCompute prepare_wavenet rejects unsupported shapes",
           "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     std::vector<uint32_t> dilations = {1};
     auto base = [&]() {
@@ -1459,12 +1469,12 @@ TEST_CASE("GpuCompute prepare_wavenet rejects unsupported shapes",
 
 TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
     auto compute = GpuCompute::create();
-    if (!compute) return;
+    if (!compute) SKIP(kNoGpu);
 
     // Before initialization the device is unavailable.
     REQUIRE_FALSE(compute->capabilities().available);
 
-    if (!compute->initialize_standalone()) return;
+    if (!compute->initialize_standalone()) SKIP(kNoGpu);
 
     const auto caps = compute->capabilities();
     REQUIRE(caps.available);
@@ -1485,16 +1495,19 @@ TEST_CASE("GpuCompute capability report", "[render][gpu][compute]") {
 
 TEST_CASE("GpuCompute device sharing with GpuSurface", "[render][gpu][compute]") {
     auto surface = GpuSurface::create_dawn();
-    if (!surface) return;
+    if (!surface)
+        SKIP("no GPU surface available (Dawn not built, or no adapter)");
 
     GpuSurface::Config config;
     config.width = 64;
     config.height = 64;
-    if (!surface->initialize(config)) return;
+    if (!surface->initialize(config))
+        SKIP("GPU surface would not initialize on this host");
 
     auto compute = GpuCompute::create();
-    if (!compute) return;
-    if (!compute->initialize_from_surface(*surface)) return;
+    if (!compute) SKIP(kNoGpu);
+    if (!compute->initialize_from_surface(*surface))
+        SKIP("GPU compute could not share the GpuSurface device");
     REQUIRE(compute->is_initialized());
 
     // Verify compute works on the shared device
@@ -1511,15 +1524,17 @@ TEST_CASE("GpuCompute device sharing with GpuSurface", "[render][gpu][compute]")
 
 TEST_CASE("GpuCompute device sharing report", "[render][gpu][compute]") {
     auto surface = GpuSurface::create_dawn();
-    if (!surface) return;
+    if (!surface)
+        SKIP("no GPU surface available (Dawn not built, or no adapter)");
 
     GpuSurface::Config config;
     config.width = 64;
     config.height = 64;
-    if (!surface->initialize(config)) return;
+    if (!surface->initialize(config))
+        SKIP("GPU surface would not initialize on this host");
 
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     auto report = compute->verify_device_sharing(*surface);
 
@@ -1535,7 +1550,7 @@ TEST_CASE("GpuCompute device sharing report", "[render][gpu][compute]") {
 
 TEST_CASE("GpuCompute benchmark magnitude", "[render][gpu][compute][benchmark]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     std::vector<uint32_t> sizes = {256, 1024, 4096, 16384, 65536, 262144, 1048576};
     auto results = compute->benchmark_magnitude(sizes, 20);
@@ -1577,7 +1592,7 @@ TEST_CASE("GpuCompute benchmark magnitude", "[render][gpu][compute][benchmark]")
 TEST_CASE("GpuCompute magnitude hot loop reuses pool buffers",
           "[render][gpu][compute][pool]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     constexpr uint32_t N = 4096;
     std::vector<float> complex_pairs(N * 2);
@@ -1660,7 +1675,7 @@ TEST_CASE("GpuCompute magnitude hot loop reuses pool buffers",
 
 TEST_CASE("GpuCompute benchmark complex multiply", "[render][gpu][compute][benchmark]") {
     auto compute = GpuCompute::create();
-    if (!compute || !compute->initialize_standalone()) return;
+    if (!compute || !compute->initialize_standalone()) SKIP(kNoGpu);
 
     std::vector<uint32_t> sizes = {256, 1024, 4096, 16384, 65536, 262144, 1048576};
     auto results = compute->benchmark_complex_multiply(sizes, 20);

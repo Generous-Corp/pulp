@@ -156,15 +156,14 @@ TEST_CASE("HeadlessSurface renders a deterministic clear-only frame",
     if (!surface) {
         // No Dawn/Graphite on this host — that's the documented
         // soft-skip path the CI lane uses when the runner lacks a GPU.
-        SUCCEED("HeadlessSurface unavailable: " + err);
-        return;
+        SKIP("HeadlessSurface unavailable: " + err);
     }
     REQUIRE(surface->is_ready());
 
     auto frame_a = surface->render_rgba(nullptr);
     if (frame_a.empty()) {
-        SUCCEED("GPU readback failed: " + surface->last_error());
-        return;
+        FAIL("GPU readback failed after the surface reported ready: "
+             + surface->last_error());
     }
     REQUIRE(frame_a.width == kW);
     REQUIRE(frame_a.height == kH);
@@ -213,8 +212,7 @@ TEST_CASE("HeadlessSurface renders a paint callback then encodes PNG",
     std::string err;
     auto surface = HeadlessSurface::create(cfg, &err);
     if (!surface) {
-        SUCCEED("HeadlessSurface unavailable: " + err);
-        return;
+        SKIP("HeadlessSurface unavailable: " + err);
     }
 
     auto paint_red_band = [](pulp::canvas::Canvas& c) {
@@ -226,8 +224,8 @@ TEST_CASE("HeadlessSurface renders a paint callback then encodes PNG",
 
     auto rgba = surface->render_rgba(paint_red_band);
     if (rgba.empty()) {
-        SUCCEED("GPU readback failed: " + surface->last_error());
-        return;
+        FAIL("GPU readback failed after the surface reported ready: "
+             + surface->last_error());
     }
     REQUIRE(rgba.width == kW);
     REQUIRE(rgba.height == kH);
@@ -240,8 +238,8 @@ TEST_CASE("HeadlessSurface renders a paint callback then encodes PNG",
     // PNG round-trip via the convenience entry point.
     auto png = surface->render_png(paint_red_band);
     if (png.empty()) {
-        SUCCEED("PNG encode failed: " + surface->last_error());
-        return;
+        FAIL("PNG encode failed after the surface reported ready: "
+             + surface->last_error());
     }
     REQUIRE(png.size() >= 8u);
     // PNG magic: 89 50 4E 47 0D 0A 1A 0A
@@ -336,8 +334,7 @@ TEST_CASE("HeadlessSurface draws a file-backed image on the GPU path",
     std::string err;
     auto surface = HeadlessSurface::create(cfg, &err);
     if (!surface) {
-        SUCCEED("HeadlessSurface unavailable: " + err);
-        return;
+        SKIP("HeadlessSurface unavailable: " + err);
     }
 
     auto paint_image = [&](pulp::canvas::Canvas& c) {
@@ -346,8 +343,8 @@ TEST_CASE("HeadlessSurface draws a file-backed image on the GPU path",
 
     auto rgba = surface->render_rgba(paint_image);
     if (rgba.empty()) {
-        SUCCEED("GPU readback failed: " + surface->last_error());
-        return;
+        FAIL("GPU readback failed after the surface reported ready: "
+             + surface->last_error());
     }
 
     // Assert the ink: the amber pixels must actually be on the surface. The
@@ -378,8 +375,7 @@ TEST_CASE("HeadlessSurface draws an SVG document on the GPU path",
     std::string err;
     auto surface = HeadlessSurface::create(cfg, &err);
     if (!surface) {
-        SUCCEED("HeadlessSurface unavailable: " + err);
-        return;
+        SKIP("HeadlessSurface unavailable: " + err);
     }
 
     auto paint_svg = [&](pulp::canvas::Canvas& c) {
@@ -388,8 +384,8 @@ TEST_CASE("HeadlessSurface draws an SVG document on the GPU path",
 
     auto rgba = surface->render_rgba(paint_svg);
     if (rgba.empty()) {
-        SUCCEED("GPU readback failed: " + surface->last_error());
-        return;
+        FAIL("GPU readback failed after the surface reported ready: "
+             + surface->last_error());
     }
 
     const uint32_t green = count_near_color(rgba, kSvgR, kSvgG, kSvgB);
@@ -442,8 +438,7 @@ TEST_CASE("HeadlessSurface draws an SVG's embedded raster image on the GPU path"
     std::string err;
     auto surface = HeadlessSurface::create(cfg, &err);
     if (!surface) {
-        SUCCEED("HeadlessSurface unavailable: " + err);
-        return;
+        SKIP("HeadlessSurface unavailable: " + err);
     }
 
     auto paint_svg = [&](pulp::canvas::Canvas& c) {
@@ -465,8 +460,8 @@ TEST_CASE("HeadlessSurface draws an SVG's embedded raster image on the GPU path"
     for (int frame = 0; frame < 3; ++frame) {
         auto rgba = surface->render_rgba(paint_svg);
         if (rgba.empty()) {
-            SUCCEED("GPU readback failed: " + surface->last_error());
-            return;
+            FAIL("GPU readback failed after the surface reported ready: "
+                 + surface->last_error());
         }
         const uint32_t amber = count_near_color(rgba, kImgR, kImgG, kImgB);
         INFO("frame " << frame << " amber pixels from the SVG's embedded image: "
@@ -496,8 +491,7 @@ TEST_CASE("HeadlessSurface keeps drawing a file-backed image across frames",
     std::string err;
     auto surface = HeadlessSurface::create(cfg, &err);
     if (!surface) {
-        SUCCEED("HeadlessSurface unavailable: " + err);
-        return;
+        SKIP("HeadlessSurface unavailable: " + err);
     }
 
     auto paint_image = [&](pulp::canvas::Canvas& c) {
@@ -507,8 +501,8 @@ TEST_CASE("HeadlessSurface keeps drawing a file-backed image across frames",
     for (int frame = 0; frame < 3; ++frame) {
         auto rgba = surface->render_rgba(paint_image);
         if (rgba.empty()) {
-            SUCCEED("GPU readback failed: " + surface->last_error());
-            return;
+            FAIL("GPU readback failed after the surface reported ready: "
+                 + surface->last_error());
         }
         const uint32_t amber = count_near_color(rgba, kImgR, kImgG, kImgB);
         INFO("frame " << frame << " amber pixels: " << amber);
@@ -530,10 +524,9 @@ TEST_CASE("HeadlessSurface skips runtime cases when Skia/Apple unavailable",
     // err is populated so callers can soft-skip.
     if (!surface) {
         REQUIRE_FALSE(err.empty());
-        SUCCEED("HeadlessSurface unavailable on this build: " + err);
-        return;
+        SKIP("HeadlessSurface unavailable on this build: " + err);
     }
-    SUCCEED("HeadlessSurface available on a non-Apple Skia build — runtime cases skipped");
+    SKIP("HeadlessSurface available on a non-Apple Skia build, runtime cases skipped");
 }
 
 #endif  // PULP_HAS_SKIA && __APPLE__

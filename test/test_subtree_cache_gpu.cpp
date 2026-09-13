@@ -136,8 +136,7 @@ TEST_CASE("Subtree cache composites a GPU image on the replay frame (offscreen)"
           "[gpu][skia][subtree-cache][issue-6262]") {
     auto f = make_offscreen_fixture(kW, kH);
     if (!f.ready()) {
-        SUCCEED("Dawn/Graphite unavailable on this host — GPU cache proof skipped.");
-        return;
+        SKIP("Dawn/Graphite unavailable on this host — GPU cache proof skipped.");
     }
 
     std::vector<uint8_t> png = make_red_png(24, 24);
@@ -158,8 +157,7 @@ TEST_CASE("Subtree cache composites a GPU image on the replay frame (offscreen)"
     std::vector<uint8_t> px1;
     uint32_t pw = 0, ph = 0;
     if (!render_gpu_frame(f, *root, px1, pw, ph)) {
-        SUCCEED("GPU readback failed (no adapter) — GPU cache proof skipped.");
-        return;
+        SKIP("GPU readback failed (no adapter) — GPU cache proof skipped.");
     }
     const uint32_t red1 = count_red(px1, pw, ph);
     INFO("frame 1 red pixels: " << red1);
@@ -170,9 +168,8 @@ TEST_CASE("Subtree cache composites a GPU image on the replay frame (offscreen)"
     // test_plugin_editor_headless_gpu's no-adapter guard. A genuine GPU host
     // (local dev, GPU CI) renders thousands of red px and runs the real proof.
     if (red1 < 100u) {
-        SUCCEED("Offscreen GPU composites nothing (no real adapter) — "
+        SKIP("Offscreen GPU composites nothing (no real adapter) — "
                 "GPU cache proof skipped.");
-        return;
     }
     REQUIRE(red1 > 1000u);          // the image painted on the record frame
     REQUIRE(cp->paints == 1);

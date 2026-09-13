@@ -325,7 +325,7 @@ TEST_CASE("PluginScanner VST3 bundle uses FUID as unique_id when SDK available",
         SUCCEED("scanned " << total_vst3 << " VST3 plugin(s), "
                            << fuid_shaped << " with FUID-shaped unique_id");
     } else {
-        SUCCEED("no VST3 plugins installed — structural test skipped");
+        SKIP("no VST3 plugins installed — structural test skipped");
     }
 }
 
@@ -419,7 +419,7 @@ TEST_CASE("ClapSlot::set_parameter round-trip via get_parameter",
         if (fs::exists(p, ec)) { found = p; break; }
     }
     if (found.empty()) {
-        SUCCEED("pulpsynth.clap not built — skipping CLAP set_parameter integration");
+        SKIP("pulpsynth.clap not built — skipping CLAP set_parameter integration");
         return;
     }
 
@@ -430,13 +430,13 @@ TEST_CASE("ClapSlot::set_parameter round-trip via get_parameter",
 
     auto slot = PluginSlot::load(info);
     if (!slot) {
-        SUCCEED("CLAP slot load returned nullptr at this path");
+        SKIP("CLAP slot load returned nullptr at this path");
         return;
     }
 
     auto params = slot->parameters();
     if (params.empty()) {
-        SUCCEED("plugin exposes no parameters — cannot exercise set_parameter");
+        SKIP("plugin exposes no parameters — cannot exercise set_parameter");
         return;
     }
 
@@ -468,7 +468,7 @@ TEST_CASE("ClapSlot::process is allocation-free after prepare() reserves",
           "[host][slot][clap][rt-safety][no-alloc]") {
     namespace fs = std::filesystem;
     if (!fs::exists(PULP_TEST_CLAP_PATH)) {
-        SUCCEED("PulpGain.clap not built — skipping ClapSlot process no-alloc test");
+        SKIP("PulpGain.clap not built — skipping ClapSlot process no-alloc test");
         return;
     }
 
@@ -479,7 +479,7 @@ TEST_CASE("ClapSlot::process is allocation-free after prepare() reserves",
 
     auto slot = PluginSlot::load(info);
     if (!slot) {
-        SUCCEED("PulpGain.clap not loadable in this environment");
+        SKIP("PulpGain.clap not loadable in this environment");
         return;
     }
 
@@ -561,7 +561,7 @@ TEST_CASE("VST3 set_parameter -> get_parameter controller-mirror round-trip",
     }
 
     if (found.empty()) {
-        SUCCEED("No .vst3 plugin installed on this system — skipping VST3 set_parameter integration");
+        SKIP("No .vst3 plugin installed on this system — skipping VST3 set_parameter integration");
         return;
     }
 
@@ -572,13 +572,13 @@ TEST_CASE("VST3 set_parameter -> get_parameter controller-mirror round-trip",
 
     auto slot = PluginSlot::load(info);
     if (!slot) {
-        SUCCEED("VST3 slot load returned nullptr — plugin may have rejected the host");
+        SKIP("VST3 slot load returned nullptr — plugin may have rejected the host");
         return;
     }
 
     auto params = slot->parameters();
     if (params.empty()) {
-        SUCCEED("plugin exposes no parameters — cannot exercise set_parameter");
+        SKIP("plugin exposes no parameters — cannot exercise set_parameter");
         return;
     }
 
@@ -595,7 +595,7 @@ TEST_CASE("VST3 set_parameter -> get_parameter controller-mirror round-trip",
         break;
     }
     if (!continuous) {
-        SUCCEED("plugin exposes no continuous writable parameter — "
+        SKIP("plugin exposes no continuous writable parameter — "
                 "cannot exercise a precise set_parameter round-trip");
         return;
     }

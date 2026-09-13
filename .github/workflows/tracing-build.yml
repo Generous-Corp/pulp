@@ -7,14 +7,24 @@ name: Tracing build (Perfetto opt-in)
 # <pulp/runtime/trace.hpp>, or the tracing test suites — would land unnoticed.
 # This lane configures ON, builds the tracing test targets, and runs them.
 #
-# Deliberately light + hermetic: the tracing tests only need pulp::runtime and
-# pulp::audio, so GPU/Skia/Dawn stay OFF. That keeps the lane fast and lets it
-# run on a stock GitHub-hosted Linux runner.
+# The two Linux jobs are deliberately light + hermetic: those tracing tests only
+# need pulp::runtime and pulp::audio, so GPU/Skia/Dawn stay OFF. That keeps them
+# fast and lets them run on a stock GitHub-hosted Linux runner.
 #
-# ADVISORY, GitHub-hosted only. `runs-on` is a hard-coded `ubuntu-latest` on
-# purpose: this lane must NEVER route through PULP_LOCAL_MACOS_RUNS_ON_JSON or
-# any self-hosted label, and must NOT be added to branch-protection required
-# checks. It contends with nothing on the required `macos` gate.
+# ADVISORY throughout - no job here may be added to branch-protection required
+# checks. The two `ubuntu-latest` jobs hard-code that label on purpose: they
+# must NEVER route through PULP_LOCAL_MACOS_RUNS_ON_JSON or any self-hosted
+# label, because that variable serves the required `macos` gate and this lane
+# must contend with nothing on it.
+#
+# `tracing-gpu-macos` is the one job that needs real hardware: a GPU trace span
+# can only be emitted by a process that has a GPU, so on a hosted Linux runner
+# the frame-pipeline test can do nothing but self-skip, and a skip is not a
+# pass. It therefore routes through its OWN dedicated variable,
+# PULP_TRACING_GPU_MACOS_RUNS_ON_JSON - never the shared local-macOS variable
+# above and never a PULP_NAMESPACE_* variable - and is `if:`-guarded to a no-op
+# until an operator deliberately sets it. It builds through
+# tools/ci/governed-build.sh so it takes a governed share of a shared Mac.
 
 on:
   push:
@@ -26,6 +36,8 @@ on:
       - 'tools/cmake/**'
       - 'CMakeLists.txt'
       - 'setup.sh'
+      - 'tools/ci/governed-build.sh'
+      - '.agents/skills/trace-sql/**'
       - '.github/workflows/tracing-build.yml'
   workflow_dispatch:
 
@@ -217,4 +229,105 @@ jobs:
           absence cannot be mistaken for a clean result.
 
           Advisory, GitHub-hosted Linux. Does not gate merge.
+          EOF
+
+  # The only lane that can prove a GPU trace span was actually emitted.
+  #
+  # `tracing-on` above builds with PULP_ENABLE_GPU=OFF, and the hosted Linux
+  # runners have no GPU at all, so `pulp-test-trace-frame-pipeline` self-skips
+  # everywhere in CI today. Catch2's SUCCEED() reports a PASS, so a green job is
+  # not evidence: the run log has to say which branch it took. Every assertion
+  # below is therefore paired with a control that must be non-zero, and the
+  # decisive one is a COUNT - a self-skipped run records a single assertion, the
+  # real path records eight.
+  #
+  # Apple Virtualization provides Metal inside a Tart guest even with
+  # --no-graphics, so a local mac runner (VM pool or host) satisfies this; the
+  # offscreen path needs no window server. Advisory, never required, and a
+  # complete no-op until PULP_TRACING_GPU_MACOS_RUNS_ON_JSON is set.
+  tracing-gpu-macos:
+    # Unset variable => no job. The `|| '"ubuntu-latest"'` below only keeps the
+    # fromJSON expression well-formed in that case; it can never dispatch there,
+    # because this `if:` has already excluded it.
+    if: >-
+      vars.PULP_TRACING_GPU_MACOS_RUNS_ON_JSON != '' &&
+      (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO)
+    runs-on: ${{ fromJSON(vars.PULP_TRACING_GPU_MACOS_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    name: GPU trace spans are emitted on real hardware
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure (PULP_TRACING=ON, GPU ON, Release)
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-trace \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_TRACING=ON \
+            -DPULP_ENABLE_GPU=ON \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF
+
+      - name: Build the frame-pipeline trace suite
+        # Through the governor: this runs on a shared Mac that also hosts the
+        # required `macos` gate, so the build takes a share, not the machine.
+        run: |
+          tools/ci/governed-build.sh \
+            cmake --build build-trace --target pulp-test-trace-frame-pipeline
+
+      - name: Run it, and prove it PASSED rather than SKIPPED
+        run: |
+          set -euo pipefail
+          log=trace-gpu.log
+          ./build-trace/test/pulp-test-trace-frame-pipeline 2>&1 | tee "$log"
+
+          # Control on the same instrument, first: if this grep finds nothing
+          # the log is empty or unreadable, and every absence below would be the
+          # instrument rather than the result.
+          control=$(grep -c "All tests passed" "$log" || true)
+          echo "control (Catch2 summary lines): $control"
+          test "$control" -gt 0
+
+          # The three ways the suite reports a Catch2 PASS without touching a
+          # GPU span: no capture backend compiled in, no adapter at runtime, or
+          # tracing compiled out entirely.
+          skips=$(grep -c -E \
+            "no GPU capture backend compiled in|GPU frame path unavailable at runtime|PULP_TRACING=OFF" \
+            "$log" || true)
+          echo "skip markers: $skips"
+          test "$skips" -eq 0
+
+          # The count is what makes the absence above mean something: a skipped
+          # run records one SUCCEED assertion, the real path records eight
+          # REQUIREs over the flushed .pftrace.
+          assertions=$(sed -n 's/.*All tests passed (\([0-9][0-9]*\) assertion.*/\1/p' "$log" | head -1)
+          echo "assertions: ${assertions:-<none>}"
+          test -n "$assertions"
+          test "$assertions" -ge 8
+
+      - name: Summarize
+        if: always()
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## GPU trace spans are emitted on real hardware
+
+          Configured `-DPULP_TRACING=ON -DPULP_ENABLE_GPU=ON` (Release), built
+          `pulp-test-trace-frame-pipeline` through the host build governor, and
+          ran it against a real Metal device - the offscreen frame path, so no
+          window server is needed.
+
+          The run step asserts the log shows the suite PASSED rather than
+          SKIPPED: `SUCCEED()` is a Catch2 pass, so the exit code cannot tell
+          the two apart. It checks the skip markers are absent, pairs that with
+          a control that must match, and then compares the assertion COUNT
+          against the eight the real path records.
+
+          Advisory, never a required check. Runs only when an operator sets
+          `PULP_TRACING_GPU_MACOS_RUNS_ON_JSON`.
           EOF

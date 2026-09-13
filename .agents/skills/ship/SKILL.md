@@ -127,6 +127,39 @@ and a real timestamped hardened-runtime signing probe. Any failure stops before
 production `codesign`; never retry through the login keychain and never ask the
 user for a password. The doctor itself NEVER prints secret values.
 
+**Installer signing is a SEPARATE key and a SEPARATE tool — probe it, never
+infer it from codesign.** Bundle signing uses the *Developer ID Application*
+key through `codesign`; the `.pkg` uses the *Developer ID Installer* key
+through a different binary. A green codesign probe says nothing about the
+second one, so the doctor probes it independently (`pkgbuild` → `productsign`
+→ `pkgutil --check-signature`) whenever `PULP_SIGN_INSTALLER_HASH` is
+configured, and refuses READY when it fails.
+
+The concrete trap: the dedicated keychain authorizes the installer key for
+`codesign`/`security`/`productsign` only, so **`productbuild --sign` is denied**.
+Headless, the suppressed authorization dialog surfaces as
+`CSSMERR_CSP_USER_CANCELED` (-128) and `Error signing data.` — with no mention
+of a keychain, and only *after* every bundle has already been signed. Read that
+error as "this tool is not on the key's ACL", not as a broken certificate.
+`build_combined_installer.sh` therefore builds the product archive UNSIGNED and
+signs it with `productsign`, which is authorized; the two produce an equivalent
+archive. Keep it that way — reintroducing `productbuild --sign` re-breaks every
+headless package build (guarded by
+`test_build_combined_installer.py::test_the_product_archive_is_signed_by_productsign_not_productbuild`).
+An ACL is baked in at `security import` time, so widening the doctor's `-T` list
+only helps keychains created *after* the change; an existing keychain keeps its
+old ACL.
+
+**Control-shipping sidecars are relocated for you.** CMake emits
+`*.inspector-capabilities.json` / `*.control-shipping*.json` beside the target,
+which for a bundle target lands in `Contents/MacOS` — where Apple permits code
+only, so `codesign` fails with `code object is not signed at all / In
+subcomponent: ….json`. `deep_sign()` moves them to
+`Contents/Resources/pulp-control-shipping-evidence` before signing, preserving
+the receipts. A consumer `package.sh` that *deletes* them first is both
+redundant and lossy: it destroys build provenance the installer would have
+sealed into the bundle.
+
 **Secrets live OUTSIDE the repo** (never committed), in
 `~/.config/pulp/secrets/` (override dir with `$PULP_SECRETS_DIR`):
 - `keychain.env` — `PULP_SIGN_KEYCHAIN`, `PULP_SIGN_KEYCHAIN_PW`, `PULP_SIGN_P12`,

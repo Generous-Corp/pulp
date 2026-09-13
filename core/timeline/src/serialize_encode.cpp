@@ -892,6 +892,27 @@ bool write_chord_scale_lane(EncodeContext& context, const ChordScaleLane& lane) 
     return context.writer.character(']');
 }
 
+bool write_dynamics_lane(EncodeContext& context, const DynamicsLane& lane) {
+    if (!context.writer.character('['))
+        return false;
+    for (std::size_t index = 0; index < lane.events().size(); ++index) {
+        const auto& event = lane.events()[index];
+        // The intensity is written as its IEEE bit pattern, the same spelling
+        // an automation point uses for its value, so a reload reproduces the
+        // authored float exactly rather than the nearest decimal.
+        if ((index != 0 && !context.writer.character(',')) ||
+            !context.writer.append("{\"intensity_bits\":") ||
+            !context.writer.u64(std::bit_cast<std::uint32_t>(event.intensity), true) ||
+            !context.writer.append(",\"interpolation\":") ||
+            !context.writer.quoted(
+                event.interpolation == AutomationInterpolation::Hold ? "hold" : "continuous") ||
+            !context.writer.append(",\"position\":") ||
+            !context.writer.i64(event.position.value, true) || !context.writer.character('}'))
+            return false;
+    }
+    return context.writer.character(']');
+}
+
 bool write_marker(EncodeContext& context, const SequenceMarker& marker) {
     return write_envelope(context, "pulp.timeline.marker", 1, [&] {
         if (!context.writer.character('{'))
@@ -1043,6 +1064,8 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
                 return false;
             if (!context.writer.append(",\"chord_scale_lane\":") ||
                 !write_chord_scale_lane(context, sequence.chord_scale_lane()) ||
+                !context.writer.append(",\"dynamics_lane\":") ||
+                !write_dynamics_lane(context, sequence.dynamics_lane()) ||
                 !context.writer.append(",\"groove\":") || !write_groove(context, sequence.groove()))
                 return false;
             if (!context.writer.append(",\"id\":") ||

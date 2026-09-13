@@ -436,9 +436,13 @@ if(PULP_BUILD_TESTS)
                     -DSOURCE_ROOT=${CMAKE_SOURCE_DIR}
                     -DBUILD_ROOT=${CMAKE_BINARY_DIR}
                     -P ${CMAKE_SOURCE_DIR}/test/cmake/gpu_clean_agent_journey_test.cmake)
+            # This contract asserts the whole source tree is pristine, so it has
+            # to exclude the self-tests that deliberately rewrite a tracked file
+            # and restore it. Without the second lock it samples mid-rewrite and
+            # reports the other test's window as a dirty checkout.
             set_tests_properties(cli-gpu-clean-agent-preparer-contract PROPERTIES
                 LABELS "gpu;gpu-probe;cli;clean-agent-preparer"
-                RESOURCE_LOCK pulp_gpu)
+                RESOURCE_LOCK "pulp_gpu;agent-capability-manifest-source")
             if(_pulp_gpu_clean_agent_multi_config)
                 set_tests_properties(cli-gpu-clean-agent-preparer-contract PROPERTIES
                     CONFIGURATIONS Release)

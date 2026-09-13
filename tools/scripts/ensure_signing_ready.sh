@@ -183,6 +183,30 @@ verify_signing_probe() {
   rm -rf "$probe_dir"
 }
 
+# Installer signing exercises a DIFFERENT private key (Developer ID Installer)
+# through a different tool than codesign, so a passing codesign probe says
+# nothing about it. Without this, the doctor reports "signing: READY" on a
+# keychain whose installer key is unusable, and the failure only surfaces at
+# `productbuild`/`productsign` time -- after every bundle is signed, as
+# `CSSMERR_CSP_USER_CANCELED`, with no mention of a keychain.
+verify_installer_probe() {
+  local probe_dir root
+  probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/pulp-installer-probe.XXXXXX")"
+  root="$probe_dir/root"
+  mkdir -p "$root"
+  : > "$root/probe"
+  if ! pkgbuild --root "$root" --identifier com.pulp.installer.probe \
+       --version 1.0 --install-location /tmp "$probe_dir/u.pkg" \
+       >/dev/null 2>&1 || \
+     ! productsign --sign "$PULP_SIGN_INSTALLER_HASH" --keychain "$KC" \
+       "$probe_dir/u.pkg" "$probe_dir/s.pkg" >/dev/null 2>&1 || \
+     ! pkgutil --check-signature "$probe_dir/s.pkg" >/dev/null 2>&1; then
+    rm -rf "$probe_dir"
+    return 1
+  fi
+  rm -rf "$probe_dir"
+}
+
 # ── 1. dedicated signing keychain (kills the codesign / 1Password prompt) ──────
 KC="${PULP_SIGN_KEYCHAIN:-}"
 if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
@@ -222,7 +246,8 @@ if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
     if [ -n "${PULP_SIGN_P12:-}" ] && [ -f "${PULP_SIGN_P12:-}" ]; then
       say "• importing Developer ID .p12 into dedicated keychain"
       security import "$PULP_SIGN_P12" -k "$KC" -P "${PULP_SIGN_P12_PW:-}" \
-        -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productsign >/dev/null
+        -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productsign \
+        -T /usr/bin/productbuild -T /usr/bin/pkgbuild >/dev/null
     else
       warn "no identity in $KC and no importable .p12 (PULP_SIGN_P12)"
     fi
@@ -245,11 +270,15 @@ if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
   if [ -z "${PULP_SIGN_IDENTITY_HASH:-}" ]; then
     err "PULP_SIGN_IDENTITY_HASH is required for unambiguous dedicated-keychain signing"
   elif security find-identity -v -p codesigning "$KC" 2>/dev/null | grep -q "Developer ID Application"; then
-    if verify_signing_probe; then
+    if ! verify_signing_probe; then
+      err "timestamped codesign probe failed — refusing production signing"
+    elif [ -n "${PULP_SIGN_INSTALLER_HASH:-}" ] && ! verify_installer_probe; then
+      err "installer-signing probe failed — the Developer ID Installer key in $(basename "$KC") cannot sign a package without an interactive prompt"
+    else
       SIGN_READY=1
       say "• signing keychain READY (timestamped probe passed): $(basename "$KC")"
-    else
-      err "timestamped codesign probe failed — refusing production signing"
+      [ -n "${PULP_SIGN_INSTALLER_HASH:-}" ] && \
+        say "• installer signing READY (productsign probe passed)"
     fi
   fi
 fi
@@ -294,6 +323,7 @@ fi
 # ── optional machine-readable export for callers (e.g. pulp ship) ──────────────
 if [ "$PRINT_ENV" -eq 1 ]; then
   [ -n "${PULP_SIGN_IDENTITY_HASH:-}" ] && echo "PULP_SIGN_IDENTITY_HASH=$PULP_SIGN_IDENTITY_HASH"
+  [ -n "${PULP_SIGN_INSTALLER_HASH:-}" ] && echo "PULP_SIGN_INSTALLER_HASH=$PULP_SIGN_INSTALLER_HASH"
   [ -n "$KC" ]                          && echo "PULP_SIGN_KEYCHAIN=$KC"
   [ -n "$KP" ]                          && echo "PULP_NOTARY_KEY_PATH=$KP"
 fi

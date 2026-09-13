@@ -234,7 +234,8 @@ function __dispatch__(id, eventName) {
                         clientX: (data && data.clientX) || 0,
                         clientY: (data && data.clientY) || 0,
                         button: (data && data.button) || 0,
-                        buttons: (eventName === 'pointerup' || eventName === 'mouseup') ? 0 : 1,
+                        buttons: (data && data.buttons !== undefined) ? data.buttons
+                            : (eventName === 'pointerup' || eventName === 'mouseup') ? 0 : 1,
                         pointerId: (data && data.pointerId) || 0,
                         pointerType: (data && data.pointerType) || 'mouse',
                         isPrimary: true,

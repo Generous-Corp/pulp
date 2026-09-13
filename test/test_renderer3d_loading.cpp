@@ -7,7 +7,7 @@ TEST_CASE("Renderer3D hardcoded textured cube renders offscreen", "[render][scen
 
     auto result = Renderer3D::render_hardcoded_textured_cube(config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -38,25 +38,24 @@ TEST_CASE("Renderer3D hardcoded textured cube renders offscreen", "[render][scen
     REQUIRE_FALSE(result.png.empty());
     REQUIRE(result.success);
 
-    const HeadlessSurface::Rgba rgba{
-        result.rgba,
-        result.width,
-        result.height,
-    };
-    if (is_mac_metal_adapter(result)) {
-        REQUIRE(HeadlessSurface::rgba_fingerprint(rgba) ==
-                kMacMetalHardcodedCubeFingerprint);
-    } else {
-        SUCCEED("Renderer fingerprint golden is scoped to macOS Metal; adapter was "
-                << result.adapter_backend_type << " / " << result.adapter_name);
-    }
-
     auto out = std::filesystem::temp_directory_path() /
         "pulp-renderer3d-hardcoded-cube.png";
     std::ofstream png(out, std::ios::binary);
     png.write(reinterpret_cast<const char*>(result.png.data()),
               static_cast<std::streamsize>(result.png.size()));
     REQUIRE(png.good());
+
+    const HeadlessSurface::Rgba rgba{
+        result.rgba,
+        result.width,
+        result.height,
+    };
+    if (!is_mac_metal_adapter(result)) {
+        SKIP("Renderer fingerprint golden is scoped to macOS Metal; adapter was "
+             << result.adapter_backend_type << " / " << result.adapter_name);
+    }
+    REQUIRE(HeadlessSurface::rgba_fingerprint(rgba) ==
+            kMacMetalHardcodedCubeFingerprint);
 }
 
 TEST_CASE("Renderer3D can request the Dawn fallback adapter for golden probes",
@@ -69,7 +68,7 @@ TEST_CASE("Renderer3D can request the Dawn fallback adapter for golden probes",
     auto result = Renderer3D::render_hardcoded_textured_cube(config);
     REQUIRE(result.fallback_adapter_requested);
     if (!result.gpu_available) {
-        SUCCEED("Dawn fallback adapter unavailable in this environment: "
+        SKIP("Dawn fallback adapter unavailable in this environment: "
                 << result.error);
         return;
     }
@@ -93,7 +92,7 @@ TEST_CASE("GpuSurface can request the Dawn null backend for API-only probes",
           "[render][scene3d][gpu][adapter]") {
     auto gpu = GpuSurface::create_dawn();
     if (!gpu) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment");
+        SKIP("Dawn/WebGPU unavailable in this environment");
         return;
     }
 
@@ -104,8 +103,15 @@ TEST_CASE("GpuSurface can request the Dawn null backend for API-only probes",
     config.backend_preference =
         GpuSurface::AdapterBackendPreference::null_backend;
     if (!gpu->initialize(config)) {
-        SUCCEED("Dawn null backend unavailable in this environment");
-        return;
+        // adapter_info() reads the adapter, which outlives a failed device
+        // request: a "Null" backend_type here means Dawn did find the null
+        // adapter and device creation is what failed, which is a real defect.
+        // No adapter at all means this build has no null backend to probe.
+        const auto probe = gpu->adapter_info();
+        if (probe.backend_type == "Null") {
+            FAIL("Dawn found the Null adapter but device creation failed");
+        }
+        SKIP("Dawn null backend unavailable in this environment");
     }
 
     const auto info = gpu->adapter_info();
@@ -129,7 +135,7 @@ TEST_CASE("Renderer3D can request Dawn null backend for API-only probes",
     auto result = Renderer3D::render_hardcoded_textured_cube(config);
     REQUIRE(result.null_backend_requested);
     if (!result.gpu_available) {
-        SUCCEED("Dawn null backend unavailable in this environment: "
+        SKIP("Dawn null backend unavailable in this environment: "
                 << result.error);
         return;
     }
@@ -157,7 +163,7 @@ TEST_CASE("Renderer3D renders parsed SceneData offscreen", "[render][scene3d][gp
 
     auto result = Renderer3D::render_scene_data(loaded.scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -228,7 +234,7 @@ TEST_CASE("Renderer3D renders generated textured cube GLB",
 
     auto result = Renderer3D::render_scene_data(loaded.scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -281,7 +287,7 @@ TEST_CASE("Renderer3D renders multiple parsed GLB mesh nodes",
 
     auto result = Renderer3D::render_scene_data(loaded.scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -336,7 +342,7 @@ TEST_CASE("Renderer3D renders official BoxTextured fixture",
 
     auto result = Renderer3D::render_scene_data(loaded.scene, config);
     if (!result.gpu_available) {
-        SUCCEED("Dawn/WebGPU unavailable in this environment: " << result.error);
+        SKIP("Dawn/WebGPU unavailable in this environment: " << result.error);
         return;
     }
 
@@ -365,25 +371,24 @@ TEST_CASE("Renderer3D renders official BoxTextured fixture",
     REQUIRE(foreground.max_y < config.height);
     REQUIRE_FALSE(result.png.empty());
 
-    const HeadlessSurface::Rgba rgba{
-        result.rgba,
-        result.width,
-        result.height,
-    };
-    if (is_mac_metal_adapter(result)) {
-        REQUIRE(HeadlessSurface::rgba_fingerprint(rgba) ==
-                kMacMetalBoxTexturedFixtureFingerprint);
-    } else {
-        SUCCEED("Renderer fingerprint golden is scoped to macOS Metal; adapter was "
-                << result.adapter_backend_type << " / " << result.adapter_name);
-    }
-
     auto out = std::filesystem::temp_directory_path() /
         "pulp-renderer3d-box-textured-official.png";
     std::ofstream png(out, std::ios::binary);
     png.write(reinterpret_cast<const char*>(result.png.data()),
               static_cast<std::streamsize>(result.png.size()));
     REQUIRE(png.good());
+
+    const HeadlessSurface::Rgba rgba{
+        result.rgba,
+        result.width,
+        result.height,
+    };
+    if (!is_mac_metal_adapter(result)) {
+        SKIP("Renderer fingerprint golden is scoped to macOS Metal; adapter was "
+             << result.adapter_backend_type << " / " << result.adapter_name);
+    }
+    REQUIRE(HeadlessSurface::rgba_fingerprint(rgba) ==
+            kMacMetalBoxTexturedFixtureFingerprint);
 }
 
 TEST_CASE("DRACO decoder unique-id overload rejects invalid data",

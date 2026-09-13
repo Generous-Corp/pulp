@@ -146,6 +146,7 @@ def _verify_producer_disposition(
         row.get("owner_package") for row in external if isinstance(row, dict)
     } != {
         "A3-first-visible-product-evidence",
+        "pulp-view-mac-window-host",
     }:
         errors.append("producer evidence does not expose every post-base non-A2T product producer")
 

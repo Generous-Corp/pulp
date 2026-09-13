@@ -39,6 +39,34 @@ function _applyMiscProp(decl, id, key, resolved, value) {
             if (typeof setPointerEvents === "function") setPointerEvents(id, resolved);
             return true;
 
+        // hitSlop — React Native. Grows the hit-test area OUTSIDE the painted
+        // box without touching layout or paint, so a visually small control can
+        // present a comfortable touch target. Accepts a number (uniform), a
+        // "10px" / "10" string, a CSS-shorthand string of 2-4 numbers
+        // (top/right/bottom/left, same order and same fill rules as `margin`),
+        // or an RN object {top,right,bottom,left}.
+        case "hitSlop": {
+            if (typeof setHitSlop !== "function") return true;
+            var _hs = value != null && typeof value === "object" ? value : resolved;
+            var t, r, b, l;
+            if (_hs != null && typeof _hs === "object") {
+                t = parseFloat(_hs.top) || 0;
+                r = parseFloat(_hs.right) || 0;
+                b = parseFloat(_hs.bottom) || 0;
+                l = parseFloat(_hs.left) || 0;
+            } else {
+                var _p = String(_hs == null ? "" : _hs).trim().split(/\s+/)
+                    .map(function (n) { return parseFloat(n) || 0; });
+                if (_p.length === 0) _p = [0];
+                t = _p[0];
+                r = _p.length > 1 ? _p[1] : t;
+                b = _p.length > 2 ? _p[2] : t;
+                l = _p.length > 3 ? _p[3] : r;
+            }
+            setHitSlop(id, t, r, b, l);
+            return true;
+        }
+
         // line-clamp (-webkit-line-clamp)
         case "webkitLineClamp":
         case "lineClamp":

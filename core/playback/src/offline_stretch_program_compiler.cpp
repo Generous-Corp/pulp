@@ -17,7 +17,8 @@ OfflineStretchProgramCompiler::fail(AudioRendererError renderer,
 OfflineStretchProgramCompileStatus OfflineStretchProgramCompiler::step(
     const timeline::Clip& clip, const timeline::Project& project,
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
-    const AudioRendererLimits& limits, double source_frame_offset, std::uint64_t document_revision,
+    const AudioRendererLimits& limits, double source_frame_offset,
+    const std::vector<LoweredPlacementFade>& placement_fades, std::uint64_t document_revision,
     std::uint64_t program_generation, OfflineStretchArtifactCache& artifact_cache,
     AudioSampleRateConverterCache& converter_cache) noexcept {
 #if defined(__cpp_exceptions)
@@ -79,9 +80,9 @@ OfflineStretchProgramCompileStatus OfflineStretchProgramCompiler::step(
             host_prepared_ = true;
         }
 
-        auto compiled =
-            compile_audio_clip_program_cached(clip, project, tempo_map, assets, limits,
-                                              converter_cache, source_frame_offset, artifact_);
+        auto compiled = compile_audio_clip_program_cached(clip, project, tempo_map, assets, limits,
+                                                          converter_cache, source_frame_offset,
+                                                          artifact_, placement_fades);
         if (!compiled)
             return fail(compiled.error(), OfflineStretchErrorCode::None);
         program_.emplace(std::move(compiled).value());

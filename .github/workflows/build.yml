@@ -1569,10 +1569,13 @@ jobs:
             # reliably on GitHub-hosted Windows runners.
             cmake_extra=(-DFETCHCONTENT_BASE_DIR="$PWD/fc")
           fi
+          # Every event that reaches this job publishes the required `macos`
+          # context, so every event must configure the same way. Turning the GPU
+          # off on one of them posts a differently configured build under the
+          # gate's name: PULP_TEXT_SHAPING follows PULP_ENABLE_GPU, and without
+          # it `render_to_rgba` returns an empty buffer, so capture-based view
+          # tests fail for the configuration rather than for the change.
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            cmake_args+=(-DPULP_ENABLE_GPU=OFF)
-          fi
           cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"
           # Mark the build in-progress; the Build step clears it on success, so a
           # build interrupted/cancelled before completion is detected next run
@@ -1737,6 +1740,24 @@ jobs:
           # gate and wedging auto-merge. Mirrors sanitizers.yml; each attempt is
           # still bounded by --timeout 120.
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
+
+      # Observation, not a gate. Every GPU case in the suite skips when no
+      # adapter is present, so a green `macos` check reads identically whether
+      # this runner has a GPU or silently lost one. PULP_REQUIRE_GPU_ADAPTER is
+      # the lane's promise: it turns that skip into an assertion for the one
+      # case that exists to hold it. `continue-on-error` keeps the answer in the
+      # log and out of the required check until the runner's adapter state is
+      # established; promote it by deleting that line.
+      - name: Observe GPU adapter contract (self-hosted macOS)
+        if: runner.os == 'macOS' && matrix.key == 'macos' && runner.environment == 'self-hosted'
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_REQUIRE_GPU_ADAPTER: '1'
+        run: |
+          set -euo pipefail
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
+            --no-tests=error -R '^A lane that requires a GPU adapter has one$'
 
       - name: Test installed SDK capability contract (affected changes)
         if: >-

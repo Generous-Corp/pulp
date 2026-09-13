@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260912-pr8259-browser-launch-identity-probe-watch",
+  "created_at": "2026-09-12T04:50:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record a Pulp-owned reliability fix inside the browser-capture launcher's custody guard. startBrowserGuardian read /bin/ps exactly once immediately after spawn and treated anything other than 'this pid owns our --user-data-dir' as a custody violation. Two transients land in that window on a saturated runner: between fork and exec the pid still carries the launcher's own argv, which owns no profile, and the ps helper kills its own read at three seconds and resolves to an empty string, so an unread is indistinguishable from a mismatch. Either one failed the capture with a message advising the operator to install a browser that was already installed. The guard now probes the pid to a deadline with exponential backoff before deciding. It still fails closed: a pid that never proves ownership is never guarded, an exited child aborts the probe immediately rather than consuming the budget, and the thrown message distinguishes an unreadable identity from a genuinely foreign one. This changes no design ingest parsing, no captured output, no rendering, layout or packaging behavior, no accepted expansion boundary, and no Vellum source authority. It changes only how long the launcher waits before trusting its own child's identity.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/browser_process.test.mjs",
+    "by-hand break-confirm loop (RED to GREEN confirmed)",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

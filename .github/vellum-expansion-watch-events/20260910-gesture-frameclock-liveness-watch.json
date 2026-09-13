@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260910-gesture-frameclock-liveness-watch",
+  "created_at": "2026-09-11T04:20:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Two lifetime fixes inside core/view. GestureRecognizer held PointerSession by value in an unordered_map while feed_session walked a reference into that node across recognizer callbacks; a callback that ended or restarted its own session re-entered dispatch, erased or rehashed the node, and the outer frame kept iterating freed memory. Sessions are now shared_ptr-owned so the outer frame keeps the node alive until it unwinds, candidates are copied before each callback, a new session_is_live() re-checks identity after every callback, and fail_conflicting_candidates collects the doomed pairs before failing any of them instead of mutating the container it walks. Separately, motion::Coordinator kept a raw FrameClock* and unsubscribed through it at unbind and teardown, so a clock destroyed first left the coordinator writing through a dangling pointer; FrameClock now hands out a weak liveness token and every coordinator use routes through live_clock(), which yields nullptr once the clock is gone. render-assets-and-backends is crossed only because core/view/** sits under its selector. No renderer, backend, GPU surface, font, asset or Skia pin changes; no fixture, snapshot or threshold moves; nothing about how a frame is painted changes. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-pointer-gestures",
+    "pulp-test-widget-bridge",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

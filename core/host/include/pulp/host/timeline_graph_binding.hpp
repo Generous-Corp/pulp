@@ -158,12 +158,11 @@ enum class TimelineGraphProcessCode : std::uint8_t {
     AutomationDeliveryFailed,
     RoutedDispatchFailed,
     CleanupFailed,
-    /// A compensating event shift met a range it cannot be applied to. Two
-    /// causes reach this one code: a transport range that locates events by
-    /// host beat rather than by document sample, and a read-ahead that would
-    /// cross the loop end. Both fail closed rather than silently dropping the
-    /// shift, so a refusal here is not evidence of a host-beat range on its
-    /// own.
+    /// A compensating event shift met a transport range that locates events by
+    /// host beat rather than by document sample, so the shift has no origin to
+    /// land on. It fails closed rather than silently dropping the shift. A
+    /// read-ahead that runs past an enabled loop's end does NOT reach here: it
+    /// is folded to the post-wrap content and plays.
     EventCompensationUnsupported,
 };
 

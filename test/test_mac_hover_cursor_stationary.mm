@@ -114,9 +114,14 @@ TEST_CASE("PulpView implements the AppKit cursor-update callback", "[mac][cursor
     if (view == nil) SKIP("PulpView is not registered in this binary");
     view.rootView = &scene.root;
 
-    // Without this AppKit has no way to ask the view what to show, and its own
-    // cursor pass resets to the arrow after each mouse-moved — which is why the
-    // cursor appeared to change only while a button was held.
+    // Structural precondition only. Without -cursorUpdate: AppKit has no way to
+    // ask the view what to show and its own cursor pass resets to the arrow
+    // after each mouse-moved, so the selector has to exist — but its presence
+    // says nothing about whether a hover ever produces a new cursor VALUE, and
+    // reading it as though it did is how a hover defect once passed review. The
+    // property itself is asserted in test_mac_hover_cursor_delivery.mm, which
+    // drives a real -mouseMoved: with no button held and reads back
+    // +[NSCursor currentCursor].
     REQUIRE([view respondsToSelector:@selector(cursorUpdate:)]);
     REQUIRE([view respondsToSelector:@selector(refreshHoverCursor)]);
 }

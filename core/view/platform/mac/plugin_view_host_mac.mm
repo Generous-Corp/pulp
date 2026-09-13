@@ -383,24 +383,15 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
   }
 }
 
-struct PulpPluginContextPressResult {
-    bool handled = false;
-    bool overlay_dismissed = false;
-};
-
-PulpPluginContextPressResult pulp_plugin_context_press(
+// Thin null-guard over the portable verb. The routing decision itself —
+// including honoring OverlayPressTarget::consume_press, so a right-click that
+// dismisses a consuming popover cannot ALSO open a context menu on the control
+// underneath — lives in pulp::view::route_context_press, where it is shared and
+// headlessly testable (see test_overlay_routing.cpp).
+pulp::view::ContextPressResult pulp_plugin_context_press(
     pulp::view::View* root, pulp::view::Point point) {
     if (!root) return {};
-    const auto overlay_press = pulp::view::route_press_to_active_overlay(
-        *root, point);
-    auto* target = overlay_press.routing ==
-                           pulp::view::OverlayPressRouting::routed
-                       ? overlay_press.target
-                       : root->hit_test(point);
-    return {
-        pulp::view::dispatch_context_menu(*root, target, point),
-        overlay_press.routing == pulp::view::OverlayPressRouting::dismissed,
-    };
+    return pulp::view::route_context_press(*root, point);
 }
 
 // `event` supplies the modifier flags and click count the drag carries. They
@@ -878,7 +869,11 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
             tracker->note_published(pulp::view::View::CursorStyle::default_);
         return;
     }
-    root->simulate_hover(local);
+    // Same hover delivery the standalone host uses: hover state, then the JS
+    // `pointermove` a scripted UI binds its cursor decision to. A bare
+    // `simulate_hover` runs no JavaScript, so a hosted scripted editor only
+    // revised its cursor once a button went down.
+    pulp::view::deliver_hover_move(*root, local);
     const auto style = pulp::view::hover_cursor_at(*root, local);
     pulp::view::mac_geometry::set_ns_cursor_for_style(style);
     if (tracker) tracker->note_published(style);
@@ -892,6 +887,21 @@ void pulp_plugin_apply_hover_cursor(pulp::view::View* root, pulp::view::Point lo
 // pass that slides a different widget under a STATIONARY pointer updates the
 // cursor: AppKit re-asks on pointer motion only, so without this the stale
 // cursor stays until the next move or click.
+// An attached native child (a WKWebView, a hosted editor) is not in the Pulp
+// View tree and picks its own cursor, but the editor's tracking area is not
+// occluded by subviews — so -mouseMoved:/-cursorUpdate: still arrive over it.
+// Publishing a Pulp-tree answer there sets the arrow on every button-less move
+// and wipes the child's choice, which reads as "the cursor only changes after a
+// mouse down": the drag path publishes the captured cursor instead, and no
+// -mouseMoved: arrives mid-drag. Record ownership in `flag` so the display
+// link's frame path can skip too, and report it.
+bool pulp_plugin_note_native_child(NSView* view, NSEvent* event, BOOL* flag) {
+  const bool owned = pulp::view::mac_geometry::native_child_owns_window_point(
+      view, event.locationInWindow);
+  if (flag) *flag = owned ? YES : NO;
+  return owned;
+}
+
 void pulp_plugin_refresh_hover_cursor(pulp::view::View* root,
                                       pulp::view::HoverCursorTracker* tracker) {
   try {
@@ -950,6 +960,10 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     // Last pointer position + last published cursor style, so the frame
     // path can re-publish when the content under a still pointer changes.
     pulp::view::HoverCursorTracker _hoverCursor;
+    // Set on every pointer event an attached native child owns; the frame path
+    // reads it rather than re-hit-testing a root-space point it cannot convert
+    // back once a design viewport is in effect.
+    BOOL _pointerOverNativeChild;
 }
 
 - (BOOL)isFlipped { return NO; }
@@ -1050,10 +1064,12 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 }
 - (void)mouseMoved:(NSEvent*)event {
     if (!self.rootView) return;
+    if (pulp_plugin_note_native_child(self, event, &_pointerOverNativeChild)) return;
     pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event], &_hoverCursor);
 }
 - (void)cursorUpdate:(NSEvent*)event {
-    if (self.rootView)
+    if (self.rootView
+        && !pulp_plugin_note_native_child(self, event, &_pointerOverNativeChild))
         pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event], &_hoverCursor);
     else [super cursorUpdate:event];
 }
@@ -1061,11 +1077,13 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     // Pointer is off the editor: stop re-resolving for it, and make the first
     // resolve after it returns publish unconditionally.
     _hoverCursor.clear_pointer();
+    _pointerOverNativeChild = NO;
     [super mouseExited:event];
 }
 // Re-ask what the cursor should be under a pointer that has not moved. Called
 // once per rendered frame by the editor's display link.
 - (void)refreshHoverCursor {
+    if (_pointerOverNativeChild) return;
     pulp_plugin_refresh_hover_cursor(self.rootView, &_hoverCursor);
 }
 - (void)mouseDown:(NSEvent*)event {
@@ -1733,6 +1751,10 @@ private:
     // Last pointer position + last published cursor style, so the frame
     // path can re-publish when the content under a still pointer changes.
     pulp::view::HoverCursorTracker _hoverCursor;
+    // Set on every pointer event an attached native child owns; the frame path
+    // reads it rather than re-hit-testing a root-space point it cannot convert
+    // back once a design viewport is in effect.
+    BOOL _pointerOverNativeChild;
 }
 
 // Keyboard-focus contract — see PulpPluginView::acceptsFirstResponder above:
@@ -1817,10 +1839,12 @@ private:
 }
 - (void)mouseMoved:(NSEvent*)event {
     if (!self.rootView) return;
+    if (pulp_plugin_note_native_child(self, event, &_pointerOverNativeChild)) return;
     pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event], &_hoverCursor);
 }
 - (void)cursorUpdate:(NSEvent*)event {
-    if (self.rootView)
+    if (self.rootView
+        && !pulp_plugin_note_native_child(self, event, &_pointerOverNativeChild))
         pulp_plugin_apply_hover_cursor(self.rootView, [self localPoint:event], &_hoverCursor);
     else [super cursorUpdate:event];
 }
@@ -1828,11 +1852,13 @@ private:
     // Pointer is off the editor: stop re-resolving for it, and make the first
     // resolve after it returns publish unconditionally.
     _hoverCursor.clear_pointer();
+    _pointerOverNativeChild = NO;
     [super mouseExited:event];
 }
 // Re-ask what the cursor should be under a pointer that has not moved. Called
 // once per rendered frame by the editor's display link.
 - (void)refreshHoverCursor {
+    if (_pointerOverNativeChild) return;
     pulp_plugin_refresh_hover_cursor(self.rootView, &_hoverCursor);
 }
 - (void)mouseDown:(NSEvent*)event {

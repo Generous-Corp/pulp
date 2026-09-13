@@ -867,3 +867,11 @@ or set an override for deterministic tests.
 - Test fixtures use `MotionPreferences::instance().reset_for_tests()` to
   clear overrides between cases. Forgetting it leaks state into the next
   test (and surprises CI when run with `--shuffle`).
+- The motion coordinator is a process-wide singleton, but a `FrameClock` is
+  routinely a stack or member object that goes out of scope long before the
+  process does. The coordinator therefore holds a weak liveness token
+  alongside the clock pointer and resolves through it, so a clock whose scope
+  ends leaves the coordinator unbound rather than holding a pointer it will
+  later dereference. If you add another long-lived observer of a caller-owned
+  clock, observe it the same way — a raw pointer parked in a singleton is a
+  use-after-free waiting for the second test in the binary.

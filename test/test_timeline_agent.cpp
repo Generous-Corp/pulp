@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -160,6 +161,12 @@ std::string gain_command(std::uint32_t replacement_bits) {
            R"("},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])";
 }
 
+std::string dynamics_command(std::string_view expected, std::string_view replacement) {
+    return std::string(R"([{"data":{"expected":)") + std::string(expected) +
+           R"(,"replacement":)" + std::string(replacement) +
+           R"(,"sequence_id":"2"},"type_name":"pulp.timeline.command.set_dynamics_lane","version":1}])";
+}
+
 std::string project_from_result(const std::string& json) {
     auto parsed = take(parse_json(json));
     const auto* project = parsed->root().find("project");
@@ -223,6 +230,48 @@ TEST_CASE("timeline agent applies typed commands and renders the resulting proje
     REQUIRE(changed_audio->num_frames() == 32);
     REQUIRE_THAT(original_audio->channels[0][0], WithinAbs(0.75f, 1e-7f));
     REQUIRE_THAT(changed_audio->channels[0][0], WithinAbs(0.375f, 1e-7f));
+}
+
+TEST_CASE("timeline agent authors a dynamics lane and hands back a document that still carries it") {
+    const auto json = empty_project_json();
+    // The apply and the serialization that returns its result are one call, so a
+    // lane the encoder dropped would read as a successful edit that silently did
+    // nothing. Asserting the returned document is what distinguishes the two.
+    const auto quiet = R"([{"intensity_bits":"1050253722","interpolation":"continuous","position":"0"}])";
+    const auto loud =
+        R"([{"intensity_bits":"1050253722","interpolation":"continuous","position":"0"},{"intensity_bits":"1062836634","interpolation":"hold","position":"1920"}])";
+
+    const auto authored = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(json), dynamics_command("[]", quiet),
+        tools::timeline::editor_writer_profile());
+    REQUIRE(authored);
+    const auto authored_project = project_from_result(authored.json);
+    // 0.3f has no exact decimal form, so a writer that round-tripped the
+    // intensity through text rather than its bit pattern would come back with a
+    // different number here.
+    REQUIRE(authored_project.find(R"("dynamics_lane":[{"intensity_bits":"1050253722")") !=
+            std::string::npos);
+    // The returned document is a document, not just a response: it reopens and
+    // validates, which is what makes the edit reachable by the next call.
+    REQUIRE(tools::timeline::validate(authored_project));
+    REQUIRE(project_from_result(tools::timeline::project_open(authored_project).json) ==
+            authored_project);
+
+    // A second edit expects what the first one wrote, so the exact-value gate is
+    // exercised across two separate calls rather than inside one.
+    const auto extended = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(authored_project),
+        dynamics_command(quiet, loud), tools::timeline::editor_writer_profile());
+    REQUIRE(extended);
+    REQUIRE(project_from_result(extended.json).find(R"("interpolation":"hold","position":"1920")") !=
+            std::string::npos);
+
+    // The same edit replayed against the document it already changed is refused
+    // rather than applied twice, because its expectation no longer holds.
+    const auto stale = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(authored_project),
+        dynamics_command("[]", quiet), tools::timeline::editor_writer_profile());
+    REQUIRE_FALSE(stale);
 }
 
 TEST_CASE("timeline agent accepts explicit inline and file project sources") {

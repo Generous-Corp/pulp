@@ -210,5 +210,5 @@ TEST_CASE("widget_bridge.cpp gates all gpu_surface_ method calls behind "
         FAIL(summary.str());
     }
 
-    SUCCEED("All gpu_surface_ member accesses are properly gated.");
+    SUCCEED("All gpu_surface_ member accesses are properly gated.");  // gpu-skip-lint: allow the completed source scan IS the assertion
 }

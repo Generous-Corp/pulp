@@ -915,6 +915,24 @@
       "notes": "pulp #1434 rn batch C wired number + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end. TS type accepts `number | string`; prop-applier forwards verbatim; bridge dispatches via FlexStyle::dim_height.unit (px / percent / auto_) and yoga_layout.cpp routes to YGNodeStyleSetHeight{,Percent,Auto}. Wave 1 drift cleanup \u2014 supported \u2192 partial (`vh` string unit is a real deferred gap). arch-no-viewport \u2014 `vh`/`vw`/`vmin`/`vmax` units are deferred because Pulp has no global viewport context (Views can be embedded in plugin editors, standalone windows, or mobile screens with different sizing semantics; CSS viewport-unit semantics are undefined at the View level). Authors should use `%` units relative to the parent container instead. See pulp #1712.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
+    "rn/hitSlop": {
+      "status": "supported",
+      "mapsTo": "prop-applier.ts / web-compat-style-decl-misc.js \u2014 setHitSlop(id, top, right, bottom, left) \u2192 View::set_hit_slop. Grows the hit-test rect outward only; layout, paint, and the widget's own bounds are untouched.",
+      "supportedValues": [
+        "number (px inset on all four edges)",
+        "string of 1-4 numbers (`margin` fill order)",
+        "{top,right,bottom,left}"
+      ],
+      "unsupportedValues": [
+        "percentage (a hit-test inset has no percentage basis)"
+      ],
+      "tests": [
+        "test/test_hit_slop.cpp",
+        "packages/pulp-react/test/prop-applier-hit-slop.test.ts"
+      ],
+      "notes": "Two authoring surfaces \u2014 the JSX prop and `el.style.hitSlop` \u2014 resolve the same input identically. A number insets all four edges. A string of 1-4 numbers fills the way the `margin` shorthand does ('12px 2px' \u2192 top/bottom 12, left/right 2); a unit suffix is parsed off and only the number used. An object's edges are INDEPENDENT and a missing edge is 0, matching React Native \u2014 the shorthand fill applies to the string form only. Unparseable edges resolve to 0 rather than NaN, so a typo cannot silently delete a control's hit target. Because slop never affects layout, a slop wider than the gap between two controls overlaps their hit rects and the topmost sibling wins.",
+      "issue": ""
+    },
     "rn/includeFontPadding": {
       "status": "supported",
       "mapsTo": "prop-applier.ts -> setIncludeFontPadding(id, bool) -> View::set_include_font_padding (storage-only slot). Pulp text-shaping pipeline uses tight baseline-relative positioning and does NOT add Android-vestigial vertical glyph padding regardless of this value \u2014 both keywords accepted, single consistent behavior produced (matches the `false` outcome that authors typically want).",

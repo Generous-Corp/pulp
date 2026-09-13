@@ -1071,19 +1071,52 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(
             [row["path"] for row in external],
-            ["inspect/src/control_gpu_health_provider.cpp"],
+            [
+                "core/view/platform/mac/window_host_mac.mm",
+                "inspect/src/control_gpu_health_provider.cpp",
+            ],
         )
+        # The macOS window host is owned by a commit authority rather than the
+        # A3 path set, so its introduction does not touch the A3 authority path.
         self.assertEqual(
             external[0]["introducing_revision"],
-            "fefbfecd9fc014df54fc55d6f3259524f1179a49",
+            "ec16c42313a48c59a3ab2efc5d718e1d75c0f771",
         )
-        self.assertTrue(
+        self.assertEqual(
+            external[0]["owner_package"], "pulp-view-mac-window-host"
+        )
+        self.assertEqual(
+            external[0]["scope_authority"]["kind"],
+            "immutable-git-commit-boundary",
+        )
+        self.assertFalse(
             external[0]["scope_authority"][
                 "producer_introduction_touched_authority_path"
             ]
         )
         self.assertEqual(
+            external[0]["scope_authority"]["added_producer_signatures"],
+            [
+                'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_acquire");',
+                'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");',
+                'PULP_TRACE_SCOPE_NAMED("gpu", "gpu_present");',
+            ],
+        )
+        self.assertEqual(
             external[0]["owner_evidence_status"],
+            "external-not-evaluated-by-a2t",
+        )
+        self.assertEqual(
+            external[1]["introducing_revision"],
+            "fefbfecd9fc014df54fc55d6f3259524f1179a49",
+        )
+        self.assertTrue(
+            external[1]["scope_authority"][
+                "producer_introduction_touched_authority_path"
+            ]
+        )
+        self.assertEqual(
+            external[1]["owner_evidence_status"],
             "external-not-evaluated-by-a2t",
         )
 

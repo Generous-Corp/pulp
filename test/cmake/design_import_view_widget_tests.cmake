@@ -9,6 +9,10 @@ pulp_add_test_suite(pulp-test-layout-snapshot LIBRARIES pulp::view)
 # empty finding list from reading as a pass.
 pulp_add_test_suite(pulp-test-appearance-defects LIBRARIES pulp::view)
 
+# hitSlop: the accepted pointer area grown past the painted box, and the
+# RangeSlider thumb's proximity growth that the same controls depend on.
+pulp_add_test_suite(pulp-test-hit-slop LIBRARIES pulp::view)
+
 # Rect / IntRect layout geometry primitives: slicing, insets, unions,
 # hit-testing, and the float-vs-integer center truncation that is the whole
 # reason the two rect types do not share an implementation.

@@ -64,6 +64,7 @@ class PreparedOwnedBuiltInSlot final : public PluginSlot {
     }
     void set_bypass(bool bypassed) override { inner_->set_bypass(bypassed); }
     bool is_bypassed() const override { return inner_->is_bypassed(); }
+    BypassSurface bypass_surface() const override { return inner_->bypass_surface(); }
     std::vector<std::uint8_t> save_state() const override { return inner_->save_state(); }
     bool restore_state(const std::vector<std::uint8_t>& data) override {
         return inner_->restore_state(data);

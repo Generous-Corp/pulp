@@ -67,6 +67,21 @@ priority and can strand usable reserved capacity.
 M1 is a deliberate delayed fallback and waits 10 minutes before taking Pulp
 work; that affects latency, not its ability to serve either required class.
 
+**One gate name means one configuration.** The `macos` job publishes the
+required context on pull requests, Shipyard `workflow_dispatch` runs, and merge
+groups alike, so it assembles its CMake arguments once and no `github.event_name`
+branch may append to them. `workflow_dispatch` used to add
+`-DPULP_ENABLE_GPU=OFF`, which is how a *weaker* build came to post under the
+required gate's name on Shipyard's own PR-validation path: `PULP_TEXT_SHAPING`
+follows `PULP_ENABLE_GPU`, Skia goes with it, `render_to_rgba` returns an empty
+buffer and `resolved_face_identity` returns an empty string, so capture- and
+font-dependent view tests fail for the configuration rather than for the diff.
+The tell is the test count: a GPU-off `macos` run reports roughly 19,859 tests
+where a `pull_request` run reports about 20,991. When that gate is red and the
+diff cannot reach the named tests, compare the totals before debugging the diff.
+`tools/scripts/test_workflow_build_dirs.py` pins the single assembly line and
+asserts no `cmake_args+=` append exists.
+
 JIT runners exist in GitHub only while claiming a job, so an empty runner list
 is healthy-idle as well as dead. Conversely, an organization-visible idle
 runner is not proof that Pulp can assign it. Prove service with queue age,
@@ -343,6 +358,32 @@ identity fields, because doing so costs ~25s per push. A green gate means "you
 did not forget", not "the pins are correct"; the `check` command above is what
 proves the latter.
 
+### `gates.sh` and the pre-push hook are two lists, not one
+
+`gates.sh` describes itself as running the gates `.githooks/pre-push` runs, and
+that is no longer true in either direction — the hook does not invoke
+`gates.sh`, and each has gates the other lacks (`framework_neutrality_check.py`
+is in `gates.sh` only). So adding a gate to one adds it to neither the other nor
+the push path. **Wire a new local gate into both files, and check the other list
+rather than assuming it inherits.**
+
+The sequencer registries are wired into both:
+
+- **`sequencer_exposure_check.py`** — the cross-surface exposure ledger at
+  `docs/status/sequencer-exposure.json`. Run base-aware, matching the CI
+  invocation, so the append-only history and tombstone rules apply; dropping
+  `--base` silently checks a weaker subset. This is the **slowest gate in the
+  local lane (~20s)**, and the cost is inherent rather than accidental: it
+  resolves every released row's evidence out of git, hundreds of short git
+  invocations, which is exactly what catches a row citing evidence that has
+  since been deleted. Do not "optimize" it by skipping that read.
+- **`negative_capability_check.py`** — the compile-refusal registry. Whole-tree
+  and sub-second. A ctest already covered it, which meant it was only reachable
+  from a full build; the local lane now fails in under a second instead.
+
+A `--repo-root` is required for the refusal registry; it defaults to a path two
+levels up from the script, which is not the worktree when the hook runs.
+
 ### A changed-path preamble needs exact trees, not full repository history
 
 Do not set the `build.yml` `classify` checkout back to `fetch-depth: 0`. GitHub
@@ -477,6 +518,97 @@ Four rules before you add or remove the flag:
 Deliberately examples-ON, do not "fix": `examples-validation.yml` (its entire
 purpose) and `nightly-full-build.yml` (whose configure step says so in a
 comment). Shipyard's `[validation.default]` likewise keeps them ON on purpose.
+
+## A GPU lane that skips everything is indistinguishable from a GPU lane that works
+
+Every GPU case in the native suite skips when no adapter is present, which is
+correct on a developer laptop and on the hosted runners that carry no
+representative GPU. The cost is that a green `macos` check reads identically
+whether the self-hosted runner rendered anything or quietly lost its adapter:
+the skipped cases are the only difference, and nothing fails.
+
+The repo does not know which of those two it is. `test_subtree_cache_gpu.cpp`
+says so in its own comment ("Dawn init succeeding is not proof the adapter
+renders"), and it skips on a near-blank readback for exactly that reason. So
+do not promote a GPU assertion to a required gate on the assumption that the
+Studios have a working Metal adapter; on a wrong guess that reddens every PR
+in the fleet at once.
+
+Two environment switches exist to make the skip falsifiable, one per lane, and
+they are the same idea in two places:
+
+- `PULP_REQUIRE_WEBGPU=1` — the browser/node GPU-audio proof in
+  `web-plugins.yml`. A null adapter becomes a hard failure instead of a
+  named skip.
+- `PULP_REQUIRE_GPU_ADAPTER=1` — the native Catch2 case
+  `A lane that requires a GPU adapter has one` (`test/test_gpu_surface.cpp`).
+  It also rejects Dawn's **Null backend**, which validates API calls and
+  composites nothing, so `AdapterInfo::null_backend` is the discriminator to
+  check rather than `adapter_type` alone (Null can report a CPU adapter type).
+
+Both are a **lane's promise, not a device probe**: read from the environment,
+inert where unset. That is what makes them safe to ship into a repo whose lanes
+have heterogeneous GPU capability.
+
+When the runner's real state is unknown, wire the switch as an **observation**
+first: a step with `continue-on-error: true`, so the answer lands in the log
+while the required check stays independent of it. Promotion is then deleting
+one line, and the same run history tells you whether promoting is honest. (This
+is step-level `continue-on-error` on an ordinary test failure, which GitHub
+covers; it is not the job-level timeout gamble warned about above, where a
+timeout surfaces as *cancelled* rather than *failed*.) `web-plugins.yml`
+already uses the non-gating-probe shape on its Linux leg for the same reason.
+
+The self-hosted macOS leg is selected with `matrix.key == 'macos' &&
+runner.environment == 'self-hosted'`. The second clause matters: when
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` is unset the leg falls back to hosted
+`macos-15`, which has no representative GPU and must not opt in.
+
+## An opt-in CMake flag hides tests more completely than any label
+
+A `LABELS "slow"` exclusion at least leaves the test visible in a ctest listing.
+A test registered inside `if(PULP_ENABLE_<FEATURE>)` on a lane that never sets
+the flag is not skipped and not excluded — it is never registered, so it appears
+in no output, no label names it, and no count changes when it disappears.
+
+`PULP_ENABLE_SCENE3D` defaults OFF (`CMakeLists.txt`), and for a long time
+nothing in `.github/workflows/` or `.shipyard/config.toml` set it. The whole
+Renderer3D and scene3d surface — 205 tests — ran on no lane at all while the
+required `macos` gate stayed green. `PULP_ENABLE_GPU` defaults ON, which is why
+the neighbouring GPU tests never showed the same hole.
+
+The check is one line, and it needs its control:
+
+```bash
+grep -rn "PULP_ENABLE_SCENE3D" .github/workflows/ .shipyard/config.toml   # 0
+grep -rc "PULP_ENABLE_GPU" .github/workflows/build.yml                    # 2
+```
+
+Without the second line a zero is ambiguous between "not wired" and "bad grep".
+
+`.github/workflows/scene3d-advisory.yml` now covers that surface: path-filtered,
+advisory, `macos-15`, SCENE3D ON, not on `merge_group`. Three things about it
+generalize to any lane you add:
+
+- **`ctest -R` is case-sensitive** and `grep -i` is not, so a regex checked with
+  grep can select far less than you think. `-R 'renderer3d|scene3d'` takes 144
+  tests; `-R '[Rr]enderer3[Dd]|[Ss]cene3[Dd]'` takes 205. The short form exits 0.
+- **An empty selection exits 0.** Pass `--no-tests=error`, *and* assert a floor
+  on the count from `ctest -N`: the flag catches a selection that matched
+  nothing, the floor catches one that merely shrank.
+- **A hosted runner has no representative GPU**, so the lane is only as honest
+  as the tests' capability guards. A guard that calls `SUCCEED()` on absence
+  reports a pass for a case that never ran; `SKIP()` reports Skipped, because
+  `PulpCatch.cmake` sets `SKIP_RETURN_CODE 4` for any suite that does not opt
+  into `SKIP_IS_FAILURE`. Check that before trusting a new lane's green.
+
+**The private `planning/` submodule is unavailable to every hosted lane by
+construction** — `submodules: false` appears throughout `.github/workflows/` and
+`submodules: true|recursive` appears nowhere. A test that reads from it can only
+be excluded, never fixed, on such a lane. Check the *transitive* dependency: of
+the two `scene3d-native-slice-handoff` tests, only one names the plan file in
+its ctest arguments; the other reaches it through a verifier that hardcodes the
+path, so excluding the obvious one alone leaves a permanent red.
 
 ## A test that "fails" on the required gate may only have run out of clock
 
@@ -1023,6 +1155,16 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   value is knowing which edit invalidated which run instead of debugging a
   two-hour timeout. Distinct from `build-dir-sentinel.sh`, which guards the
   inverse invariant (do not reuse a dirty build dir).
+  **A marker the check proves dead is deleted on the spot, so the dead-build line
+  appears once and then stops.** Do not go delete `.pulp-build-active` by hand
+  because a run mentioned it — if it is still there after a run said "reaped", the
+  owner pid is alive and a build really is running in that tree. The check now
+  exits non-zero only when it could *not* act (`2` malformed marker, `3` could not
+  remove); `gates.sh` prints a one-line note and still does not block, because
+  neither is the pusher's defect. Before this, it printed "safe to remove" and left
+  the file, so the same advisory re-printed on every push forever — a permanently
+  unclearing warning reads exactly like a passing check and gets skimmed, which is
+  how a real line in that section would get missed.
 - **A "hung"/"stuck" `git push` is almost always the pre-push diff-cover BUILD,
   not the network.** When the diff touches a coverage surface (`core/`,
   `tools/cli/`, `tools/scripts/`), `.githooks/pre-push` runs a full local
@@ -2811,8 +2953,8 @@ without a local Windows compiler, so signature drift surfaces here first.
 
 ### Advisory build-gate: `tracing-build.yml`
 
-`.github/workflows/tracing-build.yml` (advisory, `ubuntu-latest`, NOT a required
-check) is the only lane that builds the opt-in Perfetto tracing configuration
+`.github/workflows/tracing-build.yml` (advisory, NOT a required check) is the
+only lane that builds the opt-in Perfetto tracing configuration
 (`-DPULP_TRACING=ON`). Every other lane builds the default OFF config, so a
 break in the ON path — the Perfetto amalgamation fetch/compile in
 `tools/cmake/PulpTracing.cmake` or the trace macros lighting up in
@@ -2825,8 +2967,51 @@ and hostable on a stock GitHub runner. Watch point: `test_tracing.cpp`'s
 "tracing is off by default" case asserts `kTracingEnabled == false` and is
 designed to fail under ON, so the lane excludes exactly that case (Catch2
 `~"tracing is off by default"`); the other suites are config-agnostic and must
-fully pass under ON. `runs-on` is a hard-coded `ubuntu-latest` — never route it
-to a self-hosted label or add it to branch protection.
+fully pass under ON. The two Linux jobs' `runs-on` is a hard-coded
+`ubuntu-latest` — never route either to a self-hosted label, and never add any
+job in this file to branch protection.
+
+**The third job, `tracing-gpu-macos`, is the exception that needs real
+hardware.** A GPU trace span can only be emitted by a process that has a GPU, so
+on a hosted Linux runner `pulp-test-trace-frame-pipeline` can do nothing but
+self-skip — and a skip is not a pass. That job therefore:
+
+- routes through its OWN dedicated variable,
+  `PULP_TRACING_GPU_MACOS_RUNS_ON_JSON`. Never `PULP_LOCAL_MACOS_RUNS_ON_JSON`
+  (that variable serves the required `macos` gate; borrowing it puts advisory
+  GPU builds on the Studios that gate every merge), and never a
+  `PULP_NAMESPACE_*` variable (contract row `[pulp] #7`). This is the sanctioned
+  "own dedicated `runs-on` var pointing at the local labels" pattern from
+  CLAUDE.md, not a shared-lane reuse.
+- is `if:`-guarded to a no-op until an operator deliberately sets that variable.
+  The `|| '"ubuntu-latest"'` inside its `fromJSON` only keeps the expression
+  well-formed when the variable is unset; the `if:` has already excluded the job
+  by then, so it can never dispatch to a hosted Linux runner.
+- builds through `tools/ci/governed-build.sh` so it takes a governed share of a
+  shared Mac rather than every core, and configures
+  `-DPULP_TRACING=ON -DPULP_ENABLE_GPU=ON` into a separate `build-trace/` dir.
+- stays advisory forever. Do not promote it to a required check.
+
+**Its run step is written to prove PASSED, not SKIPPED** — the reason the job
+exists at all. Catch2 reports `SUCCEED("...skipped")` as a PASS, so a green job
+cannot by itself distinguish "the GPU spans were emitted" from "the test found
+no GPU and congratulated itself". The step therefore asserts three things in
+order, and the order is load-bearing:
+
+1. **A control first.** `grep -c "All tests passed"` must be > 0. If the log is
+   empty or unreadable, every absence below would be the instrument rather than
+   the result, and the step fails here reporting nothing.
+2. **Absence of the three skip markers** the suite can print without touching a
+   GPU span: `no GPU capture backend compiled in`, `GPU frame path unavailable
+   at runtime`, `PULP_TRACING=OFF`.
+3. **An assertion COUNT.** A skipped run records one `SUCCEED`; the real path
+   records eight `REQUIRE`s over the flushed `.pftrace`. The step parses the
+   count out of the Catch2 summary and requires `>= 8`. Absence (step 2) only
+   means something because this count says the run did the work.
+
+If you change `test/test_trace_frame_pipeline.cpp`, re-derive that threshold
+from the REQUIREs on its real ON path — lowering it silently re-admits a
+skipped run as a pass.
 
 ## Governance is declared, and mirrors LIVE state — not aspiration
 
@@ -8231,3 +8416,51 @@ shipyard ship --pr <n>
 for this reason, so the auto path no longer runs at all. While it is paused, do
 **not** pass `--workstream-id` — an explicit id still opts in, and a fleet where
 some PRs are managed and most are not is worse than either state alone.
+
+## A perf job's env budgets are assertions, and a tight one makes the job a runner report
+
+`.github/workflows/timeline-hardening.yml` exports its millisecond ceilings as
+env vars for the test step. That makes them look like tuning knobs; they are
+assertions, and each needs the same justification any assertion needs.
+
+An absolute wall-clock ceiling measures `work / host_throughput`. It says
+something about the code only when it sits far enough above the observed time
+that no plausible runner speed can reach it. Measure the headroom before
+adding or keeping one: run the step against a deliberately loaded host (enough
+busy processes to oversubscribe every core) and compare. A ceiling with a
+small multiple of headroom will flip roughly with runner load, and the flake
+looks exactly like a real regression.
+
+When headroom is thin, the fix is not a bigger number and not a deleted
+assertion. Move the claim into the test as something invariant to host speed —
+a ratio between two same-run measurements at different input sizes, or a count
+of the work actually done — and drop the env var. Prove it by repeating the
+job's own step under load and reporting the pass count, not by one green run.
+
+## A contract test that is not a ctest has exactly one lane, and that lane is a `paths:` filter
+
+`tools/scripts/test_ci_throughput_workflows.py` polices `test/cmake/*.cmake`: it
+asserts every `PROCESSORS 8` registration is classified into one of the known
+weighted-suite sets. It is **not** registered as a ctest, so the required `macos`
+gate never runs it. Its only lane is `.github/workflows/workflow-lint.yml`, which
+is `paths:`-filtered — and that filter listed 188 `tools/scripts` entries and zero
+`test/cmake` ones. So the one contract policing `test/cmake` could not run when
+`test/cmake` changed, and stayed red on `main` through every PR that added a
+suite. `test/cmake/**` is now in both the `pull_request:` and `push:` blocks.
+
+The general shape: when a check lives only in a path-filtered workflow, its
+filter must cover **what it reads**, not only where it lives. Grep the filter for
+the directory the test asserts over before assuming it is enforced. A check whose
+inputs are outside its own trigger is indistinguishable from a check that passes.
+
+Two invocation traps when reproducing one of these locally:
+
+- **Run a `tools/scripts` unittest module from inside `tools/scripts`.** Those
+  modules import their siblings bare (`import verify_example_validation_inventory`),
+  so from the repo root you get `ModuleNotFoundError` naming a module that plainly
+  exists — which reads as a broken checkout rather than a wrong cwd.
+- **The class name is not the file name.** `test_ci_throughput_workflows.py` holds
+  `CTestIsolationContractTests`; guessing `TestCiThroughputWorkflows` fails with
+  `AttributeError: module ... has no attribute`. Select by test name instead:
+  `python3 -B -m unittest test_ci_throughput_workflows -k <test_name>`. Use `-B`
+  so a stale `.pyc` cannot survive a break-confirm.

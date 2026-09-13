@@ -6,6 +6,7 @@
 #include <pulp/timeline/transaction.hpp>
 
 #include "timebase_test_helpers.hpp"
+#include "timeline_perf_test_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,6 +26,7 @@ using namespace pulp;
 using namespace pulp::playback;
 using namespace pulp::timebase;
 using namespace pulp::timeline;
+using namespace pulp::test::timeline_perf;
 
 namespace {
 
@@ -65,10 +67,10 @@ std::shared_ptr<const CompiledTempoMap> tempo_map() {
     return shared_compiled_tempo_map(points, RationalRate{48'000, 1});
 }
 
-std::shared_ptr<const Project> arrangement_scale_project() {
+std::shared_ptr<const Project> arrangement_scale_project(std::size_t track_count = kTrackCount) {
     std::vector<Track> tracks;
-    tracks.reserve(kTrackCount);
-    for (std::size_t track_index = 0; track_index < kTrackCount; ++track_index) {
+    tracks.reserve(track_count);
+    for (std::size_t track_index = 0; track_index < track_count; ++track_index) {
         std::vector<Clip> clips;
         clips.reserve(kClipsPerTrack);
         for (std::size_t clip_index = 0; clip_index < kClipsPerTrack; ++clip_index) {
@@ -84,17 +86,17 @@ std::shared_ptr<const Project> arrangement_scale_project() {
     ProjectInput input;
     input.id = {1};
     input.name = "arrangement-scale";
-    input.next_item_id = kFirstClipId + kTrackCount * kClipsPerTrack;
+    input.next_item_id = kFirstClipId + track_count * kClipsPerTrack;
     input.root_sequence_id = {2};
     input.sequences.push_back(std::move(sequence));
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
-std::shared_ptr<const Project> note_scale_project() {
+std::shared_ptr<const Project> note_scale_project(std::size_t track_count = kNoteTrackCount) {
     constexpr std::uint64_t first_note_id = 1'000;
     std::vector<Track> tracks;
-    tracks.reserve(kNoteTrackCount);
-    for (std::size_t track_index = 0; track_index < kNoteTrackCount; ++track_index) {
+    tracks.reserve(track_count);
+    for (std::size_t track_index = 0; track_index < track_count; ++track_index) {
         std::vector<NoteEvent> notes;
         notes.reserve(kNotesPerClip);
         for (std::size_t note_index = 0; note_index < kNotesPerClip; ++note_index) {
@@ -118,17 +120,18 @@ std::shared_ptr<const Project> note_scale_project() {
     ProjectInput input;
     input.id = {1};
     input.name = "note-scale";
-    input.next_item_id = first_note_id + kNoteTrackCount * kNotesPerClip;
+    input.next_item_id = first_note_id + track_count * kNotesPerClip;
     input.root_sequence_id = {2};
     input.sequences.push_back(std::move(sequence));
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
-std::shared_ptr<const Project> automation_scale_project() {
+std::shared_ptr<const Project>
+automation_scale_project(std::size_t track_count = kAutomationTrackCount) {
     constexpr std::uint64_t first_point_id = 10'000;
     std::vector<Track> tracks;
-    tracks.reserve(kAutomationTrackCount);
-    for (std::size_t track_index = 0; track_index < kAutomationTrackCount; ++track_index) {
+    tracks.reserve(track_count);
+    for (std::size_t track_index = 0; track_index < track_count; ++track_index) {
         std::vector<AutomationPoint> points;
         points.reserve(kAutomationPointsPerLane);
         for (std::size_t point_index = 0; point_index < kAutomationPointsPerLane; ++point_index) {
@@ -153,7 +156,7 @@ std::shared_ptr<const Project> automation_scale_project() {
     ProjectInput input;
     input.id = {1};
     input.name = "automation-scale";
-    input.next_item_id = first_point_id + kAutomationTrackCount * kAutomationPointsPerLane;
+    input.next_item_id = first_point_id + track_count * kAutomationPointsPerLane;
     input.root_sequence_id = {2};
     input.sequences.push_back(std::move(sequence));
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
@@ -221,41 +224,6 @@ Transaction session_move_transaction(WriterToken& writer, DocumentRevision revis
     return transaction;
 }
 
-bool strict_performance() {
-    const auto* value = std::getenv("PULP_PERF_STRICT");
-    return value && value[0] && value[0] != '0';
-}
-
-std::optional<std::chrono::milliseconds> performance_budget(const char* name) {
-    const auto* value = std::getenv(name);
-    if (!value || !value[0]) {
-        INFO("missing performance budget: " << name);
-        REQUIRE_FALSE(strict_performance());
-        return std::nullopt;
-    }
-
-    const std::string_view text(value);
-    std::chrono::milliseconds::rep milliseconds = 0;
-    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), milliseconds);
-    INFO("invalid performance budget " << name << '=' << text);
-    REQUIRE(parsed.ec == std::errc{});
-    REQUIRE(parsed.ptr == text.data() + text.size());
-    REQUIRE(milliseconds > 0);
-    return std::chrono::milliseconds(milliseconds);
-}
-
-template <class Rep, class Period>
-void enforce_performance_budget(const char* name,
-                                std::chrono::duration<Rep, Period> elapsed) {
-    const auto budget = performance_budget(name);
-    if (!budget)
-        return;
-    INFO(name << " elapsed_us="
-              << std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()
-              << " budget_ms=" << budget->count());
-    REQUIRE(elapsed <= *budget);
-}
-
 bool wait_for_revision(PlaybackProgramCompiler& compiler, std::uint64_t revision,
                        std::chrono::steady_clock::duration timeout) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -293,15 +261,11 @@ TEST_CASE("full arrangement scale sustains one hundred structural transactions u
         REQUIRE(summary.counts.clips == kTrackCount * kClipsPerTrack);
         REQUIRE(Project::identity_stats().nodes_created == before_summary_nodes);
         const auto before_restore_nodes = Project::identity_stats().nodes_created;
-        const auto load_started = std::chrono::steady_clock::now();
         const auto restored = take(deserialize_project(snapshot.json, registry));
-        const auto load_elapsed = std::chrono::steady_clock::now() - load_started;
         REQUIRE(restored.find_sequence({2})->tracks().size() == kTrackCount);
         REQUIRE(restored.locate({kFirstClipId + kTrackCount * kClipsPerTrack - 1}));
         REQUIRE(Project::identity_stats().nodes_created - before_restore_nodes ==
                 2 + kTrackCount + kTrackCount * kClipsPerTrack);
-        if (strict_performance())
-            enforce_performance_budget("PULP_TIMELINE_LOAD_BUDGET_MS", load_elapsed);
     }
 
     PlaybackProgramStore store;
@@ -333,24 +297,30 @@ TEST_CASE("full arrangement scale sustains one hundred structural transactions u
         }
     });
 
-    auto edits_started = std::chrono::steady_clock::now();
-    auto maximum_edit_latency = std::chrono::steady_clock::duration::zero();
     for (std::uint64_t edit = 0; edit < 100; ++edit) {
         const ItemId track_id{kFirstTrackId + edit};
         const ItemId clip_id{kFirstClipId + edit * kClipsPerTrack};
         const auto* clip = project->find_sequence({2})->find_track(track_id)->find_clip(clip_id);
         REQUIRE(clip);
-        const auto edit_started = std::chrono::steady_clock::now();
         auto reduced = reduce_transaction(*project, move_transaction(edit + 1, track_id, *clip));
         REQUIRE(reduced);
         project = std::make_shared<const Project>(std::move(reduced).value().project);
         REQUIRE(compiler.submit(
             compile_request(project, map, edit + 2, {.all = false, .tracks = {track_id}})));
-        REQUIRE(wait_for_revision(compiler, edit + 2, std::chrono::seconds(2)));
-        maximum_edit_latency =
-            std::max(maximum_edit_latency, std::chrono::steady_clock::now() - edit_started);
+        REQUIRE(wait_for_revision(compiler, edit + 2, std::chrono::seconds(30)));
+
+        // A one-track edit must stay a one-track compile. This is the property the
+        // edit-latency budget was standing in for, stated directly: the compiler
+        // carried every other track's program over untouched instead of rebuilding
+        // the sequence. Counting the work is exact on any host, where timing it
+        // measures the host as much as the compiler.
+        const auto edit_status = compiler.status();
+        INFO("edit=" << edit << " recompiled=" << edit_status.active_tracks_recompiled
+                     << " reused=" << edit_status.active_tracks_reused);
+        REQUIRE(edit_status.active_tracks_recompiled == 1);
+        REQUIRE(edit_status.active_tracks_reused == kTrackCount - 1);
+        REQUIRE(edit_status.active_tracks_completed == kTrackCount);
     }
-    const auto edits_elapsed = std::chrono::steady_clock::now() - edits_started;
     reader.request_stop();
     reader.join();
 
@@ -362,11 +332,8 @@ TEST_CASE("full arrangement scale sustains one hundred structural transactions u
     REQUIRE(status.submitted_requests == 101);
     REQUIRE(status.latest_published_revision == 101);
     REQUIRE(store.read()->document_revision() == 101);
-    if (strict_performance()) {
+    if (strict_performance())
         enforce_performance_budget("PULP_TIMELINE_COLD_COMPILE_BUDGET_MS", cold_elapsed);
-        enforce_performance_budget("PULP_TIMELINE_EDIT_BATCH_BUDGET_MS", edits_elapsed);
-        enforce_performance_budget("PULP_TIMELINE_EDIT_MAX_BUDGET_MS", maximum_edit_latency);
-    }
 }
 
 TEST_CASE("full note scale compiles five million events with one hundred thousand per clip",
@@ -388,15 +355,13 @@ TEST_CASE("full note scale compiles five million events with one hundred thousan
     PlaybackProgramStore store;
     InlineExecutor executor;
     PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
-    const auto started = std::chrono::steady_clock::now();
     REQUIRE(compiler.submit(compile_request(project, tempo_map(), 1, {.all = true})));
-    const auto elapsed = std::chrono::steady_clock::now() - started;
     const auto status = compiler.status();
     CAPTURE(status.last_error.code, status.last_error.item.value, status.last_error.audio_detail);
     REQUIRE_FALSE(status.has_error);
     REQUIRE(store.read()->document_revision() == 1);
-    if (strict_performance())
-        enforce_performance_budget("PULP_TIMELINE_NOTE_COMPILE_BUDGET_MS", elapsed);
+    REQUIRE(status.active_tracks_recompiled == kNoteTrackCount);
+    REQUIRE(status.active_tracks_reused == 0);
 }
 
 TEST_CASE("full automation scale compiles one million points with ten thousand per lane",
@@ -581,4 +546,81 @@ TEST_CASE("five-hundred-twelve-deep undo and real journal replay stay within bud
         enforce_performance_budget("PULP_TIMELINE_DEEP_UNDO_BUDGET_MS", undo_elapsed);
         enforce_performance_budget("PULP_TIMELINE_JOURNAL_REPLAY_BUDGET_MS", replay_elapsed);
     }
+}
+
+// Growth ceilings for the operations whose cost scales with project size.
+//
+// Each is an exponent `k` in `time ~ size^k`: linear work reads 1.0, quadratic
+// 2.0. They are stated here rather than exported by a workflow because they are
+// properties of the algorithms, so they must hold in every lane, and because a
+// ratio between two same-run measurements needs no host-specific calibration.
+// The headroom over 1.0 absorbs per-run fixed costs that do not scale, which
+// pull the measured exponent above the true one at these sizes.
+constexpr double kLoadGrowthCeiling = 1.4;
+constexpr double kNoteCompileGrowthCeiling = 1.4;
+constexpr double kAutomationCompileGrowthCeiling = 1.4;
+constexpr int kGrowthRounds = 2;
+
+TEST_CASE("project load cost grows linearly with arrangement size",
+          "[timeline][scale][performance][growth]") {
+#if defined(PULP_TEST_WITH_SANITIZER)
+    SKIP("full-scale coverage runs in non-instrumented builds");
+#endif
+    const auto registry = take(make_builtin_timeline_registry());
+    const auto sample = measure_growth(
+        kTrackCount / 2, kTrackCount, kGrowthRounds, [&](std::size_t track_count) {
+            const auto project = arrangement_scale_project(track_count);
+            const auto snapshot = take(serialize_project(*project, registry));
+            const auto started = cpu_now();
+            const auto restored = take(deserialize_project(snapshot.json, registry));
+            const auto elapsed = cpu_now() - started;
+            REQUIRE(restored.find_sequence({2})->tracks().size() == track_count);
+            return elapsed;
+        });
+    require_growth_within("project load", sample, kLoadGrowthCeiling);
+}
+
+TEST_CASE("note compile cost grows linearly with note count",
+          "[timeline][scale][performance][growth]") {
+#if defined(PULP_TEST_WITH_SANITIZER)
+    SKIP("full-scale coverage runs in non-instrumented builds");
+#endif
+    const auto sample = measure_growth(
+        kNoteTrackCount / 2, kNoteTrackCount, kGrowthRounds, [](std::size_t track_count) {
+            const auto project = note_scale_project(track_count);
+            PlaybackProgramStore store;
+            InlineExecutor executor;
+            PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+            const auto started = cpu_now();
+            REQUIRE(compiler.submit(compile_request(project, tempo_map(), 1, {.all = true})));
+            const auto elapsed = cpu_now() - started;
+            const auto status = compiler.status();
+            REQUIRE_FALSE(status.has_error);
+            REQUIRE(status.active_tracks_recompiled == track_count);
+            return elapsed;
+        });
+    require_growth_within("note compile", sample, kNoteCompileGrowthCeiling);
+}
+
+TEST_CASE("automation compile cost grows linearly with point count",
+          "[timeline][scale][performance][growth]") {
+#if defined(PULP_TEST_WITH_SANITIZER)
+    SKIP("full-scale coverage runs in non-instrumented builds");
+#endif
+    const auto sample = measure_growth(
+        kAutomationTrackCount / 2, kAutomationTrackCount, kGrowthRounds,
+        [](std::size_t track_count) {
+            const auto project = automation_scale_project(track_count);
+            PlaybackProgramStore store;
+            InlineExecutor executor;
+            PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+            const auto started = cpu_now();
+            REQUIRE(compiler.submit(compile_request(project, tempo_map(), 1, {.all = true})));
+            const auto elapsed = cpu_now() - started;
+            const auto status = compiler.status();
+            REQUIRE_FALSE(status.has_error);
+            REQUIRE(status.active_tracks_recompiled == track_count);
+            return elapsed;
+        });
+    require_growth_within("automation compile", sample, kAutomationCompileGrowthCeiling);
 }

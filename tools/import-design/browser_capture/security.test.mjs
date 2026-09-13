@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -551,7 +551,44 @@ test("failed browser launch still removes the ephemeral profile", {
   await assert.rejects(stat(profile), /ENOENT/);
 }));
 
-test("capture deadline removes the profile of a launching browser", {
+// A browser launched for a capture names that capture's directory in its own
+// argv, so the process table can be asked directly whether cleanup reached the
+// process rather than only the profile it was using. Commands are read, never
+// pids: a pid is not an identity, and this only ever reports what it saw.
+async function processCommandsMentioning(marker) {
+  const { stdout } = await execFileAsync(
+    "/bin/ps", ["-Aww", "-o", "pid=,command="]);
+  return stdout.split("\n")
+    .map((line) => line.trim().match(/^(\d+)\s+(.*)$/))
+    .filter((match) => match && match[2].includes(marker))
+    .map((match) => ({ pid: Number(match[1]), command: match[2] }));
+}
+
+// A test that finds a survivor has found a process nothing else will ever
+// reap, on a machine other runs share. Take the pid from the same sample that
+// proves the command still names this run's unique directory and signal it
+// there; a pid read earlier names whatever inherited it since.
+async function reapProcessesMentioning(marker) {
+  for (const found of await processCommandsMentioning(marker)) {
+    try { process.kill(-found.pid, "SIGKILL"); } catch {}
+    try { process.kill(found.pid, "SIGKILL"); } catch {}
+  }
+}
+
+// A guardian that escalates SIGTERM to SIGKILL is entitled to a grace period,
+// so a process seen the instant the owner exits is not yet a leak. Wait for
+// the table to settle and report what is left when it stops changing.
+async function settledProcessesMentioning(marker, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let seen = await processCommandsMentioning(marker);
+  while (seen.length > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    seen = await processCommandsMentioning(marker);
+  }
+  return seen;
+}
+
+test("capture deadline terminates the browser it launched", {
   skip: process.platform === "win32" ||
     Number(process.versions.node.split(".")[0]) < 22,
 }, async () => withTempTree("deadline-cleanup", async (tree) => {
@@ -578,4 +615,58 @@ while :; do sleep 1; done
     });
 
   await assert.rejects(stat(profile), /ENOENT/);
+
+  // The deadline above expires long after the launch has settled. The window
+  // this guards is the one before the guardian has recorded custody of the
+  // browser, which only a deadline that expires during the launch itself can
+  // reach, and which a single attempt reaches only sometimes.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const racedProfile = path.join(tree, `race-${attempt}`);
+    await mkdir(racedProfile);
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        captureScript,
+        "probe",
+        "--browser", browser,
+        "--profile-dir", racedProfile,
+        "--timeout-ms", "1",
+      ]),
+      (error) => {
+        assert.match(error.stderr, /browser-capture-timeout|browser-capture-failed/);
+        return true;
+      });
+  }
+
+  // Sample the process table: this is the finding under test. Removing the
+  // profile says nothing about the browser that was reading it, and a launch
+  // abandoned mid-flight outlives its own directory.
+  const survivors = await settledProcessesMentioning(tree, 15000);
+  await reapProcessesMentioning(tree);
+
+  // An empty sample means either nothing leaked or the scan cannot see this
+  // kind of process at all. Run the same scan against a process deliberately
+  // launched in the leaked shape; if that comes back empty the sample above
+  // was never evidence of anything.
+  const control = spawn(browser, [`--user-data-dir=${profile}`],
+    { detached: true, stdio: "ignore" });
+  let controlSeen = [];
+  try {
+    const deadline = Date.now() + 10000;
+    while (controlSeen.length === 0 && Date.now() < deadline) {
+      controlSeen = await processCommandsMentioning(tree);
+      if (controlSeen.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+  } finally {
+    try { process.kill(-control.pid, "SIGKILL"); } catch {}
+    try { control.kill("SIGKILL"); } catch {}
+  }
+  assert.ok(
+    controlSeen.length > 0,
+    "survivor scan could not see its own control process, so it proves nothing");
+
+  assert.deepEqual(
+    survivors.map((found) => found.command), [],
+    "capture deadline left processes running");
 }));

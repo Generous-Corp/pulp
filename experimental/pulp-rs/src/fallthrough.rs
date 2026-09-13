@@ -59,6 +59,79 @@ pub const DISABLE_ENV: &str = "PULP_RS_NO_FALLTHROUGH";
 /// Env flag that promotes the debug trace (resolved binary + argv).
 pub const DEBUG_ENV: &str = "PULP_DEBUG";
 
+/// `CMake` target that produces the delegate in a source build. The
+/// target is named `pulp-cli`; the file it emits is `pulp-cpp`, so a
+/// build that skips this target leaves every delegated command
+/// unrunnable.
+pub const CPP_BUILD_TARGET: &str = "pulp-cli";
+
+/// Delegate binary name in force for this process, honoring the
+/// `PULP_RS_CPP_BINARY` override.
+#[must_use]
+pub fn configured_cpp_binary() -> String {
+    std::env::var("PULP_RS_CPP_BINARY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_CPP_BINARY.to_owned())
+}
+
+/// stderr text for a command the CLI's own surface declares but
+/// cannot run, because the delegate binary is missing or delegation
+/// is switched off.
+///
+/// This is deliberately not the unknown-command suggester: the
+/// command is real and correctly spelled, so a "Did you mean…?" line
+/// names the command the user already typed and sends them hunting
+/// for a typo that does not exist. Name the missing binary, where it
+/// was looked for, and how to get it instead.
+///
+/// `searched` is the sibling path next to the running binary, when
+/// one is resolvable.
+#[must_use]
+pub fn delegate_unavailable_hint(
+    typed: &str,
+    binary: &str,
+    program: &str,
+    searched: Option<&Path>,
+    disabled: bool,
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = format!(
+        "`{binary} {typed}` runs on the {program} delegate binary, which is unavailable.\n"
+    );
+    if disabled {
+        let _ = writeln!(
+            out,
+            "Delegation is switched off by {DISABLE_ENV}; unset it to run `{binary} {typed}`."
+        );
+        return out;
+    }
+    match searched {
+        Some(path) => {
+            let _ = writeln!(
+                out,
+                "Looked for: {} — not found there, nor anywhere on PATH.",
+                path.display()
+            );
+        }
+        None => {
+            let _ = writeln!(
+                out,
+                "No {program} was found beside `{binary}`, nor anywhere on PATH."
+            );
+        }
+    }
+    let _ = writeln!(
+        out,
+        "Source build: cmake --build build --target {CPP_BUILD_TARGET} (emits {program})"
+    );
+    let _ = writeln!(
+        out,
+        "Release install: re-run the installer, or `{binary} upgrade`, to restore the full CLI."
+    );
+    out
+}
+
 /// Test seam — where does `pulp-cpp` live? Production resolution uses
 /// `which`-style PATH walk; tests inject a stub via
 /// [`delegate_with_resolver`].
@@ -200,10 +273,7 @@ fn delegate_with_debug<R: BinaryResolver, S: Spawner>(
     if is_fallthrough_disabled() {
         return Ok(Outcome::Disabled);
     }
-    let program_name = std::env::var("PULP_RS_CPP_BINARY")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| DEFAULT_CPP_BINARY.to_owned());
+    let program_name = configured_cpp_binary();
     let Some(cpp_path) = resolver.resolve(&program_name) else {
         return Ok(Outcome::NotFound);
     };

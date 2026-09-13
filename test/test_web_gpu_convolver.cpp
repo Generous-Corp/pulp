@@ -225,8 +225,7 @@ TEST_CASE("WebGpuConvolver expiry does not corrupt the overlap-add history",
     if (got_ok[2]) {
         // The map beat its 1 µs deadline (a fast, idle GPU). Nothing to assert
         // about expiry then — say so rather than pretend the case ran.
-        WARN("block 2 resolved before its 1 us deadline; expiry path not exercised");
-        return;
+        SKIP("block 2 resolved before its 1 us deadline; expiry path not exercised");
     }
 
     REQUIRE(conv.expired() == 1);

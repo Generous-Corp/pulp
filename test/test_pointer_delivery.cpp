@@ -1155,3 +1155,128 @@ TEST_CASE("auxiliary buttons retain identity without entering left-only legacy c
     REQUIRE(spy->legacy_drag == 0);
     REQUIRE(spy->legacy_up == 0);
 }
+
+// ── Hover delivery on the DOM move channel (deliver_hover_move) ──────────────
+//
+// Hover was the one pointer phase with no delivery verb, so every native host
+// open-coded it as a bare View::simulate_hover — which raises the hover flags
+// and calls on_hover_move but never touches on_dom_pointer_move_event, the
+// callback the bridge installs for a scripted `pointermove` listener. A
+// scripted UI therefore saw pointerdown, pointermove-while-dragging and
+// pointerup, but never a plain hover, so a handler that picks the cursor from
+// the pointer position only ran once a button was held. The user-visible shape
+// of that is "the cursor only changes when I click".
+
+namespace {
+
+// Records what arrived on the DOM move channel — the seam a scripted UI's
+// `pointermove` listener occupies — and nothing else, so a case here cannot
+// pass on a hover that only reached the legacy on_hover_move.
+class DomMoveSpy : public View {
+public:
+    DomMoveSpy() {
+        on_dom_pointer_move_event = [this](const MouseEvent& e, bool origin) {
+            ++moves;
+            last = e;
+            was_origin = origin;
+        };
+        on_dom_pointer_event = [this](const MouseEvent&, bool) { ++non_moves; };
+    }
+    void on_hover_move(Point p) override { ++legacy_hovers; last_legacy = p; }
+
+    int moves = 0;
+    int non_moves = 0;
+    int legacy_hovers = 0;
+    bool was_origin = false;
+    MouseEvent last{};
+    Point last_legacy{};
+};
+
+}  // namespace
+
+TEST_CASE("deliver_hover_move reaches the DOM move channel with no button",
+          "[view][input][hover]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<DomMoveSpy>();
+    DomMoveSpy* spy = child.get();
+    spy->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(child));
+
+    // ── Control ──────────────────────────────────────────────────────────
+    // A drag over the same spy reaches the same channel today, defect or not.
+    // If this does not fire, the spy is not wired to the channel and the hover
+    // result below is not a measurement of anything.
+    deliver_mouse_drag(root, spy, {130, 70}, 0);
+    REQUIRE(spy->moves == 1);
+    REQUIRE(spy->last.is_down == true);
+
+    // ── The property ─────────────────────────────────────────────────────
+    deliver_hover_move(root, {130, 70});
+
+    REQUIRE(spy->moves == 2);
+    // A hover carries no held button. A handler that branches on it — the
+    // grab/grabbing idiom — must take the hover branch.
+    CHECK(spy->last.is_down == false);
+    CHECK(spy->last.button == MouseButton::none);
+    CHECK(spy->last.phase == MousePhase::hover);
+    CHECK(spy->last.click_count == 0);
+    // Local space, as every other verb delivers it.
+    CHECK_THAT(spy->last.position.x, WithinAbs(30.0f, 0.01f));
+    CHECK_THAT(spy->last.position.y, WithinAbs(20.0f, 0.01f));
+    // The press/release channel stays untouched: a hover must not look like a
+    // pointerdown to a script.
+    CHECK(spy->non_moves == 0);
+}
+
+TEST_CASE("deliver_hover_move still raises hover state and on_hover_move",
+          "[view][input][hover]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<DomMoveSpy>();
+    DomMoveSpy* spy = child.get();
+    spy->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(child));
+
+    deliver_hover_move(root, {130, 70});
+    CHECK(spy->legacy_hovers == 1);
+    CHECK(spy->is_hovered());
+    CHECK_THAT(spy->last_legacy.x, WithinAbs(30.0f, 0.01f));
+
+    // Moving off clears it again, so a stale hover cannot be mistaken for a
+    // live one.
+    deliver_hover_move(root, {10, 10});
+    CHECK_FALSE(spy->is_hovered());
+    CHECK(spy->moves == 1);   // the second move hit the root, not the spy
+}
+
+TEST_CASE("deliver_hover_move bubbles to move-registered ancestors",
+          "[view][input][hover]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto wrapper = std::make_unique<View>();
+    View* wrap = wrapper.get();
+    wrap->set_bounds({100, 50, 200, 200});
+    int wrap_moves = 0;
+    Point wrap_pt{};
+    wrap->on_dom_pointer_move_event = [&](const MouseEvent& e, bool) {
+        ++wrap_moves;
+        wrap_pt = e.position;
+    };
+
+    auto child = std::make_unique<DomMoveSpy>();
+    DomMoveSpy* spy = child.get();
+    spy->set_bounds({10, 10, 50, 50});      // (110,60) in root space
+    wrap->add_child(std::move(child));
+    root.add_child(std::move(wrapper));
+
+    deliver_hover_move(root, {130, 70});
+
+    // Same target-to-root walk a drag takes, each hop in its own space: a
+    // wrapper listening for `mousemove` around a canvas child still hears it.
+    CHECK(spy->moves == 1);
+    CHECK(wrap_moves == 1);
+    CHECK_THAT(wrap_pt.x, WithinAbs(30.0f, 0.01f));   // 130 - 100
+    CHECK_THAT(spy->last.position.x, WithinAbs(20.0f, 0.01f));  // 130 - 100 - 10
+}

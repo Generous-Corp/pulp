@@ -4,6 +4,7 @@
 #include <pulp/playback/transport.hpp>
 #include <pulp/timebase/rational_time.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -148,13 +149,13 @@ constexpr bool range_admits_event_compensation(const TransportRange& range,
 
 /// Whether a compensating shift's read-ahead stays inside an enabled loop.
 ///
-/// Reading ahead near a loop end wants the content from AFTER the wrap, not the
-/// document positions past the loop point: an event read at document position
-/// `loop_end + n` never sounds in this pass. Wrap-aware read-ahead is a
-/// separate mechanism, so until it exists the crossing fails closed instead of
-/// scheduling events the pass will never reach. `loop_end_samples` is the loop
-/// end in the program's own document samples; a disabled loop is unbounded and
-/// the caller passes nothing.
+/// A window that stays inside reads one contiguous run from the shifted origin
+/// and needs no fold. A window that does not is not refused: `plan_compensated_read`
+/// folds it back around the loop point so the read-ahead returns the post-wrap
+/// content, which is what the musician hears when those frames reach the device.
+/// The fold costs a second run and a wrap-time release, so the predicate stays
+/// worth asking. `loop_end_samples` is the loop end in the program's own
+/// document samples; a disabled loop is unbounded and the caller passes nothing.
 constexpr bool loop_admits_event_compensation(const TransportRange& range,
                                               EventCompensationShift shift,
                                               timebase::SamplePosition loop_end_samples) noexcept {
@@ -163,6 +164,92 @@ constexpr bool loop_admits_event_compensation(const TransportRange& range,
     const auto origin = shifted_range_origin(range, shift);
     const auto frames = static_cast<std::int64_t>(range.frame_count);
     return origin.value <= loop_end_samples.value - frames;
+}
+
+/// One contiguous run of a compensated read window after an enabled loop has
+/// been applied to it.
+struct CompensatedReadSegment {
+    /// Document sample the run reads the program from.
+    timebase::SamplePosition document_start{};
+    /// Length of the run, in frames.
+    std::uint32_t frame_count = 0;
+    /// Where the run starts inside its `TransportRange`. Add `range.sample_offset`
+    /// to place an emitted event in the block.
+    std::uint32_t range_offset = 0;
+    /// Loop passes between `range.loop_pass_index` and the pass this run reads.
+    /// A run past the loop point reads the NEXT pass, so a per-pass note modifier
+    /// must be resolved against that pass and not against the transport's.
+    std::uint64_t pass_offset = 0;
+};
+
+/// How a compensated read window resolves against an enabled loop.
+///
+/// Reading ahead near a loop end wants the content from AFTER the wrap. An event
+/// at document position `loop_end + n` never sounds in this pass, while the one
+/// at `loop_start + n` is exactly what is heard when the window's frames reach
+/// the device a shift later. The window is therefore folded back around the loop
+/// point rather than read past it, which splits it into at most two runs — at
+/// most, because the transport refuses a loop shorter than one maximum block, so
+/// a window spans the loop point once and never twice.
+struct CompensatedReadPlan {
+    std::array<CompensatedReadSegment, 2> segments{};
+    std::uint8_t segment_count = 0;
+    /// True when the loop point falls INSIDE this window. The event stream wraps
+    /// there, ahead of the transport's own wrap, so whatever the earlier pass left
+    /// sounding is released at `segments[1].range_offset` and the transport's
+    /// later discontinuity must not release it a second time.
+    bool wraps_inside_range = false;
+};
+
+/// The one run a window that no loop bounds resolves to. The unlooped, the
+/// uncompensated, and the host-beat-mapped cases all take this shape, so a
+/// consumer walks segments once rather than carrying two code paths.
+constexpr CompensatedReadPlan plan_compensated_read(const TransportRange& range,
+                                                    EventCompensationShift shift) noexcept {
+    CompensatedReadPlan plan;
+    plan.segments[0] = {shifted_range_origin(range, shift), range.frame_count, 0, 0};
+    plan.segment_count = 1;
+    return plan;
+}
+
+/// Wrap-aware read-ahead: the runs a compensated window reads when an enabled
+/// loop bounds it.
+///
+/// The shifted origin is first folded into `[loop_start, loop_end)`, which is a
+/// no-op for an ordinary window and recovers the post-wrap position for one that
+/// has already been carried past the loop point by the shift. The number of loop
+/// lengths that fold consumed is the pass the run belongs to. Whatever remains of
+/// the window past the loop point becomes a second run reading from `loop_start`.
+constexpr CompensatedReadPlan
+plan_compensated_read(const TransportRange& range, EventCompensationShift shift,
+                      timebase::SamplePosition loop_start_samples,
+                      timebase::SamplePosition loop_end_samples) noexcept {
+    CompensatedReadPlan plan;
+    auto start = shifted_range_origin(range, shift);
+    const auto length = loop_end_samples.value - loop_start_samples.value;
+    if (length <= 0)
+        return plan_compensated_read(range, shift);
+    const auto span = static_cast<std::uint64_t>(length);
+    std::uint64_t pass_offset = 0;
+    if (start.value >= loop_end_samples.value) {
+        const auto past = static_cast<std::uint64_t>(start.value - loop_start_samples.value);
+        pass_offset = past / span;
+        start = {loop_start_samples.value + static_cast<std::int64_t>(past % span)};
+    }
+    auto head = range.frame_count;
+    if (start.value < loop_end_samples.value) {
+        const auto until_wrap = static_cast<std::uint64_t>(loop_end_samples.value - start.value);
+        if (until_wrap < head)
+            head = static_cast<std::uint32_t>(until_wrap);
+    }
+    plan.segments[0] = {start, head, 0, pass_offset};
+    plan.segment_count = 1;
+    if (head < range.frame_count) {
+        plan.segments[1] = {loop_start_samples, range.frame_count - head, head, pass_offset + 1};
+        plan.segment_count = 2;
+        plan.wraps_inside_range = true;
+    }
+    return plan;
 }
 
 /// Whether a track may offer live input while its event chain is compensated.

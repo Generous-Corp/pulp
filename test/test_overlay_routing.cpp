@@ -637,3 +637,151 @@ TEST_CASE("route_press_to_active_overlay: another tree's overlay is isolated",
     REQUIRE(View::active_overlay_ == foreign);
     REQUIRE(other_root.interaction().active_overlay == foreign);
 }
+
+// ── Dismiss-callback lifetime ────────────────────────────────────────────
+//
+// `on_overlay_dismissed` is a std::function whose storage lives inside the
+// dismissed View. A React consumer flipping setOpen(false) unmounts the
+// popover synchronously from inside that very callback, so the dismissing
+// code must invoke a COPY: calling operator() on the member in place leaves
+// std::function executing out of storage the callback just freed.
+//
+// `dismiss_claimed_overlay()` has always copied. The scope-taking
+// `dismiss_active_overlay(View&)` did not, and it is the variant the DAW
+// plugin hosts reach through `route_press_to_active_overlay`.
+//
+// The read after the unmount is what makes this a real use-after-free rather
+// than a structural assertion: `sentinel` is a by-value capture, so it lives
+// in the closure the destroyed View owned. Under a normal build this passes
+// either way; under `-DPULP_SANITIZER=address` it reports
+// heap-use-after-free without the copy.
+TEST_CASE("dismiss_active_overlay(scope) survives a callback that unmounts the "
+          "overlay", "[view][overlay][pointer][lifetime]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    int observed = 0;
+    int calls = 0;
+    int sentinel = 0x5A5A;
+    overlay->on_overlay_dismissed = [&observed, &calls, &root, overlay,
+                                     sentinel] {
+        ++calls;
+        // Unmount: the returned unique_ptr dies at the end of this full
+        // expression, destroying the View that owns this closure.
+        root.remove_child(overlay);
+        observed = sentinel;  // reads the closure's own (now freed) storage
+    };
+
+    View::dismiss_active_overlay(root);
+
+    REQUIRE(calls == 1);
+    REQUIRE(observed == sentinel);
+    REQUIRE(View::active_overlay_ == nullptr);
+    REQUIRE(root.child_count() == 0);
+}
+
+// ── Context (right-button) press routing ─────────────────────────────────
+//
+// The right button reaches the underlay through a different host entry point
+// than the left, and it did not honor `OverlayPressTarget::consume_press`:
+// the dismissal happened, then the press fell through to `hit_test` and
+// opened a context menu on the control beneath the popover. One right-click
+// both closed the popover and mutated what was under it.
+TEST_CASE("route_context_press consumes a dismissing overlay press before the "
+          "underlying context menu",
+          "[view][overlay][pointer][consumption]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto underlying_owned = std::make_unique<TestView>();
+    auto* underlying = underlying_owned.get();
+    underlying->set_bounds({400.0f, 400.0f, 200.0f, 120.0f});
+    int underlying_menus = 0;
+    underlying->on_context_menu = [&](pulp::view::Point) { ++underlying_menus; };
+    root.add_child(std::move(underlying_owned));
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    int dismissed_calls = 0;
+    overlay->on_overlay_dismissed = [&] { ++dismissed_calls; };
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    const auto consumed = pulp::view::route_context_press(root,
+                                                          {500.0f, 500.0f});
+
+    REQUIRE(dismissed_calls == 1);
+    REQUIRE(consumed.overlay_dismissed);
+    REQUIRE_FALSE(consumed.handled);
+    REQUIRE(underlying_menus == 0);
+    REQUIRE(View::active_overlay_ == nullptr);
+
+    // Positive control, same instrument and same target: with the consumption
+    // policy off, the identical press DOES reach the underlay's context menu.
+    // Without it, `underlying_menus == 0` above would be ambiguous — it could
+    // equally mean the menu was never reachable from this fixture at all.
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(false);
+    const auto through = pulp::view::route_context_press(root,
+                                                         {500.0f, 500.0f});
+
+    REQUIRE(dismissed_calls == 2);
+    REQUIRE(through.overlay_dismissed);
+    REQUIRE(through.handled);
+    REQUIRE(underlying_menus == 1);
+    REQUIRE(View::active_overlay_ == nullptr);
+}
+
+TEST_CASE("route_context_press with no overlay dispatches to the hit target",
+          "[view][overlay][pointer][consumption]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto target_owned = std::make_unique<TestView>();
+    auto* target = target_owned.get();
+    target->set_bounds({400.0f, 400.0f, 200.0f, 120.0f});
+    int menus = 0;
+    target->on_context_menu = [&](pulp::view::Point) { ++menus; };
+    root.add_child(std::move(target_owned));
+
+    const auto result = pulp::view::route_context_press(root, {500.0f, 500.0f});
+
+    REQUIRE(result.handled);
+    REQUIRE_FALSE(result.overlay_dismissed);
+    REQUIRE(menus == 1);
+}
+
+TEST_CASE("route_context_press routes an inside press into the overlay subtree",
+          "[view][overlay][pointer][consumption]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    int overlay_menus = 0;
+    overlay->on_context_menu = [&](pulp::view::Point) { ++overlay_menus; };
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    const auto result = pulp::view::route_context_press(root, {150.0f, 150.0f});
+
+    REQUIRE(result.handled);
+    REQUIRE_FALSE(result.overlay_dismissed);
+    REQUIRE(overlay_menus == 1);
+    // An inside press must not dismiss.
+    REQUIRE(View::active_overlay_ == overlay);
+}

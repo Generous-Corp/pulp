@@ -55,6 +55,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME agent-capability-rederive-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_rederive.py")
+    # Measured at 76.65 s on an unloaded Linux runner, against a suite-wide
+    # default of 120 s. That 1.6x headroom is consumed by co-scheduling on a
+    # loaded host, which is how a test that passes in isolation times out in a
+    # cohort. The slot declaration alone does not restore the budget.
+    set_tests_properties(agent-capability-rederive-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
     # The rederive self-test deliberately rewrites the manifest script's two
     # generated counters before restoring them. Keep readers from observing
     # that temporary state while retaining parallelism for unrelated tests.
@@ -229,6 +236,21 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME canvas-path-flush-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_canvas_path_flush.py")
 
+    # GPU skip-not-pass lint: a GPU case that finds no adapter must report
+    # Catch2's SKIP(), which ctest surfaces as ***Skipped. SUCCEED(), WARN(),
+    # and a bare `return;` all leave the case PASSING, so the suite's pass count
+    # is identical whether the GPU lane ran or the adapter vanished -- the day
+    # the hardware goes away, nothing changes colour. The selftest is the
+    # load-bearing half: it proves the rule tells `if (!gpu) return;` (skip
+    # because the device is missing) from `if (node.gpu_available()) return;`
+    # (skip because it is present), so the gate cannot force a conversion that
+    # would delete a real assertion.
+    add_test(NAME gpu-skip-not-pass-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/check_gpu_skip_not_pass.py"
+        --root "${CMAKE_SOURCE_DIR}")
+    add_test(NAME gpu-skip-not-pass-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_gpu_skip_not_pass.py")
+
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
     # -j`, which can exhaust memory / oversubscribe cores on a shared machine.
@@ -236,6 +258,19 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+
+    # GPU span categories: a span named `gpu_*` must be emitted under the `gpu`
+    # category. The trace-SQL GPU queries select `category GLOB 'gpu*'`, so a
+    # `gpu_*` span filed elsewhere is invisible to them rather than merely
+    # mislabelled -- nothing fails, the frame renders, and the flushed trace
+    # looks complete. macOS sat in that state while the Skia surfaces emitted
+    # the same three span names correctly, so only a source-level check covers
+    # both paths: driving the mac window host needs a window server, and a
+    # runtime assertion self-skips on every headless runner.
+    add_test(NAME trace-span-category-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/trace_span_category_lint.py")
+    add_test(NAME trace-span-category-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_span_category_lint.py")
     # macOS ObjC source lists: three hand-maintained lists (the in-tree target,
     # what the SDK installs, what a consumer recompiles per binary) must name the
     # same translation units, or the per-binary ObjC class suffix is dropped and
@@ -368,6 +403,19 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_cmake_manifest_parse.py")
     set_tests_properties(cmake-manifest-parse PROPERTIES TIMEOUT 120)
 
+    # One command, two TIMEOUT budgets. Registering a command twice is fine and
+    # deliberate here -- a second catch_discover_tests() re-registers a tagged
+    # subset under a prefix so a lane can select it by label, and 32 pairs do
+    # that -- but both registrations then run, and the TIGHTER budget is the one
+    # that decides whether the required gate is green. A `foreach` with
+    # string(REPLACE ...) assembles the name from parts, so the duplicate that
+    # cost this is invisible to a grep for the name being added. Reads an
+    # already-configured build, so it sees names no literal search can find.
+    add_test(NAME ctest-duplicate-registration COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_duplicate_registration.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(ctest-duplicate-registration PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test
@@ -482,6 +530,13 @@ if(Python3_Interpreter_FOUND)
     # gate on timing alone.
     set_tests_properties(gpu-handoff-provenance-selftest PROPERTIES TIMEOUT 300)
 
+    # The pin-freshness guard runs in tools/scripts/gates.sh, so its own cover
+    # is the only thing standing between a silent parser drift and a guard that
+    # waves every stale pin through. It shipped unregistered, which meant it
+    # existed without ever executing.
+    add_test(NAME gpu-handoff-pin-freshness-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_handoff_pin_freshness.py")
+
     # Closed-schema and semantic negative controls for the shared GPU health
     # envelope. This is intentionally GPU-free so every platform proves the
     # contract even when no real adapter is available.
@@ -508,6 +563,14 @@ if(Python3_Interpreter_FOUND)
         PROCESSORS 8)
     add_test(NAME gpu-first-visible-role-producers-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_role_producers.py")
+    # Five positive roles plus thirty-nine planted negatives, each a sealed
+    # build driving its own subprocess tree. That cost is invisible to the
+    # scheduler at the default single slot, so co-scheduled heavy tests inflate
+    # each other past the suite-wide default timeout on a loaded host. Declare
+    # what the test actually consumes and give it a budget sized to the work.
+    set_tests_properties(gpu-first-visible-role-producers-selftest PROPERTIES
+        PROCESSORS 8
+        TIMEOUT 300)
     add_test(NAME gpu-first-visible-trace-producer-overhead-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py")
     add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}

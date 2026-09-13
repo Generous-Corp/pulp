@@ -199,13 +199,22 @@ function materializedElementChildren(node, registrySet) {
 function materializedNodeTag(node) {
   return String(node && node.tagName || '').toLowerCase();
 }
-function materializedNodeAtPath(binding, values) {
+function materializedPathIndex(values) {
   const registrySet = new Set(values);
   const roots = values.filter(node => {
     const parent = node && (node.parentElement || node._parentElement);
     return !parent || !registrySet.has(parent);
   });
-  let siblings = roots;
+  return { registrySet, roots };
+}
+// The index is a pure projection of the registry snapshot, so it is rebuilt
+// once per metadata application rather than cached across commits: a retained
+// index would resolve stale paths after any reparent, and every binding in a
+// single application reads the same snapshot anyway.
+function materializedNodeAtPath(binding, values, pathIndex) {
+  const index = pathIndex || materializedPathIndex(values);
+  const registrySet = index.registrySet;
+  let siblings = index.roots;
   let node = null;
   for (const step of binding.path) {
     node = siblings[step.index] || null;
@@ -227,6 +236,7 @@ function materializedOptionalTextNode(binding, values) {
 }
 function applyMaterializedImportMetadata(metadata) {
   const values = materializedDomRegistryValues();
+  const pathIndex = materializedPathIndex(values);
   const activeLayoutBindings = Array.isArray(metadata && metadata.layout_bindings)
     ? metadata.layout_bindings : [];
   const activeTextBindings = Array.isArray(metadata && metadata.text_bindings)
@@ -261,7 +271,7 @@ function applyMaterializedImportMetadata(metadata) {
   // their captured state contributes an equivalent binding.
   if (typeof g.setPosition === 'function' && typeof g.setFlex === 'function') {
     for (const binding of activeLayoutBindings) {
-      const node = materializedNodeAtPath(binding, values);
+      const node = materializedNodeAtPath(binding, values, pathIndex);
       const id = node && (node.__pulpId || node.id);
       if (!id) {
         ++diagnostics.layout_node_miss;
@@ -295,7 +305,7 @@ function applyMaterializedImportMetadata(metadata) {
   // attributes. This intentionally wins over currentColor and stylesheet
   // tokens: the frozen computed value is the visual authority for this state.
   for (const binding of activePaintBindings) {
-    const node = materializedNodeAtPath(binding, values);
+    const node = materializedNodeAtPath(binding, values, pathIndex);
     const id = node && (node.__pulpId || node.id);
     if (!id) {
       ++diagnostics.paint_node_miss;
@@ -338,7 +348,7 @@ function applyMaterializedImportMetadata(metadata) {
   if (typeof g.setCapturedLineBoxes !== 'function') return applied;
   for (const binding of activeTextBindings) {
     const optional = binding.runtime_optional === true;
-    const node = materializedNodeAtPath(binding, values)
+    const node = materializedNodeAtPath(binding, values, pathIndex)
       || (optional ? materializedOptionalTextNode(binding, values) : null);
     if (!node) {
       if (optional) ++diagnostics.text_optional_miss;
@@ -437,13 +447,14 @@ g.__pulpApplyMaterializedImportMetadata__ = function () {
     syncMaterializedCanvasBehaviorsAfterCommit();
   return applied;
 };
-function materializedMatches(node, selector) {
-  if (!node || typeof selector !== 'string') return false;
-  // The web-compat Element shim intentionally supports only a bounded CSS
-  // selector subset. A false result is not authoritative for semantic
-  // data/ARIA attributes added by the native React host, so fall through to
-  // the deterministic fallback matcher.
-  if (typeof node.matches === 'function' && node.matches(selector)) return true;
+// A selector's parse is a pure function of its text, and the registry scan
+// re-tests one selector against every candidate node. Parse once per distinct
+// selector so a scan costs regex work proportional to the selector vocabulary
+// rather than to the number of nodes.
+const materializedSelectorParses = new Map();
+function materializedParseSelector(selector) {
+  const memo = materializedSelectorParses.get(selector);
+  if (memo) return memo;
   let remaining = selector.trim();
   const attributes = [];
   remaining = remaining.replace(
@@ -455,16 +466,34 @@ function materializedMatches(node, selector) {
       return '';
     });
   const idMatch = remaining.match(/#([A-Za-z0-9_-]+)/);
-  const classMatches = Array.from(remaining.matchAll(/\\.([A-Za-z0-9_-]+)/g));
-  const tag = remaining.replace(/#[A-Za-z0-9_-]+/g, '')
-    .replace(/\\.[A-Za-z0-9_-]+/g, '').trim().toLowerCase();
+  const parsed = {
+    attributes: attributes,
+    id: idMatch ? idMatch[1] : null,
+    classes: Array.from(remaining.matchAll(/\\.([A-Za-z0-9_-]+)/g))
+      .map(function (match) { return match[1]; }),
+    tag: remaining.replace(/#[A-Za-z0-9_-]+/g, '')
+      .replace(/\\.[A-Za-z0-9_-]+/g, '').trim().toLowerCase(),
+  };
+  materializedSelectorParses.set(selector, parsed);
+  return parsed;
+}
+function materializedMatches(node, selector) {
+  if (!node || typeof selector !== 'string') return false;
+  // The web-compat Element shim intentionally supports only a bounded CSS
+  // selector subset. A false result is not authoritative for semantic
+  // data/ARIA attributes added by the native React host, so fall through to
+  // the deterministic fallback matcher.
+  if (typeof node.matches === 'function' && node.matches(selector)) return true;
+  const parsed = materializedParseSelector(selector);
+  const attributes = parsed.attributes;
+  const tag = parsed.tag;
   if (tag && String(node.tagName || '').toLowerCase() !== tag) return false;
-  if (idMatch && String(node.id || node.getAttribute?.('id') || '') !== idMatch[1]) {
+  if (parsed.id && String(node.id || node.getAttribute?.('id') || '') !== parsed.id) {
     return false;
   }
   const classes = String(node.className || node.getAttribute?.('class') || '')
     .split(/\\s+/).filter(Boolean);
-  for (const match of classMatches) if (!classes.includes(match[1])) return false;
+  for (const wanted of parsed.classes) if (!classes.includes(wanted)) return false;
   for (const attribute of attributes) {
     if (typeof node.getAttribute !== 'function') return false;
     const actual = node.getAttribute(attribute.name);
@@ -504,6 +533,27 @@ function materializedLastDescendantSplit(selector) {
   }
   return split;
 }
+// Misses from the registry scan, keyed by the epoch @pulp/react bumps on every
+// host mutation. A miss is the expensive answer: it reads and match-tests EVERY
+// registry node before returning null, while a hit stops at the first match.
+// Captured-state resolution asks one selector per state and takes the first
+// that answers, so every state ahead of the live one costs a full-registry miss
+// on every React commit.
+//
+// Only negative answers are retained. A node that matched is a live object
+// whose own attributes can be rewritten by a paint-only commit that does not
+// bump the epoch; "nothing in the registry matches this selector" cannot change
+// without the registry or a matched attribute changing, and both bump it.
+//
+// Caching is declined outright when no epoch has been published -- a plain
+// importer runtime with no @pulp/react host, or one running before the first
+// commit. Without a bumping epoch a retained miss would never be invalidated,
+// which is a stale answer rather than a cheap one.
+let materializedFindMissEpoch = null;
+const materializedFindMisses = new Set();
+function materializedFindMissKey(selector, ancestor) {
+  return selector + '\u0000' + (ancestor || '');
+}
 g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
   if (typeof selector !== 'string' || selector.length === 0) return null;
   if (g.document && typeof g.document.querySelector === 'function') {
@@ -511,6 +561,17 @@ g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
     if (browserNode && (!ancestor || materializedClosest(browserNode, ancestor))) {
       return browserNode;
     }
+  }
+  const epoch = g.__pulpMaterializedTreeEpoch__;
+  const cacheable = typeof epoch === 'number';
+  let missKey = '';
+  if (cacheable) {
+    if (epoch !== materializedFindMissEpoch) {
+      materializedFindMisses.clear();
+      materializedFindMissEpoch = epoch;
+    }
+    missKey = materializedFindMissKey(selector, ancestor);
+    if (materializedFindMisses.has(missKey)) return null;
   }
   let targetSelector = selector.trim();
   let effectiveAncestor = ancestor || '';
@@ -537,6 +598,7 @@ g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
         (!effectiveAncestor || materializedClosest(
           directParentSelector ? parent : node, effectiveAncestor))) return node;
   }
+  if (cacheable) materializedFindMisses.add(missKey);
   return null;
 };
 g.__pulpActivateMaterializedElement__ = function (selector, eventName, eventData) {

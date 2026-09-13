@@ -45,6 +45,17 @@ Follow-up: enumerate observed React features (concurrent rendering,
 suspense boundaries, transition state, error boundaries, portal
 targets) and populate per-feature entries.
 
+## Hit-test-only props
+
+`hitSlop` is applied by `prop-applier-paint.ts` and reaches
+`View::set_hit_slop` without entering layout or paint. The applier accepts
+every form the style adapter does — number, 1-4-number shorthand string, and
+RN object — so the two authoring surfaces resolve identical input to
+identical edges. Emitting only the number form is a silent half-fix: a
+string falls through to a slop of zero with no error anywhere, which reads
+as "the fix did not work" rather than "the value was not understood". See
+`rn/hitSlop` for the grammar.
+
 ## Delegated event delivery
 
 React's delegated root listener now receives each native wheel tick once.

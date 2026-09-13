@@ -19,6 +19,12 @@ using namespace pulp::gpu_audio;
 using namespace pulp::gpu_audio_test;
 
 namespace {
+// A lane with no compute device must SKIP, out loud, and never `return` —
+// Catch2 records a bare early return as a PASS, so a GPU-less runner would
+// report this whole file green having asserted nothing about GpuSpectralStack.
+constexpr const char* kNoGpu =
+    "no GPU compute device available (Skia/Dawn not built, or no adapter)";
+
 void fill_sine(std::vector<float>& f, uint32_t k) {
     for (uint32_t i = 0; i < f.size(); ++i)
         f[i] = std::sin(2.0f * 3.14159265f * k * i / f.size());
@@ -38,7 +44,7 @@ TEST_CASE("GpuSpectralStack stacks and morphs frozen layers", "[gpu_audio][spect
     constexpr uint32_t FFT = 512, HOP = 128, K1 = 21, K2 = 53;
     GpuSpectralStack st;
     REQUIRE(st.prepare(FFT, HOP, 3));
-    if (!st.available()) return;
+    if (!st.available()) SKIP(kNoGpu);
 
     std::vector<float> a(FFT), b(FFT);
     fill_sine(a, K1);
@@ -72,7 +78,7 @@ TEST_CASE("GpuSpectralStack smear spreads spectral energy", "[gpu_audio][spectra
     constexpr uint32_t FFT = 512, HOP = 128, K1 = 40;
     GpuSpectralStack st;
     REQUIRE(st.prepare(FFT, HOP, 1));
-    if (!st.available()) return;
+    if (!st.available()) SKIP(kNoGpu);
 
     std::vector<float> a(FFT);
     fill_windowed_sine(a, K1);
@@ -90,7 +96,7 @@ TEST_CASE("GpuSpectralStack smear spreads spectral energy", "[gpu_audio][spectra
 TEST_CASE("GpuSpectralStack render before capture fails", "[gpu_audio][spectral][gpu]") {
     GpuSpectralStack st;
     REQUIRE(st.prepare(256, 128, 2));
-    if (!st.available()) return;
+    if (!st.available()) SKIP(kNoGpu);
     std::vector<float> out(256, 0.0f);
     REQUIRE_FALSE(st.render(out.data(), nullptr, 0.0f, 0.0f));
 }
@@ -181,7 +187,7 @@ TEST_CASE("SpectralStack keeps a muted layer's phase advancing (no un-mute click
         GpuSpectralStack gmuted, ghot;
         REQUIRE(gmuted.prepare(FFT, HOP, 2));
         REQUIRE(ghot.prepare(FFT, HOP, 2));
-        if (!gmuted.available()) return;  // no device in this environment
+        if (!gmuted.available()) SKIP(kNoGpu);
         for (auto* s : {&gmuted, &ghot}) {
             REQUIRE(s->capture(0, a.data()));
             REQUIRE(s->capture(1, b.data()));

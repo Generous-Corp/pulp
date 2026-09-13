@@ -57,8 +57,7 @@ std::string read_all(const std::string& path) {
 TEST_CASE("frame pipeline emits Perfetto spans across a headless render",
           "[gpu][tracing][frame][view]") {
     if (!pulp::view::has_gpu_capture()) {
-        SUCCEED("no GPU capture backend compiled in — frame-pipeline trace test skipped");
-        return;
+        SKIP("no GPU capture backend compiled in — frame-pipeline trace test skipped");
     }
 
     auto root = make_scene();
@@ -67,8 +66,7 @@ TEST_CASE("frame pipeline emits Perfetto spans across a headless render",
     // Probe the GPU frame path before asserting anything: a build with the GPU
     // backend can still lack a usable Dawn adapter at runtime (CI VM, no device).
     if (pulp::view::render_to_png_gpu(*root, kW, kH, 1.0f).empty()) {
-        SUCCEED("GPU frame path unavailable at runtime (no Dawn adapter) — skipped");
-        return;
+        SKIP("GPU frame path unavailable at runtime (no Dawn adapter) — skipped");
     }
 
     const auto out = (std::filesystem::temp_directory_path() /

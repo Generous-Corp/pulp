@@ -398,6 +398,16 @@ public:
         return bypassed_.load(std::memory_order_relaxed);
     }
 
+    // VST3 and CLAP both carry bypass AS a parameter, so the flagged
+    // `parameters()` entry is the whole answer and there is nothing else to
+    // probe.
+    BypassSurface bypass_surface() const override {
+        for (const auto& p : params_) {
+            if (p.flags.is_bypass) return BypassSurface::parameter;
+        }
+        return BypassSurface::none;
+    }
+
     std::vector<uint8_t> save_state() const override {
         if (!plugin_) return {};
         auto* ext = (const clap_plugin_state_t*)plugin_->get_extension(

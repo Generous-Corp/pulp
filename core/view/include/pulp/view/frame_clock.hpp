@@ -5,6 +5,7 @@
 /// Advanced externally by the run-loop host (native window, SDL, or test harness).
 
 #include <functional>
+#include <memory>
 #include <vector>
 #include <cstdint>
 
@@ -67,6 +68,12 @@ public:
     /// Reset all state (for testing).
     void reset();
 
+    /// Liveness token for holders that keep a raw FrameClock*. The token
+    /// expires when the clock is destroyed, so a long-lived observer (the
+    /// process-wide motion coordinator, for instance) can tell a live clock
+    /// from a stale pointer to one that has already gone out of scope.
+    std::weak_ptr<const void> liveness_token() const { return alive_; }
+
 private:
     struct Subscriber {
         int id;
@@ -85,6 +92,7 @@ private:
     float dt_ = 0;
     uint64_t frame_ = 0;
     int next_id_ = 1;
+    std::shared_ptr<const void> alive_ = std::make_shared<const char>('\0');
 };
 
 } // namespace pulp::view

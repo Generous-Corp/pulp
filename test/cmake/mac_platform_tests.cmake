@@ -160,3 +160,101 @@ if(APPLE AND NOT PULP_IOS)
     )
     catch_discover_tests(pulp-test-mac-hover-cursor-stationary)
 endif()
+if(APPLE AND NOT PULP_IOS)
+    # PULP_TEST_POINTER_DRAG spelling contract. The drive it feeds needs a real
+    # NSWindow, hit-test, and display link, so the parse is the only part a
+    # portable test can pin — and it is where a typo turns an unattended
+    # measurement into a silently idle window. Links pulp::view because the
+    # parser is defined beside its consumer in window_host_mac.mm.
+    add_executable(pulp-test-mac-test-pointer-drag
+        test_mac_test_pointer_drag.cpp
+    )
+    target_link_libraries(pulp-test-mac-test-pointer-drag PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+    )
+    catch_discover_tests(pulp-test-mac-test-pointer-drag)
+endif()
+
+if(APPLE AND NOT PULP_IOS)
+    # Whether a person SEES the cursor change while hovering. The stationary
+    # cases above drive the frame-path refresh on a windowless view and assert
+    # what the resolver computed; AppKit runs its own cursor pass and can reset
+    # that answer before it reaches the screen, so those cases pass whether or
+    # not hover works on a real window. These put the shipping view class in a
+    # live NSWindow, move the pointer with real CGEvents and no button held,
+    # pump the run loop, and read the cursor AppKit settled on.
+    #
+    # Requires a window-server session, Accessibility trust for synthetic
+    # pointer events, and an IDLE machine -- it drives the real pointer, so a
+    # human using the mouse corrupts the reading. Each case skips loudly when
+    # the session cannot support it rather than reporting a pass it did not
+    # measure. Labelled "validation" so it stays off the required headless gate,
+    # and "human-input" to mark that it takes over the pointer.
+    add_executable(pulp-test-mac-hover-cursor-live
+        test_mac_hover_cursor_live.mm
+    )
+    target_link_libraries(pulp-test-mac-hover-cursor-live PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+        "-framework ApplicationServices"
+    )
+    # Pull the host archive member; the cases message the class but reference
+    # no C++ symbol from the .mm.
+    target_link_options(pulp-test-mac-hover-cursor-live PRIVATE
+        "LINKER:-u,_OBJC_CLASS_$_PulpView"
+    )
+    catch_discover_tests(pulp-test-mac-hover-cursor-live
+        # RUN_SERIAL must precede LABELS: LABELS is a list property and would
+        # otherwise swallow "RUN_SERIAL;TRUE" as two more labels, letting these
+        # cases run concurrently and fight over the one system pointer.
+        PROPERTIES RUN_SERIAL TRUE
+                   LABELS "validation;mac;cursor;human-input")
+endif()
+if(APPLE AND NOT PULP_IOS)
+    # The cursor a window host applies on a BUTTONLESS hover, when the region
+    # under the pointer decides its cursor in a pointer-move handler — the
+    # shape a scripted UI has. A region with a statically assigned cursor is
+    # resolvable by hit-test alone and cannot see this defect, so the scene
+    # carries one only as the positive control. Nothing portable can pin the
+    # result: the answer lives in +[NSCursor currentCursor].
+    add_executable(pulp-test-mac-hover-cursor-delivery
+        test_mac_hover_cursor_delivery.mm
+    )
+    target_link_libraries(pulp-test-mac-hover-cursor-delivery PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+    )
+    # Pull the host archive member; the case messages the class but references
+    # no C++ symbol from window_host_mac.mm.
+    target_link_options(pulp-test-mac-hover-cursor-delivery PRIVATE
+        "LINKER:-u,_OBJC_CLASS_$_PulpView"
+    )
+    catch_discover_tests(pulp-test-mac-hover-cursor-delivery)
+endif()
+
+if(APPLE AND NOT PULP_IOS)
+    # A native child NSView attached via attach_native_child_view (a WKWebView,
+    # a hosted editor) is not in the Pulp View tree and owns its own cursor,
+    # but a macOS tracking area is not occluded by subviews — so the host still
+    # gets -mouseMoved: over it. These cases pin that a button-less move there
+    # leaves the child's cursor alone, with a control move over Pulp-owned
+    # content that must still publish the tree's cursor.
+    add_executable(pulp-test-mac-native-child-cursor
+        test_mac_native_child_cursor.mm
+    )
+    target_link_libraries(pulp-test-mac-native-child-cursor PRIVATE
+        pulp::view
+        Catch2::Catch2WithMain
+        "-framework AppKit"
+    )
+    # Pull the host archive members; the cases message the classes but
+    # reference no C++ symbol from either .mm.
+    target_link_options(pulp-test-mac-native-child-cursor PRIVATE
+        "LINKER:-u,_OBJC_CLASS_$_PulpView"
+        "LINKER:-u,_OBJC_CLASS_$_PulpPluginView"
+    )
+    catch_discover_tests(pulp-test-mac-native-child-cursor)
+endif()

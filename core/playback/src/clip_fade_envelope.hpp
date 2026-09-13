@@ -27,6 +27,43 @@ template <typename T> T fade_gain(timeline::ClipFadeShape shape, T progress) noe
     return progress;
 }
 
+/// Gain contributed by the placement fades a flattened leaf sits under, for a
+/// position measured in clip-relative frames.
+///
+/// Each ramp is evaluated as a window of fade PROGRESS, because that is what a
+/// shape reparameterizes. A leaf lies inside part of the ramp, so the shape is
+/// applied to the progress the leaf actually spans rather than to a ramp of its
+/// own between two endpoint gains; the second reading agrees at both edges and
+/// bends the wrong way between them for every shape but the identity.
+///
+/// Progress is a function of the position alone, so two neighbouring leaves cut
+/// from one nested window read the same gain at the frame they share and the
+/// boundary is inaudible.
+///
+/// Ramps multiply. A leaf can sit inside the head ramp of one placement and the
+/// tail ramp of another it nests within, each with its own shape, and the
+/// product of two shapes is not any single shape — which is why this is a list
+/// and not one more pair of fields.
+template <typename Position>
+float placement_fade_gain(const ClipPlacementFadeProgram& program, Position relative) noexcept {
+    const auto position = static_cast<double>(relative);
+    float value = 1.0f;
+    for (const auto& span : program.segments) {
+        const auto progress =
+            (position - span.silent_frame) / (span.open_frame - span.silent_frame);
+        // Fully open is the common case for a leaf that merely neighbours a
+        // ramp, and costs no transcendental.
+        if (progress >= 1.0)
+            continue;
+        if (!(progress > 0.0))
+            return 0.0f;
+        // Narrowed before the shape lookup for the reason the fractional
+        // overload below states: it pins EqualPower to `sinf`.
+        value *= fade_gain(span.shape, static_cast<float>(progress));
+    }
+    return value;
+}
+
 /// Clip gain including both fades, for a frame-exact position within the clip.
 ///
 /// `relative` is a whole frame offset from the clip's first timeline frame, so
@@ -42,6 +79,10 @@ inline float clip_envelope(const AudioClipRendererProgram& clip,
     if (clip.fade_out_frames != 0 && remaining < clip.fade_out_frames)
         value *= fade_gain(clip.fade_shape, static_cast<float>(remaining) /
                                                 static_cast<float>(clip.fade_out_frames));
+    // Guarded on presence: an unnested clip, or one under a placement that
+    // carries no fade, pays one predictable branch and nothing else.
+    if (clip.placement_fade)
+        value *= placement_fade_gain(*clip.placement_fade, relative);
     return value;
 }
 
@@ -71,6 +112,8 @@ inline float clip_envelope(const AudioClipRendererProgram& clip, long double rel
         value *= fade_gain(clip.fade_shape,
                            static_cast<float>(remaining / static_cast<long double>(
                                                               clip.fade_out_frames)));
+    if (clip.placement_fade)
+        value *= static_cast<long double>(placement_fade_gain(*clip.placement_fade, relative));
     return static_cast<float>(value);
 }
 

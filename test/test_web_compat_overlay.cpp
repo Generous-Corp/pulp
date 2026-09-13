@@ -253,3 +253,70 @@ TEST_CASE("auto-overlay supersedes the prior holder when a new claim fires",
     // Latest claim wins — ComboBox::open_dropdown semantics.
     REQUIRE(View::active_overlay_ != nullptr);
 }
+
+// ── 7. Outside-click consumption parity with the JSX `overlay` prop ──────
+//
+// `claimOverlay(id)` takes an optional second argument that sets
+// `View::overlay_consumes_outside_click()`. Omitting it means consume=false,
+// so the press that dismisses the overlay ALSO reaches the control beneath
+// it. The @pulp/react prop-applier and the web-compat `<select>` popup both
+// pass `true`; the CSS-shape auto-claim passed nothing.
+//
+// The split below is deliberate. `data-overlay="true"` is an explicit author
+// statement that the element is a popover — the same statement `<View
+// overlay>` makes — so it consumes, matching that path. The CSS-shape branch
+// is an inference, and a false positive there would swallow a real click
+// outright, so it stays click-through.
+
+TEST_CASE("auto-overlay: data-overlay=\"true\" consumes the outside click",
+          "[view][web-compat][issue-1148][auto-overlay]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.setAttribute('data-overlay', 'true');
+        d.style.position = 'absolute';
+    )");
+    REQUIRE(View::active_overlay_ != nullptr);
+    REQUIRE(View::active_overlay_->overlay_consumes_outside_click());
+}
+
+TEST_CASE("auto-overlay: CSS-shape inference does NOT consume the outside "
+          "click", "[view][web-compat][issue-1148][auto-overlay]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.style.position = 'absolute';
+        d.style.zIndex = '100';
+    )");
+    // Positive control for the negative assertion below: the claim really did
+    // fire, so `overlay_consumes_outside_click() == false` is a statement
+    // about the consume flag and not about an overlay that never existed.
+    REQUIRE(View::active_overlay_ != nullptr);
+    REQUIRE_FALSE(View::active_overlay_->overlay_consumes_outside_click());
+}
+
+TEST_CASE("auto-overlay: adding the data-overlay hint upgrades an existing "
+          "shape claim to consuming",
+          "[view][web-compat][issue-1148][auto-overlay]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.style.position = 'absolute';
+        d.style.zIndex = '100';
+    )");
+    REQUIRE(View::active_overlay_ != nullptr);
+    REQUIRE_FALSE(View::active_overlay_->overlay_consumes_outside_click());
+
+    // The element already holds the slot, so the claim-once guard would skip
+    // the bridge call and strand the stale consume value unless the tracked
+    // consume flag is part of the re-claim condition.
+    h.eval(R"( d.setAttribute('data-overlay', 'true'); )");
+    REQUIRE(View::active_overlay_ != nullptr);
+    REQUIRE(View::active_overlay_->overlay_consumes_outside_click());
+}

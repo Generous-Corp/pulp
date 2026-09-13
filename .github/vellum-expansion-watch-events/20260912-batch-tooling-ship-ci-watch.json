@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260912-batch-tooling-ship-ci-watch",
+  "created_at": "2026-09-12T03:35:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": ["design-source-ingest"],
+  "rationale": "Three tooling fixes batched into one PR to spend one CI run instead of three. design-source-ingest is crossed by the Rust CLI router only: when the sibling pulp-cpp delegate is absent, a known-but-delegated command fell through to the fuzzy suggester and suggested the command the user had just typed, so pulp ship reported 'Unknown command: ship / Did you mean: pulp ship?'. It now names the missing binary, the path searched and how to restore it, and distinguishes that cause from delegation switched off via PULP_RS_NO_FALLTHROUGH; a genuinely unknown command keeps its existing suggestion. Release tarballs cannot reach this state -- the packaging step hard-fails without pulp-cpp and the post-package smoke executes it -- so the reachable path is a source build that builds the pulp target without pulp-cli. The other two fixes do not cross a family selector: headless installer signing moves the product archive from productbuild --sign, which the signing key's ACL denies with CSSMERR_CSP_USER_CANCELED after all bundles are already signed, to an unsigned archive plus productsign, and teaches pulp ship doctor to probe installer signing rather than only codesign; and two ctest suites registered PROCESSORS 8 are added to the throughput classification set after measuring them at 13.6s and 70.4s against a 0.06s unweighted control. No importer, DesignIR, renderer, backend, font, asset or Skia pin changes; no fixture, snapshot or threshold moves. Registered watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": ["pulp-rs-help-parity", "ensure-signing-ready", "ci-throughput-workflows", "vellum-expansion-watch"],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

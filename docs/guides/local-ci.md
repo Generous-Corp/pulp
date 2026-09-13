@@ -1577,6 +1577,19 @@ publishes that context directly. It becomes terminal with the macOS work and
 does not wait for the combined matrix, a reporter runner, or the jobs API.
 Advisory Linux and Windows legs may therefore continue after queue admission.
 
+Because one job name carries the gate across all three events, that job also
+configures the same way on all three. It assembles its CMake arguments once —
+`-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF` — with no
+`github.event_name` branch adding to the list. A per-event flag would publish a
+differently configured build under the gate's name, and the flag that used to
+sit here, `-DPULP_ENABLE_GPU=OFF` on `workflow_dispatch`, showed exactly what
+that costs: `PULP_TEXT_SHAPING` follows `PULP_ENABLE_GPU`, so Skia went with it,
+`render_to_rgba` returned an empty buffer, and capture-based view tests failed
+for the configuration rather than for the change under test. Since Shipyard's PR
+validation arrives through `workflow_dispatch`, that was the routine path, not a
+fringe one. `tools/scripts/test_workflow_build_dirs.py` pins the single
+assembly line and the absence of any `cmake_args+=` append.
+
 Event-specific bootstrap jobs own `macos` only when classification intentionally
 omits native work or provider/classifier resolution fails closed. When a native
 matrix child exists, the corresponding bootstrap is inactive and uses an
@@ -1594,6 +1607,34 @@ on macOS's system volume); the routing helper then uses `GITHUB_WORKSPACE` only
 as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
 `tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
+
+## Whether the gate has a GPU is observed, not assumed
+
+Every GPU case in the suite skips when no adapter is present, which is the right
+behavior on a developer laptop and on the GitHub-hosted runners that carry no
+representative GPU. It also means a green `macos` check reads the same whether
+the self-hosted runner has a working adapter or quietly lost one: the skipped
+cases are the only difference, and nothing fails.
+
+`PULP_REQUIRE_GPU_ADAPTER` is how a lane states that it does have one. It is a
+policy switch, not a device probe. The single case that reads it,
+`A lane that requires a GPU adapter has one`, skips when the variable is unset
+and asserts when it is set: the surface is created, initialized, and its adapter
+must report available, must not be Dawn's Null backend (which validates API
+calls and composites nothing), and must not be a CPU adapter. Set it locally to
+turn a silent GPU skip into a real failure:
+
+```bash
+PULP_REQUIRE_GPU_ADAPTER=1 ctest --test-dir build --output-on-failure \
+  -R '^A lane that requires a GPU adapter has one$'
+```
+
+`build.yml` sets it on the self-hosted macOS leg in a step marked
+`continue-on-error`, so the runner's adapter state shows up in the log without
+the required check depending on an answer nobody has measured yet. Once the
+runs establish that the lane really does render, promote the step by deleting
+that line; if they establish that it does not, the honest fix is to stop calling
+it GPU coverage rather than to keep the skips.
 
 ## Routing contract (checked)
 

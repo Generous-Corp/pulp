@@ -88,6 +88,11 @@ let materializedRootSignature = '';
 // swapped -- would otherwise wait for the next host mutation to be applied at
 // all, and before this gate existed it simply ran on the following commit.
 let materializedHookApplied: unknown;
+// Monotonic mutation counter published to the importer runtime. It starts at 0
+// and is published on the first mark, so a runtime that reads it before any
+// commit sees `undefined` and declines to cache rather than trusting an epoch
+// that was never advertised.
+let materializedTreeEpoch = 0;
 
 // The marks live on the host-config METHOD boundaries, never inside the
 // attach / attachToRoot / detach helpers those methods usually delegate to.
@@ -99,6 +104,24 @@ let materializedHookApplied: unknown;
 // and the rendered tree all still look correct.
 function markMaterializedTreeDirty(): void {
     materializedTreeDirty = true;
+    // Publish the mutation as a monotonic epoch as well as a boolean.
+    //
+    // The boolean answers "should this commit re-apply metadata" and is
+    // consumed and cleared by resetAfterCommit. Captured-state matching asks a
+    // different question -- "can a selector's previous answer still be true" --
+    // and it is asked from the importer runtime, which cannot see a flag that
+    // resetAfterCommit has already cleared by the time it runs.
+    //
+    // Every structural mutation and every non-paint-only prop change marks the
+    // tree, and a captured-state selector matches on tag, id, class and
+    // attributes -- all of which are prop changes that land here. So a selector
+    // that found nothing at epoch N still finds nothing at epoch N, and the
+    // importer can skip re-scanning the whole registry for it. A paint-only
+    // commit, which is what a pointer drag emits by the hundred, does not bump
+    // the epoch and therefore does not invalidate that answer.
+    materializedTreeEpoch += 1;
+    (globalThis as unknown as Record<string, unknown>)
+        .__pulpMaterializedTreeEpoch__ = materializedTreeEpoch;
 }
 
 let _hc_count = 0;
@@ -494,19 +517,65 @@ function hasFixedTextDimension(value: unknown): boolean {
     return match !== null && Number(match[1]) > 0;
 }
 
+/// A fixed `lineHeight` pins a single-line Label's height as firmly as an
+/// explicit `height` does. `whiteSpace: nowrap` puts the native Label in
+/// single-line mode, and a positive line height short-circuits the intrinsic
+/// height calculation before it consults the shaper, so the measured height
+/// depends on neither the string nor its glyphs. A unitless value is a
+/// font-size multiplier, which is equally text-independent here because the
+/// gate already requires every non-text prop -- fontSize included -- to be
+/// unchanged. Percentages are rejected: the typography applier parses `'50%'`
+/// as 50px, and a correctness gate must not rest on that coercion.
+function hasFixedLineHeight(value: unknown): boolean {
+    if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+    if (typeof value !== 'string') return false;
+    const match = value.trim().match(/^([0-9]+(?:\.[0-9]+)?)(?:px)?$/);
+    return match !== null && Number(match[1]) > 0;
+}
+
+/// Types that appear in TEXT_BEARING but do not themselves become a native
+/// Label: their props land on a Row, Panel or TextEditor while the text goes
+/// to a separate caption child. `setLineHeight` is a no-op on a non-Label, so
+/// a fixed `lineHeight` on one of these pins nothing and the caption's height
+/// still follows its glyphs. Add any future delegating type here.
+const TEXT_DELEGATING: Set<Type> = new Set([
+    'button', 'Button', 'TextEditor',
+] as Type[]);
+
+/// A positive line clamp puts the Label back into multi-line mode, and the
+/// clamped height is `lineHeight x min(shaped lines, clamp)` -- text-dependent
+/// again even at a fixed width.
+function hasLineClamp(props: Props): boolean {
+    for (const key of ['lineClamp', 'WebkitLineClamp', 'webkitLineClamp']) {
+        const raw = props[key];
+        const n = typeof raw === 'number' ? raw : Number.parseFloat(String(raw ?? ''));
+        if (Number.isFinite(n) && n > 0) return true;
+    }
+    return false;
+}
+
 /// True when a React commit changes only the copy of a text-bearing native
-/// Label whose geometry is explicitly fixed. In that case Label::set_text()
-/// repaints without invalidating Yoga, and re-applying Chromium-captured
-/// metadata would manufacture a full-tree layout that the native mutation did
-/// not require.
+/// Label whose height cannot move as a result. Re-applying Chromium-captured
+/// metadata for such a commit would manufacture a full-document re-apply that
+/// the native mutation did not require. The native Label still invalidates its
+/// own layout unless both dimensions are explicit; what this gate skips is the
+/// captured-metadata re-apply, not the Yoga pass.
 function isFixedTextOnlyUpdate(type: Type, oldProps: Props, newProps: Props): boolean {
     if (!TEXT_BEARING.has(type)) return false;
     const oldText = asText(oldProps.children) ?? (oldProps.text as string | undefined);
     const newText = asText(newProps.children) ?? (newProps.text as string | undefined);
     if (oldText === newText || newText === undefined) return false;
-    if (!hasFixedTextDimension(newProps.width)
-        || !hasFixedTextDimension(newProps.height)
-        || newProps.whiteSpace !== 'nowrap') return false;
+    if (newProps.whiteSpace !== 'nowrap'
+        || !hasFixedTextDimension(newProps.width)) return false;
+    // Either an explicit height or a fixed line height pins the box
+    // vertically; requiring the former turned the latter into a silent
+    // whole-document re-apply on every keystroke of changing status copy.
+    // The line-height route only holds when this node is itself the native
+    // Label and nothing has put it back into multi-line mode.
+    if (!hasFixedTextDimension(newProps.height)
+        && !(hasFixedLineHeight(newProps.lineHeight)
+            && !TEXT_DELEGATING.has(type)
+            && !hasLineClamp(newProps))) return false;
     const nonTextKeys = new Set([...Object.keys(oldProps), ...Object.keys(newProps)]);
     nonTextKeys.delete('children');
     nonTextKeys.delete('text');

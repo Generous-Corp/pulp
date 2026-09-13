@@ -54,6 +54,48 @@ Project nested_note_project(bool child_has_device = false, std::size_t root_refe
     return take(Project::create(std::move(input)));
 }
 
+// Child-track processing a SequenceRef then nests. Named for the same reason
+// NestedChildState is: a call site reads as the document it authors, and the
+// two constructs stay separable. They must be, because they are refused by
+// different codes and a document that carries both would only ever report the
+// first.
+struct NestedChildProcessing {
+    bool device_chain = false;
+    bool automation_lane = false;
+};
+
+// One child track carrying `processing`, nested by a root exactly as
+// nested_note_project nests its own. The lane targets the track's own mixer
+// gain rather than a device parameter so the automation case needs no device
+// placement to be valid, which is what lets the two constructs be authored
+// independently.
+Project nested_child_processing_project(NestedChildProcessing processing) {
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "track";
+    child_input.clips.push_back(take(Clip::create({12}, {0}, {960}, note_content(13))));
+    if (processing.device_chain)
+        child_input.device_chain.push_back(DevicePlacement{{14}});
+    if (processing.automation_lane) {
+        auto curve = take(AutomationCurve::create(
+            {AutomationPoint{{16}, {0}, 1.0f, AutomationInterpolation::Continuous, 0.0f},
+             AutomationPoint{{17}, {960}, 0.5f, AutomationInterpolation::Continuous, 0.0f}}));
+        child_input.automation_lanes.push_back(take(AutomationLane::create(
+            {15}, TrackMixerTarget{TrackMixerParameter::Gain}, std::move(curve))));
+    }
+
+    auto child = take(Sequence::create({10}, "child", TickDuration{960},
+                                       {take(Track::create(std::move(child_input)))}));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {nested_clip(4, 10)})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
 // Child-track state a SequenceRef then nests. Named rather than positional so
 // a call site reads as the document it authors, and so adding a state later
 // cannot silently re-target an existing call.

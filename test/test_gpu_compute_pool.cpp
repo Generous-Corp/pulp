@@ -123,8 +123,7 @@ TEST_CASE("StagingBufferPool recycles buffers on rapid acquire/release",
           "[render][gpu][pool]") {
     auto env = make_dawn_env();
     if (!env.valid()) {
-        WARN("no Dawn device available (headless CI without GPU); skipping");
-        return;
+        SKIP("no Dawn device available (headless CI without GPU); skipping");
     }
 
     std::size_t created = 0;
@@ -157,8 +156,7 @@ TEST_CASE("StagingBufferPool bounds allocation under mixed sizes",
           "[render][gpu][pool]") {
     auto env = make_dawn_env();
     if (!env.valid()) {
-        WARN("no Dawn device available; skipping");
-        return;
+        SKIP("no Dawn device available; skipping");
     }
 
     std::size_t created = 0;
@@ -197,8 +195,7 @@ TEST_CASE("StagingBufferPool is safe under concurrent acquire/release",
           "[render][gpu][pool]") {
     auto env = make_dawn_env();
     if (!env.valid()) {
-        WARN("no Dawn device available; skipping");
-        return;
+        SKIP("no Dawn device available; skipping");
     }
 
     std::size_t created = 0;
@@ -244,8 +241,7 @@ TEST_CASE("StagingBufferPool destructor releases all buffers",
           "[render][gpu][pool]") {
     auto env = make_dawn_env();
     if (!env.valid()) {
-        WARN("no Dawn device available; skipping");
-        return;
+        SKIP("no Dawn device available; skipping");
     }
 
     std::size_t created = 0;
@@ -282,8 +278,7 @@ TEST_CASE("StagingBufferPool clear() drops all tracked buffers",
           "[render][gpu][pool]") {
     auto env = make_dawn_env();
     if (!env.valid()) {
-        WARN("no Dawn device available; skipping");
-        return;
+        SKIP("no Dawn device available; skipping");
     }
 
     StagingBufferPool pool(env.device, 4);
@@ -312,8 +307,7 @@ TEST_CASE("StagingBufferPool::discard drops in_flight slot without recycling",
     // without discard(), in_flight_count() would grow linearly.
     auto env = make_dawn_env();
     if (!env.valid()) {
-        WARN("no Dawn device available; skipping");
-        return;
+        SKIP("no Dawn device available; skipping");
     }
 
     std::size_t created = 0;
@@ -343,8 +337,7 @@ TEST_CASE("StagingBufferPool separates pools by usage mask",
           "[render][gpu][pool]") {
     auto env = make_dawn_env();
     if (!env.valid()) {
-        WARN("no Dawn device available; skipping");
-        return;
+        SKIP("no Dawn device available; skipping");
     }
 
     std::size_t created = 0;
@@ -374,7 +367,7 @@ TEST_CASE("StagingBufferPool separates pools by usage mask",
 #else  // !PULP_HAS_SKIA
 
 TEST_CASE("StagingBufferPool tests require Skia/Dawn", "[render][gpu][pool]") {
-    SUCCEED("Skipped: PULP_HAS_SKIA not defined");
+    SKIP("Skipped: PULP_HAS_SKIA not defined");
 }
 
 #endif  // PULP_HAS_SKIA

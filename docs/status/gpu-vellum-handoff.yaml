@@ -317,8 +317,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "74336108de9d91810fcd7e15c73994d3b73a9cc1",
-          "object_id": "7a003b641cc60f9e1c930e2d153ac8219b8a69ea",
+          "revision": "bcc5d6bf7a85029afdea039756969123f50801b8",
+          "object_id": "426e25e91ca411c53fe268d656cd5bc004b10125",
           "object_type": "blob"
         }
       ],
@@ -451,8 +451,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/platform/mac/window_host_mac.mm",
           "state": "pulp-owned-retained",
-          "revision": "2ea23dd42aca099a218b43aa1dffd719482a0827",
-          "object_id": "77f14eb4fe729fde64ce8e5322c37291b05d2402",
+          "revision": "99cbbe4dc2af11f1528e41e954c169ca4aa80f06",
+          "object_id": "37c2520fed302182d9b26ceba14c242d09ea20a2",
           "object_type": "blob"
         },
         {
@@ -467,16 +467,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/view.cpp",
           "state": "pulp-owned-retained",
-          "revision": "397d960b7d3c933932593ce64562f87d0289da77",
-          "object_id": "974aa5e81f64e18ddc06f141fd586cdb7edc5b14",
+          "revision": "426ebb0b25073fb5d6d8b74b64e3aad86c7525a3",
+          "object_id": "abb9b513ac333ce2db3936a87bd03024327be4f6",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "d697d4a524d9b45b1940923586a6e127644a319d",
-          "object_id": "a5789843cd1e5cd0f0e23c31d530a14b6300c152",
+          "revision": "8731f324d629a356f7fcb8fcad5e87d4a0aacba3",
+          "object_id": "f45fda89408cd246ad1be54e9b1be59e74c32631",
           "object_type": "blob"
         },
         {
@@ -2759,8 +2759,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-analysis/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "ae723a0a8fcbbb1c7c86833c93ae93ad5bd17d1a",
-          "object_id": "1a48f7cecd27058be525cbb0705e3e49b46e51ec",
+          "revision": "bccc2b686067285ae1756db4cf0b92514f7e4387",
+          "object_id": "49ee63d4b50a93a1e42b37285380d7f6982ab85b",
           "object_type": "blob"
         },
         {

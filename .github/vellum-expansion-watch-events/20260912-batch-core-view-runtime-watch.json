@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260912-batch-core-view-runtime-watch",
+  "created_at": "2026-09-12T03:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": ["design-output-and-packaging", "design-source-ingest", "render-assets-and-backends"],
+  "rationale": "Two independent slices batched into one PR to spend one CI run instead of two; each crosses a family selector without moving authority. render-assets-and-backends is crossed by core/view only: a use-after-free in View::dismiss_active_overlay, where the dismissed overlay was read back through the member it had just cleared, plus pointer_dispatch honouring consumption so a routed context press is not delivered twice. The control rebinds the local to a reference to restore the exact hazard and fails deterministically in plain Release, so no sanitizer build is needed to observe it. design-source-ingest and design-output-and-packaging are crossed by the materialized import runtime: __pulpFindMaterializedElement__ gains an epoch-keyed negative cache so a per-commit miss is not re-derived for every binding, taking match-tests from 180000 to 1800 in the drag steady state. Hits are deliberately not cached, so a state matching on its first selector sees no change. stateHook is deliberately not gated on shouldReapply because __pulpMaterializedStateResolver__ is an app-supplied extension point never defined in-repo and gating could silently stop polling it. No renderer, backend, font, asset or Skia pin changes; no fixture, snapshot or threshold moves; no DesignIR schema change and no importer output change. Registered watch-only so each family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": ["pulp-test-view", "pulp-browser-capture-node-unit", "confirm-failure-harness", "vellum-expansion-watch"],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -3915,6 +3915,41 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   expires, and writes the resolved browser build to stderr as a
   `[browser-capture]` line before any page work, so a failed capture already
   names both the Chrome and the stalled call.
+- **Prove a capture deadline reaped the BROWSER, not just the profile.**
+  Removing the profile directory is the easy half, and it is the half a cleanup
+  test naturally asserts. The launched Chromium is a detached process *group*,
+  so it survives the runtime's `process.exit` and is re-parented to init, where
+  nothing will ever reap it — a green "profile removed" assertion sits happily
+  on top of a permanent leak. Cleanup that fires mid-launch is the sharp case:
+  the ownership marker lives inside the profile, so removing the profile
+  guarantees custody is never recorded, and any teardown gated on recorded
+  custody degrades to a silent no-op exactly when it is needed. Two rules
+  follow. A launch abandoned before custody exists must still be terminated
+  through the live child handle: while the handle is unreaped POSIX will not
+  reuse that pid, and since a group's id is its leader's pid, no other group can
+  come to bear the number either — which is what makes `kill(-pid)` safe there,
+  with no await permitted between the `exitCode` check and the signal. And the
+  test must assert the **process is gone**, not the directory: sample `ps` with
+  a positive control in the same sample, because BSD `pgrep -fc` prints 0 both
+  when nothing matched and when the pattern was wrong, and the second one reads
+  exactly like a pass.
+- **The launch-identity check needs a deadline, not a single probe.**
+  `startBrowserGuardian` refuses to guard a pid until `/bin/ps` shows it owning
+  this capture's `--user-data-dir`, which is right: a numeric pid is not an
+  identity. But a just-spawned pid does not identify as the browser yet. Two
+  windows produce a false violation. Between fork and exec the pid still
+  carries the launcher's own argv, which owns no profile. And the `ps` helper
+  kills its own read at 3s and returns an empty string, which on a saturated
+  runner is reported as a mismatch rather than as an unread. Both render the
+  same message, `browser launch identity did not match its owned profile`,
+  wrapped in advice to install a browser that is already installed — and both
+  eject a PR from the merge queue with a red required `macos`. Probe to a
+  deadline (`resolveOwnedBrowserIdentity`) instead: keep failing closed, abort
+  at once when the child has exited, and say which of the two happened. A test
+  for this must make the pre-exec argv genuinely not own the profile —
+  `sh -c '... --user-data-dir=X ...'` carries the string in its own argv, so
+  `identityOwnsProfile` matches before any exec and the race is never exercised.
+
 - The semantic report is evidence, not permission to promote visual controls.
   Only explicit source contracts such as `data-pulp-role` may become native
   interaction overlays in a later stage.
@@ -6801,3 +6836,86 @@ Note the **Swift** emitter (`design_swift_codegen.cpp`) is a deliberate fourth
 lowering that shares only `resolve_design_ir_native` and re-derives the rest, so
 "all native lanes share X" is false for it. Plan for two full sharers (runtime +
 C++ baker), one partial (native-JS), and one non-sharer (Swift).
+
+## The materialized runtime pays its metadata cost on EVERY React commit
+
+`materialized_runtime_entry.mjs` reapplies import metadata from
+`resetAfterCommit` — every commit, not just mount. Two shapes inside it are
+therefore multiplied by the commit rate, and both read as "fine" in isolation:
+
+- `materializedNodeAtPath` used to rebuild its whole root/registry index per
+  **binding**, so one application cost O(bindings × registry).
+- `materializedMatches` re-parsed its selector text per **candidate node**, so
+  one registry scan cost regex work proportional to the node count rather than
+  to the selector vocabulary.
+
+Neither is visible at small registry sizes. A UI change that mounts a large
+always-present hidden subtree (a settings panel kept in the tree so keyboard
+traversal can reach it) triples the registry and turns both into a per-commit
+tax — which surfaces as unrelated-looking jank in whatever gesture happens to
+commit most often (a slider drag), not in the feature that grew the tree.
+
+The index is deliberately rebuilt once per application rather than cached
+across commits: a retained index resolves stale paths after any reparent. The
+selector parse memo has no such concern — a parse is a pure function of the
+selector text.
+
+**Guarding a change here:** `materializedMatches` is reachable from nearly every
+metadata binding, yet hard-breaking it leaves the dropdown arrow-traversal and
+settings cases GREEN. The case that actually catches it is *every native
+dropdown dismisses by Escape and outside press*. Run that one, not just the
+arrow cases, whenever this function changes.
+
+**Editing the file at all:** the runtime is returned as a single template
+literal (`const entry = \`…\`; return entry;`), so a regex in the source needs
+doubled backslashes (`\\[` emits `\[`), and a bare backtick or `${` anywhere in
+that region silently corrupts the emitted bundle. `node --check` does **not**
+catch that corruption — it exits 0 on truncated and broken files. Verify an
+emitted classic bundle with `vm.Script`, and an ESM source with a dynamic
+`import()` discriminating on `SyntaxError`; plant a break first and confirm the
+checker rejects it.
+
+**Testing the generator's output, not the generator:** both costs above live in
+the emitted runtime, so a test that only inspects the builder's return string
+cannot see them. `materialized_runtime_commit_cost.test.mjs` generates the
+entry, strips its two `import` lines, and runs the rest verbatim in a
+`vm.createContext` sandbox with React, the native bridge, and
+`__pulpReactDomRegistry__` stubbed — then drives the published
+`__pulpApplyMaterializedImportMetadata__`. Executing it (rather than parsing it)
+is the point: a declaration placed in the wrong function body still parses, and
+`new Function` would accept it too, so only evaluation catches a scope mistake.
+Assert **operation counts**, never wall-clock — the shared index is pinned by
+counting `parentElement` reads through a getter (one per registry node plus one
+per resolved binding; a per-binding rebuild costs `registry × bindings`), and
+the selector memo by counting parse passes at two registry sizes and requiring
+them equal. A wall-clock budget would flake on a shared runner and could not say
+which of the two costs regressed. Pair the counters with one resolution case:
+counters alone stay green if traversal breaks and resolves nothing.
+
+**Negative-control these with `confirm_failure.sh --no-build`.** The script's
+compiled lane exists to defeat a *build* hazard: restoring a source and
+rebuilding inside the same filesystem second leaves make comparing equal mtimes,
+so the object is judged current and the binary keeps the old code — which is why
+that lane demands `--build-dir`/`--target`, deletes objects, and withholds a
+verdict until it observes a compile line. A `.mjs` has no object and no build
+step, and each `node --test` run reads the source at import in a fresh process,
+so that hazard cannot arise. `--no-build` drops the build and binary-fingerprint
+steps and keeps everything that carries the verdict — baseline passes, the break
+changes the file's content hash, the broken run fails, the restore passes — and
+it restores through git, which a hand-kept `.bak` does not:
+
+```sh
+tools/scripts/confirm_failure.sh \
+  --file tools/import-design/jsx-runtime/materialized_runtime_entry.mjs \
+  --break "perl -0pi -e 's/materializedNodeAtPath\(binding, values, pathIndex\)/materializedNodeAtPath(binding, values)/g'" \
+  --no-build \
+  --test "node --test tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs"
+```
+
+It works the same way for the `@pulp/react` vitest suites, whose TypeScript is
+transpiled per run from source. Whichever lane you use, keep the discipline the
+exit code encodes: a break that changes nothing is INCONCLUSIVE (exit 2), not a
+pass. Patching a name that does not exist leaves the count at zero on both
+sides, the test passes, and that reads as "the test does not cover this" — a
+dead instrument reported as a finding. The script refuses that case outright
+rather than letting it read as a verdict.

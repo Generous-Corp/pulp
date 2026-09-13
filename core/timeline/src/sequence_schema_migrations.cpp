@@ -150,6 +150,11 @@ bool states_identity_track_order(const JsonValue& order, const JsonValue& tracks
 // the v7 one. Deliberately aliased rather than duplicated, since two identical
 // lists can only ever drift apart.
 constexpr auto& v7_members = v6_members;
+// v8 adds the dynamics lane, which sorts between the chord lane and the groove.
+constexpr std::string_view v8_members[] = {
+    "absolute_duration", "chord_scale_lane", "dynamics_lane", "groove",      "id",     "markers",
+    "musical_duration",  "name",             "regions",       "scenes",      "track_order",
+    "tracks"};
 // The three members a v7 chord event carries beyond a v6 one, and the defaults
 // that make an upgraded event mean exactly what the v6 one meant. They are
 // written as one canonical run so the upgrade and the downgrade cannot spell
@@ -187,6 +192,14 @@ const JsonValue* region_data(const JsonValue& region) noexcept {
         return nullptr;
     const auto* data = region.find("data");
     return data && data->kind == JsonValue::Kind::Object ? data : nullptr;
+}
+
+// Whether the lane states no intensity at all. Only the empty lane a v7 reader
+// would have produced can be dropped: one authored event is a performance
+// instruction with no v7 spelling, and a downgrade may not drop authored data
+// quietly just because a v7 reader would never have asked for it.
+bool states_no_dynamics(const JsonValue& lane) noexcept {
+    return lane.kind == JsonValue::Kind::Array && lane.array.empty();
 }
 
 // Whether a v7 chord event says exactly what a v6 one could have said. A bass,
@@ -516,6 +529,55 @@ migrate_sequence_v7_to_v6(std::string_view source, BoundedJsonSink& output, cons
             return fail();
         edits.push_back(RawEdit{role_comma, role.end, {}});
     }
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v7_to_v8(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 7) || !has_exact_members(*data, v7_members) ||
+        version->begin >= version->end)
+        return fail();
+    // The lane sorts immediately after chord_scale_lane in canonical order, and
+    // has_exact_members already proved that order, so this offset is
+    // trustworthy. An empty lane states no intensity, which is exactly what a
+    // v7 reader understood the document to say.
+    const auto& chord_lane = data->object[1].second;
+    if (chord_lane.begin >= chord_lane.end)
+        return fail();
+    std::string inserted = ",\"dynamics_lane\":";
+    inserted += kEmptyDynamicsLaneJson;
+    std::array edits{RawEdit{chord_lane.end, chord_lane.end, inserted},
+                     RawEdit{version->begin, version->end, "8"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v8_to_v7(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 8) || !has_exact_members(*data, v8_members) ||
+        version->begin >= version->end)
+        return fail();
+    const auto& lane = data->object[2].second;
+    // Refuse rather than drop: a v7 reader that lost the lane would perform the
+    // sequence at a different intensity, not a less annotated one.
+    if (!states_no_dynamics(lane))
+        return fail();
+    const auto lane_comma = source.find(',', data->object[1].second.end);
+    if (lane_comma == std::string_view::npos || lane_comma >= lane.begin)
+        return fail();
+    std::array edits{RawEdit{lane_comma, lane.end, {}},
+                     RawEdit{version->begin, version->end, "7"}};
     return finish(output, apply_edits(source, edits, output));
 }
 

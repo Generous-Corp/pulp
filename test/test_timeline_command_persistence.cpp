@@ -217,6 +217,15 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
                  R"({"device_id":"8","expected":")" + std::string(64, 'd') +
                      R"(","replacement":")" + std::string(64, 'e') +
                      R"(","sequence_id":"5","track_id":"6"})"),
+        // Intensity travels as its float bit pattern: 1056964608 is 0.5f and
+        // 1065353216 is 1.0f. A decimal literal would round-trip through the
+        // parser and could land one ulp away, which an exact-value gate reads
+        // as a different lane.
+        envelope("pulp.timeline.command.set_dynamics_lane",
+                 R"({"expected":[],"replacement":[{"intensity_bits":"1056964608",)"
+                 R"("interpolation":"continuous","position":"0"},)"
+                 R"({"intensity_bits":"1065353216","interpolation":"hold","position":"1920"}],)"
+                 R"("sequence_id":"5"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -311,6 +320,13 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
             "pulp.effect.delay");
     REQUIRE(std::holds_alternative<SetDeviceState>(commands[46]));
     REQUIRE(std::get<SetDeviceState>(commands[46]).replacement == hash('e'));
+    REQUIRE(std::holds_alternative<SetDynamicsLane>(commands[47]));
+    const auto& dynamics = std::get<SetDynamicsLane>(commands[47]);
+    REQUIRE(dynamics.expected.empty());
+    REQUIRE(dynamics.replacement.events().size() == 2);
+    REQUIRE(dynamics.replacement.events()[0].intensity == 0.5f);
+    REQUIRE(dynamics.replacement.events()[1].intensity == 1.0f);
+    REQUIRE(dynamics.replacement.events()[1].interpolation == AutomationInterpolation::Hold);
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;

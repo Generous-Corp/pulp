@@ -433,15 +433,14 @@ static_assert(timeline::kClipContentAlternativeCount == 6,
               "variant; if it cannot, say so at the compiler's content classifier.");
 
 runtime::Result<AudioClipRendererProgram, AudioRendererError>
-detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
-                                          const timeline::Project& project,
-                                          const timebase::CompiledTempoMap& tempo_map,
-                                          const DecodedAudioAssetPool& assets,
-                                          const AudioRendererLimits& limits,
-                                          AudioSampleRateConverterCache& cache,
-                                          double source_frame_offset) {
+detail::compile_audio_clip_program_cached(
+    const timeline::Clip& clip, const timeline::Project& project,
+    const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
+    const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache,
+    double source_frame_offset, const std::vector<LoweredPlacementFade>& placement_fades) {
     return detail::compile_audio_clip_program_cached(clip, project, tempo_map, assets, limits,
-                                                     cache, source_frame_offset, nullptr);
+                                                     cache, source_frame_offset, nullptr,
+                                                     placement_fades);
 }
 
 runtime::Result<AudioClipRendererProgram, AudioRendererError>
@@ -449,7 +448,8 @@ detail::compile_audio_clip_program_cached(
     const timeline::Clip& clip, const timeline::Project& project,
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache,
-    double source_frame_offset, std::shared_ptr<const OfflineStretchArtifact> stretch_artifact) {
+    double source_frame_offset, std::shared_ptr<const OfflineStretchArtifact> stretch_artifact,
+    const std::vector<LoweredPlacementFade>& placement_fades) {
     const auto* media = std::get_if<timeline::MediaRef>(&clip.content());
     if (!media)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
@@ -528,6 +528,43 @@ detail::compile_audio_clip_program_cached(
     if (!std::isfinite(playback.gain_linear) || playback.gain_linear < 0.0f ||
         fade_in_frames > timeline_frames || fade_out_frames > timeline_frames)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidFade, clip.id());
+    std::shared_ptr<const ClipPlacementFadeProgram> placement_fade;
+    if (!placement_fades.empty()) {
+        // Ramps arrive only from flattening, which refuses to descend into
+        // anything that is not musically anchored, so an absolute clip carrying
+        // one means the two sides disagree. Saying so beats converting a tick
+        // through a tempo map the clip does not live on.
+        if (clip.time_anchor() != timeline::ClipTimeAnchor::Musical)
+            return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidFade, clip.id());
+        ClipPlacementFadeProgram program;
+        program.segments.reserve(placement_fades.size());
+        for (const auto& span : placement_fades) {
+            // Converted through the same tempo map the clip's own fade edges
+            // went through, so a leaf and the ramp over it cannot disagree
+            // about where a tick lands, then rebased to the clip's own start
+            // because that is the origin the envelope measures from.
+            const auto origin = static_cast<double>(timeline_start);
+            const auto silent =
+                static_cast<double>(tempo_map.ticks_to_samples(span.silent_tick).value) - origin;
+            const auto open =
+                static_cast<double>(tempo_map.ticks_to_samples(span.open_tick).value) - origin;
+            // Coincident ends describe no ramp at all, and the division that
+            // reads progress from them yields no number to multiply by.
+            if (!std::isfinite(silent) || !std::isfinite(open) || silent == open)
+                return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidFade,
+                                                      clip.id());
+            // A tail ramp reads silent one frame before the tick it ends on.
+            // The authored fade-out evaluator measures what remains from a
+            // clip's LAST frame rather than from one past it, so anchoring a
+            // placement ramp anywhere else would make a fade covering one whole
+            // leaf disagree with the identical fade authored on that leaf. Both
+            // ends shift together and every leaf under the ramp shifts with
+            // them, so the gain stays a function of absolute position.
+            const auto tail_anchor = open < silent ? 1.0 : 0.0;
+            program.segments.push_back({silent - tail_anchor, open - tail_anchor, span.shape});
+        }
+        placement_fade = std::make_shared<const ClipPlacementFadeProgram>(std::move(program));
+    }
     if (clip.time_conform() == timeline::TimeConform::Stretch) {
         if (!stretch_artifact)
             return fail<AudioClipRendererProgram>(AudioRendererErrorCode::OfflineStretchRequired,
@@ -592,7 +629,8 @@ detail::compile_audio_clip_program_cached(
             clip.end(),
             AudioClipRendererProgram::SourceTimeMapping::OfflineStretchArtifact,
             std::move(stretch_artifact),
-            nullptr});
+            nullptr,
+            std::move(placement_fade)});
     }
     auto converter = cache.get(source_rate, timeline_rate, clip.id(), media->asset_id, limits);
     if (!converter)
@@ -660,7 +698,8 @@ detail::compile_audio_clip_program_cached(
                                                                 : timebase::TickPosition{},
         source_time_mapping,
         nullptr,
-        nullptr});
+        nullptr,
+        std::move(placement_fade)});
 }
 
 runtime::Result<bool, AudioRendererError> detail::prepare_audio_clip_sample_rate_converters(

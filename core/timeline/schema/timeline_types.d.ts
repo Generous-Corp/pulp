@@ -337,6 +337,13 @@ export interface PulpTimelineCommandSetDeviceState {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.set_dynamics_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetDynamicsLane {
+  expected: readonly unknown[];
+  replacement: readonly unknown[];
+  sequence_id: number | string;
+}
+
 /** `pulp.timeline.command.set_groove` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetGroove {
   expected: PulpTimelineGrooveTemplate;
@@ -534,10 +541,11 @@ export interface PulpTimelineScene {
   slots: readonly unknown[];
 }
 
-/** `pulp.timeline.sequence` — domain Document, schema version 7. */
+/** `pulp.timeline.sequence` — domain Document, schema version 8. */
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
   chord_scale_lane: readonly unknown[];
+  dynamics_lane: readonly unknown[];
   groove: PulpTimelineGrooveTemplate;
   id: number | string;
   markers: readonly unknown[];
@@ -647,6 +655,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_clip_playback_properties"
   | "pulp.timeline.command.set_clip_sequence_ref"
   | "pulp.timeline.command.set_device_state"
+  | "pulp.timeline.command.set_dynamics_lane"
   | "pulp.timeline.command.set_groove"
   | "pulp.timeline.command.set_meter_map"
   | "pulp.timeline.command.set_note_events"
@@ -724,6 +733,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_clip_playback_properties": PulpTimelineCommandSetClipPlaybackProperties;
   "pulp.timeline.command.set_clip_sequence_ref": PulpTimelineCommandSetClipSequenceRef;
   "pulp.timeline.command.set_device_state": PulpTimelineCommandSetDeviceState;
+  "pulp.timeline.command.set_dynamics_lane": PulpTimelineCommandSetDynamicsLane;
   "pulp.timeline.command.set_groove": PulpTimelineCommandSetGroove;
   "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
   "pulp.timeline.command.set_note_events": PulpTimelineCommandSetNoteEvents;

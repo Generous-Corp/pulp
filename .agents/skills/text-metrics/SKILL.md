@@ -205,6 +205,45 @@ and assert the draw origin on both branches of the cache predicate.
   Attributed text carries its own metrics source and must opt out of the memo
   rather than be approximated by it.
 
+- **`baseline_y()` is the TOP-ALIGNED baseline and ignores box height entirely
+  — `paint()` does not.** Yoga's baseline channel gets `ascent` alone, while the
+  painter resolves `rs.baseline_y` against `bounds().height` per vertical-align
+  (`height - ink_h + ascent` for bottom, `(height - ink_h) * 0.5 + ascent` for
+  middle). The two therefore agree only when the Label paints top-aligned, so a
+  bottom- or middle-aligned Label inside `align-items: baseline` is aligned on a
+  baseline its own glyphs do not sit on. That is deliberate — the CSS baseline
+  of a box is a layout property the parent reads before the child's own
+  alignment resolves — but it means a baseline-row drift is NOT automatically a
+  metrics bug. Check the child's vertical-align before touching either path,
+  and do not "fix" `baseline_y()` to consult `bounds()`: it is called during
+  measurement, when the box height is not yet known.
+
+- **`AtMost` offers an upper bound, not an assignment.** CSS resolves an
+  at-most width to `min(max-content, available)`, so echoing the whole offered
+  width back from the measure callback is wrong for any leaf whose intrinsic
+  width is 0. A soft-wrapping Label reports 0 on purpose (its parent decides
+  where lines break), so the naive echo made every auto-width *ancestor* of such
+  a label stretch to fill its slot instead of hugging its text — the label
+  itself looked correct, which is why this reads as a container bug rather than
+  a text one. Ask `Label::max_content_width()` for the unwrapped advance and
+  clamp it to the offer.
+
+- **Max-content is the widest hard-break SEGMENT, not the full string advance.**
+  The shaper gives `\n` no advance of its own, so `prepare(whole_string)
+  .total_width()` silently sums every line into one impossibly wide number for
+  any label carrying an explicit newline. Split on `\n` and take the widest
+  segment — but only once the label actually paints as lines: a single-line
+  Label that has been handed a string with a newline in it draws the whole
+  advance, and measuring it as segments reserves less than paint draws and
+  clips. Both branches must agree with `intrinsic_height()` about which case
+  they are in.
+
+- **A vertical Label's horizontal footprint is its line height, not its
+  advance.** When `paint()` rotates text 90°, reporting the shaped advance as
+  max-content makes Yoga reserve the full string length as *width* and starves
+  every sibling in the row. Check `text_direction_` before returning an advance
+  from any width path.
+
 ## How to verify a change here
 
 A baseline change that does not move a number is not a fix. Measure before and

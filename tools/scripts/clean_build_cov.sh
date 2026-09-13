@@ -23,9 +23,11 @@
 #   tools/scripts/clean_build_cov.sh --yes           # delete (idle-gated)
 #   PULP_WORKTREES_ROOT=/path/to/code clean_build_cov.sh --yes
 #
-# Root: defaults to the parent directory of this repo, so sibling worktrees
-# (the common `git worktree add ../pulp-<topic>` layout) are all scanned. Set
-# PULP_WORKTREES_ROOT to override.
+# Roots: the sibling-worktree root (PULP_WORKTREES_ROOT, else this repo's
+# parent) plus the repo itself and its in-repo agent worktrees under
+# .claude/worktrees/. All three are scanned because a coverage dir lands in any
+# of them, and on a host that points PULP_WORKTREES_ROOT at a dedicated volume
+# the last two are not under it.
 set -euo pipefail
 
 APPLY=0
@@ -47,6 +49,16 @@ if [[ ! -d "${ROOT}" ]]; then
     exit 2
 fi
 
+# A coverage dir is not only ever a sibling of the primary checkout. The repo
+# carries its own agent worktrees under .claude/worktrees/, and the primary
+# checkout builds a build-cov of its own; neither is under PULP_WORKTREES_ROOT
+# when that points at a dedicated volume, as it must on the Studio. Scanning one
+# root there reported a clean pass over 147.8 GB while 15.6 GB sat in the two
+# roots it could not reach, which is the same shape as the disk that filled.
+# Roots may overlap (the default root contains the repo), so results are
+# de-duplicated rather than assumed disjoint.
+ROOTS=("${ROOT}" "${REPO_ROOT}" "${REPO_ROOT}/.claude/worktrees")
+
 # Worktree roots with an active build — we skip their coverage dirs so a live
 # coverage run isn't corrupted mid-flight. A build process's command line
 # carries the absolute path of the dir it builds (e.g. -B <wt>/build-cov,
@@ -55,8 +67,8 @@ fi
 # use `pgrep -fl`: on Linux `-l` prints only the executable name even when `-f`
 # matched the full argv, which can turn a live build into a false idle result.
 # An unreadable process list is unknown, never evidence that deletion is safe.
-if ! active_cmolines="$(ps -e -ww -o args= 2>/dev/null)" || \
-        [[ -z "${active_cmolines}" ]]; then
+if ! active_cmdlines="$(ps -e -ww -o args= 2>/dev/null)" || \
+        [[ -z "${active_cmdlines}" ]]; then
     echo "clean_build_cov: could not read complete process command lines; nothing removed" >&2
     exit 3
 fi
@@ -64,7 +76,7 @@ fi
 is_active() {
     # $1 = absolute coverage dir. Active if any build command line mentions it.
     local dir="$1"
-    [[ -n "${active_cmolines}" ]] && grep -qF "${dir}" <<<"${active_cmolines}"
+    [[ -n "${active_cmdlines}" ]] && grep -qF "${dir}" <<<"${active_cmdlines}"
 }
 
 dir_size_kb() { du -sk "$1" 2>/dev/null | awk '{print $1}'; }
@@ -91,16 +103,27 @@ while IFS= read -r dir; do
     else
         echo "  would remove ${human}	${dir}"
     fi
-done < <(find "${ROOT}" -maxdepth 2 \( \
-    -name build-cov -o -name 'build-cov-*' -o \
-    -name build-coverage -o -name 'build-coverage-*' \
-\) -type d -prune 2>/dev/null)
+done < <(for scan_root in "${ROOTS[@]}"; do
+    [[ -d "${scan_root}" ]] || continue
+    find "${scan_root}" -maxdepth 2 \( \
+        -name build-cov -o -name 'build-cov-*' -o \
+        -name build-coverage -o -name 'build-coverage-*' \
+    \) -type d -prune 2>/dev/null
+done | sort -u)
 
 total_gb="$(awk -v kb="${total_kb}" 'BEGIN{printf "%.1f", kb/1024/1024}')"
 echo
 if [[ "${APPLY}" -eq 1 ]]; then
     echo "clean_build_cov: removed ${deleted} dir(s), ~${total_gb} GB reclaimed; skipped ${skipped} active."
 else
-    echo "clean_build_cov: ${found} coverage dir(s) under ${ROOT}; ~${total_gb} GB reclaimable (${skipped} active, skipped)."
+    echo "clean_build_cov: ${found} coverage dir(s); ~${total_gb} GB reclaimable (${skipped} active, skipped)."
+    echo "clean_build_cov: roots scanned:"
+    for scan_root in "${ROOTS[@]}"; do
+        if [[ -d "${scan_root}" ]]; then
+            echo "  ${scan_root}"
+        else
+            echo "  ${scan_root} (absent, skipped)"
+        fi
+    done
     echo "clean_build_cov: re-run with --yes to delete."
 fi

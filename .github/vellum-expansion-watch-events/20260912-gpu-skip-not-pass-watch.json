@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260912-gpu-skip-not-pass-watch",
+  "created_at": "2026-09-12T08:18:42Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": ["render-assets-and-backends", "visual-proof-harness"],
+  "rationale": "A GPU test that cannot reach a device was reporting a pass. SUCCEED() records a passing assertion, WARN() emits a message and still leaves the case passing, and a bare return; is recorded as passed with no output, so the suite's pass count stayed identical whether the GPU lane ran or the adapter vanished. Eighteen test files now report the unmet precondition with Catch2's SKIP(), which ctest surfaces as Skipped because PulpCatch.cmake sets SKIP_RETURN_CODE 4, and tools/scripts/check_gpu_skip_not_pass.py plus its self-test enforce the rule mechanically instead of in prose. Two families are crossed by test files only: render-assets-and-backends via test/test_skia_surface.cpp and test/test_skia_frame_outcome_gpu.cpp under the test/test_skia* selector, and visual-proof-harness via test/test_screenshot_gpu.cpp under test/test_*screenshot*. No renderer, backend, Skia pin, asset, font, harness, fixture, snapshot or threshold changes -- the diff converts a silent pass into an honest skip and adds a lint. Registered watch-only so each family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": ["gpu-skip-not-pass", "gpu-skip-not-pass-selftest", "vellum-expansion-watch"],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

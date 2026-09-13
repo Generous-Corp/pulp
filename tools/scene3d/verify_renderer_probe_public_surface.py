@@ -15,9 +15,33 @@ def require(condition, message, errors):
         errors.append(message)
 
 
+def resolve_struct_name(header_text, name, _seen=None):
+    """Follow `using <name> = <target>;` aliases to the struct that defines the body.
+
+    The probe result types are declared once and re-exported under per-entry-point
+    aliases, so the contract's subject is often an alias rather than a struct.
+    """
+    seen = set() if _seen is None else _seen
+    if name in seen:
+        raise ValueError(f"cyclic alias chain for {name}")
+    seen.add(name)
+    if re.search(r"struct\s+" + re.escape(name) + r"\s*\{", header_text):
+        return name
+    alias = re.search(
+        r"using\s+" + re.escape(name) + r"\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*;",
+        header_text,
+    )
+    if alias:
+        return resolve_struct_name(header_text, alias.group(1), seen)
+    return None
+
+
 def extract_result_bool_fields(header_text):
+    resolved = resolve_struct_name(header_text, "HardcodedCubeRenderResult")
+    if resolved is None:
+        raise ValueError("missing HardcodedCubeRenderResult")
     match = re.search(
-        r"struct\s+HardcodedCubeRenderResult\s*\{(?P<body>.*?)\n\};",
+        r"struct\s+" + re.escape(resolved) + r"\s*\{(?P<body>.*?)\n\};",
         header_text,
         re.DOTALL,
     )

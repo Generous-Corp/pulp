@@ -12,6 +12,7 @@
 #include <pulp/timeline/production_mode.hpp>
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -91,6 +92,12 @@ struct CompiledNoteModifier {
 /// nullptr when the note plays unconditionally, which is the common case.
 const CompiledNoteModifier* find_note_modifier(std::span<const CompiledNoteModifier> modifiers,
                                                timeline::ItemId note_id) noexcept;
+
+/// Ceiling on controller events one track program may carry. The compiler
+/// refuses a track that would exceed it with a named code, and the program
+/// wire enforces the same bound on a decoded track, so a foreign payload can
+/// claim no more than a compiled program could hold.
+inline constexpr std::size_t kMaximumControllerEventsPerTrack = std::size_t{1} << 20;
 
 /// Whether a lowered controller value was authored at its own position or
 /// synthesized at a window boundary to answer "what is sounding here".

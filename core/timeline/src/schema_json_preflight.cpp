@@ -519,6 +519,7 @@ class StructuralScanner {
         std::array requested{
             detail::JsonSpanMember{"absolute_duration"},
             detail::JsonSpanMember{"chord_scale_lane"},
+            detail::JsonSpanMember{"dynamics_lane"},
             detail::JsonSpanMember{"groove"},
             detail::JsonSpanMember{"id"},
             detail::JsonSpanMember{"markers"},
@@ -535,25 +536,25 @@ class StructuralScanner {
         if (!members(data, requested))
             return false;
         if (!require_shape(requested[0], ObjectShape | NullShape, data.begin, data_path) ||
-            !require_shape(requested[3], StringShape, data.begin, data_path) ||
-            !require_shape(requested[5], StringShape | NullShape, data.begin, data_path) ||
-            !require_shape(requested[6], StringShape, data.begin, data_path))
+            !require_shape(requested[4], StringShape, data.begin, data_path) ||
+            !require_shape(requested[6], StringShape | NullShape, data.begin, data_path) ||
+            !require_shape(requested[7], StringShape, data.begin, data_path))
             return false;
         // Markers and regions arrive together at v2: a payload that declares one
         // without the other, or carries either at v1, is rejected rather than
         // silently half-decoded.
         const auto requires_annotations =
             detail::sequence_schema_policy.requires_annotations(version);
-        const auto markers = requested[4].span;
-        const auto regions = requested[7].span;
-        if (requires_annotations != requested[4].found ||
-            (requested[4].found && !has_shape(markers, ArrayShape))) {
+        const auto markers = requested[5].span;
+        const auto regions = requested[8].span;
+        if (requires_annotations != requested[5].found ||
+            (requested[5].found && !has_shape(markers, ArrayShape))) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       data_path + "/markers");
             return false;
         }
-        if (requires_annotations != requested[7].found ||
-            (requested[7].found && !has_shape(regions, ArrayShape))) {
+        if (requires_annotations != requested[8].found ||
+            (requested[8].found && !has_shape(regions, ArrayShape))) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       data_path + "/regions");
             return false;
@@ -569,20 +570,31 @@ class StructuralScanner {
                       data_path + "/chord_scale_lane");
             return false;
         }
+        // The dynamics lane arrives at v8, so a version below that must not
+        // carry it and a version at or above it must.
+        const auto requires_dynamics_lane =
+            detail::sequence_schema_policy.requires_dynamics_lane(version);
+        const auto dynamics_lane = requested[2].span;
+        if (requires_dynamics_lane != requested[2].found ||
+            (requested[2].found && !has_shape(dynamics_lane, ArrayShape))) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      data_path + "/dynamics_lane");
+            return false;
+        }
         // The groove arrives at v4, one version after the chord lane, so it is
         // gated on its own predicate too.
         const auto requires_groove = detail::sequence_schema_policy.requires_groove(version);
-        const auto groove = requested[2].span;
-        if (requires_groove != requested[2].found ||
-            (requested[2].found && !has_shape(groove, ObjectShape))) {
+        const auto groove = requested[3].span;
+        if (requires_groove != requested[3].found ||
+            (requested[3].found && !has_shape(groove, ObjectShape))) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, data_path + "/groove");
             return false;
         }
-        if (requested[2].found && !walk_groove(groove, data_path + "/groove"))
+        if (requested[3].found && !walk_groove(groove, data_path + "/groove"))
             return false;
         const auto requires_scenes = detail::sequence_schema_policy.requires_scenes(version);
-        if (requires_scenes != requested[8].found ||
-            (requested[8].found && !has_shape(requested[8].span, ArrayShape))) {
+        if (requires_scenes != requested[9].found ||
+            (requested[9].found && !has_shape(requested[9].span, ArrayShape))) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, data_path + "/scenes");
             return false;
         }
@@ -592,17 +604,17 @@ class StructuralScanner {
             detail::sequence_schema_policy.requires_chord_detail(version);
         const auto requires_track_order =
             detail::sequence_schema_policy.requires_track_order(version);
-        if (requires_track_order != requested[9].found ||
-            (requested[9].found && !has_shape(requested[9].span, ArrayShape))) {
+        if (requires_track_order != requested[10].found ||
+            (requested[10].found && !has_shape(requested[10].span, ArrayShape))) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       data_path + "/track_order");
             return false;
         }
-        if (!requested[10].found) {
+        if (!requested[11].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, path + "/data/tracks");
             return false;
         }
-        if (requested[4].found &&
+        if (requested[5].found &&
             !governed_array(markers, counts_.markers, limits_.max_markers, data_path + "/markers",
                             [&](Span element, std::size_t index) {
                                 return walk_annotation(element, "pulp.timeline.marker", false,
@@ -611,7 +623,7 @@ class StructuralScanner {
                                                            std::to_string(index));
                             }))
             return false;
-        if (requested[7].found &&
+        if (requested[8].found &&
             !governed_array(regions, counts_.regions, limits_.max_regions, data_path + "/regions",
                             [&](Span element, std::size_t index) {
                                 return walk_annotation(element, "pulp.timeline.region", true,
@@ -645,8 +657,18 @@ class StructuralScanner {
                                           event_path);
                 }))
             return false;
-        if (requested[8].found &&
-            !governed_array(requested[8].span, counts_.scenes, limits_.max_scenes,
+        if (requested[2].found &&
+            !governed_array(
+                dynamics_lane, counts_.dynamics_events, limits_.max_dynamics_events,
+                data_path + "/dynamics_lane", [&](Span event, std::size_t index) {
+                    const auto event_path = data_path + "/dynamics_lane/" + std::to_string(index);
+                    return require_member(event, "intensity_bits", StringShape, event_path) &&
+                           require_member(event, "interpolation", StringShape, event_path) &&
+                           require_member(event, "position", StringShape, event_path);
+                }))
+            return false;
+        if (requested[9].found &&
+            !governed_array(requested[9].span, counts_.scenes, limits_.max_scenes,
                             data_path + "/scenes", [&](Span scene, std::size_t index) {
                                 return walk_scene(scene,
                                                   data_path + "/scenes/" + std::to_string(index));
@@ -657,8 +679,8 @@ class StructuralScanner {
         // shared with counts_.tracks: charging both arrays to one quota would
         // halve how many tracks a document may actually carry.
         std::size_t order_entries = 0;
-        if (requested[9].found &&
-            !governed_array(requested[9].span, order_entries, limits_.max_tracks,
+        if (requested[10].found &&
+            !governed_array(requested[10].span, order_entries, limits_.max_tracks,
                             data_path + "/track_order", [&](Span entry, std::size_t index) {
                                 if (has_shape(entry, StringShape))
                                     return true;
@@ -667,7 +689,7 @@ class StructuralScanner {
                                 return false;
                             }))
             return false;
-        const auto tracks = requested[10].span;
+        const auto tracks = requested[11].span;
         return governed_array(tracks, counts_.tracks, limits_.max_tracks, path + "/data/tracks",
                               [&](Span element, std::size_t index) {
                                   return walk_track(element,

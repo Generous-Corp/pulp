@@ -14,6 +14,12 @@ using namespace pulp::gpu_audio;
 using namespace pulp::gpu_audio_test;
 
 namespace {
+// A lane with no compute adapter must SKIP out loud: Catch2 records a bare
+// early return as a PASS, so a GPU-less runner would report this whole file
+// green having asserted nothing about the freeze at all.
+constexpr const char* kNoGpu =
+    "no GPU compute device available (Skia/Dawn not built, or no adapter)";
+
 // Scale-invariant normalized correlation of two frames in [-1, 1].
 double frame_correlation(const std::vector<float>& a, const std::vector<float>& b) {
     double dot = 0.0, na = 0.0, nb = 0.0;
@@ -31,7 +37,7 @@ TEST_CASE("GpuSpectralFreeze sustains pitch with an evolving phase", "[gpu_audio
 
     GpuSpectralFreeze fz;
     REQUIRE(fz.prepare(FFT, HOP));
-    if (!fz.gpu_available()) return;
+    if (!fz.gpu_available()) SKIP(kNoGpu);
 
     std::vector<float> frame(FFT);
     for (uint32_t i = 0; i < FFT; ++i)
@@ -65,7 +71,7 @@ TEST_CASE("GpuSpectralFreeze jitter stays real and on-pitch", "[gpu_audio][spect
     constexpr uint32_t FFT = 512, HOP = 128, K0 = 21;
     GpuSpectralFreeze fz;
     REQUIRE(fz.prepare(FFT, HOP));
-    if (!fz.gpu_available()) return;
+    if (!fz.gpu_available()) SKIP(kNoGpu);
 
     std::vector<float> frame(FFT);
     for (uint32_t i = 0; i < FFT; ++i)
@@ -85,7 +91,7 @@ TEST_CASE("GpuSpectralFreeze jitter stays real and on-pitch", "[gpu_audio][spect
 TEST_CASE("GpuSpectralFreeze render before capture fails", "[gpu_audio][spectral][gpu]") {
     GpuSpectralFreeze fz;
     REQUIRE(fz.prepare(256, 128));
-    if (!fz.gpu_available()) return;
+    if (!fz.gpu_available()) SKIP(kNoGpu);
     std::vector<float> out(256, 0.0f);
     REQUIRE_FALSE(fz.render(out.data()));
 }
@@ -145,7 +151,7 @@ TEST_CASE("GpuSpectralFreeze matches CpuSpectralStack under the unified jitter",
 
     GpuSpectralFreeze fz;
     REQUIRE(fz.prepare(FFT, HOP));
-    if (!fz.gpu_available()) return;
+    if (!fz.gpu_available()) SKIP(kNoGpu);
 
     // The stack captures unwindowed frames, so hand it the SAME Hann-windowed
     // frame the freeze's GpuStft analysis applies internally.

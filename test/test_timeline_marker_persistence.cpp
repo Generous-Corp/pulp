@@ -103,7 +103,7 @@ TEST_CASE("Timeline v4 marker fixture upgrades without requiring scenes") {
     REQUIRE(original.find(R"("type_name":"pulp.timeline.sequence","version":4)") !=
             std::string::npos);
     REQUIRE(original.find(R"("scenes")") == std::string::npos);
-    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":7)") !=
+    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":8)") !=
             std::string::npos);
     REQUIRE(resaved.find(R"("groove":{"name":"","step":"0","steps":[])") != std::string::npos);
     REQUIRE(resaved.find(R"("scenes":[])") != std::string::npos);
@@ -141,14 +141,15 @@ TEST_CASE("Timeline sequence downgrade refuses to discard authored annotations")
     DecodeLimits limits;
     const auto populated =
         sequence_envelope(take(serialize_project(annotated_project(), registry)).json);
-    // The chain walks 7 -> 6 (the section roles drop, and the chord lane states
+    // The chain walks 8 -> 7 (the empty dynamics lane drops cleanly), then
+    // 7 -> 6 (the section roles drop, and the chord lane states
     // no detail to refuse over), then 6 -> 5 (the authored order is the identity
     // order, so it drops cleanly), then 5 -> 4 (the empty scene list drops
     // cleanly), then 4 -> 3 (the straight groove drops cleanly), then 3 -> 2
     // (the empty chord lane drops cleanly), and finally refuses at 2 -> 1,
     // where the authored annotations would be lost.
     auto refused =
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 1, populated, limits);
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 8, 1, populated, limits);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
 }
@@ -163,7 +164,7 @@ TEST_CASE("Timeline version-one sequences decode with no markers or regions") {
     // Re-saving lifts the sequence to the current schema version.
     const auto resaved = take(serialize_project(decoded, registry)).json;
     REQUIRE(resaved.find(R"("markers":[],"musical_duration")") != std::string::npos);
-    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":7)") !=
+    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":8)") !=
             std::string::npos);
 }
 
@@ -196,10 +197,10 @@ TEST_CASE("Timeline snapshots reject malformed marker and region payloads") {
 
     // A version-one sequence carrying markers is a contradiction, not a hint.
     auto mismatched = snapshot;
-    const auto version = mismatched.find(R"("type_name":"pulp.timeline.sequence","version":7)");
+    const auto version = mismatched.find(R"("type_name":"pulp.timeline.sequence","version":8)");
     REQUIRE(version != std::string::npos);
     mismatched.replace(
-        version, std::string_view(R"("type_name":"pulp.timeline.sequence","version":7)").size(),
+        version, std::string_view(R"("type_name":"pulp.timeline.sequence","version":8)").size(),
         R"("type_name":"pulp.timeline.sequence","version":1)");
     auto rejected_version = deserialize_project(mismatched, registry);
     REQUIRE_FALSE(rejected_version);
@@ -371,7 +372,7 @@ TEST_CASE("the section-role downgrade drops the role and keeps the region",
     // Unlike the chord detail, a role is an annotation beside a name the older
     // reader still sees, so the downgrade drops it instead of refusing.
     const auto lowered = take(
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 6, envelope, limits));
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 8, 6, envelope, limits));
     REQUIRE(lowered.find(R"("role")") == std::string::npos);
     // The region itself survives: same identity, name, colour, and span. A v6
     // reader sees the same music with one fewer label on it.
@@ -403,7 +404,7 @@ TEST_CASE("a sequence older than section roles may not carry one",
                                                                 {sequence}})),
                                registry))
             .json;
-    constexpr std::string_view stamp = R"("type_name":"pulp.timeline.sequence","version":7)";
+    constexpr std::string_view stamp = R"("type_name":"pulp.timeline.sequence","version":8)";
     const auto at = mislabelled.find(stamp);
     REQUIRE(at != std::string::npos);
     mislabelled.replace(at, stamp.size(),

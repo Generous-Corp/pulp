@@ -368,6 +368,48 @@ TEST_CASE("timeline MCP operations edit and render inline projects", "[mcp][tool
     require_contains(excessive_rate, "sample_rate must be an integer between 1 and 768000");
 }
 
+TEST_CASE("timeline MCP authors a dynamics lane and returns a document that still carries it",
+          "[mcp][tools][timeline]") {
+    TempDir temp;
+    pulp::audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.8f)};
+    const auto source_path = temp.path / "source.wav";
+    REQUIRE(pulp::audio::write_wav_file(source_path.string(), source,
+                                        pulp::audio::WavBitDepth::Float32));
+
+    const auto project = make_timeline_project_json(source_path);
+    const auto project_argument = pulp::timeline::quote_json_string(project);
+
+    // The apply and the serialization that returns its result are one call, so a
+    // lane the encoder dropped would read as a successful edit that changed
+    // nothing. The assertion is on the returned document, not on ok:true.
+    const std::string command =
+        R"JSON([{"data":{"expected":[],"replacement":[{"intensity_bits":"1050253722","interpolation":"continuous","position":"0"}],"sequence_id":"2"},"type_name":"pulp.timeline.command.set_dynamics_lane","version":1}])JSON";
+    const auto applied = handle_timeline_command_apply("{\"commands\":" + command +
+                                                       ",\"project\":" + project_argument + "}");
+    require_contains(applied, R"JSON("revision":"1")JSON");
+    const auto changed_project = timeline_project_from_response(applied);
+    // 0.3f has no exact decimal form, so a writer that carried the intensity as
+    // text rather than its bit pattern would come back with a different number.
+    require_contains(changed_project,
+                     R"JSON("dynamics_lane":[{"intensity_bits":"1050253722")JSON");
+
+    // The returned document reopens, so the edit is reachable by the next call
+    // rather than only visible in this response.
+    const auto reopened = handle_timeline_project_open(
+        "{\"project\":" + pulp::timeline::quote_json_string(changed_project) + "}");
+    require_contains(reopened, R"JSON("ok":true)JSON");
+    REQUIRE(timeline_project_from_response(reopened) == changed_project);
+
+    // Replaying the same edit against the document it already changed is refused
+    // by the exact-value gate rather than applied a second time.
+    const auto stale = handle_timeline_command_apply(
+        "{\"commands\":" + command + ",\"project\":" +
+        pulp::timeline::quote_json_string(changed_project) + "}");
+    require_contains(stale, R"JSON("isError":true)JSON");
+}
+
 TEST_CASE("timeline MCP confines package-relative media to the project base",
           "[mcp][tools][timeline]") {
     TempDir temp;

@@ -128,7 +128,14 @@ void append_node_snapshot(const View& view,
     auto hit_regions = choc::value::createEmptyArray();
     if (view.visible() && view.hit_testable() && !abs.is_empty()) {
         auto hit = choc::value::createObject("");
-        hit.addMember("rect", rect_json(abs));
+        // The region a POINTER can reach, which is the painted rect grown by
+        // hit_slop() -- not the painted rect. A control that presents a larger
+        // target than it paints is exactly the case a reachability census has
+        // to see, and with no slop set the two rects are identical.
+        const auto slop = view.hit_slop();
+        hit.addMember("rect", rect_json(Rect{abs.x - slop.left, abs.y - slop.top,
+                                             abs.width + slop.left + slop.right,
+                                             abs.height + slop.top + slop.bottom}));
         hit_regions.addArrayElement(hit);
     }
     node.addMember("hit_regions", hit_regions);

@@ -104,6 +104,31 @@ REQUIRED_FILE_TOKENS = {
 }
 
 
+KNOWN_REPO_COORDINATES = (
+    "https://github.com/Generous-Corp/pulp/",
+    "https://github.com/danielraffel/pulp/",
+)
+
+
+def token_present(text, token):
+    """Match a required token, tolerating a repository-owner rename.
+
+    The evidence a token pins is the issue or comment it names, not the owner
+    segment of its URL, so a token spelled under one owner still matches a
+    surface that spells the same coordinate under the other.
+    """
+    if token in text:
+        return True
+    for coordinate in KNOWN_REPO_COORDINATES:
+        if not token.startswith(coordinate):
+            continue
+        suffix = token[len(coordinate):]
+        for alternate in KNOWN_REPO_COORDINATES:
+            if alternate != coordinate and alternate + suffix in text:
+                return True
+    return False
+
+
 def read_text(path: Path):
     try:
         return path.read_text(encoding="utf-8")
@@ -138,15 +163,15 @@ def main():
             errors.append(f"missing native slice CTest registration: {test_name}")
 
     for token in REQUIRED_DOC_TOKENS:
-        if token not in doc_text:
+        if not token_present(doc_text, token):
             errors.append(f"missing native slice doc token: {token}")
 
     for token in REQUIRED_CTEST_TOKENS:
-        if token not in ctest_text:
+        if not token_present(ctest_text, token):
             errors.append(f"missing native slice CTest token: {token}")
 
     for token in REQUIRED_PLAN_TOKENS:
-        if token not in plan_text:
+        if not token_present(plan_text, token):
             errors.append(f"missing native slice plan token: {token}")
 
     for token in FORBIDDEN_PLAN_TOKENS:
@@ -160,7 +185,7 @@ def main():
             errors.append(str(exc))
             continue
         for token in tokens:
-            if token not in text:
+            if not token_present(text, token):
                 errors.append(
                     f"missing native slice file token: {relative}: {token}")
 

@@ -91,20 +91,28 @@
 /// `(producer_epoch, lane_id, generation, instance_token)`, and no proper
 /// subset of it is sufficient — see `ProgramWireAutomationLaneRecord`.
 ///
-/// **What this format is sufficient for.** A note, automation, and mixer
-/// program. It structurally cannot express an audio-clip program: there is no
-/// section for clip audio regions and no way to name decoded media, and the
-/// encoder refuses such a program rather than emitting a thinner one. A
+/// **What this format is sufficient for.** A note, controller, automation, and
+/// mixer program. It structurally cannot express an audio-clip program: there
+/// is no section for clip audio regions and no way to name decoded media, and
+/// the encoder refuses such a program rather than emitting a thinner one. A
 /// consumer can therefore rely on "decoded successfully" meaning "no audio
 /// content was dropped on the way here", and a producer that needs audio needs
 /// a format change rather than an extra channel alongside this one.
 ///
 /// **What the wire carries, and what it does not.** It carries the note,
-/// automation, and mixer spine a realtime consumer needs: identity and
-/// generation, the tempo points and sample rate, per-track note events and note
-/// modifiers, clip and device-placement ordering, the mixer's constants and
-/// which lane supersedes them, and every automation lane's compiled segments in
-/// both the tick and sample domains. It does not carry decoded audio: the
+/// controller, automation, and mixer spine a realtime consumer needs: identity
+/// and generation, the tempo points and sample rate, per-track note events, note
+/// modifiers, and controller/expression events, clip and device-placement
+/// ordering, the mixer's constants and which lane supersedes them, and every
+/// automation lane's compiled segments in both the tick and sample domains.
+/// Controller events travel in their program's sequence, verbatim: a
+/// ControllerRanges section holds one `(first, count)` range per track into a
+/// ControllerEvents section, each record carries the full MIDI wire address
+/// plus the authored clip, lane, and point identity and the chased/authored
+/// origin, and the decoder preserves the producer's order rather than
+/// re-sorting, so a consumer reads exactly the sequence
+/// `TrackProgram::arrangement_controller_events()` held — ties at one sample
+/// and tick included. It does not carry decoded audio: the
 /// asset pool is bulk media that is already content-hash addressed, and a
 /// generation wire that inlined it would republish gigabytes per edit. It does
 /// not carry the audio clip programs either — those are derived from the
@@ -156,11 +164,42 @@ static_assert(std::endian::native == std::endian::little,
 /// decodes as seven records of shifted garbage rather than failing. So
 /// `min_reader_version` moves with it, which is what makes that reader refuse
 /// the payload instead of misreading it.
-inline constexpr std::uint16_t kProgramWireVersion = 2;
+///
+/// Version 3 appended two sections — the per-track controller ranges and the
+/// controller events themselves — and changed no existing record. Every
+/// version 2 layout is byte-identical, so a version 2 reader strides every
+/// section it knows exactly as before; what it does with the two it does not
+/// know is decided per payload, by `min_reader_version`, and the decision is
+/// the whole point of the design:
+///
+///   - A program carrying **no** controller events is written with
+///     `min_reader_version` 2 and the two new sections flagged optional. A
+///     version 2 reader skips them and renders precisely the program the
+///     writer meant, because there was nothing in them to miss.
+///   - A program carrying **any** controller event is written with
+///     `min_reader_version` 3 and the two sections required. A version 2
+///     reader refuses at the header with `UnsupportedVersion` — and would
+///     refuse again at the directory with `UnknownSection` if it somehow read
+///     past that — and never renders the notes with the expression silently
+///     gone. That silent loss is exactly what the encoder's former refusal of
+///     controller-bearing programs existed to prevent, so it is the one outcome
+///     an older reader is never allowed to reach.
+///
+/// Both numbers are functions of the program, so one program still has exactly
+/// one encoding. In the other direction a version 3 reader accepts a version 2
+/// payload — the two sections absent, read as empty — so a producer and a
+/// consumer can be upgraded in either order.
+inline constexpr std::uint16_t kProgramWireVersion = 3;
 
-/// Written into every payload this build produces. Bump only when a reader at
-/// an earlier version would misread the bytes rather than merely miss data.
+/// The floor written into a payload that carries no controller events: the
+/// version whose readers can still render it exactly. Bump only when a reader
+/// at an earlier version would misread the bytes rather than merely miss data.
 inline constexpr std::uint16_t kProgramWireMinReaderVersion = 2;
+
+/// The floor written into a payload that carries at least one controller
+/// event. A reader below it has no controller section to read, and missing
+/// that data is a musical loss rather than a cosmetic one, so it is refused.
+inline constexpr std::uint16_t kProgramWireControllerMinReaderVersion = 3;
 
 /// Spells `PLPW` in the first four bytes of every payload.
 inline constexpr std::uint32_t kProgramWireMagic = 0x5750'4C50u;
@@ -176,6 +215,16 @@ inline constexpr std::size_t kProgramWireMaximumTracks = 1'024;
 /// callers size ProgramWireLaneState storage against this publication bound.
 inline constexpr std::size_t kProgramWireMaximumAutomationLanes = 1'024;
 
+/// Controller events one track may carry on the wire. This is the compiler's
+/// own per-track ceiling (`kMaximumControllerEventsPerTrack`), so no program
+/// the compiler publishes can exceed it and the encoder needs no check of its
+/// own; the decoder enforces it because a foreign payload is untrusted input,
+/// and a track record claiming more is refused with `InvalidLimits` before its
+/// range is even bounds-checked, so a corrupted count is a typed rejection
+/// rather than a million-record walk.
+inline constexpr std::size_t kProgramWireMaximumControllerEventsPerTrack =
+    kMaximumControllerEventsPerTrack;
+
 enum class ProgramWireSection : std::uint32_t {
     Program = 1,
     TempoPoints = 2,
@@ -186,6 +235,12 @@ enum class ProgramWireSection : std::uint32_t {
     DevicePlacementIds = 7,
     AutomationLanes = 8,
     AutomationSegments = 9,
+    /// One `(first, count)` range per track into ControllerEvents, in track
+    /// order. A separate section rather than two more fields on the track
+    /// record, so the track record's layout — and every version 2 reader's
+    /// stride over it — stays exactly what it was.
+    ControllerRanges = 10,
+    ControllerEvents = 11,
 };
 
 /// The section is safe to ignore: a reader that does not know this id still
@@ -218,10 +273,6 @@ enum class ProgramWireErrorCode : std::uint8_t {
     /// A track carries an audio renderer program, which this version does not
     /// represent. Refused rather than dropped. `detail` carries the track id.
     AudioProgramUnsupported,
-    /// The program carries controller/expression values and the wire has no
-    /// section for them yet. Dropping them would render the notes with the
-    /// expression gone, so the program is refused rather than half-encoded.
-    ControllerEventsUnsupported,
     /// A track has a non-default production declaration, which this wire
     /// version cannot carry. Refused rather than silently strengthening the
     /// adopting realm's replay claim. `detail` carries the track id.
@@ -282,6 +333,14 @@ enum class ProgramWireErrorCode : std::uint8_t {
     /// An automation segment runs backwards or carries a non-finite value,
     /// either of which would propagate through every sample downstream.
     MalformedSegment,
+    /// A controller event names no clip, lane, or point, or carries an address
+    /// component wider than the MIDI wire gives it. Judged by the document
+    /// model's own `midi_lane_address_well_formed` rather than a second rule
+    /// here, so the two cannot drift apart. A consumer emits the address onto a
+    /// real MIDI stream, where a 200 in a four-bit group field is not a
+    /// controller the producer meant but bits landing in a neighbouring field.
+    /// `detail` carries the record's index within the section.
+    MalformedControllerEvent,
     InvalidSampleRate,
     /// The carried automation ceilings are not a configuration the renderer
     /// accepts.
@@ -441,6 +500,40 @@ struct ProgramWireNoteModifierRecord {
     std::uint8_t pad[7] = {};
 };
 
+/// One track's range into the ControllerEvents section. The ControllerRanges
+/// section holds exactly one of these per track, in track order, so
+/// `controller_ranges()[t]` belongs to `tracks()[t]`; the ranges partition the
+/// events section exclusively and in that order, as every other range does.
+struct ProgramWireControllerRangeRecord {
+    std::uint32_t first = 0;
+    std::uint32_t count = 0;
+};
+
+/// One `ControllerProgramEvent`, field by field — never cast between the two,
+/// for the reason given on `ProgramWireNoteEventRecord`. The five address
+/// bytes are `timeline::MidiLaneAddress` in its declaration order, carried
+/// whole rather than as a Pulp-local controller enumeration so a controller
+/// family nobody anticipated needs new values on the wire and never a new
+/// record; `origin` is `ControllerProgramEventOrigin`. Records sit in the
+/// program's sequence, which the encoder copies and the decoder preserves —
+/// the wire adds no ordering of its own, so what a consumer reads back is the
+/// exact order, ties included, that `arrangement_controller_events()` held.
+struct ProgramWireControllerEventRecord {
+    std::int64_t sample = 0;
+    std::int64_t tick = 0;
+    std::uint64_t clip_id = 0;
+    std::uint64_t lane_id = 0;
+    std::uint64_t point_id = 0;
+    std::uint32_t value = 0;
+    std::uint8_t group = 0;
+    std::uint8_t channel = 0;
+    std::uint8_t status = 0;
+    std::uint8_t bank = 0;
+    std::uint8_t index = 0;
+    std::uint8_t origin = 0;
+    std::uint8_t pad[6] = {};
+};
+
 /// `instance_token` is the producer's own `AutomationProgram::instance_token()`
 /// carried verbatim, because lane identity is **not** `(lane_id, generation)`
 /// alone. In-process, `AutomationCursor` decides Unchanged on the lane key
@@ -525,6 +618,8 @@ static_assert(sizeof(ProgramWireNoteEventRecord) == 40);
 static_assert(sizeof(ProgramWireNoteModifierRecord) == 32);
 static_assert(sizeof(ProgramWireAutomationLaneRecord) == 56);
 static_assert(sizeof(ProgramWireAutomationSegmentRecord) == 48);
+static_assert(sizeof(ProgramWireControllerRangeRecord) == 8);
+static_assert(sizeof(ProgramWireControllerEventRecord) == 56);
 
 /// Every record is a multiple of eight bytes, so tiling sections back to back
 /// keeps each one eight-byte aligned without a padding section between them.
@@ -538,8 +633,12 @@ static_assert(sizeof(ProgramWireNoteEventRecord) % 8 == 0);
 static_assert(sizeof(ProgramWireNoteModifierRecord) % 8 == 0);
 static_assert(sizeof(ProgramWireAutomationLaneRecord) % 8 == 0);
 static_assert(sizeof(ProgramWireAutomationSegmentRecord) % 8 == 0);
+static_assert(sizeof(ProgramWireControllerRangeRecord) % 8 == 0);
+static_assert(sizeof(ProgramWireControllerEventRecord) % 8 == 0);
 
 static_assert(std::is_trivially_copyable_v<ProgramWireHeader>);
+static_assert(std::is_trivially_copyable_v<ProgramWireControllerRangeRecord>);
+static_assert(std::is_trivially_copyable_v<ProgramWireControllerEventRecord>);
 static_assert(std::is_trivially_copyable_v<ProgramWireProgramRecord>);
 static_assert(std::is_trivially_copyable_v<ProgramWireTrackRecord>);
 static_assert(std::is_trivially_copyable_v<ProgramWireNoteEventRecord>);
@@ -613,6 +712,14 @@ class ProgramWireView {
     std::span<const ProgramWireAutomationSegmentRecord> automation_segments() const noexcept {
         return automation_segments_;
     }
+    /// One range per track, in track order; empty only for a version 2 payload
+    /// that carried no such section, and then `tracks()` has nothing to index.
+    std::span<const ProgramWireControllerRangeRecord> controller_ranges() const noexcept {
+        return controller_ranges_;
+    }
+    std::span<const ProgramWireControllerEventRecord> controller_events() const noexcept {
+        return controller_events_;
+    }
 
     // Every range below was bounds-checked at decode, so these never read past
     // their section.
@@ -641,6 +748,12 @@ class ProgramWireView {
     segments_for(const ProgramWireAutomationLaneRecord& lane) const noexcept {
         return automation_segments_.subspan(lane.segment_first, lane.segment_count);
     }
+    /// The events of the track whose index in `tracks()` matches `range`'s in
+    /// `controller_ranges()`.
+    std::span<const ProgramWireControllerEventRecord>
+    controller_events_for(const ProgramWireControllerRangeRecord& range) const noexcept {
+        return controller_events_.subspan(range.first, range.count);
+    }
 
   private:
     friend struct detail::ProgramWireDecoder;
@@ -656,6 +769,8 @@ class ProgramWireView {
     std::span<const ProgramWireIdRecord> device_placement_ids_;
     std::span<const ProgramWireAutomationLaneRecord> automation_lanes_;
     std::span<const ProgramWireAutomationSegmentRecord> automation_segments_;
+    std::span<const ProgramWireControllerRangeRecord> controller_ranges_;
+    std::span<const ProgramWireControllerEventRecord> controller_events_;
 };
 
 /// A nonzero value that is stable for this process and differs between

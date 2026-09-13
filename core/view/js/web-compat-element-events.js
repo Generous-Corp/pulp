@@ -477,4 +477,17 @@ function _dispatchEvent(target, event) {
     }
     event.eventPhase = 0;
     event.currentTarget = null;
+
+    // Pulp's popup default-behavior owner watches for the gesture that opens an
+    // `aria-haspopup` menu. `__dispatch__` fans only pointer events on to
+    // `document`, deliberately, so a native click never reaches that owner
+    // through the document path — and an app that opens its menu in a `click`
+    // handler would leave the open menu unowned. Offer the element-path event
+    // here instead, where the target is the real one, and mark it so the
+    // document tail cannot handle the same event a second time.
+    if (!event.defaultPrevented && !event.__pulpPopupOffered
+        && typeof globalThis.__pulpPopupDefaultHandle__ === "function") {
+        event.__pulpPopupOffered = true;
+        globalThis.__pulpPopupDefaultHandle__(event);
+    }
 }

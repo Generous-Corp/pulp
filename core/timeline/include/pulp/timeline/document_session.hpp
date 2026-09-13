@@ -195,6 +195,8 @@ template <class T> constexpr CommandAuthority command_authority_of() noexcept {
         return {Class::Annotation, Intent::Modify};
     else if constexpr (std::is_same_v<T, SetGroove>)
         return {Class::Annotation, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetDynamicsLane>)
+        return {Class::Annotation, Intent::Modify};
     else if constexpr (std::is_same_v<T, SetTempoMap>)
         return {Class::Timing, Intent::Modify};
     else if constexpr (std::is_same_v<T, SetMeterMap>)

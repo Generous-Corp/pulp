@@ -299,6 +299,26 @@ def _commit_signature(root: pathlib.Path) -> dict[str, str]:
     return {"status": status, "signer": signer, "fingerprint": fingerprint}
 
 
+def _unclean_status_summary(status: bytes, *, limit: int = 8) -> str:
+    """Describe the porcelain records that left a checkout unclean.
+
+    A checkout can only be repaired by whoever knows which entries dirtied it,
+    and the refusal is raised on CI where nobody can re-run `git status` after
+    the fact. Naming the entries costs nothing: they are repository-relative
+    paths in a checkout whose absolute root the same message already reports.
+    """
+    entries = sorted(
+        record.decode("utf-8", "surrogateescape")
+        for record in status.split(b"\x00")
+        if record
+    )
+    if not entries:
+        return "unreadable status records"
+    shown = ", ".join(entries[:limit])
+    hidden = len(entries) - limit
+    return f"{shown}, +{hidden} more" if hidden > 0 else shown
+
+
 def git_repository_identity(
     root: pathlib.Path, *, expected_repository: str,
     required_document: pathlib.Path | None = None, require_origin_main: bool = False,
@@ -320,7 +340,10 @@ def git_repository_identity(
         if record in status:
             status = status.replace(record, b"", 1)
     if status:
-        raise TrustError(f"repository must be completely clean at {revision}: {root}")
+        raise TrustError(
+            f"repository must be completely clean at {revision}: {root} "
+            f"({_unclean_status_summary(status)})"
+        )
     origin_url = _text(_git(root, "config", "--get", "remote.origin.url"))
     origin_repository = _github_repository(origin_url)
     if origin_repository != expected_repository:

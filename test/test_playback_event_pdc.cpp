@@ -325,7 +325,7 @@ TEST_CASE("one whole-span block matches many small blocks under a shift", "[even
     REQUIRE(offline == realtime);
 }
 
-TEST_CASE("a shift is applied per transport range, and refuses to read past a loop end",
+TEST_CASE("a shift is applied per transport range, and folds its read-ahead at a loop end",
           "[event-pdc]") {
     const auto map = flat_map();
     Programs programs;
@@ -333,68 +333,141 @@ TEST_CASE("a shift is applied per transport range, and refuses to read past a lo
                                   {
                                       authored_note(*map, 60, 64, 200, 60),
                                       authored_note(*map, 61, 700, 900, 62),
+                                      // Held across the loop point, so the pass's
+                                      // release is observable as its note-off.
+                                      authored_note(*map, 62, 980, 1'100, 64),
                                   },
                                   4'000),
                      map);
     const LoopRegion loop{true, {0}, map->samples_to_ticks({1'024})};
     const EventCompensationShift shift{80};
-    auto program = programs.store.read();
-    REQUIRE(program);
-    PlaybackProgramBlock block(program.get());
+    constexpr std::int64_t kFrames = 3'072;
+    const std::array<std::uint32_t, 1> blocks{96};
 
-    // Control: the same loop, the same blocks, no compensation. A full pass
-    // renders and the onset lands where the document authored it.
+    const auto plain = render(programs.store, *map, {}, blocks, kFrames, loop);
+    const auto compensated = render(programs.store, *map, shift, blocks, kFrames, loop);
+
+    // Control: the same loop, the same blocks, no compensation. Nothing is
+    // folded, and the onset lands where the document authored it, once per pass.
     {
-        ArrangementNoteRenderer renderer({10});
-        REQUIRE(renderer.prepare(256));
-        MasterTransport transport;
-        start_playing(transport, *map, 96, loop);
-        std::vector<Emitted> emitted;
-        for (std::int64_t origin = 0; origin < 2'048; origin += 96) {
-            TransportSnapshot snapshot;
-            REQUIRE(transport.begin_block(96, snapshot) == TransportError::None);
-            const auto result = renderer.process(block, snapshot, {});
-            REQUIRE(result.code == NoteRenderCode::Ok);
-            collect(renderer.events(), origin, emitted);
-        }
-        const auto onsets = note_on_positions(emitted, 62);
-        REQUIRE(onsets.size() == 2);
+        const auto onsets = note_on_positions(plain, 62);
+        REQUIRE(onsets.size() == 3);
         REQUIRE(onsets[0].sample == 700);
         REQUIRE(onsets[1].sample - onsets[0].sample == 1'024);
+        REQUIRE(onsets[2].sample - onsets[1].sample == 1'024);
     }
 
-    // Compensated: each range is shifted from its OWN origin, so the onset well
-    // inside the pass moves early by exactly the shift. The block whose window
-    // would run past the loop point refuses instead: what belongs there is the
-    // content after the wrap, and wrap-aware read-ahead does not exist.
-    ArrangementNoteRenderer renderer({10});
-    REQUIRE(renderer.prepare(256));
-    MasterTransport transport;
-    start_playing(transport, *map, 96, loop);
-    std::vector<Emitted> emitted;
-    bool refused = false;
-    std::int64_t frames_before_refusal = 0;
-    for (std::int64_t origin = 0; origin < 2'048; origin += 96) {
-        TransportSnapshot snapshot;
-        REQUIRE(transport.begin_block(96, snapshot) == TransportError::None);
-        const auto result = renderer.process(block, snapshot, shift);
-        if (result.code == NoteRenderCode::CompensationLoopWrapUnsupported) {
-            refused = true;
-            frames_before_refusal = origin;
-            break;
-        }
-        REQUIRE(result.code == NoteRenderCode::Ok);
-        collect(renderer.events(), origin, emitted);
+    // The positive contract. A compensated window that runs past the loop point
+    // reads the content from AFTER the wrap, so a whole steady-state pass of the
+    // compensated stream is the uncompensated stream moved early by exactly the
+    // shift — the wrap's own release included. Bounded to one interior pass so
+    // neither side is compared against content the other never rendered.
+    std::vector<Emitted> expected;
+    for (const auto& event : plain) {
+        if (event.sample < 1'024 || event.sample > 2'048)
+            continue;
+        expected.push_back({event.sample - shift.samples, event.status, event.data1});
     }
-    REQUIRE(refused);
-    // The refusal is at the loop end, not at the first block: the compensated
-    // stream really ran past the onset at 620 before the window reached the
-    // loop point, and that onset proves the shift was applied.
-    REQUIRE(frames_before_refusal > 620);
-    std::sort(emitted.begin(), emitted.end());
-    const auto onsets = note_on_positions(emitted, 62);
-    REQUIRE(onsets.size() == 1);
-    REQUIRE(onsets.front().sample == 700 - 80);
+    std::vector<Emitted> observed;
+    for (const auto& event : compensated) {
+        if (event.sample < 1'024 - shift.samples || event.sample > 2'048 - shift.samples)
+            continue;
+        observed.push_back(event);
+    }
+    REQUIRE_FALSE(expected.empty());
+    REQUIRE(observed == expected);
+
+    // Read ahead reaches the wrap before the transport does, so the note held
+    // across the loop point is released a shift early, and the post-wrap content
+    // begins from there rather than from document positions past the loop end.
+    const auto onsets = note_on_positions(compensated, 60);
+    REQUIRE(onsets.size() == 3);
+    // 1'024 + 64 - 80: the pass-1 onset, read early. There is no onset at 64 - 80
+    // because that first-pass onset precedes the shifted window and is not
+    // chased, which is the same non-chase rule a seek obeys.
+    REQUIRE(onsets[0].sample == 1'008);
+    REQUIRE(onsets[1].sample - onsets[0].sample == 1'024);
+    REQUIRE(onsets[2].sample - onsets[1].sample == 1'024);
+
+    const auto is_release = [](const Emitted& event) {
+        return (event.status & 0xf0u) == 0x80u && event.data1 == 64;
+    };
+    std::vector<std::int64_t> releases;
+    for (const auto& event : compensated)
+        if (is_release(event))
+            releases.push_back(event.sample);
+    // One release per crossing, and no second one when the transport reaches the
+    // same wrap a shift later: the fold serves it, the discontinuity does not
+    // serve it again. The stream crosses three times in this span; the
+    // uncompensated stream's third crossing falls on the render boundary.
+    REQUIRE(releases == std::vector<std::int64_t>{944, 1'968, 2'992});
+    std::vector<std::int64_t> plain_releases;
+    for (const auto& event : plain)
+        if (is_release(event))
+            plain_releases.push_back(event.sample);
+    REQUIRE(plain_releases == std::vector<std::int64_t>{1'024, 2'048});
+}
+
+TEST_CASE("a compensated read is planned against the loop it runs into", "[event-pdc]") {
+    TransportRange range;
+    range.frame_count = 64;
+    range.timeline_sample_start = {512};
+    const timebase::SamplePosition loop_start{0};
+    const timebase::SamplePosition loop_end{1'024};
+
+    SECTION("an unbounded read is one run from the shifted origin") {
+        const auto plan = plan_compensated_read(range, {128});
+        REQUIRE(plan.segment_count == 1);
+        REQUIRE_FALSE(plan.wraps_inside_range);
+        REQUIRE(plan.segments[0].document_start.value == 640);
+        REQUIRE(plan.segments[0].frame_count == 64);
+        REQUIRE(plan.segments[0].range_offset == 0);
+        REQUIRE(plan.segments[0].pass_offset == 0);
+    }
+    SECTION("a read that stays inside the loop is not folded") {
+        const auto plan = plan_compensated_read(range, {128}, loop_start, loop_end);
+        REQUIRE(plan.segment_count == 1);
+        REQUIRE_FALSE(plan.wraps_inside_range);
+        REQUIRE(plan.segments[0].document_start.value == 640);
+        REQUIRE(plan.segments[0].frame_count == 64);
+    }
+    SECTION("a read that crosses the loop point is split at it") {
+        range.timeline_sample_start = {960};
+        const auto plan = plan_compensated_read(range, {40}, loop_start, loop_end);
+        REQUIRE(plan.segment_count == 2);
+        REQUIRE(plan.wraps_inside_range);
+        // 24 frames of this pass, then the rest from the top of the loop.
+        REQUIRE(plan.segments[0].document_start.value == 1'000);
+        REQUIRE(plan.segments[0].frame_count == 24);
+        REQUIRE(plan.segments[0].range_offset == 0);
+        REQUIRE(plan.segments[0].pass_offset == 0);
+        REQUIRE(plan.segments[1].document_start.value == 0);
+        REQUIRE(plan.segments[1].frame_count == 40);
+        REQUIRE(plan.segments[1].range_offset == 24);
+        REQUIRE(plan.segments[1].pass_offset == 1);
+    }
+    SECTION("a read starting exactly on the loop end is the next pass, not a split") {
+        range.timeline_sample_start = {1'000};
+        const auto plan = plan_compensated_read(range, {24}, loop_start, loop_end);
+        REQUIRE(plan.segment_count == 1);
+        REQUIRE_FALSE(plan.wraps_inside_range);
+        REQUIRE(plan.segments[0].document_start.value == 0);
+        REQUIRE(plan.segments[0].frame_count == 64);
+        REQUIRE(plan.segments[0].pass_offset == 1);
+    }
+    SECTION("an origin already past the loop end folds back with its pass count") {
+        range.timeline_sample_start = {2'100};
+        const auto plan = plan_compensated_read(range, {16}, loop_start, loop_end);
+        REQUIRE(plan.segment_count == 1);
+        REQUIRE(plan.segments[0].document_start.value == 68);
+        REQUIRE(plan.segments[0].pass_offset == 2);
+    }
+    SECTION("a loop with no length is unbounded rather than a division") {
+        const auto plan = plan_compensated_read(range, {128}, loop_end, loop_end);
+        REQUIRE(plan.segment_count == 1);
+        REQUIRE(plan.segments[0].document_start.value == 640);
+        REQUIRE(plan.segments[0].frame_count == 64);
+    }
 }
 
 TEST_CASE("a loop admits read-ahead that stays inside it", "[event-pdc]") {

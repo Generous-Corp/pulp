@@ -341,8 +341,7 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
             const bool notes_cleared = clear_notes();
             const bool automation_cleared = clear_automation(delivered_automation_tracks);
             const bool compensation_refused =
-                note_result.code == playback::NoteRenderCode::CompensationUnsupported ||
-                note_result.code == playback::NoteRenderCode::CompensationLoopWrapUnsupported;
+                note_result.code == playback::NoteRenderCode::CompensationUnsupported;
             return fail_closed(compensation_refused
                                    ? TimelineGraphProcessCode::EventCompensationUnsupported
                                    : TimelineGraphProcessCode::NoteRenderFailed,

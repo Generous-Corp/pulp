@@ -143,7 +143,7 @@ TEST_CASE("chord/scale lane round trips and re-saves byte-identically",
 
     auto first = serialize_project(original, registry);
     REQUIRE(first.has_value());
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":7") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":8") !=
             std::string::npos);
     // Canonical order is alphabetical, so the bass and the extension mask sort
     // before the quality and the voicing hint sorts last. An event that states
@@ -281,6 +281,9 @@ TEST_CASE("a pre-lane sequence document loads as a sequence with no harmony",
     const auto lane_at = legacy.find(R"("chord_scale_lane":[],)");
     REQUIRE(lane_at != std::string::npos);
     legacy.erase(lane_at, std::string_view(R"("chord_scale_lane":[],)").size());
+    const auto dynamics_at = legacy.find(R"("dynamics_lane":[],)");
+    REQUIRE(dynamics_at != std::string::npos);
+    legacy.erase(dynamics_at, std::string_view(R"("dynamics_lane":[],)").size());
     constexpr std::string_view straight_groove =
         R"("groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},)";
     const auto groove_at = legacy.find(straight_groove);
@@ -296,10 +299,10 @@ TEST_CASE("a pre-lane sequence document loads as a sequence with no harmony",
     const auto order_end = legacy.find("],", order_at);
     REQUIRE(order_end != std::string::npos);
     legacy.erase(order_at, order_end + 2 - order_at);
-    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":7)");
+    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":8)");
     REQUIRE(version_at != std::string::npos);
     legacy.replace(version_at,
-                   std::string_view(R"("type_name":"pulp.timeline.sequence","version":7)").size(),
+                   std::string_view(R"("type_name":"pulp.timeline.sequence","version":8)").size(),
                    R"("type_name":"pulp.timeline.sequence","version":2)");
 
     const auto decoded = take(deserialize_project(legacy, registry));
@@ -390,7 +393,7 @@ TEST_CASE("the sequence chord-detail migration defaults old events and refuses t
     DecodeLimits limits;
 
     const auto plain = take(serialize_project(project_with_chord_lane(two_bar_lane()), registry));
-    const auto lowered = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7,
+    const auto lowered = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 8,
                                                6, sequence_envelope(plain.json), limits));
     // A v6 event has no detail members at all.
     REQUIRE(lowered.find(R"("chord_bass")") == std::string::npos);
@@ -399,9 +402,9 @@ TEST_CASE("the sequence chord-detail migration defaults old events and refuses t
             std::string::npos);
 
     // The upgrade puts back exactly what the downgrade removed, so a v6
-    // document states the same harmony a v7 one does.
+    // document states the same harmony a current one does.
     const auto raised = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 6,
-                                              7, lowered, limits));
+                                              8, lowered, limits));
     REQUIRE(raised == sequence_envelope(plain.json));
 
     // A bass, an extension, or a voicing hint has no v6 spelling, and dropping
@@ -410,7 +413,7 @@ TEST_CASE("the sequence chord-detail migration defaults old events and refuses t
     rich.chord_bass = 11;
     const auto authored =
         take(serialize_project(project_with_chord_lane(lane_of({rich})), registry));
-    auto refused = registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 7, 6,
+    auto refused = registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 8, 6,
                                     sequence_envelope(authored.json), limits);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
@@ -457,7 +460,7 @@ TEST_CASE("a sequence older than the chord detail may not carry it",
     // structural preflight and the decoder are asked, so neither can be the
     // only thing standing between a mislabelled document and a decode.
     auto mislabelled = current.json;
-    constexpr std::string_view stamp = R"("type_name":"pulp.timeline.sequence","version":7)";
+    constexpr std::string_view stamp = R"("type_name":"pulp.timeline.sequence","version":8)";
     const auto at = mislabelled.find(stamp);
     REQUIRE(at != std::string::npos);
     mislabelled.replace(at, stamp.size(),
