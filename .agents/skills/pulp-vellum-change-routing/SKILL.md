@@ -158,6 +158,13 @@ python3 tools/scripts/gpu_handoff_provenance.py write --receipt             # re
 Pass `--receipt`. The published receipt is asserted against the ledger's bytes,
 so regenerating without it leaves a second gate red for the next reader.
 
+`gpu_recipe_catalog.py` will not catch that omission. It validates the ledger's
+own identities and reports `OK` while the receipt still names the previous
+ledger bytes, so the check recommended above is green in exactly the state this
+paragraph warns about. Prove the receipt separately — re-run `write --receipt`
+and confirm it rewrites nothing, or compare the receipt's `handoff_sha256`
+against `shasum -a 256 docs/status/gpu-vellum-handoff.yaml`.
+
 `check` names each stale row, its path, and the field-level correction, so a
 drifted pin no longer has to be located by hand. `write` derives `revision`,
 `object_id`, and `object_type` for every declared path from a single commit

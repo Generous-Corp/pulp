@@ -390,11 +390,27 @@ delivered as soon as one is installed.
 
 **Status**: usable
 
-Attach an icon source to an application or standalone target.
+Attach an icon source to an application, standalone, or plugin-format bundle
+target. The plugin bundles `pulp_add_plugin()` generates — `<target>_VST3`,
+`<target>_AU`, `<target>_CLAP`, `<target>_AAX` — are CFBundles and accept an
+icon the same way an app bundle does.
 
 Targets build normally if you never call `pulp_app_icon(...)`. The helper is an
 optional overlay, so removing the call cleanly removes the custom-icon
 behavior.
+
+`SOURCE` takes one PNG of at least 1024x1024 and derives every size from it
+with `sips`. That is fine for soft artwork and poor for a mark with fine
+detail: `sips` uses a Lanczos kernel, which overshoots on hard edges, so a
+1-2px feature at 16x16 smears and a tile edge picks up a visible halo. When
+the icon has crisp geometry, render each size on its own pixel grid, build the
+`.icns` yourself, and pass it as `ICNS` — it is bundled verbatim. `ICNS`
+applies to macOS only; keep `SOURCE` alongside it to cover Windows, Android,
+and Linux.
+
+```cmake
+pulp_app_icon(MyPlugin_VST3 ICNS assets/MyPlugin.icns)
+```
 
 ```cmake
 pulp_app_icon(<target>

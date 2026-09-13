@@ -28,6 +28,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -319,4 +320,151 @@ TEST_CASE("auto-overlay: adding the data-overlay hint upgrades an existing "
     h.eval(R"( d.setAttribute('data-overlay', 'true'); )");
     REQUIRE(View::active_overlay_ != nullptr);
     REQUIRE(View::active_overlay_->overlay_consumes_outside_click());
+}
+
+// ── data-overlay-trigger marks the control that OPENS an overlay ────────────
+//
+// Separate from the claim: the trigger is the dropdown FIELD, the claim is on
+// the menu it opens. Marking it lets a press meant as "switch menus" reach the
+// second dropdown instead of being spent closing the first. Never inferred
+// from CSS shape — an inference that marked ordinary content would make
+// clicking away from a menu also operate whatever sits under the click.
+
+namespace {
+
+// The bridge keys widgets by its own generated id, not the DOM `id`, so these
+// count marks over the built tree instead of looking one up by name.
+int count_views(const View& v) {
+    int n = 1;
+    for (size_t i = 0; i < v.child_count(); ++i) n += count_views(*v.child_at(i));
+    return n;
+}
+
+int count_overlay_triggers(const View& v) {
+    int n = v.overlay_trigger() ? 1 : 0;
+    for (size_t i = 0; i < v.child_count(); ++i)
+        n += count_overlay_triggers(*v.child_at(i));
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("data-overlay-trigger=\"true\" marks the view as an overlay trigger",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.setAttribute('data-overlay-trigger', 'true');
+    )");
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+}
+
+TEST_CASE("an unmarked element is not an overlay trigger",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.style.position = 'absolute';
+        d.style.zIndex = '100';
+    )");
+    // Positive control: the element really reached the bridge and built views,
+    // so the zero below is about the trigger mark and not about an empty tree.
+    REQUIRE(count_views(h.root) > 1);
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+}
+
+TEST_CASE("removing data-overlay-trigger clears the mark",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        d.id = 'toggling';
+        document.body.appendChild(d);
+        d.setAttribute('data-overlay-trigger', 'true');
+    )");
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+
+    h.eval("document.getElementById('toggling').removeAttribute('data-overlay-trigger');");
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+}
+
+// ── Escape must NOTIFY the overlay's owner, not just hide it ────────────────
+//
+// A JS-owned ARIA popup (web-compat-document.js) claims the generalized
+// overlay slot on activate and releases it on dismiss, so it IS an open
+// overlay as far as the native dismissal policy is concerned. Its React state
+// is reconciled by a native `dismiss` event the JS side listens for: without
+// that event the popup would be hidden natively while the app still believes
+// its menu is open, and the next trigger press would toggle the state back to
+// closed with nothing appearing to happen.
+//
+// `route_escape_to_active_overlay` therefore goes through the dismissal path,
+// which fires `on_overlay_dismissed` — the callback `claimOverlay` installs to
+// dispatch that event — and never hides anything itself.
+
+TEST_CASE("Escape fires the overlay's native dismiss event for its JS owner",
+          "[view][web-compat][auto-overlay][escape]") {
+    OverlayGuard g;
+    Harness h;
+    // The dismiss handler marks a SECOND element as an overlay trigger, which
+    // is an observable that already round-trips through the bridge, so the
+    // assertion below is about the event actually reaching JS.
+    h.eval(R"(
+        var witness = document.createElement('div');
+        document.body.appendChild(witness);
+        var popup = document.createElement('div');
+        document.body.appendChild(popup);
+        popup.addEventListener('dismiss', function() {
+            witness.setAttribute('data-overlay-trigger', 'true');
+        });
+        popup.setAttribute('data-overlay', 'true');
+        popup.style.position = 'absolute';
+    )");
+    // Positive controls: the claim really fired and nothing has dismissed yet,
+    // so the count below is about Escape and not about a listener that was
+    // already run or an overlay that never existed.
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(h.root) ==
+            pulp::view::OverlayEscapeResult::overlay);
+
+    REQUIRE(h.root.interaction().active_overlay == nullptr);
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+}
+
+TEST_CASE("an outside press fires the overlay's native dismiss event too",
+          "[view][web-compat][auto-overlay][pointer]") {
+    // Same reconciliation obligation on the press path: the JS owner learns
+    // about the dismissal through the event, never by observing a hidden view.
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var witness = document.createElement('div');
+        document.body.appendChild(witness);
+        var popup = document.createElement('div');
+        document.body.appendChild(popup);
+        popup.addEventListener('dismiss', function() {
+            witness.setAttribute('data-overlay-trigger', 'true');
+        });
+        popup.setAttribute('data-overlay', 'true');
+        popup.style.position = 'absolute';
+        popup.style.left = '100px';
+        popup.style.top = '100px';
+        popup.style.width = '80px';
+        popup.style.height = '60px';
+    )");
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        h.root, {10.0f, 10.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(count_overlay_triggers(h.root) == 1);
 }

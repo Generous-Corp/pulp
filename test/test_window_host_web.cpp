@@ -631,3 +631,178 @@ TEST_CASE("WebInputRouter maps a click through the design viewport",
     CHECK_THAT(spy->last_down.x, WithinAbs(50.0, 1e-3));
     CHECK_THAT(spy->last_down.y, WithinAbs(50.0, 1e-3));
 }
+
+// ── Overlay dismissal ───────────────────────────────────────────────────────
+//
+// This host used to hand-roll a reduced copy of the overlay policy against the
+// process-global `View::active_overlay_` shim mirror. That cost it three
+// behaviours the macOS and Windows hosts already had — routing a press into
+// the overlay's own subtree, honouring outside-click consumption, and scoping
+// the slot to this root — and gave it no Escape path at all. It now calls the
+// same shared verbs, so these pin the delta.
+
+TEST_CASE("WebInputRouter routes a press inside an overlay into its subtree",
+          "[view][web][input][overlay]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto over = std::make_unique<InputSpy>();
+    InputSpy* popover = over.get();
+    popover->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(over));
+    popover->claim_overlay();
+
+    // A claimed overlay paints in its own top layer, so an ordinary tree
+    // hit_test resolves a LATER sibling covering the same pixels — which is
+    // exactly what an absolutely-positioned popover child loses the click to
+    // when the host hit-tests the tree instead of the overlay's subtree.
+    auto under = std::make_unique<InputSpy>();
+    InputSpy* later_sibling = under.get();
+    later_sibling->set_bounds({0, 0, 400, 300});
+    root.add_child(std::move(under));
+    REQUIRE(root.hit_test({130, 70}) == later_sibling);
+
+    WebInputRouter router(root);
+    router.set_mapping(make_mapping(400, 300, 0, 0));
+
+    BrowserPointerEvent down;
+    down.css_x = 130;
+    down.css_y = 70;
+    down.buttons = 1;
+    down.phase = BrowserPointerPhase::down;
+    REQUIRE(router.handle_pointer(down));
+
+    CHECK(popover->downs == 1);
+    CHECK(later_sibling->downs == 0);
+    // A press inside must never dismiss.
+    CHECK(root.interaction().active_overlay == popover);
+}
+
+TEST_CASE("WebInputRouter dismisses an overlay on an outside press",
+          "[view][web][input][overlay]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto over = std::make_unique<InputSpy>();
+    InputSpy* popover = over.get();
+    popover->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(over));
+    popover->claim_overlay();
+
+    int dismissed = 0;
+    popover->on_overlay_dismissed = [&] { ++dismissed; };
+
+    WebInputRouter router(root);
+    router.set_mapping(make_mapping(400, 300, 0, 0));
+
+    BrowserPointerEvent down;
+    down.css_x = 10;
+    down.css_y = 10;
+    down.buttons = 1;
+    down.phase = BrowserPointerPhase::down;
+    router.handle_pointer(down);
+
+    CHECK(dismissed == 1);
+    CHECK(root.interaction().active_overlay == nullptr);
+}
+
+TEST_CASE("WebInputRouter honours outside-click consumption",
+          "[view][web][input][overlay]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto under = std::make_unique<InputSpy>();
+    InputSpy* underlay = under.get();
+    underlay->set_bounds({0, 0, 400, 300});
+    root.add_child(std::move(under));
+
+    auto over = std::make_unique<InputSpy>();
+    InputSpy* popover = over.get();
+    popover->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(over));
+    popover->claim_overlay();
+    popover->set_overlay_consumes_outside_click(true);
+
+    WebInputRouter router(root);
+    router.set_mapping(make_mapping(400, 300, 0, 0));
+
+    BrowserPointerEvent down;
+    down.css_x = 10;
+    down.css_y = 10;
+    down.buttons = 1;
+    down.phase = BrowserPointerPhase::down;
+    router.handle_pointer(down);
+
+    // The press that dismissed the popover must not also mutate the control
+    // underneath it.
+    CHECK(underlay->downs == 0);
+    CHECK(root.interaction().active_overlay == nullptr);
+}
+
+TEST_CASE("WebInputRouter leaves another tree's overlay alone",
+          "[view][web][input][overlay]") {
+    // The process-global shim mirror names the most recent claim anywhere in
+    // the process, so reading it here dismissed a second editor's popover.
+    View root, other_root;
+    root.set_bounds({0, 0, 400, 300});
+    other_root.set_bounds({0, 0, 400, 300});
+
+    auto other_child = std::make_unique<InputSpy>();
+    InputSpy* other_popover = other_child.get();
+    other_popover->set_bounds({100, 50, 120, 80});
+    other_root.add_child(std::move(other_child));
+    other_popover->claim_overlay();
+    REQUIRE(View::active_overlay_ == other_popover);
+
+    int dismissed = 0;
+    other_popover->on_overlay_dismissed = [&] { ++dismissed; };
+
+    auto own_child = std::make_unique<InputSpy>();
+    own_child->set_bounds({0, 0, 400, 300});
+    root.add_child(std::move(own_child));
+
+    WebInputRouter router(root);
+    router.set_mapping(make_mapping(400, 300, 0, 0));
+
+    BrowserPointerEvent down;
+    down.css_x = 10;
+    down.css_y = 10;
+    down.buttons = 1;
+    down.phase = BrowserPointerPhase::down;
+    router.handle_pointer(down);
+
+    CHECK(dismissed == 0);
+    CHECK(other_root.interaction().active_overlay == other_popover);
+    other_popover->release_overlay();
+}
+
+TEST_CASE("WebInputRouter dismisses an overlay on Escape",
+          "[view][web][input][overlay]") {
+    // A popover whose trigger never took focus could previously only be
+    // closed with the mouse: handle_key delivers to the focused view, and
+    // nothing was focused.
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto over = std::make_unique<InputSpy>();
+    InputSpy* popover = over.get();
+    popover->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(over));
+    popover->claim_overlay();
+
+    int dismissed = 0;
+    popover->on_overlay_dismissed = [&] { ++dismissed; };
+
+    WebInputRouter router(root);
+    router.set_mapping(make_mapping(400, 300, 0, 0));
+
+    BrowserKeyEvent esc;
+    esc.key = "Escape";
+    esc.is_down = true;
+    REQUIRE(router.handle_key(esc));
+
+    CHECK(dismissed == 1);
+    CHECK(root.interaction().active_overlay == nullptr);
+    // The key was consumed by the dismissal, not forwarded to the tree.
+    CHECK(popover->keys == 0);
+}
