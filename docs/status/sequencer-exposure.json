@@ -5656,6 +5656,8 @@
       "delivery_state": "pending",
       "claim_id": "c7d4869f-de94-4418-85ae-86bb325dbc1f",
       "owned_paths": [
+        ".agents/skills/agent-capabilities/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
         "docs/reference/development-inspector-capabilities.md",
         "docs/status/sequencer-exposure.json",
         "inspect/CMakeLists.txt",
@@ -5723,6 +5725,21 @@
             "the broker never selects the trusted authority on a caller's behalf",
             "shape and exact-instance bindings refuse before the session is reached",
             "a cancelled or revoked checkpoint stops the operation terminally"
+          ]
+        },
+        {
+          "path": ".agents/skills/timeline/SKILL.md",
+          "needles": [
+            "The live broker surface projects `ConflictCode`; it must never re-decide it",
+            "control_timeline_admissible_writer_profile",
+            "never add a `default:` arm to `control_timeline_conflict_result_code`"
+          ]
+        },
+        {
+          "path": ".agents/skills/agent-capabilities/SKILL.md",
+          "needles": [
+            "An installed `inspect/` control header is not a design-time capability row",
+            "design_time_agent_manifest: not_applicable"
           ]
         }
       ],
