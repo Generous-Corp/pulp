@@ -5656,6 +5656,9 @@
       "delivery_state": "pending",
       "claim_id": "6bc15779-15b1-41c1-9c2d-72eca8c2889a",
       "owned_paths": [
+        ".github/vellum-expansion-watch-events/20260912-product-a-sequencer-state-control-watch.json",
+        "docs/reference/development-inspector-capabilities.md",
+        "docs/status/sequencer-exposure.json",
         "inspect/CMakeLists.txt",
         "inspect/include/pulp/inspect/capability_definitions.inc",
         "inspect/include/pulp/inspect/control_registry_digest.inc",
@@ -5665,10 +5668,8 @@
         "inspect/src/control_sequencer_state_executor.cpp",
         "inspect/src/control_standalone_host.cpp",
         "inspect/src/control_standalone_host_minimal.cpp",
-        "test/test_control_sequencer_state_executor.cpp",
         "test/cmake/view_widget_bridge_tests.cmake",
-        "docs/reference/development-inspector-capabilities.md",
-        "docs/status/sequencer-exposure.json"
+        "test/test_control_sequencer_state_executor.cpp"
       ],
       "evidence": [
         {
