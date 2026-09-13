@@ -605,8 +605,15 @@ if(Python3_Interpreter_FOUND)
             COMMAND bash
                 "${CMAKE_SOURCE_DIR}/test/cmake/test_gpu_health_cpu_only_configure.sh"
                 "${CMAKE_SOURCE_DIR}")
+        # This case configures AND builds pulp-tool-gpu-health-model plus
+        # pulp-mcp-core from scratch in a temporary tree, so it needs a
+        # build-sized budget rather than ctest's per-run default. Every other
+        # configure-and-build case here declares one for the same reason
+        # (project-package-compile-out and agent-capability-installed-sdk both
+        # use 1200).
         set_tests_properties(gpu-health-cpu-only-configure PROPERTIES
-            LABELS "slow;gpu-health")
+            LABELS "slow;gpu-health"
+            TIMEOUT 1200)
     endif()
 
     # PR-check triage: comparison logic that labels a red PR check as
