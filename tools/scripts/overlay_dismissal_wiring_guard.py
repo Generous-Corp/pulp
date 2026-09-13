@@ -1,30 +1,38 @@
 #!/usr/bin/env python3
-"""overlay_dismissal_wiring_guard.py — every platform host that routes a press
-to an open ComboBox must also consult the generalized overlay slot.
+"""overlay_dismissal_wiring_guard.py — the overlay-dismissal policy has exactly
+one implementation, and every platform host routes through it.
 
-Pulp has two independent popup-dismissal mechanisms:
+Pulp has two independent popup mechanisms a host must keep in step:
 
-  A. `ComboBox::notify_global_click(target)` closes an open native ComboBox
-     dropdown when the press lands outside it.
-  B. `View::active_overlay_` + `overlay_contains()` + `dismiss_active_overlay()`
-     closes a generalized overlay — what `@pulp/react`'s `<View overlay>` prop
-     and every imported/materialized design's popover claims.
+  A. `ComboBox`'s open native dropdown (`notify_global_click`,
+     `active_popup_in`, `close_active_popup`).
+  B. The generalized overlay slot (`RootInteractionState::active_overlay`),
+     which `@pulp/react`'s `<View overlay>` prop — and every imported or
+     materialized design's popover — claims via `View::claim_overlay()`.
 
-They are consulted by the platform hosts, not by the view tree, so each host
-carries the obligation independently. That is the whole failure mode this guard
-exists for: the standalone macOS host wires both, while the DAW plugin hosts
-wired only (A). A dropdown built on (B) therefore stayed open forever when the
-user clicked outside it inside a plugin editor, while the same UI dismissed
-correctly in the standalone app.
+Deciding what a press or an Escape means for those two is ONE policy, and it
+lives in `core/view/src/overlay_dismissal.cpp` behind the verbs declared in
+`core/view/include/pulp/view/overlay_dismissal.hpp`. Hosts own native event
+plumbing only.
 
-The rule is one-directional and deliberately narrow: a host that consults
-mechanism (A) has a press-routing path, so it must consult (B) there too. A host
-with no press routing at all is out of scope and is not flagged.
+An earlier version of this guard checked something weaker: that a host which
+consults (A) also mentions (B) *somehow*, accepting a hand-rolled equivalent as
+readily as the shared verb. That sanctioned four independent copies of the
+policy, and they drifted exactly as independent copies do — one read the
+process-global shim mirror so a press in one editor dismissed another's
+popover, one never honoured an overlay's outside-click consumption and never
+routed a press into the overlay's own subtree, and two had no Escape path at
+all. A guard that blesses the defect is worse than no guard, so the rule is now
+the stronger one:
+
+  1. A host that routes presses (it calls `ComboBox::notify_global_click`) must
+     call `route_press_to_active_overlay` or `route_context_press`.
+  2. No host may reach past the verbs to the slot itself. The slot-level
+     spellings are the shared implementation's alone.
 
 Exit codes:
-    0 - every host that consults ComboBox::notify_global_click also consults
-        the generalized overlay slot
-    1 - one or more hosts consult only the ComboBox mechanism
+    0 - every press-routing host calls a shared verb, and no host hand-rolls
+    1 - a host skipped the verbs, or reached past them to the slot
 """
 
 from __future__ import annotations
@@ -42,20 +50,34 @@ HOST_ROOTS = (
 
 SOURCE_SUFFIXES = {".mm", ".cpp", ".hpp", ".h"}
 
+# The single implementation. These two files are the policy, so the slot-level
+# spellings below are theirs to use; everything else must go through the verbs.
+POLICY_SOURCES = (
+    "core/view/src/overlay_dismissal.cpp",
+    "core/view/include/pulp/view/overlay_dismissal.hpp",
+)
+
 # Mechanism (A): the native ComboBox outside-click notification. Matched
 # call-shaped so a file that merely names it in an #include comment — and
 # delegates its actual press routing elsewhere — is correctly out of scope.
 COMBO_MARKER = "notify_global_click("
 COMBO_PATTERN = re.compile(r"\bnotify_global_click\s*\(")
 
-# Mechanism (B): any consultation of the generalized overlay slot. A host may
-# either call the shared portable verb or hand-roll the equivalent check, so
-# accept any of these rather than mandating one spelling.
-OVERLAY_PATTERNS = (
+# Mechanism (B), reached the only sanctioned way: through a shared verb.
+VERB_PATTERNS = (
     re.compile(r"\broute_press_to_active_overlay\s*\("),
-    re.compile(r"\bdismiss_active_overlay\s*\("),
+    re.compile(r"\broute_context_press\s*\("),
+)
+
+# Mechanism (B) reached the wrong way — a host re-deriving the policy from the
+# slot. Each of these was a real drift site before the policy was unified.
+HAND_ROLLED_PATTERNS = (
     re.compile(r"\bactive_overlay_\b"),
+    re.compile(r"\bactive_overlay\b(?!_)"),
     re.compile(r"\boverlay_contains\s*\("),
+    re.compile(r"\bdismiss_active_overlay\s*\("),
+    re.compile(r"\bdismiss_claimed_overlay\s*\("),
+    re.compile(r"\boverlay_consumes_outside_click\s*\("),
 )
 
 
@@ -123,64 +145,71 @@ def executable_shape(text: str) -> str:
 
 
 def matching_lines(text: str, pattern: re.Pattern[str]) -> list[int]:
-    return [index for index, line in enumerate(text.splitlines()) if pattern.search(line)]
-
-
-def matching_offsets(text: str, pattern: re.Pattern[str]) -> list[int]:
-    return [match.start() for match in pattern.finditer(text)]
-
-
-def function_bodies(text: str) -> list[tuple[int, int]]:
-    """Return brace ranges whose declaration prefix looks callable."""
-    stack: list[int] = []
-    ranges: list[tuple[int, int]] = []
-    for index, char in enumerate(text):
-        if char == "{":
-            stack.append(index)
-        elif char == "}" and stack:
-            start = stack.pop()
-            delimiter = max(text.rfind(";", 0, start),
-                            text.rfind("{", 0, start),
-                            text.rfind("}", 0, start))
-            prefix = text[delimiter + 1:start].strip()
-            if ")" in prefix:
-                ranges.append((start, index))
-    return ranges
-
-
-def mechanisms_share_body(text: str) -> bool:
-    executable = executable_shape(text)
-    combos = matching_offsets(executable, COMBO_PATTERN)
-    overlays = [
-        offset
-        for pattern in OVERLAY_PATTERNS
-        for offset in matching_offsets(executable, pattern)
-    ]
-    bodies = function_bodies(executable)
-    return bool(combos) and all(
-        any(
-            start < combo < end and
-            any(start < overlay < end for overlay in overlays)
-            for start, end in bodies
-        )
-        for combo in combos
-    )
+    return [index for index, line in enumerate(text.splitlines(), start=1)
+            if pattern.search(line)]
 
 
 def self_test() -> bool:
-    valid = """
+    """The guard must reject the shapes it exists to reject."""
+    routed = """
+    void press() {
+        ComboBox::notify_global_click(target);
+        const auto r = route_press_to_active_overlay(root, pt);
+    }
+    """
+    hand_rolled = """
+    void press() {
+        ComboBox::notify_global_click(target);
+        if (auto* o = View::active_overlay_) {
+            if (!o->overlay_contains(pt)) View::dismiss_active_overlay();
+        }
+    }
+    """
+    unwired = """
+    void press() { ComboBox::notify_global_click(target); }
+    """
+    decoys = """
     void press() {
         ComboBox::notify_global_click(target);
         route_press_to_active_overlay(root, pt);
     }
+    const char* s = "View::active_overlay_";
+    /* overlay_contains(pt); */
     """
-    unrelated = """
-    void press() { ComboBox::notify_global_click(target); }
-    void escape() { View::dismiss_active_overlay(); }
-    const char* decoy = "route_press_to_active_overlay(root, pt)";
-    /* route_press_to_active_overlay(root, pt); */
+    return (
+        verdict(routed) == ()
+        and verdict(hand_rolled) != ()
+        and verdict(unwired) != ()
+        and verdict(decoys) == ()
+    )
+
+
+def verdict(text: str) -> tuple[str, ...]:
+    """Return the reasons `text` fails, empty when it is correctly wired.
+
+    A file with no press routing at all is out of scope for rule 1 but still
+    bound by rule 2 — a host must not hand-roll the policy on any path.
     """
-    return mechanisms_share_body(valid) and not mechanisms_share_body(unrelated)
+    executable = executable_shape(text)
+    reasons: list[str] = []
+    if COMBO_PATTERN.search(executable) and not any(
+        pattern.search(executable) for pattern in VERB_PATTERNS
+    ):
+        reasons.append(
+            "routes presses to an open ComboBox but never calls "
+            "route_press_to_active_overlay() / route_context_press(), so a "
+            "React or imported-design popover can never be dismissed by an "
+            "outside click here"
+        )
+    for pattern in HAND_ROLLED_PATTERNS:
+        lines = matching_lines(executable, pattern)
+        if lines:
+            reasons.append(
+                f"reaches past the shared verbs to the overlay slot itself "
+                f"({pattern.pattern}) on line(s) "
+                f"{', '.join(str(n) for n in lines)}"
+            )
+    return tuple(reasons)
 
 
 def repo_root() -> Path:
@@ -207,28 +236,35 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    offenders: list[Path] = []
-    checked = 0
+
+    missing_policy = [rel for rel in POLICY_SOURCES if not (root / rel).is_file()]
+    if missing_policy:
+        # The verbs the hosts are required to call must exist, or the guard is
+        # measuring compliance with a policy that is not there.
+        print(
+            "overlay-dismissal-wiring: FAIL - the shared policy is missing: "
+            + ", ".join(missing_policy),
+            file=sys.stderr,
+        )
+        return 1
+
+    offenders: list[tuple[Path, tuple[str, ...]]] = []
+    press_routing_hosts = 0
+    inspected = 0
 
     for path in host_sources(root):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        executable_text = executable_shape(text)
-        combo_lines = matching_lines(executable_text, COMBO_PATTERN)
-        if not combo_lines:
-            continue
-        checked += 1
-        # Both mechanisms must occur inside one callable body. This rejects an
-        # unrelated ESC handler, namespace-level token, comment, or string;
-        # nested lambdas remain valid because their enclosing press handler is
-        # also a callable brace range.
-        paired = mechanisms_share_body(text)
-        if not paired:
-            offenders.append(path)
+        inspected += 1
+        if COMBO_PATTERN.search(executable_shape(text)):
+            press_routing_hosts += 1
+        reasons = verdict(text)
+        if reasons:
+            offenders.append((path, reasons))
 
-    if checked == 0:
+    if press_routing_hosts == 0:
         # A guard that inspects nothing cannot fail. Treat an empty census as a
         # broken guard, not as a pass.
         print(
@@ -240,25 +276,29 @@ def main() -> int:
 
     if offenders:
         print(
-            "overlay-dismissal-wiring: FAIL - these hosts route presses to an "
-            "open ComboBox but never consult the generalized overlay slot, so "
-            "a React/imported popover can never be dismissed by an outside "
-            "click in them:",
+            "overlay-dismissal-wiring: FAIL - the overlay-dismissal policy has "
+            "one implementation, in core/view/src/overlay_dismissal.cpp. These "
+            "hosts do not route through it:",
             file=sys.stderr,
         )
-        for path in offenders:
+        for path, reasons in offenders:
             print(f"  {path.relative_to(root)}", file=sys.stderr)
+            for reason in reasons:
+                print(f"      {reason}", file=sys.stderr)
         print(
-            "\nFix: call pulp::view::route_press_to_active_overlay(root, pt) "
-            "on the press path, mirroring "
-            "core/view/platform/mac/window_host_mac.mm.",
+            "\nFix: call pulp::view::route_press_to_active_overlay(root, pt) on "
+            "the press path and pulp::view::route_escape_to_active_overlay(root) "
+            "on the key path, mirroring "
+            "core/view/platform/mac/window_host_mac.mm. Do not re-derive the "
+            "decision from the slot.",
             file=sys.stderr,
         )
         return 1
 
     print(
-        f"overlay-dismissal-wiring: OK - {checked} press-routing host(s) "
-        "consult both the ComboBox and the generalized overlay mechanism."
+        f"overlay-dismissal-wiring: OK - {press_routing_hosts} press-routing "
+        f"host(s) of {inspected} inspected route through the single shared "
+        "policy, and no host hand-rolls it."
     )
     return 0
 

@@ -203,6 +203,29 @@ change, focus, blur, wheel, drop), `dispatchEvent`, `setPointerCapture` /
 `offsetHeight` / `clientWidth` / `clientHeight`, `nodeType` /
 `nodeName` (for React's reconciler hot path).
 
+## Pulp-specific author hints
+
+Two `data-*` attributes are read by the web-compat runtime itself rather than
+by any web spec, and are the HTML authoring surface for Pulp's overlay
+behaviour. Both are re-evaluated immediately on `setAttribute` /
+`removeAttribute`, not only on the next style mutation.
+
+- **`data-overlay="true"`** — the element IS a popover. It claims the
+  generalized overlay slot, so a press outside it dismisses it and a press
+  inside routes into its own subtree instead of falling through to whatever
+  sibling occupies that pixel. It also consumes the dismissing press, so
+  closing a menu cannot also operate the control underneath. (A
+  `position: absolute` element with `z-index >= 10` claims the slot by
+  inference too, but does NOT consume — an inference that swallowed a real
+  click would be worse than one that clicks through.)
+- **`data-overlay-trigger="true"`** — the element OPENS a popover: a dropdown
+  field, a menu button. A press on one while a DIFFERENT overlay is open means
+  "switch menus", so the press dismisses the open overlay and still reaches the
+  trigger, and changing dropdowns costs one press rather than two. Mark only
+  controls that open something; marking ordinary content would make clicking
+  away from a menu also operate whatever sits under the click. Never inferred
+  from CSS shape.
+
 ## Notable gaps
 
 1. **`html/ARIA`** state routing — `aria-label` and `role` route

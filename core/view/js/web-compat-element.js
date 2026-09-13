@@ -1050,7 +1050,8 @@ Element.prototype.setAttribute = function(name, value) {
         // auto-overlay heuristic. Re-evaluate now
         // so the bridge sees the claim/release immediately rather than
         // waiting for an unrelated style mutation to drive it.
-        if (name === "data-overlay" && this.style && this.style._reevaluateOverlay) {
+        if ((name === "data-overlay" || name === "data-overlay-trigger") &&
+            this.style && this.style._reevaluateOverlay) {
             this.style._reevaluateOverlay();
         }
     }
@@ -1202,8 +1203,8 @@ Element.prototype.removeAttribute = function(name) {
         delete this._dataset[_camelCase(name.slice(5))];
         // Clearing `data-overlay` may release the auto-claim if no CSS shape
         // still satisfies the heuristic.
-        if (name === "data-overlay" && was !== undefined &&
-            this.style && this.style._reevaluateOverlay) {
+        if ((name === "data-overlay" || name === "data-overlay-trigger") &&
+            was !== undefined && this.style && this.style._reevaluateOverlay) {
             this.style._reevaluateOverlay();
         }
     }
