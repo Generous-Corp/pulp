@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260913-aria-haspopup-overlay-trigger-watch",
+  "created_at": "2026-09-13T18:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Crosses the render-assets-and-backends watch family only through its broad core/view/** selector: the two files under it are core/view/js/web-compat-element.js and core/view/js/web-compat-style-decl.js, both web-compat preludes. Nothing under core/canvas or core/render is touched, no Skia, Dawn, or render-backend selector is crossed, no asset, font, shader, surface, fixture, snapshot or threshold changes, and no bridge function, manifest row or generated artifact changes -- setOverlayTrigger is already a registered bridge function and generate_widget_bridge_api.py --check is clean. The change teaches both authoring surfaces to read aria-haspopup as the overlay-TRIGGER mark, the counterpart of the role / aria-modal reading that already claims an overlay with consume=true. Without the counterpart a document that had described its own menus for assistive technology got only the half that makes a dismissing press disappear, so switching from one dropdown to a sibling cost two presses. Any ARIA token other than absent or \"false\" marks; \"false\" and removal unmark. It stays a statement rather than an inference, deliberately outside the CSS-shape heuristic, because a mark that fired on ordinary content would make clicking away from a menu also operate whatever sits under the click. The mark is additionally flushed at mount through __replayAriaAttributes__, because React commits setAttribute before appendChild and the attribute hook is a no-op while _nativeCreated is false. The parallel @pulp/react arm lives in packages/pulp-react, outside this family's selector. No rendering, paint, layout, or asset behaviour changes, no packaging or asset-resolution behaviour changes, no accepted expansion boundary moves, and no Vellum source authority changes.",
+  "tests": [
+    "ctest --test-dir build -R web-compat-overlay",
+    "npx vitest run test/prop-applier-overlay.test.ts (packages/pulp-react)",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

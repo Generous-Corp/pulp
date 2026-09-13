@@ -22,6 +22,8 @@ functions:
       - SOURCES
       - PROCESSOR_FACTORY
       - UI_SCRIPT
+      - ICON
+      - ICNS
       - CONTENT_CAPABILITIES
       - CONTENT_KINDS
       - CONTENT_HOT_RELOAD_KINDS

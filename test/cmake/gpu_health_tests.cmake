@@ -23,8 +23,14 @@ if(Python3_EXECUTABLE)
     add_test(NAME gpu-health-run-attestation
         COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_health_run_attestation.py")
+    # Fail-closed integration coverage: it shells out to the producer and the
+    # verifier per case, so the cost is sequential subprocess work rather than
+    # anything a second scheduler slot would shorten. 55.59s on the required
+    # gate against the 120s lane default it would otherwise inherit; the budget
+    # is 3x the worst run observed on 2026-09-13, rounded up.
     set_tests_properties(gpu-health-run-attestation PROPERTIES
-        LABELS "gpu;gpu-health;attestation;contract")
+        LABELS "gpu;gpu-health;attestation;contract"
+        TIMEOUT 180)
 endif()
 
 if(PULP_ENABLE_INSPECTOR)

@@ -632,7 +632,7 @@ endfunction()
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
         "ACCEPTS_MIDI;NATIVE_UI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
-        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE"
+        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
     )
@@ -914,6 +914,63 @@ function(pulp_add_plugin target)
     # ── Standalone ───────────────────────────────────────────────────────
     if("Standalone" IN_LIST PLUGIN_FORMATS)
         _pulp_add_standalone(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}" "${PLUGIN_VERSION}" "${PLUGIN_PROCESSOR_FACTORY}")
+    endif()
+
+    # ── Product icon ───────────────────────────────────────────────────
+    # ICNS bundles a finished .icns as-is; ICON derives one from a 1024x1024
+    # PNG. Applied to every bundle this call created, not just the
+    # standalone app, because the plug-in Info.plist templates all carry a
+    # CFBundleIconFile key and nothing could fill it: the key shipped
+    # substituted from the MACOSX_BUNDLE_ICON_FILE target property, which
+    # only pulp_app_icon() set, and that helper is documented for apps and
+    # dispatches per-platform (a Windows .rc on a MODULE library). A
+    # consumer wanting a branded plug-in therefore had to reach past this
+    # API and set the property on `${target}_VST3` and friends by hand --
+    # internal target names that are not a public contract. That is the gap
+    # this closes.
+    #
+    # Scope, so nobody reads more into it than it does: on a non-.app bundle
+    # macOS does not render CFBundleIconFile at all -- Finder draws the
+    # generic bundle icon whatever this writes. The key is filled because
+    # the templates declare it and an empty declared key is worse than a
+    # filled one, not because an icon will appear. The mechanism that does
+    # render is a custom Finder icon (an `Icon\r` resource fork plus a
+    # com.apple.FinderInfo xattr), which `codesign --strict` rejects as
+    # "resource fork, Finder information, or similar detritus not allowed"
+    # and which therefore cannot be used by a signed, notarized product.
+    # For artwork inside a host, the VST3 Snapshots convention is the path.
+    if(APPLE AND (PLUGIN_ICON OR PLUGIN_ICNS))
+        if(PLUGIN_ICON AND PLUGIN_ICNS)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): pass ICON or ICNS, not both.")
+        endif()
+        set(_pulp_plugin_icon_png "")
+        set(_pulp_plugin_icon_icns "")
+        if(PLUGIN_ICNS)
+            _pulp_icon_abs_path(_pulp_plugin_icon_icns
+                "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_ICNS}")
+            if(NOT EXISTS "${_pulp_plugin_icon_icns}")
+                message(FATAL_ERROR
+                    "pulp_add_plugin(${target}): ICNS not found: "
+                    "${_pulp_plugin_icon_icns}")
+            endif()
+        else()
+            _pulp_icon_abs_path(_pulp_plugin_icon_png
+                "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_ICON}")
+            if(NOT EXISTS "${_pulp_plugin_icon_png}")
+                message(FATAL_ERROR
+                    "pulp_add_plugin(${target}): ICON not found: "
+                    "${_pulp_plugin_icon_png}")
+            endif()
+        endif()
+        foreach(_pulp_icon_bundle
+                ${target}_Standalone ${target}_VST3 ${target}_AU
+                ${target}_CLAP ${target}_AAX)
+            if(TARGET ${_pulp_icon_bundle})
+                _pulp_icon_configure_macos(${_pulp_icon_bundle}
+                    "${_pulp_plugin_icon_png}" "${_pulp_plugin_icon_icns}")
+            endif()
+        endforeach()
     endif()
 
     # ── Install targets ────────────────────────────────────────────────
