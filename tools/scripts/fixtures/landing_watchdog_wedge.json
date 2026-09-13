@@ -1,0 +1,48 @@
+{
+  "_comment": "Captured from Generous-Corp/pulp on 2026-09-13, the six-hour wedge. PR #8277 was opened by the Shipyard App, had no pull_request run at all, and sat BLOCKED on a `macos` context that was never going to appear. Two workflow runs were queued/pending with zero jobs, holding the concurrency group. Timestamps are relative markers rewritten by the test to the run's own clock; the shapes are real.",
+  "required_contexts": ["macos", "Build + prove + (owner-gated) deploy"],
+  "pull_requests": [
+    {
+      "pr": {
+        "number": 8277,
+        "updated_at": "REPLACE_OLD",
+        "head": {"sha": "e8294c9f5d04a1b2c3d4e5f60718293a4b5c6d7e"},
+        "user": {"type": "Bot", "login": "shipyard-local"}
+      },
+      "check_runs": [
+        {"name": "Build + prove + (owner-gated) deploy", "status": "completed", "conclusion": "success"}
+      ],
+      "runs": [
+        {"id": 34738145833, "name": "Build and Test", "status": "queued", "created_at": "REPLACE_OLD", "jobs_total_count": 0},
+        {"id": 34739745344, "name": "Build and Test", "status": "pending", "created_at": "REPLACE_OLD", "jobs_total_count": 0}
+      ]
+    },
+    {
+      "pr": {
+        "number": 8280,
+        "updated_at": "REPLACE_OLD",
+        "head": {"sha": "aaaabbbbccccddddeeeeffff0000111122223333"},
+        "user": {"type": "User", "login": "danielraffel"}
+      },
+      "check_runs": [
+        {"name": "macos", "status": "queued", "started_at": "REPLACE_OLD"},
+        {"name": "Build + prove + (owner-gated) deploy", "status": "completed", "conclusion": "success"}
+      ],
+      "runs": []
+    },
+    {
+      "pr": {
+        "number": 8281,
+        "_comment": "The CONTROL. A healthy PR: both required contexts green on the head SHA. If this one ever produces a finding, the classifier has started flagging everything and every finding above is worthless.",
+        "updated_at": "REPLACE_OLD",
+        "head": {"sha": "1111222233334444555566667777888899990000"},
+        "user": {"type": "User", "login": "danielraffel"}
+      },
+      "check_runs": [
+        {"name": "macos", "status": "completed", "conclusion": "success"},
+        {"name": "Build + prove + (owner-gated) deploy", "status": "completed", "conclusion": "success"}
+      ],
+      "runs": []
+    }
+  ]
+}

@@ -21,7 +21,10 @@
 // invariants pure C++ so the test runs on every CI lane.
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/view/modal.hpp>
+#include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 
 #include <memory>
@@ -784,4 +787,437 @@ TEST_CASE("route_context_press routes an inside press into the overlay subtree",
     REQUIRE(overlay_menus == 1);
     // An inside press must not dismiss.
     REQUIRE(View::active_overlay_ == overlay);
+}
+
+// ── Host escape routing: route_escape_to_active_overlay ────────────────────
+//
+// Pressing Escape is a per-host obligation the same way a press is, and it
+// drifted the same way: the standalone macOS host hand-rolled a three-step
+// policy inline while both DAW plugin hosts and the web host had no Escape
+// path at all. A plugin host hands the keyboard back to the DAW whenever
+// nothing in its tree holds focus — the ordinary state while a popover is
+// open — so a `<View overlay>` popover inside a plugin editor could not be
+// closed from the keyboard. These pin the one shared policy the hosts call.
+
+TEST_CASE("route_escape_to_active_overlay: nothing open reports none",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    // A parented child, so this is a real tree with its own interaction slot
+    // rather than a detached widget resolving to the process-global fallback.
+    auto child = std::make_unique<TestView>();
+    child->set_bounds({10.0f, 10.0f, 40.0f, 40.0f});
+    root.add_child(std::move(child));
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root) ==
+            pulp::view::OverlayEscapeResult::none);
+    // A keystroke that finds nothing must not allocate interaction state onto
+    // a tree that never claimed any.
+    REQUIRE(root.existing_interaction() == nullptr);
+}
+
+TEST_CASE("route_escape_to_active_overlay dismisses a claimed overlay",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    int dismissed_calls = 0;
+    overlay->on_overlay_dismissed = [&] { ++dismissed_calls; };
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root) ==
+            pulp::view::OverlayEscapeResult::overlay);
+    REQUIRE(root.interaction().active_overlay == nullptr);
+    // Routed through the dismissal path, not a bare release, so React state
+    // can flip setOpen(false).
+    REQUIRE(dismissed_calls == 1);
+}
+
+TEST_CASE("route_escape_to_active_overlay only acts on its own tree",
+          "[view][overlay][escape]") {
+    // Two Pulp editors in one host process (the shared AUHostingService case).
+    // Escape in editor B must not close editor A's popover, which is exactly
+    // what reading the process-global shim mirror would do — A claimed most
+    // recently, so the mirror names A's overlay.
+    OverlayGuard g;
+    TestView root_a, root_b;
+    root_a.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    root_b.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root_a.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    REQUIRE(View::active_overlay_ == overlay);
+
+    int dismissed_calls = 0;
+    overlay->on_overlay_dismissed = [&] { ++dismissed_calls; };
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root_b) ==
+            pulp::view::OverlayEscapeResult::none);
+    REQUIRE(root_a.interaction().active_overlay == overlay);
+    REQUIRE(dismissed_calls == 0);
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root_a) ==
+            pulp::view::OverlayEscapeResult::overlay);
+    REQUIRE(dismissed_calls == 1);
+}
+
+TEST_CASE("route_escape_to_active_overlay closes a modal before the overlay",
+          "[view][overlay][escape]") {
+    // A modal traps interaction, so nothing behind it may act on the key. It
+    // is found by tree walk rather than by focus: a modal that never took
+    // focus still owns the screen, and in a plugin host the DAW may hold
+    // focus entirely.
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    auto modal_owned = std::make_unique<pulp::view::ModalOverlay>();
+    auto* modal = modal_owned.get();
+    modal->set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    int modal_dismissals = 0;
+    modal->on_dismiss = [&] { ++modal_dismissals; };
+    root.add_child(std::move(modal_owned));
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root) ==
+            pulp::view::OverlayEscapeResult::modal);
+    REQUIRE(modal_dismissals == 1);
+    // The overlay behind the modal is untouched.
+    REQUIRE(root.interaction().active_overlay == overlay);
+}
+
+TEST_CASE("route_escape_to_active_overlay skips a hidden modal",
+          "[view][overlay][escape]") {
+    // A modal that is not on screen must not eat the key, or a popover opened
+    // after a modal was hidden becomes undismissable.
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto modal_owned = std::make_unique<pulp::view::ModalOverlay>();
+    auto* modal = modal_owned.get();
+    modal->set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    int modal_dismissals = 0;
+    modal->on_dismiss = [&] { ++modal_dismissals; };
+    root.add_child(std::move(modal_owned));
+    modal->set_visible(false);
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root) ==
+            pulp::view::OverlayEscapeResult::overlay);
+    REQUIRE(modal_dismissals == 0);
+    REQUIRE(root.interaction().active_overlay == nullptr);
+}
+
+TEST_CASE("route_escape_to_active_overlay closes an open ComboBox dropdown",
+          "[view][overlay][escape]") {
+    // ComboBox::on_key_event fires only while the combo owns focus, which a
+    // sibling React popover routinely steals; without this host-level
+    // fallback the still-visible dropdown wedges open with no keyboard
+    // escape route.
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto combo_owned = std::make_unique<pulp::view::ComboBox>();
+    auto* combo = combo_owned.get();
+    combo->set_bounds({10.0f, 10.0f, 160.0f, 24.0f});
+    combo->set_items({"One", "Two", "Three"});
+    root.add_child(std::move(combo_owned));
+
+    pulp::view::MouseEvent open_click;
+    open_click.position = {60.0f, 12.0f};
+    open_click.is_down = true;
+    combo->on_mouse_event(open_click);
+    REQUIRE(combo->is_open());
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root) ==
+            pulp::view::OverlayEscapeResult::combo_popup);
+    REQUIRE_FALSE(combo->is_open());
+}
+
+TEST_CASE("route_escape_to_active_overlay closes a dropdown before an overlay",
+          "[view][overlay][escape]") {
+    // Ordering regression: with both open, one Escape closes the dropdown and
+    // leaves the popover, so a second Escape is needed to close that. Closing
+    // both at once would surprise a user backing out of a nested menu.
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto combo_owned = std::make_unique<pulp::view::ComboBox>();
+    auto* combo = combo_owned.get();
+    combo->set_bounds({10.0f, 10.0f, 160.0f, 24.0f});
+    combo->set_items({"One", "Two", "Three"});
+    root.add_child(std::move(combo_owned));
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({300.0f, 300.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+
+    pulp::view::MouseEvent open_click;
+    open_click.position = {60.0f, 12.0f};
+    open_click.is_down = true;
+    combo->on_mouse_event(open_click);
+    REQUIRE(combo->is_open());
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root) ==
+            pulp::view::OverlayEscapeResult::combo_popup);
+    REQUIRE(root.interaction().active_overlay == overlay);
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root) ==
+            pulp::view::OverlayEscapeResult::overlay);
+    REQUIRE(root.interaction().active_overlay == nullptr);
+}
+
+// ── Which overlays may borrow a host's keyboard ─────────────────────────────
+//
+// Deliberately narrower than what Escape acts on. Holding a DAW's keyboard
+// when nothing needs it is the more expensive mistake — the user experiences
+// it as transport and Musical Typing going dead — so a bare claim does not
+// qualify. Only a statement that the view IS a popover does.
+
+TEST_CASE("root_overlay_owns_keyboard ignores a bare overlay claim",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+
+    // What the web-compat CSS-shape heuristic produces: a claim with no
+    // outside-click consumption, because it inferred rather than was told.
+    // A decorative absolutely-positioned box can hold this for an editor's
+    // whole lifetime.
+    overlay->claim_overlay();
+    REQUIRE_FALSE(pulp::view::root_overlay_owns_keyboard(root));
+
+    // Escape still dismisses it — the two questions are different.
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root) ==
+            pulp::view::OverlayEscapeResult::overlay);
+}
+
+TEST_CASE("root_overlay_owns_keyboard accepts a declared popover",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    // What `<View overlay>` and data-overlay="true" both set.
+    overlay->set_overlay_consumes_outside_click(true);
+
+    REQUIRE(pulp::view::root_overlay_owns_keyboard(root));
+}
+
+TEST_CASE("root_overlay_owns_keyboard accepts a visible modal",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto modal_owned = std::make_unique<pulp::view::ModalOverlay>();
+    auto* modal = modal_owned.get();
+    modal->set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    root.add_child(std::move(modal_owned));
+
+    REQUIRE(pulp::view::root_overlay_owns_keyboard(root));
+    modal->set_visible(false);
+    REQUIRE_FALSE(pulp::view::root_overlay_owns_keyboard(root));
+}
+
+TEST_CASE("root_overlay_owns_keyboard accepts an open dropdown",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto combo_owned = std::make_unique<pulp::view::ComboBox>();
+    auto* combo = combo_owned.get();
+    combo->set_bounds({10.0f, 10.0f, 160.0f, 24.0f});
+    combo->set_items({"One", "Two", "Three"});
+    root.add_child(std::move(combo_owned));
+
+    REQUIRE_FALSE(pulp::view::root_overlay_owns_keyboard(root));
+
+    pulp::view::MouseEvent open_click;
+    open_click.position = {60.0f, 12.0f};
+    open_click.is_down = true;
+    combo->on_mouse_event(open_click);
+    REQUIRE(combo->is_open());
+    REQUIRE(pulp::view::root_overlay_owns_keyboard(root));
+}
+
+// ── Switching dropdowns costs one press, not two ────────────────────────────
+//
+// An overlay that consumes its outside click spends the dismissing press on
+// the close, so opening a SIBLING dropdown took two presses: one to close the
+// first, one to open the second. A press that lands on a control whose purpose
+// is opening an overlay means "switch menus", so the policy delivers it. The
+// macOS menu bar and every multi-menu toolbar behave this way.
+//
+// Scoped to triggers deliberately. Passing every dismissing press through
+// would mean clicking away from a menu also operates whatever sits under the
+// click, which is a hazard rather than a hypothetical.
+
+namespace {
+
+struct PolicyGuard {
+    PolicyGuard() : saved(pulp::view::overlay_dismissal_policy()) {}
+    ~PolicyGuard() { pulp::view::set_overlay_dismissal_policy(saved); }
+    pulp::view::OverlayDismissalPolicy saved;
+};
+
+}  // namespace
+
+TEST_CASE("a press on an overlay trigger dismisses without consuming",
+          "[view][overlay][pointer][trigger]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    auto trigger_owned = std::make_unique<TestView>();
+    auto* trigger = trigger_owned.get();
+    trigger->set_bounds({400.0f, 100.0f, 120.0f, 24.0f});
+    trigger->set_overlay_trigger(true);
+    root.add_child(std::move(trigger_owned));
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {440.0f, 110.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    // Not consumed: the host falls through and the trigger opens its own menu
+    // from the same press.
+    REQUIRE_FALSE(press.consume_press);
+    REQUIRE(root.interaction().active_overlay == nullptr);
+}
+
+TEST_CASE("a press on ordinary content still consumes the dismissal",
+          "[view][overlay][pointer][trigger]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    auto content_owned = std::make_unique<TestView>();
+    auto* content = content_owned.get();
+    content->set_bounds({400.0f, 100.0f, 120.0f, 24.0f});
+    root.add_child(std::move(content_owned));
+    REQUIRE_FALSE(content->overlay_trigger());
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {440.0f, 110.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(press.consume_press);
+}
+
+TEST_CASE("an overlay trigger is found through the view that wins the hit test",
+          "[view][overlay][pointer][trigger]") {
+    // An imported or scripted dropdown is a wrapper around the label or icon
+    // that actually wins the hit test, so the mark is honoured on any ancestor
+    // up to the root.
+    OverlayGuard g;
+    PolicyGuard p;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    auto wrapper_owned = std::make_unique<TestView>();
+    auto* wrapper = wrapper_owned.get();
+    wrapper->set_bounds({400.0f, 100.0f, 120.0f, 24.0f});
+    wrapper->set_overlay_trigger(true);
+    auto label_owned = std::make_unique<TestView>();
+    auto* label = label_owned.get();
+    label->set_bounds({4.0f, 4.0f, 100.0f, 16.0f});
+    wrapper->add_child(std::move(label_owned));
+    root.add_child(std::move(wrapper_owned));
+    REQUIRE(root.hit_test({440.0f, 110.0f}) == label);
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {440.0f, 110.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE_FALSE(press.consume_press);
+}
+
+TEST_CASE("trigger pass-through is configurable and defaults on",
+          "[view][overlay][pointer][trigger]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    REQUIRE(pulp::view::overlay_dismissal_policy().trigger_press_passes_through);
+
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    auto trigger_owned = std::make_unique<TestView>();
+    auto* trigger = trigger_owned.get();
+    trigger->set_bounds({400.0f, 100.0f, 120.0f, 24.0f});
+    trigger->set_overlay_trigger(true);
+    root.add_child(std::move(trigger_owned));
+
+    pulp::view::OverlayDismissalPolicy strict;
+    strict.trigger_press_passes_through = false;
+    pulp::view::set_overlay_dismissal_policy(strict);
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {440.0f, 110.0f});
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(press.consume_press);
+}
+
+TEST_CASE("a ComboBox marks itself as an overlay trigger",
+          "[view][overlay][pointer][trigger]") {
+    pulp::view::ComboBox combo;
+    REQUIRE(combo.overlay_trigger());
 }

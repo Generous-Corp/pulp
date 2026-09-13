@@ -406,6 +406,40 @@ the V8 provider section above.)
 > *build* tree (missing) → SIGABRT. Stage the template into the build dir or
 > build without ccache. Unrelated to V8.
 
+### A new bridge global needs a manifest row, not just a `register_bridge_function`
+
+`register_bridge_function(api, "foo", ...)` makes the global callable from a
+prelude, and nothing else. The `@pulp/react` type declarations, the mock
+registry the package's tests run against, and `docs/reference/js-bridge.md` are
+all GENERATED from `core/view/src/widget_bridge_api_manifest.tsv` — which is
+hand-maintained and is not derived from the C++. A function registered without
+its manifest row is invisible to every one of them, and a prelude that calls it
+type-checks as an unknown global downstream.
+
+The sequence is: register the function, add its `name<TAB>category<TAB>kind<TAB>source`
+row to the manifest, add its TypeScript signature to the signature map in
+`tools/scripts/generate_widget_bridge_api.py`, then
+
+```bash
+python3 tools/scripts/generate_widget_bridge_api.py --write   # regenerate
+python3 tools/scripts/generate_widget_bridge_api.py --check   # what CI runs
+```
+
+`--check` passes on a missing row rather than failing, because a row that is
+not there describes nothing to drift from — so a clean check is not evidence
+that a newly registered function reached the generated surfaces. Grep the
+generated `.d.ts` for the name instead.
+
+### A web-compat prelude reads its author hints through `_dataset`, and only re-evaluates when told
+
+`data-*` attributes land in `Element._dataset` with the name camel-cased
+(`data-overlay-trigger` → `_dataset.overlayTrigger`), but nothing re-runs a
+prelude's heuristic just because an attribute changed. `setAttribute` /
+`removeAttribute` in `web-compat-element.js` carry an explicit per-attribute
+hook that calls the re-evaluation, so a new author hint that is not named there
+appears to work in a test that sets it before the element mounts, and silently
+does nothing when it is set or cleared later.
+
 ### Web-API global registration is hybrid native+JS by design
 
 CHOC's `NativeFunction` signature can only carry `choc::value::Value` arguments — JS function values don't round-trip through it. So even though `requestAnimationFrame` / `setTimeout` / `setInterval` look like they "should" be C++-only bindings, the callbacks themselves have to live in a JS-side registry (`__frameCallbacks__`, `__timerCallbacks__`).
@@ -500,6 +534,33 @@ painted. `"transparent"` is NOT a substitute: `css_color.cpp` maps it to
 `clear_text_color()` primitive, so `@pulp/react`'s documented removal contract
 (`textColor` removed → `setTextColor(id,"")`) is currently inert on the native
 side. Fix that half the same way when it next bites.
+
+### A popup has TWO states, and only one of them belongs on screen at open
+
+`web-compat-document.js` owns any popup it can reach by ARIA shape -- a
+trigger carrying `aria-haspopup` over a `role="listbox"`/`role="menu"` -- and
+paints a keyboard cursor on one row. That cursor is NOT the app's selection.
+The app paints its own selected row however it likes; the owner's cursor is
+navigation position. Both on screen at once reads as two selections, which is
+exactly what a user reports as "why is it showing me two".
+
+So the cursor is created at open (an arrow needs somewhere to start) but not
+painted until the user asks for one: `pointerenter` on a row, an arrow key, or
+an arrow that opened the popup in the first place. `state.activeVisible` is
+that flag and `paint()` is gated on it.
+
+The seed comes from `selectedIndexIn()`, which reads
+`aria-activedescendant` / `aria-selected` / `aria-checked` / `.checked` /
+`aria-current` in that order. **An app whose rows advertise none of those gets
+index 0**, so a listbox whose current value is any row but the first shows the
+app's selection on one row and the owner's cursor on another. The fix is on
+the app side and is required for assistive technology anyway: a `role="listbox"`
+whose children are bare `<button>`s has no selection to report. Mark the rows.
+
+Where the first arrow lands then depends on whether the cursor had a home.
+Seeded from a real selection it steps off it, the way a platform combo box
+does. Seeded from an edge because nothing was marked, it lands ON that edge --
+otherwise the first ArrowDown skips the row the user was aiming at.
 
 ### `confirm_failure.sh` needs `--object` to verdict a `.js` prelude edit
 

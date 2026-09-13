@@ -1608,6 +1608,76 @@ as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
 `tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
 
+## The preamble and alias lanes run GitHub-hosted, and a persistent runner may not own them
+
+`PULP_PREAMBLE_RUNS_ON_JSON` and `PULP_ALIAS_RUNS_ON_JSON` both contract to
+`ubuntu-latest`. Neither may be pointed at a label whose only provisioning is a
+statically named persistent runner, however idle and local that runner looks.
+
+The reason is a measured outage, not a preference. Both variables used to name
+`[self-hosted, macOS, ARM64, pulp-preamble]`, served by two persistent runners,
+`pulp-preamble-m3` and `pulp-preamble-m5`. They failed independently and
+silently:
+
+- `pulp-preamble-m3` was stopped cleanly on 2026-09-01 (`Runner listener exit
+  with 0 return code, stop the service, no retry needed`) and its LaunchAgent
+  was never reloaded. Its on-disk configuration stayed valid and correct for the
+  post-org-move URL, so nothing on the host looked wrong.
+- `pulp-preamble-m5` kept serving alone until 2026-09-12T19:16:47Z, when its
+  server-side registration was deleted. The runner did exactly what it is
+  designed to do — `The runner no longer exists on the server. Cleaning up local
+  configuration.` — and erased its own `.runner`, `.credentials`, and
+  `.credentials_rsaparams`. Its `KeepAlive` LaunchAgent then respawned a listener
+  that could only exit `Not configured`, thousands of times, which reads on the
+  host as "the service is loaded" and in `launchctl list` as a `-` in the PID
+  column.
+
+From that moment the label had zero runners. `repos/<owner>/<repo>/actions/runners`
+reported `total_count: 0` while the org scope still listed unrelated runners, so
+the census was not lying and nothing was offline-but-recoverable — the
+registrations were gone. GitHub does not reject a `runs-on` it cannot satisfy;
+it queues the job. So every `build.yml` run stacked up behind
+`resolve-provider`/`classify` with no error anywhere, the required `macos` check
+never reported, and nothing merged for more than ten hours.
+
+The alias lane makes that worse than a slow check. It is the **last** job in a
+run and does one terminal jobs-API read, so a starved alias means the run never
+reaches a terminal state, holds its ref's `concurrency` group, and leaves the
+next push's run at `pending` with **zero jobs** — a wedge that survives
+re-pushes and clears only by cancelling the older run by hand.
+
+This is the failure mode decision 4 of [`.agents/contract.toml`](../../.agents/contract.toml)
+already names: *self-hosted runner names are EPHEMERAL, never static; a
+runnerless required lane is HELD, never a retry storm*. A persistent runner has
+a static name by construction, so a lane that gates a required check must not
+depend on one. The contract rows for these two lanes previously declared
+`provisioning: persistent` with literal `hosts` entries, which contradicted that
+decision; they now declare `github-hosted` with no hosts.
+
+**Why not the self-hosted Linux pool instead.** It was the obvious substitute
+and it does not qualify today. Measured on 2026-09-13, the macpro x86_64 pool
+had exactly one runner left (`pulp-auto-ephemeral-200`), registered
+`"Ephemeral": "True"` — good for a single job and then gone — while its
+provisioner `pulp-ephemeral-pool@2` sat in an exit-75 governor-refusal loop at
+restart counter 4040, having created no VM since 2026-09-10 because two
+post-job husks (VMs 201 and 202) pin 16 GB the reaper declines to reclaim
+(`SKIP 201 — post-job clone lacks a host generation`). A required-gating lane
+aimed at one non-renewing slot is a black hole with a delay on it.
+`build.yml`'s own `resolve-provider` comment states the standing precondition:
+move this lane to a self-hosted selector only once that pool is confirmed
+always-on rather than on-demand, *or the required gate just starves on a
+different pool*.
+
+**What hosted costs, honestly.** Moving off the shared hosted pool was
+originally meant to stop hosted queue saturation from starving the required
+gate, and that pressure is real. It is a latency risk. A label no runner carries
+is a certainty. The preamble and alias jobs are cheap, platform-agnostic shell
+plus one API read — they contain no macOS-only tooling — and hosted minutes are
+free on a public repository, so this is the correct default until a pool exists
+that is both always-on and not statically named. Restoring a self-hosted
+selector is a contract edit here plus a variable edit, reviewed together, never
+a variable edit alone.
+
 ## Whether the gate has a GPU is observed, not assumed
 
 Every GPU case in the suite skips when no adapter is present, which is the right
@@ -2026,6 +2096,16 @@ Before the pending check is created, the trusted controller uploads an immutable
 one-day recovery identity. A separate source-free `workflow_run` reconciler on
 protected `main` uses that identity to terminalize the exact check if cancellation
 prevents the normal completer from running; it never checks out PR code.
+That hardened checkout clones full history (`fetch-depth: 0`) rather than the
+shallow default. The GPU provenance selftests read real per-path Git history,
+and the remedy the other lanes use — `tools/scripts/hydrate_gpu_provenance_commits.py`,
+which reconnects a shallow clone by fetching the event ref — cannot run here:
+this checkout sets `persist-credentials: false`, so no credential remains for a
+fetch, and it pins `ref: ${{ github.sha }}`, so `GITHUB_REF` no longer names the
+checked-out commit. Cloning in full is the only remedy compatible with both
+hardening choices, and it is why this lane's checkout looks different from
+`build.yml`'s.
+
 The local route always fails closed: today's JIT Tart guest is disposable, but
 its Actions runner and PR code share the administrative guest account, so PR
 code could still reach protected-main runtime/cache credentials during the job.
@@ -4472,3 +4552,151 @@ every build; they catch real regressions and do not care about the optimizer.
 
 > A false red is worse than no gate: it trains everyone to wave away red as
 > "probably the box" — which is exactly how a real bug gets dismissed.
+
+---
+
+## "Can this PR actually land?" — the two-detector wedge check
+
+`shipyard status` answers *"did my validation pass"*. It does not answer
+*"can the pull request merge"*, and on 2026-09-13 the gap between those two
+questions cost roughly six hours in which **no PR in this repository could
+land**. `PULP_PREAMBLE_RUNS_ON_JSON` named the runner label `pulp-preamble`;
+no runner in either registration scope carried it; every `build.yml` run —
+`pull_request`, `workflow_dispatch` *and* `merge_group` — queued forever at
+its first job. Throughout, Shipyard reported `mac: local reachable=true` and
+the blocked PR's ship-state as healthy, with the correct SHA and one attempt.
+Every word of that was true.
+
+Two detectors now answer the second question, and they are deliberately
+different from each other in every way that matters.
+
+### 1. The precondition detector — `shipyard landability` (and the ship preflight)
+
+Runs on the fleet, as the Shipyard App, **before work queues**.
+
+```sh
+shipyard landability --repo Generous-Corp/pulp        # on demand
+```
+
+It reads the required contexts from branch protection, resolves each one to
+the jobs that render to it, walks those jobs' transitive `needs` closure,
+resolves every `runs-on` through the `vars.*_RUNS_ON_JSON` indirection, and
+checks the resulting label sets against the live runner census in **both**
+registration scopes.
+
+The `needs` closure is the whole check. The required `macos` context is
+produced by an alias job and by a matrix leg, and **every** path to it passes
+through `resolve-provider` and `classify`. On 2026-09-13 the context's own job
+was routed through a variable that was fine and those two were not — so a check
+that looked only at the producing job would have returned a clean bill of
+health in the middle of the outage. Six lanes gate one context here.
+
+`shipyard ship` / `shipyard pr` run the same check as a preflight and refuse
+with **exit 7** (`EXIT_LANE_UNSERVED`) when a required context cannot be
+scheduled. Cost: **four API calls cold, zero warm** (a 300-second fact cache),
+plus a local `git show` of the workflow file.
+
+It refuses only on `Unserved` — a self-hosted label set that no runner
+advertises *and* no fresh host attestation declares. An unreadable census, an
+unparsable expression, a `Starved` lane or a missing attestation all warn and
+proceed: each of those is a statement about the *instrument*, and an instrument
+that cannot see must not be able to stop the fleet.
+
+`Unserved` and `Starved` look identical and have opposite fixes:
+
+| verdict | what it means | fix |
+|---|---|---|
+| `Unserved` | no runner in either scope carries the labels, and no host declares the lane | restore the runner, or unset the routing variable so the job falls back to the workflow's own literal |
+| `Starved` | an online, not-busy runner **does** carry the labels and work is queueing anyway | runner-group access, ephemeral consumption, or a `workflows` permission — **not** a runner restore |
+
+It never dispatches, re-dispatches, cancels or retries. Decisions contract
+`[default] #4`: a runnerless required lane is HELD, never a retry storm. On
+2026-09-13 four blind re-dispatches helped nothing and created a second wedge
+by filling the concurrency group.
+
+Per-run escape: `--allow-unserved-lane <label>` prints the diagnosis as a
+warning and proceeds. It exists for a human who has just restored a runner and
+is waiting for the census to catch up. Never set it from automation.
+
+### 2. The outcome detector — `.github/workflows/landing-watchdog.yml`
+
+Runs every 30 minutes on `ubuntu-latest` with `GITHUB_TOKEN`, and is redundant
+on four axes by construction:
+
+| axis | precondition detector | outcome detector |
+|---|---|---|
+| host | M1 / M3 / M5 | `ubuntu-latest` |
+| credential | Shipyard App installation token | `GITHUB_TOKEN`, no admin scope |
+| method | resolve labels, census, attest | is a required context absent or unassigned past *T* |
+| code | Shipyard, Rust | `tools/scripts/landing_watchdog.py`, no shared library |
+
+The method axis is the one that matters. A precondition model can be wrong
+about a mechanism it never modelled, and that session found four distinct
+wedges of which existing models described one. An outcome check cannot be wrong
+that way: it does not care *why* `macos` is missing from a head SHA two hours
+after the last push. The cost is that it cannot say why — which is what
+detector 1 is for, and the issue body says so.
+
+Thresholds: a required context **absent** 45 minutes after the head last moved;
+a check run **unassigned** for 30 minutes; a workflow run **pending with zero
+jobs** for 15 minutes (the concurrency-holder signature, which reads exactly
+like runner saturation and is not). It opens, edits and closes one issue
+labelled `ci-landing-wedge`, and writes nothing else.
+
+Budget: 1 call plus at most 3 per open PR, every 30 minutes, on
+`GITHUB_TOKEN`'s own per-repository bucket.
+
+### Both detectors report their own failure
+
+This is the part that matters most, because the same session found **five**
+sensors on this fleet that had been dead for weeks to months — one crashing
+every tick for roughly three months — and **not one of them reported its own
+death**. A measurement aimed at the wrong target does not error; it succeeds
+and returns empty, and empty reads as a clean finding.
+
+- `shipyard landability` assesses two synthetic control lanes on every run,
+  against the same census and attestations: a label nothing can serve must come
+  back `Unserved`, a hosted label must come back `Served`. If they fail to
+  discriminate it exits non-zero instead of reporting a result it did not
+  measure.
+- The watchdog workflow replays a **captured fixture of the 2026-09-13 wedge**
+  before every live scan and fails the job if the classifier does not fire on
+  it — and equally if it flags the fixture's healthy control PR. It also
+  refuses a scan with an empty required-context list, which would otherwise
+  report every PR clean.
+- The host attestation writer (below) probes a launchd label it knows exists
+  and one it knows cannot, and records `launchd_readable: false` rather than a
+  census of zero when the domain does not discriminate.
+
+### The host attestation
+
+A runner census cannot tell an idle just-in-time pool apart from a persistent
+runner that crash-looped away, because both register nothing. Only the host
+knows. `tartci_host_attestation.py` runs every 300 seconds on each of M1, M3
+and M5 under `com.danielraffel.shipyard.host-attestation` and writes
+`~/.tartci/state/host-attestation.json`, which the landability check reads.
+
+Its rule, and the reason it exists: **no side may pass a check by delegation
+unless it names the artifact carrying the other side's verdict, and absence of
+that artifact is a fault rather than a pass.** Before it, tartci's watchdog
+printed `✓ … runtime health is owned by Shipyard` over a service in a crash
+loop with 3,684 launches and no registration file, while Shipyard knew nothing
+about that host at all.
+
+Verify deployment on a host — and never assume it:
+
+```sh
+~/.local/share/pulp-landing/staging/install_host_attestation.sh --verify
+```
+
+The receipt prints the launchd state, the installed writer's SHA-256, the
+attestation's age, and the SHA-256 of the writer that actually produced the
+file. A mismatch is reported as `SKEW`, which is a distinct condition from
+stale and from dead — the distinction a prior incident collapsed when a
+behind-the-times checker reported every lane on a healthy host as missing its
+heartbeat.
+
+Use `launchctl print`, never `launchctl list`, when checking any of this by
+hand: `list` renders a `KeepAlive` job in a crash loop as `- 0`, byte-identical
+to a healthy idle service, which is exactly how the M5 preamble runner stayed
+invisible through 3,684 respawns.

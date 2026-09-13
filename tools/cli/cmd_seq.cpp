@@ -7,6 +7,7 @@
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/tools/timeline/agent.hpp>
 #include <pulp/tools/timeline/agent_view_projection.hpp>
+#include <pulp/tools/timeline/device_catalog.hpp>
 #include <pulp/tools/timeline/writer_profile.hpp>
 
 #include <charconv>
@@ -268,6 +269,10 @@ int cmd_seq(const std::vector<std::string>& args) {
             std::cout << pulp::tools::timeline::writer_profile_json(*profile) << "\n";
             return 0;
         }
+        // The device catalog rides the no-argument capability object rather
+        // than a subcommand of its own: what a caller may author is one
+        // question, and a client that must ask twice will eventually ask once
+        // and author against half an answer.
         std::cout << "{\"profiles\":["
                   << pulp::tools::timeline::writer_profile_json(
                          pulp::tools::timeline::proposal_writer_profile())
@@ -277,7 +282,8 @@ int cmd_seq(const std::vector<std::string>& args) {
                   << ","
                   << pulp::tools::timeline::writer_profile_json(
                          pulp::tools::timeline::trusted_writer_profile())
-                  << "]}\n";
+                  << "],\"device_catalog\":" << pulp::tools::timeline::device_catalog_json()
+                  << "}\n";
         return 0;
     }
 
