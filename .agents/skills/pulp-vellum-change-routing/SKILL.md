@@ -304,3 +304,22 @@ The event is a new JSON file directly under
 claiming the affected families sorted. Coverage is compared for **equality**,
 not containment: claiming a family the diff does not touch fails the same way
 omitting one does.
+
+## Refreshing the ledger pulls this skill into skill-sync
+
+The repair for a stale pin edits `docs/status/gpu-vellum-handoff.yaml`, and that
+path is mapped to this skill in `tools/scripts/skill_path_map.json`. So a change
+that never intended to touch Vellum routing — refreshing one registry-digest
+literal inside a pinned validator script such as
+`tools/scripts/test_release_artifact_contents.py` — fails three gates in a chain,
+each naming something further from the edit than the last:
+
+1. the ctest, as `gpu-recipe-catalog-selftest`, for a stale row;
+2. the pre-push `gpu-handoff-pin` guard, once the ledger is behind the pin;
+3. `skill-sync`, once the ledger is regenerated, for `pulp-vellum-change-routing`.
+
+Expect the third rather than discovering it: the regeneration is mechanical and
+carries no routing decision, so either record what the pinned edit taught you
+here, or declare it with `Skill-Update: skip skill=pulp-vellum-change-routing
+reason="..."` on a commit in the range. Do not resolve it by reverting the ledger
+refresh — that puts step 1 back.
