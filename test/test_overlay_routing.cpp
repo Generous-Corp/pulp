@@ -1070,3 +1070,154 @@ TEST_CASE("root_overlay_owns_keyboard accepts an open dropdown",
     REQUIRE(combo->is_open());
     REQUIRE(pulp::view::root_overlay_owns_keyboard(root));
 }
+
+// ── Switching dropdowns costs one press, not two ────────────────────────────
+//
+// An overlay that consumes its outside click spends the dismissing press on
+// the close, so opening a SIBLING dropdown took two presses: one to close the
+// first, one to open the second. A press that lands on a control whose purpose
+// is opening an overlay means "switch menus", so the policy delivers it. The
+// macOS menu bar and every multi-menu toolbar behave this way.
+//
+// Scoped to triggers deliberately. Passing every dismissing press through
+// would mean clicking away from a menu also operates whatever sits under the
+// click, which is a hazard rather than a hypothetical.
+
+namespace {
+
+struct PolicyGuard {
+    PolicyGuard() : saved(pulp::view::overlay_dismissal_policy()) {}
+    ~PolicyGuard() { pulp::view::set_overlay_dismissal_policy(saved); }
+    pulp::view::OverlayDismissalPolicy saved;
+};
+
+}  // namespace
+
+TEST_CASE("a press on an overlay trigger dismisses without consuming",
+          "[view][overlay][pointer][trigger]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    auto trigger_owned = std::make_unique<TestView>();
+    auto* trigger = trigger_owned.get();
+    trigger->set_bounds({400.0f, 100.0f, 120.0f, 24.0f});
+    trigger->set_overlay_trigger(true);
+    root.add_child(std::move(trigger_owned));
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {440.0f, 110.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    // Not consumed: the host falls through and the trigger opens its own menu
+    // from the same press.
+    REQUIRE_FALSE(press.consume_press);
+    REQUIRE(root.interaction().active_overlay == nullptr);
+}
+
+TEST_CASE("a press on ordinary content still consumes the dismissal",
+          "[view][overlay][pointer][trigger]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    auto content_owned = std::make_unique<TestView>();
+    auto* content = content_owned.get();
+    content->set_bounds({400.0f, 100.0f, 120.0f, 24.0f});
+    root.add_child(std::move(content_owned));
+    REQUIRE_FALSE(content->overlay_trigger());
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {440.0f, 110.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(press.consume_press);
+}
+
+TEST_CASE("an overlay trigger is found through the view that wins the hit test",
+          "[view][overlay][pointer][trigger]") {
+    // An imported or scripted dropdown is a wrapper around the label or icon
+    // that actually wins the hit test, so the mark is honoured on any ancestor
+    // up to the root.
+    OverlayGuard g;
+    PolicyGuard p;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    auto wrapper_owned = std::make_unique<TestView>();
+    auto* wrapper = wrapper_owned.get();
+    wrapper->set_bounds({400.0f, 100.0f, 120.0f, 24.0f});
+    wrapper->set_overlay_trigger(true);
+    auto label_owned = std::make_unique<TestView>();
+    auto* label = label_owned.get();
+    label->set_bounds({4.0f, 4.0f, 100.0f, 16.0f});
+    wrapper->add_child(std::move(label_owned));
+    root.add_child(std::move(wrapper_owned));
+    REQUIRE(root.hit_test({440.0f, 110.0f}) == label);
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {440.0f, 110.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE_FALSE(press.consume_press);
+}
+
+TEST_CASE("trigger pass-through is configurable and defaults on",
+          "[view][overlay][pointer][trigger]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    REQUIRE(pulp::view::overlay_dismissal_policy().trigger_press_passes_through);
+
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+
+    auto trigger_owned = std::make_unique<TestView>();
+    auto* trigger = trigger_owned.get();
+    trigger->set_bounds({400.0f, 100.0f, 120.0f, 24.0f});
+    trigger->set_overlay_trigger(true);
+    root.add_child(std::move(trigger_owned));
+
+    pulp::view::OverlayDismissalPolicy strict;
+    strict.trigger_press_passes_through = false;
+    pulp::view::set_overlay_dismissal_policy(strict);
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        root, {440.0f, 110.0f});
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(press.consume_press);
+}
+
+TEST_CASE("a ComboBox marks itself as an overlay trigger",
+          "[view][overlay][pointer][trigger]") {
+    pulp::view::ComboBox combo;
+    REQUIRE(combo.overlay_trigger());
+}

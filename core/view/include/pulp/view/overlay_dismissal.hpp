@@ -64,8 +64,37 @@ struct OverlayPressTarget {
     /// True when an outside press dismissed an overlay that opted to consume
     /// that initiating pointer sequence. Hosts must stop before gesture and
     /// ordinary hit-test routing so the same press cannot mutate the underlay.
+    ///
+    /// False even for such an overlay when the press landed on an overlay
+    /// TRIGGER and `OverlayDismissalPolicy::trigger_press_passes_through` is
+    /// set: switching dropdowns is one press, not two.
     bool consume_press = false;
 };
+
+/// Tunable defaults for the dismissal policy. One configuration for the
+/// process, deliberately: this is a framework default, not per-editor state,
+/// and it is read-only on the press path.
+struct OverlayDismissalPolicy {
+    /// A press that dismisses an open overlay is delivered to the control
+    /// under it when that control is an overlay TRIGGER
+    /// (`View::overlay_trigger()`), so switching from one dropdown to a
+    /// sibling costs one press rather than two — the behaviour of the macOS
+    /// menu bar and of every multi-menu toolbar.
+    ///
+    /// Scoped to triggers on purpose. Passing every dismissing press through
+    /// would mean clicking away from a menu also operates whatever control
+    /// happens to sit under the click, which is a real hazard rather than a
+    /// hypothetical one; an overlay that asked to consume its outside click
+    /// still consumes it everywhere else.
+    ///
+    /// Set false to restore strict consume-everywhere dismissal.
+    bool trigger_press_passes_through = true;
+};
+
+/// The active policy. Reading is cheap and allocation-free.
+const OverlayDismissalPolicy& overlay_dismissal_policy();
+/// Replace the active policy. Call from application setup, not mid-gesture.
+void set_overlay_dismissal_policy(const OverlayDismissalPolicy& policy);
 
 /// Consult `root`'s generalized overlay slot for a press at `root_pt`.
 ///

@@ -69,6 +69,7 @@ createGrid	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setGrid	layout	function	core/view/src/widget_bridge/layout_api.cpp
 registerClick	events	function	core/view/src/widget_bridge/event_api.cpp
 claimOverlay	events	function	core/view/src/widget_bridge/event_api.cpp
+setOverlayTrigger	events	function	core/view/src/widget_bridge/event_api.cpp
 releaseOverlay	events	function	core/view/src/widget_bridge/event_api.cpp
 claimDocumentNavigationFocus	events	function	core/view/src/widget_bridge/event_api.cpp
 releaseDocumentNavigationFocus	events	function	core/view/src/widget_bridge/event_api.cpp

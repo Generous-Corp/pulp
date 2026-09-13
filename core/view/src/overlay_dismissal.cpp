@@ -28,7 +28,36 @@ ModalOverlay* topmost_modal(View* root) {
     return dynamic_cast<ModalOverlay*>(root);
 }
 
+// A framework default, not per-editor state: one configuration for the
+// process, written at application setup and only read on the press path.
+OverlayDismissalPolicy& mutable_policy() {
+    static OverlayDismissalPolicy policy;
+    return policy;
+}
+
+// Whether the press lands on a control that OPENS an overlay, in which case it
+// means "switch menus" rather than "dismiss". The trigger itself or any
+// ancestor of the hit view may carry the mark, because an imported or scripted
+// dropdown is usually a wrapper around the element that actually wins the hit
+// test.
+bool press_hits_overlay_trigger(View& root, Point root_pt) {
+    if (!overlay_dismissal_policy().trigger_press_passes_through) return false;
+    for (View* v = root.hit_test(root_pt); v != nullptr; v = v->parent()) {
+        if (v->overlay_trigger()) return true;
+        if (v == &root) break;
+    }
+    return false;
+}
+
 }  // namespace
+
+const OverlayDismissalPolicy& overlay_dismissal_policy() {
+    return mutable_policy();
+}
+
+void set_overlay_dismissal_policy(const OverlayDismissalPolicy& policy) {
+    mutable_policy() = policy;
+}
 
 OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
     auto* state = root.existing_interaction();
@@ -55,7 +84,13 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
     // dismiss_active_overlay() rather than the bare release_overlay() so React
     // state can flip setOpen(false) via on_overlay_dismissed; a bare release
     // leaves the component believing it is still open.
-    const bool consume_press = overlay->overlay_consumes_outside_click();
+    //
+    // Resolve the press target BEFORE dismissing. A dismissal callback is
+    // arbitrary application code that routinely unmounts the popover and
+    // reflows what is underneath, so a hit test taken afterwards answers about
+    // a different tree than the one the user pressed on.
+    const bool consume_press = overlay->overlay_consumes_outside_click() &&
+                               !press_hits_overlay_trigger(root, root_pt);
     View::dismiss_active_overlay(root);
     return {OverlayPressRouting::dismissed, nullptr, consume_press};
 }

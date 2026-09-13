@@ -158,6 +158,18 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         }
         return choc::value::Value();
     });
+    // setOverlayTrigger(id, flag) - mark a control that OPENS an overlay.
+    // A press on one while a different overlay is open means "switch menus",
+    // so the dismissal policy delivers that press to the trigger instead of
+    // spending it on the close. Ordinary content is never marked, or clicking
+    // away from a menu would also operate whatever sits under the click.
+    register_bridge_function(api, "setOverlayTrigger", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = self.widgets_.find(id);
+        if (it != self.widgets_.end() && it->second)
+            it->second->set_overlay_trigger(args.get<bool>(1, true));
+        return choc::value::Value();
+    });
     register_bridge_function(api, "releaseOverlay", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto it = self.widgets_.find(id);

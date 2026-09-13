@@ -1458,6 +1458,20 @@ public:
     bool overlay_consumes_outside_click() const {
         return overlay_consumes_outside_click_;
     }
+    /// Mark this view as a control that OPENS an overlay — a dropdown field, a
+    /// menu button, a popover trigger.
+    ///
+    /// A press that lands on one while a different overlay is open means
+    /// "switch menus", so the overlay-dismissal policy lets that press through
+    /// to the trigger after dismissing, and the user changes dropdowns in one
+    /// press instead of two. Ordinary content is NOT a trigger and keeps the
+    /// dismiss-and-consume behaviour, or clicking away from a menu would also
+    /// operate whatever control sits under the click.
+    ///
+    /// `ComboBox` marks itself. A scripted or imported popover trigger is
+    /// marked by its authoring surface.
+    void set_overlay_trigger(bool is_trigger) { overlay_trigger_ = is_trigger; }
+    bool overlay_trigger() const { return overlay_trigger_; }
     /// Guarded release — clears the root slot AND the shim mirror only when
     /// `this` currently holds them. A non-holder is a no-op, so one widget's
     /// teardown cannot blur an unrelated focused widget.
@@ -2690,6 +2704,7 @@ private:
     bool requires_gpu_host_ = false;
     bool contains_native_overlay_ = false;
     bool overlay_consumes_outside_click_ = false;
+    bool overlay_trigger_ = false;
     FrameClock* frame_clock_ = nullptr;
     // Lazily allocated on the first set_meter_source / set_scalar_source, so a
     // view that shows no live value costs one null pointer.

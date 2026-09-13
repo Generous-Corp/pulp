@@ -320,3 +320,74 @@ TEST_CASE("auto-overlay: adding the data-overlay hint upgrades an existing "
     REQUIRE(View::active_overlay_ != nullptr);
     REQUIRE(View::active_overlay_->overlay_consumes_outside_click());
 }
+
+// ── data-overlay-trigger marks the control that OPENS an overlay ────────────
+//
+// Separate from the claim: the trigger is the dropdown FIELD, the claim is on
+// the menu it opens. Marking it lets a press meant as "switch menus" reach the
+// second dropdown instead of being spent closing the first. Never inferred
+// from CSS shape — an inference that marked ordinary content would make
+// clicking away from a menu also operate whatever sits under the click.
+
+namespace {
+
+// The bridge keys widgets by its own generated id, not the DOM `id`, so these
+// count marks over the built tree instead of looking one up by name.
+int count_views(const View& v) {
+    int n = 1;
+    for (size_t i = 0; i < v.child_count(); ++i) n += count_views(*v.child_at(i));
+    return n;
+}
+
+int count_overlay_triggers(const View& v) {
+    int n = v.overlay_trigger() ? 1 : 0;
+    for (size_t i = 0; i < v.child_count(); ++i)
+        n += count_overlay_triggers(*v.child_at(i));
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("data-overlay-trigger=\"true\" marks the view as an overlay trigger",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.setAttribute('data-overlay-trigger', 'true');
+    )");
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+}
+
+TEST_CASE("an unmarked element is not an overlay trigger",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.style.position = 'absolute';
+        d.style.zIndex = '100';
+    )");
+    // Positive control: the element really reached the bridge and built views,
+    // so the zero below is about the trigger mark and not about an empty tree.
+    REQUIRE(count_views(h.root) > 1);
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+}
+
+TEST_CASE("removing data-overlay-trigger clears the mark",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        d.id = 'toggling';
+        document.body.appendChild(d);
+        d.setAttribute('data-overlay-trigger', 'true');
+    )");
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+
+    h.eval("document.getElementById('toggling').removeAttribute('data-overlay-trigger');");
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+}
