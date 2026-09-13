@@ -1694,7 +1694,7 @@ disabling overflow. Nothing about either failure is visible without asking.
 | `host-silent` | A declared fleet host completed no `build.yml` job for `silence_hours` while its siblings completed at least `demand_min_jobs` carrying a label set it is observed to serve. Reported at the level in `hosts.severity`, which ships as `info` (see the per-host census below). |
 | `host-map-broken` | Self-hosted jobs ran in the window and not one runner name matched any declared host prefix. A lane rename, not a silent fleet. Silence is not evaluated while the map cannot identify a host. |
 | `host-silence-degraded` | A jobs read failed or the run walk was cut short, so the window was not fully read and every silence verdict is suppressed rather than reported on evidence that does not support it. |
-| `host-unobserved`, `host-last-served`, `host-serving-inflight`, `host-idle`, `host-map-unmapped` | Census state for the step summary, always `info`. They record what the sweep saw so a would-be verdict can be counted against real traffic before anything pages. |
+| `host-unobserved`, `host-last-served`, `host-serving-inflight`, `host-idle`, `host-map-unmapped`, `host-lane-census` | Census state for the step summary, always `info`. They record what the sweep saw so a would-be verdict can be counted against real traffic before anything pages. |
 
 Label matching is **subset containment**: GitHub dispatches to a runner only if
 it carries *every* label in the array. A lane requesting
@@ -1828,18 +1828,36 @@ Four cases are deliberately not verdicts:
   `host-silence-degraded`. This is the same fail-closed discipline the checker
   already applies to an unreadable runners API.
 
+**The identity is the host, and the evidence is the lane.** m5 declares two
+prefixes: the ephemeral gate lane `m5-` and the persistent `pulp-preamble-m5`
+runner. A host-scoped predicate reads a completion on either one as the host
+serving, so the cheap always-up lane can vouch for the expensive gate lane that
+has stopped, which is close to the shape of the incident the rule exists for.
+While the rule runs in shadow, any host declaring more than one prefix also
+reports `host-lane-census`: last-served and job count per prefix, side by side.
+It is instrumentation, not a verdict. It is the number that decides whether the
+host stays the unit of identity when the rule is promoted, or whether the
+predicate has to move down to the lane.
+
 Two knobs bound the cost. `service_evidence.lookback_hours` is 720h, which is
 right for a lane that fires per release and wrong here: `build.yml` alone holds
 over 16,000 runs, so a 720h per-job walk would cost thousands of API calls every
 hour. The census uses its own `observation_hours` (72h, past a weekend and far
 past `silence_hours`) with a server-side `created>=` filter and pagination
 instead of the 20-run lane cap, plus a `max_runs` ceiling. It walks newest
-first, so the first completed job it sees for a host is already that host's
-last-served time, and it stops as soon as it is past the silence window and
-every declared host has one. Older runs can only lower a maximum that is
-already fixed, so they are never fetched. Only a host with no completion at all
-pays the full walk, which is the one case where the full walk is the evidence,
-and a truncated walk reports degraded rather than guessing.
+first and stops as soon as it is past the silence window AND every declared
+host is already proven to have served inside it. Being *proven* is the bound
+that matters: runs are ordered by creation, the rule is about completion, and
+the two come apart. A long-queued job, or a rerun (which keeps its run's
+original creation time), can complete hours after its run was created, so an
+older run can still carry a host's newest completion. Stopping at the first
+completion seen would read such a host as silent while it served minutes ago,
+which is a false fire in the exact direction this rule exists to avoid. A host
+that has not served inside the window therefore pays the full walk on every
+sweep: that is both the one case where the full walk is the evidence and the
+one case where an older run can still change the answer. `max_runs` is sized
+well clear of the live window for that reason, and a truncated walk reports
+degraded rather than guessing.
 
 **It ships in shadow mode.** `hosts.severity` is `info`, so the census reports
 to the step summary and nothing else: no issue, no assignee, no red run. That is

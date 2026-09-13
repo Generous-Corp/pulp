@@ -1803,7 +1803,11 @@ class TestHostSilenceHealthyFleet(unittest.TestCase):
                    + busy_siblings("m5-pulp-gate-01-", 4)
                    + busy_siblings("m1-pulp-gate-01-", 4))
         findings = census(records)
-        self.assertEqual(kinds(findings), ["host-last-served"] * 3)
+        # m5 declares two prefixes, so it also carries the per-lane census
+        # line. That is instrumentation for the shadow week, not a verdict:
+        # no host is reported silent here.
+        self.assertEqual(kinds(findings),
+                         ["host-lane-census"] + ["host-last-served"] * 3)
         # CONTROL: the instrument can fire on this same fixture shape: drop
         # m1's jobs back past the window and it does.
         quiet = (busy_siblings("studio-11-", 6)
@@ -1827,7 +1831,7 @@ class TestHostSilenceIdleNight(unittest.TestCase):
                    + busy_siblings("m1-pulp-gate-01-", 2))
         findings = census(records)
         self.assertEqual([f.kind for f in findings if f.variable == "m5"],
-                         ["host-idle"])
+                         ["host-lane-census", "host-idle"])
         self.assertEqual(kinds(findings, gate.INFO).count("host-silent"), 0)
 
     def test_one_more_sibling_job_crosses_the_demand_gate(self):
@@ -1878,6 +1882,52 @@ class TestHostSilenceM5Shape(unittest.TestCase):
                   if f.kind == "host-silent"][0]
         self.assertIn("no runner registered under this host's prefixes",
                       silent.detail)
+
+
+class TestHostLaneCensus(unittest.TestCase):
+    """The shadow week has to be able to see a fused host's lanes apart.
+
+    m5 declares two prefixes: the ephemeral gate lane `m5-` and the persistent
+    `pulp-preamble-m5` runner. A host-scoped predicate reads a completion on
+    either as the host serving, so the cheap always-up lane can vouch for the
+    expensive gate lane that has stopped. That is the shape of the incident the
+    rule exists for, and it is exactly what the host verdict alone cannot show.
+    """
+
+    def records(self):
+        # The gate lane stopped 11h ago; the preamble runner served 1h ago.
+        return ([job("m5-pulp-gate-01-1", 11, name="build-macos"),
+                 job("pulp-preamble-m5", 1)]
+                + busy_siblings("studio-11-", 6)
+                + busy_siblings("m1-pulp-gate-01-", 3))
+
+    def test_one_lane_vouches_for_the_host(self):
+        # Not a bug to fix here: it is the consequence of host-scoped identity,
+        # stated so the shadow week can decide whether to keep that scope.
+        kinds = [f.kind for f in census(self.records()) if f.variable == "m5"]
+        self.assertIn("host-last-served", kinds)
+        self.assertNotIn("host-silent", kinds)
+
+    def test_the_census_reports_the_lanes_apart(self):
+        lane = [f for f in census(self.records())
+                if f.kind == "host-lane-census" and f.variable == "m5"][0]
+        self.assertIn("m5-: 1 job(s), last 660m ago", lane.detail)
+        self.assertIn("pulp-preamble-m5: 1 job(s), last 60m ago", lane.detail)
+
+    def test_a_lane_with_no_completion_says_so(self):
+        records = ([job("pulp-preamble-m5", 1)]
+                   + busy_siblings("studio-11-", 6))
+        lane = [f for f in census(records)
+                if f.kind == "host-lane-census" and f.variable == "m5"][0]
+        self.assertIn("m5-: no completion in window", lane.detail)
+
+    def test_a_single_prefix_host_emits_no_lane_census(self):
+        # The control. m1 and m3 declare one prefix each, so a per-prefix line
+        # would restate the host line; if this ever returns a finding the
+        # emission is firing on something other than prefix fusion.
+        lanes = [f.variable for f in census(self.records())
+                 if f.kind == "host-lane-census"]
+        self.assertEqual(lanes, ["m5"])
 
 
 class TestHostSilenceEpisode(unittest.TestCase):
@@ -1972,7 +2022,8 @@ class TestHostPrefixMapDrift(unittest.TestCase):
         records = ([job(f"studio-11-{i}", 1) for i in range(3)]
                    + [job(f"m5-gate-{i}", 1) for i in range(3)]
                    + [job(f"m1-gate-{i}", 1) for i in range(3)])
-        self.assertEqual(kinds(census(records)), ["host-last-served"] * 3)
+        self.assertEqual(kinds(census(records)),
+                         ["host-lane-census"] + ["host-last-served"] * 3)
 
     def test_a_partial_rename_is_visible_every_sweep(self):
         records = (busy_siblings("studio-11-", 4)
@@ -2096,7 +2147,7 @@ class TestHostSilenceWiring(unittest.TestCase):
     def test_check_with_the_provider_appends_the_census(self):
         c = host_contract()
         records = gate.parse_service_records(busy_siblings("studio-11-", 3))
-        after = gate.check(c, runners(), {}, [],
+        after = gate.check(c, runners(), {}, [], now=NOW,
                            service_records=gate.static_service_records(records))
         self.assertEqual(kinds(after).count("host-last-served"), 1)
         self.assertEqual(kinds(after).count("host-unobserved"), 2)
@@ -2105,7 +2156,7 @@ class TestHostSilenceWiring(unittest.TestCase):
         c = contract([])
         records = gate.parse_service_records(busy_siblings("studio-11-", 3))
         self.assertEqual(
-            gate.check(c, runners(), {}, [],
+            gate.check(c, runners(), {}, [], now=NOW,
                        service_records=gate.static_service_records(records)),
             [])
 
@@ -2164,27 +2215,54 @@ class TestServiceRecordFetch(unittest.TestCase):
         self.assertNotIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
         self.assertEqual(len(records), 3)
 
-    def test_a_host_observed_only_outside_the_window_still_stops_the_walk(self):
-        # The silent host's own evidence: m1's newest job is older than the
-        # 6h silence window, so it will be reported silent. The walk still
-        # stops there, because that job IS its last_served and nothing older
-        # can change it. Walking the rest of the 72h would be pure cost.
+    def test_an_older_run_can_carry_a_newer_completion(self):
+        # Runs are ordered by created_at; the predicate is over completed_at.
+        # Run 3 was created 9h ago and its m1 job only completed 2h ago — a
+        # long queue or a rerun, which keeps the original created_at. Stopping
+        # at run 2 would read m1 as 7h silent while it served 2h ago, which is
+        # a false fire in the exact direction this rule exists to avoid.
         pages = {1: [
             {"id": 1, "created_at": self.at(1)},
             {"id": 2, "created_at": self.at(7)},
-            {"id": 3, "created_at": self.at(30)},
+            {"id": 3, "created_at": self.at(9)},
         ]}
         jobs = {
             1: [self.served("studio-1", 1), self.served("m5-gate-1", 1)],
             2: [self.served("m1-gate-1", 7)],
-            3: [self.served("m1-gate-2", 30)],
+            3: [self.served("m1-gate-2", 2)],
         }
         seen = []
         with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
             records, degraded = gate.fetch_service_records(
                 "o/r", "build.yml", 72, 6, 400, HOST_MAP)
         self.assertEqual(degraded, [])
-        self.assertNotIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+        self.assertIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+        self.assertEqual(
+            gate.host_last_served(records, ["m1-"]),
+            gate._parse_ts(self.at(2)))
+
+    def test_a_host_short_of_the_window_pays_the_whole_walk(self):
+        # CONTROL for the test above, and the cost of the exact exit: when the
+        # older run does NOT rescue m1, the walk cannot stop early — it reaches
+        # the start of the window, reports a complete read, and m1 keeps the
+        # old stamp that makes it silent. Identical pages, one changed job.
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(9)},
+            {"id": 4, "created_at": self.at(400)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1)],
+            2: [self.served("m1-gate-1", 7)],
+            3: [self.served("m1-gate-2", 9)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP)
+        self.assertEqual(degraded, [])
+        self.assertIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
         self.assertEqual(
             gate.host_last_served(records, ["m1-"]),
             gate._parse_ts(self.at(7)))

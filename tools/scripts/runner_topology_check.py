@@ -149,7 +149,7 @@ class Contract:
     host_silence_hours: int = 6
     host_demand_min_jobs: int = 5
     host_observation_hours: int = 72
-    host_max_runs: int = 400
+    host_max_runs: int = 900
     host_severity: str = INFO
     host_workflow: str = "build.yml"
 
@@ -250,7 +250,7 @@ def load_contract(path: Path) -> Contract:
         host_silence_hours=int(host_block.get("silence_hours", 6)),
         host_demand_min_jobs=int(host_block.get("demand_min_jobs", 5)),
         host_observation_hours=int(host_block.get("observation_hours", 72)),
-        host_max_runs=int(host_block.get("max_runs", 400)),
+        host_max_runs=int(host_block.get("max_runs", 900)),
         host_severity=str(host_block.get("severity", INFO)),
         host_workflow=str(host_block.get("workflow", "build.yml")),
     )
@@ -538,20 +538,28 @@ def host_last_served(records: list[ServiceRecord], prefixes: list[str]) -> datet
     return max(stamps) if stamps else None
 
 
-def _every_host_observed(
-    records: list[ServiceRecord], hosts: dict[str, list[str]]
+def _every_host_proven_non_silent(
+    records: list[ServiceRecord],
+    hosts: dict[str, list[str]],
+    silence_cutoff: datetime,
 ) -> bool:
-    """Has every declared host completed at least one job in what was read?
+    """Is every declared host already known to have served inside the window?
 
-    The walk is newest-first, so the FIRST completed job seen for a host is
-    already its last_served. Once every host has one, walking further back can
-    only find older jobs, which cannot change any max() and cannot change
-    observed(). That makes this the exact point the evidence stops improving.
+    This, and not "every host has been observed", is the point the walk can
+    stop. Runs are ordered by `created_at` but the predicate is over job
+    `completed_at`, and the two decouple: a queued job or a rerun (a retry
+    keeps its run's original `created_at`) can complete hours after the run was
+    created, so an older run can carry a NEWER completion. A host whose
+    best-so-far completion is still at or before the cutoff is exactly the host
+    an older run can rescue, so walking must continue while any host is in that
+    state. Once a host has a completion after the cutoff it cannot be silent,
+    and no older run can take that back.
     """
-    return all(
-        host_last_served(records, prefixes) is not None
-        for prefixes in hosts.values()
-    )
+    for prefixes in hosts.values():
+        last = host_last_served(records, prefixes)
+        if last is None or last <= silence_cutoff:
+            return False
+    return True
 
 
 def fetch_service_records(
@@ -569,10 +577,12 @@ def fetch_service_records(
     cannot cover a 6h silence window, let alone establish that a host has been
     observed at all. So the walk is filtered server-side with `created>=` and
     paginated, and bounded two ways instead: it stops as soon as it is past the
-    silence window and every declared host has been seen completing at least
-    one job, and it refuses to exceed `max_runs` in any case. Only a host with
-    no completion at all in the window pays the full walk, which is the one
-    case where the full walk is the evidence.
+    silence window and every declared host is already proven non-silent, and it
+    refuses to exceed `max_runs` in any case. A host that has not served inside
+    the window pays the full walk, which is the one case where the full walk is
+    the evidence: it is also the only case where an older run can still change
+    the answer, because a queued job or a rerun completes long after the run it
+    belongs to was created.
 
     The second return value names every read that failed or was cut short. It
     travels as data rather than being swallowed, because a window that was not
@@ -620,12 +630,14 @@ def fetch_service_records(
                 if record is not None:
                     records.append(record)
             if (run_started is not None and run_started < silence_cutoff
-                    and _every_host_observed(records, hosts)):
+                    and _every_host_proven_non_silent(
+                        records, hosts, silence_cutoff)):
                 # Everything the predicate needs is now in hand: the walk is
                 # past the silence window, so every job that could count as
-                # sibling demand has been read, and every host has its newest
-                # completion, which is its last_served. Older runs can only
-                # lower a max() that is already fixed, so they are not read.
+                # sibling demand has been read, and every host already has a
+                # completion inside the window, which no older run can undo.
+                # A host still short of that is why the walk keeps going: its
+                # rescuing completion may sit on an older, longer-queued run.
                 return records, degraded
         page += 1
 
@@ -658,6 +670,36 @@ def _host_registration(
 
 def _stamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _lane_breakdown(
+    rows: list[ServiceRecord], prefixes: list[str], now: datetime
+) -> str:
+    """Per-prefix last-served for one host, newest lane first.
+
+    The rule's unit of identity is the host, but the evidence is the lane, and
+    the motivating incident was a LANE failure: m5's gate lane served nothing
+    while the box stayed up. A host whose prefixes fuse a persistent lane with
+    an ephemeral one can have the persistent lane vouch for the whole host, so
+    the shadow week has to be able to see the lanes separately before anyone
+    argues the host predicate is enough.
+    """
+    parts = []
+    for prefix in prefixes:
+        lane = [
+            r for r in rows
+            if r.status == "completed" and r.completed_at
+            and r.runner_name.startswith(prefix)
+        ]
+        if not lane:
+            parts.append(f"{prefix}: no completion in window")
+            continue
+        newest = max(r.completed_at for r in lane)
+        parts.append(
+            f"{prefix}: {len(lane)} job(s), last "
+            f"{int((now - newest).total_seconds() // 60)}m ago"
+        )
+    return "; ".join(parts)
 
 
 def classify_host_silence(
@@ -739,6 +781,18 @@ def classify_host_silence(
         completed = [r for r in rows if r.status == "completed" and r.completed_at]
         inflight = [r for r in rows if r.status != "completed"]
         registration = _host_registration(host, prefixes, runners)
+
+        # Shadow-mode instrumentation, not a verdict: a host with more than one
+        # prefix can have one lane vouch for another, so report the lanes apart
+        # every sweep. This is the number that decides whether the host stays
+        # the unit of identity when the rule is promoted.
+        if len(prefixes) > 1 and rows:
+            findings.append(Finding(
+                INFO, "host-lane-census", host,
+                _lane_breakdown(rows, prefixes, now)
+                + ". Reported so a lane that never stops can be told apart "
+                "from a host that never stops; the verdict below is per host.",
+            ))
 
         # BOOTSTRAP: a host with no mapped job at all in the observation window
         # is not silent, it is unobserved. A host that has never reported must
@@ -1264,6 +1318,7 @@ def check(
     unread_scopes: list[str] | None = None,
     queued_ages: Any = None,
     service_records: Any = None,
+    now: datetime | None = None,
 ) -> list[Finding]:
     """`evidence` is a callable lane -> list of served label sets, invoked ONLY
     when an ephemeral lane has no live runner. A list is accepted for
@@ -1286,6 +1341,11 @@ def check(
     the per-host silence census, or a plain list of records. It defaults to
     None, which skips the census entirely, so every caller that omits it sees
     exactly the findings it saw before the census existed.
+
+    `now` is the clock the census reads. It exists so a test can pin it: a
+    fixture anchored on a constant while the code under test reads the wall
+    clock passes only for as long as the window it was written in, which is a
+    test with an expiry date. Production omits it and gets the real clock.
     """
     if not callable(evidence):
         evidence = static_evidence(evidence)
@@ -1343,7 +1403,7 @@ def check(
             service_records = static_service_records(service_records)
         records, degraded = service_records()
         findings.extend(classify_host_silence(
-            contract, records, runners, degraded=degraded))
+            contract, records, runners, now=now, degraded=degraded))
 
     return findings
 
