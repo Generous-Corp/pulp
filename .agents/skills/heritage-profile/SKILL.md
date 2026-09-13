@@ -195,6 +195,52 @@ budget code must be present in a plain Release build and absent under the
 sanitizer. A guard that silently disabled the budget everywhere would look just
 as green as a correct one.
 
+## A CPU ratio is calibrated on one platform and is not portable
+
+The sanitizer guard above answers "is this build instrumented". It does not
+answer "is this the machine the number came from", and those are different
+questions. The representative-chain budget — `2.0` with a `1.05` measurement
+tolerance — was measured on arm64 macOS and nowhere else. Both halves of the
+ratio are real work, but they are not the *same kind* of work: the baseline is
+sinc reconstruction, dense and vectorizable, while the chain adds branchy
+per-sample stages. Those two halves do not auto-vectorize alike across
+toolchains, so non-regressed code can land either side of `2.0` under a
+different compiler and ISA.
+
+That matters because the timing group is **not** confined to the reference
+platform. `cross-platform-check.yml` excludes only `validation|slow`, so a
+`performance` / `bench` / `quality-lab` test runs there on x86-64 Linux,
+arm64 Linux, and x86-64 Windows, all Release, all with NDEBUG defined.
+`nightly-intel.yml` adds macOS x86_64. Read the lane you mean before assuming a
+label keeps a timing test on Apple silicon.
+
+So nest the platform guard *inside* the instrumentation guard and report
+elsewhere rather than skipping:
+
+```cpp
+#if defined(NDEBUG) && !defined(PULP_TEST_WITH_SANITIZER)
+    const double median_ratio = /* run the trials everywhere */;
+#if defined(__APPLE__) && defined(__aarch64__)
+    REQUIRE(median_ratio <= budget * tolerance);
+#else
+    WARN("ratio " << median_ratio << "; the budget is an arm64 macOS reference");
+#endif
+#endif
+```
+
+Nesting, not extending the outer `#if`, is deliberate: every uninstrumented
+platform still *measures* and prints a real number, so a genuine regression is
+visible in the log on x86 rather than silently unmeasured, while instrumented
+builds keep the cheap `SUCCEED` and never pay for trials whose result is
+meaningless.
+
+**Know the headroom before you tighten anything.** On the reference platform the
+chain measures about `2.04` against a `2.10` threshold — roughly 3%. That is
+thin enough that a 4x increase in reconstruction filter order (2 to 8) still
+passes at `2.08`; order 16 is the smallest lever that crosses it. Useful in both
+directions: it is the break to reach for when confirming the assertion can fail,
+and it is the reason not to assume a passing run had margin to spare.
+
 ## Copy-paste prompt
 
 For a ready-to-send prompt that asks another agent to perform this workflow,
