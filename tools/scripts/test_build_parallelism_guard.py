@@ -307,6 +307,125 @@ class WorkflowAuthorOwnsWholeMachineTest(unittest.TestCase):
                     self.fail(f"{rel}: un-governed whole-machine build survives: {stripped}")
 
 
+NINJA_CONFIGURE = (
+    'cmake -S "$src" -B "$b" -G Ninja -DCMAKE_BUILD_TYPE=Release\n')
+
+
+class NinjaUnboundedClassTest(unittest.TestCase):
+    """The `ninja-unbounded` class -- a `cmake --build` with no job flag at all,
+    in a script that configures the tree with -G Ninja.
+
+    This is the class the two flag-based ones structurally cannot see: they
+    iterate `--parallel`/`-j` matches, so a command carrying neither produces no
+    match and never reaches `_classify`. Against Unix Makefiles that silence is
+    correct (no bound means `make -j1`); against Ninja the same command defaults
+    to cores + 2."""
+
+    def test_flagless_build_in_a_ninja_tree_is_flagged(self):
+        self.assertEqual(
+            kinds(NINJA_CONFIGURE + 'cmake --build "$b" --target pulp-mcp-core\n',
+                  shared_host=True),
+            ["ninja-unbounded"])
+
+    def test_flag_based_classes_are_blind_to_it(self):
+        """The control for the claim above: the same text yields no `bare` and
+        no `whole-machine` finding, because there is no flag to classify. If
+        this ever starts returning one, the new class is redundant."""
+        found = kinds(NINJA_CONFIGURE + 'cmake --build "$b"\n', shared_host=True)
+        self.assertNotIn("bare", found)
+        self.assertNotIn("whole-machine", found)
+
+    def test_governed_build_wrapper_is_not_flagged(self):
+        self.assertEqual(
+            kinds(NINJA_CONFIGURE
+                  + '"$src/tools/ci/governed-build.sh" cmake --build "$b"\n',
+                  shared_host=True),
+            [])
+
+    def test_line_continuation_to_the_wrapper_is_not_flagged(self):
+        """The wrapper is conventionally written on its own physical line with a
+        trailing backslash, so the check has to see the folded logical line."""
+        self.assertEqual(
+            kinds(NINJA_CONFIGURE
+                  + '"$src/tools/ci/governed-build.sh" \\\n'
+                    '    cmake --build "$b" \\\n'
+                    '    --target pulp-mcp-core\n',
+                  shared_host=True),
+            [])
+
+    def test_exported_parallel_level_is_not_flagged(self):
+        self.assertEqual(
+            kinds(NINJA_CONFIGURE
+                  + 'export CMAKE_BUILD_PARALLEL_LEVEL=8\n'
+                  + 'cmake --build "$b"\n',
+                  shared_host=True),
+            [])
+
+    def test_a_bounded_job_count_is_not_flagged(self):
+        self.assertEqual(
+            kinds(NINJA_CONFIGURE + 'cmake --build "$b" -j8\n', shared_host=True),
+            [])
+
+    def test_xcode_generator_is_not_flagged(self):
+        """Scoped to Ninja on purpose. Another generator's flagless default is
+        not cores + 2, and the iOS cases here configure with -G Xcode."""
+        self.assertEqual(
+            kinds('cmake -S "$src" -B "$b" -G Xcode\ncmake --build "$b"\n',
+                  shared_host=True),
+            [])
+
+    def test_no_generator_in_the_same_file_is_not_flagged(self):
+        """The CLAUDE.md shape: a bare `cmake -S . -B build` configure whose
+        generator is the platform default, then a flagless build. Which
+        generator that resolves to is not statically knowable, so the class
+        deliberately does not fire."""
+        self.assertEqual(
+            kinds('cmake -S . -B build -DCMAKE_BUILD_TYPE=Release\n'
+                  'cmake --build build --target pulp-test-state\n',
+                  shared_host=True),
+            [])
+
+    def test_a_comment_naming_the_variable_does_not_launder_the_file(self):
+        """The file-level `already governed` check reads code, not prose. The
+        real fixture carries a comment explaining why the wrapper must supply
+        CMAKE_BUILD_PARALLEL_LEVEL; matching that text would mark the file
+        governed while nothing exports it."""
+        self.assertEqual(
+            kinds(NINJA_CONFIGURE
+                  + '# CMAKE_BUILD_PARALLEL_LEVEL from the wrapper governs it.\n'
+                  + 'cmake --build "$b"\n',
+                  shared_host=True),
+            ["ninja-unbounded"])
+
+    def test_a_comment_naming_the_generator_does_not_trigger_the_class(self):
+        """The mirror image: -G Ninja discussed in prose is not a configure."""
+        self.assertEqual(
+            kinds('# This tree is deliberately not configured with -G Ninja.\n'
+                  'cmake -S "$src" -B "$b"\n'
+                  'cmake --build "$b"\n',
+                  shared_host=True),
+            [])
+
+    def test_not_flagged_on_a_surface_the_scan_cannot_call_shared(self):
+        """Like whole-machine, this is a bounded-but-too-large count rather than
+        an unbounded one, so it is only wrong where the host is shared."""
+        self.assertEqual(
+            kinds(NINJA_CONFIGURE + 'cmake --build "$b"\n', shared_host=False),
+            [])
+
+    def test_ctest_scripts_are_a_shared_host_surface(self):
+        """test/cmake/*.sh are ctest cases, and ctest runs on the shared
+        self-hosted Studios that host the required macos gate."""
+        self.assertTrue(guard.is_shared_host_surface(
+            guard.REPO_ROOT / "test" / "cmake" / "test_gpu_health_cpu_only_configure.sh"))
+
+    def test_ctest_scripts_are_scanned_by_default(self):
+        targets = {p.relative_to(guard.REPO_ROOT).as_posix()
+                   for p in guard.iter_default_targets()}
+        self.assertIn(
+            "test/cmake/test_gpu_health_cpu_only_configure.sh", targets)
+
+
 class TreeIsCleanTest(unittest.TestCase):
     """The default scan over the real repo surfaces must pass — the guard runs
     as a ctest against the tree, so a stray whole-machine/bare command anywhere
