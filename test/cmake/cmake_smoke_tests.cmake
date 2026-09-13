@@ -179,6 +179,11 @@ add_test(NAME cmake-runtime-staging-call-sites
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_runtime_staging_call_sites.cmake)
+
+add_test(NAME cmake-bundle-pkginfo-call-sites
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_bundle_pkginfo_call_sites.cmake)
 set_tests_properties(cmake-runtime-staging-call-sites PROPERTIES
     LABELS "cmake;sdk;runtime;lint"
     TIMEOUT 30)

@@ -28,6 +28,7 @@
         "tools/cmake/PulpInstallRules.cmake",
         "tools/cmake/PulpSdkProvenance.cmake",
         "tools/cmake/PulpAuv3.cmake",
+        "tools/cmake/PulpPluginFormats.cmake",
         "experimental/pulp-rs/Cargo.toml",
         "experimental/pulp-rs/Cargo.lock",
         "experimental/pulp-rs/src/**/*.rs",
