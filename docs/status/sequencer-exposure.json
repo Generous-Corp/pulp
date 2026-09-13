@@ -5648,6 +5648,150 @@
           "rationale": "No design-time capability is advertised. The slice corrects metadata a hosting capability already claimed rather than adding an authorable one."
         }
       }
+    },
+    {
+      "id": "product-a-sequencer-state-control",
+      "title": "Product A live control operations for the sequencer state channel",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "6bc15779-15b1-41c1-9c2d-72eca8c2889a",
+      "owned_paths": [
+        "inspect/CMakeLists.txt",
+        "inspect/include/pulp/inspect/capability_definitions.inc",
+        "inspect/include/pulp/inspect/control_registry_digest.inc",
+        "inspect/include/pulp/inspect/control_sequencer_state_executor.hpp",
+        "inspect/include/pulp/inspect/control_standalone_host.hpp",
+        "inspect/src/control_manifest.cpp",
+        "inspect/src/control_sequencer_state_executor.cpp",
+        "inspect/src/control_standalone_host.cpp",
+        "inspect/src/control_standalone_host_minimal.cpp",
+        "test/test_control_sequencer_state_executor.cpp",
+        "test/cmake/view_widget_bridge_tests.cmake",
+        "docs/reference/development-inspector-capabilities.md",
+        "docs/status/sequencer-exposure.json"
+      ],
+      "evidence": [
+        {
+          "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+          "needles": [
+            "PULP_INSPECT_CAPABILITY(SequencerStateRead, \"sequencer.state.read\", \"dev.pulp.sequencer/state.read@1\", Sensitive, None, HostMain, Response, 1, 1, 1, 0)",
+            "PULP_INSPECT_CAPABILITY(SequencerStateEdit, \"sequencer.state.edit\", \"dev.pulp.sequencer/state.edit@1\", Control, State, HostMain, Receipt, 0, 1, 1, 0)"
+          ]
+        },
+        {
+          "path": "inspect/src/control_sequencer_state_executor.cpp",
+          "needles": [
+            "make_control_sequencer_state_read_executor",
+            "make_control_sequencer_state_edit_executor",
+            "ui_try_submit",
+            "ResourceExhausted"
+          ]
+        },
+        {
+          "path": "inspect/src/control_standalone_host.cpp",
+          "needles": [
+            "dev.pulp.sequencer/state.read@1",
+            "dev.pulp.sequencer/state.edit@1",
+            "create_standalone_sequencer_state_channel"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The transport this projects is already installed by the released row step-sequencer-state-channel through core/state/include/pulp/state/sequencer_state_channel.hpp. This slice adds no public SDK header of its own: control_sequencer_state_executor.hpp is an inspect-internal executor seam that PulpControlShipping.cmake does not ship, and the one author-facing seam it does add, install_standalone_sequencer_state_channel_factory, lives on the already-installed control_standalone_host.hpp rather than on a new header."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "These operations read and edit a live in-process plugin state channel, not a persisted timeline document. `pulp seq` operates on a timeline document on disk and has nothing to open here; the CLI reachability of these operations is the generic live-control verb `pulp control call`, which is recorded under live_product_control where it belongs."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Same boundary as offline_timeline_cli. The generated Timeline MCP schema describes offline document sessions; a live sequencer grid held by a running host is not a timeline-document operation. The MCP reachability of these operations is the live control tool catalog, recorded under live_product_control."
+        },
+        "live_product_control": {
+          "disposition": "exposed",
+          "rationale": "Closes the live_product_control gap carried by released row step-sequencer-state-channel, whose surface names product-a-sequencer-state-operation as its sole dependency. That released row is not edited; this pending row carries the claim, because a released row's evidence resolves against the snapshot it shipped at and cannot contain identifiers this slice creates. Two typed operations are registered: dev.pulp.sequencer/state.read@1 projects the UI-side published snapshot and playhead as a response, and dev.pulp.sequencer/state.edit@1 encodes one typed step-grid command and submits it to the UI-to-audio command FIFO, returning a receipt. Both bind the HostMain executor, which is the binding ten of the twenty registered capabilities already use, because SequencerStateChannel is strictly single-producer/single-consumer per side and exactly one UI-side consumer may own the applied-echo queue; a Background binding would compile and pass every functional test while racing the UI-side cursor. The test suite asserts that binding twice over -- once as declared in the registry row and once at runtime, by installing an off-main-thread dispatcher backend and proving both operations refuse with HostUnavailable and that the refused edit never reached the FIFO. Grant-profile membership is the observe/develop flags on the capability rows, which is where Product A's profile policy is defined: the read is in both observe and develop, the edit is develop-only, and both are grantable, so the MCP catalog derives pulp_control_sequencer_state_read and pulp_control_sequencer_state_edit from the registry and `pulp control call` admits them by operation id -- Forge Sequencer and Forge Modular reach this through unified controls with no new verb and no bespoke surface. Admission is in_process because the sequencer channel is registered into the same process as the control host by install_standalone_sequencer_state_channel_factory and admitted per call by the broker's grant, not by an offline registered-writer lease; writer_profile and bounds are therefore null, and refusal_codes is empty because that field names the offline writer conflict codes conflict_code_name defines in tools/timeline/src/writer_profile.cpp, not this operation's refusals, which are typed ControlOperationStatus values (InvalidRequest, HostUnavailable, ResourceExhausted with AfterBackoff retry, Cancelled, DeadlineExceeded) carried on the receipt. A full command FIFO is a typed retryable refusal and never a silent drop, which the test proves behaviourally by draining one slot and showing the next submission succeeds.",
+          "evidence": [
+            {
+              "kind": "capability_definition",
+              "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+              "needles": [
+                "SequencerStateRead, \"sequencer.state.read\", \"dev.pulp.sequencer/state.read@1\"",
+                "SequencerStateEdit, \"sequencer.state.edit\", \"dev.pulp.sequencer/state.edit@1\""
+              ]
+            },
+            {
+              "kind": "operation_definition",
+              "path": "inspect/src/control_manifest.cpp",
+              "needles": [
+                "SequencerStateRead, \"sequencer/state.read\"",
+                "SequencerStateEdit, \"sequencer/state.edit\""
+              ]
+            },
+            {
+              "kind": "executor_binding",
+              "path": "inspect/src/control_standalone_host.cpp",
+              "needles": [
+                "make_control_sequencer_state_read_executor(sequencer_target)",
+                "make_control_sequencer_state_edit_executor(sequencer_target)",
+                "ControlMainThreadExecutor main_sequencer_read",
+                "ControlMainThreadExecutor main_sequencer_edit"
+              ]
+            },
+            {
+              "kind": "profile_policy",
+              "path": "inspect/src/capabilities.cpp",
+              "needles": [
+                "kObserveCapabilities",
+                "kDevelopCapabilities",
+                "bool capability_is_grantable(InspectorCapability capability)"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/cli/cmd_control.cpp",
+              "needles": [
+                "pulp control call --instance ID OPERATION",
+                "capability_is_grantable(descriptor->capability)",
+                ".operation_id = operation,"
+              ]
+            },
+            {
+              "kind": "mcp_projection",
+              "path": "tools/mcp/mcp_control_tool_catalog.cpp",
+              "needles": [
+                "operation_tool_name",
+                "for (const auto& operation : control_operation_registry())",
+                "capability_is_grantable(operation.capability)"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_control_sequencer_state_executor.cpp",
+              "needles": [
+                "sequencer state capabilities declare the HostMain executor binding",
+                "sequencer state read copies the published snapshot and playhead",
+                "sequencer state edit submits one exact typed command",
+                "sequencer state edit refuses a malformed or out-of-range request",
+                "a full sequencer command FIFO is a typed retryable refusal, never a drop",
+                "both sequencer operations refuse an off-host-main-thread call",
+                "sequencer operations refuse an unresolvable or wrongly-tiered channel"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The design-time installed capability manifest describes offline SDK composition contracts, not live runtime authority. These are runtime control operations on a running host's state channel, so they are advertised by the live control registry rather than by an agent-capability descriptor."
+        }
+      }
     }
   ],
   "tombstones": []
