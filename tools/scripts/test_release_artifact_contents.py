@@ -425,7 +425,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         ), mock.patch.object(rac, "__file__", str(Path(td) / "release_artifact_contents.py")):
             self.assertEqual(
                 rac._control_registry_digest(),
-                "9a32256a646ab2612cfe0c8f50a77afe9a4353b94c1504749ab855a8dc9c64a8",
+                "8754fc5a5e0072d171a753fdb44121da837c07255add5e4a8c90cb3e0216642c",
             )
 
     def test_cli_contract_tracks_import_design_runtime_manifest(self) -> None:

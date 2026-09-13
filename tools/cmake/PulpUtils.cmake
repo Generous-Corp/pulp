@@ -726,7 +726,9 @@ function(pulp_add_plugin target)
                 dev.pulp.test/input@1
                 dev.pulp.authoring/tweaks@1
                 dev.pulp.telemetry/subscribe@1
-                dev.pulp.runtime/evaluate@1)
+                dev.pulp.runtime/evaluate@1
+                dev.pulp.sequencer/transport.loop.read@1
+                dev.pulp.sequencer/transport.loop.write@1)
         else()
             set(_pulp_standalone_control_capabilities
                 dev.pulp.instance/read@1

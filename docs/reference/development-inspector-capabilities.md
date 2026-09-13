@@ -63,6 +63,8 @@ availability.
 | `dev.pulp.runtime/reload@1` (`runtime.reload`) | no | no | Frozen contract; no current executor or grant path |
 | `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | no | no | Research-unsafe acknowledged manifests may inject the bounded exact-instance evaluator; grants require broker-owned single-use consent, and results/errors are size-bounded and redacted |
 | `dev.pulp.artifact/read@1` (`artifact.read`) | no | no | Publication-bound typed client rechecks exact original lineage and broker ACL for every chunk |
+| `dev.pulp.sequencer/transport.loop.read@1` (`sequencer.transport.loop.read`) | yes | yes | Fenced main-thread sensitive read of the live `MasterTransport` publication: loop endpoints, enabled flag, transport running state, and the publication sequence. A transport that has never published refuses `HostUnavailable` rather than reporting a loop no transport has accepted |
+| `dev.pulp.sequencer/transport.loop.write@1` (`sequencer.transport.loop.write`) | no | yes | Grant-controlled fenced main-thread receipt operation with action-discriminated `set-range`/`set-enabled` input. Endpoints arrive already snapped and are never snapped for the caller; the receipt carries the transport's own acceptance, and every `TransportError` maps to its own distinct refusal message |
 | `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
 
 `off` grants nothing. `custom` starts from an empty exact allow-list. `develop`
