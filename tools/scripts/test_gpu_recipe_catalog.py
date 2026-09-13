@@ -580,8 +580,17 @@ class CatalogContract(unittest.TestCase):
 
 
 def _git(root, *arguments):
+    # Background maintenance is disabled because it outlives the command that
+    # starts it. `git commit` ends by detaching `git gc --auto` /
+    # `git maintenance run --auto`, which keeps rewriting .git for seconds
+    # after the commit returns. The fixtures below commit a whole working
+    # tree, so the loose-object count clears the threshold every time, and a
+    # teardown that walks that tree concurrently sees entries appear and
+    # vanish under it -- removing .git then fails with ENOTEMPTY. Nothing
+    # here reads a packed object store, so there is nothing to trade away.
     subprocess.run(
         ["git", "-c", "user.email=history@example.invalid", "-c", "user.name=History",
+         "-c", "gc.auto=0", "-c", "maintenance.auto=false",
          *arguments],
         cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE, check=True,
@@ -600,7 +609,10 @@ class TruncatedCheckoutAttribution(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._workspace = tempfile.TemporaryDirectory()
+        # The git config above removes the writer that makes this racy, but the
+        # workspace is disposable either way: a fixture root that resists
+        # removal is not a defect this suite should report as an error.
+        cls._workspace = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.addClassCleanup(cls._workspace.cleanup)
         base = pathlib.Path(cls._workspace.name)
 
