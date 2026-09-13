@@ -2187,6 +2187,48 @@ class TestHostSilenceWiring(unittest.TestCase):
         self.assertIsInstance(handed[0], datetime)
         self.assertIsNotNone(handed[0].tzinfo)
 
+    def test_the_live_path_hands_the_walk_the_clock_it_was_given(self):
+        """The wiring tests above pin `check`'s side of the hop. This pins
+        main()'s: the closure the live branch builds must pass its own `now`
+        down to the walk, not let the walk read the clock again.
+
+        Without this, deleting `now=now` from that one call fails OPEN. Every
+        other test in this class drives `check` with a provider of its own, so
+        the closure main() actually ships is exercised by none of them and the
+        suite stays green while the two clocks come back.
+        """
+        pinned = datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc)
+        handed = []
+        captured = {}
+
+        def fake_check(*a, **k):
+            # Positional, matching main(): contract, runners, variables,
+            # evidence, workflows_dir, unread_scopes, queued_ages, provider.
+            handed.append(a[7])
+            a[7](pinned)
+            return []
+
+        def fake_fetch(repo, workflow, observation_hours, silence_hours,
+                       max_runs, hosts, now=None):
+            captured["now"] = now
+            return [], []
+
+        inventory = gate.RunnerInventory(runners=[], warnings=[],
+                                         unread_scopes=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(gate, "fetch_runner_inventory",
+                                   return_value=inventory), \
+                 mock.patch.object(gate, "fetch_variables", return_value={}), \
+                 mock.patch.object(gate, "fetch_service_records", fake_fetch), \
+                 mock.patch.object(gate, "check", fake_check):
+                gate.main(["--mode", "report",
+                           "--workflows-dir", str(Path(tmp) / "none")])
+
+        # The control for the assertion below: a `service_records=None` would
+        # make `handed` empty and the clock assertion vacuously unreachable.
+        self.assertEqual(len(handed), 1)
+        self.assertEqual(captured["now"], pinned)
+
     def test_a_contract_without_hosts_runs_no_census(self):
         c = contract([])
         records = gate.parse_service_records(busy_siblings("studio-11-", 3))
@@ -2200,8 +2242,11 @@ class TestServiceRecordFetch(unittest.TestCase):
     """The walk that replaces the 20-run cap, and its two bounds."""
 
     def setUp(self):
-        # The walk reads the clock itself, so its fixtures anchor on real time
-        # rather than the frozen NOW the classifier is driven with.
+        # The walk now takes its instant from the caller, but these fixtures
+        # still anchor on real time and pass `self.base` in explicitly: it keeps
+        # every relative age in one place, and the tests that matter here are
+        # about which pages get read, not about which clock was used. The two
+        # tests that pin the clock itself hand over a frozen instant instead.
         self.base = datetime.now(timezone.utc)
 
     def at(self, hours):
@@ -2384,7 +2429,7 @@ class TestServiceRecordFetch(unittest.TestCase):
     def test_a_fused_hosts_two_served_lanes_still_stop_the_walk(self):
         # CONTROL for the test above: the identical pages with the gate lane's
         # job moved inside the silence window. Both m5 lanes and m1 are then
-        # proven, so the walk stops and run 4 is never read -- the per-prefix
+        # proven, so the walk stops and run 4 is never read: the per-prefix
         # bound costs the extra pages only while a declared lane is unproven.
         pages = {1: [
             {"id": 1, "created_at": self.at(1)},
@@ -2404,6 +2449,37 @@ class TestServiceRecordFetch(unittest.TestCase):
                 "o/r", "build.yml", 72, 6, 400, HOST_MAP, now=self.base)
         self.assertEqual(degraded, [])
         self.assertNotIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+
+    def test_a_fused_hosts_quiet_lane_holds_it_open_whichever_lane_is_quiet(self):
+        """The mirror of the fusion test: the OTHER declared lane is the quiet one.
+
+        Both tests read `for prefix in prefixes`, so both pass today. They are
+        not redundant: a bound that walks only the first declared prefix still
+        satisfies the test above, because there the quiet lane is `m5-`, which
+        HOST_MAP lists first. Swapping which lane is quiet is what makes that
+        narrowing fail, and the prefix order in the contract is incidental:
+        nothing forbids a future edit from reordering the list.
+        """
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(8)},
+            {"id": 4, "created_at": self.at(400)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1)],
+            2: [self.served("m1-gate-1", 2)],
+            3: [self.served("pulp-preamble-m5", 8)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP, now=self.base)
+        self.assertEqual(degraded, [])
+        self.assertIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+        self.assertIn(
+            "pulp-preamble-m5: 1 job(s), last 480m ago",
+            gate._lane_breakdown(records, HOST_MAP["m5"], self.base))
 
     def test_hitting_the_run_cap_reports_degraded(self):
         pages = {1: [{"id": i, "created_at": self.at(1)} for i in range(1, 6)]}

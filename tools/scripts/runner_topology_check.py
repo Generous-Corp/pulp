@@ -593,12 +593,20 @@ def fetch_service_records(
     cannot cover a 6h silence window, let alone establish that a host has been
     observed at all. So the walk is filtered server-side with `created>=` and
     paginated, and bounded two ways instead: it stops as soon as it is past the
-    silence window and every declared host is already proven non-silent, and it
-    refuses to exceed `max_runs` in any case. A host that has not served inside
-    the window pays the full walk, which is the one case where the full walk is
-    the evidence: it is also the only case where an older run can still change
-    the answer, because a queued job or a rerun completes long after the run it
-    belongs to was created.
+    silence window and every declared PREFIX is already proven non-silent, and
+    it refuses to exceed `max_runs` in any case. The bound is per prefix, not
+    per host, because a host that declares several prefixes would otherwise let
+    its cheapest always-up lane stop the walk, and the quiet lane's real last
+    completion would never be read. The verdict stays per host; only the walk's
+    bound moved down to the lane.
+
+    A lane that has not served inside the window therefore pays the full walk
+    on every sweep. That is the one case where the full walk is the evidence:
+    it is also the only case where an older run can still change the answer,
+    because a queued job or a rerun completes long after the run it belongs to
+    was created. The corollary is a live cost, not a hypothetical: a prefix
+    that stays declared after its pool is retired can never be proven, so every
+    sweep walks the entire observation window until the contract drops it.
 
     The second return value names every read that failed or was cut short. It
     travels as data rather than being swallowed, because a window that was not
@@ -696,6 +704,18 @@ def _stamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _age_minutes(now: datetime, then: datetime) -> int:
+    """Whole minutes from `then` to `now`, never negative.
+
+    The walk reads pages of history against one pinned instant, so a job that
+    completes while the sweep is mid-walk carries a stamp AFTER that instant
+    and prints a negative age. The reading is honest and the clamp is only for
+    the text: a completion newer than the clock is zero minutes old, not minus
+    three, and the verdict never looks at this number.
+    """
+    return max(0, int((now - then).total_seconds() // 60))
+
+
 def _lane_breakdown(
     rows: list[ServiceRecord], prefixes: list[str], now: datetime
 ) -> str:
@@ -721,7 +741,7 @@ def _lane_breakdown(
         newest = max(r.completed_at for r in lane)
         parts.append(
             f"{prefix}: {len(lane)} job(s), last "
-            f"{int((now - newest).total_seconds() // 60)}m ago"
+            f"{_age_minutes(now, newest)}m ago"
         )
     return "; ".join(parts)
 
@@ -836,7 +856,7 @@ def classify_host_silence(
             findings.append(Finding(
                 INFO, "host-last-served", host,
                 f"last served {_stamp(last)} "
-                f"({int((now - last).total_seconds() // 60)}m ago), "
+                f"({_age_minutes(now, last)}m ago), "
                 f"{len(completed)} job(s) in the window. "
                 f"Registration: {registration}.",
             ))

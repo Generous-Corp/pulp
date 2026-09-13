@@ -1906,6 +1906,14 @@ has stopped, which is close to the shape of the incident the rule exists for.
 While the rule runs in shadow, any host declaring more than one prefix that has
 any mapped job in the window also reports `host-lane-census`: last-served and
 job count per prefix, side by side.
+
+Read the `{n} job(s)` counts as counts *down to where the walk stopped*, not
+counts over the window. The walk exits as soon as every declared prefix is
+proven, so a healthy lane's count says how many of its jobs were seen before
+that exit, and a busier lane can report fewer jobs than a quieter one simply
+because the exit came sooner. The last-served age beside it is the load-bearing
+number; the count is only there to show the age rests on real traffic.
+
 It is instrumentation, not a verdict. It is the number that decides whether the
 host stays the unit of identity when the rule is promoted, or whether the
 predicate has to move down to the lane.
