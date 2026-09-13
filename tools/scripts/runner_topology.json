@@ -94,38 +94,21 @@
     },
     {
       "variable": "PULP_ALIAS_RUNS_ON_JSON",
-      "purpose": "Required-check alias job for `macos`. It is the LAST job in a build.yml run and does one terminal jobs-API read, so starving it does not merely delay a check: the run never reaches a terminal state, holds this ref's concurrency group, and leaves the next push's run at status `pending` with zero jobs. The `linux` and `windows` aliases already report from the self-hosted preamble for that reason; this lane gives `macos` the same protection without borrowing preamble capacity when a dedicated alias pool exists.",
-      "expect": [
-        "self-hosted",
-        "macOS",
-        "ARM64",
-        "pulp-preamble"
-      ],
+      "purpose": "Required-check alias job for `macos`. It is the LAST job in a build.yml run and does one terminal jobs-API read, so starving it does not merely delay a check: the run never reaches a terminal state, holds this ref's concurrency group, and leaves the next push's run at status `pending` with zero jobs. That is why this lane may never point at a label whose provisioning depends on a statically named persistent runner. It previously contracted [self-hosted, macOS, ARM64, pulp-preamble], served by the persistent runners `pulp-preamble-m3` and `pulp-preamble-m5`. Both registrations ceased to exist on the server -- m3's listener was stopped cleanly on 2026-09-01 and never reloaded, and m5's registration was deleted server-side at 2026-09-12T19:16:47Z, at which point the runner logged `The runner no longer exists on the server. Cleaning up local configuration.` and erased its own credentials. The label then had zero runners, `repos/Generous-Corp/pulp/actions/runners` reported total_count 0, and every build.yml run queued behind it for 10+ hours with no error surfaced anywhere. Decision 4 of .agents/contract.toml already forbids this shape: self-hosted runner names are EPHEMERAL, never static. A persistent runner has a static name by construction, so a REQUIRED lane must not depend on one. The alias jobs are cheap, platform-agnostic shell plus one API read -- they carry no macOS-only tooling -- so GitHub-hosted Linux serves them correctly and is free on this public repository.",
+      "expect": "ubuntu-latest",
       "unset_fallback": "ubuntu-latest",
-      "provisioning": "persistent",
+      "provisioning": "github-hosted",
       "severity": "required",
-      "hosts": [
-        "pulp-preamble-m3",
-        "pulp-preamble-m5"
-      ]
+      "hosts": []
     },
     {
       "variable": "PULP_PREAMBLE_RUNS_ON_JSON",
-      "purpose": "Cheap preamble/probe legs that gate the heavier build jobs.",
-      "expect": [
-        "self-hosted",
-        "macOS",
-        "ARM64",
-        "pulp-preamble"
-      ],
-      "provisioning": "persistent",
+      "purpose": "Cheap preamble/probe legs (`resolve-provider`, `classify`, `protected-receipt-reuse`, and the `linux`/`windows` aliases) that gate the heavier build jobs. These jobs gate the required `macos` check, so this lane is required in effect even though it builds nothing. It previously contracted the same `pulp-preamble` label as the alias lane and died with it -- see that lane for the incident. Two candidate self-hosted replacements were rejected on evidence rather than principle: the persistent macOS preamble runners are the statically named shape decision 4 forbids, and the macpro x86_64 Linux pool was measured on 2026-09-13 with exactly one single-use `--ephemeral` runner left and its provisioner (`pulp-ephemeral-pool@2`) in an exit-75 governor-refusal loop at restart counter 4040, having provisioned nothing since 2026-09-10 because two unreapable post-job husks pin its memory. Routing a required-gating lane at a pool with one non-renewing slot trades one black hole for another. build.yml's own `resolve-provider` comment states the standing condition for moving this lane to a self-hosted selector: flip only once that pool is confirmed always-on rather than on-demand, or the required gate simply starves on a different pool.",
+      "expect": "ubuntu-latest",
+      "unset_fallback": "ubuntu-latest",
+      "provisioning": "github-hosted",
       "severity": "required",
-      "hosts": [
-        "pulp-studio-01",
-        "pulp-studio-02",
-        "pulp-studio-03",
-        "pulp-preamble-m5"
-      ]
+      "hosts": []
     },
     {
       "variable": "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",

@@ -1608,6 +1608,76 @@ as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
 `tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
 
+## The preamble and alias lanes run GitHub-hosted, and a persistent runner may not own them
+
+`PULP_PREAMBLE_RUNS_ON_JSON` and `PULP_ALIAS_RUNS_ON_JSON` both contract to
+`ubuntu-latest`. Neither may be pointed at a label whose only provisioning is a
+statically named persistent runner, however idle and local that runner looks.
+
+The reason is a measured outage, not a preference. Both variables used to name
+`[self-hosted, macOS, ARM64, pulp-preamble]`, served by two persistent runners,
+`pulp-preamble-m3` and `pulp-preamble-m5`. They failed independently and
+silently:
+
+- `pulp-preamble-m3` was stopped cleanly on 2026-09-01 (`Runner listener exit
+  with 0 return code, stop the service, no retry needed`) and its LaunchAgent
+  was never reloaded. Its on-disk configuration stayed valid and correct for the
+  post-org-move URL, so nothing on the host looked wrong.
+- `pulp-preamble-m5` kept serving alone until 2026-09-12T19:16:47Z, when its
+  server-side registration was deleted. The runner did exactly what it is
+  designed to do — `The runner no longer exists on the server. Cleaning up local
+  configuration.` — and erased its own `.runner`, `.credentials`, and
+  `.credentials_rsaparams`. Its `KeepAlive` LaunchAgent then respawned a listener
+  that could only exit `Not configured`, thousands of times, which reads on the
+  host as "the service is loaded" and in `launchctl list` as a `-` in the PID
+  column.
+
+From that moment the label had zero runners. `repos/<owner>/<repo>/actions/runners`
+reported `total_count: 0` while the org scope still listed unrelated runners, so
+the census was not lying and nothing was offline-but-recoverable — the
+registrations were gone. GitHub does not reject a `runs-on` it cannot satisfy;
+it queues the job. So every `build.yml` run stacked up behind
+`resolve-provider`/`classify` with no error anywhere, the required `macos` check
+never reported, and nothing merged for more than ten hours.
+
+The alias lane makes that worse than a slow check. It is the **last** job in a
+run and does one terminal jobs-API read, so a starved alias means the run never
+reaches a terminal state, holds its ref's `concurrency` group, and leaves the
+next push's run at `pending` with **zero jobs** — a wedge that survives
+re-pushes and clears only by cancelling the older run by hand.
+
+This is the failure mode decision 4 of [`.agents/contract.toml`](../../.agents/contract.toml)
+already names: *self-hosted runner names are EPHEMERAL, never static; a
+runnerless required lane is HELD, never a retry storm*. A persistent runner has
+a static name by construction, so a lane that gates a required check must not
+depend on one. The contract rows for these two lanes previously declared
+`provisioning: persistent` with literal `hosts` entries, which contradicted that
+decision; they now declare `github-hosted` with no hosts.
+
+**Why not the self-hosted Linux pool instead.** It was the obvious substitute
+and it does not qualify today. Measured on 2026-09-13, the macpro x86_64 pool
+had exactly one runner left (`pulp-auto-ephemeral-200`), registered
+`"Ephemeral": "True"` — good for a single job and then gone — while its
+provisioner `pulp-ephemeral-pool@2` sat in an exit-75 governor-refusal loop at
+restart counter 4040, having created no VM since 2026-09-10 because two
+post-job husks (VMs 201 and 202) pin 16 GB the reaper declines to reclaim
+(`SKIP 201 — post-job clone lacks a host generation`). A required-gating lane
+aimed at one non-renewing slot is a black hole with a delay on it.
+`build.yml`'s own `resolve-provider` comment states the standing precondition:
+move this lane to a self-hosted selector only once that pool is confirmed
+always-on rather than on-demand, *or the required gate just starves on a
+different pool*.
+
+**What hosted costs, honestly.** Moving off the shared hosted pool was
+originally meant to stop hosted queue saturation from starving the required
+gate, and that pressure is real. It is a latency risk. A label no runner carries
+is a certainty. The preamble and alias jobs are cheap, platform-agnostic shell
+plus one API read — they contain no macOS-only tooling — and hosted minutes are
+free on a public repository, so this is the correct default until a pool exists
+that is both always-on and not statically named. Restoring a self-hosted
+selector is a contract edit here plus a variable edit, reviewed together, never
+a variable edit alone.
+
 ## Whether the gate has a GPU is observed, not assumed
 
 Every GPU case in the suite skips when no adapter is present, which is the right
