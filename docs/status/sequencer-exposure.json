@@ -5656,6 +5656,7 @@
       "delivery_state": "pending",
       "claim_id": "product-a-sequencer-transport-operation",
       "owned_paths": [
+        ".github/vellum-expansion-watch-events/20260912-pa-sequencer-transport-loop-watch.json",
         "docs/status/sequencer-exposure.json",
         "inspect/CMakeLists.txt",
         "inspect/include/pulp/inspect/capability_definitions.inc",
