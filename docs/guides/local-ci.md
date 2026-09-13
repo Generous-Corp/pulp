@@ -1833,8 +1833,9 @@ prefixes: the ephemeral gate lane `m5-` and the persistent `pulp-preamble-m5`
 runner. A host-scoped predicate reads a completion on either one as the host
 serving, so the cheap always-up lane can vouch for the expensive gate lane that
 has stopped, which is close to the shape of the incident the rule exists for.
-While the rule runs in shadow, any host declaring more than one prefix also
-reports `host-lane-census`: last-served and job count per prefix, side by side.
+While the rule runs in shadow, any host declaring more than one prefix that has
+any mapped job in the window also reports `host-lane-census`: last-served and
+job count per prefix, side by side.
 It is instrumentation, not a verdict. It is the number that decides whether the
 host stays the unit of identity when the rule is promoted, or whether the
 predicate has to move down to the lane.
@@ -1846,13 +1847,16 @@ hour. The census uses its own `observation_hours` (72h, past a weekend and far
 past `silence_hours`) with a server-side `created>=` filter and pagination
 instead of the 20-run lane cap, plus a `max_runs` ceiling. It walks newest
 first and stops as soon as it is past the silence window AND every declared
-host is already proven to have served inside it. Being *proven* is the bound
-that matters: runs are ordered by creation, the rule is about completion, and
+*prefix* is already proven to have served inside it. The verdict is per host,
+but the bound is per lane, because proving m5 over the union of its prefixes
+would let the always-up preamble runner stop the walk and leave the gate lane's
+real last completion unread, making the census wrong about exactly the host it
+was added to instrument. Being *proven* is the bound that matters: runs are ordered by creation, the rule is about completion, and
 the two come apart. A long-queued job, or a rerun (which keeps its run's
 original creation time), can complete hours after its run was created, so an
 older run can still carry a host's newest completion. Stopping at the first
 completion seen would read such a host as silent while it served minutes ago,
-which is a false fire in the exact direction this rule exists to avoid. A host
+which is a false fire in the exact direction this rule exists to avoid. A lane
 that has not served inside the window therefore pays the full walk on every
 sweep: that is both the one case where the full walk is the evidence and the
 one case where an older run can still change the answer. `max_runs` is sized

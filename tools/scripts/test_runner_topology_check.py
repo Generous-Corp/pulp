@@ -25,6 +25,7 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 from pathlib import Path
 from unittest import mock
 
@@ -2152,6 +2153,40 @@ class TestHostSilenceWiring(unittest.TestCase):
         self.assertEqual(kinds(after).count("host-last-served"), 1)
         self.assertEqual(kinds(after).count("host-unobserved"), 2)
 
+    def test_the_provider_is_handed_the_clock_the_verdict_is_judged_against(self):
+        # One clock, not two. A provider that walks history bounds that walk by
+        # a silence cutoff of its own, and the classifier then judges against
+        # another: a lane proven non-silent by less than the walk's wall time
+        # would be re-read as silent on the records the walk stopped fetching
+        # because of that proof. Narrow, and in the one direction this rule
+        # must never fire in, so the instant is threaded rather than re-read.
+        c = host_contract()
+        records = gate.parse_service_records(busy_siblings("studio-11-", 3))
+        handed = []
+
+        def provider(now):
+            handed.append(now)
+            return list(records), []
+
+        gate.check(c, runners(), {}, [], now=NOW, service_records=provider)
+        self.assertEqual(handed, [NOW])
+
+    def test_a_caller_that_pins_nothing_still_hands_over_one_instant(self):
+        # The default path cannot be told apart by a stamp (the two reads are
+        # microseconds apart), so what is assertable is the shape: the provider
+        # is handed a real tz-aware instant rather than None, exactly once.
+        c = host_contract()
+        handed = []
+
+        def provider(now):
+            handed.append(now)
+            return [], []
+
+        gate.check(c, runners(), {}, [], service_records=provider)
+        self.assertEqual(len(handed), 1)
+        self.assertIsInstance(handed[0], datetime)
+        self.assertIsNotNone(handed[0].tzinfo)
+
     def test_a_contract_without_hosts_runs_no_census(self):
         c = contract([])
         records = gate.parse_service_records(busy_siblings("studio-11-", 3))
@@ -2203,7 +2238,8 @@ class TestServiceRecordFetch(unittest.TestCase):
             {"id": 3, "created_at": self.at(9)},
         ]}
         jobs = {
-            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1)],
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1),
+                self.served("pulp-preamble-m5", 1)],
             2: [self.served("m1-gate-1", 2)],
             3: [self.served("studio-3", 9)],
         }
@@ -2213,11 +2249,11 @@ class TestServiceRecordFetch(unittest.TestCase):
                 "o/r", "build.yml", 72, 6, 400, HOST_MAP)
         self.assertEqual(degraded, [])
         self.assertNotIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
-        self.assertEqual(len(records), 3)
+        self.assertEqual(len(records), 4)
 
     def test_an_older_run_can_carry_a_newer_completion(self):
         # Runs are ordered by created_at; the predicate is over completed_at.
-        # Run 3 was created 9h ago and its m1 job only completed 2h ago — a
+        # Run 3 was created 9h ago and its m1 job only completed 2h ago: a
         # long queue or a rerun, which keeps the original created_at. Stopping
         # at run 2 would read m1 as 7h silent while it served 2h ago, which is
         # a false fire in the exact direction this rule exists to avoid.
@@ -2227,7 +2263,8 @@ class TestServiceRecordFetch(unittest.TestCase):
             {"id": 3, "created_at": self.at(9)},
         ]}
         jobs = {
-            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1)],
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1),
+                self.served("pulp-preamble-m5", 1)],
             2: [self.served("m1-gate-1", 7)],
             3: [self.served("m1-gate-2", 2)],
         }
@@ -2243,7 +2280,7 @@ class TestServiceRecordFetch(unittest.TestCase):
 
     def test_a_host_short_of_the_window_pays_the_whole_walk(self):
         # CONTROL for the test above, and the cost of the exact exit: when the
-        # older run does NOT rescue m1, the walk cannot stop early — it reaches
+        # older run does NOT rescue m1, the walk cannot stop early. It reaches
         # the start of the window, reports a complete read, and m1 keeps the
         # old stamp that makes it silent. Identical pages, one changed job.
         pages = {1: [
@@ -2253,7 +2290,8 @@ class TestServiceRecordFetch(unittest.TestCase):
             {"id": 4, "created_at": self.at(400)},
         ]}
         jobs = {
-            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1)],
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1),
+                self.served("pulp-preamble-m5", 1)],
             2: [self.served("m1-gate-1", 7)],
             3: [self.served("m1-gate-2", 9)],
         }
@@ -2275,7 +2313,8 @@ class TestServiceRecordFetch(unittest.TestCase):
             {"id": 3, "created_at": self.at(9)},
         ], 2: []}
         jobs = {
-            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1)],
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1),
+                self.served("pulp-preamble-m5", 1)],
             2: [self.served("studio-2", 7)],
             3: [self.served("studio-3", 9)],
         }
@@ -2298,6 +2337,73 @@ class TestServiceRecordFetch(unittest.TestCase):
         # one, so it must not report degraded and suppress every verdict.
         self.assertEqual(degraded, [])
         self.assertNotIn("repos/o/r/actions/runs/2/jobs?per_page=100", seen)
+
+    def test_a_pinned_clock_bounds_the_window_not_the_wall_time(self):
+        # The other half of the one-clock contract: the walk must derive its
+        # window from the instant it was handed. A `now` accepted and then
+        # ignored reads as wired while every cutoff still comes off the wall
+        # clock, which is the defect being closed, not a fix for it.
+        pinned = datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc)
+        seen = []
+        with mock.patch.object(gate, "_api", self._api({1: []}, {}, seen)):
+            gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP, now=pinned)
+        want = (pinned - timedelta(hours=72)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.assertIn("created=" + quote(">=" + want), seen[0])
+
+    def test_a_fused_hosts_quiet_lane_holds_the_walk_open(self):
+        # The defect the per-prefix bound closes, driven through the fetch the
+        # way production runs it. m5 declares two prefixes: the persistent
+        # `pulp-preamble-m5` runner served an hour ago, the `m5-` gate lane
+        # only 8h ago on run 3. Proving m5 over the UNION lets the preamble
+        # stop the walk at run 1, after which run 3 is never read and the
+        # census reports the gate lane as having served nothing all window --
+        # the one line the shadow week exists to read, wrong in the fused shape
+        # it was added to instrument.
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(8)},
+            {"id": 4, "created_at": self.at(400)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("pulp-preamble-m5", 1)],
+            2: [self.served("m1-gate-1", 2)],
+            3: [self.served("m5-gate-1", 8)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP, now=self.base)
+        self.assertEqual(degraded, [])
+        self.assertIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+        self.assertIn(
+            "m5-: 1 job(s), last 480m ago",
+            gate._lane_breakdown(records, HOST_MAP["m5"], self.base))
+
+    def test_a_fused_hosts_two_served_lanes_still_stop_the_walk(self):
+        # CONTROL for the test above: the identical pages with the gate lane's
+        # job moved inside the silence window. Both m5 lanes and m1 are then
+        # proven, so the walk stops and run 4 is never read -- the per-prefix
+        # bound costs the extra pages only while a declared lane is unproven.
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(8)},
+            {"id": 4, "created_at": self.at(400)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("pulp-preamble-m5", 1),
+                self.served("m5-gate-1", 1)],
+            2: [self.served("m1-gate-1", 2)],
+            3: [self.served("m5-gate-2", 8)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP, now=self.base)
+        self.assertEqual(degraded, [])
+        self.assertNotIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
 
     def test_hitting_the_run_cap_reports_degraded(self):
         pages = {1: [{"id": i, "created_at": self.at(1)} for i in range(1, 6)]}

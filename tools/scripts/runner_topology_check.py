@@ -511,8 +511,12 @@ def parse_service_records(data: Any) -> list[ServiceRecord]:
 
 
 def static_service_records(records: list[ServiceRecord], degraded: list[str] | None = None):
-    """A service-record provider backed by a fixed list (fixtures, tests)."""
-    return lambda: (list(records), list(degraded or []))
+    """A service-record provider backed by a fixed list (fixtures, tests).
+
+    Providers take the census clock so a history-reading one cannot drift from
+    the classifier. A fixed list has no history to read, so it ignores it.
+    """
+    return lambda now=None: (list(records), list(degraded or []))
 
 
 def _host_of(runner_name: str, hosts: dict[str, list[str]]) -> str | None:
@@ -538,27 +542,38 @@ def host_last_served(records: list[ServiceRecord], prefixes: list[str]) -> datet
     return max(stamps) if stamps else None
 
 
-def _every_host_proven_non_silent(
+def _every_lane_proven_non_silent(
     records: list[ServiceRecord],
     hosts: dict[str, list[str]],
     silence_cutoff: datetime,
 ) -> bool:
-    """Is every declared host already known to have served inside the window?
+    """Is every declared prefix already known to have served inside the window?
 
     This, and not "every host has been observed", is the point the walk can
     stop. Runs are ordered by `created_at` but the predicate is over job
     `completed_at`, and the two decouple: a queued job or a rerun (a retry
     keeps its run's original `created_at`) can complete hours after the run was
-    created, so an older run can carry a NEWER completion. A host whose
-    best-so-far completion is still at or before the cutoff is exactly the host
-    an older run can rescue, so walking must continue while any host is in that
-    state. Once a host has a completion after the cutoff it cannot be silent,
+    created, so an older run can carry a NEWER completion. A lane whose
+    best-so-far completion is still at or before the cutoff is exactly the lane
+    an older run can rescue, so walking must continue while any lane is in that
+    state. Once a lane has a completion after the cutoff it cannot be silent,
     and no older run can take that back.
+
+    The bound is per PREFIX even though the verdict is per host, and the
+    difference is load-bearing for a fused host. Proving m5 over the union of
+    its prefixes lets the always-up `pulp-preamble-m5` runner stop the walk,
+    after which the `m5-` gate lane's real last completion is never read and
+    `host-lane-census` reports it as having served nothing all window. That is
+    the one line the shadow week exists to read, and the fused host is exactly
+    the shape where it would have been wrong. A fused host whose gate lane is
+    quiet therefore pays the full walk, which is the cost a host short of the
+    window already pays.
     """
     for prefixes in hosts.values():
-        last = host_last_served(records, prefixes)
-        if last is None or last <= silence_cutoff:
-            return False
+        for prefix in prefixes:
+            last = host_last_served(records, [prefix])
+            if last is None or last <= silence_cutoff:
+                return False
     return True
 
 
@@ -569,6 +584,7 @@ def fetch_service_records(
     silence_hours: int,
     max_runs: int,
     hosts: dict[str, list[str]],
+    now: datetime | None = None,
 ) -> tuple[list[ServiceRecord], list[str]]:
     """Jobs the fleet ran for `workflow`, newest first, plus what went unread.
 
@@ -587,8 +603,14 @@ def fetch_service_records(
     The second return value names every read that failed or was cut short. It
     travels as data rather than being swallowed, because a window that was not
     fully read cannot tell a silent host from an unobserved one.
+
+    `now` is the instant the classifier judges against. It has to be the same
+    one, or the walk can stop on a proof the classifier then computes its
+    cutoff past: a lane proven by less than the walk's own wall time would be
+    re-read as silent on records the walk stopped fetching precisely because of
+    that proof. Narrow, but it is the direction this rule must never fire in.
     """
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     observed_cutoff = now - timedelta(hours=observation_hours)
     silence_cutoff = now - timedelta(hours=silence_hours)
     created = "created=" + quote(">=" + observed_cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -630,14 +652,16 @@ def fetch_service_records(
                 if record is not None:
                     records.append(record)
             if (run_started is not None and run_started < silence_cutoff
-                    and _every_host_proven_non_silent(
+                    and _every_lane_proven_non_silent(
                         records, hosts, silence_cutoff)):
-                # Everything the predicate needs is now in hand: the walk is
-                # past the silence window, so every job that could count as
-                # sibling demand has been read, and every host already has a
-                # completion inside the window, which no older run can undo.
-                # A host still short of that is why the walk keeps going: its
-                # rescuing completion may sit on an older, longer-queued run.
+                # Everything the census needs is now in hand: the walk is past
+                # the silence window, and every declared lane already has a
+                # completion inside it, which no older run can undo. A lane
+                # still short of that is why the walk keeps going: its rescuing
+                # completion may sit on an older, longer-queued run. Demand is
+                # only ever consulted for a host that is NOT proven, and such a
+                # host holds the walk open, so a verdict never rests on a
+                # half-read demand count.
                 return records, degraded
         page += 1
 
@@ -675,7 +699,7 @@ def _stamp(value: datetime) -> str:
 def _lane_breakdown(
     rows: list[ServiceRecord], prefixes: list[str], now: datetime
 ) -> str:
-    """Per-prefix last-served for one host, newest lane first.
+    """Per-prefix last-served for one host, in the order the map declares.
 
     The rule's unit of identity is the host, but the evidence is the lane, and
     the motivating incident was a LANE failure: m5's gate lane served nothing
@@ -1337,10 +1361,12 @@ def check(
     check made before it existed: no caller that omits it can see a changed
     result.
 
-    `service_records` is a callable () -> (records, degraded reasons) feeding
-    the per-host silence census, or a plain list of records. It defaults to
-    None, which skips the census entirely, so every caller that omits it sees
-    exactly the findings it saw before the census existed.
+    `service_records` is a callable (now) -> (records, degraded reasons)
+    feeding the per-host silence census, or a plain list of records. It
+    defaults to None, which skips the census entirely, so every caller that
+    omits it sees exactly the findings it saw before the census existed. It
+    takes the clock rather than reading its own so a provider that walks
+    history bounds that walk against the instant the verdict is judged at.
 
     `now` is the clock the census reads. It exists so a test can pin it: a
     fixture anchored on a constant while the code under test reads the wall
@@ -1401,7 +1427,12 @@ def check(
     if service_records is not None:
         if not callable(service_records):
             service_records = static_service_records(service_records)
-        records, degraded = service_records()
+        # One clock for the whole census. The provider walks history against
+        # the same instant the classifier judges against, so a lane the walk
+        # proved non-silent cannot be re-read as silent moments later on the
+        # records the walk stopped fetching because of that proof.
+        now = now or datetime.now(timezone.utc)
+        records, degraded = service_records(now)
         findings.extend(classify_host_silence(
             contract, records, runners, now=now, degraded=degraded))
 
@@ -1818,14 +1849,14 @@ def main(argv: list[str] | None = None) -> int:
             # has no live runner, so a healthy fleet pays no API calls.
             return fetch_queued_job_ages(args.repo, labels)
 
-        def service_records() -> tuple[list[ServiceRecord], list[str]]:
+        def service_records(now: datetime) -> tuple[list[ServiceRecord], list[str]]:
             # Unlike the lane providers this cannot be lazy: whether a host
             # stopped serving is only answerable from history. The cost is
             # bounded by the early exit and the run cap instead.
             return fetch_service_records(
                 args.repo, contract.host_workflow,
                 contract.host_observation_hours, contract.host_silence_hours,
-                contract.host_max_runs, contract.hosts)
+                contract.host_max_runs, contract.hosts, now=now)
 
         if not contract.hosts:
             service_records = None
