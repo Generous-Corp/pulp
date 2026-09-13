@@ -464,6 +464,12 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           clean: true
+          # The GPU provenance selftests need real per-path history, and the
+          # usual remedy (hydrate_gpu_provenance_commits.py) cannot run here:
+          # persist-credentials: false leaves no credential for a fetch, and
+          # ref: ${{ github.sha }} leaves a GITHUB_REF that does not match the
+          # checked-out commit. Clone full history instead.
+          fetch-depth: 0
 
       # A workflow_dispatch run is scoped to protected main even after it
       # detaches to a PR head. Never expose that scope's persistent caches to

@@ -406,6 +406,44 @@ interpreter for the base resolver, policy classifier, JSON extraction, and
 protected-base version-bump verifier. A result that depends on whether M3 or M5
 claimed `pulp-preamble` is a fleet fault, not a retryable check failure.
 
+### A lane that runs the GPU provenance selftests must reconnect its history first
+
+The GPU provenance selftests read real per-path Git history, so a shallow
+checkout fails them on the checkout shape rather than on any defect. Every lane
+that runs them therefore carries a hydration step immediately after checkout:
+
+```yaml
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+```
+
+It is wired into `build.yml`, `cross-platform-check.yml`, `intel-portability.yml`,
+`nightly-full-build.yml`, `nightly-intel.yml`, `sanitizers.yml` (asan, ubsan and
+rtsan; tsan does not run the suite) and `validate.yml`. Adding a lane that runs
+a broad `ctest` means adding this step too —
+`tools/scripts/test_gpu_provenance_ci_wiring.py` is the cover that fails when a
+lane is missing it, so the omission surfaces locally instead of as a red lane. It runs in `workflow-lint.yml`, not as a ctest: it parses the workflow
+YAML, and the required macOS CTest hosts carry no PyYAML.
+
+`build-macos.yml` is the exception, and deliberately so: its hardened checkout
+sets `persist-credentials: false` (no credential remains for a fetch) and pins
+`ref: ${{ github.sha }}` (so `GITHUB_REF` no longer names the checked-out
+commit). The hydration script needs both, so that lane clones full history with
+`fetch-depth: 0` instead. This does not reopen the `classify` preamble question
+above — that job classifies changed paths and still wants exact trees at depth 1.
+
+**`git rev-parse --is-shallow-repository` is a remedy trigger, not a failure
+predicate.** A warm self-hosted checkout can retain every object it ever fetched
+while `actions/checkout` rewrites the shallow boundary, so object presence does
+not prove ancestry, and a repository reporting `false` can still be missing the
+connection a selftest walks. The predicate that actually decides the outcome is
+whether each pinned revision resolves *and* is an ancestor of `HEAD` — which is
+what the script asserts after hydrating, and what its
+`gpu-provenance-hydration: PASS total=<n> fetched=<n> cap=128` line reports. A
+guard written against the shallow flag alone passes on a hydrated clone and on a
+warm dirty one alike.
+
 ### Browser-source fidelity is a required dependency, not a skip
 
 Generic agent HTML uses a real browser capture as its source reference before

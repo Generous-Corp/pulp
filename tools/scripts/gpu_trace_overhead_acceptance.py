@@ -54,6 +54,9 @@ def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
 json_schema_lite = _load_local_source("json_schema_lite", "json_schema_lite.py")
 _load_local_source("sdk_capability_handoff", "sdk_capability_handoff.py")
 sdk_provenance = _load_local_source("sdk_provenance", "sdk_provenance.py")
+connected_git_history = _load_local_source(
+    "connected_git_history", "connected_git_history.py"
+)
 
 
 EXPECTED_EXIT = {"pass": 0, "fail": 1, "unavailable": 2, "unverified": 2}
@@ -3926,6 +3929,13 @@ def bind_independent_human_review_document(
 
 
 def main() -> int:
+    # This benchmark binds its result to source revisions it reads out of Git. A
+    # truncated checkout answers those queries with its graft boundary, which
+    # would bind the receipt to the wrong commit with exit status 0. Name the
+    # cause and stop; this raises, it never skips.
+    connected_git_history.require_connected_history(
+        SCRIPT_DIR.parents[1], "GPU trace overhead acceptance"
+    )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", type=Path, required=True)
     parser.add_argument("--install-prefix", type=Path, required=True)

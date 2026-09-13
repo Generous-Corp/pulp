@@ -45,6 +45,19 @@ def close(a, b, tol=1e-4) -> bool:
     return a is not None and b is not None and abs(a - b) <= tol * max(1.0, abs(b))
 
 
+def has_no_inverse(param: dict) -> bool:
+    """Whether this control's display map reads the same at every position.
+
+    A zero multiplier flattens the map onto its offset, and a base-1
+    exponential is 1 whatever the knob does, so both show one physical value
+    across the whole range. There is no position to come back to, and
+    `from_display` returning nothing for them is the right answer rather than
+    a failed conversion.
+    """
+    return (float(param.get("displayMultiplier", 1.0)) == 0.0
+            or float(param.get("displayBase", 0.0)) == 1.0)
+
+
 # Measured, 2026-08-05, by CARTOG scan 5 on the installed library.
 VCF = {"name": "Cutoff frequency", "minValue": 0.006558, "maxValue": 0.993442,
        "defaultValue": 0.5, "unit": " Hz", "displayBase": 1024.0,
@@ -152,6 +165,12 @@ def test_the_awkward_shapes_do_not_produce_numbers() -> int:
             "displayBase": 0.0, "displayMultiplier": 0.0, "displayOffset": 5.0}
     bad += check(pu.from_display(5.0, dead) is None,
                  "a control whose multiplier is zero cannot be placed")
+    flat = {"minValue": 0.0, "maxValue": 1.0, "unit": " Hz",
+            "displayBase": 1.0, "displayMultiplier": 8211.6, "displayOffset": 0.0}
+    bad += check(pu.from_display(8211.6, flat) is None,
+                 "a control whose display value never changes cannot be placed")
+    bad += check(has_no_inverse(flat) and has_no_inverse(dead),
+                 "and both of those shapes are recognised as having no inverse")
     bad += check(pu.from_display(-3.0, VCF) is None,
                  "an exponential control cannot be placed at a negative Hz")
     # Inverted range: sorted, or every value on it reads as out of range.
@@ -184,6 +203,7 @@ def test_against_whatever_this_machine_measured() -> int:
     with open(path) as f:
         doc = json.load(f)
     checked = worst = 0
+    non_invertible = 0
     offenders = []
     for entry in (doc.get("modules") or []):
         if not pu.knows_units(entry):
@@ -199,7 +219,10 @@ def test_against_whatever_this_machine_measured() -> int:
                     continue
                 back = pu.from_display(shown, p)
                 if back is None:
-                    offenders.append((entry["model"], p.get("name"), v, shown))
+                    if has_no_inverse(p):
+                        non_invertible += 1
+                    else:
+                        offenders.append((entry["model"], p.get("name"), v, shown))
                     continue
                 checked += 1
                 drift = abs(back - v)
@@ -207,7 +230,8 @@ def test_against_whatever_this_machine_measured() -> int:
                     worst = drift
                 if drift > 1e-3:
                     offenders.append((entry["model"], p.get("name"), v, drift))
-    print(f"  ....   round-tripped {checked} live control positions")
+    print(f"  ....   round-tripped {checked} live control positions, "
+          f"non_invertible {non_invertible} refused for having no inverse")
     return check(not offenders and worst < 1e-3,
                  "every measured control on this machine round-trips",
                  f"worst drift {worst:g}, offenders {offenders[:4]}")
