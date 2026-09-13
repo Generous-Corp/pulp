@@ -49,10 +49,25 @@ bool dispatch_context_menu(View& root, Point root_pos) {
 }
 
 bool dispatch_context_menu(View& root, View* target, Point root_pos) {
-    if (!target || !target->on_context_menu) return false;
-    auto callback = target->on_context_menu;
-    callback(point_to_local(root_pos, target, &root));
-    return true;
+    // `contextmenu` BUBBLES in the DOM, and real pages depend on it: the
+    // handler is routinely on a wrapper while the ink on top is a child canvas
+    // or an absolutely-positioned overlay with no listener of its own. Without
+    // this walk the hit test lands on that child, finds no callback, and the
+    // gesture is dropped -- the wrapper's handler never runs even though the
+    // press was inside it. Every other pointer verb in this file already walks
+    // target-to-root for the same reason.
+    //
+    // The NEAREST handler wins and the walk stops there, matching the single
+    // on_context_menu slot a View carries; this is a bubble to the first
+    // listener, not a fan-out to every ancestor.
+    for (auto* view = target; view != nullptr;
+         view = (view == &root) ? nullptr : view->parent()) {
+        if (!view->on_context_menu) continue;
+        auto callback = view->on_context_menu;
+        callback(point_to_local(root_pos, view, &root));
+        return true;
+    }
+    return false;
 }
 
 bool should_yield_to_gesture(View& root, const MouseEvent& event) {

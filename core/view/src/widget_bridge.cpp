@@ -321,6 +321,28 @@ function __ensureNativeRegistered__(id, group) {
         registerGesture(id);
     } else if (group === 'wheel' && typeof registerWheel === 'function') {
         registerWheel(id);
+    } else if (group === 'contextmenu' && typeof registerContextMenu === 'function') {
+        // registerContextMenu evaluates `<cb>(x, y)`, so `cb` has to be an
+        // EXPRESSION THAT YIELDS A FUNCTION. web-compat passes the call
+        // `__dispatch__('id', 'contextmenu', 0)` instead: its arguments are
+        // evaluated -- which dispatches, but with a literal 0 where the event
+        // belongs -- it returns undefined, and the appended (x, y) then throws
+        // a TypeError that safe_dispatch_eval swallows. The press coordinates
+        // were discarded on that path. The IIFE below receives them.
+        //
+        // The point arrives in the widget's LOCAL space. clientX/clientY are
+        // rebased through getLayoutRect so they land in whatever space
+        // getBoundingClientRect() reports, which makes the idiomatic
+        // `e.clientX - el.getBoundingClientRect().left` cancel exactly rather
+        // than depending on the two agreeing by luck. offsetX/offsetY keep the
+        // local point, matching pointer_payload's split.
+        registerContextMenu(id, '(function(x,y){'
+            + 'var r=(typeof getLayoutRect===\'function\')?getLayoutRect(\'' + id + '\'):null;'
+            + '__dispatch__(\'' + id + '\',\'contextmenu\',{'
+            + 'clientX:(r&&typeof r.left===\'number\'?r.left:0)+x,'
+            + 'clientY:(r&&typeof r.top===\'number\'?r.top:0)+y,'
+            + 'offsetX:x,offsetY:y,button:2,buttons:2,'
+            + 'pointerType:\'mouse\',isPrimary:true});})');
     }
 }
 function on(id, eventName, fn) {
@@ -343,6 +365,17 @@ function on(id, eventName, fn) {
         // critical for trackpad zoom on any wrapper div that subscribes via
         // 'wheel'.
         __ensureNativeRegistered__(id, 'wheel');
+    } else if (eventName === 'contextmenu') {
+        // Context-menu subscriptions route through on(id, 'contextmenu', fn):
+        // React's onContextMenu prop reaches here via prop-applier, and
+        // web-compat's addEventListener('contextmenu') reaches here too.
+        // Without this case the callback is stored in __callbacks__ and
+        // registerContextMenu(id, ...) is never invoked, so
+        // View::on_context_menu stays null and the platform right-click
+        // (rightMouseDown: -> route_context_press -> dispatch_context_menu)
+        // finds no handler and returns false. Same shape, and the same class
+        // of defect, as the wheel case above.
+        __ensureNativeRegistered__(id, 'contextmenu');
     }
 }
 )";
