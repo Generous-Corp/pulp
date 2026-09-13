@@ -197,6 +197,27 @@ The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
 unregenerated ledger fails locally and in CI with the repair command in the
 failure message rather than only as a stale-identity report.
 
+**A pin makes two separable claims, and only one is enforced everywhere.**
+Provenance is "the pinned revision is an ancestor of HEAD and still carries the
+named blob and tree" — a fact about history that no later commit can falsify.
+Currency is "the path at HEAD still holds that same blob" — a fact any commit
+touching the path invalidates. One `require_current` switch selects between
+them, and it has to be honored at all three layers a caller can enter through:
+`validate_handoff_routing()` in `gpu_recipe_catalog.py`, and
+`validate_with_catalog()` plus `resolve_identity()` in
+`gpu_handoff_provenance.py`. The resolver is the easy one to miss, because it
+reads as a lookup rather than a check — and a resolver that refuses stale-at-HEAD
+input makes the strict answer leak back into every consumer above it.
+
+Currency is off by default because the required per-commit gate validates every
+pinned row, not just the rows a branch touched. Asserting currency there means
+one commit landing on a pinned path turns that gate red for every other PR in
+flight until each repins, which serializes concurrent work across the whole
+pinned set. What catches a stale pin instead is
+`gpu_handoff_provenance.py check` and the diff-scoped freshness guard, which
+fires only for the branch that actually moved a pinned path and prints the
+repair command with it.
+
 ## The "Vellum freeze" CI job runs two checks, and the second is the one that fails
 
 `.github/workflows/vellum-freeze-check.yml` runs `vellum_freeze_check.py` **and**
