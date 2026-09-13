@@ -989,3 +989,84 @@ TEST_CASE("route_escape_to_active_overlay closes a dropdown before an overlay",
             pulp::view::OverlayEscapeResult::overlay);
     REQUIRE(root.interaction().active_overlay == nullptr);
 }
+
+// ── Which overlays may borrow a host's keyboard ─────────────────────────────
+//
+// Deliberately narrower than what Escape acts on. Holding a DAW's keyboard
+// when nothing needs it is the more expensive mistake — the user experiences
+// it as transport and Musical Typing going dead — so a bare claim does not
+// qualify. Only a statement that the view IS a popover does.
+
+TEST_CASE("root_overlay_owns_keyboard ignores a bare overlay claim",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+
+    // What the web-compat CSS-shape heuristic produces: a claim with no
+    // outside-click consumption, because it inferred rather than was told.
+    // A decorative absolutely-positioned box can hold this for an editor's
+    // whole lifetime.
+    overlay->claim_overlay();
+    REQUIRE_FALSE(pulp::view::root_overlay_owns_keyboard(root));
+
+    // Escape still dismisses it — the two questions are different.
+    REQUIRE(pulp::view::route_escape_to_active_overlay(root) ==
+            pulp::view::OverlayEscapeResult::overlay);
+}
+
+TEST_CASE("root_overlay_owns_keyboard accepts a declared popover",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    // What `<View overlay>` and data-overlay="true" both set.
+    overlay->set_overlay_consumes_outside_click(true);
+
+    REQUIRE(pulp::view::root_overlay_owns_keyboard(root));
+}
+
+TEST_CASE("root_overlay_owns_keyboard accepts a visible modal",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto modal_owned = std::make_unique<pulp::view::ModalOverlay>();
+    auto* modal = modal_owned.get();
+    modal->set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    root.add_child(std::move(modal_owned));
+
+    REQUIRE(pulp::view::root_overlay_owns_keyboard(root));
+    modal->set_visible(false);
+    REQUIRE_FALSE(pulp::view::root_overlay_owns_keyboard(root));
+}
+
+TEST_CASE("root_overlay_owns_keyboard accepts an open dropdown",
+          "[view][overlay][escape]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto combo_owned = std::make_unique<pulp::view::ComboBox>();
+    auto* combo = combo_owned.get();
+    combo->set_bounds({10.0f, 10.0f, 160.0f, 24.0f});
+    combo->set_items({"One", "Two", "Three"});
+    root.add_child(std::move(combo_owned));
+
+    REQUIRE_FALSE(pulp::view::root_overlay_owns_keyboard(root));
+
+    pulp::view::MouseEvent open_click;
+    open_click.position = {60.0f, 12.0f};
+    open_click.is_down = true;
+    combo->on_mouse_event(open_click);
+    REQUIRE(combo->is_open());
+    REQUIRE(pulp::view::root_overlay_owns_keyboard(root));
+}

@@ -142,17 +142,28 @@ OverlayEscapeResult route_escape_to_active_overlay(View& root,
                                                    std::uint16_t modifiers = 0,
                                                    bool is_repeat = false);
 
-/// Whether `root` currently owns something Escape would dismiss — the
-/// non-mutating question `route_escape_to_active_overlay` answers by acting.
+/// Whether an overlay under `root` is the kind that should own the keyboard.
 ///
 /// A plugin host needs this before the key ever arrives. An embedded editor
 /// borrows the DAW keyboard only for an active bounded interaction, so with
 /// nothing focused it is not first responder and never receives Escape at all
-/// — which is precisely the state an open popover leaves behind. Consulting
-/// this alongside the focus check lets the editor hold the keyboard for
-/// exactly as long as a dismissible overlay is open, and give it back the
-/// moment one closes. Keys the editor does not consume are still forwarded to
-/// the host, so transport does not go dead while a popover is up.
-bool root_has_dismissible_overlay(View& root);
+/// — which is precisely the state an open popover leaves behind.
+///
+/// Deliberately NARROWER than what `route_escape_to_active_overlay` acts on,
+/// because holding a DAW's keyboard when nothing needs it is the more
+/// expensive mistake: the user experiences it as transport and Musical Typing
+/// going dead. Three things qualify, and a bare claim does not:
+///
+///   - A visible `ModalOverlay`. It traps interaction by definition.
+///   - An open `ComboBox` dropdown. An open menu owns arrows, Enter, Escape.
+///   - A claimed overlay that consumes its outside click. That flag is the
+///     author's STATEMENT that the view is a popover — `@pulp/react`'s
+///     `<View overlay>` prop and `data-overlay="true"` both set it. The
+///     web-compat CSS-shape heuristic (`position:absolute` + a high
+///     `z-index`) deliberately does not, because it is an INFERENCE that can
+///     fire on a decorative absolutely-positioned box; such a box can hold
+///     the slot for an editor's whole lifetime, and keeping the keyboard that
+///     long would be indistinguishable from the plug-in stealing it.
+bool root_overlay_owns_keyboard(View& root);
 
 }  // namespace pulp::view

@@ -995,10 +995,19 @@ TEST_CASE("PluginViewHost (mac CPU) — Escape dismisses a claimed overlay and "
 
         int dismissed = 0;
         popover->on_overlay_dismissed = [&dismissed] { ++dismissed; };
-        popover->claim_overlay();
 
-        // Opening the popover is what lets the editor take the keyboard; a
-        // click on the editor runs the same sync the host runs after a press.
+        // A bare claim is not enough. The web-compat CSS-shape heuristic
+        // claims on an inference that can fire on a decorative box, and such
+        // a box can hold the slot for the editor's whole lifetime — holding
+        // the DAW keyboard that long is indistinguishable from stealing it.
+        popover->claim_overlay();
+        [pulp_view syncKeyFocus];
+        REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
+        REQUIRE(window.firstResponder == host_field);
+
+        // Declaring the view a popover — what `<View overlay>` and
+        // data-overlay="true" both do — is the statement that qualifies.
+        popover->set_overlay_consumes_outside_click(true);
         [pulp_view syncKeyFocus];
         REQUIRE([pulp_view acceptsFirstResponder]);
         REQUIRE(window.firstResponder == pulp_view);

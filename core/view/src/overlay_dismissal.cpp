@@ -106,11 +106,12 @@ OverlayEscapeResult route_escape_to_active_overlay(View& root,
     return OverlayEscapeResult::none;
 }
 
-bool root_has_dismissible_overlay(View& root) {
+bool root_overlay_owns_keyboard(View& root) {
     if (topmost_modal(&root)) return true;
     if (ComboBox::active_popup_in(root)) return true;
     auto* state = root.existing_interaction();
-    return state && state->active_overlay != nullptr;
+    auto* overlay = state ? state->active_overlay : nullptr;
+    return overlay != nullptr && overlay->overlay_consumes_outside_click();
 }
 
 }  // namespace pulp::view

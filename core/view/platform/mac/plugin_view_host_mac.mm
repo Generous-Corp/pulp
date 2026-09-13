@@ -608,17 +608,19 @@ static bool pulp_key_input_focused_under_root(pulp::view::View* root) {
 
 // Whether this editor should hold the DAW's keyboard right now.
 //
-// Focus is one reason; an open dismissible overlay is the other. A modal, an
-// open dropdown, or a claimed `<View overlay>` popover is an active bounded
-// interaction that owns Escape — and with nothing focused the editor is not
-// first responder, so without this the Escape that closes it never arrives and
-// the popover can only be dismissed with the mouse. The borrow is exactly as
-// long as the overlay is open: -keyDown: re-syncs afterwards, so dismissing it
-// hands the keyboard straight back. Keys the editor does not consume are
-// forwarded to the host, so transport keys keep working meanwhile.
+// Focus is one reason; an overlay that owns the keyboard is the other. A
+// modal, an open dropdown, or a popover the author declared as one is an
+// active bounded interaction that owns Escape — and with nothing focused the
+// editor is not first responder, so without this the Escape that closes it
+// never arrives and the popover can only be dismissed with the mouse. The
+// borrow is exactly as long as that overlay is open: -keyDown: re-syncs
+// afterwards, so dismissing it hands the keyboard straight back. Keys the
+// editor does not consume are forwarded to the host, so transport keys keep
+// working meanwhile. What does and does not qualify — and why a bare claim
+// does not — is pulp::view::root_overlay_owns_keyboard's contract.
 static bool pulp_editor_should_hold_keyboard(pulp::view::View* root) {
     if (pulp_key_input_focused_under_root(root)) return true;
-    return root != nullptr && pulp::view::root_has_dismissible_overlay(*root);
+    return root != nullptr && pulp::view::root_overlay_owns_keyboard(*root);
 }
 
 static bool pulp_is_navigation_key(pulp::view::KeyCode key,
