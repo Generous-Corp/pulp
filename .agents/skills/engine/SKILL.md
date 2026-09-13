@@ -501,6 +501,33 @@ painted. `"transparent"` is NOT a substitute: `css_color.cpp` maps it to
 (`textColor` removed → `setTextColor(id,"")`) is currently inert on the native
 side. Fix that half the same way when it next bites.
 
+### A popup has TWO states, and only one of them belongs on screen at open
+
+`web-compat-document.js` owns any popup it can reach by ARIA shape -- a
+trigger carrying `aria-haspopup` over a `role="listbox"`/`role="menu"` -- and
+paints a keyboard cursor on one row. That cursor is NOT the app's selection.
+The app paints its own selected row however it likes; the owner's cursor is
+navigation position. Both on screen at once reads as two selections, which is
+exactly what a user reports as "why is it showing me two".
+
+So the cursor is created at open (an arrow needs somewhere to start) but not
+painted until the user asks for one: `pointerenter` on a row, an arrow key, or
+an arrow that opened the popup in the first place. `state.activeVisible` is
+that flag and `paint()` is gated on it.
+
+The seed comes from `selectedIndexIn()`, which reads
+`aria-activedescendant` / `aria-selected` / `aria-checked` / `.checked` /
+`aria-current` in that order. **An app whose rows advertise none of those gets
+index 0**, so a listbox whose current value is any row but the first shows the
+app's selection on one row and the owner's cursor on another. The fix is on
+the app side and is required for assistive technology anyway: a `role="listbox"`
+whose children are bare `<button>`s has no selection to report. Mark the rows.
+
+Where the first arrow lands then depends on whether the cursor had a home.
+Seeded from a real selection it steps off it, the way a platform combo box
+does. Seeded from an edge because nothing was marked, it lands ON that edge --
+otherwise the first ArrowDown skips the row the user was aiming at.
+
 ### `confirm_failure.sh` needs `--object` to verdict a `.js` prelude edit
 
 Preludes are embedded into a generated `build/core/view/web_compat_preludes_gen.cpp`,

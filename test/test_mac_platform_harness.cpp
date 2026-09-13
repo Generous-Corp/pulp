@@ -1637,18 +1637,20 @@ TEST_CASE("a mouse-opened popup accepts arrow navigation and paints its highligh
     REQUIRE(engine.evaluate("document.activeElement !== trigger")
                 .getWithDefault<bool>(false));
 
-    // The claim itself: a mouse-opened popup is owned, and its first option is
-    // painted, not merely marked.
+    // The claim itself: a mouse-opened popup is owned. The keyboard cursor
+    // exists so an arrow has somewhere to start, but NOTHING is painted --
+    // a user who has only pressed the trigger has not asked for a cursor, and
+    // a row lit next to the app's own selected row reads as two selections.
     REQUIRE(engine.evaluate("!!globalThis.__pulpPopupDefaultState__")
                 .getWithDefault<bool>(false));
     REQUIRE(engine.evaluate(
-        "globalThis.__pulpPopupDefaultState__.activeIndex === 0")
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 0 && "
+        "globalThis.__pulpPopupDefaultState__.activeVisible === false")
                 .getWithDefault<bool>(false));
     REQUIRE(engine.evaluate(
-        "globalThis.__pulpPopupDefaultState__.options[0]."
-        "getAttribute('data-pulp-popup-active') === 'true' && "
-        "globalThis.__pulpPopupDefaultState__.options[0].style.background === "
-        "'rgba(120,180,255,0.18)'")
+        "globalThis.__pulpPopupDefaultState__.options.every(function(o) { "
+        "return o.getAttribute('data-pulp-popup-active') === 'false' "
+        "&& o.style.background !== 'rgba(120,180,255,0.18)'; })")
                 .getWithDefault<bool>(false));
 
     const auto option_id = [&engine](int index) {
@@ -1662,13 +1664,32 @@ TEST_CASE("a mouse-opened popup accepts arrow navigation and paints its highligh
     auto* option1_view = bridge.widget(option_id(1));
     REQUIRE(option0_view != nullptr);
     REQUIRE(option1_view != nullptr);
-    // Control for the pair of widget assertions below: the highlighted row is
-    // painted natively, so a later "no background" reading means the highlight
-    // came off, not that the instrument is looking at the wrong widget.
+    // These are the PIXELS for the assertion above. The attribute can read
+    // "false" while the row is still painted, so the unpainted open state has
+    // to be read off the widget as well: neither row carries a background.
+    REQUIRE_FALSE(option0_view->has_background_color());
+    REQUIRE_FALSE(option1_view->has_background_color());
+
+    // The first arrow REVEALS the cursor. This popup's rows carry no ARIA
+    // selection, so the cursor was seeded at an edge rather than at a row the
+    // user picked -- there is nothing to step away from, and ArrowDown must
+    // land ON the first row rather than skipping it.
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 0 && "
+        "globalThis.__pulpPopupDefaultState__.activeVisible === true && "
+        "globalThis.__pulpPopupDefaultState__.options[0]."
+        "getAttribute('data-pulp-popup-active') === 'true' && "
+        "globalThis.__pulpPopupDefaultState__.options[0].style.background === "
+        "'rgba(120,180,255,0.18)'")
+                .getWithDefault<bool>(false));
+    // Positive control for the "nothing painted" reading above: the very same
+    // widget instrument now DOES report a background, so the earlier absence
+    // was the deferred highlight and not a dead probe.
     REQUIRE(option0_view->has_background_color());
     REQUIRE_FALSE(option1_view->has_background_color());
 
-    // Arrow navigation moves the selection and repaints the highlight.
+    // Once revealed, arrows move normally and the highlight follows.
     REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
     REQUIRE(engine.evaluate(
         "globalThis.__pulpPopupDefaultState__.activeIndex === 1 && "
@@ -1699,5 +1720,155 @@ TEST_CASE("a mouse-opened popup accepts arrow navigation and paints its highligh
     // a selection rather than decoration.
     REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::enter));
     REQUIRE(engine.evaluate("selected === 'A' && popup === null")
+                .getWithDefault<bool>(false));
+}
+
+TEST_CASE("a mouse-opened popup shows no cursor until asked, then steps off the "
+          "selected row",
+          "[mac][platform-harness][keyboard][popup-default]") {
+    // The shape a real app ships: a listbox that paints its OWN selected row,
+    // and marks it for assistive technology with aria-selected. Two things are
+    // pinned here. First, opening with the mouse must not add a second lit row
+    // -- an app that already shows which value is current does not want the
+    // popup owner painting a competing one before the user has asked for a
+    // cursor. Second, the cursor is still seeded at the selection, so the
+    // first arrow steps OFF it the way a platform combo box does, rather than
+    // restarting from the top of the list.
+    pulp::view::ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    pulp::state::StateStore store;
+    pulp::view::WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        var popup = null;
+        var selected = 'B';
+        var trigger = document.createElement('button');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-controls', 'seeded-popup');
+        trigger.textContent = 'B';
+        trigger.style.position = 'absolute';
+        trigger.style.left = '8px';
+        trigger.style.top = '8px';
+        trigger.style.width = '80px';
+        trigger.style.height = '24px';
+        trigger.addEventListener('click', function() {
+            if (popup) {
+                popup.parentNode.removeChild(popup);
+                popup = null;
+                return;
+            }
+            popup = document.createElement('div');
+            popup.id = 'seeded-popup';
+            popup.setAttribute('role', 'listbox');
+            popup.style.position = 'absolute';
+            popup.style.left = '8px';
+            popup.style.top = '36px';
+            popup.style.width = '100px';
+            popup.style.height = '96px';
+            ['A', 'B', 'C'].forEach(function(label) {
+                var option = document.createElement('button');
+                option.setAttribute('role', 'option');
+                option.setAttribute(
+                    'aria-selected', label === selected ? 'true' : 'false');
+                option.textContent = label;
+                option.addEventListener('click', function() {
+                    selected = label;
+                    trigger.textContent = label;
+                    if (popup) popup.parentNode.removeChild(popup);
+                    popup = null;
+                });
+                popup.appendChild(option);
+            });
+            document.body.appendChild(popup);
+        });
+        document.body.appendChild(trigger);
+    )");
+    const auto trigger_id = std::string(
+        engine.evaluate("trigger._id").getWithDefault<std::string_view>(""));
+    auto* trigger_view = bridge.widget(trigger_id);
+    REQUIRE(trigger_view != nullptr);
+    trigger_view->set_position(View::Position::absolute);
+    trigger_view->set_left(8.0f);
+    trigger_view->set_top(8.0f);
+    trigger_view->flex().preferred_width = 80.0f;
+    trigger_view->flex().preferred_height = 24.0f;
+    trigger_view->set_bounds({8, 8, 80, 24});
+    trigger_view->set_hit_testable(true);
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+    host->set_app_key_monitor([](const pulp::view::KeyEvent&) { return false; });
+    REQUIRE(root.hit_test({40, 20}) == trigger_view);
+
+    REQUIRE(pt::run_hidden_event_loop(
+        *host,
+        {{.at_ms = 10,
+          .events = {{.phase = pt::SimulatedMouse::Phase::down, .x = 40, .y = 20}}},
+         {.at_ms = 30,
+          .events = {{.phase = pt::SimulatedMouse::Phase::up, .x = 40, .y = 20}}}},
+        /*stop_after_ms=*/250));
+
+    // Controls: the menu really opened and the owner really claimed it, so a
+    // later "nothing is painted" reading cannot be a popup that never existed.
+    REQUIRE(engine.evaluate("!!document.getElementById('seeded-popup')")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("!!globalThis.__pulpPopupDefaultState__")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.options.length === 3")
+                .getWithDefault<bool>(false));
+
+    // The cursor found the app's selected row rather than the top of the list,
+    // and it is deliberately invisible.
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 1 && "
+        "globalThis.__pulpPopupDefaultState__.seededFromSelection === true && "
+        "globalThis.__pulpPopupDefaultState__.activeVisible === false")
+                .getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.options.every(function(o) { "
+        "return o.getAttribute('data-pulp-popup-active') === 'false' "
+        "&& o.style.background !== 'rgba(120,180,255,0.18)'; })")
+                .getWithDefault<bool>(false));
+
+    const auto row = [&](int index) -> View* {
+        auto id = engine
+                      .evaluate("globalThis.__pulpPopupDefaultState__.options["
+                                + std::to_string(index) + "]._id")
+                      .getWithDefault<std::string>("");
+        REQUIRE_FALSE(id.empty());
+        return bridge.widget(id);
+    };
+    REQUIRE(row(0) != nullptr);
+    REQUIRE(row(1) != nullptr);
+    REQUIRE(row(2) != nullptr);
+    // The pixels agree with the attributes: no row is painted by the owner.
+    REQUIRE_FALSE(row(0)->has_background_color());
+    REQUIRE_FALSE(row(1)->has_background_color());
+    REQUIRE_FALSE(row(2)->has_background_color());
+
+    // The first arrow reveals the cursor AND moves it, because it had a home
+    // to move from. ArrowDown on a list showing 'B' goes to 'C'.
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::down));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 2 && "
+        "globalThis.__pulpPopupDefaultState__.activeVisible === true && "
+        "globalThis.__pulpPopupDefaultState__.options[2]."
+        "getAttribute('data-pulp-popup-active') === 'true'")
+                .getWithDefault<bool>(false));
+    // Positive control for the three "no background" readings above: the same
+    // instrument now reports a painted row, so their absence was the deferral.
+    REQUIRE(row(2)->has_background_color());
+    REQUIRE_FALSE(row(1)->has_background_color());
+
+    // ArrowUp walks back over the selected row, which is ordinary movement.
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::up));
+    REQUIRE(engine.evaluate(
+        "globalThis.__pulpPopupDefaultState__.activeIndex === 1")
+                .getWithDefault<bool>(false));
+
+    // And Enter commits whatever the cursor is on, closing the menu.
+    REQUIRE(pt::simulate_app_key(*host, pulp::view::KeyCode::enter));
+    REQUIRE(engine.evaluate("selected === 'B' && popup === null")
                 .getWithDefault<bool>(false));
 }
