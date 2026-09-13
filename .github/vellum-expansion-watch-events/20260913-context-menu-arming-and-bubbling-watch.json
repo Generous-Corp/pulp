@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260913-context-menu-arming-and-bubbling-watch",
+  "created_at": "2026-09-13T20:40:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Crosses the render-assets-and-backends watch family only through its broad `core/view/**` selector, the same way 20260912-overlay-dismissal-single-policy-watch did. Every source file in this change is under core/view: core/view/src/widget_bridge.cpp, core/view/src/pointer_dispatch.cpp, and core/view/{src,include/pulp/view}/context_menu.{cpp,hpp}. Nothing under core/canvas or core/render is touched, no Skia, Dawn, or render-backend selector is crossed, no design-system asset changes, and no packaging or asset-resolution behaviour changes.\n\nThe change makes a right-click reach its handler. A React onContextMenu prop had never worked in any Pulp app: prop-applier lowercases the prop name and emits on(id, 'contextmenu', cb), and the on() preamble in widget_bridge.cpp routed click, hover, pointer, gesture and wheel to __ensureNativeRegistered__ while dropping contextmenu, so registerContextMenu was never issued and View::on_context_menu stayed null. Separately, dispatch_context_menu fired only the hit-tested view's callback with no target-to-root walk, so a listener on a wrapper never ran when the press landed on a child canvas drawn over it -- which is how contextmenu behaves in the DOM and how real pages are built. Both halves were required; fixing either alone still produces nothing on such a tree. The registered callback is also corrected from a call expression to a function expression, which is what event_api.cpp's `cb + \"(\" + x + \",\" + y + \")\"` composition requires: the old form dispatched with a literal 0 where the event belongs, discarding the press coordinates, and then threw a TypeError that safe_dispatch_eval swallowed.\n\nContextMenu additionally gains accepts_navigation_input() while open -- both macOS hosts gate navigation keys on that predicate, so its existing arrow-key handling was unreachable in a plugin editor or standalone -- plus Home/End. Wrapping at the ends is deliberately not added, because test_context_menu.cpp asserts the clamp with a stated rationale.\n\nNo rendering, paint, layout, or asset behaviour changes; no bridge function is removed or re-signatured and both dispatch_context_menu overloads keep their declarations; no generated artifact or manifest row moves. Registered watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves, no accepted expansion boundary moves, and no Vellum artifact changes.",
+  "tests": [
+    "./build/test/pulp-test-context-menu (80 assertions, 16 cases)",
+    "./build/test/pulp-test-pointer-focus-lifecycle (38 assertions, 10 cases)",
+    "./build/test/pulp-test-widget-bridge-animation [context-menu] (32 assertions, 2 cases)",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "tools/scripts/confirm_failure.sh --file core/view/src/pointer_dispatch.cpp --break ... (CONFIRMED)",
+    "tools/scripts/confirm_failure.sh --file core/view/src/widget_bridge.cpp --break ... (CONFIRMED)"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
