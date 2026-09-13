@@ -190,6 +190,18 @@ The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
 unregenerated ledger fails locally and in CI with the repair command in the
 failure message rather than only as a stale-identity report.
 
+**A capability-registry change stales a handoff pin without touching any GPU or
+Vellum file.** `tools/scripts/test_release_artifact_contents.py` is a pinned
+path *and* one of the sites that hardcodes the control-registry digest, so
+adding a row to `inspect/include/pulp/inspect/capability_definitions.inc`
+re-pins the digest there and stales that row by pure transitivity. The
+resulting `gpu-recipe-catalog-selftest` failure names a GPU catalog and a
+release-artifact script, and nothing in either message mentions the capability
+registry — so the natural reading is that the row belongs to another author's
+change. Before dismissing it, check whether the flagged path is in your own
+diff (`git diff --name-only <base>..HEAD -- <path>`) with a control grep that
+must return non-zero; the answer is frequently yes.
+
 ## The "Vellum freeze" CI job runs two checks, and the second is the one that fails
 
 `.github/workflows/vellum-freeze-check.yml` runs `vellum_freeze_check.py` **and**
