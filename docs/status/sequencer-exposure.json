@@ -5658,7 +5658,10 @@
       "owned_paths": [
         ".github/vellum-expansion-watch-events/20260912-product-a-sequencer-state-control-watch.json",
         "docs/reference/development-inspector-capabilities.md",
+        "docs/reference/sequencer-state-channel.md",
+        "docs/status/gpu-vellum-handoff.yaml",
         "docs/status/sequencer-exposure.json",
+        "docs/validation/gpu-handoff-provenance/receipt.json",
         "inspect/CMakeLists.txt",
         "inspect/include/pulp/inspect/capability_definitions.inc",
         "inspect/include/pulp/inspect/control_registry_digest.inc",
@@ -5669,7 +5672,19 @@
         "inspect/src/control_standalone_host.cpp",
         "inspect/src/control_standalone_host_minimal.cpp",
         "test/cmake/view_widget_bridge_tests.cmake",
-        "test/test_control_sequencer_state_executor.cpp"
+        "test/fixtures/control_installed_host_e2e_fixture.cpp",
+        "test/test_control_broker_daemon.cpp",
+        "test/test_control_endpoint_enrollment.cpp",
+        "test/test_control_host_enrollment.cpp",
+        "test/test_control_manifest.cpp",
+        "test/test_control_phase15_aggregate_e2e.cpp",
+        "test/test_control_sequencer_state_executor.cpp",
+        "test/test_control_trusted_host_e2e.cpp",
+        "test/test_control_trusted_host_inventory.cpp",
+        "test/test_inspector_domain_helpers.cpp",
+        "tools/cmake/PulpControlShipping.cmake",
+        "tools/cmake/check_control_shipping_artifact.cmake",
+        "tools/scripts/test_release_artifact_contents.py"
       ],
       "evidence": [
         {
@@ -5694,6 +5709,14 @@
             "dev.pulp.sequencer/state.read@1",
             "dev.pulp.sequencer/state.edit@1",
             "create_standalone_sequencer_state_channel"
+          ]
+        },
+        {
+          "path": "docs/reference/sequencer-state-channel.md",
+          "needles": [
+            "## Control-platform projection",
+            "`dev.pulp.sequencer/state.read@1`",
+            "`dev.pulp.sequencer/state.edit@1`"
           ]
         }
       ],
