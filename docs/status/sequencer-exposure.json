@@ -5879,6 +5879,87 @@
           ]
         }
       }
+    },
+    {
+      "id": "plugin-bundle-icon-api",
+      "title": "A product icon reachable from pulp_add_plugin() for every macOS bundle it creates",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "6a6b819e-235f-410b-84e6-fffc315424e8",
+      "owned_paths": [
+        "tools/cmake/PulpUtils.cmake",
+        "test/cmake/test_plugin_bundle_icon.cmake",
+        "test/cmake/cmake_smoke_tests.cmake",
+        "docs/reference/cmake.md",
+        "docs/status/cmake-functions.yaml",
+        "tools/scripts/versioning.json",
+        "docs/status/sequencer-exposure.json"
+      ],
+      "evidence": [
+        {
+          "path": "tools/cmake/PulpUtils.cmake",
+          "needles": [
+            "ICON;ICNS",
+            "_pulp_icon_configure_macos(${_pulp_icon_bundle}"
+          ]
+        },
+        {
+          "path": "test/cmake/test_plugin_bundle_icon.cmake",
+          "needles": [
+            "plugin_bundle_icon_verified=true"
+          ]
+        },
+        {
+          "path": "docs/reference/cmake.md",
+          "needles": [
+            "ICNS            <path>"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "An SDK consumer can now pass ICON or ICNS to pulp_add_plugin() and have the asset bundled into every macOS bundle the call creates -- Standalone, VST3, AU, CLAP, AAX. Before this the plug-in Info.plist templates carried a CFBundleIconFile key that nothing could fill: the key substitutes at generate time from the MACOSX_BUNDLE_ICON_FILE target property, and only pulp_app_icon() set that, which is documented for apps and dispatches per-platform. A consumer had to set the property on the internal ${target}_VST3 / _AU / _CLAP target names by hand, which are not a public contract. The parameter is optional, so an existing consumer build is unchanged. Scope is deliberately narrow and stated in the docs: this ships the asset and fills the key; macOS does not render CFBundleIconFile for a non-.app bundle, so no icon appears in Finder for the plug-in formats.",
+          "evidence": [
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpUtils.cmake",
+              "needles": [
+                "ICON;ICNS"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpUtils.cmake",
+              "needles": [
+                "_pulp_icon_configure_macos(${_pulp_icon_bundle}"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "A build-system parameter for macOS bundle resources. It adds no Timeline command, argument, or handler."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP operation, schema, or handler is added or widened; this never reaches a running process."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The icon is a static bundle resource fixed at build time. Nothing here is controllable, automatable, or observable at run time."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No installed design-time capability is registered or widened; the parameter is consumed entirely by CMake during configure."
+        }
+      }
     }
   ],
   "tombstones": []
