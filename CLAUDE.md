@@ -1076,12 +1076,19 @@ Its own coverage is `tools/scripts/test_confirm_failure.sh`, registered as the
 
 ### Test Lanes — what gates the required `macos` check
 
-Not every test runs on the per-PR required gate. Tests route by CTest `LABELS`:
-`slow` (long, e.g. iOS try-compile) and `validation` (the **example** plugins'
-real-host `pluginval`/`auval`/`clap-dlopen` validators — the only users of that
-label) are **excluded** from the required gate. They are reported by the
-advisory `example-validation` lane and do not block until that context is
-promoted to required.
+Not every test runs on the per-PR required gate. Tests route by CTest `LABELS`,
+and the required gate excludes **five** label groups —
+`validation|slow|performance|bench|quality-lab`. `slow` is a genuinely long test
+(e.g. the iOS try-compile). `validation` is the **example** plugins' real-host
+`pluginval`/`auval`/`clap-dlopen` validators — the only users of that label;
+these are reported by the advisory `example-validation` lane and do not block
+until that context is promoted to required. `performance`, `bench`, and
+`quality-lab` are relative-timing and CPU-budget measurements: they are robust
+to steady load but not to the load *variance* a runner hosting concurrent build
+VMs produces, so they cannot hold a required gate there. They still run on
+push, on the nightly, and on the advisory `cross-platform-check` lane — which
+excludes only `validation|slow`, so a timing test lands there on x86-64 Linux
+and Windows and on arm64 Linux.
 `build.yml`'s required `macos` Actions job configures examples OFF. Shipyard's
 separate `[validation.default]` remains blocking and deliberately keeps
 `PULP_BUILD_EXAMPLES=ON` until the path-filtered `example-validation` context is
@@ -1092,8 +1099,8 @@ clap-validator require an operator-dispatched advisory image);
 it reports on relevant example, the state/format headers and core CMake source
 lists they depend on, and shared dependency PRs, but remains advisory until
 promoted into `required_status_checks`. Before moving any
-test off the required gate by labeling it `slow`/`validation`, confirm something
-still enforces it — the nightly is an informational backstop, not a gate. Full
+test off the required gate by labeling it with any of those five, confirm
+something still enforces it — the nightly is an informational backstop, not a gate. Full
 model, label taxonomy, and how to add tests:
 **[docs/guides/test-lanes.md](docs/guides/test-lanes.md)**.
 

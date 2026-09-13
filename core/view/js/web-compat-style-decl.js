@@ -85,6 +85,23 @@ CSSStyleDeclaration.prototype._reevaluateOverlay = function() {
     // menu also operate whatever sits under the click.
     var triggerHint = el._dataset && el._dataset.overlayTrigger;
     var isTrigger = (triggerHint === "true" || triggerHint === true);
+    // `aria-haspopup` says the same thing in the vocabulary a document that
+    // cares about assistive technology has already written it in, and it is
+    // the exact counterpart of the ARIA the overlay side already reads:
+    // `role="menu"|"listbox"|"dialog"` and `aria-modal` say "I AM a
+    // dismissable overlay", `aria-haspopup` says "I OPEN one". Honouring only
+    // half of that pair is what makes a correctly-authored app pay two presses
+    // to switch menus. Still a STATEMENT rather than an inference — an author
+    // writes it deliberately — so this stays inside the explicit branch and
+    // never joins the CSS-shape heuristic. The ARIA token set is
+    // true|menu|listbox|tree|grid|dialog; "false" and absent do not mark.
+    if (!isTrigger && el.getAttribute) {
+        var ariaPopup = el.getAttribute("aria-haspopup");
+        if (ariaPopup != null) {
+            var token = String(ariaPopup).toLowerCase();
+            isTrigger = (token !== "" && token !== "false");
+        }
+    }
     if (this._autoOverlayTrigger !== isTrigger) {
         if (typeof setOverlayTrigger === "function")
             setOverlayTrigger(el._id, isTrigger);

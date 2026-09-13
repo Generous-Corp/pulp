@@ -184,3 +184,77 @@ describe('@pulp/react prop-applier — overlay routing', () => {
         expect(bridge.calls.filter((c) => c.fn === 'releaseOverlay').length).toBe(1);
     });
 });
+
+// `aria-haspopup` — the counterpart of the claims above.
+//
+// The arms above read ARIA to decide which element IS a dismissable overlay,
+// and claim it with consume=true so a press outside cannot also operate the
+// underlay. `View::overlay_trigger()` is the exception that keeps that rule
+// from taxing the press the user meant: a press landing on a marked control
+// is delivered to it rather than spent on the dismissal, so switching from one
+// dropdown to another costs one press. An app that already described its menus
+// for assistive technology has said everything the policy needs; honouring
+// only the half that makes presses disappear is what made switching cost two.
+describe('@pulp/react prop-applier — aria-haspopup marks an overlay trigger', () => {
+    const withProps = (id: string, props: Record<string, unknown>): PulpInstance => ({
+        ...makeInstance(id),
+        props,
+    });
+
+    it('aria-haspopup="menu" marks the control as a trigger', () => {
+        applyAllProps(withProps('t1', { 'aria-haspopup': 'menu' }));
+        const marks = bridge.calls.filter((c) => c.fn === 'setOverlayTrigger');
+        expect(marks.length).toBe(1);
+        expect(marks[0].args).toEqual(['t1', true]);
+    });
+
+    it.each(['listbox', 'dialog', 'tree', 'grid', 'true'])(
+        'aria-haspopup="%s" marks too (the whole ARIA token set)', (token) => {
+            applyAllProps(withProps('t2', { 'aria-haspopup': token }));
+            const marks = bridge.calls.filter((c) => c.fn === 'setOverlayTrigger');
+            expect(marks.length).toBe(1);
+            expect(marks[0].args).toEqual(['t2', true]);
+        });
+
+    it('aria-haspopup={true} (boolean) marks', () => {
+        applyAllProps(withProps('t3', { 'aria-haspopup': true }));
+        expect(bridge.calls.filter((c) => c.fn === 'setOverlayTrigger')[0].args)
+            .toEqual(['t3', true]);
+    });
+
+    it('aria-haspopup="false" UNMARKS rather than marking', () => {
+        applyAllProps(withProps('t4', { 'aria-haspopup': 'false' }));
+        const marks = bridge.calls.filter((c) => c.fn === 'setOverlayTrigger');
+        expect(marks.length).toBe(1);
+        expect(marks[0].args).toEqual(['t4', false]);
+    });
+
+    it('does not touch the trigger API when the prop is absent', () => {
+        // Negative control in the direction that matters: the pass-through is
+        // scoped to triggers. If ordinary content were marked, closing a menu
+        // would also operate whatever sits under the click.
+        applyAllProps(withProps('t5', { background: '#000', role: 'button' }));
+        expect(bridge.calls.some((c) => c.fn === 'setOverlayTrigger')).toBe(false);
+    });
+
+    it('a popover is claimed, not marked; its trigger is marked, not claimed', () => {
+        applyAllProps(withProps('menu', { role: 'menu' }));
+        applyAllProps(withProps('button', { 'aria-haspopup': 'menu' }));
+        const claims = bridge.calls.filter((c) => c.fn === 'claimOverlay');
+        const marks = bridge.calls.filter((c) => c.fn === 'setOverlayTrigger');
+        expect(claims.map((c) => c.args)).toEqual([['menu', true]]);
+        expect(marks.map((c) => c.args)).toEqual([['button', true]]);
+    });
+
+    it('overlayTrigger={true} is the explicit opt-in for non-ARIA documents', () => {
+        applyAllProps(withProps('t6', { overlayTrigger: true }));
+        expect(bridge.calls.filter((c) => c.fn === 'setOverlayTrigger')[0].args)
+            .toEqual(['t6', true]);
+    });
+
+    it('overlayTrigger={false} unmarks', () => {
+        applyAllProps(withProps('t7', { overlayTrigger: false }));
+        expect(bridge.calls.filter((c) => c.fn === 'setOverlayTrigger')[0].args)
+            .toEqual(['t7', false]);
+    });
+});
