@@ -226,6 +226,19 @@ behaviour. Both are re-evaluated immediately on `setAttribute` /
   away from a menu also operate whatever sits under the click. Never inferred
   from CSS shape.
 
+`aria-haspopup` is the standards-vocabulary spelling of that second hint and
+is honoured identically: any token other than absent or `"false"`
+(`true` / `menu` / `listbox` / `tree` / `grid` / `dialog`) marks the control
+as an overlay trigger, and removing the attribute clears the mark. It is the
+exact counterpart of the ARIA the overlay side already reads —
+`role="dialog" | "alertdialog" | "menu" | "listbox"` and `aria-modal="true"`
+claim the slot — so a document that has already described its menus for
+assistive technology needs no Pulp-specific attribute to get one-press menu
+switching. Honouring only the claim half is what made a correctly-authored
+document pay two presses. `data-overlay-trigger` remains available for
+documents that do not author ARIA. (`@pulp/react` reads the same
+`aria-haspopup` prop, plus an explicit `overlayTrigger` prop.)
+
 ## Notable gaps
 
 1. **`html/ARIA`** state routing — `aria-label` and `role` route

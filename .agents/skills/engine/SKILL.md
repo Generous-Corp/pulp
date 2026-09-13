@@ -440,6 +440,27 @@ hook that calls the re-evaluation, so a new author hint that is not named there
 appears to work in a test that sets it before the element mounts, and silently
 does nothing when it is set or cleared later.
 
+The mirror-image trap costs more, because it hits every real consumer rather
+than a test. `_reevaluateOverlay` returns immediately while `_nativeCreated` is
+false, and React commits `setAttribute` BEFORE `appendChild`, so the hook above
+fires against an element with no native widget and does nothing. An author hint
+therefore needs BOTH the per-attribute hook (for a later write) and a flush at
+mount, which for ARIA attributes is `__replayAriaAttributes__` — the same
+replay `aria-label` and `role` already go through. A hint wired only to the
+hook works in a hand-written `appendChild`-then-`setAttribute` test and never
+fires for React. `aria-haspopup`, which marks an overlay TRIGGER, is wired to
+both.
+
+An author hint may also have a standards spelling already in the document, and
+reading only the Pulp-specific one is a silent half-implementation rather than
+a missing feature. The overlay pair is the worked example: Pulp read
+`role`/`aria-modal` to CLAIM an overlay but only `data-overlay-trigger` to mark
+the control that OPENS one, so a document with correct ARIA got the half that
+consumes presses and not the half that gives one back — and switching menus
+cost two presses in an app whose markup already said everything the policy
+needed. When adding a hint, check whether ARIA (or another web standard)
+already expresses it.
+
 ### Web-API global registration is hybrid native+JS by design
 
 CHOC's `NativeFunction` signature can only carry `choc::value::Value` arguments — JS function values don't round-trip through it. So even though `requestAnimationFrame` / `setTimeout` / `setInterval` look like they "should" be C++-only bindings, the callbacks themselves have to live in a JS-side registry (`__frameCallbacks__`, `__timerCallbacks__`).

@@ -922,6 +922,15 @@ and are what a popover should use. The threshold is 10, chosen to sit above the
 in-flow stacking range (1-3) and below conventional popover values, so a
 decorative absolutely-positioned badge does not hijack click routing.
 
+The heuristic decides claiming only, never the overlay-TRIGGER mark that lets a
+dismissing press still reach the control it landed on. That mark comes from
+`data-overlay-trigger` or from `aria-haspopup`, both statements an author
+writes deliberately, and is never inferred from CSS shape: a mark that fired on
+ordinary content would make clicking away from a menu also operate whatever
+sits under the click. `_reevaluateOverlay` therefore re-runs on those two
+attributes as well as on `position` / `zIndex`, and reads them outside the
+shape branch.
+
 ## Known buggy-but-supported
 
 1. `css/lineHeight` unitless multiplier (`lineHeight: 1.5`) — silently

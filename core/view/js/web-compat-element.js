@@ -421,6 +421,18 @@ function __replayAriaAttributes__(el) {
             }
         }
     }
+    // `aria-haspopup` marks an overlay TRIGGER rather than an access state, so
+    // it goes through the overlay heuristic instead of setAccessibilityState —
+    // but it needs the same pre-mount replay. `setAttribute` re-evaluates
+    // immediately, and that call is a no-op while `_nativeCreated` is false,
+    // which is exactly the state React's commit order (setAttribute, THEN
+    // appendChild) leaves every freshly mounted button in. Without this the
+    // mark would only ever land on an element whose author happened to write
+    // the attribute after mounting it.
+    if (el._attributes["aria-haspopup"] !== undefined
+        && el.style && el.style._reevaluateOverlay) {
+        el.style._reevaluateOverlay();
+    }
 }
 
 // Replay <rect> SVG attributes through the SvgRectWidget bridge. Mirrors the
@@ -1059,6 +1071,14 @@ Element.prototype.setAttribute = function(name, value) {
     // document.createElement(); keep it in lockstep
     // with the legacy web-compat.js bundle so HTML `dir` attributes
     // reach the same View::WritingDirection slot as CSS `direction`.
+    // `aria-haspopup` marks an overlay TRIGGER (see _reevaluateOverlay). It is
+    // not a data-* attribute, so it needs its own branch: without it the mark
+    // would only land if some unrelated style write happened to drive the
+    // heuristic later, which for a static toolbar button never happens.
+    else if (name === "aria-haspopup" && this.style
+             && this.style._reevaluateOverlay) {
+        this.style._reevaluateOverlay();
+    }
     else if (name === "dir" && typeof setDirection !== "undefined") {
         var dv = String(value).toLowerCase();
         if (dv === "rtl" || dv === "ltr" || dv === "auto") {
@@ -1207,6 +1227,12 @@ Element.prototype.removeAttribute = function(name) {
             was !== undefined && this.style && this.style._reevaluateOverlay) {
             this.style._reevaluateOverlay();
         }
+    }
+    // A control that stops offering a popup stops being an overlay trigger,
+    // so the mark has to come off with the attribute.
+    else if (name === "aria-haspopup" && was !== undefined && this.style
+             && this.style._reevaluateOverlay) {
+        this.style._reevaluateOverlay();
     }
     // Reset View::access_role_ / access_label_ when role / aria-label are
     // removed, otherwise assistive tech can read stale native state after the
