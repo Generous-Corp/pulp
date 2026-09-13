@@ -22,9 +22,25 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-recipe-catalog-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_recipe_catalog.py")
+    add_test(NAME gpu-connected-git-history-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_connected_git_history.py")
+    # The catalog selftest builds throwaway clones per equivalence class to
+    # prove its guard fires on a real shallow repository rather than on a
+    # simulated flag, so its runtime is dominated by clone I/O and scales with
+    # the host. It measures ~62s on an idle M3; the required gate's default
+    # per-test budget leaves no room for a slower runner on top of that.
+    set_tests_properties(gpu-recipe-catalog-selftest PROPERTIES TIMEOUT 300)
     add_test(NAME gpu-clean-agent-journey-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_clean_agent_journey.py")
+    # A CI job that runs a broad ctest on a shallow checkout cannot see the
+    # per-path git history the GPU provenance selftests read, so
+    # test_gpu_provenance_ci_wiring.py asserts every such job hydrates it.
+    # That scanner parses the workflow YAML, and workflow-lint installs PyYAML
+    # and owns the YAML-dependent workflow contracts. Do not register it here:
+    # required macOS CTest hosts lack PyYAML, and neither a hard ImportError
+    # nor a skipped unittest suite is an honest result on this gate.
     add_test(NAME doxygen-installed-header-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/doxygen_installed_header_check.py")

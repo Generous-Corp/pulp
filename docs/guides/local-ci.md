@@ -2096,6 +2096,16 @@ Before the pending check is created, the trusted controller uploads an immutable
 one-day recovery identity. A separate source-free `workflow_run` reconciler on
 protected `main` uses that identity to terminalize the exact check if cancellation
 prevents the normal completer from running; it never checks out PR code.
+That hardened checkout clones full history (`fetch-depth: 0`) rather than the
+shallow default. The GPU provenance selftests read real per-path Git history,
+and the remedy the other lanes use — `tools/scripts/hydrate_gpu_provenance_commits.py`,
+which reconnects a shallow clone by fetching the event ref — cannot run here:
+this checkout sets `persist-credentials: false`, so no credential remains for a
+fetch, and it pins `ref: ${{ github.sha }}`, so `GITHUB_REF` no longer names the
+checked-out commit. Cloning in full is the only remedy compatible with both
+hardening choices, and it is why this lane's checkout looks different from
+`build.yml`'s.
+
 The local route always fails closed: today's JIT Tart guest is disposable, but
 its Actions runner and PR code share the administrative guest account, so PR
 code could still reach protected-main runtime/cache credentials during the job.

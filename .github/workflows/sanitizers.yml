@@ -178,6 +178,10 @@ jobs:
           submodules: false
           lfs: false
 
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
       - name: Set up Namespace macOS cache
         if: contains(needs.resolve-runners.outputs.asan_runs_on, 'namespace-profile')
         uses: ./.github/actions/setup-namespace-macos-cache
@@ -349,6 +353,10 @@ jobs:
           submodules: false
           lfs: false
 
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
       - name: Set up Namespace macOS cache
         if: contains(needs.resolve-runners.outputs.ubsan_runs_on, 'namespace-profile')
         uses: ./.github/actions/setup-namespace-macos-cache
@@ -411,6 +419,10 @@ jobs:
         with:
           submodules: false
           lfs: false
+
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
 
       - name: Install Clang 18
         # apt.llvm.org intermittently 5xx's during release cuts; retry

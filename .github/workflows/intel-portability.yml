@@ -60,6 +60,10 @@ jobs:
         with:
           lfs: false
 
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
       - name: Install ccache + ninja
         run: |
           brew install ccache ninja || {
