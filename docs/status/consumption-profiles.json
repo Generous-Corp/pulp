@@ -42,8 +42,8 @@
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 91,
-            "public_header_count": 71
+            "closure_node_count": 94,
+            "public_header_count": 72
           },
           {
             "exported_as": "Pulp::host",
@@ -53,7 +53,12 @@
           {
             "exported_as": "Pulp::inspect-offline-runtime",
             "closure_node_count": 84,
-            "public_header_count": 71
+            "public_header_count": 72
+          },
+          {
+            "exported_as": "Pulp::inspect",
+            "closure_node_count": 83,
+            "public_header_count": 72
           },
           {
             "exported_as": "Pulp::standalone",
@@ -71,29 +76,24 @@
             "public_header_count": 136
           },
           {
+            "exported_as": "Pulp::inspect-ui-runtime",
+            "closure_node_count": 81,
+            "public_header_count": 72
+          },
+          {
             "exported_as": "Pulp::format-view",
             "closure_node_count": 80,
             "public_header_count": 136
           },
           {
-            "exported_as": "Pulp::inspect",
-            "closure_node_count": 80,
-            "public_header_count": 71
-          },
-          {
-            "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 78,
-            "public_header_count": 71
-          },
-          {
             "exported_as": "Pulp::inspect-runtime-eval",
             "closure_node_count": 74,
-            "public_header_count": 71
+            "public_header_count": 72
           },
           {
             "exported_as": "Pulp::inspect-telemetry",
             "closure_node_count": 73,
-            "public_header_count": 71
+            "public_header_count": 72
           },
           {
             "exported_as": "Pulp::view",
@@ -141,6 +141,11 @@
             "public_header_count": 3
           },
           {
+            "exported_as": "Pulp::inspect-runtime",
+            "closure_node_count": 39,
+            "public_header_count": 72
+          },
+          {
             "exported_as": "Pulp::format-core",
             "closure_node_count": 38,
             "public_header_count": 136
@@ -171,14 +176,9 @@
             "public_header_count": 113
           },
           {
-            "exported_as": "Pulp::inspect-runtime",
-            "closure_node_count": 26,
-            "public_header_count": 71
-          },
-          {
             "exported_as": "Pulp::inspect-client",
             "closure_node_count": 23,
-            "public_header_count": 71
+            "public_header_count": 72
           },
           {
             "exported_as": "Pulp::osc",
@@ -193,7 +193,7 @@
           {
             "exported_as": "Pulp::inspect-control",
             "closure_node_count": 22,
-            "public_header_count": 71
+            "public_header_count": 72
           },
           {
             "exported_as": "Pulp::smf-interchange",
@@ -258,12 +258,12 @@
           {
             "exported_as": "Pulp::inspect-authoring",
             "closure_node_count": 17,
-            "public_header_count": 71
+            "public_header_count": 72
           },
           {
             "exported_as": "Pulp::inspect-protocol",
             "closure_node_count": 17,
-            "public_header_count": 71
+            "public_header_count": 72
           },
           {
             "exported_as": "Pulp::sample-bank-manifest",
@@ -1916,7 +1916,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 80,
+            "node_count": 83,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -1926,12 +1926,15 @@
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
+              "pulp-playback",
               "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
+              "pulp-timeline",
+              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -2036,7 +2039,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2103,7 +2106,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2171,7 +2174,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2237,7 +2240,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2382,7 +2385,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2443,7 +2446,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2459,14 +2462,22 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 26,
+            "node_count": 39,
             "pulp_targets": [
+              "pulp-audio",
               "pulp-events",
               "pulp-foundation",
+              "pulp-midi",
+              "pulp-music",
               "pulp-platform",
+              "pulp-playback",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
+              "pulp-signal",
               "pulp-state",
+              "pulp-timebase",
+              "pulp-timeline",
+              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
@@ -2484,7 +2495,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 19,
+            "count": 24,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -2501,8 +2512,13 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
+              "AudioToolbox",
               "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
               "CoreFoundation",
+              "CoreMIDI",
               "CoreServices",
               "Foundation",
               "Security",
@@ -2514,7 +2530,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2524,7 +2540,9 @@
             "pulp-events",
             "pulp-inspect-control",
             "pulp-inspect-protocol",
+            "pulp-playback",
             "pulp-state",
+            "pulp-timeline-editor",
             "pulp-tool-gpu-health-model"
           ]
         },
@@ -2643,7 +2661,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2659,7 +2677,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 91,
+            "node_count": 94,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -2674,12 +2692,15 @@
               "pulp-music",
               "pulp-native-components",
               "pulp-platform",
+              "pulp-playback",
               "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
+              "pulp-timeline",
+              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -2796,7 +2817,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2924,7 +2945,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
@@ -2941,7 +2962,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 78,
+            "node_count": 81,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -2951,12 +2972,15 @@
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
+              "pulp-playback",
               "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
+              "pulp-timeline",
+              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -3057,7 +3081,7 @@
             ]
           },
           "public_headers": {
-            "count": 71,
+            "count": 72,
             "roots": [
               "inspect/include"
             ],
