@@ -107,11 +107,17 @@ OverlayEscapeResult route_escape_to_active_overlay(View& root,
 }
 
 bool root_overlay_owns_keyboard(View& root) {
-    if (topmost_modal(&root)) return true;
-    if (ComboBox::active_popup_in(root)) return true;
+    // Slot reads first, modal walk last: the two slot reads are O(1) and the
+    // walk is O(tree) with a dynamic_cast per node. This runs at press and
+    // focus-sync frequency rather than Escape frequency, which is the same
+    // order as the host's own hit test on the same press, but there is no
+    // reason to pay it when a cheaper answer already said yes.
     auto* state = root.existing_interaction();
     auto* overlay = state ? state->active_overlay : nullptr;
-    return overlay != nullptr && overlay->overlay_consumes_outside_click();
+    if (overlay != nullptr && overlay->overlay_consumes_outside_click())
+        return true;
+    if (ComboBox::active_popup_in(root)) return true;
+    return topmost_modal(&root) != nullptr;
 }
 
 }  // namespace pulp::view
