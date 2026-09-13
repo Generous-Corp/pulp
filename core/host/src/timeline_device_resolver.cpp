@@ -1,6 +1,8 @@
 #include <pulp/host/timeline_device_resolver.hpp>
 
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/midi/block_ops.hpp>
+#include <pulp/midi/humanize.hpp>
 
 #include "timeline_graph_binding_internal.hpp"
 
@@ -9,7 +11,9 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace pulp::host {
 namespace {
@@ -113,29 +117,198 @@ class BasicInstrumentSlot final : public PluginSlot {
     bool bypassed_ = false;
 };
 
+// Look-ahead note humaniser.
+//
+// A device can only place a note EARLIER than its written position if it is
+// already holding the note when that position arrives, so this kernel is
+// forward-only and its declared latency IS its look-ahead window. The host
+// shifts the whole scheduling window earlier by exactly that many samples,
+// which turns a forward-only displacement into placement anywhere in
+// [nominal - window, nominal]. Without the window the device could only ever
+// drag a note late, and the compensation would have nothing to compensate.
+//
+// The window is a constant and no parameter moves it: the host resolves the
+// chain shift once, on the control thread, and caches it. A latency that
+// changed under automation would invalidate a number the audio thread is
+// already scheduling against.
+class EventHumaniserSlot final : public PluginSlot {
+  public:
+    EventHumaniserSlot() {
+        info_.name = "Pulp Note Humaniser";
+        info_.manufacturer = "Pulp";
+        info_.version = "1";
+        info_.unique_id = std::string(kEventHumaniserBindingKey);
+        info_.format = PluginFormat::BuiltIn;
+        info_.is_instrument = false;
+        info_.is_effect = true;
+        info_.num_inputs = 0;
+        info_.num_outputs = 0;
+        info_.category = "MidiEffect";
+        info_.supports_midi_in = true;
+        info_.supports_midi_out = true;
+    }
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double sample_rate, int maximum_block_size) override {
+        if (!std::isfinite(sample_rate) || sample_rate <= 0.0 || maximum_block_size <= 0)
+            return false;
+        reset();
+        prepared_ = true;
+        return true;
+    }
+    void release() override {
+        reset();
+        prepared_ = false;
+    }
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
+                 const midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
+                 const ParameterEventQueue&, int frame_count) override {
+        output.clear();
+        if (frame_count <= 0)
+            return;
+        if (!prepared_ || bypassed_) {
+            // PluginSlot's host-side bypass contract is pass-through, and for an
+            // event device the stream is what passes through. The Timeline
+            // binding refuses a bypassed placement outright, so a compensated
+            // chain never reaches this branch with a stale shift.
+            midi::copy_midi_block(midi_in, midi_out);
+            position_ += frame_count;
+            return;
+        }
+        humanise_.process(midi_in, midi_out, timebase::SamplePosition{position_}, frame_count);
+        position_ += frame_count;
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool bypassed) override { bypassed_ = bypassed; }
+    bool is_bypassed() const override { return bypassed_; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>& data) override { return data.empty(); }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return kEventHumaniserWindowSamples; }
+    int tail_samples() const override { return 0; }
+
+  private:
+    // Seeded, so the same authored note draws the same displacement on every
+    // render. A payoff test that cannot predict the schedule cannot prove the
+    // compensation moved it.
+    static constexpr std::uint64_t kSeed = 0x5ee'd10'ddull;
+    static constexpr std::uint8_t kVelocitySpread = 12;
+
+    static constexpr midi::HumanizeSpec spec() noexcept {
+        return {static_cast<std::int64_t>(kEventHumaniserWindowSamples), kVelocitySpread, kSeed};
+    }
+    void reset() noexcept {
+        humanise_ = midi::Humanize<>(spec());
+        position_ = 0;
+    }
+
+    PluginInfo info_;
+    midi::Humanize<> humanise_{spec()};
+    std::int64_t position_ = 0;
+    bool prepared_ = false;
+    bool bypassed_ = false;
+};
+
 } // namespace
 
+namespace {
+
+constexpr BuiltInDeviceDescriptor kBuiltInDevices[] = {
+    {kEventHumaniserBindingKey, "Pulp Note Humaniser", "Pulp", "MidiEffect",
+     "Forward-only note displacement inside a fixed look-ahead window; the window is the "
+     "device's reported latency and the host compensates the scheduling stream by it.",
+     BuiltInDeviceDomain::EventToEvent, 0, 0, kEventHumaniserWindowSamples, false},
+    {kBasicInstrumentBindingKey, "Pulp Basic Instrument", "Pulp", "Instrument",
+     "Polyphonic square-wave instrument that turns scheduled notes into audio.",
+     BuiltInDeviceDomain::EventToAudio, 0, 2, 0, true},
+};
+
+} // namespace
+
+std::span<const BuiltInDeviceDescriptor> builtin_device_catalog() noexcept {
+    return {kBuiltInDevices, std::size(kBuiltInDevices)};
+}
+
+const BuiltInDeviceDescriptor* find_builtin_device(std::string_view binding_key) noexcept {
+    for (const auto& descriptor : kBuiltInDevices)
+        if (descriptor.binding_key == binding_key)
+            return &descriptor;
+    return nullptr;
+}
+
+PluginInfo builtin_device_plugin_info(const BuiltInDeviceDescriptor& descriptor) {
+    PluginInfo info;
+    info.name = std::string(descriptor.display_name);
+    info.manufacturer = std::string(descriptor.manufacturer);
+    info.version = "1";
+    info.unique_id = std::string(descriptor.binding_key);
+    info.format = PluginFormat::BuiltIn;
+    info.is_instrument = descriptor.is_instrument;
+    info.is_effect = !descriptor.is_instrument;
+    info.num_inputs = descriptor.num_audio_inputs;
+    info.num_outputs = descriptor.num_audio_outputs;
+    info.category = std::string(descriptor.category);
+    info.supports_midi_in = true;
+    info.supports_midi_out = descriptor.domain == BuiltInDeviceDomain::EventToEvent;
+    return info;
+}
+
 std::unique_ptr<PluginSlot> load_builtin_plugin(const PluginInfo& info) {
-    if (info.format != PluginFormat::BuiltIn || !info.path.empty() ||
-        info.unique_id != kBasicInstrumentBindingKey || info.num_inputs != 0 ||
-        info.num_outputs != 2)
+    if (info.format != PluginFormat::BuiltIn || !info.path.empty())
         return nullptr;
+    const auto* descriptor = find_builtin_device(info.unique_id);
+    if (!descriptor || info.num_inputs != descriptor->num_audio_inputs ||
+        info.num_outputs != descriptor->num_audio_outputs)
+        return nullptr;
+    if (descriptor->binding_key == kEventHumaniserBindingKey)
+        return std::make_unique<EventHumaniserSlot>();
     return std::make_unique<BasicInstrumentSlot>();
+}
+
+int event_device_latency_ceiling_samples() noexcept {
+    return detail::timeline_graph_binding::kEventDeviceLatencyCeilingSamples;
 }
 
 namespace detail::timeline_graph_binding {
 namespace {
 
-TimelineGraphAdmission validate_declaration(const timeline::DevicePlacement& placement) noexcept {
+timeline::DeviceSlotKind slot_kind_for(BuiltInDeviceDomain domain) noexcept {
+    return domain == BuiltInDeviceDomain::EventToEvent ? timeline::DeviceSlotKind::EventToEvent
+                                                       : timeline::DeviceSlotKind::EventToAudio;
+}
+
+// `descriptor` is an out-parameter rather than a return value so the refusals
+// keep their order: a caller that learns the binding first would report
+// UnsupportedDeviceBinding for a placement whose position is already wrong.
+TimelineGraphAdmission validate_declaration(const timeline::DevicePlacement& placement,
+                                            const BuiltInDeviceDescriptor*& descriptor) noexcept {
+    descriptor = nullptr;
     const auto& configuration = placement.configuration;
     if (configuration.position != timeline::DeviceChainPosition::PreFader)
         return reject(TimelineGraphAdmissionCode::UnsupportedDevicePosition, 0, 0, placement.id);
-    if (configuration.slot_kind != timeline::DeviceSlotKind::EventToAudio)
+    // Narrowed, not deleted. The event domain is now admitted, so this refusal
+    // names only the kind no built-in occupies; an audio-to-audio insert still
+    // has nowhere to run.
+    if (configuration.slot_kind != timeline::DeviceSlotKind::EventToEvent &&
+        configuration.slot_kind != timeline::DeviceSlotKind::EventToAudio)
         return reject(TimelineGraphAdmissionCode::UnsupportedDeviceSlotKind, 0, 0, placement.id);
     if (configuration.device_kind != timeline::DeviceKind::BuiltIn)
         return reject(TimelineGraphAdmissionCode::UnsupportedDeviceKind, 0, 0, placement.id);
-    if (configuration.binding_key != kBasicInstrumentBindingKey)
+    descriptor = find_builtin_device(configuration.binding_key);
+    if (!descriptor)
         return reject(TimelineGraphAdmissionCode::UnsupportedDeviceBinding, 0, 0, placement.id);
+    // A binding key carries its own domain. Declaring the instrument as an
+    // event-to-event device would wire a node that emits no MIDI into the
+    // middle of the chain, so the declaration has to agree with the catalog.
+    if (configuration.slot_kind != slot_kind_for(descriptor->domain)) {
+        descriptor = nullptr;
+        return reject(TimelineGraphAdmissionCode::UnsupportedDeviceSlotKind, 0, 0, placement.id);
+    }
     if (configuration.bypassed)
         return reject(TimelineGraphAdmissionCode::UnsupportedDeviceBypass, 0, 0, placement.id);
     if (configuration.wet_dry_bits != std::bit_cast<std::uint32_t>(1.0f))
@@ -170,11 +343,13 @@ const timeline::Track* project_track_for(const playback::PlaybackProgram& progra
     return track;
 }
 
-bool canonical_builtin_node(const GraphNode* node) noexcept {
+bool canonical_builtin_node(const GraphNode* node,
+                            const BuiltInDeviceDescriptor& descriptor) noexcept {
     return node && node->type == NodeType::Plugin && node->plugin &&
            node->plugin_info.format == PluginFormat::BuiltIn && node->plugin_info.path.empty() &&
-           node->plugin_info.unique_id == kBasicInstrumentBindingKey &&
-           node->plugin_info.num_inputs == 0 && node->plugin_info.num_outputs == 2;
+           node->plugin_info.unique_id == descriptor.binding_key &&
+           node->plugin_info.num_inputs == descriptor.num_audio_inputs &&
+           node->plugin_info.num_outputs == descriptor.num_audio_outputs;
 }
 
 } // namespace
@@ -258,86 +433,130 @@ TimelineGraphAdmission resolve_timeline_device_route(
     const bool caller_owned = !route.device_routes.empty() || route.midi_destination != 0 ||
                               route.post_device_audio_source != 0 ||
                               route.post_mixer_audio_destination != 0;
-    if (placements.size() != 1)
-        return reject(TimelineGraphAdmissionCode::UnsupportedDeviceChain, placements.size(), 1,
-                      route.track_id);
-    const auto& placement = placements.front();
-    if (placement.configuration.device_kind != timeline::DeviceKind::BuiltIn)
-        return {};
+    if (placements.size() > kAdmittedDeviceChainLength)
+        return reject(TimelineGraphAdmissionCode::UnsupportedDeviceChain, placements.size(),
+                      kAdmittedDeviceChainLength, route.track_id);
+    // A non-built-in anywhere leaves the whole chain to the caller, exactly as
+    // the single-device path did for its one placement.
+    for (const auto& placement : placements)
+        if (placement.configuration.device_kind != timeline::DeviceKind::BuiltIn)
+            return {};
     if (caller_owned)
-        return reject(TimelineGraphAdmissionCode::MixedDeviceOwnership, 1, 0, placement.id);
-    if (const auto admission = validate_declaration(placement); !admission)
-        return admission;
+        return reject(TimelineGraphAdmissionCode::MixedDeviceOwnership, placements.size(), 0,
+                      placements.front().id);
 
-    NodeId plugin_node = 0;
-    if (previous) {
-        const auto prior = std::find_if(previous->owned_devices.begin(),
-                                        previous->owned_devices.end(), [&](const auto& candidate) {
-                                            return candidate.declaration.id == placement.id;
-                                        });
-        if (prior != previous->owned_devices.end() && prior->track_id == route.track_id &&
-            prior->declaration == placement && canonical_builtin_node(edit->node(prior->plugin_node)))
-            plugin_node = prior->plugin_node;
-    }
-    if (plugin_node == 0) {
-        PluginInfo info;
-        info.name = "Pulp Basic Instrument";
-        info.manufacturer = "Pulp";
-        info.version = "1";
-        info.unique_id = std::string(kBasicInstrumentBindingKey);
-        info.format = PluginFormat::BuiltIn;
-        info.is_instrument = true;
-        info.num_inputs = 0;
-        info.num_outputs = 2;
-        info.supports_midi_in = true;
-        auto slot = factory ? factory(info) : nullptr;
-        if (!slot)
-            return reject(TimelineGraphAdmissionCode::DeviceFactoryFailed, 0, 1, placement.id);
-        plugin_node = edit->add_owned_builtin_plugin_node(std::move(slot), 0, 2,
-                                                          "Timeline basic instrument");
-        if (plugin_node == 0)
-            return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0, placement.id);
+    // A placement the catalog cannot accept at all is refused on its own terms
+    // before the chain is judged as a shape, so the position a bad declaration
+    // happens to occupy never renames its refusal.
+    std::array<const BuiltInDeviceDescriptor*, kAdmittedDeviceChainLength> descriptors{};
+    for (std::size_t index = 0; index < placements.size(); ++index)
+        if (const auto admission = validate_declaration(placements[index], descriptors[index]);
+            !admission)
+            return admission;
+
+    // Chain shape: the last device is the one that leaves the event domain and
+    // produces audio; every device before it stays in it. A lone event-to-event
+    // device is still refused — it would feed the mixer nothing.
+    for (std::size_t index = 0; index < placements.size(); ++index) {
+        const bool interior = index + 1 < placements.size();
+        const bool is_event_to_event =
+            placements[index].configuration.slot_kind == timeline::DeviceSlotKind::EventToEvent;
+        if (is_event_to_event != interior)
+            return reject(TimelineGraphAdmissionCode::UnsupportedDeviceChain, index,
+                          placements.size(), placements[index].id);
     }
 
-    generated_routes = {{placement.id, plugin_node}};
+    std::array<NodeId, kAdmittedDeviceChainLength> nodes{};
+    for (std::size_t index = 0; index < placements.size(); ++index) {
+        const auto& placement = placements[index];
+        const auto* descriptor = descriptors[index];
+        NodeId plugin_node = 0;
+        if (previous) {
+            const auto prior =
+                std::find_if(previous->owned_devices.begin(), previous->owned_devices.end(),
+                             [&](const auto& candidate) {
+                                 return candidate.declaration.id == placement.id;
+                             });
+            if (prior != previous->owned_devices.end() && prior->track_id == route.track_id &&
+                prior->declaration == placement &&
+                canonical_builtin_node(edit->node(prior->plugin_node), *descriptor))
+                plugin_node = prior->plugin_node;
+        }
+        if (plugin_node == 0) {
+            const auto info = builtin_device_plugin_info(*descriptor);
+            auto slot = factory ? factory(info) : nullptr;
+            if (!slot)
+                return reject(TimelineGraphAdmissionCode::DeviceFactoryFailed, 0, 1, placement.id);
+            plugin_node = edit->add_owned_builtin_plugin_node(
+                std::move(slot), descriptor->num_audio_inputs, descriptor->num_audio_outputs,
+                std::string(descriptor->display_name));
+            if (plugin_node == 0)
+                return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0, placement.id);
+        }
+        nodes[index] = plugin_node;
+    }
+
+    generated_routes.clear();
+    generated_routes.reserve(placements.size());
+    for (std::size_t index = 0; index < placements.size(); ++index)
+        generated_routes.push_back({placements[index].id, nodes[index]});
     route.device_routes = generated_routes;
     const auto final_destination = route.audio_destination;
     const auto final_port = route.audio_destination_first_port;
     route.audio_destination = track->mixer_node;
     route.audio_destination_first_port = 0;
-    route.midi_destination = plugin_node;
-    route.post_device_audio_source = plugin_node;
+    route.midi_destination = nodes[0];
+    route.post_device_audio_source = nodes[placements.size() - 1];
     route.post_device_audio_source_first_port = 0;
     route.post_mixer_audio_destination = final_destination;
     route.post_mixer_audio_destination_first_port = final_port;
 
-    const auto* node = edit->node(plugin_node);
-    if (!canonical_builtin_node(node))
-        return reject(TimelineGraphAdmissionCode::DeviceFactoryFailed, 0, 1, placement.id,
-                      plugin_node);
+    // Interior event edges. connect_midi refuses an exact duplicate, so a
+    // re-prepare that reused both nodes would read as a mutation failure
+    // unless the surviving edge is recognised before reconnecting.
+    for (std::size_t index = 0; index + 1 < placements.size(); ++index) {
+        const auto& existing = edit->connections();
+        const bool already_connected =
+            std::any_of(existing.begin(), existing.end(), [&](const Connection& connection) {
+                return connection.midi && connection.source_node == nodes[index] &&
+                       connection.dest_node == nodes[index + 1];
+            });
+        if (!already_connected && !edit->connect_midi(nodes[index], nodes[index + 1]))
+            return reject(TimelineGraphAdmissionCode::GraphMutationFailed, 0, 0,
+                          placements[index + 1].id, nodes[index + 1]);
+    }
+
     // Discovery is control-thread work and happens exactly once, here, so the
     // shift the audio thread schedules against is a cached prepared number and
     // never a live metadata call.
-    int reported_latency = 0;
-    if (const auto latency = resolve_event_device_latency(*node->plugin, placement.id, plugin_node,
-                                                          reported_latency);
-        !latency)
-        return latency;
-    const int event_latency = event_domain_latency_samples(placement, reported_latency);
-    const std::array<int, 1> chain_latencies{event_latency};
+    std::array<int, kAdmittedDeviceChainLength> chain_latencies{};
+    for (std::size_t index = 0; index < placements.size(); ++index) {
+        const auto* node = edit->node(nodes[index]);
+        if (!canonical_builtin_node(node, *descriptors[index]))
+            return reject(TimelineGraphAdmissionCode::DeviceFactoryFailed, 0, 1,
+                          placements[index].id, nodes[index]);
+        int reported_latency = 0;
+        if (const auto latency = resolve_event_device_latency(
+                *node->plugin, placements[index].id, nodes[index], reported_latency);
+            !latency)
+            return latency;
+        chain_latencies[index] = event_domain_latency_samples(placements[index], reported_latency);
+        metadata.push_back({generated_routes[index], node->plugin->parameters()});
+    }
     const auto resolved = playback::accumulate_event_chain_shift(
-        chain_latencies, kEventDeviceLatencyCeilingSamples);
+        std::span<const int>(chain_latencies.data(), placements.size()),
+        kEventDeviceLatencyCeilingSamples);
     if (const auto admitted =
             admit_event_compensation(resolved, program_track->provider(), route.track_id);
         !admitted)
         return admitted;
     event_shift = resolved.shift;
-    metadata.push_back({generated_routes.front(), node->plugin->parameters()});
     if (const auto admission =
             detail::validate_timeline_automation_routes(*program_track, metadata, claimed_nodes);
         !admission)
         return admission;
-    owned_devices.push_back({route.track_id, placement, plugin_node});
+    for (std::size_t index = 0; index < placements.size(); ++index)
+        owned_devices.push_back({route.track_id, placements[index], nodes[index]});
     return {};
 }
 

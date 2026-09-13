@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260912-nwb-event-to-event-device",
+  "created_at": "2026-09-12T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Event-to-event device change that crosses this family through exactly one path: docs/status/cli-commands.yaml, the shared CLI manifest the family claims because every CLI command is catalogued in the same file as the design-import commands. The diff edits only the seq capabilities summary in that manifest and changes nothing about design import: the design-import entries are untouched, and no file under tools/import-design, tools/import-validation, tools/cli/import_*, tools/mcp/**/*design*, templates/**/*design* or docs/**/*design-import* appears in the diff. The selector match was measured path by path against every pattern in both family tables and returned that single path, paired with a control path (tools/import-design/fidelity_diff.py) that had to match and did match two families, so the matcher was live rather than returning empty. The substance of the change is elsewhere: Pulp gains its first executable event-to-event device, a MIDI humaniser built on the existing pulp::midi::Humanize kernel, so the event-stream delay compensation that already shipped finally has a device that reports a non-zero latency for the scheduler to compensate. The admitted chain stays one event-to-event device ahead of one instrument, and every other shape is a typed refusal at admission rather than a truncation. Both bounds - the admitted chain length and the per-device latency ceiling - move onto the public resolver header so a caller can predict a refusal instead of discovering it, and the catalogue that publishes them reaches the CLI and MCP boundaries through one encoder in tools/timeline, so the two surfaces emit identical payloads by construction. No DSP, no Forge, and no design-import code is touched. negative_capability_check.py was hardened in the same change to read TimelineGraphAdmissionCode alongside CompileErrorCode, so the refusals this package adds are actually covered; no lane was dropped and no assertion was weakened. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-timeline-graph-binding",
+    "pulp-test-cli-timeline",
+    "pulp-test-mcp-timeline-tools",
+    "tools/scripts/negative_capability_check.py",
+    "tools/scripts/sequencer_exposure_check.py",
+    "tools/scripts/vellum_expansion_watch_check.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

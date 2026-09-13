@@ -1659,6 +1659,29 @@ upgrade a version stamp and nothing else, and make the downgrade **refuse** when
 the member is present rather than dropping it. Nothing else in the migration
 needs to move bytes.
 
+### A device chain is refused in two layers, and the model gets there first
+
+`validate_device_chain` in `core/timeline/src/track.cpp` refuses the shapes a
+chain cannot have at all — an identity transition between adjacent slot kinds,
+and an out-of-order chain — at `Track::create`, before any host sees the
+document. Graph admission in `core/host/` refuses a second, narrower class:
+a shape the model accepts but the resolver will not build, reported as a
+`TimelineGraphAdmissionCode`.
+
+The practical consequence is that a host-level refusal for a shape the model
+already rejects is **unreachable**, and a test that tries to construct one
+aborts rather than failing an assertion, because `Track::create` returns an
+error `Result` and `take()` on it is a contract violation. Assert such a case
+at the model layer, and keep a separate standalone-shape assertion for the host
+refusal so narrowing the model's reach does not silently retire it.
+
+The device catalog (`tools/timeline/src/device_catalog.cpp`) publishes what a
+chain may name — binding key, domain, reported latency, and the two bounds
+admission enforces. It lives in `tools/timeline` rather than in either
+boundary because `pulp-cli` and `pulp-mcp-core` link `pulp::tool-timeline`
+publicly but not `pulp::host`; putting the encoder anywhere else widens a
+target's link surface to pull the host in.
+
 ### `Track::create` moves its input partway through, so late validation reads an empty collection
 
 `Track::create` hands `input.device_chain` to a `shared_ptr` about two thirds of
@@ -2838,9 +2861,13 @@ no, and nothing at authoring time warns anyone.
 
 `tools/scripts/negative_capability_check.py` (ctest
 `playback-negative-capability`) is what makes that cost visible. It cross-refers
-every refusal-shaped `CompileErrorCode` raise against this module's public
-headers and `core/timeline/schema/timeline_schema.json`, and requires an owner
-and a written reason for each refusal it can reach from here. The gate is
+every refusal-shaped `CompileErrorCode` **and `TimelineGraphAdmissionCode`**
+raise against this module's public headers and
+`core/timeline/schema/timeline_schema.json`, and requires an owner and a written
+reason for each refusal it can reach from here. The admission enum is in scope
+because a device chain is authored here and refused at graph admission rather
+than by the compiler, so a checker reading only the compiler's enum would call
+that whole class of refusals invisible. The gate is
 registered in `test/cmake/timeline_tests.cmake` beside the engine dependency
 floor.
 
