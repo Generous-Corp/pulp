@@ -406,6 +406,40 @@ the V8 provider section above.)
 > *build* tree (missing) → SIGABRT. Stage the template into the build dir or
 > build without ccache. Unrelated to V8.
 
+### A new bridge global needs a manifest row, not just a `register_bridge_function`
+
+`register_bridge_function(api, "foo", ...)` makes the global callable from a
+prelude, and nothing else. The `@pulp/react` type declarations, the mock
+registry the package's tests run against, and `docs/reference/js-bridge.md` are
+all GENERATED from `core/view/src/widget_bridge_api_manifest.tsv` — which is
+hand-maintained and is not derived from the C++. A function registered without
+its manifest row is invisible to every one of them, and a prelude that calls it
+type-checks as an unknown global downstream.
+
+The sequence is: register the function, add its `name<TAB>category<TAB>kind<TAB>source`
+row to the manifest, add its TypeScript signature to the signature map in
+`tools/scripts/generate_widget_bridge_api.py`, then
+
+```bash
+python3 tools/scripts/generate_widget_bridge_api.py --write   # regenerate
+python3 tools/scripts/generate_widget_bridge_api.py --check   # what CI runs
+```
+
+`--check` passes on a missing row rather than failing, because a row that is
+not there describes nothing to drift from — so a clean check is not evidence
+that a newly registered function reached the generated surfaces. Grep the
+generated `.d.ts` for the name instead.
+
+### A web-compat prelude reads its author hints through `_dataset`, and only re-evaluates when told
+
+`data-*` attributes land in `Element._dataset` with the name camel-cased
+(`data-overlay-trigger` → `_dataset.overlayTrigger`), but nothing re-runs a
+prelude's heuristic just because an attribute changed. `setAttribute` /
+`removeAttribute` in `web-compat-element.js` carry an explicit per-attribute
+hook that calls the re-evaluation, so a new author hint that is not named there
+appears to work in a test that sets it before the element mounts, and silently
+does nothing when it is set or cleared later.
+
 ### Web-API global registration is hybrid native+JS by design
 
 CHOC's `NativeFunction` signature can only carry `choc::value::Value` arguments — JS function values don't round-trip through it. So even though `requestAnimationFrame` / `setTimeout` / `setInterval` look like they "should" be C++-only bindings, the callbacks themselves have to live in a JS-side registry (`__frameCallbacks__`, `__timerCallbacks__`).
