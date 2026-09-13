@@ -942,4 +942,88 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
     }
 }
 
+// ── Overlay Escape reachability ─────────────────────────────────────────────
+//
+// A `<View overlay>` popover claims the overlay slot but focuses nothing, so
+// the editor was not first responder and Escape never reached -keyDown: at
+// all — the popover could only be dismissed with the mouse inside a DAW. The
+// editor now borrows the keyboard for exactly as long as a dismissible
+// overlay is open, and hands it back the moment one closes.
+
+TEST_CASE("PluginViewHost (mac CPU) — Escape dismisses a claimed overlay and "
+          "returns the keyboard",
+          "[plugin-view-host][overlay][escape][mac][cpu]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — overlay Escape test skipped.");
+            return;
+        }
+
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        auto popover_owned = std::make_unique<FocusRecordingView>();
+        auto* popover = popover_owned.get();
+        // Not a text field and not navigation-capable: claiming the overlay is
+        // the ONLY reason the editor may hold the keyboard here.
+        popover->text_input = false;
+        popover->set_bounds({100, 50, 120, 80});
+        root.add_child(std::move(popover_owned));
+
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        PulpTestHostField* host_field =
+            [[PulpTestHostField alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
+        [window.contentView addSubview:host_field];
+        REQUIRE([window makeFirstResponder:host_field]);
+
+        // Nothing focused and no overlay: the DAW keeps the keyboard.
+        REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
+
+        int dismissed = 0;
+        popover->on_overlay_dismissed = [&dismissed] { ++dismissed; };
+
+        // A bare claim is not enough. The web-compat CSS-shape heuristic
+        // claims on an inference that can fire on a decorative box, and such
+        // a box can hold the slot for the editor's whole lifetime — holding
+        // the DAW keyboard that long is indistinguishable from stealing it.
+        popover->claim_overlay();
+        [pulp_view syncKeyFocus];
+        REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
+        REQUIRE(window.firstResponder == host_field);
+
+        // Declaring the view a popover — what `<View overlay>` and
+        // data-overlay="true" both do — is the statement that qualifies.
+        popover->set_overlay_consumes_outside_click(true);
+        [pulp_view syncKeyFocus];
+        REQUIRE([pulp_view acceptsFirstResponder]);
+        REQUIRE(window.firstResponder == pulp_view);
+
+        [pulp_view keyDown:make_key_event(53, 0, @"\x1b")];  // 53 = Escape
+        REQUIRE(dismissed == 1);
+        REQUIRE(root.interaction().active_overlay == nullptr);
+
+        // -keyDown: re-syncs, so the keyboard goes straight back to the host.
+        REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
+        REQUIRE(window.firstResponder == host_field);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
 #endif  // __APPLE__

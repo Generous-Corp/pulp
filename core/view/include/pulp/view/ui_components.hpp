@@ -49,6 +49,10 @@ public:
     ComboBox() {
         set_focusable(true);
         set_access_role(AccessRole::combo_box);
+        // Opening a dropdown IS this control's purpose, so a press on it while
+        // a different overlay is open means "switch menus": the dismissal
+        // policy lets that press through instead of spending it on the close.
+        set_overlay_trigger(true);
     }
 
     // pulp #1818 — clear the popup slot if this dying ComboBox holds it.

@@ -259,6 +259,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "chooseFolder": "(title?: string) => string",
     "claimDocumentNavigationFocus": "() => boolean",
     "claimOverlay": "(id: string) => void",
+    "setOverlayTrigger": "(id: string, isTrigger?: boolean) => void",
     "clearBoxShadow": "(id: string) => void",
     "clearTransform": "(id: string) => void",
     "clearWidgetSchema": "(id: string) => void",

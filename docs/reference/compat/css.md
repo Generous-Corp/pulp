@@ -903,6 +903,25 @@ forwards to `setHitSlop`. Object edges are independent — a missing edge is
 shorthand rule; only the string form fills. The catalog entry is
 `rn/hitSlop`, since that is where the semantics are defined.
 
+## `position` and `z-index` also decide overlay claiming
+
+The style adapter re-evaluates Pulp's auto-overlay heuristic whenever
+`position` or `zIndex` changes, so those two declarations carry a second
+meaning beyond stacking: `position: absolute` together with `z-index >= 10`
+claims the generalized overlay slot, which routes presses into the element's
+own subtree and dismisses it on a press outside. Dropping either one releases
+the claim.
+
+That is an INFERENCE, so it deliberately does not consume the dismissing press
+— a false positive that clicks through merely closes something that should not
+have claimed, whereas one that swallowed a real click would lose the click
+outright. The explicit statement is the `data-overlay` / `data-overlay-trigger`
+attribute pair documented under
+[HTML / DOM-lite compat](html.md#pulp-specific-author-hints); those do consume,
+and are what a popover should use. The threshold is 10, chosen to sit above the
+in-flow stacking range (1-3) and below conventional popover values, so a
+decorative absolutely-positioned badge does not hijack click routing.
+
 ## Known buggy-but-supported
 
 1. `css/lineHeight` unitless multiplier (`lineHeight: 1.5`) — silently

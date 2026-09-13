@@ -10,6 +10,7 @@
 /// `web_input.cpp` only owns the DOM listener plumbing that feeds them.
 
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -396,8 +397,18 @@ public:
     }
 
     bool handle_key(const BrowserKeyEvent& event) {
-        View* target = focus_target_ ? focus_target_ : &root_;
         const KeyEvent ke = translate_key(event);
+        // Escape runs the shared dismissal policy before focused-view
+        // delivery, matching every other host: a modal, an open ComboBox
+        // dropdown, then the generalized overlay slot. Without it a popover
+        // whose trigger never took focus could only be closed with the mouse.
+        if (ke.is_down && ke.key == KeyCode::escape &&
+            route_escape_to_active_overlay(root_, ke.modifiers, ke.is_repeat) !=
+                OverlayEscapeResult::none) {
+            mark_dirty();
+            return true;
+        }
+        View* target = focus_target_ ? focus_target_ : &root_;
         bool handled = target->on_key_event(ke);
 
         const std::string text = text_for_key(event);
@@ -470,21 +481,35 @@ private:
     }
 
     bool pointer_down(const MouseEvent& me, int raw_pointer_id) {
-        // An active overlay (ComboBox popup, claimed popover) hit-tests first;
-        // a click outside it dismisses it and then falls through to the view
-        // underneath, matching the macOS host.
-        if (auto* overlay = View::active_overlay_) {
-            if (!overlay->overlay_contains(me.window_position))
-                View::dismiss_active_overlay();
-        }
-
-        if (me.button == MouseButton::right &&
-            dispatch_context_menu(root_, me.window_position)) {
+        // The generalized overlay slot is consulted through the one shared
+        // policy, exactly as the macOS and Windows hosts do. This host used to
+        // hand-roll a reduced version of it against the process-global
+        // `View::active_overlay_` shim mirror, which cost it three behaviours
+        // the other hosts have: a press INSIDE the overlay was not routed into
+        // the overlay's subtree (so an absolutely-positioned popover child lost
+        // the click to whatever sibling occupied that pixel), an overlay that
+        // opted to consume the dismissing press did not get to (so one click
+        // both closed the popover and mutated the underlay), and the slot was
+        // read process-wide rather than from this root.
+        const auto overlay_press =
+            route_press_to_active_overlay(root_, me.window_position);
+        if (overlay_press.consume_press) {
             mark_dirty();
             return true;
         }
 
-        View* target = root_.hit_test(me.window_position);
+        View* target =
+            overlay_press.routing == OverlayPressRouting::routed
+                ? overlay_press.target
+                : root_.hit_test(me.window_position);
+
+        // The overlay-aware context-menu overload, so a right-click inside a
+        // popover reaches the popover rather than the sibling beneath it.
+        if (me.button == MouseButton::right &&
+            dispatch_context_menu(root_, target, me.window_position)) {
+            mark_dirty();
+            return true;
+        }
         ComboBox::notify_global_click(target);
         if (!target) {
             set_focus(nullptr);
