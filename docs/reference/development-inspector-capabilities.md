@@ -63,6 +63,7 @@ availability.
 | `dev.pulp.runtime/reload@1` (`runtime.reload`) | no | no | Frozen contract; no current executor or grant path |
 | `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | no | no | Research-unsafe acknowledged manifests may inject the bounded exact-instance evaluator; grants require broker-owned single-use consent, and results/errors are size-bounded and redacted |
 | `dev.pulp.artifact/read@1` (`artifact.read`) | no | no | Publication-bound typed client rechecks exact original lineage and broker ACL for every chunk |
+| `dev.pulp.timeline/document-session@1` (`timeline.document.session`) | no | yes | Controller-gated background executor opens, applies, diffs, undoes, and redoes one exact-instance `timeline::DocumentSession`; the broker projects the session's own `CommandAuthority`/`ConflictCode` verdict rather than re-deciding it, refuses a writer profile escalation to `trusted`, and carries optimistic `expected_revision` plus `idempotency_key` replay through unchanged |
 | `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
 
 `off` grants nothing. `custom` starts from an empty exact allow-list. `develop`

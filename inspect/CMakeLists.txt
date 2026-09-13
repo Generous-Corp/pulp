@@ -130,6 +130,7 @@ add_library(pulp-inspect-runtime
     src/control_host_development_executor.cpp
     src/control_state_read_executor.cpp
     src/control_state_write_executor.cpp
+    src/control_timeline_document_session_executor.cpp
     src/control_host_ui_executor.cpp
     src/control_main_thread_executor.cpp
     src/control_trace_session_executor.cpp
@@ -146,6 +147,7 @@ target_link_libraries(pulp-inspect-runtime
         pulp::inspect-protocol
         pulp::events
         pulp::state
+        pulp::timeline
     PRIVATE
         pulp::tool-gpu-health-model)
 

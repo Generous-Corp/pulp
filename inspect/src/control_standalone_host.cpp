@@ -78,7 +78,8 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
         "PULP_INSPECT_CAPABILITY_STATE_WRITE_V1\0"
         "PULP_INSPECT_CAPABILITY_TEST_INPUT_V1\0"
         "PULP_INSPECT_CAPABILITY_AUTHORING_TWEAKS_V1\0"
-        "PULP_INSPECT_CAPABILITY_TELEMETRY_STREAM_V1";
+        "PULP_INSPECT_CAPABILITY_TELEMETRY_STREAM_V1\0"
+        "PULP_INSPECT_CAPABILITY_TIMELINE_DOCUMENT_SESSION_V1";
 
 #undef PULP_CONTROL_COMPONENT_MARKER
 
@@ -102,6 +103,12 @@ std::atomic<detail::StandaloneRuntimeEvaluatorFactory>& evaluator_factory() {
 
 std::atomic<detail::StandaloneControlAuthorHooksFactory>& author_hooks_factory() {
     static std::atomic<detail::StandaloneControlAuthorHooksFactory> factory{nullptr};
+    return factory;
+}
+
+std::atomic<detail::StandaloneTimelineDocumentSessionFactory>&
+timeline_document_session_factory() {
+    static std::atomic<detail::StandaloneTimelineDocumentSessionFactory> factory{nullptr};
     return factory;
 }
 
@@ -374,10 +381,16 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     .publication_id = plan.publication_id,
                     .read_result = [provider] { return provider->snapshot(); }};
             });
+        auto timeline_document_session = make_control_timeline_document_session_executor(
+            [](const ControlAdmissionPlan& plan)
+                -> std::optional<ControlTimelineDocumentSessionSource> {
+                return detail::create_standalone_timeline_document_session_source(plan);
+            });
         ControlOperationExecutor state_executor =
             [state_read = std::move(state_read),
              state_write = std::move(fenced_state_write),
-             gpu_health_read = std::move(gpu_health_read)](
+             gpu_health_read = std::move(gpu_health_read),
+             timeline_document_session = std::move(timeline_document_session)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                 const ControlExecutionContext& context) {
                 if (request.operation_id == "dev.pulp.state/read@1")
@@ -386,6 +399,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return state_write(plan, request, context);
                 if (request.operation_id == "dev.pulp.gpu/health.read@1")
                     return gpu_health_read(plan, request, context);
+                if (request.operation_id == "dev.pulp.timeline/document-session@1")
+                    return timeline_document_session(plan, request, context);
                 return unavailable_operation();
             };
 
@@ -860,6 +875,21 @@ create_standalone_runtime_evaluator(format::Processor& processor,
                                     format::ViewBridge& bridge) {
     const auto factory = evaluator_factory().load(std::memory_order_acquire);
     return factory ? factory(processor, bridge) : nullptr;
+}
+
+bool install_standalone_timeline_document_session_factory(
+    StandaloneTimelineDocumentSessionFactory factory) noexcept {
+    if (!factory)
+        return false;
+    auto expected = static_cast<StandaloneTimelineDocumentSessionFactory>(nullptr);
+    return timeline_document_session_factory().compare_exchange_strong(
+        expected, factory, std::memory_order_release, std::memory_order_relaxed);
+}
+
+std::optional<ControlTimelineDocumentSessionSource>
+create_standalone_timeline_document_session_source(const ControlAdmissionPlan& plan) {
+    const auto factory = timeline_document_session_factory().load(std::memory_order_acquire);
+    return factory ? factory(plan) : std::nullopt;
 }
 
 } // namespace detail

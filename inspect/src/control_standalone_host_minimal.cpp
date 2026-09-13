@@ -156,6 +156,16 @@ create_standalone_runtime_evaluator(format::Processor&, format::ViewBridge&) {
     return {};
 }
 
+bool install_standalone_timeline_document_session_factory(
+    StandaloneTimelineDocumentSessionFactory) noexcept {
+    return false;
+}
+
+std::optional<ControlTimelineDocumentSessionSource>
+create_standalone_timeline_document_session_source(const ControlAdmissionPlan&) {
+    return std::nullopt;
+}
+
 } // namespace detail
 
 } // namespace pulp::inspect
