@@ -35,12 +35,12 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_clean_agent_journey.py")
     # A CI job that runs a broad ctest on a shallow checkout cannot see the
-    # per-path git history the GPU provenance selftests read. Deliberately
-    # unlabelled: `slow`/`validation` would route this off the required macOS
-    # gate, which is the one place the wiring has to be enforced.
-    add_test(NAME gpu-provenance-ci-wiring-selftest
-        COMMAND ${Python3_EXECUTABLE}
-            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_provenance_ci_wiring.py")
+    # per-path git history the GPU provenance selftests read, so
+    # test_gpu_provenance_ci_wiring.py asserts every such job hydrates it.
+    # That scanner parses the workflow YAML, and workflow-lint installs PyYAML
+    # and owns the YAML-dependent workflow contracts. Do not register it here:
+    # required macOS CTest hosts lack PyYAML, and neither a hard ImportError
+    # nor a skipped unittest suite is an honest result on this gate.
     add_test(NAME doxygen-installed-header-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/doxygen_installed_header_check.py")

@@ -423,7 +423,8 @@ It is wired into `build.yml`, `cross-platform-check.yml`, `intel-portability.yml
 rtsan; tsan does not run the suite) and `validate.yml`. Adding a lane that runs
 a broad `ctest` means adding this step too —
 `tools/scripts/test_gpu_provenance_ci_wiring.py` is the cover that fails when a
-lane is missing it, so the omission surfaces locally instead of as a red lane.
+lane is missing it, so the omission surfaces locally instead of as a red lane. It runs in `workflow-lint.yml`, not as a ctest: it parses the workflow
+YAML, and the required macOS CTest hosts carry no PyYAML.
 
 `build-macos.yml` is the exception, and deliberately so: its hardened checkout
 sets `persist-credentials: false` (no credential remains for a fetch) and pins

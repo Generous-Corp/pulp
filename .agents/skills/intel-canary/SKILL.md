@@ -242,4 +242,5 @@ Both lanes therefore carry the hydration step immediately after checkout:
 Adding another Intel leg that runs a broad `ctest` means adding this step too.
 `tools/scripts/test_gpu_provenance_ci_wiring.py` is the cover that fails when a
 lane is missing it, so the omission surfaces locally rather than as a red Intel
-lane whose message points at neither Intel nor portability.
+lane whose message points at neither Intel nor portability. It runs in `workflow-lint.yml`, not as a ctest: it parses the workflow
+YAML, and the required macOS CTest hosts carry no PyYAML.

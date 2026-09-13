@@ -12,8 +12,12 @@ which unshallows a shallow checkout and self-verifies. A checkout that already
 clones full history (`fetch-depth: 0`) is equally sufficient. This test asserts
 one of the two is present in every job that runs a non-narrowing ctest.
 
-PyYAML is imported hard on purpose: a missing parser must ERROR the suite, not
-silently skip it into a green result that proves nothing.
+This runs in `workflow-lint.yml`, which installs PyYAML, and is deliberately
+NOT a ctest: the required macOS CTest hosts have no PyYAML, so registering it
+there buys either a hard ImportError on every run or a skip that reports a
+green result proving nothing. Given a lane that carries the parser, the import
+stays hard on purpose -- a missing parser there is a broken lane, not a reason
+to degrade into a pass.
 """
 
 from __future__ import annotations
