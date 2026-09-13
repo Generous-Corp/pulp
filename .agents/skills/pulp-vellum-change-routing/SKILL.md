@@ -244,3 +244,23 @@ The trusted PR gate validates a deterministic synthetic merge tree, but event
 time and emergency-expiry checks are bound to the real PR source head supplied
 with `--source-head`. A synthetic merge intentionally carries a fixed historical
 timestamp and must never become the provenance clock for a newly added event.
+
+## Regenerate against the MERGED tree, not against the base you branched from
+
+`write` derives every identity from one source commit, so a ledger regenerated
+on a branch whose base has moved pins revisions the merged tree no longer agrees
+with. The symptom is not a clear staleness report: it arrives as unrelated-looking
+reds — three `test_gpu_recipe_catalog` failures and a
+`test_gpu_handoff_provenance::test_check_reports_a_clean_ledger` assertion —
+which read as a regression in the change set rather than as a base mismatch.
+
+The order that works is the one the `ci` skill already prescribes for a pinned
+path: land the file edits, bring the branch onto the merged tree, and only then
+run `gpu_handoff_provenance.py write --receipt`. Regenerating before the rebase
+means doing it twice.
+
+**The regenerated ledger survives its own commit.** After committing the YAML
+and receipt, `check` still reports `OK: every pinned identity matches` at the new
+source commit, because the pin-refresh commit touches only paths the inventory
+excludes. So the cascade above terminates after exactly one round — a second
+regeneration is not needed, and running one only produces an empty diff.

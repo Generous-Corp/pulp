@@ -224,3 +224,22 @@ correct by construction.
 
 > A silent cancel is indistinguishable from "this workflow does nothing" — which is
 > exactly how working coverage got written off as absent.
+
+### The Intel lanes run a broad ctest, so they need the history hydration step
+
+`intel-portability.yml` and `nightly-intel.yml` both run a full `ctest` pass,
+which selects the GPU provenance selftests. Those read real per-path Git
+history, and `actions/checkout` gives the lane a shallow clone, so the suite
+fails on the shape of the checkout rather than on any Intel portability defect.
+Both lanes therefore carry the hydration step immediately after checkout:
+
+```yaml
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+```
+
+Adding another Intel leg that runs a broad `ctest` means adding this step too.
+`tools/scripts/test_gpu_provenance_ci_wiring.py` is the cover that fails when a
+lane is missing it, so the omission surfaces locally rather than as a red Intel
+lane whose message points at neither Intel nor portability.
