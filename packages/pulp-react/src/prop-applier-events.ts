@@ -57,6 +57,43 @@ export function applyEventProp(
             return true;
         }
 
+        // The counterpart of the two arms above. They say "this element IS a
+        // dismissable overlay"; `aria-haspopup` says "this control OPENS one".
+        // The dismissal policy needs both: it claims a popover with
+        // consume=true so a press outside it cannot also operate the underlay,
+        // and `View::overlay_trigger()` is the exception that keeps that rule
+        // from taxing the press the user actually meant. Without the mark, a
+        // press on a second dropdown's trigger while the first is open is
+        // spent entirely on the dismissal, so switching menus costs two
+        // presses instead of one.
+        //
+        // Reading it from ARIA rather than from a Pulp-specific prop is the
+        // point: an app that has already described its own menus for assistive
+        // technology has said everything the policy needs, and until now Pulp
+        // honoured only the half of that description that made presses
+        // disappear. `data-overlay-trigger` (web-compat) and an explicit
+        // `overlayTrigger` prop remain available for documents that do not use
+        // ARIA.
+        //
+        // Scoped to triggers deliberately -- ordinary content stays consumed,
+        // or clicking away from a menu would also operate whatever sits under
+        // the click. Any ARIA token other than absent/"false" marks
+        // (true|menu|listbox|tree|grid|dialog); "false" unmarks, so a control
+        // that stops offering a popup stops being a trigger.
+        case 'aria-haspopup': {
+            const token = typeof value === 'string' ? value.toLowerCase() : value;
+            const isTrigger = token === true
+                || (typeof token === 'string' && token !== '' && token !== 'false');
+            call('setOverlayTrigger', id, isTrigger);
+            return true;
+        }
+
+        // An explicit opt-in for documents that do not author ARIA. Same
+        // effect, stated in Pulp's own vocabulary.
+        case 'overlayTrigger':
+            call('setOverlayTrigger', id, !!value);
+            return true;
+
         default:
             return false;
     }
