@@ -48,6 +48,7 @@ SOURCE_BUNDLE_PATHS = (
     "core/audio/include/pulp/audio/sample_interpolation.hpp",
     "core/audio/include/pulp/audio/sample_sinc_kernel.hpp",
     "core/signal/include/pulp/signal/interpolator.hpp",
+    "core/signal/include/pulp/signal/windowing.hpp",
     "test/support/sample_interpolation_render.hpp",
     "test/sample_interpolation_benchmark.cpp",
     "test/cmake/sampler_interpolation_benchmark_tests.cmake",
@@ -71,6 +72,69 @@ def source_bundle_sha256() -> str:
     return digest.hexdigest()
 
 
+PULP_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"](pulp/[^">]+)[">]', re.MULTILINE)
+
+
+def _pulp_include_roots() -> list[Path]:
+    return sorted(REPO_ROOT.glob("core/*/include"))
+
+
+def _resolve_pulp_include(include: str, owner: str, roots: list[Path]) -> str | None:
+    for root in roots:
+        candidate = root / include
+        if candidate.is_file():
+            return candidate.relative_to(REPO_ROOT).as_posix()
+    sibling = (REPO_ROOT / owner).parent / include
+    if sibling.is_file():
+        return sibling.relative_to(REPO_ROOT).as_posix()
+    return None
+
+
+def source_bundle_closure_errors() -> list[str]:
+    """Report pulp headers the benchmark compiles but the bundle does not hash.
+
+    The digest measures only the declared paths, so a bundle input that starts
+    including a pulp header from outside the bundle silently stops being
+    measured: that header's code reaches the benchmark while editing it leaves
+    the digest unchanged, and a content-addressed gate that cannot see a
+    compilation input is no longer addressing the content it claims to.
+    """
+    declared = set(SOURCE_BUNDLE_PATHS)
+    roots = _pulp_include_roots()
+    errors: list[str] = []
+    pending = [p for p in SOURCE_BUNDLE_PATHS if p.endswith((".hpp", ".cpp"))]
+    scanned: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in scanned:
+            continue
+        scanned.add(current)
+        try:
+            text = (REPO_ROOT / current).read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append(f"cannot read source bundle input {current}: {exc}")
+            continue
+        for match in PULP_INCLUDE_RE.finditer(text):
+            include = match.group(1)
+            resolved = _resolve_pulp_include(include, current, roots)
+            if resolved is None:
+                errors.append(
+                    f"{current} includes <{include}>, which resolves to no file "
+                    "under core/*/include"
+                )
+                continue
+            if resolved not in declared:
+                errors.append(
+                    f"{current} includes <{include}> ({resolved}), a compilation "
+                    "input absent from SOURCE_BUNDLE_PATHS"
+                )
+            if resolved not in scanned:
+                pending.append(resolved)
+    if not scanned:
+        errors.append("source bundle closure scanned no inputs")
+    return errors
+
+
 def _non_placeholder(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip()) and "unspecified" not in value.lower()
 
@@ -81,6 +145,7 @@ def validate(
     source_only: bool = False,
 ) -> list[str]:
     errors: list[str] = []
+    errors.extend(source_bundle_closure_errors())
     if not isinstance(data, dict):
         return ["root must be an object"]
     if data.get("schema") != SCHEMA:
@@ -256,6 +321,49 @@ def _load(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _closure_control_failures() -> list[str]:
+    """Prove the closure check can fail, by dropping an input it must catch.
+
+    A declared path that another bundle input includes is the only kind the
+    closure walk can rediscover, so dropping one must produce an error. Finding
+    no such path means the control could not have discriminated, which is
+    reported rather than passed over.
+    """
+    global SOURCE_BUNDLE_PATHS
+    intact = SOURCE_BUNDLE_PATHS
+    if source_bundle_closure_errors():
+        return ["source bundle closure must be clean before its negative control"]
+    roots = _pulp_include_roots()
+    reachable = set()
+    for owner in intact:
+        if not owner.endswith((".hpp", ".cpp")):
+            continue
+        try:
+            text = (REPO_ROOT / owner).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for match in PULP_INCLUDE_RE.finditer(text):
+            resolved = _resolve_pulp_include(match.group(1), owner, roots)
+            if resolved in intact:
+                reachable.add(resolved)
+    if not reachable:
+        return [
+            "closure negative control found no declared path reachable by "
+            "include, so it could not discriminate"
+        ]
+    failures: list[str] = []
+    try:
+        for dropped in sorted(reachable):
+            SOURCE_BUNDLE_PATHS = tuple(p for p in intact if p != dropped)
+            if not any(dropped in error for error in source_bundle_closure_errors()):
+                failures.append(
+                    f"negative control was not detected: undeclared bundle input {dropped}"
+                )
+    finally:
+        SOURCE_BUNDLE_PATHS = intact
+    return failures
+
+
 def self_test(
     path: Path,
     benchmark_binary: Path | None,
@@ -288,6 +396,7 @@ def self_test(
     for name, mutation in mutations:
         if not validate(mutation, benchmark_binary, source_only):
             failures.append(f"negative control was not detected: {name}")
+    failures.extend(_closure_control_failures())
     if benchmark_binary is not None and not source_only:
         try:
             with tempfile.NamedTemporaryFile() as altered:
