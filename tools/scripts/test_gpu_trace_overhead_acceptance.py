@@ -23,6 +23,33 @@ darwin_mutation_proof = unittest.skipUnless(
 )
 
 
+def _connected_git_history():
+    """Load the shallow-history guard directly, as this suite loads its subject."""
+
+    path = Path(__file__).resolve().parent / "connected_git_history.py"
+    spec = importlib.util.spec_from_file_location("connected_git_history", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def setUpModule() -> None:
+    """Fail loudly on a truncated checkout; never report a skip.
+
+    This suite loads its subject with ``spec_from_file_location``, so the guard
+    inside that module's ``main()`` never runs here. Without this hook the suite
+    would report a pass built on history the checkout does not have. Raising --
+    rather than skipping -- is the point: a raise in ``setUpModule`` yields
+    ``FAILED (errors=1)`` and a nonzero exit, and a skip would read as success.
+    """
+
+    _connected_git_history().require_connected_history(
+        ROOT, "the GPU trace overhead acceptance selftest"
+    )
+
+
+
 class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
     def bound_receipt(self):
         head = MODULE.subprocess.run(

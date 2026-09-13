@@ -1786,6 +1786,18 @@ authority itself was denied — the class and intent it required, by name.
 names. It never emits a bit index or a raw capability integer, so a caller
 cannot come to depend on the internal encoding.
 
+With no `--writer-profile`, the same object also carries a `device_catalog`:
+every built-in device a track's device chain may name, plus the two bounds
+admission enforces on a chain. Each device entry carries the `binding_key` a
+placement must name, a `domain` of `event-to-event` or `event-to-audio` (an
+event-to-event device may precede an event-to-audio one, never follow it), and
+the `latency_samples` the device reports — so a caller can add the chain's
+latencies and predict both the scheduling-window shift and a refusal past
+`latency_ceiling_samples` without authoring anything. `max_chain_length` is the
+longest chain the host binding lowers; a longer one is refused rather than
+truncated. The `pulp_timeline_device_catalog` MCP tool returns the same object
+from the same encoder, so the CLI and MCP answers are identical by construction.
+
 `export` first plans conversion against the selected format and stops unless
 every reported lossy concept has its own repeated `--accept-loss <concept-id>`
 argument. There is deliberately no force or accept-all switch: a newly
@@ -1827,7 +1839,9 @@ writes to it. Every payload carries a `version` field, so a consumer pins the
 projection shape rather than inferring it. The same encoders back the
 `pulp_timeline_view_outline`, `pulp_timeline_view_region`, and
 `pulp_timeline_view_diff` MCP tools, so the CLI and MCP payloads are identical
-by construction rather than by review.
+by construction rather than by review. `pulp_timeline_device_catalog` is the
+fourth read projection over the same model, answering what a device chain may
+name; `pulp seq capabilities` emits it from the same encoder.
 
 `view outline` returns the project, sequence, track, and clip identities with
 per-node content hashes and an explicit count of what the view omitted.

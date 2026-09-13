@@ -3316,3 +3316,18 @@ different from a released one in exactly the way a developer will hit first.
 The install path is `tools/cli/local_sdk_install.cpp`, which has the command
 runners; `configure_arguments()` in the profile file is pure and should stay
 that way, taking the resolved path rather than fetching it.
+
+## A capability answer that varies by argument needs its absence asserted too
+
+`pulp seq capabilities` carries the built-in device catalog on its
+**no-argument** object only; a `--writer-profile <name>` response deliberately
+does not repeat it. The catalog rides the existing capability object rather than
+getting a subcommand of its own, because "what may I author" is one question and
+a client that has to ask twice will eventually ask once and author against half
+an answer.
+
+When a response's shape depends on its arguments like this, the CLI test must
+assert the **absence** in the narrowed response as its control, not only the
+presence in the broad one. A presence-only test passes identically whether the
+field is conditional or unconditionally appended everywhere, so it cannot tell
+you which one you shipped.

@@ -44,9 +44,24 @@ TimelineGraphAdmission validate_timeline_graph_routes(
             const auto* sequence =
                 project ? project->find_sequence(program.sequence_id()) : nullptr;
             const auto* authored = sequence ? sequence->find_track(route.track_id) : nullptr;
-            resolver_owned_candidate = authored && authored->device_chain().size() == 1 &&
-                                       authored->device_chain().front().configuration.device_kind ==
-                                           timeline::DeviceKind::BuiltIn;
+            // The resolver owns a whole chain, not only a single device: it
+            // builds every node in an admitted chain and generates the device
+            // routes this validation would otherwise demand from the caller.
+            // Bounding the test at one device left a two-device chain looking
+            // caller-owned with no routes supplied, which reads as a missing
+            // device placement rather than as the shape the resolver admits.
+            // Ownership is decided by who authored the placements, never by how
+            // many there are: bounding it by length handed an over-long built-in
+            // chain back to caller-owned validation, which then reported the
+            // absent routes instead of the length the resolver actually refuses.
+            if (authored != nullptr) {
+                const auto chain = authored->device_chain();
+                resolver_owned_candidate =
+                    !chain.empty() &&
+                    std::all_of(chain.begin(), chain.end(), [](const auto& placement) {
+                        return placement.configuration.device_kind == timeline::DeviceKind::BuiltIn;
+                    });
+            }
         }
         if (!program_track->ordered_device_placement_ids().empty() &&
             !program_track->mixer().transparent() && !has_post_source && !resolver_owned_candidate)

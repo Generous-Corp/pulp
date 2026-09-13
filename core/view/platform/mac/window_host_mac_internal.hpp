@@ -233,10 +233,6 @@ void set_ns_cursor_hidden(bool hidden);
 // Styles with no native backing fall back to the arrow cursor.
 void set_ns_cursor_for_style(pulp::view::View::CursorStyle style);
 
-// Depth-first search for the topmost (last-painted) ModalOverlay in the
-// subtree rooted at `root`. Returns nullptr when none is visible.
-pulp::view::ModalOverlay* find_topmost_modal(pulp::view::View* root);
-
 }  // namespace pulp::view::mac_geometry
 
 // ── Display-link frame timing ────────────────────────────────────────

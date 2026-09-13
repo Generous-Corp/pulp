@@ -21,6 +21,7 @@
 #include "tools/import-design/browser_capture_tree.hpp"
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <functional>

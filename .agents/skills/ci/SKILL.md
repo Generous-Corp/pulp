@@ -406,6 +406,44 @@ interpreter for the base resolver, policy classifier, JSON extraction, and
 protected-base version-bump verifier. A result that depends on whether M3 or M5
 claimed `pulp-preamble` is a fleet fault, not a retryable check failure.
 
+### A lane that runs the GPU provenance selftests must reconnect its history first
+
+The GPU provenance selftests read real per-path Git history, so a shallow
+checkout fails them on the checkout shape rather than on any defect. Every lane
+that runs them therefore carries a hydration step immediately after checkout:
+
+```yaml
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+```
+
+It is wired into `build.yml`, `cross-platform-check.yml`, `intel-portability.yml`,
+`nightly-full-build.yml`, `nightly-intel.yml`, `sanitizers.yml` (asan, ubsan and
+rtsan; tsan does not run the suite) and `validate.yml`. Adding a lane that runs
+a broad `ctest` means adding this step too —
+`tools/scripts/test_gpu_provenance_ci_wiring.py` is the cover that fails when a
+lane is missing it, so the omission surfaces locally instead of as a red lane. It runs in `workflow-lint.yml`, not as a ctest: it parses the workflow
+YAML, and the required macOS CTest hosts carry no PyYAML.
+
+`build-macos.yml` is the exception, and deliberately so: its hardened checkout
+sets `persist-credentials: false` (no credential remains for a fetch) and pins
+`ref: ${{ github.sha }}` (so `GITHUB_REF` no longer names the checked-out
+commit). The hydration script needs both, so that lane clones full history with
+`fetch-depth: 0` instead. This does not reopen the `classify` preamble question
+above — that job classifies changed paths and still wants exact trees at depth 1.
+
+**`git rev-parse --is-shallow-repository` is a remedy trigger, not a failure
+predicate.** A warm self-hosted checkout can retain every object it ever fetched
+while `actions/checkout` rewrites the shallow boundary, so object presence does
+not prove ancestry, and a repository reporting `false` can still be missing the
+connection a selftest walks. The predicate that actually decides the outcome is
+whether each pinned revision resolves *and* is an ancestor of `HEAD` — which is
+what the script asserts after hydrating, and what its
+`gpu-provenance-hydration: PASS total=<n> fetched=<n> cap=128` line reports. A
+guard written against the shallow flag alone passes on a hydrated clone and on a
+warm dirty one alike.
+
 ### Browser-source fidelity is a required dependency, not a skip
 
 Generic agent HTML uses a real browser capture as its source reference before
@@ -8464,3 +8502,112 @@ Two invocation traps when reproducing one of these locally:
   `AttributeError: module ... has no attribute`. Select by test name instead:
   `python3 -B -m unittest test_ci_throughput_workflows -k <test_name>`. Use `-B`
   so a stale `.pyc` cannot survive a break-confirm.
+
+---
+
+## "Green validation" and "can merge" are different questions
+
+`shipyard status` reporting `running: 0 / pending: 0` and `mac: local
+reachable=true`, with `ship-state list` showing the right SHA and one attempt,
+is fully compatible with **every pull request in the repository being
+unmergeable**. On 2026-09-13 that state held for about six hours. The required
+`macos` context was not red and not pending — it was *absent from
+`statusCheckRollup` entirely*, because the runner label its lane asked for
+matched zero runners in either registration scope, so every `build.yml` run
+(`pull_request`, `workflow_dispatch` **and** `merge_group`) queued forever at
+its first job.
+
+**Absence is the failure mode, and absence reads as a clean finding.**
+`mergeStateStatus: BLOCKED` with `reviewDecision: ""` and
+`required_approving_review_count: 0` means there is nothing to approve, nothing
+failing, and no explanation anywhere in the API or the UI for what is missing.
+
+Two detectors now answer the second question. Full operator detail:
+[docs/guides/local-ci.md](../../../docs/guides/local-ci.md).
+
+### First move when a PR sits BLOCKED with nothing red
+
+```sh
+shipyard landability --repo Generous-Corp/pulp
+```
+
+Exit 0 clean, **7** when a required context cannot be scheduled, **1** when the
+command's own control lanes fail to discriminate — in which case every verdict
+it printed is suspect and you must fix the instrument before reading its output.
+
+It resolves each required context to the jobs that render to it **and their
+transitive `needs` closure**. That closure is the check: `macos` is produced by
+an alias job and by a matrix leg, and every path to it passes through
+`resolve-provider` and `classify`. Looking only at the job named `macos` returns
+a clean answer mid-outage. Six lanes gate that one context today.
+
+`shipyard ship` / `shipyard pr` run the same check as a preflight and refuse
+with exit 7 before queueing. Four API calls cold, zero warm.
+
+### Do not re-dispatch. Read the verdict instead.
+
+Decisions contract `[default] #4`: a runnerless required lane is HELD, never a
+retry storm. On 2026-09-13 four blind `workflow run build.yml` re-dispatches
+helped nothing **and created a second wedge** — the extra runs sat `queued`
+holding the concurrency group (`build.yml` declares one with no
+`cancel-in-progress` for that path), so the newest run showed `pending` with
+zero jobs, which reads exactly like runner saturation and is not.
+
+A plain cancel will not move a run whose jobs were never assigned to a runner.
+`POST /actions/runs/{id}/force-cancel` will, and the held run materialises its
+jobs within seconds.
+
+Two verdicts look identical and have opposite fixes:
+
+| verdict | evidence | fix |
+|---|---|---|
+| `Unserved` | no runner in either scope carries the labels, and no host attests the lane | restore the runner, **or** unset the routing variable so the job falls back to the workflow's own literal |
+| `Starved` | an online, not-busy runner **does** carry the labels, and work is queued anyway | runner-group access, ephemeral consumption, or a `workflows` permission — not a runner restore |
+
+### Census both scopes, or do not census
+
+`repos/{owner}/{repo}/actions/runners` omits org-registered runners **entirely**
+and returns the same empty list whether a lane is org-served or dead. A
+repo-scope-only census is why `fleet-status` reported `runners.total=0` while the
+org held two online. `shipyard landability` reads both and says which scope
+satisfied a lane.
+
+Also: a JIT census proves neither idle capacity nor outage. The event-class
+pool registers only while a job is in flight, so an empty census at rest is
+normal — which is why the verdict needs a host attestation, not just a census.
+
+### `launchctl list` cannot see a crash loop
+
+For a `KeepAlive` job, `launchctl list` renders `spawn scheduled` as `- 0` —
+byte-identical to a healthy loaded-but-idle service. M5's preamble runner read
+as healthy through **3,684 respawns** with no `.runner` registration file at
+all. Use `launchctl print gui/$UID/<label>`, which exposes `state` and the
+`runs` counter, and run it first against a job you know is loaded: over SSH the
+GUI domain can be invisible, and an empty answer is then a scope error rather
+than a dead service.
+
+### Trust a sensor only when it can report its own death
+
+Five sensors on this fleet were found dead — one crashing every tick for roughly
+three months, another unloaded for seven weeks — and **none reported itself**.
+So every detector here carries a control that must fail:
+
+- `shipyard landability` assesses two synthetic lanes each run (one nothing can
+  serve, one GitHub always serves) and exits non-zero if they stop
+  discriminating.
+- `landing-watchdog.yml` replays a captured fixture of the 2026-09-13 wedge
+  before every live scan, and fails if the classifier does not fire on it — or
+  if it flags the fixture's healthy control PR.
+- The host attestation writer probes a launchd label that exists and one that
+  cannot, and records `launchd_readable: false` rather than a census of zero.
+
+Verify the attestation is actually running on a host rather than assuming it:
+
+```sh
+~/.local/share/pulp-landing/staging/install_host_attestation.sh --verify
+```
+
+`SKEW` in that receipt means the file was written by a different writer than the
+one installed — a distinct condition from stale and from dead, and the one a
+prior incident collapsed when a behind-the-times checker reported every lane on a
+healthy host as missing its heartbeat.

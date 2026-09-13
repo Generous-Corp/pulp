@@ -1009,10 +1009,15 @@ Two habits come out of it:
 `tools/scripts/negative_capability_check.py` (ctest
 `playback-negative-capability`, selftest
 `playback-negative-capability-selftest`) reads the refusal-shaped members of
-`CompileErrorCode` — anything spelled `Unsupported`, `NotSupported`,
-`Rejected`, `Refused`, or `Disallowed` — finds every site that raises one, and
-decides whether the refused construct is reachable from the timeline authoring
-surface. An authorable refusal needs an entry in
+`CompileErrorCode` **and of `TimelineGraphAdmissionCode`** — anything spelled
+`Unsupported`, `NotSupported`, `Rejected`, `Refused`, or `Disallowed` — finds
+every site that raises one, and decides whether the refused construct is
+reachable from the timeline authoring surface. Both enums are read because a
+document is refused in two places, not one: the playback compiler refuses what
+it cannot lower, and graph admission refuses a device chain shape it will not
+build. A checker pointed at one enum reports a clean registry while the other
+enum's refusals accumulate unowned, which is the failure this gate exists to
+prevent. An authorable refusal needs an entry in
 `tools/scripts/negative_capability_allowlist.json` carrying an owner, a
 `status` of `live-defect` or `intended`, and a reason.
 

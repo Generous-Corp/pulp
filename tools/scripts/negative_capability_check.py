@@ -7,10 +7,12 @@ refuses. Authoring one is worse than the feature not existing: the document
 becomes unplayable, and nothing at authoring time says so. This check makes
 adding one cost a written reason and an owner rather than nothing.
 
-The check reads the refusal-shaped members of `CompileErrorCode`, finds every
-site that raises one, decides whether the refused construct is reachable from
-the timeline authoring surface, and requires an allowlist entry for each
-authorable refusal. Naming a code is not raising it: a field's declared default
+The check reads the refusal-shaped members of every enum in `REFUSAL_ENUMS`
+(`CompileErrorCode`, raised while compiling a document, and
+`TimelineGraphAdmissionCode`, raised while binding one to the signal graph),
+finds every site that raises one, decides whether the refused construct is
+reachable from the timeline authoring surface, and requires an allowlist entry
+for each authorable refusal. Naming a code is not raising it: a field's declared default
 and a `case` label both mention a code that some other site already produced,
 so neither counts as a site. It does not forbid negative capabilities; it forbids
 undocumented ones, and it fails on an allowlist entry whose raise site is gone
@@ -27,9 +29,11 @@ What this check cannot see:
     construct silently, clamping it, or substituting a default are all the same
     defect and none of them name a `CompileErrorCode`. Only a named refusal is
     in range.
-  * Refusals raised outside `CompileErrorCode`. Importers, exporters, and
-    renderers carry their own error enums; a construct refused there is out of
-    range even when it is equally authorable.
+  * Refusals raised outside the enums in `REFUSAL_ENUMS`. Importers, exporters,
+    and renderers carry their own error enums; a construct refused there is out
+    of range even when it is equally authorable. An enum left out of that table
+    is invisible to this check by construction, not by judgement — adding a
+    refusal surface means adding its enum here.
   * Authorability at a distance. The read that proves a construct authorable
     must appear within `AUTHORING_LOOKBACK_LINES` source lines above the raise.
     A guard whose authored input arrives through a value computed further away,
@@ -53,6 +57,18 @@ from pathlib import Path
 
 
 COMPILE_ERROR_HEADER = Path("core/playback/include/pulp/playback/program_compiler.hpp")
+ADMISSION_CODE_HEADER = Path("core/host/include/pulp/host/timeline_graph_binding.hpp")
+
+# Every enum whose refusal-shaped members this check governs, with the header
+# that declares it. A construct refused while binding a timeline to the signal
+# graph is exactly as authorable as one refused while compiling the same
+# document, so both surfaces are read; a refusal enum missing from this table
+# is unreachable by the check no matter how authorable the construct is.
+REFUSAL_ENUMS: tuple[tuple[str, Path], ...] = (
+    ("CompileErrorCode", COMPILE_ERROR_HEADER),
+    ("TimelineGraphAdmissionCode", ADMISSION_CODE_HEADER),
+)
+
 ALLOWLIST_PATH = Path("tools/scripts/negative_capability_allowlist.json")
 AUTHORING_HEADER_DIR = Path("core/timeline/include/pulp/timeline")
 AUTHORING_SCHEMA = Path("core/timeline/schema/timeline_schema.json")
@@ -74,16 +90,28 @@ AUTHORING_LOOKBACK_LINES = 40
 
 MINIMUM_REASON_LENGTH = 24
 
-ENUM_RE = re.compile(r"enum\s+class\s+CompileErrorCode\s*(?::[^{]*)?\{(.*?)\}", re.DOTALL)
-RAISE_RE = re.compile(r"\bCompileErrorCode::([A-Za-z_]\w*)")
+ENUM_NAMES = tuple(name for name, _ in REFUSAL_ENUMS)
+ENUM_ALTERNATION = "|".join(re.escape(name) for name in ENUM_NAMES)
+
+
+def enum_body_re(name: str) -> re.Pattern[str]:
+    """Match the member list of one refusal enum's declaration."""
+    return re.compile(r"enum\s+class\s+" + re.escape(name) + r"\s*(?::[^{]*)?\{(.*?)\}", re.DOTALL)
+
+
+RAISE_RE = re.compile(rf"\b(?:{ENUM_ALTERNATION})::([A-Za-z_]\w*)")
 # A field whose declared default happens to name a code declares nothing about
 # where that code is raised.
-FIELD_DEFAULT_RE = re.compile(r"^\s*CompileErrorCode\s+\w+\s*=\s*CompileErrorCode::")
+FIELD_DEFAULT_RE = re.compile(
+    rf"^\s*(?:{ENUM_ALTERNATION})\s+\w+\s*=\s*(?:{ENUM_ALTERNATION})::"
+)
 # A `case` label selects on a code the compiler already produced elsewhere, so
 # a table that maps every member to its wire name would otherwise read as a
 # raise of all of them. Only the label text is dropped, never the whole line, so
 # a genuine raise sharing the line with a label is still found.
-CASE_LABEL_RE = re.compile(r"\bcase\s+(?:[A-Za-z_]\w*::)*CompileErrorCode::[A-Za-z_]\w*\s*:(?!:)")
+CASE_LABEL_RE = re.compile(
+    rf"\bcase\s+(?:[A-Za-z_]\w*::)*(?:{ENUM_ALTERNATION})::[A-Za-z_]\w*\s*:(?!:)"
+)
 
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//[^\n]*")
@@ -134,7 +162,7 @@ def strip_comments(text: str) -> str:
 
 
 def blank_case_labels(text: str) -> str:
-    """Blank out `case CompileErrorCode::X:` labels, preserving line count."""
+    """Blank out `case <RefusalEnum>::X:` labels, preserving line count."""
     return CASE_LABEL_RE.sub(lambda match: " " * len(match.group(0)), text)
 
 
@@ -150,12 +178,12 @@ def source_files(root: Path) -> list[Path]:
     return files
 
 
-def refusal_codes(root: Path) -> tuple[list[str], list[str]]:
-    """Return (all enum members, members whose name refuses a construct)."""
-    header = root / COMPILE_ERROR_HEADER
+def enum_members(root: Path, name: str, header_path: Path) -> tuple[list[str], list[str]]:
+    """Return (members, refusal-shaped members) for one refusal enum."""
+    header = root / header_path
     if not header.is_file():
         return ([], [])
-    body = ENUM_RE.search(strip_comments(header.read_text(encoding="utf-8")))
+    body = enum_body_re(name).search(strip_comments(header.read_text(encoding="utf-8")))
     if not body:
         return ([], [])
     members = [
@@ -167,6 +195,17 @@ def refusal_codes(root: Path) -> tuple[list[str], list[str]]:
     refusals = [
         member for member in members if any(word in member for word in REFUSAL_WORDS)
     ]
+    return (members, refusals)
+
+
+def refusal_codes(root: Path) -> tuple[list[str], list[str]]:
+    """Return (all members, refusal-shaped members) across every refusal enum."""
+    members: list[str] = []
+    refusals: list[str] = []
+    for name, header_path in REFUSAL_ENUMS:
+        enum_all, enum_refusals = enum_members(root, name, header_path)
+        members.extend(enum_all)
+        refusals.extend(enum_refusals)
     return (members, refusals)
 
 
@@ -228,7 +267,7 @@ def raise_sites(root: Path, refusals: set[str], symbols: set[str]) -> list[dict[
     sites: list[dict[str, object]] = []
     for path in source_files(root):
         text = path.read_text(encoding="utf-8", errors="replace")
-        if "CompileErrorCode::" not in text:
+        if not any(f"{name}::" in text for name in ENUM_NAMES):
             continue
         lines = blank_case_labels(strip_comments(text)).splitlines()
         for index, line in enumerate(lines):
@@ -295,9 +334,24 @@ def load_allowlist(root: Path) -> tuple[list[dict[str, object]], list[str]]:
 
 def verify(root: Path) -> list[str]:
     errors: list[str] = []
-    members, refusals = refusal_codes(root)
-    if not members:
-        return [f"could not read CompileErrorCode from {COMPILE_ERROR_HEADER.as_posix()}"]
+    members: list[str] = []
+    refusals: list[str] = []
+    owning_enum: dict[str, str] = {}
+    for name, header_path in REFUSAL_ENUMS:
+        enum_all, enum_refusals = enum_members(root, name, header_path)
+        if not enum_all:
+            return [f"could not read {name} from {header_path.as_posix()}"]
+        members.extend(enum_all)
+        refusals.extend(enum_refusals)
+        for member in enum_refusals:
+            # Two enums spelling the same refusal would share one allowlist key,
+            # so one written reason would silently cover both raise surfaces.
+            if member in owning_enum:
+                errors.append(
+                    f"refusal {member} is declared by both {owning_enum[member]} and {name}; "
+                    "an allowlist entry cannot say which one it accounts for"
+                )
+            owning_enum[member] = name
 
     symbols = authoring_symbols(root)
     if not symbols:
@@ -336,10 +390,13 @@ def verify(root: Path) -> list[str]:
 
 
 def describe(root: Path) -> int:
-    members, refusals = refusal_codes(root)
+    refusals: list[str] = []
+    for name, header_path in REFUSAL_ENUMS:
+        enum_all, enum_refusals = enum_members(root, name, header_path)
+        refusals.extend(enum_refusals)
+        print(f"{name} members: {len(enum_all)}")
+        print(f"{name} refusal-shaped members: {', '.join(enum_refusals) or '(none)'}")
     symbols = authoring_symbols(root)
-    print(f"CompileErrorCode members: {len(members)}")
-    print(f"refusal-shaped members: {', '.join(refusals) or '(none)'}")
     print(f"authoring-surface symbols: {len(symbols)}")
     for site in raise_sites(root, set(refusals), symbols):
         verdict = "authorable" if site["reads"] else "not-authorable"
@@ -361,13 +418,23 @@ def run_selftest() -> int:
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory) / "repo"
-        for path in (
-            COMPILE_ERROR_HEADER,
+        # The fixture must carry every header the enums are read from and every
+        # file the allowlist accounts for. Deriving the second set from the
+        # allowlist rather than restating it keeps the fixture honest when a
+        # refusal moves: a hardcoded list would drop the file and the entry
+        # would then read as stale, which is the gate grading a fixture rather
+        # than the repository.
+        fixture_paths = {
             ALLOWLIST_PATH,
             AUTHORING_SCHEMA,
             Path("core/playback/src/program_compiler.cpp"),
             Path("core/playback/src/sequence_content_lowerer.cpp"),
-        ):
+        }
+        fixture_paths.update(header for _, header in REFUSAL_ENUMS)
+        fixture_paths.update(
+            Path(entry["file"]) for entry in load_allowlist(repo)[0] if entry.get("file")
+        )
+        for path in sorted(fixture_paths):
             (root / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(repo / path, root / path)
         shutil.copytree(repo / AUTHORING_HEADER_DIR, root / AUTHORING_HEADER_DIR)
@@ -576,6 +643,68 @@ def run_selftest() -> int:
         header.write_text(original_header, encoding="utf-8")
         if verify(root):
             print("selftest rejected the restored fixture")
+            return 1
+
+        # The second refusal enum must be read on the same terms as the first.
+        # A refusal added while binding a timeline to the signal graph is as
+        # authorable as one added while compiling it, and a check that reads
+        # only the compiler enum reports a clean repository while the other
+        # surface grows unaccounted refusals — which is exactly the gap this
+        # enum was added to close.
+        admission_fixture_codes = ("UnsupportedDeviceSlotKind", "UnsupportedDeviceChain")
+        declared_admission = set(
+            enum_members(root, "TimelineGraphAdmissionCode", ADMISSION_CODE_HEADER)[1]
+        )
+        missing_admission = [
+            code for code in admission_fixture_codes if code not in declared_admission
+        ]
+        if missing_admission:
+            print(
+                "selftest fixtures name "
+                + ", ".join(missing_admission)
+                + ", which TimelineGraphAdmissionCode no longer declares as a refusal; "
+                "re-point the fixture at a member it does declare"
+            )
+            return 1
+
+        admission = root / "core/host/src/selftest_admission.cpp"
+        admission.write_text(
+            "#include <pulp/host/timeline_graph_binding.hpp>\n"
+            "namespace pulp::host {\n"
+            "TimelineGraphAdmissionCode refuse(const timeline::DevicePlacement& placement) {\n"
+            "    if (placement.configuration.slot_kind != timeline::DeviceSlotKind::EventToAudio)\n"
+            "        return TimelineGraphAdmissionCode::UnsupportedDeviceSlotKind;\n"
+            "    return TimelineGraphAdmissionCode::Accepted;\n"
+            "}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        if not any(
+            "selftest_admission.cpp" in error and "authorable" in error for error in verify(root)
+        ):
+            print("selftest missed a synthetic authorable graph-admission refusal")
+            return 1
+
+        # And an admission refusal that reads nothing a user authored is still
+        # out of range, so the second enum does not widen the rule, only the
+        # surface it is applied to.
+        admission.write_text(
+            "#include <pulp/host/timeline_graph_binding.hpp>\n"
+            "namespace pulp::host {\n"
+            "TimelineGraphAdmissionCode refuse(unsigned long budget, unsigned long charged) {\n"
+            "    if (charged > budget)\n"
+            "        return TimelineGraphAdmissionCode::UnsupportedDeviceChain;\n"
+            "    return TimelineGraphAdmissionCode::Accepted;\n"
+            "}\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        if verify(root):
+            print("selftest rejected a graph-admission refusal that reads nothing authorable")
+            return 1
+        admission.unlink()
+        if verify(root):
+            print("selftest rejected the fixture after the graph-admission cases")
             return 1
 
     print("negative_capability_selftest=true")

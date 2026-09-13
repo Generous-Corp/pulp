@@ -1,120 +1,130 @@
 {
-  "$schema": "Declarative config\u2192doc drift map. Each entry: when any file matching `paths` changes in a diff range, at least ONE file in `docs` must change too, or the gate fails with `why`. Consumed by tools/scripts/config_doc_check.py (mirrors skill_sync_check.py). Bypass on the tip commit with `Config-Doc: skip reason=\"...\"`.",
-  "trailers": {
-    "config_doc": "Config-Doc"
+ "$schema": "Declarative config→doc drift map. Each entry: when any file matching `paths` changes in a diff range, at least ONE file in `docs` must change too, or the gate fails with `why`. Consumed by tools/scripts/config_doc_check.py (mirrors skill_sync_check.py). Bypass on the tip commit with `Config-Doc: skip reason=\"...\"`.",
+ "trailers": {
+  "config_doc": "Config-Doc"
+ },
+ "entries": [
+  {
+   "paths": [
+    ".shipyard/config.toml",
+    ".shipyard.local/config.toml.example"
+   ],
+   "docs": [
+    "docs/guides/versioning.md",
+    "docs/guides/local-ci.md"
+   ],
+   "why": "Shipyard validation config (targets, gates, routing) is documented in the versioning + local-ci guides; a change here without a doc edit silently drifts the operator-facing description of how CI validates and merges."
   },
-  "entries": [
-    {
-      "paths": [
-        ".shipyard/config.toml",
-        ".shipyard.local/config.toml.example"
-      ],
-      "docs": [
-        "docs/guides/versioning.md",
-        "docs/guides/local-ci.md"
-      ],
-      "why": "Shipyard validation config (targets, gates, routing) is documented in the versioning + local-ci guides; a change here without a doc edit silently drifts the operator-facing description of how CI validates and merges."
-    },
-    {
-      "paths": [
-        "tools/shipyard.toml",
-        "tools/install-shipyard.sh"
-      ],
-      "docs": [
-        "docs/guides/versioning.md"
-      ],
-      "why": "The Shipyard binary pin and installer are covered by the versioning guide's three-layer enforcement design; bumping the pin or changing install logic without a doc edit drifts the documented toolchain."
-    },
-    {
-      "paths": [
-        ".github/workflows/build.yml",
-        ".github/workflows/build-macos.yml"
-      ],
-      "docs": [
-        "docs/guides/local-ci.md"
-      ],
-      "why": "The build workflow's runner routing (self-hosted macOS + GitHub-hosted lanes) is documented in local-ci.md; changing job/runner wiring without a doc edit drifts the documented CI topology."
-    },
-    {
-      "paths": [
-        "tools/scripts/runner_topology.json",
-        ".github/workflows/runner-topology-check.yml"
-      ],
-      "docs": [
-        "docs/guides/local-ci.md"
-      ],
-      "why": "The routing contract IS the documented lane->label topology; local-ci.md was already drifted from the live variables (it described the macOS overflow lane as pointing at a label the variable had not named for months) precisely because the two could move independently. Changing a lane without updating the guide re-opens that gap."
-    },
-    {
-      "paths": [
-        ".github/workflows/auto-release.yml",
-        ".github/workflows/auto-release-watchdog.yml",
-        ".github/workflows/release-cadence-check.yml",
-        ".github/workflows/watchdog-reaper.yml",
-        ".github/workflows/release-deleted-tripwire.yml"
-      ],
-      "docs": [
-        "docs/guides/release-watchdog.md"
-      ],
-      "why": "The auto-release + watchdog + cadence-check trio is the release-watchdog design; changing any of them without a doc edit drifts the documented three-layer release-failure protection."
-    },
-    {
-      "paths": [
-        ".github/workflows/runner-health-check.yml",
-        "tools/scripts/queue_age_watchdog.py"
-      ],
-      "docs": [
-        "docs/guides/local-ci.md"
-      ],
-      "why": "The off-fleet queue-age watchdog's thresholds, its two-condition runner-lane rule (age AND lane-liveness), and its pre-job-expansion rule (aged pull-request build.yml run with stable exact identity and a successful empty jobs response) are documented in local-ci.md, including the measured queue-age baseline and degraded-evidence boundary. Retuning the guard without a doc edit drifts the operator-facing account of when CI pages a human \u2014 and a monitor whose documented behavior is wrong gets muted."
-    },
-    {
-      "paths": [
-        ".github/workflows/merge-stall-check.yml",
-        "tools/scripts/merge_stall_watchdog.py"
-      ],
-      "docs": [
-        "docs/guides/local-ci.md"
-      ],
-      "why": "The off-fleet merge-stall watchdog's alarm predicate (required-green + CLEAN/BEHIND + auto-merge + age, sustained two sweeps) and its threshold are documented in local-ci.md as the operator-facing account of when CI pages on 'green PRs are not merging'. Retuning the guard without a doc edit drifts that account, and a monitor whose documented behavior is wrong gets muted."
-    },
-    {
-      "paths": [
-        ".github/workflows/version-skill-check.yml",
-        ".github/workflows/coverage.yml"
-      ],
-      "docs": [
-        "docs/guides/versioning.md"
-      ],
-      "why": "The authoritative version/skill/coverage gate workflows are described by the versioning guide; changing the enforced gates without a doc edit drifts the documented enforcement layer."
-    },
-    {
-      "paths": [
-        ".github/workflows/version-at-land.yml"
-      ],
-      "docs": [
-        "docs/guides/version-at-land-cutover.md"
-      ],
-      "why": "The single-writer post-merge version-assignment bot is documented by the cutover guide, including the dry-run\u2192--push flip and the one-time straggler rule; changing the workflow (especially the flip off dry-run) without a doc edit drifts the release-critical cutover procedure."
-    },
-    {
-      "paths": [
-        ".github/workflows/api-contracts.yml",
-        "tools/build-api-docs.sh"
-      ],
-      "docs": [
-        "docs/guides/test-lanes.md"
-      ],
-      "why": "The API-contract lane is promotable to a required context only because of two properties that are invisible in the file itself — it reports on merge_group, and it carries no paths filter. test-lanes.md is where those are explained, along with why the HTML render stays off the lane. The advisory version of this check reported a main-breaking defect it could not block; a lane whose documented behavior is wrong is how that happens again."
-    },
-    {
-      "paths": [
-        ".github/workflows/gcc-compile-gate.yml"
-      ],
-      "docs": [
-        "docs/guides/local-ci.md"
-      ],
-      "why": "The GCC compile gate is the only GCC compilation of core/ in PR CI; its trigger paths and the options that keep it cheap (GPU/tests/examples off) are described in the local-CI guide so the coverage boundary is discoverable."
-    }
-  ]
+  {
+   "paths": [
+    "tools/shipyard.toml",
+    "tools/install-shipyard.sh"
+   ],
+   "docs": [
+    "docs/guides/versioning.md"
+   ],
+   "why": "The Shipyard binary pin and installer are covered by the versioning guide's three-layer enforcement design; bumping the pin or changing install logic without a doc edit drifts the documented toolchain."
+  },
+  {
+   "paths": [
+    ".github/workflows/build.yml",
+    ".github/workflows/build-macos.yml"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "The build workflow's runner routing (self-hosted macOS + GitHub-hosted lanes) is documented in local-ci.md; changing job/runner wiring without a doc edit drifts the documented CI topology."
+  },
+  {
+   "paths": [
+    "tools/scripts/runner_topology.json",
+    ".github/workflows/runner-topology-check.yml"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "The routing contract IS the documented lane->label topology; local-ci.md was already drifted from the live variables (it described the macOS overflow lane as pointing at a label the variable had not named for months) precisely because the two could move independently. Changing a lane without updating the guide re-opens that gap."
+  },
+  {
+   "paths": [
+    ".github/workflows/auto-release.yml",
+    ".github/workflows/auto-release-watchdog.yml",
+    ".github/workflows/release-cadence-check.yml",
+    ".github/workflows/watchdog-reaper.yml",
+    ".github/workflows/release-deleted-tripwire.yml"
+   ],
+   "docs": [
+    "docs/guides/release-watchdog.md"
+   ],
+   "why": "The auto-release + watchdog + cadence-check trio is the release-watchdog design; changing any of them without a doc edit drifts the documented three-layer release-failure protection."
+  },
+  {
+   "paths": [
+    ".github/workflows/runner-health-check.yml",
+    "tools/scripts/queue_age_watchdog.py"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "The off-fleet queue-age watchdog's thresholds, its two-condition runner-lane rule (age AND lane-liveness), and its pre-job-expansion rule (aged pull-request build.yml run with stable exact identity and a successful empty jobs response) are documented in local-ci.md, including the measured queue-age baseline and degraded-evidence boundary. Retuning the guard without a doc edit drifts the operator-facing account of when CI pages a human — and a monitor whose documented behavior is wrong gets muted."
+  },
+  {
+   "paths": [
+    ".github/workflows/merge-stall-check.yml",
+    "tools/scripts/merge_stall_watchdog.py"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "The off-fleet merge-stall watchdog's alarm predicate (required-green + CLEAN/BEHIND + auto-merge + age, sustained two sweeps) and its threshold are documented in local-ci.md as the operator-facing account of when CI pages on 'green PRs are not merging'. Retuning the guard without a doc edit drifts that account, and a monitor whose documented behavior is wrong gets muted."
+  },
+  {
+   "paths": [
+    ".github/workflows/version-skill-check.yml",
+    ".github/workflows/coverage.yml"
+   ],
+   "docs": [
+    "docs/guides/versioning.md"
+   ],
+   "why": "The authoritative version/skill/coverage gate workflows are described by the versioning guide; changing the enforced gates without a doc edit drifts the documented enforcement layer."
+  },
+  {
+   "paths": [
+    ".github/workflows/version-at-land.yml"
+   ],
+   "docs": [
+    "docs/guides/version-at-land-cutover.md"
+   ],
+   "why": "The single-writer post-merge version-assignment bot is documented by the cutover guide, including the dry-run→--push flip and the one-time straggler rule; changing the workflow (especially the flip off dry-run) without a doc edit drifts the release-critical cutover procedure."
+  },
+  {
+   "paths": [
+    ".github/workflows/api-contracts.yml",
+    "tools/build-api-docs.sh"
+   ],
+   "docs": [
+    "docs/guides/test-lanes.md"
+   ],
+   "why": "The API-contract lane is promotable to a required context only because of two properties that are invisible in the file itself — it reports on merge_group, and it carries no paths filter. test-lanes.md is where those are explained, along with why the HTML render stays off the lane. The advisory version of this check reported a main-breaking defect it could not block; a lane whose documented behavior is wrong is how that happens again."
+  },
+  {
+   "paths": [
+    ".github/workflows/gcc-compile-gate.yml"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "The GCC compile gate is the only GCC compilation of core/ in PR CI; its trigger paths and the options that keep it cheap (GPU/tests/examples off) are described in the local-CI guide so the coverage boundary is discoverable."
+  },
+  {
+   "paths": [
+    ".github/workflows/landing-watchdog.yml",
+    "tools/scripts/landing_watchdog.py"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "The landing watchdog is the redundant, GitHub-hosted half of the wedge detector; its thresholds and its independence from the fleet are what an operator needs to read before trusting or ignoring the issue it opens. A change here without a doc edit silently drifts the description of what the alarm means."
+  }
+ ]
 }

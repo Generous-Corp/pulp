@@ -70,6 +70,104 @@
       "owner": "playback",
       "status": "live-defect",
       "reason": "set_active_take_lane selects a comp lane on a track a SequenceRef then nests. Selection is the same substitution freeze performs: begin_track returns ActiveTake content built from the lane's comp segments and discards the arrangement. The nested walk reads the arrangement, so honouring the nesting would sound exactly the material the author deselected. The refusal is scoped to a SELECTED lane; an unselected lane is inert at both levels and does not refuse. Flip this when a flattened leaf can carry comped take segments, the same missing construct freeze needs."
+    },
+    {
+      "code": "UnsupportedDevicePosition",
+      "file": "core/host/src/timeline_device_resolver.cpp",
+      "owner": "host",
+      "status": "live-defect",
+      "reason": "The document model lets a device be placed post-fader, but the binding wires the whole device chain ahead of the track's mixer node and the mixer exposes no post-gain insertion tap, so a post-fader placement has nowhere to run; the refusal stands until the mixer publishes that tap."
+    },
+    {
+      "code": "UnsupportedDeviceSlotKind",
+      "file": "core/host/src/timeline_device_resolver.cpp",
+      "owner": "host",
+      "status": "live-defect",
+      "reason": "Narrowed rather than deleted now that the event domain is admitted: an audio-to-audio insert is still refused because no built-in occupies that slot and the binding has no audio-in device node to wire, and a placement whose declared slot kind disagrees with its binding key's catalog domain is refused because the declaration, not the key, decides where the node is wired."
+    },
+    {
+      "code": "UnsupportedDeviceKind",
+      "file": "core/host/src/timeline_device_resolver.cpp",
+      "owner": "host",
+      "status": "intended",
+      "reason": "An external, generated, or unresolved device is the caller's to build; the chain-level filter already hands such a chain back before this per-placement guard can fire, so it is a defensive restatement of the built-in-only contract rather than a refusal a document reaches today."
+    },
+    {
+      "code": "UnsupportedDeviceBinding",
+      "file": "core/host/src/timeline_device_resolver.cpp",
+      "owner": "host",
+      "status": "intended",
+      "reason": "A binding key outside the built-in device catalog names no device at all: there is no descriptor to size the node, no factory to build it, and no latency to compensate, so admitting it would bind an empty node into the chain and call it playable."
+    },
+    {
+      "code": "UnsupportedDeviceBypass",
+      "file": "core/host/src/timeline_device_resolver.cpp",
+      "owner": "host",
+      "status": "live-defect",
+      "reason": "The chain's event-compensation shift is resolved once at prepare and cached for the audio thread; a bypassed device still reports its look-ahead latency, so admitting bypass would either schedule against a shift the bypassed chain no longer imposes or require the shift to move under automation, which the cached prepared number cannot follow."
+    },
+    {
+      "code": "UnsupportedDeviceWetDry",
+      "file": "core/host/src/timeline_device_resolver.cpp",
+      "owner": "host",
+      "status": "live-defect",
+      "reason": "A wet/dry mix other than fully wet has no meaning in the event domain — there is no dry event stream to blend and no audio to crossfade at the instrument, which produces sound from nothing — so the refusal stands until a per-domain mix contract defines what blending an event stream means."
+    },
+    {
+      "code": "UnsupportedDeviceState",
+      "file": "core/host/src/timeline_device_resolver.cpp",
+      "owner": "host",
+      "status": "live-defect",
+      "reason": "A placement carrying a state reference asks the binding to restore device state the built-in slots have no deserialisation path for; admitting it would silently drop the authored state and play a differently configured device than the document describes."
+    },
+    {
+      "code": "EventChainLiveInputUnsupported",
+      "file": "core/host/src/timeline_device_resolver.cpp",
+      "owner": "host",
+      "status": "live-defect",
+      "reason": "A track offering live input into a chain compensated by reading ahead would diverge from its scheduled events by exactly the chain's event latency, because a live note cannot be issued early; the pair is refused until a per-track monitor policy defines what the musician hears."
+    },
+    {
+      "code": "UnsupportedDeviceChain",
+      "file": "core/host/src/timeline_device_resolver.cpp",
+      "owner": "host",
+      "status": "live-defect",
+      "reason": "The binding admits an event-to-event chain that ends in exactly one event-to-audio device, up to the admitted chain length; a longer chain, a chain that does not end in the audio-producing device, and a project chain that disagrees with the compiled placement order are all refused because each would bind a node whose prepared latency or routing the compensation shift does not describe."
+    },
+    {
+      "code": "UnsupportedDeviceChain",
+      "file": "core/host/src/timeline_graph_binding_candidate.cpp",
+      "owner": "host",
+      "status": "intended",
+      "reason": "A retained owned device whose declaration no longer matches the project's authored chain is refused rather than rebound, so a stale node cannot keep playing under a declaration the document has already changed; the caller answers by preparing the binding again from scratch."
+    },
+    {
+      "code": "RealtimeStretchRejected",
+      "file": "core/host/src/timeline_graph_binding.cpp",
+      "owner": "host",
+      "status": "intended",
+      "reason": "Realtime stretch is admitted against declared per-clip and per-program resource limits; a program past those limits is refused at prepare rather than dropped to a lower quality on the audio thread, because a silent quality fallback is indistinguishable from the engine working."
+    },
+    {
+      "code": "RealtimeStretchRejected",
+      "file": "core/host/src/timeline_graph_binding_candidate.cpp",
+      "owner": "host",
+      "status": "intended",
+      "reason": "The candidate path re-admits realtime stretch against the same declared limits before a rebind, so a program that grew past them while bound is refused at the same gate rather than reaching the audio thread through an incremental update."
+    },
+    {
+      "code": "RoutedPlanRejected",
+      "file": "core/host/src/timeline_graph_binding_internal.hpp",
+      "owner": "host",
+      "status": "intended",
+      "reason": "The executor's own topology validation rejected the routed plan; this site relays that verdict with the offending node and index rather than inventing a graph-level reason, and an unmapped validation code falls through to the same refusal so a new executor verdict cannot be admitted by omission."
+    },
+    {
+      "code": "AutomationRendererRejected",
+      "file": "core/host/src/timeline_automation_delivery.cpp",
+      "owner": "host",
+      "status": "intended",
+      "reason": "Creating the track automation renderer failed against its declared lane limits; the binding relays the renderer's own error code and lane id rather than binding a track whose automation would not be delivered."
     }
   ]
 }

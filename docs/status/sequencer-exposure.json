@@ -5650,6 +5650,237 @@
       }
     },
     {
+      "id": "event-to-event-device-and-catalog",
+      "title": "An executable event-to-event device, its admitted chain shape, and the catalog that publishes both",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "8f23668d-92bc-4b0c-a1ff-f51b9e3796e4",
+      "owned_paths": [
+        "core/host/include/pulp/host/timeline_device_resolver.hpp",
+        "core/host/src/timeline_device_resolver.cpp",
+        "core/host/src/timeline_graph_binding_routes.cpp",
+        "tools/timeline/include/pulp/tools/timeline/device_catalog.hpp",
+        "tools/timeline/src/device_catalog.cpp",
+        "tools/timeline/CMakeLists.txt",
+        "tools/cli/cmd_seq.cpp",
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/mcp/mcp_tools.hpp",
+        "test/test_timeline_event_device_chain.cpp",
+        "test/test_cli_timeline.cpp",
+        "test/test_mcp_timeline_sessions.cpp",
+        "test/cmake/timeline_tests.cmake",
+        "docs/policies/event-stream-pdc.md",
+        "docs/reference/cli.md",
+        "docs/status/cli-commands.yaml",
+        "tools/scripts/negative_capability_check.py",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/hosting/SKILL.md",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        ".agents/skills/cli-maintenance/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/host/include/pulp/host/timeline_device_resolver.hpp",
+          "needles": [
+            "kEventHumaniserBindingKey",
+            "BuiltInDeviceDescriptor",
+            "builtin_device_catalog",
+            "kAdmittedDeviceChainLength",
+            "event_device_latency_ceiling_samples"
+          ]
+        },
+        {
+          "path": "core/host/src/timeline_device_resolver.cpp",
+          "needles": [
+            "EventHumaniserSlot",
+            "kBuiltInDevices",
+            "resolve_timeline_device_route"
+          ]
+        },
+        {
+          "path": "tools/timeline/src/device_catalog.cpp",
+          "needles": [
+            "device_catalog_json",
+            "event-to-event",
+            "latency_ceiling_samples"
+          ]
+        },
+        {
+          "path": "tools/cli/cmd_seq.cpp",
+          "needles": [
+            "device_catalog_json"
+          ]
+        },
+        {
+          "path": "tools/mcp/mcp_timeline_tools.cpp",
+          "needles": [
+            "handle_timeline_device_catalog",
+            "pulp_timeline_device_catalog"
+          ]
+        },
+        {
+          "path": "test/test_timeline_event_device_chain.cpp",
+          "needles": [
+            "timeline event device chain plays an event-to-event device before the instrument",
+            "timeline event device chain refuses the shapes the narrowing excludes",
+            "timeline built-in device catalog describes what a chain may name"
+          ]
+        },
+        {
+          "path": "docs/policies/event-stream-pdc.md",
+          "needles": [
+            "An event-to-event device executes"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_check.py",
+          "needles": [
+            "REFUSAL_ENUMS",
+            "TimelineGraphAdmissionCode"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "pulp.device.event.humanise is Pulp's first executable event-to-event device: a MIDI humaniser built on the existing pulp::midi::Humanize kernel, which reports kEventHumaniserWindowSamples of latency because a device that may move an attack later must hold that attack for the width of the window it may move it into. Until it existed, every chain Pulp could play resolved to a zero shift and the compensating path was proven only by its own test doubles; it is now driven by a device that runs. The header also publishes the two bounds admission enforces -- kAdmittedDeviceChainLength and event_device_latency_ceiling_samples() -- so a caller can predict a refusal instead of discovering it on a round trip, and so no caller can drift by re-declaring the ceiling: the function forwards to the single constant derived from CustomNodeType::kMaxLatencySamples that the graph binding already enforces. The admitted shape is deliberately narrow -- one event-to-event device ahead of one instrument -- and every other declaration is a typed refusal at admission rather than a truncation.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/host/include/pulp/host/timeline_device_resolver.hpp",
+              "needles": [
+                "kEventHumaniserBindingKey",
+                "struct BuiltInDeviceDescriptor",
+                "builtin_device_catalog",
+                "kAdmittedDeviceChainLength",
+                "event_device_latency_ceiling_samples"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_event_device_chain.cpp",
+              "needles": [
+                "timeline event device chain plays an event-to-event device before the instrument",
+                "timeline built-in device catalog describes what a chain may name"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "pulp seq capabilities now carries a device_catalog on its no-argument object: every built-in device a track's device chain may name, each device's binding key, domain and reported latency, and the max_chain_length and latency_ceiling_samples admission enforces. It rides the existing capability object rather than a subcommand of its own because what a caller may author is one question, and a client that must ask twice will eventually ask once and author against half an answer. A named --writer-profile response deliberately does not carry it, and the CLI test asserts that absence as its control, so the catalog is a property of the unrestricted capability answer rather than something every response repeats. This closes the offline CLI gap event-stream-pdc-contract records; that row's dispositions are frozen at its merge, so the closure is recorded here rather than by editing it.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "docs/status/cli-commands.yaml",
+              "needles": [
+                "device_catalog of every built-in device"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "device_catalog_json"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/timeline/src/device_catalog.cpp",
+              "needles": [
+                "device_catalog_json",
+                "max_chain_length",
+                "latency_ceiling_samples"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_cli_timeline.cpp",
+              "needles": [
+                "\"binding_key\":\"pulp.device.event.humanise\"",
+                "\"max_chain_length\":2"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "pulp_timeline_device_catalog is a fourth hand-written read-projection descriptor alongside the three view tools, published in tools/list and bound in the same view_bindings table, so a design-time client discovers what a device chain may name without reading source. It takes no arguments but still parses them, so a malformed or non-object payload is refused the way every other timeline tool refuses one rather than answered with a catalog the caller never asked for. Both boundaries call one encoder in tools/timeline, so the CLI and MCP payloads are identical by construction rather than by review -- and that placement is what makes the capability reachable at all: pulp-cli and pulp-mcp-core link pulp::tool-timeline publicly but not pulp::host, so the host types stay confined to device_catalog.cpp and no target's link surface widens. This closes the offline MCP gap event-stream-pdc-contract records, whose dispositions are frozen at that row's merge.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "pulp_timeline_device_catalog",
+                "timeline_view_mcp_tools_json_fragment"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_tools.hpp",
+              "needles": [
+                "handle_timeline_device_catalog"
+              ]
+            },
+            {
+              "kind": "mcp_projection",
+              "path": "tools/timeline/include/pulp/tools/timeline/device_catalog.hpp",
+              "needles": [
+                "struct DeviceCatalogEntry",
+                "device_catalog_json",
+                "event_device_latency_ceiling_samples"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_sessions.cpp",
+              "needles": [
+                "timeline MCP answers what a device chain may name",
+                "pulp_timeline_device_catalog"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Nothing here is a live control. The device chain is authored in the document and resolved at admission on the control thread; there is no Product A capability ID, operation, executor or policy projection that names a device chain, and inventing one from this slice would advertise a live authority no executor implements. The live surface becomes projectable when the sequencer control tranche lands a timeline document capability, not as a side effect of a device becoming executable.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "event-stream-pdc-contract"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No installed agent-capability row advertises event-chain device authoring. The catalog this row publishes is the fact such a row would need to describe, so advertising it is now possible rather than a claim about a chain that cannot execute -- but the manifest row itself, with its own version and digest, is a separate registration and is not written here.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "event-stream-pdc-contract"
+          ]
+        }
+      }
+    },
+    {
       "id": "product-a-timeline-document-session",
       "title": "Live Product A control over a mutable Timeline document session",
       "classification": "live_product_control",

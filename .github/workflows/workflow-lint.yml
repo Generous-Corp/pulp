@@ -114,6 +114,7 @@ on:
       - 'tools/scripts/fixtures/recovery_judgement_parameter_hpp.patch'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
+      - 'tools/scripts/test_gpu_provenance_ci_wiring.py'
       - 'tools/scripts/runner_topology.json'
       - '.shipyard/config.toml'
       - 'test/cmake/**'
@@ -215,6 +216,7 @@ on:
       - 'tools/scripts/fixtures/recovery_judgement_parameter_hpp.patch'
       - 'tools/scripts/example_validation_paths.py'
       - 'tools/scripts/test_example_validation_paths.py'
+      - 'tools/scripts/test_gpu_provenance_ci_wiring.py'
       - 'tools/scripts/runner_topology.json'
       - '.shipyard/config.toml'
       - 'test/cmake/**'
@@ -322,6 +324,7 @@ jobs:
           python3 tools/scripts/test_shipyard_recovery_result_check.py
           python3 tools/scripts/test_shipyard_recovery_worker_workflow.py
           python3 tools/scripts/test_shipyard_recovery_judgement.py
+          python3 tools/scripts/test_gpu_provenance_ci_wiring.py
 
       - name: Release-pipeline regression tests (#720, #1962, #2467)
         # Regression coverage for silent CI-pipeline failures:
