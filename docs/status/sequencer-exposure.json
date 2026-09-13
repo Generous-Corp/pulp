@@ -5774,7 +5774,7 @@
                 "sequencer state read copies the published snapshot and playhead",
                 "sequencer state edit submits one exact typed command",
                 "sequencer state edit refuses a malformed or out-of-range request",
-                "a full sequencer command FIFO is a typed retryable refusal, never a drop",
+                "a full sequencer command FIFO is a typed retryable refusal and never a drop",
                 "both sequencer operations refuse an off-host-main-thread call",
                 "sequencer operations refuse an unresolvable or wrongly-tiered channel"
               ]

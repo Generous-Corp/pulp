@@ -323,7 +323,7 @@ TEST_CASE("sequencer state edit refuses a malformed or out-of-range request",
     CHECK_FALSE(channel.audio_try_pop_command().has_value());
 }
 
-TEST_CASE("a full sequencer command FIFO is a typed retryable refusal, never a drop",
+TEST_CASE("a full sequencer command FIFO is a typed retryable refusal and never a drop",
           "[inspect][control][sequencer][edit][backpressure]") {
     state::SequencerStateChannel channel;
     auto executor = make_control_sequencer_state_edit_executor(resolver(channel));
