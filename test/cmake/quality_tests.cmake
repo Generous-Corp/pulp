@@ -518,6 +518,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-provenance-hydration-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_gpu_provenance_commits.py")
 
+    # The sibling suite mocks subprocess wholesale, so it proves the candidate
+    # order and the fall-through without ever asking git whether those refs
+    # resolve. This drives real git against a genuinely shallow clone whose
+    # refs/pull/<n>/merge is absent -- the production condition the fallback
+    # exists for -- and also asserts an unreachable commit still fails closed.
+    add_test(NAME gpu-provenance-hydration-real-git-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_real_git.py")
+
     # The handoff ledger pins a revision, blob, and tree per referenced path, so
     # any commit touching a pinned path stales rows far from the edit. This
     # covers the generator that owns those identities and the drift check that
