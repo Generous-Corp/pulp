@@ -37,6 +37,10 @@ import subprocess
 import sys
 from typing import Any, Iterator, NamedTuple
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import connected_git_history  # noqa: E402
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_HANDOFF = ROOT / "docs/status/gpu-vellum-handoff.yaml"
@@ -55,6 +59,10 @@ GIT_TIMEOUT_SECONDS = 30
 # not re-shell the same hundreds of Git queries.
 _IDENTITY_CACHE: dict[tuple[str, str, str, str], "Identity"] = {}
 _CATALOG_MODULE: Any = None
+# Reading the graft-boundary list is one Git query plus one file read, and the
+# answer cannot change mid-run. Caching it per checkout keeps the guard below off
+# the per-path hot loop, which resolves a hundred rows.
+_BOUNDARY_CACHE: dict[str, set[str]] = {}
 
 
 class ProvenanceError(RuntimeError):
@@ -214,6 +222,17 @@ def resolve_source_commit(root: pathlib.Path, requested: str) -> str:
     return commit
 
 
+def shallow_boundaries_for(root: pathlib.Path) -> set[str]:
+    """Return this checkout's graft boundaries, resolved once per run."""
+
+    key = str(root)
+    cached = _BOUNDARY_CACHE.get(key)
+    if cached is None:
+        cached = connected_git_history.shallow_boundaries(root)
+        _BOUNDARY_CACHE[key] = cached
+    return cached
+
+
 def resolve_identity(root: pathlib.Path, commit: str, path: str) -> Identity:
     """Derive one row's identity fields from the single source commit.
 
@@ -230,6 +249,21 @@ def resolve_identity(root: pathlib.Path, commit: str, path: str) -> Identity:
         return cached
 
     revision = git_output(root, ["log", "-1", "--format=%H", commit, "--", path])
+    boundaries = shallow_boundaries_for(root)
+    # Same predicate as connected_git_history.resolves_to_boundary, applied to
+    # the answer already in hand rather than re-running the identical query for
+    # each of a hundred rows.
+    if boundaries and (not revision or revision in boundaries):
+        # Emitting this revision would pin the row to the oldest commit the
+        # checkout happens to hold rather than to the commit that last changed
+        # the path -- a well-formed SHA that is simply wrong, written over a
+        # correct ledger with exit status 0. Refuse instead.
+        raise ProvenanceError(
+            f"cannot resolve the owning revision of {path!r}: this checkout's Git "
+            "history is truncated, so per-path last-owner revisions resolve to the "
+            "shallow graft boundary instead of the real owning commit; "
+            f"{connected_git_history.REMEDY}"
+        )
     if not revision:
         raise ProvenanceError(
             f"path {path!r} has no commit history at source commit {commit}"

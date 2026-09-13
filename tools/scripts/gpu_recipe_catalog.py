@@ -12,6 +12,7 @@ import subprocess
 import sys
 from typing import Any
 
+import connected_git_history
 import json_schema_lite
 
 
@@ -736,6 +737,20 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
     if head_revision is None:
         return ["handoff repository HEAD cannot be resolved"]
 
+    # A truncated checkout answers "which commit last owned this path?" with its
+    # graft boundary, or cannot answer at all because the pinned revision is not
+    # in the object store. Either way the row below fails for a reason that has
+    # nothing to do with the ledger, and saying "absent from its pinned revision"
+    # sends the reader to repair a file that is not broken. An empty boundary set
+    # -- a complete checkout, or a Git query that could not be run -- leaves every
+    # message below exactly as it was.
+    shallow_boundaries = connected_git_history.shallow_boundaries(root)
+    shallow_problem = (
+        "handoff identities cannot be verified: this checkout's Git history is "
+        f"truncated, so pinned revisions resolve to the shallow graft boundary "
+        f"instead of the real owning commit; {connected_git_history.REMEDY}"
+    )
+
     routed_paths = sorted(
         {
             row["path"]
@@ -842,19 +857,35 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
                 pinned_object, pinned_type, head_object, latest_owner,
                 ancestor_code, checkout_dirty,
             ) = git_facts[fact_key]
-            if pinned_object is None:
-                problems.append(
-                    f"handoff entries[{index}].pulp_paths[{row_index}] is absent "
-                    "from its pinned Pulp revision"
-                )
-            elif (
+            row_is_stale = (
                 ancestor_code != 0
                 or pinned_object != object_id
                 or pinned_type != object_type
                 or head_object != object_id
                 or latest_owner != revision
                 or checkout_dirty
+            )
+            # Only re-attribute rows that already failed. A green row needs no
+            # explanation, and asking Git per row would add ~100 log queries to
+            # the common case where nothing is wrong.
+            if (
+                (pinned_object is None or row_is_stale)
+                and shallow_boundaries
+                and connected_git_history.resolves_to_boundary(
+                    root, str(revision), path, shallow_boundaries
+                )
             ):
+                # One truncated checkout is one defect, however many rows it
+                # breaks. Deduplicate so the true cause is not buried under a
+                # hundred copies of itself.
+                if shallow_problem not in problems:
+                    problems.append(shallow_problem)
+            elif pinned_object is None:
+                problems.append(
+                    f"handoff entries[{index}].pulp_paths[{row_index}] is absent "
+                    "from its pinned Pulp revision"
+                )
+            elif row_is_stale:
                 problems.append(
                     f"handoff entries[{index}].pulp_paths[{row_index}] has stale "
                     "revision/blob/tree identity"
