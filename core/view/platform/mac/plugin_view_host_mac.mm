@@ -670,10 +670,10 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
     // process-global).
     auto* fv = pulp_focus_under_root(root);
     // Only a FOCUSED text field consumes keys in a plugin host. With nothing
-    // focused and no dismissible overlay open the editor isn't first responder
-    // (see pulp_editor_should_hold_keyboard), so the key never reaches here —
-    // it stays with the DAW for
-    // transport + Musical Typing. A plugin must NOT route the bare computer keyboard
+    // focused and no keyboard-owning overlay open the editor isn't first
+    // responder (see pulp_editor_should_hold_keyboard), so the key never
+    // reaches here — it stays with the DAW for transport + Musical Typing.
+    // A plugin must NOT route the bare computer keyboard
     // into its own musical typing; that fights the host. (The standalone drives its
     // own QWERTY musical typing through a different window host.)
     if (!fv) return false;
@@ -1015,8 +1015,9 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 // but left no path to hand transport keys back after the user left a field;
 // the forward supersedes that approach.)
 - (BOOL)acceptsFirstResponder {
-    // Borrow the keyboard only for text entry or an explicitly active bounded
-    // navigation interaction. Mere focusability never takes it from the DAW.
+    // Borrow the keyboard only for text entry, an explicitly active bounded
+    // navigation interaction, or an overlay that owns Escape. Mere
+    // focusability never takes it from the DAW.
     return pulp_editor_should_hold_keyboard(self.rootView);
 }
 - (void)syncKeyFocus {
@@ -1799,7 +1800,8 @@ private:
 // focused field and forward everything else back to the host (transport +
 // Musical Typing) via pulp_plugin_forward_key_to_host in -keyDown:.
 - (BOOL)acceptsFirstResponder {
-    // Same bounded text-or-navigation contract as the CPU plugin view.
+    // Same bounded text / navigation / keyboard-owning-overlay contract as
+    // the CPU plugin view.
     return pulp_editor_should_hold_keyboard(self.rootView);
 }
 - (void)syncKeyFocus {
