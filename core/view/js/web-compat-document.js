@@ -634,10 +634,18 @@ globalThis.self = window;
         if (option._nativeCreated && typeof clearBackground === "function")
             clearBackground(option._id);
     }
+    // A list that shows both its selection and a keyboard cursor the instant
+    // it opens reads as two selections, and a user who has not touched the
+    // keyboard or the mouse has not asked for a cursor at all. So the cursor
+    // exists from the moment the popup is owned -- arrow keys need somewhere
+    // to start from -- but it is not PAINTED until the user reveals it by
+    // moving the pointer over a row, by pressing an arrow, or by opening the
+    // popup with an arrow in the first place. Until then the only thing on
+    // screen is whatever the app paints for its own selected row.
     function paint() {
         if (!state) return;
         for (var i = 0; i < state.options.length; ++i) {
-            var active = i === state.activeIndex;
+            var active = state.activeVisible && i === state.activeIndex;
             state.options[i].setAttribute("data-pulp-popup-active", active ? "true" : "false");
             if (active) {
                 state.options[i].style.background = "rgba(120,180,255,0.18)";
@@ -684,7 +692,7 @@ globalThis.self = window;
         }
         return -1;
     }
-    function activate(trigger, edge) {
+    function activate(trigger, edge, reveal) {
         var popup = popupFor(trigger);
         var options = optionsFor(popup);
         // Resolve the replacement before retiring what is already owned. A
@@ -720,6 +728,11 @@ globalThis.self = window;
                   popup: popup, options: options,
                   baseBackgrounds: baseBackgrounds,
                   hoverHandlers: hoverHandlers,
+                  seededFromSelection: selectedIndex >= 0,
+                  // An arrow key is itself the request for a cursor, so a
+                  // popup opened that way shows one immediately; a pointer
+                  // press is not.
+                  activeVisible: !!reveal,
                   activeIndex: selectedIndex >= 0 ? selectedIndex
                       : (edge === "last" ? options.length - 1 : 0) };
         state.onNativeDismiss = function() {
@@ -735,6 +748,7 @@ globalThis.self = window;
                 var onEnter = function() {
                     if (!state || state.options[index] !== options[index]) return;
                     state.activeIndex = index;
+                    state.activeVisible = true;
                     paint();
                 };
                 hoverHandlers.push(onEnter);
@@ -862,6 +876,7 @@ globalThis.self = window;
             for (var i = 0; i < state.options.length; ++i)
                 if (state.options[i].contains(event.target)) {
                     state.activeIndex = i;
+                    state.activeVisible = true;
                     paint();
                     return;
                 }
@@ -874,8 +889,8 @@ globalThis.self = window;
             event.preventDefault();
             clickSelf(trigger);
             var edge = event.key === "ArrowUp" ? "last" : "first";
-            if (!activate(trigger, edge))
-                requestAnimationFrame(function() { activate(trigger, edge); });
+            if (!activate(trigger, edge, true))
+                requestAnimationFrame(function() { activate(trigger, edge, true); });
             return;
         }
         if (!state || optedOut(state.trigger)) return;
@@ -887,10 +902,25 @@ globalThis.self = window;
         } else if (event.key === "ArrowDown" || event.key === "ArrowUp"
                    || event.key === "Home" || event.key === "End") {
             event.preventDefault();
-            state.activeIndex = event.key === "Home" ? 0
-                : event.key === "End" ? count - 1
-                : event.key === "ArrowDown" ? (state.activeIndex + 1) % count
-                : (state.activeIndex - 1 + count) % count;
+            // The first arrow on a popup whose cursor is still hidden has to
+            // decide whether it REVEALS the cursor or MOVES it. Both, but the
+            // answer differs by whether the cursor had a home: seeded from the
+            // app's own selected row it steps off it, the way every platform
+            // combo box steps from the selection (ArrowDown on a list showing
+            // LEVEL goes to the row after LEVEL, not back onto LEVEL). Seeded
+            // from an edge because nothing was selected, there is nothing to
+            // step away from, so the first arrow lands ON that edge rather
+            // than skipping the row the user was aiming at.
+            var landOnSeed = !state.activeVisible && !state.seededFromSelection
+                && (event.key === "ArrowDown" || event.key === "ArrowUp");
+            state.activeVisible = true;
+            if (landOnSeed)
+                state.activeIndex = event.key === "ArrowUp" ? count - 1 : 0;
+            else
+                state.activeIndex = event.key === "Home" ? 0
+                    : event.key === "End" ? count - 1
+                    : event.key === "ArrowDown" ? (state.activeIndex + 1) % count
+                    : (state.activeIndex - 1 + count) % count;
             paint();
             state.options[state.activeIndex].focus();
         } else if (event.key === "Enter" || event.key === " ") {
