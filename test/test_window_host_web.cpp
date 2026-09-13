@@ -646,19 +646,21 @@ TEST_CASE("WebInputRouter routes a press inside an overlay into its subtree",
     View root;
     root.set_bounds({0, 0, 400, 300});
 
-    // The underlay occupies the same pixels the popover floats over, which is
-    // what an absolutely-positioned popover child loses the click to when the
-    // host hit-tests the tree instead of the overlay.
-    auto under = std::make_unique<InputSpy>();
-    InputSpy* underlay = under.get();
-    underlay->set_bounds({0, 0, 400, 300});
-    root.add_child(std::move(under));
-
     auto over = std::make_unique<InputSpy>();
     InputSpy* popover = over.get();
     popover->set_bounds({100, 50, 120, 80});
     root.add_child(std::move(over));
     popover->claim_overlay();
+
+    // A claimed overlay paints in its own top layer, so an ordinary tree
+    // hit_test resolves a LATER sibling covering the same pixels — which is
+    // exactly what an absolutely-positioned popover child loses the click to
+    // when the host hit-tests the tree instead of the overlay's subtree.
+    auto under = std::make_unique<InputSpy>();
+    InputSpy* later_sibling = under.get();
+    later_sibling->set_bounds({0, 0, 400, 300});
+    root.add_child(std::move(under));
+    REQUIRE(root.hit_test({130, 70}) == later_sibling);
 
     WebInputRouter router(root);
     router.set_mapping(make_mapping(400, 300, 0, 0));
@@ -671,7 +673,7 @@ TEST_CASE("WebInputRouter routes a press inside an overlay into its subtree",
     REQUIRE(router.handle_pointer(down));
 
     CHECK(popover->downs == 1);
-    CHECK(underlay->downs == 0);
+    CHECK(later_sibling->downs == 0);
     // A press inside must never dismiss.
     CHECK(root.interaction().active_overlay == popover);
 }
