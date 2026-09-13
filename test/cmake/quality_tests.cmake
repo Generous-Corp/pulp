@@ -657,8 +657,17 @@ if(Python3_Interpreter_FOUND)
         # configure-and-build case here declares one for the same reason
         # (project-package-compile-out and agent-capability-installed-sdk both
         # use 1200).
+        # PROCESSORS is a scheduling weight, not a job count: it tells ctest
+        # how much of its -j budget this case consumes. The two other
+        # configure-and-build cases here declare none, and that is right for
+        # them -- they are the only test in their label lane. This one is not:
+        # build.yml's default leg runs the unfiltered inventory at -j8, so
+        # without a weight ctest is free to schedule seven more tests beside a
+        # build that has already taken a governed share of the same host. The
+        # weight is the governed share the build itself asks for.
         set_tests_properties(gpu-health-cpu-only-configure PROPERTIES
             LABELS "slow;gpu-health"
+            PROCESSORS 8
             TIMEOUT 1200)
     endif()
 
