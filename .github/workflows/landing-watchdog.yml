@@ -1,0 +1,108 @@
+# Outcome-based landing watchdog — the redundant half of the wedge detector.
+#
+# Shipyard's landability preflight is the primary: it runs on the fleet, as the
+# Shipyard GitHub App, by resolving runner labels before work queues. This one
+# runs here, on GitHub's own hosts, with GITHUB_TOKEN, by looking only at
+# outcomes. Four independent axes — host, credential, method, code — so that a
+# failure of the primary is not automatically a failure of both. On 2026-09-13
+# the fleet's own launchd sensors had been dead for weeks to months and none of
+# them reported it; a detector that lives on the machines it watches shares
+# that blind spot by construction.
+#
+# It never dispatches, cancels, re-runs or merges. Decisions contract
+# `[default] #4`: a runnerless required lane is HELD, never a retry storm. The
+# only thing it writes is one tracking issue.
+name: Landing watchdog
+
+on:
+  schedule:
+    # Every 30 minutes. Never a tighter loop: GitHub's secondary/anti-burst
+    # limit is separate from the core quota and trips with quota to spare,
+    # taking the whole caller's API access with it.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      no_issue:
+        description: "Report findings without opening or closing the tracking issue"
+        type: boolean
+        default: false
+
+concurrency:
+  group: landing-watchdog
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  watch:
+    name: Landing watchdog
+    # A fork running this on its own schedule would scan the fork's pull
+    # requests with the fork's token and open issues there. Nothing useful,
+    # and a scheduled job is the one trigger a fork inherits silently.
+    if: github.repository == 'Generous-Corp/pulp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # The fixture replay runs first and on every tick. It is the live proof
+      # that the classifier still fires: if a change silences the detector,
+      # this step fails here rather than the detector quietly reporting health
+      # for the rest of its life. Exit 1 means "findings were produced", which
+      # is what this fixture MUST produce.
+      - name: Negative control - the classifier must still fire on the captured wedge
+        run: |
+          set -o pipefail
+          python3 tools/scripts/landing_watchdog.py \
+            --config .shipyard/config.toml \
+            --replay tools/scripts/fixtures/landing_watchdog_wedge.json \
+            --json > /tmp/replay.json && rc=0 || rc=$?
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::negative control did not fire (exit $rc). The captured 2026-09-13 wedge must produce findings; a classifier that returns none for it is broken and every clean result it reports below is meaningless." >&2
+            cat /tmp/replay.json || true
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          findings = json.load(open("/tmp/replay.json"))["findings"]
+          states = {f["state"] for f in findings}
+          missing = {"absent", "unassigned", "zero_jobs"} - states
+          if missing:
+              raise SystemExit(f"::error::control fired but did not produce {sorted(missing)}")
+          # The fixture's third PR is fully green: flagging it would mean the
+          # classifier flags everything, which passes the check above while
+          # being useless.
+          if any(f["pr"] == 8281 for f in findings):
+              raise SystemExit("::error::control flagged the healthy PR; the classifier is not discriminating")
+          print(f"control OK: {len(findings)} findings, states {sorted(states)}")
+          PY
+
+      - name: Self-test the unit suite
+        run: python3 tools/scripts/test_landing_watchdog.py
+
+      - name: Scan open pull requests
+        id: scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -o pipefail
+          ARGS=""
+          if [ "${{ inputs.no_issue }}" = "true" ]; then ARGS="--no-issue"; fi
+          # Exit 1 = findings (the issue was opened/updated, which is the
+          # working outcome, not a job failure). Exit 3 = broken instrument,
+          # which MUST fail the job.
+          python3 tools/scripts/landing_watchdog.py --config .shipyard/config.toml $ARGS && rc=0 || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -ge 2 ]; then
+            echo "::error::landing watchdog could not measure (exit $rc) - this is an instrument failure, not a clean result" >&2
+            exit "$rc"
+          fi
+          if [ "$rc" -eq 1 ]; then
+            echo "::warning::landing wedge detected; see the ci-landing-wedge issue"
+          fi

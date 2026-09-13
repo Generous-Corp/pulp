@@ -4552,3 +4552,151 @@ every build; they catch real regressions and do not care about the optimizer.
 
 > A false red is worse than no gate: it trains everyone to wave away red as
 > "probably the box" — which is exactly how a real bug gets dismissed.
+
+---
+
+## "Can this PR actually land?" — the two-detector wedge check
+
+`shipyard status` answers *"did my validation pass"*. It does not answer
+*"can the pull request merge"*, and on 2026-09-13 the gap between those two
+questions cost roughly six hours in which **no PR in this repository could
+land**. `PULP_PREAMBLE_RUNS_ON_JSON` named the runner label `pulp-preamble`;
+no runner in either registration scope carried it; every `build.yml` run —
+`pull_request`, `workflow_dispatch` *and* `merge_group` — queued forever at
+its first job. Throughout, Shipyard reported `mac: local reachable=true` and
+the blocked PR's ship-state as healthy, with the correct SHA and one attempt.
+Every word of that was true.
+
+Two detectors now answer the second question, and they are deliberately
+different from each other in every way that matters.
+
+### 1. The precondition detector — `shipyard landability` (and the ship preflight)
+
+Runs on the fleet, as the Shipyard App, **before work queues**.
+
+```sh
+shipyard landability --repo Generous-Corp/pulp        # on demand
+```
+
+It reads the required contexts from branch protection, resolves each one to
+the jobs that render to it, walks those jobs' transitive `needs` closure,
+resolves every `runs-on` through the `vars.*_RUNS_ON_JSON` indirection, and
+checks the resulting label sets against the live runner census in **both**
+registration scopes.
+
+The `needs` closure is the whole check. The required `macos` context is
+produced by an alias job and by a matrix leg, and **every** path to it passes
+through `resolve-provider` and `classify`. On 2026-09-13 the context's own job
+was routed through a variable that was fine and those two were not — so a check
+that looked only at the producing job would have returned a clean bill of
+health in the middle of the outage. Six lanes gate one context here.
+
+`shipyard ship` / `shipyard pr` run the same check as a preflight and refuse
+with **exit 7** (`EXIT_LANE_UNSERVED`) when a required context cannot be
+scheduled. Cost: **four API calls cold, zero warm** (a 300-second fact cache),
+plus a local `git show` of the workflow file.
+
+It refuses only on `Unserved` — a self-hosted label set that no runner
+advertises *and* no fresh host attestation declares. An unreadable census, an
+unparsable expression, a `Starved` lane or a missing attestation all warn and
+proceed: each of those is a statement about the *instrument*, and an instrument
+that cannot see must not be able to stop the fleet.
+
+`Unserved` and `Starved` look identical and have opposite fixes:
+
+| verdict | what it means | fix |
+|---|---|---|
+| `Unserved` | no runner in either scope carries the labels, and no host declares the lane | restore the runner, or unset the routing variable so the job falls back to the workflow's own literal |
+| `Starved` | an online, not-busy runner **does** carry the labels and work is queueing anyway | runner-group access, ephemeral consumption, or a `workflows` permission — **not** a runner restore |
+
+It never dispatches, re-dispatches, cancels or retries. Decisions contract
+`[default] #4`: a runnerless required lane is HELD, never a retry storm. On
+2026-09-13 four blind re-dispatches helped nothing and created a second wedge
+by filling the concurrency group.
+
+Per-run escape: `--allow-unserved-lane <label>` prints the diagnosis as a
+warning and proceeds. It exists for a human who has just restored a runner and
+is waiting for the census to catch up. Never set it from automation.
+
+### 2. The outcome detector — `.github/workflows/landing-watchdog.yml`
+
+Runs every 30 minutes on `ubuntu-latest` with `GITHUB_TOKEN`, and is redundant
+on four axes by construction:
+
+| axis | precondition detector | outcome detector |
+|---|---|---|
+| host | M1 / M3 / M5 | `ubuntu-latest` |
+| credential | Shipyard App installation token | `GITHUB_TOKEN`, no admin scope |
+| method | resolve labels, census, attest | is a required context absent or unassigned past *T* |
+| code | Shipyard, Rust | `tools/scripts/landing_watchdog.py`, no shared library |
+
+The method axis is the one that matters. A precondition model can be wrong
+about a mechanism it never modelled, and that session found four distinct
+wedges of which existing models described one. An outcome check cannot be wrong
+that way: it does not care *why* `macos` is missing from a head SHA two hours
+after the last push. The cost is that it cannot say why — which is what
+detector 1 is for, and the issue body says so.
+
+Thresholds: a required context **absent** 45 minutes after the head last moved;
+a check run **unassigned** for 30 minutes; a workflow run **pending with zero
+jobs** for 15 minutes (the concurrency-holder signature, which reads exactly
+like runner saturation and is not). It opens, edits and closes one issue
+labelled `ci-landing-wedge`, and writes nothing else.
+
+Budget: 1 call plus at most 3 per open PR, every 30 minutes, on
+`GITHUB_TOKEN`'s own per-repository bucket.
+
+### Both detectors report their own failure
+
+This is the part that matters most, because the same session found **five**
+sensors on this fleet that had been dead for weeks to months — one crashing
+every tick for roughly three months — and **not one of them reported its own
+death**. A measurement aimed at the wrong target does not error; it succeeds
+and returns empty, and empty reads as a clean finding.
+
+- `shipyard landability` assesses two synthetic control lanes on every run,
+  against the same census and attestations: a label nothing can serve must come
+  back `Unserved`, a hosted label must come back `Served`. If they fail to
+  discriminate it exits non-zero instead of reporting a result it did not
+  measure.
+- The watchdog workflow replays a **captured fixture of the 2026-09-13 wedge**
+  before every live scan and fails the job if the classifier does not fire on
+  it — and equally if it flags the fixture's healthy control PR. It also
+  refuses a scan with an empty required-context list, which would otherwise
+  report every PR clean.
+- The host attestation writer (below) probes a launchd label it knows exists
+  and one it knows cannot, and records `launchd_readable: false` rather than a
+  census of zero when the domain does not discriminate.
+
+### The host attestation
+
+A runner census cannot tell an idle just-in-time pool apart from a persistent
+runner that crash-looped away, because both register nothing. Only the host
+knows. `tartci_host_attestation.py` runs every 300 seconds on each of M1, M3
+and M5 under `com.danielraffel.shipyard.host-attestation` and writes
+`~/.tartci/state/host-attestation.json`, which the landability check reads.
+
+Its rule, and the reason it exists: **no side may pass a check by delegation
+unless it names the artifact carrying the other side's verdict, and absence of
+that artifact is a fault rather than a pass.** Before it, tartci's watchdog
+printed `✓ … runtime health is owned by Shipyard` over a service in a crash
+loop with 3,684 launches and no registration file, while Shipyard knew nothing
+about that host at all.
+
+Verify deployment on a host — and never assume it:
+
+```sh
+~/.local/share/pulp-landing/staging/install_host_attestation.sh --verify
+```
+
+The receipt prints the launchd state, the installed writer's SHA-256, the
+attestation's age, and the SHA-256 of the writer that actually produced the
+file. A mismatch is reported as `SKEW`, which is a distinct condition from
+stale and from dead — the distinction a prior incident collapsed when a
+behind-the-times checker reported every lane on a healthy host as missing its
+heartbeat.
+
+Use `launchctl print`, never `launchctl list`, when checking any of this by
+hand: `list` renders a `KeepAlive` job in a crash loop as `- 0`, byte-identical
+to a healthy idle service, which is exactly how the M5 preamble runner stayed
+invisible through 3,684 respawns.
