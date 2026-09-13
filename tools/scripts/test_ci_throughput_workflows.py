@@ -64,6 +64,7 @@ QUALITY_WEIGHTED_SUITES = {
     "gpu-dpr-runner-selftest",
     "gpu-first-visible-external-adapter-selftest",
     "gpu-first-visible-role-producers-selftest",
+    "gpu-health-cpu-only-configure",
 }
 
 def load_workflow(path: pathlib.Path) -> dict:
