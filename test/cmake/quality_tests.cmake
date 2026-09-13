@@ -13,6 +13,7 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
     pulp::audio
     pulp::midi
     pulp::music
+    pulp::playback
     pulp::sequence
     pulp::signal
     pulp::timebase)
