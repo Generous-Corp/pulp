@@ -342,6 +342,31 @@ fn checked_in_gpu_views_keep_the_safe_sql_contract() {
     assert!(PROBE_SQL.contains("unbound_tooling.name GLOB 'gpu_readback*'"));
 }
 
+#[test]
+fn startup_view_admits_an_untagged_cohort_only_when_nothing_is_tagged() {
+    // The untagged cohort exists, and it is gated on the absence of any tagged
+    // candidate so a mixed capture still answers from its tagged lifecycle.
+    assert!(STARTUP_SQL.contains("), unidentified_candidates AS ("));
+    assert!(STARTUP_SQL.contains("), admitted_candidates AS ("));
+    assert!(STARTUP_SQL.contains("FROM unidentified_candidates"));
+    assert!(STARTUP_SQL.contains("WHERE NOT EXISTS (SELECT 1 FROM identified_candidates)"));
+    // The cold-frame anchor compares null to null, which `=` never matches, so
+    // untagged pre-first-frame setup would classify as unknown without `IS`.
+    assert!(STARTUP_SQL.contains("anchor.evidence_id IS c.evidence_id"));
+    assert!(!STARTUP_SQL.contains("anchor.evidence_id = c.evidence_id"));
+}
+
+#[test]
+fn health_and_probe_views_keep_the_evidence_gate() {
+    // Relaxing startup must not reach the two questions whose answer is only
+    // meaningful for one identified GPU instance.
+    for sql in [HEALTH_SQL, PROBE_SQL] {
+        assert!(sql.contains("), selected_evidence AS ("));
+        assert!(sql.contains("JOIN selected_evidence USING (evidence_id)"));
+        assert!(!sql.contains("unidentified_candidates"));
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn processor_failure_remains_an_error() {

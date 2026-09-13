@@ -666,6 +666,22 @@ compile-in sentinel must match the requested state. Preserve the source
 archive, closed build request/receipt, product, logs, and digest/version-bound
 toolchain snapshots. A direct binary or build-driver assertion cannot pass.
 
+### The evidence requirement is question-scoped
+
+`gpu-startup` answers for a capture taken with no instrumentation at all: when no
+startup candidate carries an evidence id, it admits a single untagged cohort and
+reports the setup work the capture plainly contains, with a NULL evidence id.
+`gpu-health` and `gpu-probe` do **not** relax — an untagged capture stays
+`unavailable` there, because each of those answers is a correlation claim, and a
+correlation with nothing to correlate is not a weaker answer but a different one.
+
+Two things follow. A `gpu-startup` breakdown is **not** evidence that the capture
+is tagged, so it does not predict that `gpu-health` or `gpu-probe` will answer at
+all. And a *partially* tagged capture fails closed everywhere: one tagged
+candidate drops the untagged cohort, putting `gpu-startup` back on the exact
+shared-evidence-id requirement rather than letting it fall through to the relaxed
+path.
+
 ## Correlate a catalog recipe with Perfetto
 
 Begin with `pulp gpu recipes list --symptom <exact-token> --json`, run the

@@ -1,8 +1,11 @@
 -- GPU startup attribution over backend-neutral trace events. The closed view
 -- selects the earliest render-frame lifecycle carrying frame_index = 0 (or the
 -- single identified legacy lifecycle) and keeps both its cold/setup work and
--- later indexed steady-state work separate. Selection is accepted only when
--- every startup candidate has one exact, valid evidence ID.
+-- later indexed steady-state work separate. A capture in which no startup
+-- candidate carries an evidence ID is accepted as one untagged cohort whose
+-- rows report a NULL evidence_id. As soon as any candidate is tagged, the
+-- untagged cohort is dropped and selection requires one exact, valid evidence
+-- ID shared by every tagged candidate.
 --
 -- `duration_ns` is wall-clock time. `cpu_running_ns` is populated only when
 -- Perfetto thread_state intervals cover the complete slice on its stable utid;
@@ -47,6 +50,8 @@ WITH candidates AS (
       OR (s.category GLOB 'render*' AND s.name GLOB 'frame*'))
 ), identified_candidates AS (
   SELECT * FROM candidates WHERE evidence_id IS NOT NULL
+), unidentified_candidates AS (
+  SELECT * FROM candidates WHERE evidence_id IS NULL
 ), identified_evidence AS (
   SELECT MIN(evidence_id) AS evidence_id
   FROM identified_candidates
@@ -81,6 +86,14 @@ WITH candidates AS (
   FROM singleton_unindexed_lifecycle
   JOIN identified_evidence USING (evidence_id)
   WHERE NOT EXISTS (SELECT 1 FROM first_indexed_anchor)
+), admitted_candidates AS (
+  SELECT identified_candidates.*
+  FROM identified_candidates
+  JOIN selected_lifecycle USING (evidence_id)
+  UNION ALL
+  SELECT unidentified_candidates.*
+  FROM unidentified_candidates
+  WHERE NOT EXISTS (SELECT 1 FROM identified_candidates)
 ), selected_rows AS (
   SELECT
     c.*,
@@ -89,13 +102,12 @@ WITH candidates AS (
     p.pid,
     (
       SELECT MAX(anchor.ts + anchor.dur)
-      FROM identified_candidates AS anchor
-      WHERE anchor.evidence_id = c.evidence_id
+      FROM admitted_candidates AS anchor
+      WHERE anchor.evidence_id IS c.evidence_id
         AND anchor.stage = 'frame'
         AND anchor.frame_index = 0
     ) AS cold_frame_end_ts
-  FROM identified_candidates AS c
-  JOIN selected_lifecycle USING (evidence_id)
+  FROM admitted_candidates AS c
   LEFT JOIN thread_track AS tt ON c.track_id = tt.id
   LEFT JOIN thread AS th ON tt.utid = th.utid
   LEFT JOIN process AS p ON th.upid = p.upid

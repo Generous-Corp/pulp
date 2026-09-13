@@ -655,3 +655,167 @@ fn health_and_probe_reject_mixed_evidence_before_the_row_cap() {
         assert_eq!(mixed["evidence_ids"], serde_json::json!([]));
     }
 }
+
+#[test]
+fn startup_accepts_a_fully_untagged_capture() {
+    // The untagged fixture is the healthy fixture with every evidence ID
+    // removed and nothing else changed, so the tagged control below isolates
+    // the annotation as the only difference.
+    let untagged = run("gpu-startup", "untagged-startup.pftrace", 2);
+    assert_eq!(untagged["verdict"], "unverified");
+    assert_eq!(untagged["capture_complete"], true);
+    assert_eq!(untagged["dominant_stage"], "pipeline-prepare");
+    assert_eq!(untagged["evidence_ids"], serde_json::json!([]));
+    // Category scoping is defined by an evidence ID on one process instance,
+    // so an untagged cohort reports no scope rather than guessing one.
+    assert_eq!(untagged["observed_categories"], serde_json::json!([]));
+    assert_eq!(untagged["category_scope"], serde_json::Value::Null);
+    let rows = untagged["contributors"].as_array().expect("contributor rows");
+    assert_eq!(
+        rows.iter()
+            .map(|row| row["stage"].as_str().expect("stage"))
+            .collect::<Vec<_>>(),
+        vec!["pipeline-prepare", "resource-upload"]
+    );
+    assert!(rows.iter().all(|row| row.get("evidence_id").is_none()));
+    assert!(rows.iter().all(|row| row["timing_phase"] == "cold"));
+    assert_eq!(untagged["steady_state_contributors"], serde_json::json!([]));
+    assert_eq!(
+        untagged["next_actions"][0]["code"],
+        "inspect-pipeline-signature"
+    );
+
+    // Control: the same capture with its evidence IDs intact answers the same
+    // question with the same stages, proving the fixture is not merely inert.
+    let tagged = run("gpu-startup", "healthy.pftrace", 2);
+    assert_eq!(tagged["verdict"], "unverified");
+    assert_eq!(
+        tagged["evidence_ids"],
+        serde_json::json!(["0123456789abcdef0123456789abcdef"])
+    );
+    assert_eq!(
+        tagged["contributors"]
+            .as_array()
+            .expect("tagged contributor rows")
+            .iter()
+            .map(|row| row["stage"].as_str().expect("stage"))
+            .collect::<Vec<_>>(),
+        vec!["pipeline-prepare", "resource-upload"]
+    );
+}
+
+#[test]
+fn startup_infers_untagged_cold_setup_from_the_untagged_frame_zero() {
+    // The cold-frame anchor joins an untagged row to an untagged frame, where
+    // both evidence IDs are NULL. Equality never matches two NULLs, so this
+    // pre-first-frame setup only reads as cold under a null-safe comparison.
+    let trace = tempfile::NamedTempFile::new().expect("untagged cold setup trace");
+    let fixture = serde_json::json!({"traceEvents": [
+        {"name":"gpu_shader_compile","cat":"gpu","ph":"X","ts":900,
+         "dur":500,"pid":31,"tid":31,
+         "args":{"debug.health_state":"healthy","debug.sequence":0}},
+        {"name":"frame","cat":"render","ph":"X","ts":1000,"dur":600,
+         "pid":31,"tid":31,
+         "args":{"debug.health_state":"healthy","debug.sequence":1,
+                 "debug.frame_index":0}},
+        {"name":"gpu_submit","cat":"gpu","ph":"X","ts":5000,"dur":100,
+         "pid":31,"tid":31,
+         "args":{"debug.health_state":"healthy","debug.sequence":2}}
+    ]});
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let result = run_path("gpu-startup", trace.path(), 2);
+    assert_eq!(result["verdict"], "unverified");
+    assert_eq!(result["capture_complete"], true);
+    assert_eq!(result["evidence_ids"], serde_json::json!([]));
+    let phases: std::collections::BTreeMap<&str, &str> = result["contributors"]
+        .as_array()
+        .expect("contributor rows")
+        .iter()
+        .map(|row| {
+            (
+                row["stage"].as_str().expect("stage"),
+                row["timing_phase"].as_str().expect("timing phase"),
+            )
+        })
+        .collect();
+    assert_eq!(phases.get("shader-compile"), Some(&"cold"));
+    assert_eq!(phases.get("frame"), Some(&"cold"));
+    assert_eq!(phases.get("submit"), Some(&"unknown"));
+}
+
+#[test]
+fn startup_still_rejects_a_partially_tagged_capture() {
+    // One tagged candidate among untagged ones drops the untagged cohort and
+    // answers from the tagged lifecycle alone.
+    let evidence = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let one_tag = untagged_startup_tagged_in_order(&[Some(evidence)]);
+    let single = run_path("gpu-startup", one_tag.path(), 2);
+    assert_eq!(single["verdict"], "unverified");
+    assert_eq!(single["evidence_ids"], serde_json::json!([evidence]));
+    let rows = single["contributors"].as_array().expect("contributor rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["stage"], "pipeline-prepare");
+    assert_eq!(rows[0]["evidence_id"], evidence);
+
+    // Two disagreeing IDs, and one malformed ID, each fail closed rather than
+    // falling back to the untagged cohort.
+    let conflicting = untagged_startup_tagged_in_order(&[
+        Some(evidence),
+        Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+    ]);
+    let malformed = untagged_startup_tagged_in_order(&[Some("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")]);
+    for closed in [conflicting.path(), malformed.path()] {
+        let result = run_path("gpu-startup", closed, 2);
+        assert_eq!(result["verdict"], "unavailable");
+        assert_eq!(result["capture_complete"], false);
+        assert_eq!(result["unavailable_reason"], "missing-question-category");
+        assert_eq!(result["contributors"], serde_json::json!([]));
+        assert_eq!(result["evidence_ids"], serde_json::json!([]));
+    }
+}
+
+#[test]
+fn health_and_probe_require_evidence_on_an_untagged_capture() {
+    // The untagged fixture carries a health transition and a probe, so the
+    // only reason these two answer nothing is the missing evidence ID.
+    for question in ["gpu-health", "gpu-probe"] {
+        let tagged = run(question, "healthy.pftrace", 0);
+        assert_eq!(tagged["verdict"], "pass");
+        assert_eq!(
+            tagged["evidence_ids"],
+            serde_json::json!(["0123456789abcdef0123456789abcdef"])
+        );
+
+        let untagged = run(question, "untagged-startup.pftrace", 2);
+        assert_eq!(untagged["verdict"], "unavailable");
+        assert_eq!(untagged["capture_complete"], false);
+        assert_eq!(untagged["unavailable_reason"], "missing-question-category");
+        assert_eq!(untagged["observed_categories"], serde_json::json!([]));
+        assert_eq!(untagged["category_scope"], serde_json::Value::Null);
+        assert_eq!(untagged["contributors"], serde_json::json!([]));
+        assert_eq!(untagged["evidence_ids"], serde_json::json!([]));
+        assert_eq!(
+            untagged["next_actions"][0]["code"],
+            "capture-required-gpu-category"
+        );
+    }
+}
+
+/// Copy the untagged startup fixture and tag its leading slices in order.
+fn untagged_startup_tagged_in_order(ids: &[Option<&str>]) -> tempfile::NamedTempFile {
+    let source = repo_root().join("test/fixtures/perfetto-gpu/untagged-startup.pftrace");
+    let mut fixture: Value =
+        serde_json::from_slice(&std::fs::read(source).expect("untagged fixture")).unwrap();
+    let events = fixture["traceEvents"]
+        .as_array_mut()
+        .expect("fixture events");
+    for (event, id) in events.iter_mut().zip(ids) {
+        if let Some(id) = id {
+            event["args"]["debug.gpu_evidence_id"] = serde_json::Value::from(*id);
+        }
+    }
+    let trace = tempfile::NamedTempFile::new().expect("partially tagged trace");
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+    trace
+}
