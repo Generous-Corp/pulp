@@ -556,13 +556,24 @@ class CatalogContract(unittest.TestCase):
             ["git", "rev-parse", f"{row['revision']}:{row['path']}"],
             cwd=catalog.ROOT, text=True,
         ).strip()
+        # A pin naming an older commit that really did carry this blob is the
+        # exact shape every commit touching a pinned path produces. It is true
+        # provenance and stale currency, so it separates the two tiers: the
+        # default validation accepts it, and only the opt-in rejects it.
+        self.assertEqual(catalog.validate_handoff_routing(handoff, catalog.ROOT), [])
         self.assertIn(
-            "stale revision/blob/tree identity",
-            "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+            "pin is not current at HEAD",
+            "\n".join(
+                catalog.validate_handoff_routing(
+                    handoff, catalog.ROOT, require_current=True
+                )
+            ),
         )
 
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
         handoff["entries"][0]["pulp_paths"][0]["object_id"] = "0" * 40
+        # A blob that the pinned revision never carried is a provenance defect,
+        # so it has to be rejected by the always-on tier without any opt-in.
         self.assertIn(
             "stale revision/blob/tree identity",
             "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),

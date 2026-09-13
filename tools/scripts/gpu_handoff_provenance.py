@@ -355,11 +355,20 @@ def apply_identities(
     return updated
 
 
-def validate_with_catalog(document: dict[str, Any], root: pathlib.Path) -> list[str]:
+def validate_with_catalog(
+    document: dict[str, Any],
+    root: pathlib.Path,
+    require_current: bool = False,
+) -> list[str]:
     """Run the existing fail-closed validator against a candidate ledger.
 
     The validator remains the authority on acceptance. This tool never relaxes
     it; it only refuses to emit output the validator would reject.
+
+    ``require_current`` additionally demands that every pinned path still match
+    HEAD. This tool is a consumer rather than a merge gate, so it asks for that
+    stronger claim: reading or regenerating the ledger is exactly when a pin
+    that has fallen behind is worth reporting.
     """
 
     global _CATALOG_MODULE
@@ -375,7 +384,9 @@ def validate_with_catalog(document: dict[str, Any], root: pathlib.Path) -> list[
         spec.loader.exec_module(catalog)
         _CATALOG_MODULE = catalog
     problems = list(catalog.validate_handoff(document))
-    problems.extend(catalog.validate_handoff_routing(document, root))
+    problems.extend(
+        catalog.validate_handoff_routing(document, root, require_current=require_current)
+    )
     return problems
 
 
@@ -454,7 +465,7 @@ def command_check(args: argparse.Namespace) -> int:
     commit = resolve_source_commit(args.root, args.source_commit)
     identities = resolve_inventory_identities(args.root, commit, inventory)
     drifts = compare_inventory(document, inventory, identities)
-    problems = validate_with_catalog(document, args.root)
+    problems = validate_with_catalog(document, args.root, require_current=True)
     command = repair_command(args.handoff, commit)
 
     if args.json:
@@ -522,7 +533,7 @@ def command_write(args: argparse.Namespace) -> int:
     updated = apply_identities(document, inventory, identities)
     rendered = serialize_handoff(updated)
 
-    problems = validate_with_catalog(updated, args.root)
+    problems = validate_with_catalog(updated, args.root, require_current=True)
     if problems:
         print(
             "gpu-handoff-provenance: generated ledger still fails the handoff "
