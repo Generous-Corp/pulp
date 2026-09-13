@@ -86,6 +86,10 @@ add_test(NAME cmake-standalone-document-types
     COMMAND ${CMAKE_COMMAND}
         -DPULP_DOC_TYPE_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/standalone-document-types
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_standalone_document_types.cmake)
+
+add_test(NAME cmake-plugin-bundle-icon
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_bundle_icon.cmake)
 set_tests_properties(cmake-standalone-document-types PROPERTIES
     LABELS "cmake;app;standalone;plist"
     # Runs in ~1.5s warm; the budget covers three throwaway project configures
