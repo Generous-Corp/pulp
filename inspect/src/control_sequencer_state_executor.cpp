@@ -372,6 +372,18 @@ make_control_sequencer_state_edit_executor(ControlSequencerStateTargetResolver r
                 if (!ok || scope_id.empty() || !clear_scope_from_id(scope_id, scope))
                     return fail(ControlResultCode::InvalidRequest,
                                 "clear requires a declared scope enumerator");
+                // A narrower scope addresses more of the grid, so every index it
+                // reads must be supplied. Defaulting an absent index to zero would
+                // silently clear a cell the caller never named, and nothing
+                // downstream re-validates a command once it is on the channel.
+                const bool scope_needs_pattern = scope != state::ClearScope::All;
+                const bool scope_needs_lane = scope == state::ClearScope::Lane ||
+                                              scope == state::ClearScope::Cell;
+                const bool scope_needs_step = scope == state::ClearScope::Cell;
+                if ((scope_needs_pattern && !pattern_present) ||
+                    (scope_needs_lane && !lane_present) || (scope_needs_step && !step_present))
+                    return fail(ControlResultCode::InvalidRequest,
+                                "clear scope requires every index it addresses");
                 command.kind = state::StepEditKind::Clear;
                 command.payload.clear = state::ClearEdit{
                     scope, static_cast<std::uint8_t>(pattern), static_cast<std::uint8_t>(lane),

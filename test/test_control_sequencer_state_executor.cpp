@@ -290,6 +290,15 @@ TEST_CASE("sequencer state edit encodes every declared edit kind",
     CHECK(command->kind == state::StepEditKind::SetPatternLength);
     CHECK(command->payload.set_pattern_length.pattern == 5);
     CHECK(command->payload.set_pattern_length.length == 12);
+
+    // The widest scope addresses no index, so it stays accepted without one.
+    // This is what keeps the index requirement scope-exact rather than blanket.
+    REQUIRE(executor(plan(), edit_request(R"({"kind":"clear","scope":"all"})"), context())
+                .terminal_state == ControlReceiptState::Completed);
+    command = channel.audio_try_pop_command();
+    REQUIRE(command.has_value());
+    CHECK(command->kind == state::StepEditKind::Clear);
+    CHECK(command->payload.clear.scope == state::ClearScope::All);
 }
 
 TEST_CASE("sequencer state edit refuses a malformed or out-of-range request",
@@ -309,6 +318,12 @@ TEST_CASE("sequencer state edit refuses a malformed or out-of-range request",
     refuse(R"({"kind":"switch-pattern","pattern":32})");
     refuse(R"({"kind":"switch-pattern","pattern":0,"gesture_phase":"levitate"})");
     refuse(R"({"kind":"clear","pattern":0})");
+    // A clear scope must carry every index it addresses; an absent index must
+    // never be defaulted into clearing a cell the caller did not name.
+    refuse(R"({"kind":"clear","scope":"cell"})");
+    refuse(R"({"kind":"clear","scope":"cell","pattern":0,"lane":0})");
+    refuse(R"({"kind":"clear","scope":"lane","pattern":0})");
+    refuse(R"({"kind":"clear","scope":"pattern"})");
     refuse(R"({"kind":"randomize-lane","pattern":0,"lane":0})");
     refuse(R"({"kind":"randomize-lane","pattern":0,"lane":0,"seed":1,)"
            R"("min_velocity":120,"max_velocity":30})");
