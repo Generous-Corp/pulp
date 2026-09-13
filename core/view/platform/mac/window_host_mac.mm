@@ -881,7 +881,13 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         try {
             if (!self.rootView) return;
             auto pt = [self localPoint:event];
-            pulp::view::dispatch_context_menu(*self.rootView, pt);
+            // Through the shared verb, not a bare dispatch_context_menu: a
+            // right-click must consult the generalized overlay slot the same
+            // way the left button does, or it opens a context menu on the
+            // control UNDERNEATH an open popover while dismissing the popover.
+            // Both outcomes it reports — a claimed menu and a dismissal —
+            // only need a repaint here.
+            (void)pulp::view::route_context_press(*self.rootView, pt);
             [self setNeedsDisplay:YES];
         } catch (const std::exception& e) {
             std::cerr << "MacWindowHost rightMouseDown error: " << e.what() << "\n";
