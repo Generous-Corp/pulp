@@ -206,9 +206,9 @@ monitoring from output scheduling — a take can be *placed* correctly even when
 it was *monitored* late. That is a later slice. Refusing now forecloses none of
 it, and it removes no capability: the compiler currently rejects any track
 policy that makes a provider other than the arrangement available, so no
-compiled program can reach this refusal. It is written now so that the first
-executable event-to-event device meets a stated policy rather than an
-undefined one.
+compiled program can reach this refusal. It is stated rather than left undefined so that
+the executable event-to-event device Pulp ships meets a written policy at the
+boundary it cannot yet compensate.
 
 ### Typed diagnostics
 
@@ -231,11 +231,6 @@ scheduled stream is identical between the two.
 
 ## What remains open
 
-- **Executable event-to-event devices.** The runtime envelope admits one device
-  shape; every other declaration is still a typed refusal. Until an
-  event-to-event device executes, every chain Pulp can play resolves to a zero
-  shift, so the compensating path above is proven by its own tests rather than
-  exercised by production content.
 - **Per-track monitor bypass.** Live input into a latent event chain is refused,
   not compensated.
 - **Host-side latency-changed notification.** Pulp offers a hosted CLAP plugin
@@ -247,6 +242,43 @@ scheduled stream is identical between the two.
   latency source rather than a real backend.
 
 ## Acceptance
+
+### An event-to-event device executes
+
+Pulp owns one executable event-to-event device: a MIDI humaniser, published as
+`pulp.device.event.humanise`. It reuses the existing `pulp::midi::Humanize`
+kernel rather than introducing new DSP, and reports
+`kEventHumaniserWindowSamples` of latency because a humaniser that may move an
+attack later must hold the attack for the width of the window it may move it
+into. That reported latency is what the compensating path consumes, so the
+shift the scheduler applies is now produced by a device that runs rather than
+by a test double alone.
+
+The admitted chain is deliberately narrow: an event-to-event device followed by
+an instrument, at most `kAdmittedDeviceChainLength` devices. Every other shape
+is a typed refusal at admission rather than a truncation — a lone event-to-event
+device, the reverse order, a longer chain, an `AudioToAudio` slot, a device
+whose declared domain disagrees with the catalogue, and an unknown binding key.
+A caller can predict all of those without a round trip, because the catalogue
+publishes both bounds alongside every device it admits.
+
+That catalogue is reachable from both offline surfaces over one encoder:
+`pulp seq capabilities` carries it on the no-argument capability object, and the
+`pulp_timeline_device_catalog` MCP tool returns the same JSON. Neither surface
+links the host, so the projection lives in `tools/timeline` and the bounds are
+owned by the graph binding that enforces them rather than restated by a caller.
+
+Covered by `test/test_timeline_event_device_chain.cpp` (the humaniser playing
+before the instrument with its uncompensated render as the control, the single
+directed event edge with the reversed edge as its control, each refusal above
+with an admitted chain as the positive control, and every catalogued device
+instantiated through the published plugin info), `test/test_cli_timeline.cpp`
+(the CLI projection, with a named writer profile as the control that the
+catalogue rides the no-argument object alone), and
+`test/test_mcp_timeline_sessions.cpp` (the fourth read-projection descriptor and
+its dispatch, with an unbound tool name as the control).
+
+### The compensating path
 
 The behaviour above is covered by `test/test_playback_event_pdc.cpp` (shift
 accumulation and range checking, saturation, tempo change inside a shifted

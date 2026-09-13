@@ -358,6 +358,7 @@ pulp_add_test_suite(pulp-test-timeline-offline-renderer
 
 pulp_add_test_suite(pulp-test-timeline-graph-binding
     SOURCES test_timeline_graph_binding.cpp
+        test_timeline_event_device_chain.cpp
         test_timeline_event_pdc_admission.cpp
         test_timeline_graph_automation_delivery.cpp
         test_timeline_graph_binding_lifecycle.cpp
