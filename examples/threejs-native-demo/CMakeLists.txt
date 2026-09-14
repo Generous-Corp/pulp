@@ -53,6 +53,43 @@ if(PULP_ENABLE_GPU AND PULP_HAS_THREEJS)
             LABELS "threejs;gpu;headless;gltf;texture"
         )
 
+        # Strict (no skip-pass) capture gate. The two tests above tolerate a
+        # build without V8, or a host without a native Dawn adapter, as a
+        # skipped PNG assertion: they guard only against the demo hanging. That
+        # tolerance means a lane that can never capture reports the same green
+        # as a lane that captured successfully. Opt in with
+        # PULP_VALIDATE_CAPTURE_STRICT on a lane where the capture is genuinely
+        # expected to produce a PNG, and the skip paths become failures.
+        if(PULP_VALIDATE_CAPTURE_STRICT)
+            add_test(
+                NAME threejs_native_demo_capture_strict
+                COMMAND ${CMAKE_COMMAND}
+                    -DDEMO_BIN=$<TARGET_FILE:pulp-threejs-native-demo>
+                    -DDEMO_MODE=cube
+                    -DREQUIRE_CAPTURE=ON
+                    -DCAPTURE_PATH=${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-demo-capture-strict.png
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/capture_test.cmake
+            )
+            set_tests_properties(threejs_native_demo_capture_strict PROPERTIES
+                TIMEOUT 60
+                LABELS "threejs;gpu;headless;capture-strict"
+            )
+
+            add_test(
+                NAME threejs_native_demo_gltf_box_capture_strict
+                COMMAND ${CMAKE_COMMAND}
+                    -DDEMO_BIN=$<TARGET_FILE:pulp-threejs-native-demo>
+                    -DDEMO_MODE=gltf-box
+                    -DREQUIRE_CAPTURE=ON
+                    -DCAPTURE_PATH=${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-gltf-box-capture-strict.png
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/capture_test.cmake
+            )
+            set_tests_properties(threejs_native_demo_gltf_box_capture_strict PROPERTIES
+                TIMEOUT 60
+                LABELS "threejs;gpu;headless;gltf;texture;capture-strict"
+            )
+        endif()
+
         # pulp #30: strict (no skip-pass) V8 provider-identity + cube-coexistence
         # gate. Opt-in via PULP_VALIDATE_V8_PROVIDER_STRICT so the default Pulp
         # CI lane (which may build without V8) is unaffected. Asserts the sealed

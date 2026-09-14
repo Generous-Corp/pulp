@@ -224,6 +224,31 @@ sealed-provider (`FindV8.cmake`) section) and that the GPU is real hardware
 `PULP_VALIDATE_V8_PROVIDER_STRICT`) parses that block with no skip-pass and
 then requires a non-empty `--demo cube --capture` PNG.
 
+### 4a. A capture test that skips is not a capture test that passed
+
+`capture_test.cmake` has two modes, and only one of them is evidence that the
+capture works.
+
+The default (tolerant) mode exists to guard against the demo *hanging*. If the
+build has no V8, or the host has no native Dawn adapter, the binary prints an
+explanatory line on stderr and exits 1, and the script reports
+`SKIP (tolerant mode): ...` and stops without asserting the PNG. That is the
+right behaviour for a lane that merely wants to know the demo terminates, but it
+means a lane that can never capture anything reports exactly the same green as a
+lane that captured a real frame. Read a green `threejs_native_demo_*_no_hang`
+result as "it did not hang", never as "it rendered".
+
+Configure with `-DPULP_VALIDATE_CAPTURE_STRICT=ON` on any lane where the capture
+is genuinely expected to produce a PNG. That registers
+`threejs_native_demo_capture_strict` and
+`threejs_native_demo_gltf_box_capture_strict`, which pass `REQUIRE_CAPTURE=ON`
+into the same script: both skip paths become `FATAL_ERROR`, so a missing V8 or a
+missing native Dawn adapter fails instead of reporting success. They write their
+own `*-capture-strict.png` files so a strict run cannot pass by finding a
+tolerant run's leftover output, and they carry the `capture-strict` label. This
+is the same opt-in shape as `PULP_VALIDATE_V8_PROVIDER_STRICT`, which
+`provider_identity_test.cmake` uses for the same reason.
+
 ### 5. Prefer contract-driven bridge work
 
 When something breaks, do not guess at generic browser APIs.

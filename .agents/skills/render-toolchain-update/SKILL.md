@@ -147,6 +147,13 @@ retain those fields in the PR/landing evidence.
 7. Run the manifest mirror/audit tests and both fetch-script suites. Fetch a real native
    Skia asset and matched V8 asset, configure with GPU + Lottie + V8, and run the
    provider-identity/ODR validation. A pixel-only test is insufficient.
+   Configure that validation lane with `PULP_VALIDATE_CAPTURE_STRICT=ON`
+   alongside `PULP_VALIDATE_V8_PROVIDER_STRICT=ON`. The default Three.js native
+   demo capture tests tolerate a build without V8, or a host without a native
+   Dawn adapter, as a skipped PNG assertion, so a toolchain pin that quietly
+   broke the V8 link or the Dawn adapter still shows them green. The strict
+   variants turn both skips into failures, which is what you want from the one
+   lane whose job is to prove the new pins actually render.
    For m153+, run `python3 tools/scripts/verify_skia_m153_capabilities.py
    --platform <matching-native-desktop-platform> --skia-dir
    <materialized-generation>`. Run each architecture on its matching host; the
