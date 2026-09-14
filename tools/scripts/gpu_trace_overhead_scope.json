@@ -85,6 +85,7 @@
     "test/fixtures/perfetto-gpu/render-only.pftrace",
     "test/fixtures/perfetto-gpu/truncated-json.pftrace",
     "test/fixtures/perfetto-gpu/unavailable-state.pftrace",
+    "test/fixtures/perfetto-gpu/untagged-startup.pftrace",
     "test/fixtures/perfetto-gpu/unverified-state.pftrace",
     "test/fixtures/perfetto-gpu/wrong-category.pftrace",
     "test/test_mcp_server.cpp",

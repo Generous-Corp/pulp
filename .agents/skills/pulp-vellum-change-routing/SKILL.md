@@ -197,6 +197,28 @@ The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
 unregenerated ledger fails locally and in CI with the repair command in the
 failure message rather than only as a stale-identity report.
 
+**Write the receipt in the same run as the ledger, before you commit either.**
+`write --receipt` stamps `source_commit` with whatever HEAD is when it runs, and
+`test_published_receipt_binds_the_checked_in_ledger` re-derives the ledger from
+that commit and compares bytes. A bare `write` that is then committed leaves no
+way to fold the receipt into that commit afterwards: regenerating stamps the
+commit you just made, and `--amend`ing the receipt into it orphans that SHA, so
+the receipt names a commit that is no longer an ancestor of HEAD, and every
+further amend repeats it. Regenerate from a clean tree with `--receipt` first,
+then commit the ledger and the receipt together. To recover from a bare `write`
+that already landed, `git reset --soft` back to the commit that owns the edited
+files, restore the ledger, and regenerate with `--receipt`.
+
+Nothing in the fast path catches that omission. `gates.sh`'s `gpu-handoff pin
+freshness` gate only asserts the ledger was **touched**, so a bare `write` turns
+it green, and `gpu_recipe_catalog.py` validates the ledger's own identities and
+also reports `OK`. The stale receipt surfaces only in
+`gpu-handoff-provenance-selftest`. Run it directly before pushing:
+
+```bash
+python3 -B tools/scripts/test_gpu_handoff_provenance.py -k published_receipt
+```
+
 **A capability-registry change stales a handoff pin without touching any GPU or
 Vellum file.** `tools/scripts/test_release_artifact_contents.py` is a pinned
 path *and* one of the sites that hardcodes the control-registry digest, so
