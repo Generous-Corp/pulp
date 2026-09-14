@@ -144,7 +144,18 @@ set_target_properties(pulp-test-cli-run-fixture PROPERTIES
 
 # CLI shell-out behavior tests — launches the built `pulp` binary.
 function(pulp_bind_cli_shellout_target target)
-    if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
+    # The condition below mirrors the one the root CMakeLists uses to decide
+    # whether tools/cli is added at all. It is NOT interchangeable with
+    # `if(TARGET pulp-cli)`: the root adds test/ before tools/cli, so that
+    # target does not exist yet while this runs and such a guard silently
+    # binds nothing. The path is composed rather than taken from
+    # $<TARGET_FILE:pulp-cli> for the same reason, and add_dependencies
+    # resolves the name at generate time, so naming it here is fine.
+    if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
+        # These tests launch the CLI, so it has to be built before they run.
+        # Without this a shellout test can execute against a stale binary, or
+        # in a clean tree against one that was never built.
+        add_dependencies(${target} pulp-cli)
         set(_pulp_cli_path "${CMAKE_BINARY_DIR}/tools/cli/pulp-cpp${CMAKE_EXECUTABLE_SUFFIX}")
         if(CMAKE_CONFIGURATION_TYPES)
             set(_pulp_cli_path "${CMAKE_BINARY_DIR}/tools/cli/$<CONFIG>/pulp-cpp${CMAKE_EXECUTABLE_SUFFIX}")
