@@ -6216,7 +6216,9 @@
       "owned_paths": [
         ".github/vellum-expansion-watch-events/20260912-pa-sequencer-transport-loop-watch.json",
         "docs/reference/development-inspector-capabilities.md",
+        "docs/status/gpu-vellum-handoff.yaml",
         "docs/status/sequencer-exposure.json",
+        "docs/validation/gpu-handoff-provenance/receipt.json",
         "inspect/CMakeLists.txt",
         "inspect/include/pulp/inspect/capability_definitions.inc",
         "inspect/include/pulp/inspect/control_registry_digest.inc",
