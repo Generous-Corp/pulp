@@ -112,6 +112,8 @@ executor on the target host fails closed.
 | `dev.pulp.artifact/read@1` | `dev.pulp.artifact/read@1` (`artifact.read`) | `artifact-chunk` |
 | `dev.pulp.sequencer/state.read@1` | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | `response` |
 | `dev.pulp.sequencer/state.edit@1` | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | `receipt` |
+| `dev.pulp.sequencer/transport.loop.read@1` | `dev.pulp.sequencer/transport.loop.read@1` (`sequencer.transport.loop.read`) | `response` |
+| `dev.pulp.sequencer/transport.loop.write@1` | `dev.pulp.sequencer/transport.loop.write@1` (`sequencer.transport.loop.write`) | `receipt` |
 <!-- END GENERATED operation-matrix -->
 
 ## Canonical control foundation
