@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260914-pr8350-android-gpu-adapter-identity-watch",
+  "created_at": "2026-09-14T08:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record an Android-only GPU adapter identity accessor in core/render/platform/android. GpuDriverPolicy carried a Vulkan blocklist with zero call sites: shouldUseVulkan() ended in a TODO naming a nativeGetGpuName() that does not exist, so a device on a known-bad Mali or Adreno driver received Vulkan regardless and only the post-crash flag caught it. The change adds android_gpu_adapter_identity() over the live GpuSurface, exports it through JNI as nativeGetGpuAdapterInfo() returning {name, vendor, driver}, and has PulpSurfaceView persist that triple once Dawn has initialized so the policy can match it against the blocklist on the next launch. The behavioural effect is confined to Android backend selection: a blocklisted adapter now actually declines Vulkan instead of the blocklist being dead code. No render surface abstraction, no Skia or Dawn backend on any other platform, no asset pipeline, and no captured or serialized output changes; the accessor is read-only and the JNI export answers null rather than throwing when no adapter exists yet. This touches no accepted expansion boundary and no Vellum source authority, so the disposition is watch-only.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch",
+    "android/app/src/test/kotlin/com/pulp/render/GpuDriverPolicyTest.kt"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
