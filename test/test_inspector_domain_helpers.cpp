@@ -92,6 +92,7 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
         InspectorCapability::TelemetryStream,
         InspectorCapability::SequencerStateRead,
         InspectorCapability::SequencerStateEdit,
+        InspectorCapability::TimelineDocumentSession,
     });
     REQUIRE(std::ranges::equal(observe, expected_observe));
     REQUIRE(std::ranges::equal(develop, expected_develop));
