@@ -863,9 +863,10 @@ a second Pulp plug-in is loaded beside it, in somebody else's host. The
 
 ## A green `--check` says nothing about a module outside `PUBLIC_ROOTS`
 
-`PUBLIC_ROOTS` in `tools/scripts/agent_capability_surface.py` lists exactly six
-domains: `audio`, `midi`, `music`, `sequence`, `signal`, `timebase`. Headers
-anywhere else are not scanned, not classified, and not fingerprinted.
+`PUBLIC_ROOTS` in `tools/scripts/agent_capability_surface.py` lists exactly
+seven domains: `audio`, `midi`, `music`, `playback`, `sequence`, `signal`,
+`timebase`. Headers anywhere else are not scanned, not classified, and not
+fingerprinted.
 
 That matters most at the moment it is least visible. Adding a new optional
 module under `core/` and exporting it — appending the target to
@@ -894,6 +895,44 @@ consumer contract with typed bindings and operational probes that do not exist �
 does not, and adding it would mean manufacturing rows to describe headers no
 generator claims. Record which way you went; silence here looks identical to
 having never asked.
+
+## Widening `PUBLIC_ROOTS` is four more edits, and each hides the next
+
+The four coordinated edits above cover a new header inside a domain that is
+already scanned. Admitting a whole new *domain* is a second, disjoint set, and
+the tooling reveals them strictly one at a time — satisfying one produces an
+error that looks unrelated to the one before it:
+
+1. **`PUBLIC_ROOTS`** in `agent_capability_surface.py`. Until the root is
+   declared, `discover_headers()` returns nothing for it, so the domain reads as
+   fully reviewed because it is entirely invisible.
+2. **The schema enum** in `docs/status/agent-capability-surface.schema.json` —
+   in **three** separate places (the review-root `domain`, the inventory's
+   `propertyNames`, and the frozen-entry `domain`). Miss one and a row that the
+   surface script just legitimately produced is rejected as schema-invalid.
+3. **`REVIEWED_MINIMAL_TARGETS`** in `agent_capability_registry.py`. The failure
+   is `include has no covered public target owner`, which names the binding, not
+   the missing map row. The value is the CMake **export** name
+   (`Pulp::playback`), which `PulpInstallRules.cmake` derives from the target
+   (`pulp-playback`) — not the target name itself.
+4. **The compile probe's link list** in `test/cmake/quality_tests.cmake`. The
+   generated link probe for `pulp-test-agent-capability-compile` cannot resolve a
+   symbol from a subsystem the target does not link, so the probe fails at link
+   time with no mention of capabilities at all.
+
+Two preconditions are worth measuring before starting, because assuming either
+one wastes the whole pass. The domain's headers must already install — the check
+is the per-subsystem `install(DIRECTORY …)` loop over
+`_pulp_sdk_header_subsystems` in `PulpInstallRules.cmake`, not the presence of
+an `install(TARGETS …)` line. And the target must already be in
+`PULP_SDK_TARGETS`; if it is not, adding it is itself public surface (see below)
+and belongs in its own slice.
+
+Partial coverage is the expected end state, and it must be spelled. Classify the
+headers that are not part of the advertised closure as `infrastructure` with
+empty `capability_keys`, never as `unsupported_capability`: an absent key means
+*unknown*, and `unsupported_capability` asserts a fact about the header that
+nobody measured.
 
 ## Splitting an exported target means exporting BOTH halves
 

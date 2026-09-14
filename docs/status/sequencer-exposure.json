@@ -6270,6 +6270,89 @@
           "rationale": "This slice describes no installed design-time authoring capability."
         }
       }
+    },
+    {
+      "id": "sequence-controller-playback-program",
+      "title": "Controller playback program events advertised as a reviewed public SDK capability",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "634a6a40-04e1-4cd0-ad42-90ce9ae30b27",
+      "owned_paths": [
+        ".agents/skills/agent-capabilities/SKILL.md",
+        "docs/status/agent-capabilities.json",
+        "docs/status/agent-capability-surface.json",
+        "docs/status/agent-capability-surface.schema.json",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/quality_tests.cmake",
+        "test/test_agent_capability_compile.cpp",
+        "tools/agent-capabilities/contract-history.json",
+        "tools/scripts/agent_capability_catalog_timing.py",
+        "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_registry.py",
+        "tools/scripts/agent_capability_surface.py"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program.hpp",
+          "needles": [
+            "struct ControllerProgramEvent {",
+            "constexpr bool controller_program_event_less(const ControllerProgramEvent& lhs,"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The controller playback program ships as the public header pulp/playback/program.hpp on Pulp::playback, and this slice makes that header a reviewed capability root rather than an unreviewed legacy path. ControllerProgramEvent is the value a host reads or writes to place a controller move on the playback timeline, and controller_program_event_less is the exported ordering predicate that decides how two moves at the same coordinate resolve — so a consumer can sort, merge or diff a controller program without re-deriving the engine's own tie-break.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program.hpp",
+              "needles": [
+                "struct ControllerProgramEvent {",
+                "constexpr bool controller_program_event_less(const ControllerProgramEvent& lhs,"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The playback program is an in-process value type consumed by hosts; this slice adds no offline Timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The playback program is an in-process value type consumed by hosts; this slice adds no MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The header carries no Product A live control capability, grant, or policy projection."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "exposed",
+          "rationale": "The capability manifest publishes sequence.controller-playback with typed bindings for pulp::playback::ControllerProgramEvent and pulp::playback::controller_program_event_less at target Pulp::playback, so a design-time agent can discover the playback program root and its ordering predicate from the manifest alone.",
+          "evidence": [
+            {
+              "kind": "capability_definition",
+              "path": "docs/status/agent-capabilities.json",
+              "needles": [
+                "sequence.controller-playback"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "descriptor",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        }
+      }
     }
   ],
   "tombstones": []
