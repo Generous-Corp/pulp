@@ -277,8 +277,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
           "state": "pulp-owned-retained",
-          "revision": "47d43daf3af7a10522b54852115820e048191699",
-          "object_id": "653cc2a24fa4c06d88f2187bf7e6e8bdb2de5c1c",
+          "revision": "3ab90dffde2463c415aa268ee813dbdb006918af",
+          "object_id": "bea37afe4b564f2047897c92ac7eeb289eb451d4",
           "object_type": "blob"
         },
         {
@@ -475,8 +475,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/widget_bridge.cpp",
           "state": "pulp-owned-retained",
-          "revision": "01505424cd12193b455b64b8f15d31397092dfd6",
-          "object_id": "0458caed5a80803e96625518b92aa12e909f6e70",
+          "revision": "05f5f2eece541c3825fc844ef206686abe193b0c",
+          "object_id": "9fd3baad04126bfdbfca07f99ad4b41eb56f9d04",
           "object_type": "blob"
         },
         {
@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "79d23645eededb3468cfec91b3d5b58456400f2e",
-          "object_id": "1f0a4e534668aaec8a0838cd8bed39339378e5b8",
+          "revision": "5921b5856f40505641681c850845200f7bd26e4d",
+          "object_id": "1b7dd17923805d996ff4ae3052d93c5e4c1cc041",
           "object_type": "blob"
         },
         {
@@ -2759,16 +2759,16 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-analysis/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "bccc2b686067285ae1756db4cf0b92514f7e4387",
-          "object_id": "49ee63d4b50a93a1e42b37285380d7f6982ab85b",
+          "revision": "381765327e48478ac4a497e1129a756ed5fe2e01",
+          "object_id": "8a10c72cdd4c702bd5896d0e051dfd1046e033f8",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-sql/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "ae723a0a8fcbbb1c7c86833c93ae93ad5bd17d1a",
-          "object_id": "277f92f41671581587467824f1a3755346941f5c",
+          "revision": "761a380032fae2bd95d4a1f6a1030acc7e01d1fd",
+          "object_id": "dc208d01dbfd14988e25656672c02cae734872d3",
           "object_type": "blob"
         },
         {
