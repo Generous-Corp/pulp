@@ -1867,8 +1867,16 @@ Render the root arrangement of a canonical timeline project to a Float32 WAV
 without opening an audio device.
 
 ```bash
-pulp render song.pulpseq.json --out song.wav [--sample-rate 48000]
+pulp render song.pulpseq.json --out song.wav [--sample-rate 48000] [--tail-frames 24000]
 ```
+
+`--tail-frames` renders that many extra frames after the sequence ends, so a
+delay, reverb, or release envelope still ringing past the last event is captured
+rather than cut at it. It defaults to `0`, which ends the file exactly at the
+sequence end — the length an unflagged render has always produced. The tail is
+counted against the same in-memory render budget as the sequence itself, and a
+tail that overruns that budget is refused rather than truncated. The emitted
+JSON reports the requested tail alongside the frames actually written.
 
 The renderer resolves local asset locators, compiles the immutable playback
 program, and processes it in bounded blocks. It currently renders arrangement

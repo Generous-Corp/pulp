@@ -105,6 +105,30 @@ def main() -> int:
         and explain_rate["maximum"] == gen.MAX_COMPILED_SAMPLE_RATE,
     )
 
+    render_tail = _tool(document, "pulp_timeline_render")["inputSchema"]["properties"].get(
+        "tail_frames"
+    )
+    check(
+        "render exposes the tail as an explicit bounded integer option",
+        render_tail is not None
+        and render_tail["type"] == "integer"
+        and render_tail["minimum"] == 0
+        and render_tail["maximum"] == gen.MAX_TAIL_FRAMES,
+    )
+    check(
+        "the tail stays optional, so an unflagged render keeps its current length",
+        "tail_frames" not in _tool(document, "pulp_timeline_render")["inputSchema"]["required"],
+    )
+    check(
+        "render is the only operation carrying a tail",
+        [
+            tool["name"]
+            for tool in document["tools"]
+            if "tail_frames" in tool["inputSchema"]["properties"]
+        ]
+        == ["pulp_timeline_render"],
+    )
+
     defs = manifest["$defs"]
     expected_documents = sorted(
         name

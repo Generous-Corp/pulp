@@ -155,7 +155,7 @@ function(pulp_bind_cli_shellout_target target)
 endfunction()
 
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp
-    test_cli_audio_heritage.cpp)
+    test_cli_audio_heritage.cpp test_cli_timeline_render_shellout.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-shellout PRIVATE
     PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)

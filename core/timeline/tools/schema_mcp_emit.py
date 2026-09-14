@@ -29,6 +29,7 @@ CONCEPTS = _REPO_ROOT / "core" / "interchange" / "capabilities" / "concepts.json
 
 GENERATOR_ID = "schema-mcp-emit"
 MAX_COMPILED_SAMPLE_RATE = 768_000
+MAX_TAIL_FRAMES = 4_294_967_295
 TOOL_DEFS_VERSION = 1
 
 
@@ -62,6 +63,19 @@ def _sample_rate_property() -> dict:
         "minimum": 1,
         "maximum": MAX_COMPILED_SAMPLE_RATE,
         "description": "Render sample rate in Hz. Defaults to 48000.",
+    }
+
+
+def _tail_frames_property() -> dict:
+    return {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": MAX_TAIL_FRAMES,
+        "description": (
+            "Extra frames rendered after the sequence ends, capturing a ringing "
+            "delay, reverb, or release instead of cutting it. Defaults to 0, "
+            "which ends the file exactly at the sequence end."
+        ),
     }
 
 
@@ -269,6 +283,7 @@ def generate(manifest: dict) -> str:
                         "description": "Destination audio file path.",
                     },
                     "sample_rate": _sample_rate_property(),
+                    "tail_frames": _tail_frames_property(),
                 },
                 ["output", "project"],
             ),

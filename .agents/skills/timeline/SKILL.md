@@ -56,6 +56,17 @@ Apply edits as one expected-revision transaction, validate the result, use
 `explain` to inspect playback lowering/PDC, then render only when an audio
 artifact is needed. Never modify canonical project JSON text directly.
 
+A render ends at the sequence end unless you ask for more. `pulp render`'s
+`--tail-frames <n>` and `pulp_timeline_render`'s `tail_frames` render n frames
+after the transport stops; both default to zero, which is the length every
+render produced before the option existed. The default is the trap, not the
+option: a program whose last event feeds a delay, reverb, or release envelope
+renders with that tail cut at the last note, and nothing reports it — the file
+is well-formed and the JSON says `ok`. If a bounce sounds like it ends abruptly,
+suspect the missing tail before suspecting the DSP. The tail is charged against
+the same in-memory render budget as the sequence and is refused with its own
+message when it does not fit, so a tail is never silently truncated to make one.
+
 `command_apply` carries both halves of that sentence as optional arguments,
 and both are session-only — a stateless apply opens its own document and
 keeps no retry record, so it refuses them rather than accepting and ignoring
