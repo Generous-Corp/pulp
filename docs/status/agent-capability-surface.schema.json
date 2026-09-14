@@ -32,7 +32,7 @@
         "properties": {
           "domain": {
             "type": "string",
-            "enum": ["audio", "midi", "music", "sequence", "signal", "timebase"]
+            "enum": ["audio", "midi", "music", "playback", "sequence", "signal", "timebase"]
           },
           "source": { "type": "string", "minLength": 1 },
           "install_prefix": { "type": "string", "pattern": "^pulp/" }
@@ -65,7 +65,7 @@
           "minProperties": 1,
           "propertyNames": {
             "type": "string",
-            "enum": ["audio", "midi", "music", "sequence", "signal", "timebase"]
+            "enum": ["audio", "midi", "music", "playback", "sequence", "signal", "timebase"]
           },
           "additionalProperties": {
             "type": "object",
@@ -103,7 +103,7 @@
         "properties": {
           "domain": {
             "type": "string",
-            "enum": ["audio", "midi", "music", "sequence", "signal", "timebase"]
+            "enum": ["audio", "midi", "music", "playback", "sequence", "signal", "timebase"]
           },
           "source": { "type": "string", "minLength": 1 },
           "fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
