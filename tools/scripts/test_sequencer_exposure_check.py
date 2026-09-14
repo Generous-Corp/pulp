@@ -29,6 +29,33 @@ from sequencer_exposure_check import (
 SHA_A = "1" * 40
 SHA_B = "2" * 40
 
+_CHECK_TALLY = {"clean": 0, "calibrated": 0}
+
+
+def _tallied(checker):
+    """Count every check this selftest runs, so its summary is a measurement.
+
+    A hand-written tally in the closing line goes stale the first time somebody
+    adds a control, and nothing in the suite can notice: the number is prose.
+    Counting the real calls makes the summary as falsifiable as the controls it
+    describes.
+    """
+
+    def tallied(*args, **kwargs):
+        errors = checker(*args, **kwargs)
+        _CHECK_TALLY["calibrated" if errors else "clean"] += 1
+        return errors
+
+    return tallied
+
+
+validate_document = _tallied(validate_document)
+validate_git_provenance = _tallied(validate_git_provenance)
+validate_release_evidence = _tallied(validate_release_evidence)
+validate_schema_contract = _tallied(validate_schema_contract)
+validate_tombstone_provenance = _tallied(validate_tombstone_provenance)
+validate_transition = _tallied(validate_transition)
+
 
 def write(root: Path, path: str, text: str) -> None:
     destination = root / path
@@ -704,6 +731,215 @@ def main() -> int:
         if transition_errors:
             raise AssertionError(f"covered pending transition failed: {transition_errors}")
 
+        # A registration manifest is never owned whole. The row that registered
+        # a target there owns a line, so another slice appending to the same
+        # manifest is not a sequencer change; the row's whole-file ownership and
+        # a manifest named for the sequencer stay watched.
+        manifest_base = copy.deepcopy(valid)
+        manifest_owner = copy.deepcopy(pending)
+        manifest_owner.update({
+            "id": "SEQ-MANIFEST-OWNER",
+            "claim_id": "manifest-owner-claim",
+            "owned_paths": [
+                "inspect/src/control_generic_host.cpp",
+                "test/cmake/view_widget_bridge_tests.cmake",
+                "inspect/CMakeLists.txt",
+                "test/cmake/timeline_tests.cmake",
+            ],
+        })
+        manifest_base["rows"].append(manifest_owner)
+        for shared_manifest in (
+            "test/cmake/view_widget_bridge_tests.cmake",
+            "inspect/CMakeLists.txt",
+        ):
+            transition_errors = validate_transition(
+                manifest_base, manifest_base, [shared_manifest]
+            )
+            if transition_errors:
+                raise AssertionError(
+                    f"registration manifest was governed as an owned path: {transition_errors}"
+                )
+        for exclusive_path in (
+            "inspect/src/control_generic_host.cpp",
+            "test/cmake/timeline_tests.cmake",
+        ):
+            transition_errors = validate_transition(
+                manifest_base, manifest_base, [exclusive_path]
+            )
+            if not any(exclusive_path in error and "not covered" in error
+                       for error in transition_errors):
+                raise AssertionError(
+                    f"exclusively owned path escaped the watch: {exclusive_path}: "
+                    f"{transition_errors}"
+                )
+
+        # A path two rows declare is shared by construction and not watched;
+        # with one declaring row gone it is exclusively owned again.
+        shared_registry = "tools/scripts/negative_capability_allowlist.json"
+        shared_base = copy.deepcopy(valid)
+        for index in (1, 2):
+            shared_owner = copy.deepcopy(pending)
+            shared_owner.update({
+                "id": f"SEQ-SHARED-{index}",
+                "claim_id": f"shared-claim-{index}",
+                "owned_paths": [shared_registry, f"inspect/src/shared_owner_{index}.cpp"],
+            })
+            shared_base["rows"].append(shared_owner)
+        transition_errors = validate_transition(shared_base, shared_base, [shared_registry])
+        if transition_errors:
+            raise AssertionError(
+                f"path declared by two rows was governed: {transition_errors}"
+            )
+        sole_base = copy.deepcopy(shared_base)
+        sole_base["rows"] = [
+            row for row in sole_base["rows"] if row["id"] != "SEQ-SHARED-2"
+        ]
+        transition_errors = validate_transition(sole_base, sole_base, [shared_registry])
+        if not any("not covered" in error for error in transition_errors):
+            raise AssertionError(
+                f"exclusively owned registry escaped the watch: {transition_errors}"
+            )
+
+        # Dropping a path from its only owner does not free it in the same
+        # transition: the de-annexation is its own ledger-only change, and the
+        # path is free once that change is the base.
+        annexed = "inspect/src/control_generic_host.cpp"
+        deannexed = copy.deepcopy(manifest_base)
+        for row in deannexed["rows"]:
+            if row["id"] == "SEQ-MANIFEST-OWNER":
+                row["owned_paths"].remove(annexed)
+        transition_errors = validate_transition(
+            manifest_base, deannexed, [annexed, "docs/status/sequencer-exposure.json"]
+        )
+        if not any(annexed in error and "not covered" in error
+                   for error in transition_errors):
+            raise AssertionError(
+                f"same-transition de-annexation freed a changed path: {transition_errors}"
+            )
+        transition_errors = validate_transition(
+            manifest_base, deannexed, ["docs/status/sequencer-exposure.json"]
+        )
+        if transition_errors:
+            raise AssertionError(f"ledger-only de-annexation failed: {transition_errors}")
+        transition_errors = validate_transition(deannexed, deannexed, [annexed])
+        if transition_errors:
+            raise AssertionError(
+                f"de-annexed path stayed watched after landing: {transition_errors}"
+            )
+
+        # Moving a path between two sole owners is not sharing: the receiving
+        # row must be a pending row that covers the change.
+        transferred = copy.deepcopy(deannexed)
+        receiver = copy.deepcopy(valid["rows"][1])
+        receiver.update({
+            "id": "SEQ-RECEIVER",
+            "claim_id": "receiver-claim",
+            "owned_paths": [annexed],
+        })
+        transferred["rows"].append(receiver)
+        transition_errors = validate_transition(
+            manifest_base, transferred, [annexed, "docs/status/sequencer-exposure.json"]
+        )
+        if not any(annexed in error and "not covered" in error
+                   for error in transition_errors):
+            raise AssertionError(
+                f"transfer to a released row freed a changed path: {transition_errors}"
+            )
+        receiver["delivery_state"] = "pending"
+        receiver.pop("release")
+        transition_errors = validate_transition(
+            manifest_base, transferred, [annexed, "docs/status/sequencer-exposure.json"]
+        )
+        if transition_errors:
+            raise AssertionError(
+                f"transfer to a covering pending row failed: {transition_errors}"
+            )
+
+        # A removed row's tombstone keeps its paths watched.
+        entombed = copy.deepcopy(manifest_base)
+        entombed["rows"] = [
+            row for row in entombed["rows"] if row["id"] != "SEQ-MANIFEST-OWNER"
+        ]
+        entombed["tombstones"].append({
+            "id": "SEQ-MANIFEST-OWNER",
+            "delivery_state": "pending",
+            "claim_id": "manifest-owner-claim",
+            "owned_paths": list(manifest_owner["owned_paths"]),
+            "rationale": "Removed by the fixture.",
+        })
+        transition_errors = validate_transition(
+            manifest_base, entombed, [annexed, "docs/status/sequencer-exposure.json"]
+        )
+        if transition_errors:
+            raise AssertionError(
+                f"tombstoned removal of an owned path failed: {transition_errors}"
+            )
+        transition_errors = validate_transition(entombed, entombed, [annexed])
+        if not any(annexed in error and "not covered" in error
+                   for error in transition_errors):
+            raise AssertionError(
+                f"tombstone stopped watching its owned path: {transition_errors}"
+            )
+
+        # A file a row only proves a line in is protected by that row's
+        # needles, not watched whole, whether the proof is row or surface
+        # evidence. The catalog is row evidence of one row here; the CLI
+        # projection is surface evidence of one row in the fixture.
+        evidence_only = copy.deepcopy(valid)
+        evidence_only["rows"][1]["evidence"].append(
+            row_evidence("tools/mcp/mcp_control_tool_catalog.cpp", "sequencer.control")
+        )
+        for evidence_only_path in (
+            "tools/mcp/mcp_control_tool_catalog.cpp",
+            "tools/cli/cmd_control.cpp",
+        ):
+            transition_errors = validate_transition(
+                evidence_only, evidence_only, [evidence_only_path]
+            )
+            if transition_errors:
+                raise AssertionError(
+                    f"evidence-only file was governed whole: {evidence_only_path}: "
+                    f"{transition_errors}"
+                )
+
+        # A wholesale-regenerated artifact is never watched whole. Another
+        # required gate compels its refresh whenever a pinned path changes, so
+        # watching it would leave the author no way to satisfy both gates at
+        # once. A sibling path the same row owns exclusively stays watched, so
+        # the exemption cannot pass by unwatching everything.
+        generated_base = copy.deepcopy(valid)
+        generated_owner = copy.deepcopy(pending)
+        generated_owner.update({
+            "id": "SEQ-GENERATED-OWNER",
+            "claim_id": "generated-owner-claim",
+            "owned_paths": [
+                "docs/status/gpu-vellum-handoff.yaml",
+                "docs/validation/gpu-handoff-provenance/receipt.json",
+                "inspect/src/control_generated_sibling.cpp",
+            ],
+        })
+        generated_base["rows"].append(generated_owner)
+        for regenerated_path in (
+            "docs/status/gpu-vellum-handoff.yaml",
+            "docs/validation/gpu-handoff-provenance/receipt.json",
+        ):
+            transition_errors = validate_transition(
+                generated_base, generated_base, [regenerated_path]
+            )
+            if transition_errors:
+                raise AssertionError(
+                    f"regenerated artifact was governed as an owned path: "
+                    f"{regenerated_path}: {transition_errors}"
+                )
+        transition_errors = validate_transition(
+            generated_base, generated_base, ["inspect/src/control_generated_sibling.cpp"]
+        )
+        if not any("not covered" in error for error in transition_errors):
+            raise AssertionError(
+                f"sibling of a regenerated artifact escaped the watch: "
+                f"{transition_errors}"
+            )
+
         mutation = copy.deepcopy(valid)
         rename_pending = copy.deepcopy(pending)
         rename_pending["id"] = "SEQ-RENAME-PENDING"
@@ -914,7 +1150,11 @@ def main() -> int:
                 f"published tombstone rewrite unexpectedly passed: {transition_errors}"
             )
 
-    print("sequencer exposure checker selftest: OK (15 green, 29 calibrated red controls)")
+    print(
+        "sequencer exposure checker selftest: OK "
+        f"({_CHECK_TALLY['clean']} clean checks, "
+        f"{_CHECK_TALLY['calibrated']} calibrated failures)"
+    )
     return 0
 
 

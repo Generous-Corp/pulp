@@ -350,8 +350,9 @@ catch_discover_tests(pulp-test-design-import-jsx-runtime
 if(APPLE)
     add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)
     target_link_libraries(pulp-test-screenshot-compare PRIVATE pulp::view Catch2::Catch2WithMain)
+    pulp_scaled_test_timeout(_pulp_screenshot_compare_timeout 240)
     catch_discover_tests(pulp-test-screenshot-compare
-        PROPERTIES TIMEOUT 240
+        PROPERTIES TIMEOUT "${_pulp_screenshot_compare_timeout}"
         LABELS "parser-import")
 endif()
 

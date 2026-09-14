@@ -446,7 +446,9 @@ endif()
 # fixtures are source-owned and it needs no example plugin.
 add_executable(pulp-test-modal-analysis test_modal_analysis.cpp)
 target_link_libraries(pulp-test-modal-analysis PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-modal-analysis PROPERTIES TIMEOUT 300)
+pulp_scaled_test_timeout(_pulp_modal_analysis_timeout 300)
+catch_discover_tests(pulp-test-modal-analysis
+    PROPERTIES TIMEOUT "${_pulp_modal_analysis_timeout}")
 # Measured-versus-reported latency. Its fixture is a source-owned delay line, so
 # it needs no example plugin.
 add_executable(pulp-test-latency-contract test_latency_contract.cpp)

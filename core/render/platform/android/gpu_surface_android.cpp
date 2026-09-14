@@ -1108,6 +1108,26 @@ GpuSurface* android_gpu_surface() {
     return g_gpu_surface.get();
 }
 
+AndroidGpuAdapterIdentity android_gpu_adapter_identity() {
+    // g_gpu_surface is reset on the destroy path, so read it under the same
+    // mutex the frame hooks use rather than racing teardown.
+    std::lock_guard lock(g_surface_mutex);
+    AndroidGpuAdapterIdentity identity;
+    if (!g_gpu_surface || !g_gpu_surface->is_initialized()) return identity;
+
+    const auto info = g_gpu_surface->adapter_info();
+    if (!info.available) return identity;
+
+    identity.available = true;
+    identity.name = info.name;
+    identity.vendor = info.vendor;
+    // AdapterInfo carries no numeric driver version: neither Pulp's struct nor
+    // Dawn's wgpu::AdapterInfo has one. The description string is the only
+    // driver-build detail the adapter reports, so it is what the policy matches.
+    identity.driver = info.description;
+    return identity;
+}
+
 } // namespace pulp::render
 
 // JNI `extern "C"` exports for this surface live in the sibling TU

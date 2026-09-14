@@ -6208,6 +6208,61 @@
       }
     },
     {
+      "id": "view-contextmenu-arming-and-bubbling",
+      "title": "Right-click context menus reach their handler, with keyboard navigation",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "pulp-pr-8307-contextmenu",
+      "owned_paths": [
+        "core/view/include/pulp/view/context_menu.hpp",
+        "core/view/src/context_menu.cpp",
+        "core/view/src/pointer_dispatch.cpp",
+        "core/view/src/widget_bridge.cpp",
+        "docs/reference/compat/react.md",
+        "docs/status/gpu-vellum-handoff.yaml",
+        "docs/validation/gpu-handoff-provenance/receipt.json",
+        "test/test_context_menu.cpp",
+        "test/test_widget_bridge_animation.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/view/src/pointer_dispatch.cpp",
+          "needles": [
+            "`contextmenu` BUBBLES in the DOM",
+            "The NEAREST handler wins and the walk stops there"
+          ]
+        },
+        {
+          "path": "core/view/src/context_menu.cpp",
+          "needles": [
+            "void ContextMenu::move_hover_to_edge(bool last)"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "Pointer and keyboard dispatch for a view widget; it adds no sequencer or timeline SDK API."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "A right-click gesture is not an offline Timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "A right-click gesture is not an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Context-menu dispatch is view input handling, not an independently controllable runtime capability."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This slice describes no installed design-time authoring capability."
+        }
+      }
+    },
+    {
       "id": "offline-timeline-render-tail",
       "title": "Explicit render tail on the offline timeline render verb",
       "classification": "offline_cli_mcp",

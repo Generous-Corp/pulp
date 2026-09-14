@@ -139,18 +139,23 @@ pulp_add_test_suite(pulp-test-sample-heritage-shipping-gates
     TEST_SPEC "[shipping-gate]~[g1]~[performance],[heritage][typed][pitch][polyphony],[heritage][typed][mip],[heritage][typed][pitch][stream][mip],[heritage][typed][failure],[heritage][latency]"
     LABELS "quality-lab;audio;sampler;heritage;shipping-gate"
     TIMEOUT 30)
+# The two registrations below run the same instrumented binary as the suite
+# above, so they need the same budget. pulp_add_test_suite scales TIMEOUT for
+# its own registration only; a literal here would leave these two cases at the
+# uninstrumented budget while their sibling gets the scaled one.
+pulp_scaled_test_timeout(_pulp_heritage_variant_timeout 30)
 catch_discover_tests(pulp-test-sample-heritage-shipping-gates
     TEST_SPEC "[shipping-gate][g1]"
     TEST_PREFIX "heritage-g1::"
     PROPERTIES
-        TIMEOUT 30
+        TIMEOUT "${_pulp_heritage_variant_timeout}"
     LABELS "audio;sampler;heritage;heritage-g1;shipping-gate")
 catch_discover_tests(pulp-test-sample-heritage-shipping-gates
     TEST_SPEC "[shipping-gate][performance]"
     TEST_PREFIX "heritage-performance::"
     PROPERTIES
         RUN_SERIAL TRUE
-        TIMEOUT 30
+        TIMEOUT "${_pulp_heritage_variant_timeout}"
     LABELS "quality-lab;performance;audio;sampler;heritage;shipping-gate")
 include("${CMAKE_CURRENT_LIST_DIR}/heritage_calibration_tests.cmake")
 pulp_add_test_suite(pulp-test-sample-starvation-envelope

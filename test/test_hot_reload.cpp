@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "support/thread_progress.hpp"
 #include <chrono>
 #include <pulp/view/script_engine.hpp>
 #include <choc/platform/choc_FileWatcher.h>
@@ -69,7 +70,7 @@ static bool wait_for_history_containing(HotReloader& reloader,
     return has_expected();
 }
 
-TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
+TEST_CASE("HotReloader detects file changes", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_test");
     auto js_file = tmp_dir / "ui.js";
 
@@ -98,7 +99,7 @@ TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader reload_count increments", "[view][hotreload]") {
+TEST_CASE("HotReloader reload_count increments", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_test2");
     auto js_file = tmp_dir / "ui.js";
 
@@ -123,7 +124,7 @@ TEST_CASE("HotReloader reload_count increments", "[view][hotreload]") {
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader multiple sequential reloads", "[view][hotreload]") {
+TEST_CASE("HotReloader multiple sequential reloads", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_multi");
     auto js_file = tmp_dir / "ui.js";
 
@@ -150,7 +151,7 @@ TEST_CASE("HotReloader multiple sequential reloads", "[view][hotreload]") {
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader only reloads on JS modification", "[view][hotreload]") {
+TEST_CASE("HotReloader only reloads on JS modification", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_jsonly");
     auto js_file = tmp_dir / "ui.js";
 
@@ -178,7 +179,7 @@ TEST_CASE("HotReloader only reloads on JS modification", "[view][hotreload]") {
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader directory watching", "[view][hotreload]") {
+TEST_CASE("HotReloader directory watching", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_test3");
     auto entry = tmp_dir / "main.js";
 
@@ -203,7 +204,7 @@ TEST_CASE("HotReloader directory watching", "[view][hotreload]") {
 }
 
 TEST_CASE("HotReloader seeds observed JS file content",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_seed");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -248,7 +249,7 @@ TEST_CASE("HotReloader file seed skips non-JS files and missing paths",
 }
 
 TEST_CASE("HotReloader ignores same-content rewrites",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_same_content");
     auto entry = tmp_dir / "main.js";
 
@@ -256,6 +257,13 @@ TEST_CASE("HotReloader ignores same-content rewrites",
 
     HotReloader reloader(entry, [](const std::string&) {});
     REQUIRE(reloader.observed_content_hashes_.count(entry.lexically_normal().string()) == 1);
+
+    // The content gate is consume-once, and the live watcher thread is a
+    // second consumer of it: if the watcher observes the rewrite first, the
+    // direct call below is correctly told there is nothing new. Release the
+    // watcher so this thread is the only consumer and the gate's answer is
+    // a property of the content rather than of who got there first.
+    reloader.watcher_.reset();
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(entry, "// entry v1");
@@ -269,7 +277,7 @@ TEST_CASE("HotReloader ignores same-content rewrites",
 }
 
 TEST_CASE("HotReloader content hash still reloads changed modules",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_module_hash");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -279,6 +287,13 @@ TEST_CASE("HotReloader content hash still reloads changed modules",
 
     HotReloader reloader(tmp_dir, "main.js", [](const std::string&) {});
     REQUIRE(reloader.observed_content_hashes_.count(module.lexically_normal().string()) == 1);
+
+    // The content gate is consume-once, and the live watcher thread is a
+    // second consumer of it: if the watcher observes the rewrite first, the
+    // direct call below is correctly told there is nothing new. Release the
+    // watcher so this thread is the only consumer and the gate's answer is
+    // a property of the content rather than of who got there first.
+    reloader.watcher_.reset();
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(module, "// module v1");
@@ -292,7 +307,7 @@ TEST_CASE("HotReloader content hash still reloads changed modules",
 }
 
 TEST_CASE("HotReloader file watcher ignores unsupported changes",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_filter");
     auto entry = tmp_dir / "main.js";
     auto text_file = tmp_dir / "notes.txt";
@@ -318,7 +333,7 @@ TEST_CASE("HotReloader file watcher ignores unsupported changes",
 }
 
 TEST_CASE("HotReloader module file change reloads directory entry",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_module");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -362,7 +377,7 @@ TEST_CASE("HotReloader pending reload without callback still drains",
 }
 
 TEST_CASE("HotReloader empty or missing entry files do not schedule reloads",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_empty_entry");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -388,4 +403,105 @@ TEST_CASE("HotReloader empty or missing entry files do not schedule reloads",
     }
 
     std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("HotReloader content gate hands a rewrite to exactly one caller",
+          "[view][hotreload][rt-safety]") {
+    auto tmp_dir = make_temp_dir("pulp_hotreload_gate_race");
+    auto entry = tmp_dir / "main.js";
+
+    write_js_file(entry, "// entry v0");
+
+    HotReloader reloader(entry, [](const std::string&) {});
+    reloader.watcher_.reset();
+
+    constexpr int kThreads = 8;
+    constexpr int kRounds = 512;
+
+    for (int round = 0; round < kRounds; ++round) {
+        write_js_file(entry, "// entry v" + std::to_string(round + 1));
+
+        std::atomic<bool> go{false};
+        std::atomic<int> ready{0};
+        std::atomic<int> claims{0};
+        std::atomic<bool> timed_out{false};
+        std::vector<std::thread> threads;
+        threads.reserve(kThreads);
+
+        for (int i = 0; i < kThreads; ++i) {
+            threads.emplace_back([&] {
+                ready.fetch_add(1, std::memory_order_relaxed);
+
+                // A start gate rather than a sleep: the threads must call the
+                // gate close enough together to contend for the same rewrite.
+                // Spinning is the point, so it carries its own deadline — a
+                // release that never arrives has to fail an assertion below
+                // rather than hang the suite.
+                const auto deadline =
+                    std::chrono::steady_clock::now() + pulp::test::kProgressDeadline;
+                while (!go.load(std::memory_order_acquire) &&
+                       std::chrono::steady_clock::now() < deadline) {
+                }
+
+                if (!go.load(std::memory_order_acquire)) {
+                    timed_out.store(true, std::memory_order_relaxed);
+                    return;
+                }
+
+                if (reloader.should_reload_for_modified_file(entry))
+                    claims.fetch_add(1, std::memory_order_relaxed);
+            });
+        }
+
+        const bool all_ready = pulp::test::wait_for_condition(
+            [&] { return ready.load(std::memory_order_relaxed) == kThreads; });
+
+        go.store(true, std::memory_order_release);
+        for (auto& thread : threads)
+            thread.join();
+
+        REQUIRE(all_ready);
+        REQUIRE_FALSE(timed_out.load());
+
+        // The gate is a read-modify-write over the observed-hash map. Every
+        // thread sees the same new content, so exactly one of them may be
+        // told to reload; two claims means two reloads for one edit.
+        REQUIRE(claims.load() == 1);
+    }
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("HotReloader teardown stops the watcher before releasing its state",
+          "[view][hotreload][rt-safety]") {
+    constexpr int kRounds = 8;
+
+    for (int round = 0; round < kRounds; ++round) {
+        auto tmp_dir = make_temp_dir("pulp_hotreload_teardown");
+        auto entry = tmp_dir / "main.js";
+
+        write_js_file(entry, "// entry v0");
+
+        std::atomic<bool> stop{false};
+        std::thread churn([&] {
+            for (int i = 1; !stop.load(std::memory_order_relaxed); ++i) {
+                write_js_file(entry, "// entry v" + std::to_string(i));
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        });
+
+        {
+            // Destroyed while the watcher thread is dispatching into
+            // `on_file_changed`, which writes the members declared after
+            // `watcher_`. Releasing the watcher last leaves that thread
+            // writing into storage the destructor has already reclaimed.
+            HotReloader reloader(tmp_dir, "main.js", [](const std::string&) {});
+            std::this_thread::sleep_for(std::chrono::milliseconds(60));
+            REQUIRE(reloader.watched_path_ == tmp_dir);
+        }
+
+        stop.store(true, std::memory_order_relaxed);
+        churn.join();
+        std::filesystem::remove_all(tmp_dir);
+    }
 }
