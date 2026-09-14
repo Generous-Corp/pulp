@@ -1761,6 +1761,10 @@ disabling overflow. Nothing about either failure is visible without asking.
 | `profile-contract-drift` | A supplied TartCI source profile does not serve the contracted event classes, scope, or post-transform labels, or incorrectly fixes one priority for both classes. |
 | `profile-receipt-drift` | A supplied installed-profile receipt does not bind to the exact supplied source-profile digest. |
 | `source-manifest-drift` | A supplied private desired-fleet manifest disagrees with the Pulp contract or source profile, including its declared `tart_home`. |
+| `host-silent` | A declared fleet LANE completed no `build.yml` job for `silence_hours` while at least `demand_min_jobs` of the work it serves completed elsewhere, counted across two independent witnesses: jobs carrying a label set it is observed to serve, plus distinct pieces of work for a job name only it is observed to run. Reported at the level in `hosts.severity`, which ships as `info` (see the per-lane census below). |
+| `host-map-broken` | Self-hosted jobs ran in the window and not one runner name matched any declared host prefix. A lane rename, not a silent fleet. Silence is not evaluated while the map cannot identify a host. |
+| `host-silence-degraded` | A jobs read failed or the run walk was cut short, so the window was not fully read and every silence verdict is suppressed rather than reported on evidence that does not support it. |
+| `host-unobserved`, `host-last-served`, `host-serving-inflight`, `host-idle`, `host-unmeasurable`, `host-map-unmapped`, `host-lane-census` | Census state for the step summary, always `info`. They record what the sweep saw so a would-be verdict can be counted against real traffic before anything pages. |
 
 Label matching is **subset containment**: GitHub dispatches to a runner only if
 it carries *every* label in the array. A lane requesting
@@ -1820,7 +1824,9 @@ wedged, a lane that is slow rather than dead, or a black hole in a `runs-on`
 hard-coded in a workflow rather than driven by a variable. A capacity shortfall
 (labels resolve, queue still grows) is caught only once the queue crosses the
 stall budget above, and only when no runner is live — a lane with one wedged
-runner online and a growing queue still reads healthy. An ephemeral lane whose consuming
+runner online and a growing queue still reads healthy. The per-host census
+below watches the other half of that gap from the other side: not "can these
+labels be served" but "is this HOST still serving". An ephemeral lane whose consuming
 workflow has not run inside the lookback window yields no evidence and is
 reported as a black hole — a false positive that is deliberately biased loud, on
 the grounds that a silent relief valve is what caused this in the first place.
@@ -1844,6 +1850,172 @@ same claim, and the checker no longer conflates them:
   persistent token-scope regression report green hourly and hide a real dead
   lane behind a permissions bug. Fix the token scope, or verify the lane's
   provisioner by hand — do not read it as either verdict.
+
+### A lane can read healthy while a host serves nothing
+
+Every check above is about a **lane**: can this label set be served. None of
+them can answer **is this host still serving**, and those two came apart on m5.
+Its disk filled, its runner stayed registered and `online`, every lane it backs
+kept resolving to a live runner, and m5 quietly served nothing for days. Each
+lane check was correct and the fleet was down a third of its capacity.
+
+The `hosts` block in `runner_topology.json` closes that half. It is a per-host
+census, not a new monitor and not a heartbeat: it reads the same jobs API the
+lane checks already read, and keeps the two fields those throw away,
+`runner_name` and `completed_at`. Host identity is the runner-name prefix,
+because tartci fixes an ephemeral runner's name as
+`<lane>-<supervisor pid>-<boot index>`, so the lane prefix is stable across
+boots while the full name is not. That prefix map is the one reviewed datum;
+everything else the census computes from observation.
+
+```
+silent(lane) := observed(lane)
+                AND (now - last_served(lane)) > silence_hours
+                AND demand(lane, silence_hours) >= demand_min_jobs
+
+demand(lane, w) := jobs completed elsewhere within w carrying a label set
+                   this lane is observed to serve
+                 + distinct (job name, run) pairs completed elsewhere
+                   within w for a job name only this lane is observed to run
+```
+
+**Demand is the clause that makes this survivable.** Silence on its own fires
+every quiet night and gets muted inside a week. Silence beside completed sibling
+jobs carrying a label set this lane is observed to serve is a lane that could
+have taken work and did not. `sibling_demand` counts only label sets the lane
+itself completed jobs for in the window, so m5's `pulp-preamble` traffic, which
+no other lane serves, is never demand against m1 or m3.
+
+**A lane with no sibling is measured against the work instead.** That last
+sentence cuts both ways: if no other declared lane serves any label set this one
+serves, then sibling demand is not low, it is unmeasurable, and the clause
+scores zero however hard the fleet is working. That is not a corner case. It is
+the shape of the lane that stopped on 2026-09-12, which had been the busiest on
+the fleet. For a lane like that the checker asks the same question against the
+work: did the jobs this lane is observed to run keep completing somewhere else?
+The walk is scoped to one workflow, so a job name identifies a job definition
+rather than a category, and only names this lane owns count. A name another
+declared lane also ran in the window is not this lane's signature, and counting
+it would manufacture displacement out of unrelated work. Ownership is judged
+among declared self-hosted lanes only, so a hosted runner cannot disown a name:
+rerouting a broken lane's jobs to a hosted runner is the most common way its
+silence gets hidden, and it is precisely what this is built to see.
+
+**Two witnesses, one question, and neither gates the other.** Label set and job
+name are independent readings of the same question, and each survives a case the
+other cannot. A reroute changes the label set by definition, so only the name
+witness sees one. A singleton lane has no sibling at all, so only the name
+witness exists for it. They are summed into one demand count, and the finding
+reports the split so the reader can see which one carried it. Gating either on
+the other is the defect that hid the motivating incident: an earlier build only
+consulted the name witness when the lane had no peer, and "peer" spanned the
+whole 72h observation window while demand is its 6h subset, so a single stale
+40h completion on a lane that had itself since died was enough to switch the
+name witness off for a lane whose work was visibly being taken elsewhere.
+
+Three smaller rules keep the count honest:
+
+- **Only a completion disowns a name.** A job still *running* on a sibling has
+  not established that the name is shared. Counting it would hand any concurrent
+  job a veto over the verdict for as long as it runs.
+- **The threshold counts distinct work, not rows.** Five reruns of one job are
+  five rows and one job's worth of demand, so displaced work is keyed by
+  `(job name, run)`, falling back to the runner name when a payload carries no
+  run id. The run rather than the runner, because a hosted runner is named
+  `GitHub Actions <id>` with a fresh id per job: on exactly the runners
+  displaced work lands on, a runner-name key collapses nothing. The name rather
+  than the run alone, because one run holds many job definitions, and a whole
+  workflow rerouted off a lane at once is as many pieces of demand as it has
+  jobs.
+- **A runner outside the prefix map is named `off-fleet`.** It is where the work
+  went, so it is the half of the proof that matters most, and it has no declared
+  host by construction. Calling it `hosted` would be a guess, and the wrong one
+  exactly when a lane rename has left a self-hosted runner unmapped.
+
+Five cases are deliberately not verdicts:
+
+- **Bootstrap.** A host with no mapped job at all in the observation window is
+  `host-unobserved`, never silent. A host that has never reported cannot page,
+  and a host decommissioned for a month falls out of observation on its own
+  rather than needing to be un-declared.
+- **In flight.** A host with a job still running has not stopped serving. A job
+  wedged long enough to matter is a different failure with a different owner
+  (the stale-run reaper), so the census reports the state and declines the
+  verdict.
+- **Idle fleet.** Silence under the demand threshold is `host-idle`: nothing this
+  lane serves was being served anywhere else either. A lane with no sibling
+  reports `host-idle` too when not enough of its own work completed elsewhere,
+  since the name witness is a real measurement that came back low.
+- **A lane neither witness can reach.** If no other declared lane serves a label
+  set this one serves, and every job name it ran was also run by a declared
+  lane, then neither witness exists and nothing about this lane can be measured
+  at all. That is `host-unmeasurable`, and it says so in those words. Reporting
+  a structural blind spot in the same language as a quiet fleet is how the blind
+  spot reads as a clean bill of health.
+- **An unread window.** If any read failed, or the walk hit its run cap before
+  covering the window, every silence verdict is suppressed and the sweep reports
+  `host-silence-degraded`. This is the same fail-closed discipline the checker
+  already applies to an unreadable runners API.
+
+**The identity is the lane, and the host is inventory.** m5 declares two
+prefixes: the ephemeral gate lane `m5-` and the persistent `pulp-preamble-m5`
+runner. A host-scoped predicate read a completion on either one as the host
+serving, so the cheap always-up lane vouched for the expensive gate lane that
+had stopped, which is the shape of the incident the rule exists for. Each lane
+therefore carries its own verdict, keyed `host/prefix` on a host that declares
+more than one. A host's always-up lane cannot vouch for a lane beside it that
+stopped, and evidence stays with the lane it describes: an online registration
+on the preamble runner is not an alibi for the gate lane next to it. Any host
+declaring more than one prefix that has any mapped job in the window also
+reports `host-lane-census`: last-served and job count per prefix, side by side.
+
+Read the `{n} job(s)` counts as counts *down to where the walk stopped*, not
+counts over the window. The walk exits as soon as every declared prefix is
+proven, so a healthy lane's count says how many of its jobs were seen before
+that exit, and a busier lane can report fewer jobs than a quieter one simply
+because the exit came sooner. The last-served age beside it is the load-bearing
+number; the count is only there to show the age rests on real traffic.
+
+It is instrumentation, not a verdict. It is the number that decides whether the
+host stays the unit of identity when the rule is promoted, or whether the
+predicate has to move down to the lane.
+
+Two knobs bound the cost. `service_evidence.lookback_hours` is 720h, which is
+right for a lane that fires per release and wrong here: `build.yml` alone holds
+over 16,000 runs, so a 720h per-job walk would cost thousands of API calls every
+hour. The census uses its own `observation_hours` (72h, past a weekend and far
+past `silence_hours`) with a server-side `created>=` filter and pagination
+instead of the 20-run lane cap, plus a `max_runs` ceiling. It walks newest
+first and stops as soon as it is past the silence window AND every declared
+*prefix* is already proven to have served inside it. The verdict is per host,
+but the bound is per lane, because proving m5 over the union of its prefixes
+would let the always-up preamble runner stop the walk and leave the gate lane's
+real last completion unread, making the census wrong about exactly the host it
+was added to instrument. Being *proven* is the bound that matters: runs are ordered by creation, the rule is about completion, and
+the two come apart. A long-queued job, or a rerun (which keeps its run's
+original creation time), can complete hours after its run was created, so an
+older run can still carry a host's newest completion. Stopping at the first
+completion seen would read such a host as silent while it served minutes ago,
+which is a false fire in the exact direction this rule exists to avoid. A lane
+that has not served inside the window therefore pays the full walk on every
+sweep: that is both the one case where the full walk is the evidence and the
+one case where an older run can still change the answer. `max_runs` is sized
+well clear of the live window for that reason, and a truncated walk reports
+degraded rather than guessing.
+
+**It ships in shadow mode.** `hosts.severity` is `info`, so the census reports
+to the step summary and nothing else: no issue, no assignee, no red run. That is
+deliberate, so one week of hourly sweeps can count would-be fires against real
+traffic before anything pages. Promoting it is a reviewed edit of that one value
+to `error` plus a per-host issue step in `runner-topology-check.yml`, and it must
+not happen before the operator notification path has been confirmed to reach a
+human.
+
+The census does not diagnose and does not remediate. It does not read on-host
+disk receipts, does not ssh anywhere, and adds no host-side agent. It reports
+the persistent-registration state for a silent host as the discriminator between
+"powered off" and "up but not serving", which is the m5 shape, and leaves the
+call to an operator.
 
 ### Where it runs, and why
 
@@ -2129,6 +2301,22 @@ omit the source identity, and continue to resolve the current live head. The unt
 its isolated home before dropping privileges and explicitly forwards only the
 run-unique source path required by setup/build/test; it never inherits the
 protected Actions checkout as its working directory.
+
+That isolated home, and every other run-unique path the lane creates, live under
+a run-unique root beneath `/private/tmp` rather than under `$RUNNER_TEMP`.
+`$RUNNER_TEMP` sits inside the runner account's home directory, which is mode
+`700`, so the `nobody` uid cannot traverse into it: the wrapper changes into the
+isolated home as the trusted user and then drops privileges, and every untrusted
+command inherits a working directory it cannot resolve, failing in `getcwd`
+before the command itself runs. `/private/tmp` and its ancestors are world
+traversable, and the root is created `0711` so `nobody` can traverse into its own
+paths without enumerating anything beside them. Because that base is
+world-writable and sticky, the root is created without `mkdir -p`: a path that
+already exists belongs to someone else and the run fails closed instead of
+adopting it. The `if: always()` teardown step is the only thing that removes the
+root, and its safety guard matches the same `/private/tmp/pulp-retarget-*`
+prefix; the root literal and that guard must move together or cleanup refuses
+and leaks the untrusted tree.
 
 Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 
@@ -4595,6 +4783,64 @@ health in the middle of the outage. Six lanes gate one context here.
 with **exit 7** (`EXIT_LANE_UNSERVED`) when a required context cannot be
 scheduled. Cost: **four API calls cold, zero warm** (a 300-second fact cache),
 plus a local `git show` of the workflow file.
+
+#### `[landability] workflows` in `.shipyard/config.toml`
+
+The check can only resolve a required context to a lane if it has read the
+workflow that produces it. Branch protection on `main` requires **five**
+contexts, and the tool's built-in default reads only `build.yml` — which left
+four of them `no_producer`: not checked, and reported as a warning that reads
+identically to a clean result. `.shipyard/config.toml` therefore names all five
+producers explicitly:
+
+| required context | producing workflow |
+|---|---|
+| `macos` | `build.yml` |
+| `Enforce version & skill sync` | `version-skill-check.yml` |
+| `Build + prove + (owner-gated) deploy` | `wclap-cloudflare.yml` |
+| `Vellum freeze` | `vellum-freeze-check.yml` |
+| `Vellum trusted freeze` | `vellum-trusted-gate.yml` |
+
+None of the five is path-filtered under `pull_request` — `wclap-cloudflare.yml`
+keeps its `paths:` under `push` on purpose, because a path-filtered **required**
+check leaves unrelated pull requests stuck on "Expected — Waiting for status"
+forever. Add a row here whenever a workflow starts producing a required context,
+or that context silently stops being checked.
+
+### 1b. The trigger detector — will the gate ever be *requested*?
+
+Exit 7 answers *can the required contexts be scheduled*. That presupposes a run
+will be **requested**, and on 2026-09-14 one was not: a pull request on a sibling
+repository was opened against a feature base, its gate declared
+`on.pull_request.branches: [main]`, GitHub evaluated that trigger exactly as
+documented, and created no run. The pull request sat `CLEAN` with an **empty**
+check rollup for **2 h 48 m**.
+
+The same command now also classifies links (1)–(3) and (5) of the chain and
+refuses with **exit 8** (`EXIT_TRIGGER_UNREACHABLE`) — deliberately *not* 7,
+because the remedies are disjoint: a 7 is fixed on the fleet, an 8 on the pull
+request or the workflow file by its author. `--allow-unserved-lane` does not
+wave an 8 through; the narrow escape is `--allow-unreachable-trigger <workflow>`.
+It costs **zero additional API calls**: the protection read is the one the lane
+check already makes, and workflows, base and diff are local.
+
+```sh
+shipyard landability --pr <N>     # adds up to 3 reads, the third only if needed
+```
+
+Of its eight verdicts only one — `triggered` with no run on the head yet — is
+ever resolved by waiting. The rest name the clause that refused and whose fix it
+is. Two are worth memorising because they are the ones people get wrong:
+
+- **`base_excluded` after a retarget.** GitHub auto-retargets a stacked child
+  pull request when its parent merges; that is an `edited` event, and a workflow
+  without `edited` in `on.pull_request.types` never sees it. The fix is a
+  **push** (`synchronize`), which the tool prints and never performs.
+- **`wrong_evidence`.** A `workflow_dispatch` run checks out the branch **tip**,
+  not `refs/pull/N/merge`, so it is not the run a `strict: true` requirement was
+  written for. Dispatch is the right tool only for **re-running** an existing
+  `pull_request` run (`POST actions/runs/{id}/rerun`), never for producing a
+  missing one.
 
 It refuses only on `Unserved` — a self-hosted label set that no runner
 advertises *and* no fresh host attestation declares. An unreadable census, an

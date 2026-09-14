@@ -434,7 +434,12 @@ The sequencer registries are wired into both:
   local lane (~20s)**, and the cost is inherent rather than accidental: it
   resolves every released row's evidence out of git, hundreds of short git
   invocations, which is exactly what catches a row citing evidence that has
-  since been deleted. Do not "optimize" it by skipping that read.
+  since been deleted. Do not "optimize" it by skipping that read. It watches a
+  changed path three ways: a sequencer-name substring, a ledger row that claims
+  the path in `owned_paths`, and newly added sequencer semantics. A path claimed
+  by two or more rows is watched by none of them, because no single row can be
+  the one asked to cover it; registration manifests and wholesale-regenerated
+  artifacts are never claimed whole, so a manifest edit never needs a row.
 - **`negative_capability_check.py`** — the compile-refusal registry. Whole-tree
   and sub-second. A ctest already covered it, which meant it was only reachable
   from a full build; the local lane now fails in under a second instead.
@@ -830,17 +835,46 @@ a wedged/dead runner — see the `pulp-runner-ops` skill), so it's worth checkin
 just don't conclude it without evidence. In the 2026-06-18 case the cause turned
 out to be non-hardware (a misdiagnosis worth not repeating). Check in this order:
 
-1. **Did the required checks even register?** A PR opened by the **Shipyard GitHub
-   App** does NOT auto-trigger `pull_request` workflows, so the required `macos`
-   and `Enforce version & skill sync` checks never appear on the PR head SHA until
-   you dispatch them by hand:
+1. **Did the required checks even register — and if not, WHY?** Ask the head SHA,
+   never the PR's check rollup and never a run's `pull_requests[]` association
+   (that array comes back **empty** on genuine `pull_request` runs, so a detector
+   filtering on it reports "no run" for a PR whose run exists — Pulp's own
+   `vellum-freeze-recovery.yml` has that bug):
    ```bash
-   ghapp workflow run build.yml --ref <branch>             # posts the required `macos` check
-   ghapp workflow run version-skill-check.yml --ref <branch>  # posts `Enforce version & skill sync`
+   ghapp api 'repos/Generous-Corp/pulp/actions/runs?head_sha=<sha>&per_page=50' \
+     --jq '[.workflow_runs[]|{event,path,status,conclusion}]'
+   shipyard landability --pr <N>     # names WHICH clause refused, and whose fix it is
    ```
-   This is the most common reason a Shipyard PR "sits." (`shipyard pr` dispatches
-   `build.yml` itself but you may still need `version-skill-check.yml`.) After a
-   new push the head SHA changes — re-dispatch on the new SHA.
+   If no `pull_request` run exists on that SHA, the workflow's `on:` block did not
+   admit this PR. `shipyard landability` says which clause did it and exits **8**
+   (`EXIT_TRIGGER_UNREACHABLE`, distinct from 7's fleet fault). The usual causes:
+   the PR's **base** is not in `on.pull_request.branches`; every changed file is
+   excluded by a `paths` filter; or the PR was **retargeted** and the workflow
+   does not declare `edited` in `types`, so nothing re-fired.
+
+   **The fix is a push, not a dispatch.**
+   ```bash
+   git commit --allow-empty -m "ci: re-fire pull_request" && git push   # fires `synchronize`
+   ```
+   `ghapp workflow run <workflow>` was previously recommended here and is **the
+   wrong tool**: a `workflow_dispatch` run checks out the **branch tip**, not
+   `refs/pull/N/merge`, so under `strict: true` it is not the run the requirement
+   was written for — and Shipyard's own cloud backend is itself a dispatch source
+   on some repositories, so its runs must never be read as the gate. A dispatch is
+   the right tool for exactly one thing: **re-running** an existing `pull_request`
+   run that went red or was cancelled, which is `POST actions/runs/{id}/rerun` —
+   same event, same merge ref — not a fresh dispatch.
+
+   The claim this step used to make — that a Shipyard-App-opened PR does not
+   auto-trigger `pull_request` workflows — is **false** and is withdrawn.
+   pulp#8277 was opened by `shipyard-local[bot]` and carries 25 `pull_request`
+   runs plus a `pull_request_target` run on its head; spectr#120 was App-authored
+   and its trigger was evaluated exactly as documented (it correctly refused on
+   `branches: [main]`). Acting on the withdrawn claim cost 2 h 48 m on spectr#120
+   and four blind re-dispatches on 2026-09-13, which created a second wedge by
+   filling the concurrency group.
+
+   After a new push the head SHA changes — re-read the runs on the **new** SHA.
 2. **Is it a version-bump race?** The other concurrent agent re-bumping `main`'s
    `CMakeLists.txt VERSION` makes the PR `DIRTY` (conflict on the VERSION line).
    Merge `origin/main` in, re-resolve the VERSION to one above main, push,
@@ -1397,9 +1431,15 @@ The existing fork-routing regression test is defense in depth, not proof that a
 runner is inaccessible to untrusted workflow revisions.
 ## Re-running a wedged required check
 
-`macos` and `Enforce version & skill sync` can be re-dispatched
-(`ghapp workflow run <workflow> --ref <branch>`). The two Vellum gates can be
-recovered too — they take a `pr_number` input. The ordinary freeze gate uses a
+A wedged or red `macos` / `Enforce version & skill sync` run is **re-run**, not
+re-dispatched — `POST actions/runs/{id}/rerun` (`ghapp run rerun <id>`), which
+replays the **same event on the same merge ref** and so reports into the same
+required check. A fresh `ghapp workflow run` is a different event on the branch
+tip and does not stand in for it; see "Did the required checks even register"
+above for why that distinction cost 2 h 48 m. The two Vellum gates are the
+exception and can genuinely be dispatched — they take a `pr_number` input and
+post their result to the PR head **by API** rather than relying on the run's own
+check-run identity, which is precisely why they were built that way. The ordinary freeze gate uses a
 separate hosted recovery workflow so the privileged dispatch event never
 shares a workflow with an untrusted checkout:
 
@@ -1426,6 +1466,34 @@ and only the newest pending run instead of accumulating one hosted job per edit.
 Merge-group runs fall back to their queue ref, so separate queue entries never
 share the PR group. Closed-PR `edited` events are filtered at the job boundary
 and checked again by the resolver before checkout or commit-status mutation.
+### The retarget lane's untrusted root cannot live under `$RUNNER_TEMP`
+
+`build-macos.yml` runs every PR-controlled command as the `nobody` uid: the
+wrapper `cd`s into the isolated untrusted home **as the trusted user** and only
+then `exec sudo -u nobody`. So `nobody` inherits that working directory — and
+if it cannot traverse to it, every untrusted command dies in `getcwd` before it
+runs, with `getcwd: cannot access parent directories`. That message naming
+*parent directories* rather than the cloned tree is the tell: the tree exists
+and is owned correctly, the path to it is unreachable.
+
+`$RUNNER_TEMP` is under the runner account's home, which is mode `700`. Deriving
+the ephemeral root from it therefore kills the entire lane — and because
+`build-macos.yml` is `workflow_dispatch`-only, nothing routine exercises it, so
+the breakage stays invisible until someone reaches for the break-glass recovery
+lever on a wedged macOS gate and finds it dead.
+
+The root is derived from `/private/tmp` instead, at mode `0711` (traversable,
+not enumerable), created **without** `mkdir -p` so a pre-existing path in that
+world-writable sticky directory fails closed instead of being adopted. The
+teardown guard's `case` pattern must carry the same base literal; if the two
+drift, cleanup refuses and the untrusted tree leaks. Both invariants, plus the
+root-off-the-runner-home rule, are pinned by
+`tools/scripts/test_build_macos_workflow_dispatch.py`.
+
+**Do not "fix" this by granting world traversal on the runner account's home.**
+The trusted checkout lives under it; `chmod o+x` there hands the untrusted uid a
+path to exactly what the two-account isolation exists to keep away from it.
+
 ## Codecov "missing lines" is usually a leg that never uploaded
 
 When Codecov shows fewer lines than the repo has, look for a coverage leg
@@ -2119,6 +2187,31 @@ bisectable.
   `// thread-assert:allow`. Runs as the `thread-safe-assertions` ctest case and
   in `gates.sh`. When graduating any required lane to VMs, expect this class of
   latent UB to surface — fix at the source, don't suppress.
+- **ctest label-exclusion guard (`ctest_label_exclusion_guard.py`).** A Catch2
+  suite whose *every* ctest registration carries a label in
+  `PULP_COVERAGE_CTEST_LABEL_EXCLUDE` (`validation|slow|performance|bench|quality-lab`,
+  defined in `scripts/coverage_ctest_policy.sh`) is enforced by nothing: the
+  required `macos` gate drops those labels with `ctest -LE "$label_exclude"`
+  (`build.yml`), and the diff-coverage lane drops the same list with
+  `--label-exclude` (`tools/scripts/local_diff_cover.sh`). Both lanes are
+  individually correct and together they read as a *missing test* rather than a
+  missing lane — the suite never runs on the merge-blocking gate, and its lines
+  report 0% covered, so the obvious next move is to write a test that already
+  exists. Nothing else detects it, because the gate that would complain is the
+  gate the label removed. The fix is the TEST_SPEC split already used by
+  `test/cmake/character_delay_tests.cmake`: register the executable once with
+  `TEST_SPEC "~[slow]"` and **no** label (reaches the gate and coverage), and
+  again with `TEST_SPEC "[slow]" TEST_PREFIX "slow::" LABELS slow`. Tag the slow
+  cases, not the fast ones, so a future case defaults to the enforced lane. The
+  guard reads the excluded-label list out of the policy script rather than
+  copying it, so it cannot drift from what the lanes apply. Known blind targets
+  are frozen in `tools/scripts/ctest_label_exclusion_guard.json` with a per-entry
+  reason; the guard fails on a *stale* entry too, so the ledger cannot rot.
+  Runs as the `ctest-label-exclusion-guard` ctest (plus
+  `ctest-label-exclusion-guard-selftest`) and in `gates.sh` — whole-tree there,
+  not diff-scoped, because the condition is a property of a target's entire
+  registration set and the rescuing sibling can live in a manifest the push never
+  touched.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a

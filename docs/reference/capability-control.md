@@ -98,6 +98,11 @@ For every sequencer delivery slice:
    A cross-module sequencer slice also carries the exact
    `Sequencer-Exposure: <row-id>` commit trailer so generic ownership paths are
    bound to that pending row.
+   `owned_paths` and `evidence` are not the same declaration: `owned_paths`
+   claims a file as the row's own and puts it under the watch, while `evidence`
+   only cites a file as proof and does not. Cite a shared or foreign file as
+   evidence; claim a file as owned only when this row is the single ledger
+   owner of it, because a file two rows both claim is owned by neither.
 2. Classify infrastructure and backend-only work explicitly instead of
    inventing a user control for it.
 3. Preserve unresolved gaps with an owner and dependency; do not silently

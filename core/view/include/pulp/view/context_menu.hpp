@@ -77,6 +77,14 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_event(const MouseEvent& event) override;
     bool on_key_event(const KeyEvent& event) override;
+    /// An open menu owns the arrow keys, the same way an open ComboBox does.
+    /// Without this the host never routes them here: both the plugin-editor
+    /// path and the standalone path gate navigation keys on this predicate,
+    /// so a focused menu's arrow keys went back to the DAW and `on_key_event`
+    /// -- which has handled up/down since it shipped -- was simply never
+    /// called. Every keyboard test drove `on_key_event` directly and so could
+    /// not see it.
+    bool accepts_navigation_input() const override { return !closed_; }
     View* hit_test(Point local_point) override;  // whole overlay is hit (catch outside clicks)
     bool wants_mouse_input() const override { return true; }
 
@@ -107,6 +115,7 @@ private:
     // Row index under a local point, or -1 if outside the box / on a non-row.
     int row_at(Point local_point, const MenuLayout& lay) const;
     void move_hover(int delta);    // keyboard nav, skipping separators + disabled
+    void move_hover_to_edge(bool last);  // Home / End
     void fire_close(std::optional<int> result);
 
     std::vector<Item> items_;

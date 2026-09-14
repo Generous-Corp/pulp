@@ -404,23 +404,53 @@ It runs advisory (`--mode=hint`) in the agent PostToolUse hook, enforcing
 `version-skill-check.yml` PR gate. Bypass a genuinely doc-irrelevant edit with
 a `Config-Doc: skip reason="..."` trailer on any commit in the range.
 
-### Coverage lane failure semantics
+### Instrumented lane failure semantics
 
-**Test wall-clock budgets are scaled, not removed, on a coverage tree.** A
+**Test wall-clock budgets are scaled, not removed, on an instrumented tree.** A
 coverage build compiles at `-O0` with an instrumentation counter update on
-every region, and the lane runs on a shared host, so a `TIMEOUT` authored for
-an optimized build becomes a false failure. `ctest --timeout` cannot rescue it:
-that is only a default, and a per-test `TIMEOUT` property always wins.
+every region; the ASan and TSan lanes compile the same `-O0` Debug tree and add
+a shadow-memory check on every access. Both run on shared hosts, so a `TIMEOUT`
+authored for an optimized build becomes a false failure. `ctest --timeout`
+cannot rescue it: that is only a default, and a per-test `TIMEOUT` property
+always wins.
 
 `tools/cmake/PulpTestTimeout.cmake` multiplies every `pulp_add_test_suite`
 budget by `PULP_TEST_TIMEOUT_COVERAGE_SCALE` (**4**) when `PULP_COVERAGE_ENABLED`
-is set, clamped to `PULP_TEST_TIMEOUT_CEILING` (**3600s**). That ceiling must stay
+is set, or by `PULP_TEST_TIMEOUT_SANITIZER_SCALE` (**8**) when `PULP_SANITIZER`
+is set, clamped to `PULP_TEST_TIMEOUT_CEILING` (**3600s**). The sanitizer number
+is the coverage number composed with the sanitizer runtimes' own overhead over
+an equivalent uninstrumented tree, so it is a floor over the coverage scale
+rather than an independent guess. The two are mutually exclusive in a real
+configure (`PulpInstrumentation.cmake` refuses the combination), and the
+resolver takes the larger rather than the product so the answer does not depend
+on branch order. That ceiling must stay
 strictly below the CI lane's own `job_timeout` (7200s): a test clamped at the
 job budget can never time out first, so the job is killed instead and the run
 reports `cancelled` with no failing test named — which defeats the purpose of
 keeping budgets finite. Pin
 `PULP_TEST_TIMEOUT_SCALE` to override; a value below 1 fails configuration
 because it would shorten every budget in the tree.
+
+**What the scale does not reach.** The multiplier is applied by
+`pulp_add_test_suite` and by explicit `pulp_scaled_test_timeout` calls, which
+together cover 65 of the 215 `TIMEOUT` declarations in `test/cmake/`. The other
+150 are literals on raw `set_tests_properties(... TIMEOUT n)` and are unscaled
+on every instrumented lane; widening one of those is an edit at the site.
+
+A test that declares no `TIMEOUT` property at all is outside this mechanism
+entirely. It is bounded by the lane's `ctest --timeout` (120s on the ASan, TSan
+and UBSan legs of `sanitizers.yml`), and because a per-test property only ever
+*overrides* that default, no scale factor here can widen it. Such a test times
+out at just over the lane default, which is the signature to look for before
+reaching for this module: a `***Timeout` at ~120s on a sanitizer lane is the
+workflow's default, not a scaled budget, and the fix is either to give the test
+a real budget or to raise the lane's own `--timeout`.
+
+Read a `***Timeout` row as a censored observation. CTest reports the wall clock
+at the moment it killed the test, which is the budget plus scheduling delta, so
+it is a lower bound on the time the test needed and never evidence that the test
+was about to finish. Overshooting a budget "by a fraction of a percent" does not
+argue for a small scale.
 
 The budget stays finite on purpose. An unbounded test cannot distinguish "slow
 under instrumentation" from "wedged", which is the only question a timeout
