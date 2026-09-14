@@ -394,6 +394,21 @@ export interface BaseProps extends FlexProps, StyleProps, GestureProps {
     /// `<View overlay style={{position: 'absolute', ...}}>` get clicks
     /// instead of whatever sibling/ancestor view sits behind the popover.
     overlay?: boolean;
+    /// Mark this view as a control that OPENS an overlay — a dropdown field,
+    /// a menu button. The counterpart of `overlay`: that prop claims the slot
+    /// with consume=true so a press outside a popover cannot also operate the
+    /// underlay, and this mark is the exception that keeps the rule from
+    /// taxing the press the user meant. A press landing on a marked control
+    /// (or any ancestor of one) dismisses the open overlay AND still reaches
+    /// the control, so switching from one dropdown to a sibling costs one
+    /// press rather than two.
+    ///
+    /// Prefer `aria-haspopup`, which the prop-applier reads identically and
+    /// which assistive technology needs anyway; this prop exists for documents
+    /// that do not author ARIA. Mark only controls that open something —
+    /// marking ordinary content would make clicking away from a menu also
+    /// operate whatever sits under the click.
+    overlayTrigger?: boolean;
 }
 
 // ── Container intrinsics ────────────────────────────────────────────

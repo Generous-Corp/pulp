@@ -8,6 +8,7 @@
 #include <pulp/inspect/control_installed_host.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_manifest.hpp>
+#include <pulp/inspect/control_sequencer_state_executor.hpp>
 #include <pulp/inspect/control_state_read_executor.hpp>
 #include <pulp/inspect/control_state_write_executor.hpp>
 #include <pulp/inspect/control_standalone_ui_adapter.hpp>
@@ -76,6 +77,8 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
         "PULP_INSPECT_CAPABILITY_TRACE_SESSION_CONTROL_V1\0"
         "PULP_INSPECT_CAPABILITY_GPU_HEALTH_READ_V1\0"
         "PULP_INSPECT_CAPABILITY_STATE_WRITE_V1\0"
+        "PULP_INSPECT_CAPABILITY_SEQUENCER_STATE_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_SEQUENCER_STATE_EDIT_V1\0"
         "PULP_INSPECT_CAPABILITY_TEST_INPUT_V1\0"
         "PULP_INSPECT_CAPABILITY_AUTHORING_TWEAKS_V1\0"
         "PULP_INSPECT_CAPABILITY_TELEMETRY_STREAM_V1\0"
@@ -94,6 +97,11 @@ std::optional<std::string> random_evidence_id() noexcept {
     } catch (...) {
         return std::nullopt;
     }
+}
+
+std::atomic<detail::StandaloneSequencerStateChannelFactory>& sequencer_channel_factory() {
+    static std::atomic<detail::StandaloneSequencerStateChannelFactory> factory{nullptr};
+    return factory;
 }
 
 std::atomic<detail::StandaloneRuntimeEvaluatorFactory>& evaluator_factory() {
@@ -381,6 +389,24 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     .publication_id = plan.publication_id,
                     .read_result = [provider] { return provider->snapshot(); }};
             });
+        sequencer_channel_ = detail::create_standalone_sequencer_state_channel(processor);
+        auto sequencer_target =
+            [this](const ControlAdmissionPlan& plan)
+            -> std::optional<ControlSequencerStateTarget> {
+            if (!sequencer_channel_)
+                return std::nullopt;
+            return ControlSequencerStateTarget{.registration_id = plan.registration_id,
+                                               .host_tier = ControlHostTier::Standalone,
+                                               .channel = sequencer_channel_.get()};
+        };
+        // Both sequencer operations touch UI-side channel state, so both are
+        // fenced onto the host main thread rather than only the mutating one.
+        ControlMainThreadExecutor main_sequencer_read(
+            rpc_, make_control_sequencer_state_read_executor(sequencer_target));
+        auto fenced_sequencer_read = main_sequencer_read.executor();
+        ControlMainThreadExecutor main_sequencer_edit(
+            rpc_, make_control_sequencer_state_edit_executor(sequencer_target));
+        auto fenced_sequencer_edit = main_sequencer_edit.executor();
         auto timeline_document_session = make_control_timeline_document_session_executor(
             [](const ControlAdmissionPlan& plan)
                 -> std::optional<ControlTimelineDocumentSessionSource> {
@@ -389,6 +415,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         ControlOperationExecutor state_executor =
             [state_read = std::move(state_read),
              state_write = std::move(fenced_state_write),
+             sequencer_read = std::move(fenced_sequencer_read),
+             sequencer_edit = std::move(fenced_sequencer_edit),
              gpu_health_read = std::move(gpu_health_read),
              timeline_document_session = std::move(timeline_document_session)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
@@ -397,6 +425,10 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return state_read(plan, request, context);
                 if (request.operation_id == "dev.pulp.state/parameter-gesture@1")
                     return state_write(plan, request, context);
+                if (request.operation_id == "dev.pulp.sequencer/state.read@1")
+                    return sequencer_read(plan, request, context);
+                if (request.operation_id == "dev.pulp.sequencer/state.edit@1")
+                    return sequencer_edit(plan, request, context);
                 if (request.operation_id == "dev.pulp.gpu/health.read@1")
                     return gpu_health_read(plan, request, context);
                 if (request.operation_id == "dev.pulp.timeline/document-session@1")
@@ -799,6 +831,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     std::shared_ptr<ControlTelemetryTap> telemetry_;
     std::shared_ptr<ControlStandaloneUiAdapter> ui_adapter_;
     std::shared_ptr<ControlGpuHealthProvider> gpu_health_provider_;
+    std::shared_ptr<state::SequencerStateChannel> sequencer_channel_;
     std::unique_ptr<ControlGpuHealthViewAdapter> gpu_health_view_adapter_;
     std::string gpu_health_lifecycle_id_;
     std::optional<std::string> gpu_health_evidence_id_;
@@ -858,6 +891,22 @@ StandaloneControlAuthorHooks
 create_standalone_control_author_hooks(format::Processor& processor) {
     const auto factory = author_hooks_factory().load(std::memory_order_acquire);
     return factory ? factory(processor) : StandaloneControlAuthorHooks{};
+}
+
+bool install_standalone_sequencer_state_channel_factory(
+    StandaloneSequencerStateChannelFactory factory) noexcept {
+    if (!factory)
+        return false;
+    auto expected = static_cast<StandaloneSequencerStateChannelFactory>(nullptr);
+    return sequencer_channel_factory().compare_exchange_strong(expected, factory,
+                                                               std::memory_order_release,
+                                                               std::memory_order_relaxed);
+}
+
+std::shared_ptr<state::SequencerStateChannel>
+create_standalone_sequencer_state_channel(format::Processor& processor) {
+    const auto factory = sequencer_channel_factory().load(std::memory_order_acquire);
+    return factory ? factory(processor) : nullptr;
 }
 
 bool install_standalone_runtime_evaluator_factory(

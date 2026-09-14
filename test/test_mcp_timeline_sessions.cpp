@@ -836,7 +836,7 @@ TEST_CASE("timeline MCP publishes the view projection tools in a parseable catal
     REQUIRE(parsed);
     const auto& root = (*parsed)->root();
     REQUIRE(root.kind == pulp::timeline::JsonValue::Kind::Array);
-    REQUIRE(root.array.size() == 3);
+    REQUIRE(root.array.size() == 4);
 
     // The published catalog is read as JSON rather than as text: it is rendered
     // with different spacing than the fragment above, so a substring needle
@@ -859,7 +859,7 @@ TEST_CASE("timeline MCP publishes the view projection tools in a parseable catal
     };
 
     for (const auto* name : {"pulp_timeline_view_outline", "pulp_timeline_view_region",
-                             "pulp_timeline_view_diff"}) {
+                             "pulp_timeline_view_diff", "pulp_timeline_device_catalog"}) {
         require_contains(fragment, std::string(R"JSON("name":")JSON") + name + R"JSON(")JSON");
         INFO(catalog);
         REQUIRE(publishes(name));
@@ -869,4 +869,58 @@ TEST_CASE("timeline MCP publishes the view projection tools in a parseable catal
     INFO(catalog);
     REQUIRE(publishes("pulp_timeline_command_apply"));
     REQUIRE_FALSE(publishes("pulp_timeline_view_absent"));
+}
+
+TEST_CASE("timeline MCP answers what a device chain may name",
+          "[mcp][tools][timeline][agent-view]") {
+    // Dispatched by name rather than called directly: publishing a descriptor
+    // and binding a handler are two separate acts, and a tool that appears in
+    // tools/list but resolves to nothing is the failure worth catching.
+    const auto dispatched = handle_timeline_tool("pulp_timeline_device_catalog", "{}");
+    REQUIRE(dispatched.has_value());
+    INFO(*dispatched);
+    auto payload = pulp::timeline::parse_json(*dispatched);
+    REQUIRE(payload);
+    const auto* structured = (*payload)->root().find("structuredContent");
+    REQUIRE(structured != nullptr);
+
+    const auto* devices = structured->find("devices");
+    REQUIRE(devices != nullptr);
+    REQUIRE(devices->kind == pulp::timeline::JsonValue::Kind::Array);
+    const auto domain_of = [&devices](const std::string& binding_key) -> std::string {
+        for (const auto& device : devices->array) {
+            const auto* key = device.find("binding_key");
+            if (key == nullptr || key->scalar != binding_key)
+                continue;
+            const auto* domain = device.find("domain");
+            return domain == nullptr ? std::string{} : domain->scalar;
+        }
+        return {};
+    };
+    REQUIRE(domain_of("pulp.device.event.humanise") == "event-to-event");
+    REQUIRE(domain_of("pulp.instrument.basic") == "event-to-audio");
+    // Control: a key the catalog does not carry reads as absent through the same
+    // walk, so the two findings above are the catalog answering, not the lookup
+    // returning whatever it was handed.
+    REQUIRE(domain_of("pulp.device.event.absent").empty());
+
+    // The bounds ride the same answer as the devices, so a caller can predict a
+    // refusal instead of discovering it by authoring a chain and being refused.
+    const auto* max_chain = structured->find("max_chain_length");
+    REQUIRE(max_chain != nullptr);
+    REQUIRE(max_chain->scalar == "2");
+    const auto* ceiling = structured->find("latency_ceiling_samples");
+    REQUIRE(ceiling != nullptr);
+    REQUIRE(ceiling->scalar == "65535");
+
+    // Control: the same dispatcher returns nothing for a name it does not bind,
+    // so the assertions above read a real binding rather than a default answer.
+    REQUIRE_FALSE(handle_timeline_tool("pulp_timeline_device_absent", "{}").has_value());
+
+    // A malformed payload is refused rather than answered, so the catalog never
+    // stands in for a request the caller did not successfully make.
+    const auto refused = handle_timeline_tool("pulp_timeline_device_catalog", "[]");
+    REQUIRE(refused.has_value());
+    require_contains(*refused, "arguments must be an object");
+    require_contains(*refused, R"JSON("isError":true)JSON");
 }

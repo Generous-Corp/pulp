@@ -36,7 +36,7 @@ constexpr std::string_view kManifest = R"({
   "product_name": "Pulp Trusted Host Fixture",
   "bundle_id": "dev.pulp.test.trusted-host-fixture",
   "build_id": "build:0123456789abcdef0123456789abcdef",
-  "registry_digest": "cf0e580ccfc990c572287ad8a64966d0c9ae397a821a196c8bff72c94b590f00",
+  "registry_digest": "4ff481964a336f977e8c2e7ded9e23b0b487e3792f2b451ab316983f97f23417",
   "endpoint_included": true,
   "unsafe_runtime_eval_acknowledged": false,
   "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
@@ -92,7 +92,7 @@ std::optional<ControlTrustedHostSnapshot> make_snapshot(Directory& directory) {
     const auto validation = validate_control_artifact_bytes(
         binary,
         {.profile_id = "developer-local",
-         .manifest_digest = "6c1a643db61a546e369e8762ae2683d7d9e4ef593709be9eaf7ffa99970e898b",
+         .manifest_digest = "29d3154b72ef1b034c84ee9eba729e00a27611aab9565972d0749f9a4583be47",
          .endpoint_included = true,
          .capability_ids = {"session.describe"}});
     CAPTURE(validation.error);

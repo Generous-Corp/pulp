@@ -31,6 +31,9 @@ def _load_local_source(module_name: str, filename: str) -> types.ModuleType:
 
 
 json_schema_lite = _load_local_source("json_schema_lite", "json_schema_lite.py")
+connected_git_history = _load_local_source(
+    "connected_git_history", "connected_git_history.py"
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1282,6 +1285,13 @@ def verify(root: Path, *, require_terminal: bool = False) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Every acceptance question below is answered against repository history. On
+    # a truncated checkout those answers are the graft boundary's, not the real
+    # ones, so name that cause here rather than emitting a verdict derived from
+    # it. This raises; it never skips.
+    connected_git_history.require_connected_history(
+        ROOT, "GPU probe acceptance verification"
+    )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("receipt_dir", type=Path)
     parser.add_argument(

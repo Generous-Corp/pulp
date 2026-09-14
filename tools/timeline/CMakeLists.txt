@@ -4,6 +4,7 @@ add_library(pulp::tool-timeline ALIAS pulp-tool-timeline)
 target_sources(pulp-tool-timeline PRIVATE
     src/bounded_zip_archive.cpp
     src/dawproject_media_packager.cpp
+    src/device_catalog.cpp
     src/timeline_agent.cpp
     src/timeline_agent_view.cpp
     src/timeline_interchange.cpp

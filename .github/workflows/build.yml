@@ -1225,8 +1225,13 @@ jobs:
         with:
           lfs: false
           # GPU provenance self-tests use HEAD^ and exact historical receipts.
-          # Keep normal checkout shallow; the bounded hydration step below
-          # fetches only the authority commits named by checked-in evidence.
+          # Keep normal checkout shallow. The hydration step below reconnects
+          # the history when it needs to: it reads the revisions the checked-in
+          # evidence pins, and if Git reports a shallow repository it
+          # `--unshallow`es the event ref, then proves every pinned revision
+          # both resolves and is an ancestor of HEAD. The bound it enforces is
+          # on how many revisions that evidence may name, not on how much the
+          # fetch transfers.
           fetch-depth: 2
           # Self-hosted runner reuses its workspace across runs so ccache,
           # FetchContent caches, and CMake configure persist between PRs.

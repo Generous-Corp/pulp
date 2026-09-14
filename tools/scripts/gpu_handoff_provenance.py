@@ -37,6 +37,10 @@ import subprocess
 import sys
 from typing import Any, Iterator, NamedTuple
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import connected_git_history  # noqa: E402
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_HANDOFF = ROOT / "docs/status/gpu-vellum-handoff.yaml"
@@ -55,6 +59,10 @@ GIT_TIMEOUT_SECONDS = 30
 # not re-shell the same hundreds of Git queries.
 _IDENTITY_CACHE: dict[tuple[str, str, str, str], "Identity"] = {}
 _CATALOG_MODULE: Any = None
+# Reading the graft-boundary list is one Git query plus one file read, and the
+# answer cannot change mid-run. Caching it per checkout keeps the guard below off
+# the per-path hot loop, which resolves a hundred rows.
+_BOUNDARY_CACHE: dict[str, set[str]] = {}
 
 
 class ProvenanceError(RuntimeError):
@@ -192,12 +200,41 @@ def canonical_paths(document: dict[str, Any]) -> list[str]:
     return sorted({row.path for row in canonical_inventory(document)})
 
 
-def resolve_source_commit(root: pathlib.Path, requested: str) -> str:
+def newest_pinned_ancestor(root: pathlib.Path, paths: list[str]) -> str | None:
+    """Name the newest commit reachable from HEAD that touched a pinned path.
+
+    Identities derived there are identical to HEAD's for every pinned path,
+    because by construction nothing later touched one, so it satisfies the
+    validator exactly as HEAD does. Unlike HEAD it does not move when an
+    unrelated commit lands, which is what makes it the commit to record once an
+    amend or a rebase has orphaned the one a receipt named.
+
+    Returns ``None`` rather than raising: this only ever enriches an error that
+    is already being reported, and a checkout too shallow to answer must not
+    turn that error into a different one.
+    """
+
+    if not paths:
+        return None
+    try:
+        commit = git_output(root, ["log", "-1", "--format=%H", "HEAD", "--", *paths])
+    except ProvenanceError:
+        return None
+    return commit or None
+
+
+def resolve_source_commit(
+    root: pathlib.Path, requested: str, canonical: list[str] | None = None
+) -> str:
     """Authenticate one exact commit and prove it is reachable from HEAD.
 
     Every emitted revision is an ancestor of the source commit, so requiring the
     source commit to be an ancestor of HEAD is what makes the validator's own
     ancestry check pass for all of them at once.
+
+    ``canonical`` is the pinned path inventory. It is optional because the
+    ancestry rule does not depend on it; when supplied, a failure names a commit
+    that would satisfy the rule instead of leaving the reader to derive one.
     """
 
     try:
@@ -207,42 +244,92 @@ def resolve_source_commit(root: pathlib.Path, requested: str) -> str:
             f"source commit {requested!r} does not resolve to a commit: {error}"
         ) from error
     if git_status_code(root, ["merge-base", "--is-ancestor", commit, "HEAD"]) != 0:
-        raise ProvenanceError(
+        # Rewriting the commit a receipt pins is the way this is reached in
+        # practice, and the obvious repair regresses: regenerating creates a new
+        # commit, so recording that one is never satisfiable. Say which
+        # operations orphan the pin, and name an existing commit that does not.
+        detail = (
             f"source commit {commit} is not an ancestor of HEAD; identities "
-            "generated from it cannot satisfy the handoff validator"
+            "generated from it cannot satisfy the handoff validator. A rebase, "
+            "amend, or squash of the pinned commit is the usual cause; merging "
+            "origin/main preserves the pin where rebasing onto it does not. "
+            "Record a commit that already exists rather than the one "
+            "regeneration is about to create"
         )
+        suggestion = newest_pinned_ancestor(root, canonical or [])
+        if suggestion is not None:
+            detail += f", such as {suggestion}"
+        raise ProvenanceError(detail)
     return commit
 
 
-def resolve_identity(root: pathlib.Path, commit: str, path: str) -> Identity:
+def shallow_boundaries_for(root: pathlib.Path) -> set[str]:
+    """Return this checkout's graft boundaries, resolved once per run."""
+
+    key = str(root)
+    cached = _BOUNDARY_CACHE.get(key)
+    if cached is None:
+        cached = connected_git_history.shallow_boundaries(root)
+        _BOUNDARY_CACHE[key] = cached
+    return cached
+
+
+def resolve_identity(
+    root: pathlib.Path,
+    commit: str,
+    path: str,
+    require_current: bool = False,
+) -> Identity:
     """Derive one row's identity fields from the single source commit.
 
-    The validator pins each row to HEAD's tree, so an identity whose blob does
-    not match HEAD is rejected no matter how faithfully it describes the source
-    commit. Comparing here turns that into a named refusal instead of drift the
-    caller has to diagnose.
+    What this commit did to this path is a fact about history, so by default
+    the answer is read out of history alone and a later commit cannot change
+    it. That is what a reader asking "did this source commit produce these
+    bytes?" needs, and it stays true however far HEAD moves on.
+
+    ``require_current`` additionally demands that the derived blob still match
+    HEAD. A generator wants that, because an identity that disagrees with HEAD
+    cannot satisfy a currency-checking consumer no matter how faithfully it
+    describes its source commit; raising here names the problem instead of
+    emitting a ledger that fails later.
     """
 
     head_revision = git_output(root, ["rev-parse", "HEAD"])
-    cache_key = (str(root), commit, head_revision, path)
+    cache_key = (str(root), commit, head_revision, path, require_current)
     cached = _IDENTITY_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
     revision = git_output(root, ["log", "-1", "--format=%H", commit, "--", path])
+    boundaries = shallow_boundaries_for(root)
+    # Same predicate as connected_git_history.resolves_to_boundary, applied to
+    # the answer already in hand rather than re-running the identical query for
+    # each of a hundred rows.
+    if boundaries and (not revision or revision in boundaries):
+        # Emitting this revision would pin the row to the oldest commit the
+        # checkout happens to hold rather than to the commit that last changed
+        # the path -- a well-formed SHA that is simply wrong, written over a
+        # correct ledger with exit status 0. Refuse instead.
+        raise ProvenanceError(
+            f"cannot resolve the owning revision of {path!r}: this checkout's Git "
+            "history is truncated, so per-path last-owner revisions resolve to the "
+            "shallow graft boundary instead of the real owning commit; "
+            f"{connected_git_history.REMEDY}"
+        )
     if not revision:
         raise ProvenanceError(
             f"path {path!r} has no commit history at source commit {commit}"
         )
     object_id = git_output(root, ["rev-parse", f"{revision}:{path}"])
-    head_object = git_output(root, ["rev-parse", f"HEAD:{path}"])
-    if object_id != head_object:
-        raise ProvenanceError(
-            f"path {path!r} is {object_id} at its owning revision {revision} but "
-            f"{head_object} at HEAD, so no identity derived from source commit "
-            f"{commit} can satisfy the validator; regenerate with "
-            "--source-commit HEAD"
-        )
+    if require_current:
+        head_object = git_output(root, ["rev-parse", f"HEAD:{path}"])
+        if object_id != head_object:
+            raise ProvenanceError(
+                f"path {path!r} is {object_id} at its owning revision {revision} "
+                f"but {head_object} at HEAD, so no identity derived from source "
+                f"commit {commit} can satisfy a currency-checking consumer; "
+                "regenerate with --source-commit HEAD"
+            )
     object_type = git_output(root, ["cat-file", "-t", object_id])
     if object_type not in OBJECT_TYPES:
         raise ProvenanceError(
@@ -254,14 +341,22 @@ def resolve_identity(root: pathlib.Path, commit: str, path: str) -> Identity:
 
 
 def resolve_inventory_identities(
-    root: pathlib.Path, commit: str, inventory: list[PathRow]
+    root: pathlib.Path,
+    commit: str,
+    inventory: list[PathRow],
+    require_current: bool = False,
 ) -> dict[str, Identity]:
-    """Resolve each distinct path once and reuse it across duplicate rows."""
+    """Resolve each distinct path once and reuse it across duplicate rows.
+
+    ``require_current`` is forwarded unchanged; see ``resolve_identity``.
+    """
 
     identities: dict[str, Identity] = {}
     for row in inventory:
         if row.path not in identities:
-            identities[row.path] = resolve_identity(root, commit, row.path)
+            identities[row.path] = resolve_identity(
+                root, commit, row.path, require_current=require_current
+            )
     return identities
 
 
@@ -355,11 +450,20 @@ def apply_identities(
     return updated
 
 
-def validate_with_catalog(document: dict[str, Any], root: pathlib.Path) -> list[str]:
+def validate_with_catalog(
+    document: dict[str, Any],
+    root: pathlib.Path,
+    require_current: bool = False,
+) -> list[str]:
     """Run the existing fail-closed validator against a candidate ledger.
 
     The validator remains the authority on acceptance. This tool never relaxes
     it; it only refuses to emit output the validator would reject.
+
+    ``require_current`` additionally demands that every pinned path still match
+    HEAD. This tool is a consumer rather than a merge gate, so it asks for that
+    stronger claim: reading or regenerating the ledger is exactly when a pin
+    that has fallen behind is worth reporting.
     """
 
     global _CATALOG_MODULE
@@ -375,7 +479,9 @@ def validate_with_catalog(document: dict[str, Any], root: pathlib.Path) -> list[
         spec.loader.exec_module(catalog)
         _CATALOG_MODULE = catalog
     problems = list(catalog.validate_handoff(document))
-    problems.extend(catalog.validate_handoff_routing(document, root))
+    problems.extend(
+        catalog.validate_handoff_routing(document, root, require_current=require_current)
+    )
     return problems
 
 
@@ -451,10 +557,14 @@ def command_paths(args: argparse.Namespace) -> int:
 def command_check(args: argparse.Namespace) -> int:
     document = load_handoff(args.handoff)
     inventory = canonical_inventory(document)
-    commit = resolve_source_commit(args.root, args.source_commit)
-    identities = resolve_inventory_identities(args.root, commit, inventory)
+    commit = resolve_source_commit(
+        args.root, args.source_commit, canonical_paths(document)
+    )
+    identities = resolve_inventory_identities(
+        args.root, commit, inventory, require_current=True
+    )
     drifts = compare_inventory(document, inventory, identities)
-    problems = validate_with_catalog(document, args.root)
+    problems = validate_with_catalog(document, args.root, require_current=True)
     command = repair_command(args.handoff, commit)
 
     if args.json:
@@ -505,7 +615,9 @@ def command_check(args: argparse.Namespace) -> int:
 def command_write(args: argparse.Namespace) -> int:
     document = load_handoff(args.handoff)
     inventory = canonical_inventory(document)
-    commit = resolve_source_commit(args.root, args.source_commit)
+    commit = resolve_source_commit(
+        args.root, args.source_commit, canonical_paths(document)
+    )
 
     dirty = dirty_canonical_paths(args.root, canonical_paths(document))
     if dirty:
@@ -518,11 +630,13 @@ def command_write(args: argparse.Namespace) -> int:
             print(f"  {path}", file=sys.stderr)
         return 2
 
-    identities = resolve_inventory_identities(args.root, commit, inventory)
+    identities = resolve_inventory_identities(
+        args.root, commit, inventory, require_current=True
+    )
     updated = apply_identities(document, inventory, identities)
     rendered = serialize_handoff(updated)
 
-    problems = validate_with_catalog(updated, args.root)
+    problems = validate_with_catalog(updated, args.root, require_current=True)
     if problems:
         print(
             "gpu-handoff-provenance: generated ledger still fails the handoff "
@@ -555,7 +669,9 @@ def command_write(args: argparse.Namespace) -> int:
 
 def command_receipt(args: argparse.Namespace) -> int:
     document = load_handoff(args.handoff)
-    commit = resolve_source_commit(args.root, args.source_commit)
+    commit = resolve_source_commit(
+        args.root, args.source_commit, canonical_paths(document)
+    )
     # Hash what the file actually holds. Re-serializing would describe bytes
     # that may differ from the ledger this receipt names.
     rendered = args.handoff.read_text(encoding="utf-8")

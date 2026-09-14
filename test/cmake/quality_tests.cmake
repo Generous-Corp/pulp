@@ -22,9 +22,25 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-recipe-catalog-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_recipe_catalog.py")
+    add_test(NAME gpu-connected-git-history-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_connected_git_history.py")
+    # The catalog selftest builds throwaway clones per equivalence class to
+    # prove its guard fires on a real shallow repository rather than on a
+    # simulated flag, so its runtime is dominated by clone I/O and scales with
+    # the host. It measures ~62s on an idle M3; the required gate's default
+    # per-test budget leaves no room for a slower runner on top of that.
+    set_tests_properties(gpu-recipe-catalog-selftest PROPERTIES TIMEOUT 300)
     add_test(NAME gpu-clean-agent-journey-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_clean_agent_journey.py")
+    # A CI job that runs a broad ctest on a shallow checkout cannot see the
+    # per-path git history the GPU provenance selftests read, so
+    # test_gpu_provenance_ci_wiring.py asserts every such job hydrates it.
+    # That scanner parses the workflow YAML, and workflow-lint installs PyYAML
+    # and owns the YAML-dependent workflow contracts. Do not register it here:
+    # required macOS CTest hosts lack PyYAML, and neither a hard ImportError
+    # nor a skipped unittest suite is an honest result on this gate.
     add_test(NAME doxygen-installed-header-check
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/doxygen_installed_header_check.py")
@@ -416,6 +432,17 @@ if(Python3_Interpreter_FOUND)
         --build-dir "${CMAKE_BINARY_DIR}")
     set_tests_properties(ctest-duplicate-registration PROPERTIES TIMEOUT 120)
 
+    # The other half of the check above. That one rejects one command held to two
+    # budgets and says nothing about whether the budget in force is big enough;
+    # this carries the measured cost of the tests that run in minutes and fails
+    # when a declared budget falls under 3x it -- including when it is absent
+    # altogether, which is how a test ends up on the 120s lane default nobody
+    # chose for it. Also reads an already-configured build.
+    add_test(NAME ctest-measured-budgets COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_measured_budgets.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(ctest-measured-budgets PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test
@@ -518,6 +545,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-provenance-hydration-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_gpu_provenance_commits.py")
 
+    # The sibling suite mocks subprocess wholesale, so it proves the candidate
+    # order and the fall-through without ever asking git whether those refs
+    # resolve. This drives real git against a genuinely shallow clone whose
+    # refs/pull/<n>/merge is absent -- the production condition the fallback
+    # exists for -- and also asserts an unreachable commit still fails closed.
+    add_test(NAME gpu-provenance-hydration-real-git-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_real_git.py")
+
     # The handoff ledger pins a revision, blob, and tree per referenced path, so
     # any commit touching a pinned path stales rows far from the edit. This
     # covers the generator that owns those identities and the drift check that
@@ -573,10 +608,21 @@ if(Python3_Interpreter_FOUND)
         TIMEOUT 300)
     add_test(NAME gpu-first-visible-trace-producer-overhead-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py")
+    # Both drive the acceptance tooling over whole planted corpora -- the
+    # verifier once per structural mutation -- in sequential subprocess work, so
+    # wall time tracks user+sys and the default single scheduler slot is already
+    # the right one. The budget is what is wrong: with no explicit TIMEOUT they
+    # inherit the lane default of 120s, and the verifier ran 67.75s on the
+    # required gate and 90.94s locally under load against it. Budgets here are
+    # 3x the worst run observed on 2026-09-13, rounded up to the next step.
     add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_trace_overhead_acceptance.py")
+    set_tests_properties(gpu-trace-overhead-acceptance-selftest PROPERTIES
+        TIMEOUT 180)
     add_test(NAME gpu-trace-overhead-verifier-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_trace_overhead_acceptance.py")
+    set_tests_properties(gpu-trace-overhead-verifier-selftest PROPERTIES
+        TIMEOUT 300)
     # Typed, GPU-free negative controls for the DPR experiment evidence
     # envelope. Real trials remain separately gated on A2T trace coverage and
     # A3 budget receipts; this test proves only the portable contract.
@@ -605,8 +651,24 @@ if(Python3_Interpreter_FOUND)
             COMMAND bash
                 "${CMAKE_SOURCE_DIR}/test/cmake/test_gpu_health_cpu_only_configure.sh"
                 "${CMAKE_SOURCE_DIR}")
+        # This case configures AND builds pulp-tool-gpu-health-model plus
+        # pulp-mcp-core from scratch in a temporary tree, so it needs a
+        # build-sized budget rather than ctest's per-run default. Every other
+        # configure-and-build case here declares one for the same reason
+        # (project-package-compile-out and agent-capability-installed-sdk both
+        # use 1200).
+        # PROCESSORS is a scheduling weight, not a job count: it tells ctest
+        # how much of its -j budget this case consumes. The two other
+        # configure-and-build cases here declare none, and that is right for
+        # them -- they are the only test in their label lane. This one is not:
+        # build.yml's default leg runs the unfiltered inventory at -j8, so
+        # without a weight ctest is free to schedule seven more tests beside a
+        # build that has already taken a governed share of the same host. The
+        # weight is the governed share the build itself asks for.
         set_tests_properties(gpu-health-cpu-only-configure PROPERTIES
-            LABELS "slow;gpu-health")
+            LABELS "slow;gpu-health"
+            PROCESSORS 8
+            TIMEOUT 1200)
     endif()
 
     # PR-check triage: comparison logic that labels a red PR check as
@@ -671,6 +733,12 @@ if(Python3_Interpreter_FOUND)
     # idempotency marker). Needs a working `git`.
     add_test(NAME version-at-land-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_version_at_land.py")
+    # Each source-driven case builds a real one-PR git range, and the
+    # transaction cases drive concurrent drains through one: sequential git
+    # subprocess work, 39.06s on the required gate against the 120s it would
+    # otherwise inherit. 3x the worst run observed on 2026-09-13, rounded up.
+    set_tests_properties(version-at-land-selftest PROPERTIES
+        TIMEOUT 180)
 
     # min-OS measurement: --measure/--elf floor derivation over a built binary
     # (magic-byte format detection + Mach-O/ELF/PE/ar readers). The primitive the

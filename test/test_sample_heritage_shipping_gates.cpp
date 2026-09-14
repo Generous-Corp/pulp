@@ -743,6 +743,17 @@ TEST_CASE("Representative chain stays within the shipping CPU budget",
 // extra work more than the baseline's — so the ratio drifts on an instrumented
 // build and the verdict tracks runner load rather than the code. Assert it only
 // where it means something.
+//
+// "Where it means something" is also a PLATFORM statement. 2.0 is the ratio
+// this chain measures on arm64 macOS, rounded, and the 5% tolerance is the
+// idle-host noise around that reading; both numbers were calibrated there and
+// nowhere else. The ratio is not portable: the baseline is sinc reconstruction
+// and the chain is branchy per-sample work, and those two halves do not
+// auto-vectorize alike across toolchains, so the same non-regressed code can
+// sit either side of 2.0 under a different compiler and ISA. Until someone
+// calibrates a second reference, measure the ratio everywhere and assert it
+// only where the number came from, reporting it elsewhere so a real
+// regression is still visible in the log.
 #if defined(NDEBUG) && !defined(PULP_TEST_WITH_SANITIZER)
     constexpr double shipping_budget_ratio = 2.0;
     constexpr double measurement_tolerance = 1.05;
@@ -761,9 +772,15 @@ TEST_CASE("Representative chain stays within the shipping CPU budget",
         ratios[trial] = chain_seconds / baseline_seconds;
     }
     std::sort(ratios.begin(), ratios.end());
+    const double median_ratio = ratios[ratios.size() / 2];
+#if defined(__APPLE__) && defined(__aarch64__)
     INFO("2x shipping budget includes a 5% wall-clock measurement tolerance");
-    REQUIRE(ratios[ratios.size() / 2] <=
-            shipping_budget_ratio * measurement_tolerance);
+    REQUIRE(median_ratio <= shipping_budget_ratio * measurement_tolerance);
+#else
+    WARN("Chain/baseline CPU ratio " << median_ratio
+         << " (median of 5); the " << shipping_budget_ratio
+         << "x budget is an arm64 macOS reference and is not asserted here");
+#endif
 #else
     SUCCEED("Relative CPU budget is enforced by the uninstrumented Release configuration");
 #endif

@@ -3,6 +3,7 @@
 #include <pulp/format/standalone_control_host.hpp>
 #include <pulp/inspect/control_host_development_executor.hpp>
 #include <pulp/inspect/control_timeline_document_session_executor.hpp>
+#include <pulp/state/sequencer_state_channel.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -55,6 +56,22 @@ create_standalone_control_author_hooks(format::Processor& processor);
 
 using StandaloneRuntimeEvaluatorFactory =
     std::shared_ptr<RuntimeEvaluator> (*)(format::Processor&, format::ViewBridge&);
+
+using StandaloneSequencerStateChannelFactory =
+    std::shared_ptr<state::SequencerStateChannel> (*)(format::Processor&);
+
+/// Installs the author-owned sequencer state channel the control operations
+/// dev.pulp.sequencer/state.read@1 and dev.pulp.sequencer/state.edit@1 bind to.
+/// A host that installs nothing keeps both operations refusing with a typed
+/// HostUnavailable, so the seam is opt-in rather than a silent empty grid.
+///
+/// The returned channel must be the SAME channel the host's engine thread
+/// drives, and the host remains its single UI-side applied-echo consumer: the
+/// operations only read the published snapshot/playhead and submit commands.
+bool install_standalone_sequencer_state_channel_factory(
+    StandaloneSequencerStateChannelFactory factory) noexcept;
+std::shared_ptr<state::SequencerStateChannel>
+create_standalone_sequencer_state_channel(format::Processor& processor);
 
 /// Installed only by a research-unsafe author target that also links the
 /// separately shipped high-risk evaluator archive.

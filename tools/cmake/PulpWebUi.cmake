@@ -224,6 +224,7 @@ set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/yoga_measurement_internal.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/grid_layout.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/layout_snapshot.cpp
+    ${_PULP_WEBUI_ROOT}/core/view/src/overlay_dismissal.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/pointer_dispatch.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/gesture.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/caret.cpp
