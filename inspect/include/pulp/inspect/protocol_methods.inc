@@ -80,6 +80,8 @@ PULP_INSPECT_METHOD(kAudioLevels, "Audio.levels", TelemetryStream, Event)
 PULP_INSPECT_METHOD(kCaptureScreenshot, "Capture.screenshot", CaptureImage, Request)
 PULP_INSPECT_METHOD(kCaptureScreenshotNode, "Capture.screenshotNode", CaptureImage, Request)
 
+PULP_INSPECT_METHOD(kRenderCaptureFrame, "Render.captureFrame", CaptureImage, Request)
+
 PULP_INSPECT_METHOD(kMotionStartTrace, "Motion.startTrace", TraceControl, Request)
 PULP_INSPECT_METHOD(kMotionStopTrace, "Motion.stopTrace", TraceControl, Request)
 PULP_INSPECT_METHOD(kMotionSnapshot, "Motion.snapshot", DiagnosticsRead, Request)

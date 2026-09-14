@@ -3,6 +3,7 @@
 
 #include <pulp/inspect/agent_context.hpp>
 #include <pulp/inspect/capture_source.hpp>
+#include <pulp/inspect/skp_capture_source.hpp>
 #include <pulp/inspect/editor_url.hpp>
 #include <pulp/inspect/protocol.hpp>
 #include <pulp/inspect/runtime_evaluator.hpp>
@@ -40,6 +41,9 @@ public:
     }
     void set_capture_source(InspectorCaptureSource* source) {
         capture_ = source;
+    }
+    void set_skp_capture_source(SkpCaptureSource* source) {
+        skp_capture_ = source;
     }
     /// Attach the overlay. Also seeds the overlay's source-jump config
     /// with the handler's current config so the `J` hotkey matches
@@ -121,6 +125,7 @@ private:
     view::View* root_ = nullptr;
     InspectorAgentContextSource* agent_context_ = nullptr;
     InspectorCaptureSource* capture_ = nullptr;
+    SkpCaptureSource* skp_capture_ = nullptr;
     InspectorOverlay* overlay_ = nullptr;
     StateInspector* state_ = nullptr;
     ConsoleCapture* console_ = nullptr;
@@ -149,6 +154,7 @@ private:
     InspectorMessage handle_runtime(const InspectorMessage& req);
     InspectorMessage handle_audio(const InspectorMessage& req);
     InspectorMessage handle_capture(const InspectorMessage& req);
+    InspectorMessage handle_render(const InspectorMessage& req);
     InspectorMessage handle_motion(const InspectorMessage& req);
     InspectorMessage handle_trace(const InspectorMessage& req);
     InspectorMessage handle_live_constant(const InspectorMessage& req);
