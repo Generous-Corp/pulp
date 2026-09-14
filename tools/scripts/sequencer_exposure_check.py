@@ -97,6 +97,20 @@ E0_INFRASTRUCTURE_PATHS = {
 SHARED_CROSS_DOMAIN_PATHS = {
     "docs/reference/capability-control.md",
 }
+# Files a repo tool rewrites wholesale. A row that lists one of these in its
+# owned_paths would otherwise govern every unrelated PR that regenerates it,
+# and the author has no way to comply: the gpu-handoff pin-freshness gate
+# *requires* the refresh whenever a pinned path changes, while this gate would
+# reject the refreshed file for lacking a pending row. Exempting them here
+# resolves that contradiction without weakening the semantic check below --
+# sequencer semantics newly added to one of these files is still governed.
+GENERATED_ARTIFACT_PATHS = {
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/validation/gpu-handoff-provenance/receipt.json",
+}
+# A changed path that merely appears in some row's owned_paths is governed,
+# unless it is shared across domains or machine-generated.
+UNGOVERNED_BY_DOCUMENTATION = SHARED_CROSS_DOMAIN_PATHS | GENERATED_ARTIFACT_PATHS
 
 
 def _is_nonempty_string(value: Any) -> bool:
@@ -1119,7 +1133,7 @@ def validate_transition(
         if path not in E0_INFRASTRUCTURE_PATHS and
         (
             is_sequencer_owned_path(path) or
-            (path in documented and path not in SHARED_CROSS_DOMAIN_PATHS) or
+            (path in documented and path not in UNGOVERNED_BY_DOCUMENTATION) or
             path in (semantic_added_paths or set())
         )
     )

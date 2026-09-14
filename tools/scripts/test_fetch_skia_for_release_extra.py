@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import contextlib
+import email.message
 import hashlib
+import http.client
 import importlib.util
 import io
 import json
@@ -14,6 +16,7 @@ import runpy
 import sys
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from unittest import mock
 
@@ -327,6 +330,155 @@ class BakedSkiaShortCircuit(unittest.TestCase):
             # The broken link is gone, replaced by a real tree with the fetched lib.
             self.assertFalse(pathlib.Path("external/skia-build/build").is_symlink())
             self.assertEqual(skia.expected_library_path("darwin-arm64").read_bytes(), b"ok")
+
+
+def _http_error(code: int, retry_after: str | None = None) -> urllib.error.HTTPError:
+    headers = email.message.Message()
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return urllib.error.HTTPError(
+        "https://example.invalid/skia.zip", code, "boom", headers, None
+    )
+
+
+class _TruncatedResponse:
+    """Yields one chunk, then fails the way a dropped connection does."""
+
+    def __init__(self, prefix: bytes):
+        self._prefix = prefix
+        self._sent = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, size: int = -1) -> bytes:
+        if self._sent:
+            raise http.client.IncompleteRead(b"", 4096)
+        self._sent = True
+        return self._prefix
+
+
+class DownloadRetry(unittest.TestCase):
+    """The pinned Skia asset is fetched once per macOS gate run; a single
+    transient 5xx there ejects a PR from the merge queue."""
+
+    def _zip_path(self, td: str) -> pathlib.Path:
+        return pathlib.Path(td) / "asset.zip"
+
+    def test_transient_5xx_is_retried_and_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dest = self._zip_path(td)
+            responses = [_http_error(502), _FakeResponse(b"payload")]
+            slept: list[float] = []
+            with mock.patch.object(skia.urllib.request, "urlopen",
+                                   side_effect=responses) as urlopen, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                skia.download_release_asset(
+                    "https://example.invalid/skia.zip", dest, sleep=slept.append
+                )
+            self.assertEqual(dest.read_bytes(), b"payload")
+            self.assertEqual(urlopen.call_count, 2)
+            self.assertEqual(len(slept), 1, "exactly one backoff between two attempts")
+
+    def test_permanent_404_is_not_retried(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            slept: list[float] = []
+            with mock.patch.object(skia.urllib.request, "urlopen",
+                                   side_effect=_http_error(404)) as urlopen, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(urllib.error.HTTPError) as cm:
+                    skia.download_release_asset(
+                        "https://example.invalid/skia.zip", self._zip_path(td),
+                        sleep=slept.append,
+                    )
+            self.assertEqual(cm.exception.code, 404)
+            self.assertEqual(urlopen.call_count, 1, "a bad pin must fail immediately")
+            self.assertEqual(slept, [])
+
+    def test_exhausting_attempts_raises_the_last_error(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            slept: list[float] = []
+            err = urllib.error.URLError("connection reset")
+            with mock.patch.object(skia.urllib.request, "urlopen",
+                                   side_effect=err) as urlopen, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(urllib.error.URLError, "connection reset"):
+                    skia.download_release_asset(
+                        "https://example.invalid/skia.zip", self._zip_path(td),
+                        attempts=3, sleep=slept.append,
+                    )
+            self.assertEqual(urlopen.call_count, 3)
+            self.assertEqual(len(slept), 2, "no backoff after the final attempt")
+
+    def test_backoff_grows_and_honours_retry_after(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            slept: list[float] = []
+            with mock.patch.object(skia.urllib.request, "urlopen",
+                                   side_effect=urllib.error.URLError("down")), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(urllib.error.URLError):
+                    skia.download_release_asset(
+                        "https://example.invalid/skia.zip", self._zip_path(td),
+                        attempts=3, sleep=slept.append,
+                    )
+            self.assertEqual(slept, [2.0, 4.0])
+
+            served: list[float] = []
+            with mock.patch.object(skia.urllib.request, "urlopen",
+                                   side_effect=[_http_error(503, "7"),
+                                                _FakeResponse(b"ok")]), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                skia.download_release_asset(
+                    "https://example.invalid/skia.zip", self._zip_path(td),
+                    sleep=served.append,
+                )
+            self.assertEqual(served, [7.0], "a numeric Retry-After overrides the schedule")
+
+    def test_partial_body_is_truncated_not_appended(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dest = self._zip_path(td)
+            with mock.patch.object(skia.urllib.request, "urlopen",
+                                   side_effect=[_TruncatedResponse(b"HALF"),
+                                                _FakeResponse(b"WHOLE")]), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                skia.download_release_asset(
+                    "https://example.invalid/skia.zip", dest, sleep=lambda _s: None
+                )
+            self.assertEqual(dest.read_bytes(), b"WHOLE",
+                             "a retry must not concatenate onto the failed body")
+
+
+class DownloadRetryThroughMain(unittest.TestCase):
+    def test_fetch_survives_a_transient_502(self) -> None:
+        with tempfile.TemporaryDirectory() as td, cwd(pathlib.Path(td)):
+            data = make_provider_zip_bytes(b"retried")
+            digest = hashlib.sha256(data).hexdigest()
+            pathlib.Path("tools/deps").mkdir(parents=True)
+            pathlib.Path("tools/deps/manifest.json").write_text(
+                json.dumps({"dependencies": [{
+                    "name": "Skia",
+                    "determinism": {"release_assets": {
+                        "mac-arm64": {
+                            "url": "https://example.invalid/skia.zip",
+                            "sha256": digest,
+                        },
+                    }},
+                }]}),
+                encoding="utf-8",
+            )
+            with mock.patch.object(skia.urllib.request, "urlopen",
+                                   side_effect=[_http_error(502),
+                                                _FakeResponse(data)]) as urlopen, \
+                 mock.patch.object(skia.time, "sleep"), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(skia.main(["fetch", "darwin-arm64"]), 0)
+            self.assertEqual(urlopen.call_count, 2)
+            self.assertEqual(
+                skia.expected_library_path("darwin-arm64").read_bytes(), b"retried"
+            )
 
 
 if __name__ == "__main__":
