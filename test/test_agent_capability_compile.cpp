@@ -27,6 +27,7 @@
 #include <pulp/music/rhythm_relationship.hpp>
 #include <pulp/music/spelling.hpp>
 #include <pulp/music/voicing.hpp>
+#include <pulp/playback/program.hpp>
 #include <pulp/sequence/host_transport_projector.hpp>
 #include <pulp/signal/additive_bank.hpp>
 #include <pulp/signal/analysis_frontends.hpp>
@@ -332,6 +333,14 @@ int main() {
         (void)pulp::music::derive_rhythm_relationship<64>(pulp::music::BinaryPattern<>{}, pulp::music::RhythmRelationshipConfig{});
     }
     {
+        // sequence.controller-playback
+        static_assert(sizeof(pulp::playback::ControllerProgramEvent) > 0);
+        auto volatile binding_55 = &pulp::playback::controller_program_event_less;
+        (void)binding_55;
+        pulp::playback::ControllerProgramEvent probe_value_0{}; (void)probe_value_0;
+        (void)pulp::playback::controller_program_event_less(pulp::playback::ControllerProgramEvent{}, pulp::playback::ControllerProgramEvent{});
+    }
+    {
         // sequence.host-transport-projector
         static_assert(sizeof(pulp::sequence::HostTransportProjector) > 0);
         pulp::sequence::HostTransportProjector probe_value_0{}; (void)probe_value_0.reset();
@@ -399,10 +408,10 @@ int main() {
         // signal.drum-tom-voice
         static_assert(sizeof(pulp::signal::drum::TomVoice) > 0);
         static_assert(sizeof(pulp::signal::drum::TomVoice::LadderMathProfile) > 0);
-        auto volatile binding_70 = static_cast<bool (pulp::signal::drum::TomVoice::*)(pulp::signal::drum::TomVoice::LadderMathProfile) noexcept>(&pulp::signal::drum::TomVoice::set_ladder_math_profile);
-        (void)binding_70;
-        auto volatile binding_71 = static_cast<pulp::signal::drum::TomVoice::LadderMathProfile (pulp::signal::drum::TomVoice::*)() const noexcept>(&pulp::signal::drum::TomVoice::ladder_math_profile);
-        (void)binding_71;
+        auto volatile binding_72 = static_cast<bool (pulp::signal::drum::TomVoice::*)(pulp::signal::drum::TomVoice::LadderMathProfile) noexcept>(&pulp::signal::drum::TomVoice::set_ladder_math_profile);
+        (void)binding_72;
+        auto volatile binding_73 = static_cast<pulp::signal::drum::TomVoice::LadderMathProfile (pulp::signal::drum::TomVoice::*)() const noexcept>(&pulp::signal::drum::TomVoice::ladder_math_profile);
+        (void)binding_73;
         pulp::signal::drum::TomVoice probe_value_0{}; (void)probe_value_0.reset();
         pulp::signal::drum::TomVoice::LadderMathProfile probe_value_1{pulp::signal::drum::TomVoice::LadderMathProfile::reference}; (void)probe_value_1;
         (void)(pulp::signal::drum::TomVoice{}).set_ladder_math_profile(pulp::signal::drum::TomVoice::LadderMathProfile::realtime_efficient);
@@ -442,14 +451,14 @@ int main() {
     }
     {
         // signal.fir-design
-        auto volatile binding_79 = static_cast<pulp::signal::FirLeastSquaresResult (*)(std::span<const pulp::signal::FirDesignPoint>, const pulp::signal::FirLeastSquaresOptions&)>(&pulp::signal::design_fir_least_squares);
-        (void)binding_79;
+        auto volatile binding_81 = static_cast<pulp::signal::FirLeastSquaresResult (*)(std::span<const pulp::signal::FirDesignPoint>, const pulp::signal::FirLeastSquaresOptions&)>(&pulp::signal::design_fir_least_squares);
+        (void)binding_81;
         (void)pulp::signal::design_fir_least_squares(std::span<const pulp::signal::FirDesignPoint>{}, pulp::signal::FirLeastSquaresOptions{});
     }
     {
         // signal.fir-equiripple-design
-        auto volatile binding_80 = static_cast<pulp::signal::FirEquirippleResult (*)(std::span<const pulp::signal::FirEquirippleBand>, const pulp::signal::FirEquirippleOptions&)>(&pulp::signal::design_fir_equiripple);
-        (void)binding_80;
+        auto volatile binding_82 = static_cast<pulp::signal::FirEquirippleResult (*)(std::span<const pulp::signal::FirEquirippleBand>, const pulp::signal::FirEquirippleOptions&)>(&pulp::signal::design_fir_equiripple);
+        (void)binding_82;
         (void)pulp::signal::design_fir_equiripple(std::span<const pulp::signal::FirEquirippleBand>{}, pulp::signal::FirEquirippleOptions{});
     }
     {
@@ -491,8 +500,8 @@ int main() {
     }
     {
         // signal.minimum-phase-fir
-        auto volatile binding_89 = static_cast<pulp::signal::MinimumPhaseFirResult (*)(std::span<const double>, const pulp::signal::MinimumPhaseFirOptions&)>(&pulp::signal::reconstruct_minimum_phase_fir);
-        (void)binding_89;
+        auto volatile binding_91 = static_cast<pulp::signal::MinimumPhaseFirResult (*)(std::span<const double>, const pulp::signal::MinimumPhaseFirOptions&)>(&pulp::signal::reconstruct_minimum_phase_fir);
+        (void)binding_91;
         (void)pulp::signal::reconstruct_minimum_phase_fir(std::span<const double>{}, pulp::signal::MinimumPhaseFirOptions{});
     }
     {
@@ -547,10 +556,10 @@ int main() {
     {
         // signal.routing-primitives
         static_assert(sizeof(pulp::signal::AudioMatrixMixerT<float>) > 0);
-        auto volatile binding_105 = static_cast<bool (*)(const float*, const float*, float*, float*, std::size_t) noexcept>(&pulp::signal::mid_side_encode_block<float>);
-        (void)binding_105;
-        auto volatile binding_106 = static_cast<bool (*)(float, std::span<float>) noexcept>(&pulp::signal::nway_constant_power_gains<float>);
-        (void)binding_106;
+        auto volatile binding_107 = static_cast<bool (*)(const float*, const float*, float*, float*, std::size_t) noexcept>(&pulp::signal::mid_side_encode_block<float>);
+        (void)binding_107;
+        auto volatile binding_108 = static_cast<bool (*)(float, std::span<float>) noexcept>(&pulp::signal::nway_constant_power_gains<float>);
+        (void)binding_108;
         static_assert(sizeof(pulp::signal::PathLatencyAlignerT<float>) > 0);
         static_assert(sizeof(pulp::signal::ClickFreePathSwitcherT<float>) > 0);
         pulp::signal::AudioMatrixMixerT<float> probe_value_0{}; (void)probe_value_0.reset();
@@ -591,12 +600,12 @@ int main() {
         static_assert(sizeof(pulp::signal::SpectralBandLayoutT<float>) > 0);
         static_assert(sizeof(pulp::signal::SpectralMaskTableT<float>) > 0);
         static_assert(sizeof(pulp::signal::SpectralBandResolutionT<float>) > 0);
-        auto volatile binding_118 = static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, int, float, pulp::signal::SpectralBandResolutionT<float>&) noexcept>(&pulp::signal::analyze_spectral_band_resolution<float>);
-        (void)binding_118;
-        auto volatile binding_119 = static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, int, float, pulp::signal::SpectralMaskTableT<float>&) noexcept>(&pulp::signal::build_spectral_mask<float>);
-        (void)binding_119;
-        auto volatile binding_120 = static_cast<bool (*)(std::complex<float>* const*, int, int, const pulp::signal::SpectralMaskTableT<float>&) noexcept>(&pulp::signal::apply_spectral_mask<float>);
+        auto volatile binding_120 = static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, int, float, pulp::signal::SpectralBandResolutionT<float>&) noexcept>(&pulp::signal::analyze_spectral_band_resolution<float>);
         (void)binding_120;
+        auto volatile binding_121 = static_cast<bool (*)(const pulp::signal::SpectralBandLayoutT<float>&, int, float, pulp::signal::SpectralMaskTableT<float>&) noexcept>(&pulp::signal::build_spectral_mask<float>);
+        (void)binding_121;
+        auto volatile binding_122 = static_cast<bool (*)(std::complex<float>* const*, int, int, const pulp::signal::SpectralMaskTableT<float>&) noexcept>(&pulp::signal::apply_spectral_mask<float>);
+        (void)binding_122;
         pulp::signal::SpectralBandLayoutT<float> probe_value_0{}; (void)probe_value_0;
         pulp::signal::SpectralMaskTableT<float> probe_value_1{}; (void)probe_value_1;
         pulp::signal::SpectralBandResolutionT<float> probe_value_2{}; (void)probe_value_2;
@@ -715,44 +724,44 @@ int main() {
     {
         // timebase.beat-division
         static_assert(sizeof(pulp::timebase::BeatDivision) > 0);
-        auto volatile binding_149 = &pulp::timebase::division_ticks;
-        (void)binding_149;
+        auto volatile binding_151 = &pulp::timebase::division_ticks;
+        (void)binding_151;
         pulp::timebase::BeatDivision probe_value_0{pulp::timebase::BeatDivision::Quarter}; (void)probe_value_0;
         (void)pulp::timebase::division_ticks(pulp::timebase::BeatDivision::Quarter);
     }
     {
         // timebase.coordinate-random
         static_assert(sizeof(pulp::timebase::RandomCoordinate) > 0);
-        auto volatile binding_151 = &pulp::timebase::coordinate_chance;
-        (void)binding_151;
+        auto volatile binding_153 = &pulp::timebase::coordinate_chance;
+        (void)binding_153;
         pulp::timebase::RandomCoordinate probe_value_0{pulp::timebase::TickPosition{0}, 0, 0, 0}; (void)probe_value_0;
         (void)pulp::timebase::coordinate_chance(0, pulp::timebase::RandomCoordinate{}, 1, 2);
     }
     {
         // timebase.grid-projection
-        auto volatile binding_152 = &pulp::timebase::project_grid;
-        (void)binding_152;
+        auto volatile binding_154 = &pulp::timebase::project_grid;
+        (void)binding_154;
         (void)pulp::timebase::project_grid(pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}, pulp::timebase::RationalRate{48000, 1}).value(), pulp::timebase::CompiledMeterMap::compile(pulp::timebase::MeterMap{}).value(), pulp::timebase::GridProjectionRequest{}, std::span<const pulp::timebase::GridProjectionRange>{}, std::span<pulp::timebase::GridProjectionPoint>{});
     }
     {
         // timebase.groove-kernel
-        auto volatile binding_153 = &pulp::timebase::OrderPreservingGrooveKernel::create;
-        (void)binding_153;
+        auto volatile binding_155 = &pulp::timebase::OrderPreservingGrooveKernel::create;
+        (void)binding_155;
         (void)pulp::timebase::OrderPreservingGrooveKernel::create(pulp::timebase::GrooveKernelInput{});
     }
     {
         // timebase.ratchet
-        auto volatile binding_154 = &pulp::timebase::project_ratchet_interval<>;
-        (void)binding_154;
+        auto volatile binding_156 = &pulp::timebase::project_ratchet_interval<>;
+        (void)binding_156;
         (void)pulp::timebase::project_ratchet_interval<>(pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, 2, pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, std::span<pulp::timebase::TickPosition>{});
     }
     {
         // timebase.swing
         static_assert(sizeof(pulp::timebase::SwingRatio) > 0);
-        auto volatile binding_156 = &pulp::timebase::swing_position;
-        (void)binding_156;
-        auto volatile binding_157 = &pulp::timebase::unswing_position;
-        (void)binding_157;
+        auto volatile binding_158 = &pulp::timebase::swing_position;
+        (void)binding_158;
+        auto volatile binding_159 = &pulp::timebase::unswing_position;
+        (void)binding_159;
         pulp::timebase::SwingRatio probe_value_0{1, 2}; (void)probe_value_0;
         (void)pulp::timebase::swing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
         (void)pulp::timebase::unswing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
@@ -760,12 +769,12 @@ int main() {
     {
         // timebase.tempo-map
         static_assert(sizeof(pulp::timebase::CompiledTempoMap) > 0);
-        auto volatile binding_159 = static_cast<pulp::runtime::Result<pulp::timebase::CompiledTempoMap, pulp::timebase::TempoMapError> (*)(std::span<const pulp::timebase::TempoPoint>, pulp::timebase::RationalRate) noexcept>(&pulp::timebase::CompiledTempoMap::compile);
-        (void)binding_159;
-        auto volatile binding_160 = static_cast<pulp::timebase::SamplePosition (pulp::timebase::CompiledTempoMap::*)(pulp::timebase::TickPosition) const noexcept>(&pulp::timebase::CompiledTempoMap::ticks_to_samples);
-        (void)binding_160;
-        auto volatile binding_161 = static_cast<pulp::timebase::SampleToTickResult (pulp::timebase::CompiledTempoMap::*)(pulp::timebase::SamplePosition) const noexcept>(&pulp::timebase::CompiledTempoMap::resolve_sample);
+        auto volatile binding_161 = static_cast<pulp::runtime::Result<pulp::timebase::CompiledTempoMap, pulp::timebase::TempoMapError> (*)(std::span<const pulp::timebase::TempoPoint>, pulp::timebase::RationalRate) noexcept>(&pulp::timebase::CompiledTempoMap::compile);
         (void)binding_161;
+        auto volatile binding_162 = static_cast<pulp::timebase::SamplePosition (pulp::timebase::CompiledTempoMap::*)(pulp::timebase::TickPosition) const noexcept>(&pulp::timebase::CompiledTempoMap::ticks_to_samples);
+        (void)binding_162;
+        auto volatile binding_163 = static_cast<pulp::timebase::SampleToTickResult (pulp::timebase::CompiledTempoMap::*)(pulp::timebase::SamplePosition) const noexcept>(&pulp::timebase::CompiledTempoMap::resolve_sample);
+        (void)binding_163;
         pulp::timebase::CompiledTempoMap probe_value_0{pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}, pulp::timebase::RationalRate{48000, 1}).value()}; (void)probe_value_0;
         (void)pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}.points(), pulp::timebase::RationalRate{48000, 1});
         (void)(pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}, pulp::timebase::RationalRate{48000, 1}).value()).ticks_to_samples(pulp::timebase::TickPosition{705600});
