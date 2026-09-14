@@ -334,15 +334,63 @@ Two mechanics that cost time on the way to that error:
   that prints `exit=0` under a pipe may have exited 1. Read `${PIPESTATUS[0]}`,
   or drop the pipe.
 - **`write --source-commit` refuses on an unclean canonical path** (rc=2). So a
-  repair cannot precede the merge commit that resolves the conflict: take
-  `--theirs` on the generated ledgers, commit the merge, and regenerate from the
-  merge sha.
+  repair cannot precede the merge commit that resolves the conflict: let the
+  merge land, then regenerate from the merge sha. On a checkout without the
+  merge driver below, "let the merge land" means taking `--theirs` on the
+  generated ledgers by hand first.
 
 A receipt conflict is also not always pointer churn. One case reported
 `102 rows unchanged` while `handoff_sha256` moved to a value matching **neither**
 parent — the ledger bytes were equal and the receipt hash was not, which means
 the hash was computed over a tree that no longer existed. Regenerate from the
 merge sha rather than picking a side.
+
+## `regenerate-me` in a ledger is a resolved merge, not corruption
+
+`.gitattributes` routes `docs/status/gpu-vellum-handoff.yaml` and
+`docs/validation/gpu-handoff-provenance/receipt.json` to the
+`pulp-gpu-ledger` merge driver, which `setup.sh` registers via
+`tools/scripts/install-githooks.sh`. When both sides of a merge have
+regenerated, the driver takes the other side's file and overwrites every
+`object_id` — and the receipt's `handoff_sha256` — with the literal
+`regenerate-me`. The merge then completes with no conflict markers and commits
+itself.
+
+**The value is invalid on purpose, and that is the entire mechanism.** Every
+resolution that produces something *shaped* like an identity is accepted
+somewhere: a stale-but-ancestral pin satisfies the always-on provenance tier, so
+a driver that computed the merged value — or `merge=ours` — would hand Git a
+wrong answer and Git would commit it without a word. `regenerate-me` cannot
+survive. It fails the 40-hex check in `validate_handoff` *and* the blob
+comparison in `validate_handoff_routing`, and
+`tools/scripts/gpu_ledger_sentinel_check.py` rejects it from both the pre-push
+hook and `gates.sh` before it can reach CI.
+
+So when a ledger reads `regenerate-me`, nothing is broken and nothing is lost —
+the merge is done and the regeneration is owed:
+
+```sh
+python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt
+git commit docs/status/gpu-vellum-handoff.yaml \
+           docs/validation/gpu-handoff-provenance/receipt.json
+```
+
+Land that as **its own commit**: amending a commit that touches a pinned path
+changes that path's owning revision and re-stales the row just repaired. Drop
+`--receipt` and the ledger is repaired while the receipt stays bound to bytes
+that no longer exist — green locally, red in CI.
+
+Two limits worth knowing before trusting the driver:
+
+- **A clone that never ran `setup.sh` has no driver**, because Git resolves
+  `merge=<name>` against *local* config that no clone carries. The attribute is
+  still present and the merge still conflicts as text, so such a checkout gets
+  the old hand-resolution rather than anything worse. The failure is silent,
+  which is why `install-githooks.sh` registers the driver every run rather than
+  only on first setup.
+- **GitHub's server-side merge does not run merge drivers.** A pull request can
+  still show `CONFLICTING` on github.com while the same merge is clean locally.
+  Merge `origin/main` into the branch, regenerate, and push.
 
 ## The watch-family selectors match PATHS, so a one-line include can demand an event
 

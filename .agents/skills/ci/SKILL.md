@@ -810,6 +810,44 @@ ship a `[[deprecated]]` alias so downstream keeps compiling — lines containing
 `--selftest` proves the gate can fail (8 cases). A gate that cannot fail is not
 a gate.
 
+## Gate: gpu-ledger-sentinel (`tools/scripts/gpu_ledger_sentinel_check.py`)
+
+Rejects a push whose `docs/status/gpu-vellum-handoff.yaml` or
+`docs/validation/gpu-handoff-provenance/receipt.json` still contains the literal
+`regenerate-me`. That value is written by the `pulp-gpu-ledger` merge driver,
+which resolves the collision those two generated files produce on every branch
+that outlives a main move. The repair is one command, and it is in the failure
+text:
+
+```sh
+python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt
+```
+
+**Why an invalid value rather than a merged one.** A stale-but-ancestral pin
+passes the always-on provenance tier, so any driver that computes a plausible
+merge — `merge=ours` included — produces something Git commits in silence. The
+sentinel is chosen so that nothing accepts it.
+
+**Why it needed its own gate.** The two guards that look closest both miss it,
+and each misses it for a structural reason rather than an oversight:
+
+* `gpu_handoff_pin_freshness.py` fires when a pinned path changes and the ledger
+  does **not**. A sentinel merge changes the ledger, so it reads the sentinel as
+  the refresh it was waiting for.
+* `conflict_marker_check.py` looks for `<<<<<<<`. The driver's entire purpose is
+  that there are none.
+
+Which left CI twenty minutes downstream — the roundtrip the driver exists to
+remove.
+
+**It runs from the pre-push hook as well as `gates.sh`, and that distinction is
+load-bearing.** `gates.sh` is run by convention; it is not invoked by
+`.githooks/pre-push`, and `.shipyard/config.toml [validation.gates]` runs its own
+explicit script list rather than the file. A rule wired only into `gates.sh`
+therefore holds only for whoever remembered to run it — which is why
+`gpu_handoff_pin_freshness.py` (gate 6b2), wired that way, does not actually gate
+a push today.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before shelling out to `pulp` (or `shipyard pr`, which ultimately

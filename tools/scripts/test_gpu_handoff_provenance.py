@@ -21,6 +21,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import gpu_handoff_provenance as provenance  # noqa: E402
+import gpu_ledger_sentinel_check as sentinel_check  # noqa: E402
 
 
 def git(root: pathlib.Path, *arguments: str) -> str:
@@ -971,17 +972,76 @@ class MergeSentinel(unittest.TestCase):
         # every collision to our own side and quietly drop the other one.
         self.assertEqual(command[1:], ["%A", "%B"])
 
-    def test_gates_rejects_the_sentinel_before_it_reaches_ci(self) -> None:
-        """The local half of the design.
+    def test_the_sentinel_check_reads_a_merged_ledger_and_refuses_it(self) -> None:
+        """The local half of the design, end to end on real driver output.
 
         The pin-freshness guard cannot cover this: it fires when a pinned path
         changes and the ledger does not, and a sentinel merge changes the
-        ledger -- so it reads the sentinel as a refresh and stays silent.
+        ledger, so it reads the sentinel as the refresh it was waiting for. The
+        conflict-marker guard cannot either -- the driver's whole purpose is
+        that there are no markers.
         """
 
-        gates = (self.root / "tools/scripts/gates.sh").read_text(encoding="utf-8")
-        self.assertIn(f"grep -q {self.SENTINEL}", gates)
-        self.assertIn("--receipt", gates)
+        # Spelled out rather than taken from sentinel_check.LEDGERS: naming the
+        # files the guard is supposed to cover is the entire assertion, and
+        # deriving them from the guard's own list would shrink the expectation
+        # in lockstep with the bug. Dropping the receipt from that list left
+        # this case green until it was written this way.
+        expected = [
+            pathlib.Path("docs/status/gpu-vellum-handoff.yaml"),
+            pathlib.Path("docs/validation/gpu-handoff-provenance/receipt.json"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            fake = pathlib.Path(directory)
+            for relative in expected:
+                target = fake / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                subprocess.run(
+                    [str(self.driver), str(target), str(self.root / relative)],
+                    check=True, stdin=subprocess.DEVNULL, timeout=30,
+                )
+            # Control: the pristine tree this was copied from must be silent,
+            # or a guard that fires on everything would look like one that
+            # detected something.
+            self.assertEqual(sentinel_check.sentinel_files(self.root), [])
+            self.assertEqual(sentinel_check.sentinel_files(fake), expected)
+            with contextlib.redirect_stderr(io.StringIO()) as reported:
+                self.assertEqual(sentinel_check.main(["--root", str(fake)]), 1)
+            for relative in expected:
+                self.assertIn(str(relative), reported.getvalue())
+            self.assertIn(sentinel_check.REPAIR, reported.getvalue())
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(
+                    sentinel_check.main(["--root", str(fake), "--mode", "hint"]), 0
+                )
+
+    def test_the_driver_and_the_check_agree_on_the_sentinel(self) -> None:
+        """Git runs the driver as a bare shell command, so it cannot import the
+        checker; the two literals are only in step because this says so. A
+        silent disagreement would leave the driver writing something no guard
+        looks for, which is the failure this whole design exists to prevent.
+        """
+
+        self.assertEqual(sentinel_check.SENTINEL, self.SENTINEL)
+        self.assertIn(
+            f'"{self.SENTINEL}"', self.driver.read_text(encoding="utf-8")
+        )
+
+    def test_both_push_paths_run_the_sentinel_check(self) -> None:
+        """gates.sh is run by convention; the hook is run by git.
+
+        Wiring only gates.sh would leave the sentinel reaching CI for anyone
+        who did not think to run it -- the twenty-minute roundtrip the driver
+        exists to remove.
+        """
+
+        script = "gpu_ledger_sentinel_check.py"
+        for surface in ("tools/scripts/gates.sh", ".githooks/pre-push"):
+            self.assertIn(
+                script,
+                (self.root / surface).read_text(encoding="utf-8"),
+                f"{surface} does not run {script}",
+            )
 
 
 def catalog_module():
