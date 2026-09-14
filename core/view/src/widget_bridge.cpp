@@ -78,7 +78,13 @@ bool subtree_contains_view(View& node, const View* target) {
 // Element.prototype._registerNativeEvent does for addEventListener
 // callers, but on the lower-level `on()` channel that @pulp/react and
 // other native bridges use directly.
-static const char* kJSPreamble = R"(
+// MSVC caps a single string literal at 16380 bytes (C2026), and this preamble
+// grew past it, so it is stored in two parts and joined at the call site.
+// The ARM64 cross-compiler enforces the cap where the x64 host compiler does
+// not, so an over-long preamble breaks only the windows-arm64 build. The split
+// point is arbitrary and only has to avoid cutting a token; keep each part well
+// under the cap when adding to the preamble.
+static const char* kJSPreamblePart1 = R"(
 var __callbacks__ = {};
 var __nativeRegistered__ = {};
 var __pulpEventPropagation__ = {};
@@ -308,6 +314,9 @@ function __dispatch__(id, eventName) {
         }
     }
 }
+)";
+
+static const char* kJSPreamblePart2 = R"(
 function __ensureNativeRegistered__(id, group) {
     var key = id + ':' + group;
     __nativeRegistered__[key] = true;
@@ -513,7 +522,8 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // most as long as the bridge.
     repaint_callback_ = [&root] { root.request_repaint(); };
     register_api();
-    eval_or_throw(engine_, "kJSPreamble", kJSPreamble);
+    eval_or_throw(engine_, "kJSPreamble",
+                  std::string(kJSPreamblePart1) + kJSPreamblePart2);
     eval_or_throw(engine_, "css_colors", preludes::css_colors);
     eval_or_throw(engine_, "css_parser", preludes::css_parser);
     eval_or_throw(engine_, "web_compat_element", preludes::web_compat_element);

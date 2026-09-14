@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 48,
+  "manifest_revision": 49,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -33,7 +33,7 @@
       },
       "sequence": {
         "state": "partial",
-        "capabilities": 1
+        "capabilities": 2
       },
       "signal": {
         "state": "partial",
@@ -2254,6 +2254,79 @@
         }
       },
       "contract_digest": "sha256:b9b771d4ed5f85c58bae0a638d8b490dc21eebdbe023226670d73ea001773881"
+    },
+    {
+      "key": "sequence.controller-playback",
+      "domain": "sequence",
+      "summary": "Lowered controller and expression values for playback, carrying the full wire address rather than a Pulp-local controller enumeration so an unanticipated controller family needs new values and not new types.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "control-or-audio-when-quiescent",
+        "release": "none"
+      },
+      "state_model": "Immutable value events owned by a compiled track program, read as a bounded span against the tempo map the program was built with.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "compiled controller and expression lanes",
+      "output_domain": "controller value events ordered for half-open block scheduling, each tagged ControllerProgramEventOrigin::Authored or ControllerProgramEventOrigin::Chased",
+      "units": [
+        "samples",
+        "ticks"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "block-synchronous",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/playback/program.hpp",
+          "qualified_name": "pulp::playback::ControllerProgramEvent",
+          "target": "Pulp::playback",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "block-order",
+          "kind": "cpp_function",
+          "include": "pulp/playback/program.hpp",
+          "qualified_name": "pulp::playback::controller_program_event_less",
+          "target": "Pulp::playback",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:cab7310dceeeab4d37e785a30ef7d16ece7ef0dbccecd3088b91c743a1588b0b"
     },
     {
       "key": "sequence.host-transport-projector",
@@ -7086,13 +7159,13 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 101,
+    "total": 102,
     "by_domain": {
       "audio": 8,
       "midi": 16,
       "music": 7,
       "offline": 0,
-      "sequence": 1,
+      "sequence": 2,
       "signal": 60,
       "timebase": 9
     }
