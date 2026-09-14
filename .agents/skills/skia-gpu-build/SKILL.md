@@ -155,6 +155,15 @@ shipping artifact.
 
 ## Gotchas (each cost real time)
 
+- **A failed `fetch_skia_for_release.py` is not always a bad pin.** The pinned
+  archive is a few hundred megabytes from a release CDN, fetched fresh on lanes
+  with no warm cache, so a single transient 5xx or dropped connection there fails
+  the whole configure. The fetcher now retries that class with backoff, so a
+  failure that survives it is worth reading literally: a 403/404 is refused on the
+  first attempt and means the pin names a missing or revoked asset, and an
+  `OSError` is refused too because it is usually a full disk rather than the
+  network. Check free space before re-running a fetch that failed on write.
+
 - **Release Skia archives require `SK_RELEASE` in every consumer, including
   Debug Pulp builds.** The published skia-builder libraries live under
   `lib/Release` and compile Skia's inline ref-counting code with release
