@@ -70,7 +70,7 @@ static bool wait_for_history_containing(HotReloader& reloader,
     return has_expected();
 }
 
-TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
+TEST_CASE("HotReloader detects file changes", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_test");
     auto js_file = tmp_dir / "ui.js";
 
@@ -99,7 +99,7 @@ TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader reload_count increments", "[view][hotreload]") {
+TEST_CASE("HotReloader reload_count increments", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_test2");
     auto js_file = tmp_dir / "ui.js";
 
@@ -124,7 +124,7 @@ TEST_CASE("HotReloader reload_count increments", "[view][hotreload]") {
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader multiple sequential reloads", "[view][hotreload]") {
+TEST_CASE("HotReloader multiple sequential reloads", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_multi");
     auto js_file = tmp_dir / "ui.js";
 
@@ -151,7 +151,7 @@ TEST_CASE("HotReloader multiple sequential reloads", "[view][hotreload]") {
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader only reloads on JS modification", "[view][hotreload]") {
+TEST_CASE("HotReloader only reloads on JS modification", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_jsonly");
     auto js_file = tmp_dir / "ui.js";
 
@@ -179,7 +179,7 @@ TEST_CASE("HotReloader only reloads on JS modification", "[view][hotreload]") {
     std::filesystem::remove_all(tmp_dir);
 }
 
-TEST_CASE("HotReloader directory watching", "[view][hotreload]") {
+TEST_CASE("HotReloader directory watching", "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_test3");
     auto entry = tmp_dir / "main.js";
 
@@ -204,7 +204,7 @@ TEST_CASE("HotReloader directory watching", "[view][hotreload]") {
 }
 
 TEST_CASE("HotReloader seeds observed JS file content",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_seed");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -249,7 +249,7 @@ TEST_CASE("HotReloader file seed skips non-JS files and missing paths",
 }
 
 TEST_CASE("HotReloader ignores same-content rewrites",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_same_content");
     auto entry = tmp_dir / "main.js";
 
@@ -277,7 +277,7 @@ TEST_CASE("HotReloader ignores same-content rewrites",
 }
 
 TEST_CASE("HotReloader content hash still reloads changed modules",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_module_hash");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -307,7 +307,7 @@ TEST_CASE("HotReloader content hash still reloads changed modules",
 }
 
 TEST_CASE("HotReloader file watcher ignores unsupported changes",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_filter");
     auto entry = tmp_dir / "main.js";
     auto text_file = tmp_dir / "notes.txt";
@@ -333,7 +333,7 @@ TEST_CASE("HotReloader file watcher ignores unsupported changes",
 }
 
 TEST_CASE("HotReloader module file change reloads directory entry",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_direct_module");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";
@@ -377,7 +377,7 @@ TEST_CASE("HotReloader pending reload without callback still drains",
 }
 
 TEST_CASE("HotReloader empty or missing entry files do not schedule reloads",
-          "[view][hotreload]") {
+          "[view][hotreload][slow]") {
     auto tmp_dir = make_temp_dir("pulp_hotreload_empty_entry");
     auto entry = tmp_dir / "main.js";
     auto module = tmp_dir / "module.mjs";

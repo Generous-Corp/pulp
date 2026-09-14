@@ -20,12 +20,22 @@ pulp_add_test_suite(pulp-test-widgets-label LIBRARIES pulp::view)
 # Hot-reload tests
 add_executable(pulp-test-hot-reload test_hot_reload.cpp)
 target_link_libraries(pulp-test-hot-reload PRIVATE pulp::view Catch2::Catch2WithMain)
-# `slow`: each HotReloader scenario sleeps on file-watcher
-# debounce + filesystem mtime resolution (~1-1.5 sec each).
+# Registered twice. The `[slow]` scenarios each wait on file-watcher debounce
+# plus filesystem mtime resolution (~1-1.5 sec apiece), so they carry the
+# `slow` label that both the required macOS gate and the diff-coverage lane
+# exclude. The rest run in milliseconds and stay unlabelled so they reach
+# both. Tagging the slow cases rather than the fast ones is deliberate: an
+# untagged future case lands on the enforced lane instead of vanishing from it.
 catch_discover_tests(pulp-test-hot-reload
+    TEST_SPEC "~[slow]"
     PROPERTIES
-        RESOURCE_LOCK hot-reload-file-watcher
-        LABELS slow)
+        RESOURCE_LOCK hot-reload-file-watcher)
+catch_discover_tests(pulp-test-hot-reload
+    TEST_SPEC "[slow]"
+    TEST_PREFIX "slow::"
+    LABELS slow
+    PROPERTIES
+        RESOURCE_LOCK hot-reload-file-watcher)
 
 # The model/provider registrations in this owner file are intentionally visible
 # when the optional Inspector component is disabled. Inspector-only fixtures in
