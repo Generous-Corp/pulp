@@ -434,7 +434,12 @@ The sequencer registries are wired into both:
   local lane (~20s)**, and the cost is inherent rather than accidental: it
   resolves every released row's evidence out of git, hundreds of short git
   invocations, which is exactly what catches a row citing evidence that has
-  since been deleted. Do not "optimize" it by skipping that read.
+  since been deleted. Do not "optimize" it by skipping that read. It watches a
+  changed path three ways: a sequencer-name substring, a ledger row that claims
+  the path in `owned_paths`, and newly added sequencer semantics. A path claimed
+  by two or more rows is watched by none of them, because no single row can be
+  the one asked to cover it; registration manifests and wholesale-regenerated
+  artifacts are never claimed whole, so a manifest edit never needs a row.
 - **`negative_capability_check.py`** — the compile-refusal registry. Whole-tree
   and sub-second. A ctest already covered it, which meant it was only reachable
   from a full build; the local lane now fails in under a second instead.
