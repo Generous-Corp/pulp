@@ -82,7 +82,10 @@ public:
     // Content-addressed reload gate: returns true only when `path` is a readable
     // .js/.mjs whose content hash differs from the last observed hash (a
     // save-without-edit or an editor's atomic-rename touch does not reload).
-    // Updates the observed-hash map as a side effect. Public because it is
+    // Updates the observed-hash map as a side effect, under `hashes_mutex_`,
+    // so a caller on the owning thread may race the watcher thread safely. The
+    // gate is consume-once: of two callers seeing the same new content, exactly
+    // one is told to reload. Public because it is
     // exercised directly by the unit tests: a private definition that is
     // referenced from only one in-library call site is elided by MSVC (a private
     // method cannot be referenced across a translation unit), so a test reaching
@@ -96,8 +99,17 @@ private:
     std::string entry_file_;
     ReloadCallback on_reload_;
 #if !TARGET_OS_IPHONE
+    // The watcher owns a background thread that dispatches into
+    // `on_file_changed`, which writes every member below. Only `~Watcher`
+    // stops that thread, so the destructor releases this explicitly before
+    // anything it feeds. Reverse-declaration-order alone would tear the
+    // watched state down first and leave the thread writing into it.
     std::unique_ptr<choc::file::Watcher> watcher_;
 #endif
+    // Guards `observed_content_hashes_`. Separate from `pending_mutex_`
+    // because the content gate reads the file before it touches the map, and
+    // holding the pending-code lock across that I/O would stall `poll_reload`.
+    mutable std::mutex hashes_mutex_;
     std::unordered_map<std::string, std::uint64_t> observed_content_hashes_;
 
     mutable std::mutex pending_mutex_;

@@ -24,6 +24,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 from pathlib import Path
 from unittest import mock
 
@@ -1721,6 +1723,1126 @@ class TestQueuedJobAgeFetch(unittest.TestCase):
     def test_no_queued_jobs_reads_empty_not_stalled(self):
         with mock.patch.object(gate, "_api", self._api([])):
             self.assertEqual(gate.fetch_queued_job_ages("o/r", VM_LANE), [])
+
+
+# ── Per-host service silence ────────────────────────────────────────────
+#
+# The census reads the same jobs API the lane checks already read, and keeps
+# the two fields those throw away: runner_name and completed_at. Fixtures are
+# jobs-API-shaped so a shape change in the real payload breaks them here.
+
+NOW = datetime(2026, 9, 11, 12, 0, 0, tzinfo=timezone.utc)
+
+HOST_MAP = {
+    "m3": ["studio-"],
+    "m5": ["m5-", "pulp-preamble-m5"],
+    "m1": ["m1-"],
+}
+
+# Every host is observed serving this set on the live fleet, so it is the set
+# sibling demand is measured over.
+GATE_LABELS = ["self-hosted", "macOS", "ARM64",
+               "pulp-build", "pulp-build-pr-head", "pulp-build-vm"]
+# Only m5 serves preamble, so a preamble job is demand against nobody else.
+PREAMBLE_LABELS = ["self-hosted", "macOS", "ARM64", "pulp-preamble"]
+
+HOST_RUNNERS = [
+    {"name": "pulp-preamble-m5", "status": "online",
+     "labels": ["self-hosted", "macOS", "ARM64", "pulp-preamble"]},
+]
+
+
+def ago(hours, base=NOW):
+    return (base - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def job(runner_name, hours_ago, labels=None, status="completed",
+        conclusion="success", name="build", base=NOW, run_id=None):
+    """One jobs-API job object, shaped exactly as the live endpoint returns."""
+    payload = {
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "runner_name": runner_name,
+        "completed_at": None if status != "completed" else ago(hours_ago, base),
+        "labels": list(GATE_LABELS if labels is None else labels),
+    }
+    if run_id is not None:
+        payload["run_id"] = run_id
+    return payload
+
+
+def host_contract(**kw):
+    c = contract([])
+    c.hosts = {host: list(prefixes) for host, prefixes in HOST_MAP.items()}
+    c.host_silence_hours = 6
+    c.host_demand_min_jobs = 5
+    c.host_observation_hours = 72
+    c.host_max_runs = 400
+    c.host_severity = gate.INFO
+    for key, value in kw.items():
+        setattr(c, key, value)
+    return c
+
+
+def census(records_json, *, runner_specs=HOST_RUNNERS, degraded=None, **kw):
+    return gate.classify_host_silence(
+        host_contract(**kw),
+        gate.parse_service_records(records_json),
+        gate.parse_runners(list(runner_specs)),
+        now=NOW,
+        degraded=degraded,
+    )
+
+
+def busy_siblings(host_prefix, count, hours_ago=1.0, labels=None):
+    """`count` completed sibling jobs inside the silence window."""
+    return [job(f"{host_prefix}{i}", hours_ago, labels=labels)
+            for i in range(count)]
+
+
+class TestHostSilenceHealthyFleet(unittest.TestCase):
+    def test_all_three_hosts_serving_fires_nothing(self):
+        records = (busy_siblings("studio-11-", 4)
+                   + busy_siblings("m5-pulp-gate-01-", 4)
+                   + busy_siblings("m1-pulp-gate-01-", 4))
+        findings = census(records)
+        # m5 declares two prefixes, so it carries the per-lane census line AND
+        # two lane verdicts: its gate lane served, its preamble lane has no job
+        # in the window at all. The declared-but-idle lane is reported as
+        # unobserved rather than folded into its sibling's health, which is the
+        # whole point of the lane being the unit. Nothing is silent here.
+        self.assertEqual(kinds(findings),
+                         ["host-lane-census"] + ["host-last-served"] * 3
+                         + ["host-unobserved"])
+        # CONTROL: the instrument can fire on this same fixture shape: drop
+        # m1's jobs back past the window and it does.
+        quiet = (busy_siblings("studio-11-", 6)
+                 + busy_siblings("m5-pulp-gate-01-", 6)
+                 + busy_siblings("m1-pulp-gate-01-", 1, hours_ago=30))
+        self.assertIn("host-silent", kinds(census(quiet)))
+
+    def test_last_served_line_names_the_timestamp(self):
+        records = busy_siblings("studio-11-", 1, hours_ago=2)
+        served = [f for f in census(records) if f.variable == "m3"]
+        self.assertEqual([f.kind for f in served], ["host-last-served"])
+        self.assertIn(ago(2), served[0].detail)
+
+
+class TestHostSilenceIdleNight(unittest.TestCase):
+    def test_silence_without_sibling_demand_is_not_a_verdict(self):
+        # The whole fleet went quiet: m5 is silent, but so is everything it
+        # could have taken work from. Four sibling jobs is below the gate.
+        records = ([job("m5-pulp-gate-01-1", 11)]
+                   + busy_siblings("studio-11-", 2)
+                   + busy_siblings("m1-pulp-gate-01-", 2))
+        findings = census(records)
+        # The census line is keyed to the host; the verdict is keyed to the
+        # lane that earned it.
+        self.assertEqual([f.kind for f in findings if f.variable == "m5"],
+                         ["host-lane-census"])
+        self.assertEqual([f.kind for f in findings if f.variable == "m5/m5-"],
+                         ["host-idle"])
+        self.assertEqual(kinds(findings, gate.INFO).count("host-silent"), 0)
+
+    def test_one_more_sibling_job_crosses_the_demand_gate(self):
+        # CONTROL for the test above, on the same instrument and target: the
+        # ONLY change is a fifth sibling job.
+        records = ([job("m5-pulp-gate-01-1", 11)]
+                   + busy_siblings("studio-11-", 3)
+                   + busy_siblings("m1-pulp-gate-01-", 2))
+        silent = [f for f in census(records) if f.kind == "host-silent"]
+        self.assertEqual([f.variable for f in silent], ["m5/m5-"])
+
+
+class TestHostSilenceM5Shape(unittest.TestCase):
+    """The incident this rule exists for: up, registered, serving nothing."""
+
+    def records(self):
+        return ([job("m5-pulp-gate-01-1", 11, name="build-macos")]
+                + busy_siblings("studio-11-", 6)
+                + busy_siblings("m1-pulp-gate-01-", 3))
+
+    def test_silent_lane_is_reported_once(self):
+        # A fused host must not produce one verdict per prefix when only one
+        # of its lanes stopped. The qualifier names which lane it was.
+        silent = [f for f in census(self.records()) if f.kind == "host-silent"]
+        self.assertEqual([f.variable for f in silent], ["m5/m5-"])
+
+    def test_detail_carries_the_hours_and_the_sibling_count(self):
+        silent = [f for f in census(self.records()) if f.kind == "host-silent"][0]
+        self.assertIn("served no jobs for 11.0h", silent.detail)
+        # One count, then the split that says which witness carried it: nine
+        # jobs this lane serves completed elsewhere, all nine of them on a
+        # sibling lane carrying a label set it serves.
+        self.assertIn("while 9 job(s) it serves completed elsewhere", silent.detail)
+        self.assertIn("(9 carrying a label set it serves, 0 a job only it is "
+                      "observed to run)", silent.detail)
+
+    def test_detail_carries_the_episode_key(self):
+        silent = [f for f in census(self.records()) if f.kind == "host-silent"][0]
+        self.assertIn(f"Last served {ago(11)} (episode key)", silent.detail)
+
+    def test_the_registration_discriminator_stays_with_its_own_lane(self):
+        # Up but not serving vs powered off: the persistent registration is
+        # what separates them, and it is read from the runners API the checker
+        # already queries. It is scoped to the lane that owns the runner --
+        # m5's online preamble registration is NOT evidence about the ephemeral
+        # gate lane beside it, and reporting it there would restate the
+        # substitution the per-host verdict used to make.
+        findings = census(self.records())
+        silent = [f for f in findings if f.kind == "host-silent"][0]
+        self.assertEqual(silent.variable, "m5/m5-")
+        self.assertIn("no runner registered under the prefix 'm5-'",
+                      silent.detail)
+        self.assertNotIn("pulp-preamble-m5=online", silent.detail)
+        # CONTROL: the discriminator IS reported, on the lane it describes.
+        preamble = [f for f in findings
+                    if f.variable == "m5/pulp-preamble-m5"][0]
+        self.assertIn("pulp-preamble-m5=online", preamble.detail)
+
+    def test_detail_carries_the_jobs_that_prove_demand(self):
+        silent = [f for f in census(self.records()) if f.kind == "host-silent"][0]
+        self.assertIn("studio-11-0", silent.detail)
+        self.assertIn(ago(1), silent.detail)
+
+    def test_a_powered_off_host_is_reported_as_unregistered(self):
+        silent = [f for f in census(self.records(), runner_specs=[])
+                  if f.kind == "host-silent"][0]
+        self.assertIn("no runner registered under the prefix 'm5-'",
+                      silent.detail)
+
+
+class TestHostLaneCensus(unittest.TestCase):
+    """A fused host's lanes are judged apart, not as one host.
+
+    m5 declares two prefixes: the ephemeral gate lane `m5-` and the persistent
+    `pulp-preamble-m5` runner. Under a host-scoped predicate a completion on
+    either read as the host serving, so the cheap always-up lane vouched for
+    the expensive gate lane that had stopped -- the shape of the incident the
+    rule exists for, and the one thing a host verdict cannot show. The lane is
+    therefore the unit of judgment, and the host line is inventory only.
+    """
+
+    def records(self):
+        # The gate lane stopped 11h ago; the preamble runner served 1h ago.
+        return ([job("m5-pulp-gate-01-1", 11, name="build-macos"),
+                 job("pulp-preamble-m5", 1)]
+                + busy_siblings("studio-11-", 6)
+                + busy_siblings("m1-pulp-gate-01-", 3))
+
+    def test_a_healthy_lane_cannot_vouch_for_the_one_beside_it(self):
+        # The alibi, removed. The preamble runner served an hour ago and the
+        # gate lane beside it has served nothing for 11h; the host is reported
+        # silent on the lane that stopped, not excused by the lane that did not.
+        findings = census(self.records())
+        self.assertEqual([f.kind for f in findings if f.variable == "m5/m5-"],
+                         ["host-silent"])
+        # CONTROL: the sibling lane is separately, honestly reported healthy --
+        # so the verdict above is lane separation, not a blanket pessimism that
+        # would report any fused host silent.
+        self.assertEqual(
+            [f.kind for f in findings if f.variable == "m5/pulp-preamble-m5"],
+            ["host-last-served"])
+        # The host line carries no verdict of its own any more.
+        self.assertEqual([f.kind for f in findings if f.variable == "m5"],
+                         ["host-lane-census"])
+
+    def test_the_census_reports_the_lanes_apart(self):
+        lane = [f for f in census(self.records())
+                if f.kind == "host-lane-census" and f.variable == "m5"][0]
+        self.assertIn("m5-: 1 job(s), last 660m ago", lane.detail)
+        self.assertIn("pulp-preamble-m5: 1 job(s), last 60m ago", lane.detail)
+
+    def test_a_lane_with_no_completion_says_so(self):
+        records = ([job("pulp-preamble-m5", 1)]
+                   + busy_siblings("studio-11-", 6))
+        lane = [f for f in census(records)
+                if f.kind == "host-lane-census" and f.variable == "m5"][0]
+        self.assertIn("m5-: no completion in window", lane.detail)
+
+    def test_a_single_prefix_host_emits_no_lane_census(self):
+        # The control. m1 and m3 declare one prefix each, so a per-prefix line
+        # would restate the host line; if this ever returns a finding the
+        # emission is firing on something other than prefix fusion.
+        lanes = [f.variable for f in census(self.records())
+                 if f.kind == "host-lane-census"]
+        self.assertEqual(lanes, ["m5"])
+
+
+class TestHostSilenceDemandWitnesses(unittest.TestCase):
+    """One question, two independent witnesses, counted as one total.
+
+    The question is always the same: did the work this lane serves keep
+    flowing while the lane served nothing? "Flowing elsewhere" has two
+    readings, and neither subsumes the other.
+
+    By LABEL SET -- another declared lane completed jobs carrying a label set
+    this lane is observed to serve. It proves the work stayed inside the
+    self-hosted fleet, and it is the only witness available for a lane whose
+    job names its siblings also run.
+
+    By JOB NAME -- a job definition only this lane is observed to run
+    completed off the lane, hosted runners included. It is the only witness
+    that survives a reroute, because a reroute changes the label set by
+    definition; and it is the only witness a singleton lane has at all,
+    because a singleton has no sibling to carry its labels.
+
+    m5's preamble lane is the live singleton: it serves ["self-hosted"
+    "macOS" "ARM64" "pulp-preamble"] and no other declared lane has ever
+    served that set, so the label-set witness scores zero against it however
+    hard the rest of the fleet is working.
+    """
+
+    def preamble(self, hours_ago, name):
+        return job("pulp-preamble-m5", hours_ago,
+                   labels=PREAMBLE_LABELS, name=name)
+
+    def elsewhere(self, count, name="resolve-provider", hours_ago=2.0,
+                  runner="hosted-runner-{i}", run_id=None):
+        """`count` of this lane's jobs, completing on a hosted runner."""
+        return [job(runner.format(i=i), hours_ago, name=name,
+                    labels=["macos-15"],
+                    run_id=None if run_id is None else run_id.format(i=i))
+                for i in range(count)]
+
+    def records(self, displaced=6, **kw):
+        # The preamble lane last served 26h ago; every gate lane is busy.
+        return ([self.preamble(26 + i, n) for i, n in
+                 enumerate(("resolve-provider", "classify",
+                            "protected-receipt-reuse"))]
+                + busy_siblings("studio-11-", 6)
+                + busy_siblings("m5-pulp-gate-01-", 6)
+                + busy_siblings("m1-pulp-gate-01-", 3)
+                + self.elsewhere(displaced, **kw))
+
+    def lane(self, records):
+        return [f for f in census(records)
+                if f.variable == "m5/pulp-preamble-m5"]
+
+    def test_work_that_kept_flowing_elsewhere_is_the_demand(self):
+        found = self.lane(self.records(displaced=6))
+        self.assertEqual([f.kind for f in found], ["host-silent"])
+        # One total, then the split that says which witness carried it.
+        self.assertIn("while 6 job(s) it serves completed elsewhere",
+                      found[0].detail)
+        self.assertIn("(0 carrying a label set it serves, 6 a job only it is "
+                      "observed to run)", found[0].detail)
+        # The proof names the runner that took the work, so the claim can be
+        # checked without re-querying. That the thief is a HOSTED runner is
+        # the normal case, not a disqualifier: rerouting a broken lane's jobs
+        # to a hosted runner is the most common way its silence gets hidden.
+        # It matches no declared prefix, so it is named off-fleet rather than
+        # attributed to a host it does not belong to.
+        self.assertIn("off-fleet hosted-runner-0 resolve-provider",
+                      found[0].detail)
+
+    def test_a_busy_fleet_is_not_demand_on_a_lane_nothing_can_substitute_for(self):
+        # Fifteen gate jobs completed inside the silence window and NOT ONE is
+        # demand on this lane, because no gate lane serves the label set it
+        # serves. The label-set witness here is unmeasurable by construction,
+        # not merely unmet, which is why it cannot be the only witness.
+        found = self.lane(self.records(displaced=0))
+        self.assertEqual([f.kind for f in found], ["host-idle"])
+        self.assertIn("only 0 job(s) it serves completed elsewhere",
+                      found[0].detail)
+        # CONTROL: the same instrument, the same fixtures, a lane that DOES
+        # have siblings carrying its label set -- and the verdict fires. The
+        # zero above is the fleet's shape, not a broken measurement.
+        control = ([job("studio-11-0", 11)]
+                   + busy_siblings("m5-pulp-gate-01-", 6)
+                   + busy_siblings("m1-pulp-gate-01-", 3))
+        self.assertEqual(
+            [f.kind for f in census(control) if f.variable == "m3"],
+            ["host-silent"])
+
+    def test_below_the_demand_gate_there_is_still_no_verdict(self):
+        found = self.lane(self.records(displaced=4))
+        self.assertEqual([f.kind for f in found], ["host-idle"])
+        self.assertIn("only 4 job(s)", found[0].detail)
+        self.assertIn("needs 5", found[0].detail)
+
+    def test_a_name_a_sibling_also_runs_is_not_this_lane_s_signature(self):
+        # The preamble lane did run a job named "build" -- but so does every
+        # gate lane, so the name is not its signature and its appearance
+        # elsewhere proves nothing. Without this guard a generic name is
+        # exactly what manufactures displacement out of unrelated work.
+        shared = (self.records(displaced=6, name="build")
+                  + [self.preamble(26, "build")])
+        self.assertEqual([f.kind for f in self.lane(shared)], ["host-idle"])
+        # CONTROL: byte-identical records but for the displaced jobs' name,
+        # same count, same window -- and the verdict fires. The guard
+        # discriminates between names; it does not suppress the witness.
+        owned = (self.records(displaced=6, name="protected-receipt-reuse")
+                 + [self.preamble(26, "build")])
+        self.assertEqual([f.kind for f in self.lane(owned)], ["host-silent"])
+
+    def test_a_lane_with_a_real_sibling_takes_the_label_set_path(self):
+        # Give a gate lane preamble-labelled work and the label sets are no
+        # longer disjoint, so the label-set witness is measurable and carries
+        # the finding on its own.
+        records = (self.records(displaced=0)
+                   + busy_siblings("studio-11-p", 6, labels=PREAMBLE_LABELS))
+        found = self.lane(records)
+        self.assertEqual([f.kind for f in found], ["host-silent"])
+        self.assertIn("(6 carrying a label set it serves, 0 a job only it is "
+                      "observed to run)", found[0].detail)
+
+    def test_a_stale_sibling_completion_cannot_switch_the_name_witness_off(self):
+        # A sibling that carried this lane's label set ONCE, 40h ago, and has
+        # served nothing since. It is history, not demand: it says a sibling
+        # once could have taken this work, and says nothing about the 6h the
+        # lane has been silent. Reading it as a gate let 72h of history
+        # disable a 6h measurement, and one stale row from a lane that had
+        # itself since died was enough to do it.
+        stale = self.records(displaced=6) + [
+            job("m5-pulp-gate-01-stale", 40, labels=PREAMBLE_LABELS,
+                name="macos")]
+        found = self.lane(stale)
+        self.assertEqual([f.kind for f in found], ["host-silent"])
+        self.assertIn("(0 carrying a label set it serves, 6 a job only it is "
+                      "observed to run)", found[0].detail)
+        # CONTROL: the same stale sibling, the displaced work removed. The
+        # finding tracks the evidence, not the code path it arrived by.
+        quiet = self.records(displaced=0) + [
+            job("m5-pulp-gate-01-stale", 40, labels=PREAMBLE_LABELS,
+                name="macos")]
+        self.assertEqual([f.kind for f in self.lane(quiet)], ["host-idle"])
+
+    def test_only_a_completion_disowns_a_job_name(self):
+        # A sibling lane is RUNNING a job named like one of this lane's. It
+        # has not finished it, so it is not yet evidence that the name is
+        # shared -- and treating it as evidence hands any concurrent job a
+        # veto over the whole verdict.
+        inflight = self.records(displaced=6) + [
+            job("m5-pulp-gate-01-9", 0, status="in_progress", conclusion=None,
+                name="resolve-provider")]
+        self.assertEqual([f.kind for f in self.lane(inflight)],
+                         ["host-silent"])
+        # CONTROL: the same record, completed. Now the name genuinely is
+        # shared, ownership is lost, and the name witness must go quiet.
+        completed = self.records(displaced=6) + [
+            job("m5-pulp-gate-01-9", 2, name="resolve-provider")]
+        self.assertEqual([f.kind for f in self.lane(completed)],
+                         ["host-idle"])
+
+    def test_the_threshold_counts_distinct_work_not_rows(self):
+        # Five rows, one job, one runner: a matrix leg re-fired, or somebody
+        # hitting rerun four times. Five rows of the same work is one job's
+        # worth of demand, not five.
+        reruns = self.records(displaced=5, runner="hosted-runner-0")
+        found = self.lane(reruns)
+        self.assertEqual([f.kind for f in found], ["host-idle"])
+        self.assertIn("only 1 job(s)", found[0].detail)
+        # CONTROL: the same five rows spread over five runners is five
+        # distinct pieces of work, and convicts.
+        self.assertEqual([f.kind for f in self.lane(self.records(displaced=5))],
+                         ["host-silent"])
+
+    def test_distinct_work_is_a_run_not_a_runner_name(self):
+        # A hosted runner is named "GitHub Actions <id>" with a fresh id per
+        # job, so five reruns of one job report five different runner names
+        # and a runner-name key collapses none of them -- on exactly the
+        # runners displaced work lands on. The run is what identifies the
+        # work, so five rows of one run count once and stay under the gate.
+        one_run = self.records(displaced=5, runner="GitHub Actions 100007{i}",
+                               run_id="34801701064")
+        found = self.lane(one_run)
+        self.assertEqual([f.kind for f in found], ["host-idle"])
+        self.assertIn("only 1 job(s)", found[0].detail)
+        # CONTROL: the same five distinctly-named runners in five distinct
+        # runs are five pieces of work, and convict.
+        five_runs = self.records(displaced=5,
+                                 runner="GitHub Actions 100007{i}",
+                                 run_id="3480170106{i}")
+        self.assertEqual([f.kind for f in self.lane(five_runs)],
+                         ["host-silent"])
+
+    def test_one_run_of_distinct_jobs_is_distinct_work(self):
+        # A run holds many job definitions, so collapsing by run alone would
+        # read a whole rerouted workflow -- every job this lane owns, moved
+        # off it at once -- as a single piece of demand. The name is the
+        # other half of the key for exactly that case.
+        names = ("resolve-provider", "classify", "protected-receipt-reuse",
+                 "seed-cache", "emit-manifest")
+        served = [self.preamble(26 + i, n) for i, n in enumerate(names)]
+        one_run = (served
+                   + busy_siblings("studio-11-", 6)
+                   + busy_siblings("m5-pulp-gate-01-", 6)
+                   + busy_siblings("m1-pulp-gate-01-", 3)
+                   + [job("GitHub Actions 1000071044", 2.0, name=n,
+                          labels=["macos-15"], run_id="34801701064")
+                      for n in names])
+        found = self.lane(one_run)
+        self.assertEqual([f.kind for f in found], ["host-silent"])
+        self.assertIn("5 a job only it is observed to run", found[0].detail)
+        # CONTROL: the same five rows under one name, one run, is one piece
+        # of work however many rows it takes, and stays under the gate.
+        same_name = (served
+                     + busy_siblings("studio-11-", 6)
+                     + busy_siblings("m5-pulp-gate-01-", 6)
+                     + busy_siblings("m1-pulp-gate-01-", 3)
+                     + [job("GitHub Actions 100007104%d" % i, 2.0,
+                            name="resolve-provider", labels=["macos-15"],
+                            run_id="34801701064")
+                        for i in range(5)])
+        self.assertEqual([f.kind for f in self.lane(same_name)], ["host-idle"])
+
+    def test_a_lane_no_witness_can_reach_is_unmeasurable_not_idle(self):
+        # No sibling serves a label set it serves, and every job name it ran
+        # was also run by a declared lane. Neither witness exists, so nothing
+        # about this lane can be measured at all. Reporting that in the same
+        # words as a quiet fleet is how a structural blind spot reads as a
+        # clean bill of health.
+        blind = ([self.preamble(26, "build")]
+                 + busy_siblings("studio-11-", 6)
+                 + busy_siblings("m1-pulp-gate-01-", 3))
+        found = self.lane(blind)
+        self.assertEqual([f.kind for f in found], ["host-unmeasurable"])
+        self.assertIn("Not idle", found[0].detail)
+        # CONTROL: give the lane one job name of its own and the work to go
+        # with it, and the same fixture convicts. Unmeasurable is a property
+        # of the evidence available, not a lane that can never be judged.
+        seen = (blind + [self.preamble(26, "resolve-provider")]
+                + self.elsewhere(6))
+        self.assertEqual([f.kind for f in self.lane(seen)], ["host-silent"])
+
+
+class TestHostSilenceEpisode(unittest.TestCase):
+    def test_the_episode_key_is_stable_across_sweeps(self):
+        # A deliberate power-off fires once per episode. The workflow closes on
+        # a NEWER last_served, so two sweeps of an unchanged outage must carry
+        # the same key or the tracker would churn hourly.
+        records = ([job("m1-pulp-gate-01-1", 20)]
+                   + busy_siblings("studio-11-", 6))
+        first = [f for f in census(records) if f.kind == "host-silent"][0]
+        second = [f for f in census(records) if f.kind == "host-silent"][0]
+        self.assertEqual(first.detail, second.detail)
+        self.assertIn(ago(20), first.detail)
+
+    def test_serving_again_ends_the_episode(self):
+        served_again = ([job("m1-pulp-gate-01-1", 20),
+                         job("m1-pulp-gate-01-2", 1)]
+                        + busy_siblings("studio-11-", 6))
+        findings = census(served_again)
+        self.assertEqual([f.kind for f in findings if f.variable == "m1"],
+                         ["host-last-served"])
+
+
+class TestHostSilenceBootstrap(unittest.TestCase):
+    def test_a_host_with_no_mapped_job_is_unobserved_not_silent(self):
+        # m1 has never reported. A host that has never served must not be able
+        # to page, and a decommissioned host must fall out on its own.
+        records = busy_siblings("studio-11-", 8) + busy_siblings("m5-gate-", 8)
+        findings = census(records)
+        self.assertEqual([f.kind for f in findings if f.variable == "m1"],
+                         ["host-unobserved"])
+        self.assertEqual([f.level for f in findings if f.variable == "m1"],
+                         [gate.INFO])
+
+    def test_unobserved_survives_heavy_sibling_demand(self):
+        # CONTROL: demand is far past the gate, so only the bootstrap rule can
+        # be what keeps m1 quiet.
+        records = busy_siblings("studio-11-", 40)
+        m1 = [f for f in census(records) if f.variable == "m1"]
+        self.assertEqual([f.kind for f in m1], ["host-unobserved"])
+
+
+class TestHostSilenceInFlight(unittest.TestCase):
+    def test_a_host_mid_job_has_not_stopped_serving(self):
+        # Measured live: m1 had zero COMPLETED build.yml jobs in 6h with two
+        # runners online and busy. A host mid-job has not stopped serving, and
+        # a wedged job is the stale-run reaper's failure, not this one's.
+        records = ([job("m1-pulp-gate-01-1", 20),
+                    job("m1-pulp-gate-slot2-02-9", 0, status="in_progress",
+                        conclusion=None)]
+                   + busy_siblings("studio-11-", 8))
+        findings = census(records)
+        self.assertEqual([f.kind for f in findings if f.variable == "m1"],
+                         ["host-serving-inflight"])
+
+    def test_without_the_in_flight_job_the_same_fixture_fires(self):
+        # CONTROL on the same instrument and target: remove only the running
+        # job and the verdict appears.
+        records = ([job("m1-pulp-gate-01-1", 20)]
+                   + busy_siblings("studio-11-", 8))
+        self.assertEqual([f.kind for f in census(records) if f.variable == "m1"],
+                         ["host-silent"])
+
+
+class TestHostSilenceLabelScope(unittest.TestCase):
+    def test_a_label_set_this_host_never_serves_is_not_demand(self):
+        # m5 runs the preamble lane m1 and m3 do not serve. 30 preamble jobs
+        # are not evidence that m1 was passed over. In this fixture m1 is the
+        # only lane serving its own label set AND the only name it ran is a
+        # name the preamble lane ran too, so neither witness exists for it --
+        # which is host-unmeasurable, not host-silent. The claim under test is
+        # the negative one, and it holds: 30 jobs of the wrong shape do not
+        # convict.
+        records = ([job("m1-pulp-gate-01-1", 20)]
+                   + [job(f"pulp-preamble-m5", 1, labels=PREAMBLE_LABELS)] * 30)
+        self.assertEqual([f.kind for f in census(records) if f.variable == "m1"],
+                         ["host-unmeasurable"])
+
+    def test_a_label_set_this_host_does_serve_is_demand(self):
+        # CONTROL: same host, same silence, same count, and only the label set
+        # changes, to one m1 is observed serving.
+        records = ([job("m1-pulp-gate-01-1", 20)]
+                   + busy_siblings("m5-pulp-gate-01-", 30))
+        self.assertEqual([f.kind for f in census(records) if f.variable == "m1"],
+                         ["host-silent"])
+
+
+class TestHostPrefixMapDrift(unittest.TestCase):
+    def test_a_full_lane_rename_reports_a_broken_map_not_silence(self):
+        records = [job(f"renamed-gate-{i}", 1) for i in range(9)]
+        findings = census(records)
+        self.assertEqual(kinds(findings), ["host-map-broken"] * 3)
+        self.assertEqual([f.kind for f in findings].count("host-silent"), 0)
+
+    def test_the_same_names_under_a_matching_map_do_not_report_drift(self):
+        # CONTROL: the identical record count with names the map covers.
+        records = ([job(f"studio-11-{i}", 1) for i in range(3)]
+                   + [job(f"m5-gate-{i}", 1) for i in range(3)]
+                   + [job(f"m1-gate-{i}", 1) for i in range(3)])
+        self.assertEqual(kinds(census(records)),
+                         ["host-lane-census"] + ["host-last-served"] * 3
+                         + ["host-unobserved"])
+
+    def test_a_partial_rename_is_visible_every_sweep(self):
+        records = (busy_siblings("studio-11-", 4)
+                   + busy_siblings("m5-gate-", 4)
+                   + busy_siblings("m1-gate-", 4)
+                   + [job("renamed-gate-1", 1)])
+        findings = census(records)
+        unmapped = [f for f in findings if f.kind == "host-map-unmapped"]
+        self.assertEqual(len(unmapped), 1)
+        self.assertIn("renamed-gate-1", unmapped[0].detail)
+        # Silence is still adjudicated: a partial rename is not a blackout.
+        self.assertEqual(kinds(findings).count("host-last-served"), 3)
+
+    def test_a_hosted_only_window_cannot_break_the_map(self):
+        # GitHub-hosted runner names never match a fleet prefix, so counting
+        # them would let a quiet weekend read as a lane rename.
+        hosted = [{"name": "build", "status": "completed", "conclusion": "success",
+                   "runner_name": f"GitHub Actions {i}", "completed_at": ago(1),
+                   "labels": ["ubuntu-latest"]} for i in range(12)]
+        findings = census(hosted)
+        # Four declared lanes across three hosts, none of them observed.
+        self.assertEqual(kinds(findings), ["host-unobserved"] * 4)
+
+
+class TestHostSilenceDegradedGuard(unittest.TestCase):
+    def test_an_unread_window_suppresses_every_silence_verdict(self):
+        records = ([job("m5-pulp-gate-01-1", 11)]
+                   + busy_siblings("studio-11-", 9))
+        findings = census(records, degraded=["jobs for run 42 could not be read"])
+        self.assertEqual(kinds(findings), ["host-silence-degraded"])
+        self.assertIn("run 42", findings[0].detail)
+
+    def test_the_same_records_without_the_degradation_do_fire(self):
+        # CONTROL: the guard is what suppressed it, not the fixture.
+        records = ([job("m5-pulp-gate-01-1", 11)]
+                   + busy_siblings("studio-11-", 9))
+        self.assertIn("host-silent", kinds(census(records)))
+
+
+class TestServiceRecordParsing(unittest.TestCase):
+    def test_a_skipped_job_is_not_service(self):
+        # 369 of 654 jobs in a measured 12h window carried runner_name null.
+        skipped = [{"name": "gate", "status": "completed", "conclusion": "skipped",
+                    "runner_name": None, "completed_at": ago(1),
+                    "labels": GATE_LABELS}]
+        self.assertEqual(gate.parse_service_records(skipped), [])
+
+    def test_a_real_job_survives_the_filter(self):
+        # CONTROL: the filter is not rejecting everything.
+        self.assertEqual(
+            len(gate.parse_service_records([job("m5-gate-1", 1)])), 1)
+
+    def test_host_last_served_takes_the_newest_completion(self):
+        records = gate.parse_service_records([
+            job("m5-gate-1", 9), job("m5-gate-2", 3), job("studio-1", 1)])
+        self.assertEqual(gate.host_last_served(records, ["m5-"]),
+                         gate._parse_ts(ago(3)))
+
+    def test_host_last_served_ignores_a_running_job(self):
+        records = gate.parse_service_records([
+            job("m5-gate-1", 9),
+            job("m5-gate-2", 0, status="in_progress", conclusion=None)])
+        self.assertEqual(gate.host_last_served(records, ["m5-"]),
+                         gate._parse_ts(ago(9)))
+
+    def test_a_stamp_on_a_job_that_is_not_completed_does_not_count(self):
+        # Defence in depth. The live API reports completed_at only on a
+        # completed job, so a stamp on a running one is malformed input;
+        # crediting it would let work that has not finished pass for service.
+        malformed = [{"name": "build", "status": "in_progress",
+                      "conclusion": None, "runner_name": "m5-gate-2",
+                      "completed_at": ago(0), "labels": GATE_LABELS}]
+        records = gate.parse_service_records(malformed + [job("m5-gate-1", 9)])
+        self.assertEqual(gate.host_last_served(records, ["m5-"]),
+                         gate._parse_ts(ago(9)))
+
+    def test_the_same_stamp_on_a_completed_job_does_count(self):
+        # CONTROL: only the status differs, and the newer stamp then wins.
+        well_formed = [{"name": "build", "status": "completed",
+                        "conclusion": "success", "runner_name": "m5-gate-2",
+                        "completed_at": ago(0), "labels": GATE_LABELS}]
+        records = gate.parse_service_records(well_formed + [job("m5-gate-1", 9)])
+        self.assertEqual(gate.host_last_served(records, ["m5-"]),
+                         gate._parse_ts(ago(0)))
+
+    def test_host_last_served_is_none_for_an_unseen_host(self):
+        records = gate.parse_service_records([job("studio-1", 1)])
+        self.assertIsNone(gate.host_last_served(records, ["m1-"]))
+
+
+class TestHostSilenceSeverity(unittest.TestCase):
+    def test_the_shadow_default_cannot_fail_a_run_or_open_an_issue(self):
+        records = ([job("m5-pulp-gate-01-1", 11)]
+                   + busy_siblings("studio-11-", 9))
+        findings = census(records)
+        self.assertEqual([f.level for f in findings if f.kind == "host-silent"],
+                         [gate.INFO])
+        # The workflow branches on the exit code alone, and only ERROR moves it.
+        self.assertFalse(any(f.level == gate.ERROR for f in findings))
+
+    def test_promoting_the_knob_makes_it_an_error(self):
+        records = ([job("m5-pulp-gate-01-1", 11)]
+                   + busy_siblings("studio-11-", 9))
+        findings = census(records, host_severity=gate.ERROR)
+        self.assertEqual([f.level for f in findings if f.kind == "host-silent"],
+                         [gate.ERROR])
+
+    def test_info_findings_reach_the_report(self):
+        records = ([job("m5-pulp-gate-01-1", 11)]
+                   + busy_siblings("studio-11-", 9))
+        report = gate.render(census(records))
+        self.assertIn("INFO  [host-silent] m5", report)
+
+
+class TestHostSilenceWiring(unittest.TestCase):
+    def test_check_without_the_provider_runs_no_census(self):
+        c = host_contract()
+        before = gate.check(c, runners(), {}, [])
+        self.assertEqual(kinds(before).count("host-last-served"), 0)
+        self.assertEqual(kinds(before).count("host-unobserved"), 0)
+
+    def test_check_with_the_provider_appends_the_census(self):
+        c = host_contract()
+        records = gate.parse_service_records(busy_siblings("studio-11-", 3))
+        after = gate.check(c, runners(), {}, [], now=NOW,
+                           service_records=gate.static_service_records(records))
+        self.assertEqual(kinds(after).count("host-last-served"), 1)
+        # Three unobserved lanes, not two hosts: m5 declares two prefixes.
+        self.assertEqual(kinds(after).count("host-unobserved"), 3)
+
+    def test_the_provider_is_handed_the_clock_the_verdict_is_judged_against(self):
+        # One clock, not two. A provider that walks history bounds that walk by
+        # a silence cutoff of its own, and the classifier then judges against
+        # another: a lane proven non-silent by less than the walk's wall time
+        # would be re-read as silent on the records the walk stopped fetching
+        # because of that proof. Narrow, and in the one direction this rule
+        # must never fire in, so the instant is threaded rather than re-read.
+        c = host_contract()
+        records = gate.parse_service_records(busy_siblings("studio-11-", 3))
+        handed = []
+
+        def provider(now):
+            handed.append(now)
+            return list(records), []
+
+        gate.check(c, runners(), {}, [], now=NOW, service_records=provider)
+        self.assertEqual(handed, [NOW])
+
+    def test_a_caller_that_pins_nothing_still_hands_over_one_instant(self):
+        # The default path cannot be told apart by a stamp (the two reads are
+        # microseconds apart), so what is assertable is the shape: the provider
+        # is handed a real tz-aware instant rather than None, exactly once.
+        c = host_contract()
+        handed = []
+
+        def provider(now):
+            handed.append(now)
+            return [], []
+
+        gate.check(c, runners(), {}, [], service_records=provider)
+        self.assertEqual(len(handed), 1)
+        self.assertIsInstance(handed[0], datetime)
+        self.assertIsNotNone(handed[0].tzinfo)
+
+    def test_the_live_path_hands_the_walk_the_clock_it_was_given(self):
+        """The wiring tests above pin `check`'s side of the hop. This pins
+        main()'s: the closure the live branch builds must pass its own `now`
+        down to the walk, not let the walk read the clock again.
+
+        Without this, deleting `now=now` from that one call fails OPEN. Every
+        other test in this class drives `check` with a provider of its own, so
+        the closure main() actually ships is exercised by none of them and the
+        suite stays green while the two clocks come back.
+        """
+        pinned = datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc)
+        handed = []
+        captured = {}
+
+        def fake_check(*a, **k):
+            # Positional, matching main(): contract, runners, variables,
+            # evidence, workflows_dir, unread_scopes, queued_ages, provider.
+            handed.append(a[7])
+            a[7](pinned)
+            return []
+
+        def fake_fetch(repo, workflow, observation_hours, silence_hours,
+                       max_runs, hosts, now=None):
+            captured["now"] = now
+            return [], []
+
+        inventory = gate.RunnerInventory(runners=[], warnings=[],
+                                         unread_scopes=[])
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(gate, "fetch_runner_inventory",
+                                   return_value=inventory), \
+                 mock.patch.object(gate, "fetch_variables", return_value={}), \
+                 mock.patch.object(gate, "fetch_service_records", fake_fetch), \
+                 mock.patch.object(gate, "check", fake_check):
+                gate.main(["--mode", "report",
+                           "--workflows-dir", str(Path(tmp) / "none")])
+
+        # The control for the assertion below: a `service_records=None` would
+        # make `handed` empty and the clock assertion vacuously unreachable.
+        self.assertEqual(len(handed), 1)
+        self.assertEqual(captured["now"], pinned)
+
+    def test_a_contract_without_hosts_runs_no_census(self):
+        c = contract([])
+        records = gate.parse_service_records(busy_siblings("studio-11-", 3))
+        self.assertEqual(
+            gate.check(c, runners(), {}, [], now=NOW,
+                       service_records=gate.static_service_records(records)),
+            [])
+
+
+class TestServiceRecordFetch(unittest.TestCase):
+    """The walk that replaces the 20-run cap, and its two bounds."""
+
+    def setUp(self):
+        # The walk now takes its instant from the caller, but these fixtures
+        # still anchor on real time and pass `self.base` in explicitly: it keeps
+        # every relative age in one place, and the tests that matter here are
+        # about which pages get read, not about which clock was used. The two
+        # tests that pin the clock itself hand over a frozen instant instead.
+        self.base = datetime.now(timezone.utc)
+
+    def at(self, hours):
+        return ago(hours, self.base)
+
+    def served(self, runner_name, hours):
+        return job(runner_name, hours, base=self.base)
+
+    def _api(self, pages, jobs_by_run, seen):
+        def call(args):
+            path = args[0]
+            seen.append(path)
+            if "/jobs" in path:
+                run_id = int(path.split("/runs/")[1].split("/")[0])
+                return {"jobs": jobs_by_run.get(run_id, [])}
+            # "per_page=" also contains "page=", so the split has to be exact.
+            page = int(path.split("&page=")[1].split("&")[0])
+            return {"workflow_runs": pages.get(page, [])}
+        return call
+
+    def test_the_walk_filters_server_side_on_created(self):
+        seen = []
+        with mock.patch.object(gate, "_api", self._api({1: []}, {}, seen)):
+            gate.fetch_service_records("o/r", "build.yml", 72, 6, 400, HOST_MAP)
+        # A 20-run cap measured under an hour of history here, so the window
+        # has to come from the server, not from a page size.
+        self.assertIn("created=%3E%3D", seen[0])
+        self.assertIn("/actions/workflows/build.yml/runs", seen[0])
+
+    def test_the_walk_stops_once_every_host_has_served_recently(self):
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(9)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1),
+                self.served("pulp-preamble-m5", 1)],
+            2: [self.served("m1-gate-1", 2)],
+            3: [self.served("studio-3", 9)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP)
+        self.assertEqual(degraded, [])
+        self.assertNotIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+        self.assertEqual(len(records), 4)
+
+    def test_an_older_run_can_carry_a_newer_completion(self):
+        # Runs are ordered by created_at; the predicate is over completed_at.
+        # Run 3 was created 9h ago and its m1 job only completed 2h ago: a
+        # long queue or a rerun, which keeps the original created_at. Stopping
+        # at run 2 would read m1 as 7h silent while it served 2h ago, which is
+        # a false fire in the exact direction this rule exists to avoid.
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(9)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1),
+                self.served("pulp-preamble-m5", 1)],
+            2: [self.served("m1-gate-1", 7)],
+            3: [self.served("m1-gate-2", 2)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP)
+        self.assertEqual(degraded, [])
+        self.assertIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+        self.assertEqual(
+            gate.host_last_served(records, ["m1-"]),
+            gate._parse_ts(self.at(2)))
+
+    def test_a_host_short_of_the_window_pays_the_whole_walk(self):
+        # CONTROL for the test above, and the cost of the exact exit: when the
+        # older run does NOT rescue m1, the walk cannot stop early. It reaches
+        # the start of the window, reports a complete read, and m1 keeps the
+        # old stamp that makes it silent. Identical pages, one changed job.
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(9)},
+            {"id": 4, "created_at": self.at(400)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1),
+                self.served("pulp-preamble-m5", 1)],
+            2: [self.served("m1-gate-1", 7)],
+            3: [self.served("m1-gate-2", 9)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP)
+        self.assertEqual(degraded, [])
+        self.assertIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+        self.assertEqual(
+            gate.host_last_served(records, ["m1-"]),
+            gate._parse_ts(self.at(7)))
+
+    def test_a_host_still_missing_keeps_the_walk_going(self):
+        # CONTROL for the early exit: the identical pages, minus m1's job.
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(9)},
+        ], 2: []}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1),
+                self.served("pulp-preamble-m5", 1)],
+            2: [self.served("studio-2", 7)],
+            3: [self.served("studio-3", 9)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            gate.fetch_service_records("o/r", "build.yml", 72, 6, 400, HOST_MAP)
+        self.assertIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+
+    def test_a_run_older_than_the_window_ends_the_walk(self):
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(400)},
+        ]}
+        jobs = {1: [self.served("studio-1", 1)]}
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP)
+        # Reaching the start of the window is a COMPLETE read, not a truncated
+        # one, so it must not report degraded and suppress every verdict.
+        self.assertEqual(degraded, [])
+        self.assertNotIn("repos/o/r/actions/runs/2/jobs?per_page=100", seen)
+
+    def test_a_pinned_clock_bounds_the_window_not_the_wall_time(self):
+        # The other half of the one-clock contract: the walk must derive its
+        # window from the instant it was handed. A `now` accepted and then
+        # ignored reads as wired while every cutoff still comes off the wall
+        # clock, which is the defect being closed, not a fix for it.
+        pinned = datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc)
+        seen = []
+        with mock.patch.object(gate, "_api", self._api({1: []}, {}, seen)):
+            gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP, now=pinned)
+        want = (pinned - timedelta(hours=72)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.assertIn("created=" + quote(">=" + want), seen[0])
+
+    def test_a_fused_hosts_quiet_lane_holds_the_walk_open(self):
+        # The defect the per-prefix bound closes, driven through the fetch the
+        # way production runs it. m5 declares two prefixes: the persistent
+        # `pulp-preamble-m5` runner served an hour ago, the `m5-` gate lane
+        # only 8h ago on run 3. Proving m5 over the UNION lets the preamble
+        # stop the walk at run 1, after which run 3 is never read and the
+        # census reports the gate lane as having served nothing all window --
+        # the one line the shadow week exists to read, wrong in the fused shape
+        # it was added to instrument.
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(8)},
+            {"id": 4, "created_at": self.at(400)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("pulp-preamble-m5", 1)],
+            2: [self.served("m1-gate-1", 2)],
+            3: [self.served("m5-gate-1", 8)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP, now=self.base)
+        self.assertEqual(degraded, [])
+        self.assertIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+        self.assertIn(
+            "m5-: 1 job(s), last 480m ago",
+            gate._lane_breakdown(records, HOST_MAP["m5"], self.base))
+
+    def test_a_fused_hosts_two_served_lanes_still_stop_the_walk(self):
+        # CONTROL for the test above: the identical pages with the gate lane's
+        # job moved inside the silence window. Both m5 lanes and m1 are then
+        # proven, so the walk stops and run 4 is never read: the per-prefix
+        # bound costs the extra pages only while a declared lane is unproven.
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(8)},
+            {"id": 4, "created_at": self.at(400)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("pulp-preamble-m5", 1),
+                self.served("m5-gate-1", 1)],
+            2: [self.served("m1-gate-1", 2)],
+            3: [self.served("m5-gate-2", 8)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP, now=self.base)
+        self.assertEqual(degraded, [])
+        self.assertNotIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+
+    def test_a_fused_hosts_quiet_lane_holds_it_open_whichever_lane_is_quiet(self):
+        """The mirror of the fusion test: the OTHER declared lane is the quiet one.
+
+        Both tests read `for prefix in prefixes`, so both pass today. They are
+        not redundant: a bound that walks only the first declared prefix still
+        satisfies the test above, because there the quiet lane is `m5-`, which
+        HOST_MAP lists first. Swapping which lane is quiet is what makes that
+        narrowing fail, and the prefix order in the contract is incidental:
+        nothing forbids a future edit from reordering the list.
+        """
+        pages = {1: [
+            {"id": 1, "created_at": self.at(1)},
+            {"id": 2, "created_at": self.at(7)},
+            {"id": 3, "created_at": self.at(8)},
+            {"id": 4, "created_at": self.at(400)},
+        ]}
+        jobs = {
+            1: [self.served("studio-1", 1), self.served("m5-gate-1", 1)],
+            2: [self.served("m1-gate-1", 2)],
+            3: [self.served("pulp-preamble-m5", 8)],
+        }
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP, now=self.base)
+        self.assertEqual(degraded, [])
+        self.assertIn("repos/o/r/actions/runs/3/jobs?per_page=100", seen)
+        self.assertIn(
+            "pulp-preamble-m5: 1 job(s), last 480m ago",
+            gate._lane_breakdown(records, HOST_MAP["m5"], self.base))
+
+    def test_hitting_the_run_cap_reports_degraded(self):
+        pages = {1: [{"id": i, "created_at": self.at(1)} for i in range(1, 6)]}
+        jobs = {i: [self.served("studio-1", 1)] for i in range(1, 6)}
+        seen = []
+        with mock.patch.object(gate, "_api", self._api(pages, jobs, seen)):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 2, HOST_MAP)
+        self.assertEqual(len(degraded), 1)
+        self.assertIn("2-run cap", degraded[0])
+
+    def test_a_failed_jobs_page_is_reported_not_swallowed(self):
+        pages = {1: [{"id": 1, "created_at": self.at(1)},
+                     {"id": 2, "created_at": self.at(400)}]}
+
+        def call(args):
+            if "/jobs" in args[0]:
+                raise subprocess.CalledProcessError(1, "gh")
+            page = int(args[0].split("&page=")[1].split("&")[0])
+            return {"workflow_runs": pages.get(page, [])}
+
+        with mock.patch.object(gate, "_api", call):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP)
+        self.assertEqual(records, [])
+        self.assertEqual(degraded, ["jobs for run 1 could not be read"])
+
+    def test_an_unreadable_run_page_is_reported_not_swallowed(self):
+        def call(args):
+            raise subprocess.CalledProcessError(1, "gh")
+
+        with mock.patch.object(gate, "_api", call):
+            records, degraded = gate.fetch_service_records(
+                "o/r", "build.yml", 72, 6, 400, HOST_MAP)
+        self.assertEqual(records, [])
+        self.assertEqual(degraded, ["run page 1 of build.yml could not be read"])
+
+
+class TestShippedHostsBlock(unittest.TestCase):
+    def setUp(self):
+        self.c = gate.load_contract(HERE / "runner_topology.json")
+
+    def test_the_shipped_map_declares_the_three_fleet_hosts(self):
+        self.assertEqual(sorted(self.c.hosts), ["m1", "m3", "m5"])
+
+    def test_m5_maps_only_the_prefix_that_can_still_serve(self):
+        # m5 also hosted the persistent `pulp-preamble-m5` runner, and
+        # declaring it was correct while it served. Its registration was
+        # deleted 2026-09-12 and both preamble lanes were contracted to
+        # github-hosted in the same change, so the prefix can never serve
+        # again. The walk bound is per prefix, so a retired prefix holds
+        # every sweep open for the whole observation window -- measured at
+        # 383 API calls and 785s -- and would report a permanent silence for
+        # an intended state once this block leaves shadow mode. Re-declaring
+        # it means restoring the runner AND reversing that lane contract.
+        self.assertEqual(self.c.hosts["m5"], ["m5-"])
+        self.assertNotIn("pulp-preamble-m5", self.c.hosts["m5"])
+
+    def test_why_notes_are_not_parsed_as_hosts(self):
+        for key in self.c.hosts:
+            self.assertFalse(key.startswith("_"))
+
+    def test_the_shipped_thresholds_are_the_reviewed_values(self):
+        self.assertEqual(self.c.host_silence_hours, 6)
+        self.assertEqual(self.c.host_demand_min_jobs, 5)
+
+    def test_the_observation_window_is_bounded_well_below_the_lane_lookback(self):
+        # service_evidence.lookback_hours is 720, which is right for a lane
+        # that fires per release and would cost thousands of job calls here.
+        self.assertLess(self.c.host_observation_hours, self.c.lookback_hours)
+        self.assertGreater(self.c.host_observation_hours,
+                           self.c.host_silence_hours)
+
+    def test_the_shipped_severity_is_still_shadow_mode(self):
+        # Promotion to "error" is a reviewed edit of the contract, the
+        # workflow, and this assertion together, and it must not land before
+        # the operator notification path is confirmed.
+        self.assertEqual(self.c.host_severity, gate.INFO)
 
 
 if __name__ == "__main__":
