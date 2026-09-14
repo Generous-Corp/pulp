@@ -226,6 +226,9 @@ set(_PULP_WEBUI_VIEW_SOURCES
     ${_PULP_WEBUI_ROOT}/core/view/src/layout_snapshot.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/overlay_dismissal.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/pointer_dispatch.cpp
+    # Defines View::simulate_context_click alongside the reach verbs, so the
+    # web target links the same one-policy right-button press the hosts use.
+    ${_PULP_WEBUI_ROOT}/core/view/src/press_reach.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/gesture.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/caret.cpp
     ${_PULP_WEBUI_ROOT}/core/view/src/continuous_frames.cpp
