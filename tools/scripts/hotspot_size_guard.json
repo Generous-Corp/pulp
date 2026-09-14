@@ -269,6 +269,11 @@
       "path": "core/view/src/ui_components.cpp",
       "max_loc": 1500,
       "note": "Composite UI component hotspot; split further before growing"
+    },
+    {
+      "path": "CLAUDE.md",
+      "max_loc": 2037,
+      "note": "Always-resident agent context read on every turn; every line costs every session, so growth is a residency decision — declare it with a Hotspot-Grow: CLAUDE.md trailer"
     }
   ]
 }
