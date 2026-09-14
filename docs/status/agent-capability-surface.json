@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 69,
+  "inventory_version": 70,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -21,6 +21,11 @@
       "install_prefix": "pulp/music"
     },
     {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback",
+      "install_prefix": "pulp/playback"
+    },
+    {
       "domain": "sequence",
       "source": "core/sequence/include/pulp/sequence",
       "install_prefix": "pulp/sequence"
@@ -37,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 453,
-    "reviewed_headers": 161,
+    "public_headers": 487,
+    "reviewed_headers": 195,
     "legacy_unreviewed_headers": 292,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 107,
-      "capability_support": 39,
-      "infrastructure": 13,
+      "capability_entrypoint": 108,
+      "capability_support": 44,
+      "infrastructure": 41,
       "legacy_unreviewed": 292,
       "unsupported_capability": 2
     },
@@ -64,6 +69,12 @@
       "music": {
         "public_headers": 11,
         "reviewed_headers": 11,
+        "legacy_unreviewed_headers": 0,
+        "unsupported_headers": 0
+      },
+      "playback": {
+        "public_headers": 34,
+        "reviewed_headers": 34,
         "legacy_unreviewed_headers": 0,
         "unsupported_headers": 0
       },
@@ -1762,6 +1773,324 @@
         "music.chord-voicing"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/audio_renderer.hpp",
+      "fingerprint": "sha256:4cbd6e13feb8f2020ebea81c7987db226aa01c4f207c4cfe1544512a217f751c",
+      "include": "pulp/playback/audio_renderer.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The audio renderer's error vocabulary (AudioRendererErrorCode, including the OfflineStretchRequired refusal) over forward-declared program, compiler-task, conversion-artifact and realtime-stretch types. It is the engine-internal render entry point composed by the playback module, not an advertised installed agent capability of its own."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/audio_renderer_limits.hpp",
+      "fingerprint": "sha256:4fc9eb204afba8208594e823cf27a3b89e5e0979ed8cfa064b34bdf111b0d0d0",
+      "include": "pulp/playback/audio_renderer_limits.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "sequence.controller-playback"
+      ],
+      "rationale": "Shared compile-path and realtime ceilings for the audio renderer, deliberately split out of the renderer API so the structural PlaybackProgram header can bound itself without pulling buffer or decoder surfaces. pulp/playback/program.hpp is the include the sequence.controller-playback bindings name, and it includes this header directly, so the advertised bindings do not compile without it."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/automation_cursor.hpp",
+      "fingerprint": "sha256:e333f64f1409003719d8c56feeea591d5f2dd9d47849c525a28d6c3e7df8e97e",
+      "include": "pulp/playback/automation_cursor.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Realtime block reader over a compiled automation program: AutomationTransition seeds and linear ramps, AutomationBlockEvent, AutomationCursorCode, and AutomationProgramAdoption. It is a bounded realtime cursor primitive intended for composition inside a renderer, and it advertises no installed agent capability of its own."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/automation_limits.hpp",
+      "fingerprint": "sha256:c4a7cb9dd6f07fed1c34a5f5d590de305ac2a32039528a7d2d3bfe930dd0cc05",
+      "include": "pulp/playback/automation_limits.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "sequence.controller-playback"
+      ],
+      "rationale": "AutomationPlaybackLimits and its kMaximum* hard ceilings, with web_defaults() and platform_defaults() presets that bound a compiled automation program before it reaches the audio thread. pulp/playback/program.hpp includes it directly, so it is part of the compile-time surface the sequence.controller-playback bindings are declared over."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/automation_program.hpp",
+      "fingerprint": "sha256:c12cec87efad34083f509829ab4a6b51cde276c3cafb7ed05f0d9697a7b0b716",
+      "include": "pulp/playback/automation_program.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "sequence.controller-playback"
+      ],
+      "rationale": "AutomationProgramInstanceToken, AutomationProgramErrorCode/Error, and AutomationProgramSegment — the compiled automation vocabulary a track program is expressed over, carrying both tick and sample bounds so a segment means the same thing to the document and to the render path. It reaches pulp/playback/program.hpp through track_mixer_program.hpp, so the sequence.controller-playback bindings depend on it at compile time."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/automation_recording.hpp",
+      "fingerprint": "sha256:06ebed4aa0f2135a325a97048c91646841357d4967e610985c64c3ba3f5df697",
+      "include": "pulp/playback/automation_recording.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Automation capture vocabulary — AutomationRecordMode Touch/Latch/Write, RecordedAutomationPoint, and the record and curve-materialization error enums. It describes how captured gestures become lane data inside the playback module and makes no installed agent capability claim."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/buffered_content_source.hpp",
+      "fingerprint": "sha256:67d7fbf99fa998a65c6204c7e246f1ffa8ab448953179f3e05d24eae4b143a39",
+      "include": "pulp/playback/buffered_content_source.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Ring-backed source for content produced ahead of the playhead — the buffering half of timeline::ProductionMode::Buffered, with its thread model documented in the header. Its own documentation states that Pulp ships no inference runtime, no model weights, and no producer that performs inference, so this is a bounded buffering primitive for a host- supplied producer rather than an advertised capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/capture_engine.hpp",
+      "fingerprint": "sha256:cddd98aca3fdc18fb931a42f71009752949f8e2dc10530ef4e158d8f071bc0ce",
+      "include": "pulp/playback/capture_engine.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "CaptureTrackConfig and CaptureEngineConfig, including the default preallocation cap that bounds how much a capture may reserve up front. It is the bounded recording-buffer substrate the recording coordinator composes, not an installed agent capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/chord_pattern_renderer.hpp",
+      "fingerprint": "sha256:60e4e8779676eedff5f0e2f4b31b7f2cb610079168cbdaa84c7c3b774d3f919a",
+      "include": "pulp/playback/chord_pattern_renderer.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Registration of the pulp.playback.chord_pattern content schema and its ChordPatternContent value type against the compile-context registry. It is one registered content kind inside the playback compiler rather than an advertised consumer capability; the capability claim, if one is made, belongs to the content surface that authors these patterns."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/clip_launch.hpp",
+      "fingerprint": "sha256:4d6a6bae3dafd68547a534466441add75ba3db6b388879d6602b71ec2ef504e5",
+      "include": "pulp/playback/clip_launch.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Realtime clip-launch engine on the monotonic clock, with a constexpr next_launch_boundary() and documented saturation behaviour at the ends of its range. It is a bounded realtime scheduling primitive composed inside the playback engine and binds no installed agent capability of its own."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/compile_context_registry.hpp",
+      "fingerprint": "sha256:d7da460ae42d89c31bb01a5c1f30da582d96a8abd33e447f2a865f5537a4422f",
+      "include": "pulp/playback/compile_context_registry.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Registry of content-program output kinds and renderer state policies (Reset versus CarryByItemId) plus the ContentFragmentNote fragment type. It is the extension seam the program compiler resolves registered content through, not an advertised installed capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/compile_executor.hpp",
+      "fingerprint": "sha256:047d2b5985fd195f281f501c42435de4b1865140bbebbbe7860cca00a2c4ce44",
+      "include": "pulp/playback/compile_executor.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "CompileSliceBudget, CompileTaskStatus, the abstract CompileTask and CompileExecutor interfaces, and the DeferredCompileExecutor. It is scheduling infrastructure that lets compilation be sliced against a budget, with no capability surface of its own."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/dirty_track_resolver.hpp",
+      "fingerprint": "sha256:d0280b67a3ed178db15c9022854b3adcc034b6b0a985fdf1ef39a7c772f76e24",
+      "include": "pulp/playback/dirty_track_resolver.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "DirtyTrackSet and resolve_dirty_tracks(): the canonical translation from transaction dirtiness to root-track compiler dirtiness in one fail-closed path. It is a pure internal derivation shared by the compiler and makes no installed agent capability claim."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/event_compensation.hpp",
+      "fingerprint": "sha256:cf9986a4cd145275093e73311281ec8eb6abc52bf4de97eec4da6e8304849db8",
+      "include": "pulp/playback/event_compensation.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "EventCompensationShift, expressed in samples rather than ticks by deliberate design, with the documented invariant that compensation shifts the scheduling window and never rewrites event data. It is a bounded scheduling adjustment composed inside the renderer, not an advertised capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/external_sync.hpp",
+      "fingerprint": "sha256:7ef8447d4783267894611f1a14032347fcbab6e2f2e6dd2208ab1053717e764f",
+      "include": "pulp/playback/external_sync.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "MTC vocabulary — MtcFrameRate (including 29.97 drop), MtcTimecode, validity checking and conversion to samples. It is a bounded timecode conversion primitive for an external-sync source and advertises no installed agent capability of its own."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/generated_event_source.hpp",
+      "fingerprint": "sha256:6253ce3419ffa5a655f0f941ef9995d6980e6175efdd9fe32685bdfc95f7d57b",
+      "include": "pulp/playback/generated_event_source.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Bounded single-producer/single-consumer handoff for event batches produced ahead of the playhead. A missing batch advances as event silence and requests an active-note flush so a lost note-off cannot become a stuck note. It is a realtime handoff primitive for a host-supplied producer rather than an advertised capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/midi_capture_materializer.hpp",
+      "fingerprint": "sha256:e6734737a53c8cb9186d17cee9a562500bf29823aacad7b25f67157b0ba3c7b2",
+      "include": "pulp/playback/midi_capture_materializer.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Configuration, result and error types for turning a MIDI capture buffer into materialized lane data. It is one internal step of the recording path inside the playback module and makes no installed agent capability claim."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/note_renderer.hpp",
+      "fingerprint": "sha256:b4abb63c3c555e5478ce5153e9f967e7fb074d744211c6fa6366720e04cbed15",
+      "include": "pulp/playback/note_renderer.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Note emission for one render block, including the detail-namespace offset- in-range helper and NoteRenderCode. It is the internal note half of the renderer shell rather than an advertised consumer capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/offline_stretch_artifact.hpp",
+      "fingerprint": "sha256:9df2a677c997570db86c0b0810c766c6735744efda48d56e68eeba83e7c48703",
+      "include": "pulp/playback/offline_stretch_artifact.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Offline stretch artifact identity: a pinned algorithm version, its configuration, and a key built from content hashes plus the source range so a cached artifact can only be reused for exactly the input it was rendered from. It is cache-identity infrastructure, not an advertised capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/production_class.hpp",
+      "fingerprint": "sha256:8321d125d7df42c7892b5ee99accef450073072e79aa575af898ea334faadec4",
+      "include": "pulp/playback/production_class.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Derivations of what a compiled program may honestly claim about being replayed — provider and track production declarations and the resulting program reproducibility. It is an internal honesty derivation over the program graph and binds no installed agent capability of its own."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/program.hpp",
+      "fingerprint": "sha256:8475c93fcc8b219d1f1ec4774f1739e9ab08ffb51051f7a2bac680dc21036c42",
+      "include": "pulp/playback/program.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "sequence.controller-playback"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/program_compiler.hpp",
+      "fingerprint": "sha256:da4c2ce2a937f2001d6abe2e731e6984c8cfbcbe48f47d69d4669f90cd282bf8",
+      "include": "pulp/playback/program_compiler.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The compile path from committed document deltas to exactly recompiled tracks: TrackCompilePolicy, CompileInvalidationInput, and a compiler that rejects a request whose project or revision does not match. It is the producing side of a compiled program; the installed claim is made by the compiled program surface it emits, not by the compiler entry point."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/program_identity.hpp",
+      "fingerprint": "sha256:92ea83fe26d3d39d244ba0860cb9094ff08e0392c1bc19ce6279412b1adbc0b4",
+      "include": "pulp/playback/program_identity.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "sequence.controller-playback"
+      ],
+      "rationale": "ProgramGeneration, RendererProgramKey, and is_monotonic_renderer_adoption: the identity vocabulary that lets a renderer refuse a non-monotonic program swap rather than adopt a stale publication. pulp/playback/program.hpp includes it directly and expresses program publication in these types, so it is required support for the sequence.controller-playback bindings rather than an independent claim."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/program_wire.hpp",
+      "fingerprint": "sha256:f9c86057b4ad3169207bf924d797ca0ccdf931c691b42c65d2212073740f554b",
+      "include": "pulp/playback/program_wire.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The flat, pointer-free byte layout one compiled program generation is published in, plus its native encoder and validating decoder — the crossing form for a consumer that does not share the producer's address space, such as an AudioWorklet and its Worker. Sections tile the payload exactly and a length that disagrees with its content is a rejection rather than an interpretation; a static_assert refuses a big-endian host. It is a serialization surface with no typed capability binding of its own today."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/realtime_stretch_renderer.hpp",
+      "fingerprint": "sha256:25b344ef63523fdad5f4af59072a908b488042f2e149494ca36ec3e1beb32073",
+      "include": "pulp/playback/realtime_stretch_renderer.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "RealtimeStretchRenderCode and the live stretch runtime that owns a disjoint mutable lane per track, with explicit codes for unsupported scrubbing, impossible ratios, backpressure and underflow. It is a bounded realtime renderer composed inside the playback engine, not an advertised installed capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/realtime_stretch_state_bank.hpp",
+      "fingerprint": "sha256:dd02d3ef9b543e3d8744772ccfc35d850e6df4fae9d762eadcf49a74a223c28a",
+      "include": "pulp/playback/realtime_stretch_state_bank.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "RealtimeStretchStateSpec and the state bank's refusal vocabulary — duplicate identity, state, channel, time-ratio and byte limits, processor- prepare rejection and allocation failure. It is a bounded preallocated state pool for the realtime stretch path and makes no installed agent capability claim."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/recording_commit.hpp",
+      "fingerprint": "sha256:87f362d0519e153abdcced725703cfc23bc0e5af87000d47433ec4669fd0581f",
+      "include": "pulp/playback/recording_commit.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "RecordingTakeCommitRequest, SealedRecordingTake and RecordingCommitError: the sealed handoff from a finished capture to the document commands and media asset that land it. It is the internal commit step of the recording path rather than an advertised capability surface."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/recording_coordinator.hpp",
+      "fingerprint": "sha256:96dfd4b5b13477a83bfe35aa40b8ec5fd7806496fe0c045c14a38b337a022572",
+      "include": "pulp/playback/recording_coordinator.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Recording monitor modes and resolved paths (Off/Direct/Software/Auto), recording sources, and the track and coordinator configuration around them. It is the playback module's internal recording orchestration and binds no installed agent capability of its own."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/stable_renderer_shell.hpp",
+      "fingerprint": "sha256:d44b66f80099a3e80044fed6f7a21fdf752957a6879edcd8d76846bec9a87bc0",
+      "include": "pulp/playback/stable_renderer_shell.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "RendererCarryState — what survives a program swap — and PlaybackProgramBlock, the move-only non-owning block view whose documentation requires an enclosing immutable audio-thread publication to keep the program alive for its whole lifetime. It is the realtime borrow and latch side of the program surface, composed by the renderer rather than advertised on its own."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/tempo_sync.hpp",
+      "fingerprint": "sha256:7c5c6607b7bbbc26622b3f6ab2400c7b9727362ccea6b81a69da3184bbbeae8b",
+      "include": "pulp/playback/tempo_sync.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The backend-independent external-clock seam: an opaque TempoSyncHostTime that carries its source identity so a device, wall, or different Link clock cannot be handed to the wrong transport, and a TempoSyncCommand bundle applied at the first output sample of a block. It is the licensing- safe abstraction an optional third-party tempo-sync SDK plugs in behind, not an installed capability of its own."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/track_automation_program.hpp",
+      "fingerprint": "sha256:5c329e154a3d2b33f3817760735982d8f7328a44e3c076c24a23016e658b2535",
+      "include": "pulp/playback/track_automation_program.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Immutable compiler-supplied grouping of one track's compiled automation lanes, with a refusal vocabulary that reports the colliding control verbatim on a duplicate lane or target. Its own documentation is explicit that it validates the grouping without proving document provenance, so it is internal compiled structure rather than an advertised capability."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/track_automation_renderer.hpp",
+      "fingerprint": "sha256:46f89f442e6010891f5ec1123ed135a767ab7f1388771a20bccfbe9b37a2bf66",
+      "include": "pulp/playback/track_automation_renderer.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Realtime emission of automation to device placements: TrackAutomationEvent with its sample offset and ramp duration, DeviceAutomationBatch with its coalescing flag, and a renderer code set that refuses a program, track or tempo-map mismatch rather than emitting into the wrong target. It is a bounded realtime emitter composed inside the renderer and makes no installed agent capability claim today."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/track_mixer_program.hpp",
+      "fingerprint": "sha256:88c89096272bdd2c56b6b756fd426a7c7e09861286032a3e29ed7df47f966396",
+      "include": "pulp/playback/track_mixer_program.hpp",
+      "disposition": "capability_support",
+      "capability_keys": [
+        "sequence.controller-playback"
+      ],
+      "rationale": "The compiled form of a track's own level and stereo placement, where a non-null automation lane supersedes the authored constant entirely so a lane and a constant never both apply. A static_assert ties kMaximumTrackMixerGain to timeline::kMaximumTrackGainLinear, which is what keeps the render path from honouring an automated gain the document would refuse to store, and transparent() is what keeps an untouched track bit- identical to its pre-mixer render. pulp/playback/program.hpp includes it directly, so it is compile-time support for the sequence.controller- playback bindings."
+    },
+    {
+      "domain": "playback",
+      "source": "core/playback/include/pulp/playback/transport.hpp",
+      "fingerprint": "sha256:13685c53c2e82e28bff6b56edf5a82e94e78cbedb73539c6a0046d5dd0c7a1be",
+      "include": "pulp/playback/transport.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "The transport control surface — play, stop, loop, scrub and tempo — with a refusal vocabulary that rejects a loop or scrub window too short for the maximum block and an epoch advance that fails rather than wrap to an aliased identity. It is the playback engine's own control object; its agent-facing exposure is claimed by the capability rows that bind a transport surface, not by this header."
     },
     {
       "domain": "sequence",

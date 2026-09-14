@@ -653,4 +653,81 @@ EXPORTS = [
             "arguments": "",
         }],
     ),
+    capability(
+        key="sequence.controller-playback",
+        domain="sequence",
+        summary=(
+            "Lowered controller and expression values for playback, carrying the "
+            "full wire address rather than a Pulp-local controller enumeration so "
+            "an unanticipated controller family needs new values and not new types."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "control",
+            "process": "audio",
+            "reset": "control-or-audio-when-quiescent",
+            "release": "none",
+        },
+        state_model=(
+            "Immutable value events owned by a compiled track program, read as a "
+            "bounded span against the tempo map the program was built with."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain="compiled controller and expression lanes",
+        output_domain=(
+            "controller value events ordered for half-open block scheduling, each "
+            "tagged ControllerProgramEventOrigin::Authored or "
+            "ControllerProgramEventOrigin::Chased"
+        ),
+        units=["samples", "ticks"],
+        latency="zero",
+        tail="none",
+        scheduling="block-synchronous",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/playback/program.hpp",
+                qualified_name="pulp::playback::ControllerProgramEvent",
+                target="Pulp::playback",
+                header_fingerprint=(
+                    "sha256:8475c93fcc8b219d1f1ec4774f1739e9ab08ffb51051f7a2bac680dc21036c42"
+                ),
+            ),
+            binding(
+                role="block-order",
+                kind="cpp_function",
+                include="pulp/playback/program.hpp",
+                qualified_name="pulp::playback::controller_program_event_less",
+                target="Pulp::playback",
+                header_fingerprint=(
+                    "sha256:8475c93fcc8b219d1f1ec4774f1739e9ab08ffb51051f7a2bac680dc21036c42"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "entrypoint",
+                "binding": "pulp::playback::ControllerProgramEvent",
+                "operation": "construct",
+                "arguments": "",
+            },
+            {
+                "role": "block-order",
+                "binding": "pulp::playback::controller_program_event_less",
+                "operation": "function_call",
+                "arguments": (
+                    "pulp::playback::ControllerProgramEvent{}, "
+                    "pulp::playback::ControllerProgramEvent{}"
+                ),
+            },
+        ],
+    ),
 ]
