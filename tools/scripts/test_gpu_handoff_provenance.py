@@ -88,6 +88,82 @@ class FixtureRepository(unittest.TestCase):
         self.assertEqual(nested.revision, self.second_commit)
         self.assertEqual(nested.object_type, "tree")
 
+    def test_orphaned_pin_error_names_the_cause_and_a_usable_commit(self) -> None:
+        """The error a rewritten pin produces has to end the search, not start it.
+
+        Three lanes independently spent a day on this because the message said
+        only that the commit was unreachable. Regenerating is the obvious
+        repair and it cannot converge -- the new commit is not an ancestor of
+        HEAD either -- so the message must say which operation orphaned the pin
+        and name a commit that already satisfies the rule.
+        """
+
+        orphan = git(self.root, "rev-parse", "HEAD")
+        git(self.root, "commit", "--quiet", "--amend", "-m", "rewrite nested")
+        self.assertNotEqual(git(self.root, "rev-parse", "HEAD"), orphan)
+
+        with self.assertRaises(provenance.ProvenanceError) as caught:
+            provenance.resolve_source_commit(
+                self.root, orphan, ["leaf.txt", "nested"]
+            )
+        message = str(caught.exception)
+        self.assertIn(orphan, message)
+        for cause in ("rebase", "amend", "merging origin/main"):
+            self.assertIn(cause, message, f"the error does not name {cause!r}")
+        suggested = provenance.newest_pinned_ancestor(
+            self.root, ["leaf.txt", "nested"]
+        )
+        self.assertIsNotNone(suggested)
+        self.assertIn(suggested, message)
+
+    def test_suggested_commit_satisfies_the_rule_it_is_offered_for(self) -> None:
+        """A suggestion that does not resolve is worse than none.
+
+        The commit is correct because nothing later touched a pinned path, so
+        every identity it yields is the identity HEAD yields. Assert both
+        halves: it resolves, and it produces HEAD's identities.
+        """
+
+        (self.root / "unpinned.txt").write_text(
+            "unrelated\n", encoding="utf-8"
+        )
+        git(self.root, "add", "unpinned.txt")
+        git(self.root, "commit", "--quiet", "-m", "land an unrelated commit")
+
+        paths = ["leaf.txt", "nested"]
+        suggested = provenance.newest_pinned_ancestor(self.root, paths)
+        self.assertEqual(suggested, self.second_commit)
+        self.assertNotEqual(
+            suggested,
+            git(self.root, "rev-parse", "HEAD"),
+            "the fixture no longer distinguishes the suggestion from HEAD",
+        )
+        self.assertEqual(
+            provenance.resolve_source_commit(self.root, suggested, paths), suggested
+        )
+        for path in paths:
+            self.assertEqual(
+                provenance.resolve_identity(self.root, suggested, path),
+                provenance.resolve_identity(self.root, "HEAD", path),
+            )
+
+    def test_missing_inventory_still_reports_the_ancestry_failure(self) -> None:
+        """Enrichment must not be able to convert the error into a different one.
+
+        `resolve_source_commit` is called from a test with two positional
+        arguments, and a caller may hold no inventory at all. Both must still
+        get the ancestry refusal.
+        """
+
+        orphan = git(self.root, "rev-parse", "HEAD")
+        git(self.root, "commit", "--quiet", "--amend", "-m", "rewrite nested")
+
+        self.assertIsNone(provenance.newest_pinned_ancestor(self.root, []))
+        for canonical in (None, []):
+            with self.assertRaises(provenance.ProvenanceError) as caught:
+                provenance.resolve_source_commit(self.root, orphan, canonical)
+            self.assertIn("is not an ancestor of HEAD", str(caught.exception))
+
     def test_identity_tracks_a_later_edit(self) -> None:
         (self.root / "leaf.txt").write_text("leaf two\n", encoding="utf-8")
         git(self.root, "add", "leaf.txt")

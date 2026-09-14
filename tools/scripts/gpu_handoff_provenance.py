@@ -200,12 +200,41 @@ def canonical_paths(document: dict[str, Any]) -> list[str]:
     return sorted({row.path for row in canonical_inventory(document)})
 
 
-def resolve_source_commit(root: pathlib.Path, requested: str) -> str:
+def newest_pinned_ancestor(root: pathlib.Path, paths: list[str]) -> str | None:
+    """Name the newest commit reachable from HEAD that touched a pinned path.
+
+    Identities derived there are identical to HEAD's for every pinned path,
+    because by construction nothing later touched one, so it satisfies the
+    validator exactly as HEAD does. Unlike HEAD it does not move when an
+    unrelated commit lands, which is what makes it the commit to record once an
+    amend or a rebase has orphaned the one a receipt named.
+
+    Returns ``None`` rather than raising: this only ever enriches an error that
+    is already being reported, and a checkout too shallow to answer must not
+    turn that error into a different one.
+    """
+
+    if not paths:
+        return None
+    try:
+        commit = git_output(root, ["log", "-1", "--format=%H", "HEAD", "--", *paths])
+    except ProvenanceError:
+        return None
+    return commit or None
+
+
+def resolve_source_commit(
+    root: pathlib.Path, requested: str, canonical: list[str] | None = None
+) -> str:
     """Authenticate one exact commit and prove it is reachable from HEAD.
 
     Every emitted revision is an ancestor of the source commit, so requiring the
     source commit to be an ancestor of HEAD is what makes the validator's own
     ancestry check pass for all of them at once.
+
+    ``canonical`` is the pinned path inventory. It is optional because the
+    ancestry rule does not depend on it; when supplied, a failure names a commit
+    that would satisfy the rule instead of leaving the reader to derive one.
     """
 
     try:
@@ -215,10 +244,22 @@ def resolve_source_commit(root: pathlib.Path, requested: str) -> str:
             f"source commit {requested!r} does not resolve to a commit: {error}"
         ) from error
     if git_status_code(root, ["merge-base", "--is-ancestor", commit, "HEAD"]) != 0:
-        raise ProvenanceError(
+        # Rewriting the commit a receipt pins is the way this is reached in
+        # practice, and the obvious repair regresses: regenerating creates a new
+        # commit, so recording that one is never satisfiable. Say which
+        # operations orphan the pin, and name an existing commit that does not.
+        detail = (
             f"source commit {commit} is not an ancestor of HEAD; identities "
-            "generated from it cannot satisfy the handoff validator"
+            "generated from it cannot satisfy the handoff validator. A rebase, "
+            "amend, or squash of the pinned commit is the usual cause; merging "
+            "origin/main preserves the pin where rebasing onto it does not. "
+            "Record a commit that already exists rather than the one "
+            "regeneration is about to create"
         )
+        suggestion = newest_pinned_ancestor(root, canonical or [])
+        if suggestion is not None:
+            detail += f", such as {suggestion}"
+        raise ProvenanceError(detail)
     return commit
 
 
@@ -516,7 +557,9 @@ def command_paths(args: argparse.Namespace) -> int:
 def command_check(args: argparse.Namespace) -> int:
     document = load_handoff(args.handoff)
     inventory = canonical_inventory(document)
-    commit = resolve_source_commit(args.root, args.source_commit)
+    commit = resolve_source_commit(
+        args.root, args.source_commit, canonical_paths(document)
+    )
     identities = resolve_inventory_identities(
         args.root, commit, inventory, require_current=True
     )
@@ -572,7 +615,9 @@ def command_check(args: argparse.Namespace) -> int:
 def command_write(args: argparse.Namespace) -> int:
     document = load_handoff(args.handoff)
     inventory = canonical_inventory(document)
-    commit = resolve_source_commit(args.root, args.source_commit)
+    commit = resolve_source_commit(
+        args.root, args.source_commit, canonical_paths(document)
+    )
 
     dirty = dirty_canonical_paths(args.root, canonical_paths(document))
     if dirty:
@@ -624,7 +669,9 @@ def command_write(args: argparse.Namespace) -> int:
 
 def command_receipt(args: argparse.Namespace) -> int:
     document = load_handoff(args.handoff)
-    commit = resolve_source_commit(args.root, args.source_commit)
+    commit = resolve_source_commit(
+        args.root, args.source_commit, canonical_paths(document)
+    )
     # Hash what the file actually holds. Re-serializing would describe bytes
     # that may differ from the ledger this receipt names.
     rendered = args.handoff.read_text(encoding="utf-8")
