@@ -1803,11 +1803,17 @@ jobs:
           listing="$(ctest --test-dir "$PULP_BUILD_DIR" -N 2>/dev/null)" || listing=""
           raw_lines="$(printf '%s\n' "$listing" | wc -l | tr -d ' ')"
           registered="$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p' | tail -1)"
+          # Also echo the control to the job log. $GITHUB_STEP_SUMMARY has no
+          # REST API, so a summary-only number cannot be read back from a
+          # finished run; the log can. Same reason the ctest-failure step below
+          # echoes its names twice.
+          echo "ctest-nonruns: registered(ctest -N raw lines)=$raw_lines registered(total)=${registered:-unknown}"
           PULP_CTEST_JUNIT="$junit" \
           PULP_CTEST_RAW_LINES="$raw_lines" \
           PULP_CTEST_REGISTERED="${registered:-unknown}" \
           python3 - >> "$GITHUB_STEP_SUMMARY" <<'PYEOF'
           import os
+          import sys
           import xml.etree.ElementTree as ET
 
           leg = os.environ.get("PULP_CTEST_LEG", "")
@@ -1833,6 +1839,13 @@ jobs:
           print(f"| reported non-runs (`notrun`/`disabled`) | {len(nonruns)} |")
           print(f"| `<testcase>` entries in the report | {len(cases)} |")
           print("")
+          # Same numbers to the job log, which (unlike the summary) is
+          # retrievable from a finished run.
+          print(
+              f"ctest-nonruns: attempted={suite.get('tests')} "
+              f"testcases={len(cases)} nonruns={len(nonruns)}",
+              file=sys.stderr,
+          )
           if not cases:
               print("_The report has no `<testcase>` entries: `--output-junit` did not take._")
           if not nonruns:
