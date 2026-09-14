@@ -6355,6 +6355,71 @@
       }
     },
     {
+      "id": "control-capability-operation-discoverability",
+      "title": "Offline discoverability and documentation enforcement for the control capability registry",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "23612851-d383-485a-a565-2c132c7e909b",
+      "owned_paths": [
+        ".agents/skills/cli-maintenance/SKILL.md",
+        "docs/reference/cli.md",
+        "docs/reference/development-inspector-capabilities.md",
+        "docs/status/cli-commands.yaml",
+        "docs/status/sequencer-exposure.json",
+        "tools/cli/cmd_control.cpp",
+        "tools/scripts/inspector_truth_check.py"
+      ],
+      "evidence": [
+        {
+          "path": "tools/scripts/inspector_truth_check.py",
+          "needles": [
+            "def operation_doc_errors(",
+            "def parse_control_operations(",
+            "def write_root(",
+            "development inspector docs omit operation"
+          ]
+        },
+        {
+          "path": "docs/reference/development-inspector-capabilities.md",
+          "needles": [
+            "<!-- BEGIN GENERATED operation-matrix",
+            "| `dev.pulp.sequencer/state.read@1` | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | `response` |",
+            "| `dev.pulp.sequencer/state.edit@1` | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | `receipt` |"
+          ]
+        },
+        {
+          "path": "tools/cli/cmd_control.cpp",
+          "needles": [
+            "void print_capabilities(bool json)",
+            "serialize_control_registry()",
+            "capabilities accepts only --json"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "No public SDK header, symbol, or install rule changes. The offline catalog prints serialize_control_registry(), which control_manifest.hpp already declares and PulpInstallRules.cmake already installs; the CLI is a consumer of that existing projection, not a new SDK surface."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Adds no `pulp seq` verb, flag, or document reader. `pulp control capabilities` reads the frozen in-binary capability registry and opens no timeline document; the sequencer operations it happens to list are runtime control operations, not persisted timeline state."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Adds no MCP tool and changes no generated Timeline MCP schema. The catalog is a CLI verb only; whether to mirror it as an MCP tool is a separate decision that would need its own row."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Registers no capability, operation, executor, grant, or profile membership, and calls nothing. dev.pulp.sequencer/state.read@1 and dev.pulp.sequencer/state.edit@1 were registered by product-a-sequencer-state-control and are unchanged here; that released row is not edited. This slice only makes the existing registry readable without a live instance and makes an operation added without documentation fail the inspector-truth gate, so it narrows what can ship silently rather than widening live authority."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Registers no design-time agent capability row and edits no agent-capability manifest. The generated matrix describes runtime control operations, which the agent-capabilities ledger deliberately does not advertise."
+        }
+      }
+    },
+    {
       "id": "product-a-timeline-document-session",
       "title": "Live Product A control over a mutable Timeline document session",
       "classification": "live_product_control",
