@@ -108,6 +108,7 @@ executor on the target host fails closed.
 | `dev.pulp.telemetry/subscribe@1` | `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | `stream` |
 | `dev.pulp.runtime/reload@1` | `dev.pulp.runtime/reload@1` (`runtime.reload`) | `receipt` |
 | `dev.pulp.runtime/evaluate@1` | `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | `receipt` |
+| `dev.pulp.timeline/document-session@1` | `dev.pulp.timeline/document-session@1` (`timeline.document.session`) | `receipt` |
 | `dev.pulp.artifact/read@1` | `dev.pulp.artifact/read@1` (`artifact.read`) | `artifact-chunk` |
 | `dev.pulp.sequencer/state.read@1` | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | `response` |
 | `dev.pulp.sequencer/state.edit@1` | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | `receipt` |
