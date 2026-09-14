@@ -729,12 +729,38 @@ Four things bite when touching this:
   separate changes; make the skip readable first, and promote only against a
   measured population.
 
-Provisioning the missing dependency is the other half, and it is also not a
-gate. The self-hosted macOS leg runs `pulp trace fetch` before ctest so
-`pulp-rust-gpu-trace-analysis-integration` — the only registration that runs the
-GPU trace-analysis acceptance tests — can execute instead of skipping. A failed
-fetch only warns and the suite skips as before, so the step cannot redden the
-fleet on a guess about what the Studios can reach.
+### Provisioning a skipped dependency is a SEPARATE decision from reporting it
+
+Making a skip visible is safe. Removing the skip is not, and the two must not
+ride in one change — the second can redden the required gate for the whole
+fleet while the first reddens nothing.
+
+`pulp-rust-gpu-trace-analysis-integration` is the worked example. It is the only
+registration that runs the GPU trace-analysis acceptance tests, and it skips
+whenever the pinned `trace_processor_shell` is absent, which is always: nothing
+in `.github/**` or `.shipyard/**` installs it (0 files mention
+`PULP_TRACE_PROCESSOR`, `trace fetch`, or `trace_processor_shell`, against a
+control of 79 workflow files matching `runs-on`).
+
+One measured run with a `pulp trace fetch` step added established the facts,
+and they are worth keeping even though the step was withdrawn:
+
+- **The Studios can reach the download.** `pulp trace fetch` returned success on
+  `studio-pulp-gate-01`. Network access was never the blocker.
+- **29 acceptance tests execute once provisioned; 28 pass.**
+- **One fails**: `untagged_tooling_failure_cannot_hide_behind_a_tagged_healthy_probe`,
+  and it fails on `main` independently of any branch. So provisioning the
+  dependency turns the required `macos` gate red for every PR until that test's
+  probe semantics are settled.
+
+Hence: land the reporting, hold the provisioning until the failure it exposes
+has an owner. A skip that is *reported* costs nothing; a skip that is *removed*
+spends the fleet's merge capacity on somebody else's open question.
+
+Note when reasoning about persistence: the required macOS gate is an
+**ephemeral** lane (`tools/scripts/runner_topology.json` lanes[0]), a Tart clone
+destroyed after one job, so nothing a job writes to `$HOME` — a fetched
+`~/.pulp/tools/...` included — survives into the next run.
 
 ## An opt-in CMake flag hides tests more completely than any label
 

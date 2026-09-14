@@ -1655,29 +1655,6 @@ jobs:
             ~/AppData/Local/ccache
           key: ${{ steps.ccache-cache.outputs.cache-primary-key }}
 
-      # Provisioning, not a gate. `pulp-rust-gpu-trace-analysis-integration`
-      # is the only thing that runs the GPU trace-analysis acceptance tests, and
-      # it reports a CTest SKIP when the pinned `trace_processor_shell` is
-      # absent. Nothing else in CI installs it, so those tests have never run
-      # here. Fetch it where the runner can reach the download; a failed fetch
-      # leaves the suite skipping exactly as it does today, and the non-run
-      # summary below records that it did. Asserts no host precondition.
-      - name: Provision pinned trace_processor (self-hosted macOS)
-        if: runner.os == 'macOS' && matrix.key == 'macos' && runner.environment == 'self-hosted'
-        continue-on-error: true
-        # `pulp trace fetch` shells `curl -fL --retry 2` with no --max-time and
-        # no --connect-timeout, and this job declares no timeout-minutes of its
-        # own. A blackholed route would stall the serialized required macOS gate
-        # for the workflow default rather than fail. Bound it: a timed-out fetch
-        # is the same outcome as a failed one — the suite skips, and the
-        # non-run summary below records that it did.
-        timeout-minutes: 5
-        shell: bash
-        run: |
-          set -uo pipefail
-          "$PULP_BUILD_DIR/pulp" trace fetch \
-            || echo "::warning::trace_processor not provisioned; the trace integration suite will skip"
-
       - name: Test (non-Windows)
         if: runner.os != 'Windows'
         shell: bash
