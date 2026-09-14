@@ -3074,8 +3074,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_release_artifact_contents.py",
           "state": "pulp-owned-retained",
-          "revision": "78f6934e91ce6eb18f54cbd69947a13b479fef93",
-          "object_id": "60dc5af331596e4c108fc0cff70b0a134229162c",
+          "revision": "d1b16506d233653139c69b6e509ed0e0c06ec8a6",
+          "object_id": "3aac7def1ebb18851203e8ec675f563282a36be8",
           "object_type": "blob"
         }
       ],
