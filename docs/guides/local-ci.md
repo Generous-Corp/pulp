@@ -2972,6 +2972,22 @@ the `slow` label in `test/CMakeLists.txt` (or the appropriate subdir
 CMakeLists) and reconfigure. There's no separate registry to keep in
 sync.
 
+### Seeing which tests did not run
+
+A CTest skip (`SKIP_RETURN_CODE`) is green, so on the required `macos` check a
+test that has never run once looks exactly like a test that runs and passes
+every time. `build.yml`'s non-Windows test step therefore passes
+`--output-junit`, and an `always()` observation step writes every `notrun` test
+— name, skip reason, labels, and the skipping command's output — into the job
+summary, with `ctest.junit.xml` kept in the `ctest-logs-<key>` artifact even on
+green runs. It observes and never asserts: skipping is frequently the correct
+outcome (no GPU, no device, no vendor SDK), and the summary also prints the
+registered `ctest -N` population beside the report's attempted `tests=` count so
+a gap created by label exclusions or `--exclude-regex` stays visible. The
+self-hosted macOS leg additionally runs `pulp trace fetch` before testing so the
+GPU trace-analysis integration suite can run instead of skipping; a failed fetch
+only warns, and the suite skips as it did before.
+
 ## Switching a job's runner without a code change
 
 Provider-switchable build, release, coverage, and sanitizer decisions use

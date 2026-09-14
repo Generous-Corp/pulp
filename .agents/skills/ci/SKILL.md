@@ -689,6 +689,53 @@ runner.environment == 'self-hosted'`. The second clause matters: when
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` is unset the leg falls back to hosted
 `macos-15`, which has no representative GPU and must not opt in.
 
+## A ctest SKIP is green, so a test that never ran reads as a passing one
+
+`SKIP_RETURN_CODE` is the right tool — a test needing a GPU, a device, an absent
+platform or a vendor SDK should skip rather than fail — but the required `macos`
+check reports the skip and the pass identically. A suite that has never executed
+once therefore looks exactly like a suite that executes and passes on every PR,
+and a real failure inside it is invisible for as long as the precondition is
+missing.
+
+`build.yml`'s non-Windows test step makes the non-runs readable without making
+them fail: `--output-junit` writes a report, and an `always()` observation step
+renders the `notrun` tests — name, skip reason, labels, and the skipping
+command's output — into the job summary, with the XML kept in the
+`ctest-logs-<key>` artifact on green runs too. Same shape as the GPU-adapter
+observation above: `continue-on-error: true`, records the answer, asserts
+nothing.
+
+Four things bite when touching this:
+
+- **The `--output-junit` path must be ABSOLUTE.** With `--test-dir`, ctest
+  resolves a relative report path against the *build dir*, so
+  `--output-junit "$PULP_BUILD_DIR/ctest.junit.xml"` lands at
+  `$PULP_BUILD_DIR/$PULP_BUILD_DIR/ctest.junit.xml`. Nothing errors, and the
+  upload step's `if-no-files-found: ignore` swallows the miss — the observation
+  silently observes nothing.
+- **The report's status vocabulary is `run` / `fail` / `notrun` / `disabled`.**
+  A failing test ran; only `notrun` and `disabled` are non-runs. Filtering on
+  `status != "run"` files every failure under "did not run".
+- **`ctest -N` is the control for the flag itself.** It is the registered
+  population; the report's `tests=` is the attempted one. Any gap is created by
+  `-LE` label exclusions, `--exclude-regex`, or configure-time absence, which
+  remove a test from the report entirely — a strictly larger blind spot that a
+  JUnit report cannot see. No `<testcase>` entries at all means the flag did not
+  take.
+- **Never turn exit 77 into a failure to make a skip visible.** That is what
+  `tools/scripts/test_ios_gate_skip_contract.py` exists to prevent, after doing
+  it in the Build step took the iOS gate out. Visibility and enforcement are
+  separate changes; make the skip readable first, and promote only against a
+  measured population.
+
+Provisioning the missing dependency is the other half, and it is also not a
+gate. The self-hosted macOS leg runs `pulp trace fetch` before ctest so
+`pulp-rust-gpu-trace-analysis-integration` — the only registration that runs the
+GPU trace-analysis acceptance tests — can execute instead of skipping. A failed
+fetch only warns and the suite skips as before, so the step cannot redden the
+fleet on a guess about what the Studios can reach.
+
 ## An opt-in CMake flag hides tests more completely than any label
 
 A `LABELS "slow"` exclusion at least leaves the test visible in a ctest listing.
