@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260914-pr8351-visual-harness-raster-determinism-watch",
+  "created_at": "2026-09-14T09:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Record the first PNG golden in the visual harness. All five committed goldens were Yoga layout JSON, so the harness made raster claims through a gate that compared nothing; the PNG plumbing in spec.py and runner.py had never been exercised by a fixture. This adds canvas2d/raster-determinism, a text-free fixture whose drawing is declared as an ops array so the golden's content is reviewable in the fixture diff, with its sha256 recorded in tools/harness/visual/pins.py beside the existing font and release-asset digests. Rasterization goes through the pinned skia-python wheel rather than pulp::view::render_to_png, because render_to_png resolves to CoreGraphics on Apple and Skia elsewhere (per-platform bytes by construction) and both visual-harness.yml smoke jobs are pytest lanes with no Pulp C++ build. Fixtures opt in with driver: declarative_raster, leaving the existing kind: render capture semantics untouched. Cross-host byte identity is stated as unproven: darwin-arm64 and darwin-x86_64 under Rosetta were measured identical, linux-x86_64 is deliberately absent from RASTER_GOLDEN_VERIFIED_PLATFORMS, and both jobs publish the digest they computed so the first Linux run either confirms or disproves it. This changes only the proof harness and its own workflow; no render surface, backend, importer, asset pipeline, or shipped output moves, and no accepted expansion boundary or Vellum source authority is touched, so the disposition is watch-only.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch",
+    "tools/harness/visual/tests/test_raster_golden.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
