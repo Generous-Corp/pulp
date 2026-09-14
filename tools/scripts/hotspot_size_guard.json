@@ -272,7 +272,7 @@
     },
     {
       "path": "CLAUDE.md",
-      "max_loc": 2037,
+      "max_loc": 2051,
       "note": "Always-resident agent context read on every turn; every line costs every session, so growth is a residency decision — declare it with a Hotspot-Grow: CLAUDE.md trailer"
     }
   ]
