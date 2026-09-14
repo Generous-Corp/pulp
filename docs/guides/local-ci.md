@@ -4596,6 +4596,64 @@ with **exit 7** (`EXIT_LANE_UNSERVED`) when a required context cannot be
 scheduled. Cost: **four API calls cold, zero warm** (a 300-second fact cache),
 plus a local `git show` of the workflow file.
 
+#### `[landability] workflows` in `.shipyard/config.toml`
+
+The check can only resolve a required context to a lane if it has read the
+workflow that produces it. Branch protection on `main` requires **five**
+contexts, and the tool's built-in default reads only `build.yml` — which left
+four of them `no_producer`: not checked, and reported as a warning that reads
+identically to a clean result. `.shipyard/config.toml` therefore names all five
+producers explicitly:
+
+| required context | producing workflow |
+|---|---|
+| `macos` | `build.yml` |
+| `Enforce version & skill sync` | `version-skill-check.yml` |
+| `Build + prove + (owner-gated) deploy` | `wclap-cloudflare.yml` |
+| `Vellum freeze` | `vellum-freeze-check.yml` |
+| `Vellum trusted freeze` | `vellum-trusted-gate.yml` |
+
+None of the five is path-filtered under `pull_request` — `wclap-cloudflare.yml`
+keeps its `paths:` under `push` on purpose, because a path-filtered **required**
+check leaves unrelated pull requests stuck on "Expected — Waiting for status"
+forever. Add a row here whenever a workflow starts producing a required context,
+or that context silently stops being checked.
+
+### 1b. The trigger detector — will the gate ever be *requested*?
+
+Exit 7 answers *can the required contexts be scheduled*. That presupposes a run
+will be **requested**, and on 2026-09-14 one was not: a pull request on a sibling
+repository was opened against a feature base, its gate declared
+`on.pull_request.branches: [main]`, GitHub evaluated that trigger exactly as
+documented, and created no run. The pull request sat `CLEAN` with an **empty**
+check rollup for **2 h 48 m**.
+
+The same command now also classifies links (1)–(3) and (5) of the chain and
+refuses with **exit 8** (`EXIT_TRIGGER_UNREACHABLE`) — deliberately *not* 7,
+because the remedies are disjoint: a 7 is fixed on the fleet, an 8 on the pull
+request or the workflow file by its author. `--allow-unserved-lane` does not
+wave an 8 through; the narrow escape is `--allow-unreachable-trigger <workflow>`.
+It costs **zero additional API calls**: the protection read is the one the lane
+check already makes, and workflows, base and diff are local.
+
+```sh
+shipyard landability --pr <N>     # adds up to 3 reads, the third only if needed
+```
+
+Of its eight verdicts only one — `triggered` with no run on the head yet — is
+ever resolved by waiting. The rest name the clause that refused and whose fix it
+is. Two are worth memorising because they are the ones people get wrong:
+
+- **`base_excluded` after a retarget.** GitHub auto-retargets a stacked child
+  pull request when its parent merges; that is an `edited` event, and a workflow
+  without `edited` in `on.pull_request.types` never sees it. The fix is a
+  **push** (`synchronize`), which the tool prints and never performs.
+- **`wrong_evidence`.** A `workflow_dispatch` run checks out the branch **tip**,
+  not `refs/pull/N/merge`, so it is not the run a `strict: true` requirement was
+  written for. Dispatch is the right tool only for **re-running** an existing
+  `pull_request` run (`POST actions/runs/{id}/rerun`), never for producing a
+  missing one.
+
 It refuses only on `Unserved` — a self-hosted label set that no runner
 advertises *and* no fresh host attestation declares. An unreadable census, an
 unparsable expression, a `Starved` lane or a missing attestation all warn and

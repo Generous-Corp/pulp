@@ -1913,9 +1913,20 @@ advisory unless explicitly required by branch protection.
 Saturation is possible (a real burst, or a wedged runner), but the required
 `macos` gate runs on the local M1/M3/M5 event-class JIT pool, so confirm it
 rather than assume it. Before concluding capacity:
-(1) check the required checks even registered — a Shipyard-App-opened PR does NOT
-auto-trigger `pull_request` workflows, so `ghapp workflow run build.yml --ref
-<branch>` + `… version-skill-check.yml --ref <branch>` are often needed;
+(1) check whether a `pull_request` run exists **on the head SHA**
+(`ghapp api 'repos/Generous-Corp/pulp/actions/runs?head_sha=<sha>'`). If none
+does, the trigger did not admit the PR — `shipyard landability <PR>` names which
+clause — and the fix is a `synchronize` **push**, not a dispatch. Do **not**
+reach for `ghapp workflow run`: a `workflow_dispatch` run checks out the branch
+tip rather than `refs/pull/N/merge`, so it is the wrong proof under `strict:
+true` even where GitHub accepts the check. (The older claim here — that an
+App-opened PR does not auto-trigger `pull_request` workflows — is **false** and
+was withdrawn: pulp#8277 was opened by `shipyard-local[bot]` and carries 25
+`pull_request` runs plus a `pull_request_target` run on its head; spectr#120 was
+App-authored and its trigger was evaluated exactly as documented, correctly
+refusing on `branches: [main]`.) Also note a run's `pull_requests[]` array can
+be **empty** on a genuine `pull_request` run, so never filter on it — key on
+`head_sha` + `event`;
 (2) check for a version-bump race (PR goes `DIRTY` on the `CMakeLists.txt`
 VERSION line — re-merge `main`); (3) only then verify capacity from queue age,
 host supervisor/lease state, and an exact repository-visible job assignment.
