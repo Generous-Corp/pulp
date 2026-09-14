@@ -56,6 +56,30 @@ string falls through to a slop of zero with no error anywhere, which reads
 as "the fix did not work" rather than "the value was not understood". See
 `rn/hitSlop` for the grammar.
 
+## Arming: a handler prop is not a subscription
+
+`prop-applier` turns every `on*` prop into `on(id, <lowercased name>, cb)`, but
+`on()` is what decides whether native dispatch is ARMED for that name. A name it
+does not route reaches `__callbacks__` and nothing else: the handler is
+installed, looks correct in the tree, and is never called. `onContextMenu` sat in
+that state — the whole `contextmenu` group was missing from `on()` and from
+`__ensureNativeRegistered__`, so `registerContextMenu` was never issued and
+`View::on_context_menu` stayed null. The routed groups are `click`, `hover`,
+`pointer`, `gesture`, `wheel` and `contextmenu`; a prop outside them is inert.
+
+`onDoubleClick` is still in that state, and is the reason to check rather than
+assume: `eventNameFor` produces `doubleclick`, which is neither the DOM's
+`dblclick` nor the gesture registrar's `doubletap`, so nothing produces it. The
+test for "is this prop live" is whether `on()` routes its name to a registrar —
+not whether the prop applies without error.
+
+`onContextMenu` receives a DOM-shaped payload: `clientX`/`clientY` in the space
+`getBoundingClientRect()` reports (so `e.clientX - rect.left` cancels exactly),
+widget-local `offsetX`/`offsetY`, and `button`/`buttons` of 2. `contextmenu`
+bubbles, so a listener on a wrapper still fires when the press lands on a child
+that has no listener of its own — the common case of a canvas drawn over its
+container.
+
 ## Delegated event delivery
 
 React's delegated root listener now receives each native wheel tick once.

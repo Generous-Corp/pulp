@@ -84,6 +84,7 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 android.os.Looper.prepare()  // AChoreographer needs a Looper
                 renderLooper = android.os.Looper.myLooper()
                 nativeOnSurfaceCreated(holder.surface)
+                recordGpuAdapterIdentity()
                 initComplete = true
                 Log.i(TAG, "Dawn init complete, entering Looper for choreographer callbacks")
                 android.os.Looper.loop()     // Blocks — processes AChoreographer callbacks
@@ -292,6 +293,23 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         return clip
     }
 
+    /**
+     * Hand the adapter Dawn just initialized to the driver policy, so the next
+     * launch can check it against the Vulkan blocklist. The policy decision is
+     * made before any adapter exists, so a persisted identity is the only thing
+     * it can consult.
+     */
+    private fun recordGpuAdapterIdentity() {
+        val info = nativeGetGpuAdapterInfo()
+        if (info == null || info.size < 3) {
+            Log.w(TAG, "No GPU adapter identity reported; blocklist stays unevaluated")
+            return
+        }
+        val identity = GpuDriverPolicy.GpuAdapterIdentity(info[0], info[1], info[2])
+        Log.i(TAG, "GPU adapter: ${identity.name} / ${identity.vendor} / ${identity.driver}")
+        GpuDriverPolicy.rememberAdapter(context, identity)
+    }
+
     // ── Native Methods ────────────────────────────────────────────────────
 
     // Display density — called once in init, before surface lifecycle
@@ -303,6 +321,10 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private external fun nativeOnSurfaceCreated(surface: Surface)
     private external fun nativeOnSurfaceResized(width: Int, height: Int)
     private external fun nativeOnSurfaceDestroyed()  // blocks until render thread stops
+
+    // Adapter identity — valid only after nativeOnSurfaceCreated has initialized
+    // Dawn; null before that and after the surface is destroyed
+    private external fun nativeGetGpuAdapterInfo(): Array<String>?
 
     // Touch events — called on main thread
     private external fun nativeOnTouchDown(pointerId: Int, x: Float, y: Float, pressure: Float)

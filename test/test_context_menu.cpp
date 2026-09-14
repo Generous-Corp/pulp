@@ -126,6 +126,63 @@ TEST_CASE("ContextMenu keyboard down+enter selects, skipping separators",
     REQUIRE(root->child_count() == 0);
 }
 
+TEST_CASE("ContextMenu Home and End jump to the selectable ends",
+          "[view][context-menu]") {
+    auto root = make_root();
+    std::optional<int> got;
+
+    // Both ends are unselectable on purpose: End must walk INWARD past the
+    // trailing separator and Home past the leading disabled row, so neither
+    // key can park the cursor somewhere Enter would then refuse.
+    Item disabled{1, "Disabled"};
+    disabled.enabled = false;
+    auto* menu = ContextMenu::show(
+        root.get(), {kAnchorX, kAnchorY},
+        {disabled, {2, "Second"}, {3, "Third"}, Item::make_separator()},
+        [&](std::optional<int> id) { got = id; });
+
+    REQUIRE(menu->hovered_index() == -1);
+    REQUIRE(menu->on_key_event(key_down(KeyCode::end_)));
+    REQUIRE(menu->hovered_index() == 2);
+
+    REQUIRE(menu->on_key_event(key_down(KeyCode::home)));
+    REQUIRE(menu->hovered_index() == 1);
+
+    REQUIRE(menu->on_key_event(key_down(KeyCode::enter)));
+    REQUIRE(got.has_value());
+    REQUIRE(*got == 2);
+}
+
+// The transport, not the handling. `on_key_event` has understood up/down
+// since the widget shipped, but BOTH hosts gate navigation keys on
+// `accepts_navigation_input()` -- the plugin editor at
+// plugin_view_host_mac.mm and the standalone at window_host_mac.mm -- and
+// ContextMenu inherited the base `false`. So a focused menu's arrow keys went
+// back to the DAW and the handler was never called. Every other keyboard case
+// in this file drives `on_key_event` directly and so cannot see that.
+TEST_CASE("ContextMenu claims navigation keys while it is open",
+          "[view][context-menu]") {
+    auto root = make_root();
+    std::optional<int> got;
+
+    auto* menu = ContextMenu::show(
+        root.get(), {kAnchorX, kAnchorY}, {{1, "First"}, {2, "Second"}},
+        [&](std::optional<int> id) { got = id; });
+
+    REQUIRE(menu->accepts_navigation_input());
+    // Control: a plain View in the same tree does not claim them, so the
+    // predicate is discriminating rather than universally true.
+    View plain;
+    REQUIRE_FALSE(plain.accepts_navigation_input());
+
+    REQUIRE(menu->on_key_event(key_down(KeyCode::escape)));
+    REQUIRE(got.has_value() == false);
+    // Dismissed: the menu is detached and destroyed by the close wrapper, so
+    // nothing is left in the tree to claim the keys. `menu` is dangling here
+    // by design -- do not dereference it; the tree is the observable.
+    REQUIRE(root->child_count() == 0);
+}
+
 TEST_CASE("ContextMenu keyboard skips disabled rows",
           "[view][context-menu]") {
     auto root = make_root();
