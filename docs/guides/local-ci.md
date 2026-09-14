@@ -1875,7 +1875,7 @@ silent(lane) := observed(lane)
 
 demand(lane, w) := jobs completed elsewhere within w carrying a label set
                    this lane is observed to serve
-                 + distinct (job name, runner) pairs completed elsewhere
+                 + distinct (job name, run) pairs completed elsewhere
                    within w for a job name only this lane is observed to run
 ```
 
@@ -1918,9 +1918,15 @@ Three smaller rules keep the count honest:
 - **Only a completion disowns a name.** A job still *running* on a sibling has
   not established that the name is shared. Counting it would hand any concurrent
   job a veto over the verdict for as long as it runs.
-- **The threshold counts distinct work, not rows.** A service record carries no
-  run id, so five reruns of one job on one runner are five rows and one job's
-  worth of demand. Displaced work is keyed by `(job name, runner)`.
+- **The threshold counts distinct work, not rows.** Five reruns of one job are
+  five rows and one job's worth of demand, so displaced work is keyed by
+  `(job name, run)`, falling back to the runner name when a payload carries no
+  run id. The run rather than the runner, because a hosted runner is named
+  `GitHub Actions <id>` with a fresh id per job: on exactly the runners
+  displaced work lands on, a runner-name key collapses nothing. The name rather
+  than the run alone, because one run holds many job definitions, and a whole
+  workflow rerouted off a lane at once is as many pieces of demand as it has
+  jobs.
 - **A runner outside the prefix map is named `off-fleet`.** It is where the work
   went, so it is the half of the proof that matters most, and it has no declared
   host by construction. Calling it `hosted` would be a guess, and the wrong one

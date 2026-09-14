@@ -177,6 +177,7 @@ class ServiceRecord:
     status: str
     completed_at: datetime | None
     name: str = ""
+    run_id: str = ""
 
     @property
     def self_hosted(self) -> bool:
@@ -497,6 +498,7 @@ def _service_record(job: dict[str, Any]) -> ServiceRecord | None:
         status=str(job.get("status", "")),
         completed_at=_parse_ts(completed) if completed else None,
         name=str(job.get("name", "")),
+        run_id=str(job.get("run_id", "") or ""),
     )
 
 
@@ -966,16 +968,21 @@ def classify_host_silence(
             elsewhere = {r.name for r in others if r.status == "completed"}
             owned_names = {r.name for r in completed} - elsewhere
 
-            # Keyed by (name, runner) so the threshold counts distinct work
-            # rather than rows: five reruns of one job on one runner are one
-            # job's worth of demand, not five.
+            # Keyed by (name, run) so the threshold counts distinct work
+            # rather than rows: five reruns of one job are one job's worth of
+            # demand, not five. The key has to be the run rather than the
+            # runner, because a hosted runner's name carries a fresh id per
+            # job -- and hosted runners are exactly where displaced work
+            # lands, so a runner-name key collapses nothing where it matters.
+            # The fallback to the runner name keeps a payload with no run ids
+            # counting the way it did before rather than counting rows.
             displaced: dict[tuple[str, str], ServiceRecord] = {}
             for r in records:
                 if (r.status == "completed" and r.completed_at
                         and r.completed_at > silence_cutoff
                         and r.name in owned_names
                         and not r.runner_name.startswith(prefix)):
-                    displaced.setdefault((r.name, r.runner_name), r)
+                    displaced.setdefault((r.name, r.run_id or r.runner_name), r)
 
             demand = sibling_demand + list(displaced.values())
             if len(demand) >= contract.host_demand_min_jobs:

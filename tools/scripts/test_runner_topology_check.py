@@ -1757,9 +1757,9 @@ def ago(hours, base=NOW):
 
 
 def job(runner_name, hours_ago, labels=None, status="completed",
-        conclusion="success", name="build", base=NOW):
+        conclusion="success", name="build", base=NOW, run_id=None):
     """One jobs-API job object, shaped exactly as the live endpoint returns."""
-    return {
+    payload = {
         "name": name,
         "status": status,
         "conclusion": conclusion,
@@ -1767,6 +1767,9 @@ def job(runner_name, hours_ago, labels=None, status="completed",
         "completed_at": None if status != "completed" else ago(hours_ago, base),
         "labels": list(GATE_LABELS if labels is None else labels),
     }
+    if run_id is not None:
+        payload["run_id"] = run_id
+    return payload
 
 
 def host_contract(**kw):
@@ -1996,10 +1999,11 @@ class TestHostSilenceDemandWitnesses(unittest.TestCase):
                    labels=PREAMBLE_LABELS, name=name)
 
     def elsewhere(self, count, name="resolve-provider", hours_ago=2.0,
-                  runner="hosted-runner-{i}"):
+                  runner="hosted-runner-{i}", run_id=None):
         """`count` of this lane's jobs, completing on a hosted runner."""
         return [job(runner.format(i=i), hours_ago, name=name,
-                    labels=["macos-15"])
+                    labels=["macos-15"],
+                    run_id=None if run_id is None else run_id.format(i=i))
                 for i in range(count)]
 
     def records(self, displaced=6, **kw):
@@ -2124,9 +2128,8 @@ class TestHostSilenceDemandWitnesses(unittest.TestCase):
 
     def test_the_threshold_counts_distinct_work_not_rows(self):
         # Five rows, one job, one runner: a matrix leg re-fired, or somebody
-        # hitting rerun four times. ServiceRecord carries no run id, so rows
-        # are all the checker has -- and five rows of the same work is one
-        # job's worth of demand, not five.
+        # hitting rerun four times. Five rows of the same work is one job's
+        # worth of demand, not five.
         reruns = self.records(displaced=5, runner="hosted-runner-0")
         found = self.lane(reruns)
         self.assertEqual([f.kind for f in found], ["host-idle"])
@@ -2135,6 +2138,55 @@ class TestHostSilenceDemandWitnesses(unittest.TestCase):
         # distinct pieces of work, and convicts.
         self.assertEqual([f.kind for f in self.lane(self.records(displaced=5))],
                          ["host-silent"])
+
+    def test_distinct_work_is_a_run_not_a_runner_name(self):
+        # A hosted runner is named "GitHub Actions <id>" with a fresh id per
+        # job, so five reruns of one job report five different runner names
+        # and a runner-name key collapses none of them -- on exactly the
+        # runners displaced work lands on. The run is what identifies the
+        # work, so five rows of one run count once and stay under the gate.
+        one_run = self.records(displaced=5, runner="GitHub Actions 100007{i}",
+                               run_id="34801701064")
+        found = self.lane(one_run)
+        self.assertEqual([f.kind for f in found], ["host-idle"])
+        self.assertIn("only 1 job(s)", found[0].detail)
+        # CONTROL: the same five distinctly-named runners in five distinct
+        # runs are five pieces of work, and convict.
+        five_runs = self.records(displaced=5,
+                                 runner="GitHub Actions 100007{i}",
+                                 run_id="3480170106{i}")
+        self.assertEqual([f.kind for f in self.lane(five_runs)],
+                         ["host-silent"])
+
+    def test_one_run_of_distinct_jobs_is_distinct_work(self):
+        # A run holds many job definitions, so collapsing by run alone would
+        # read a whole rerouted workflow -- every job this lane owns, moved
+        # off it at once -- as a single piece of demand. The name is the
+        # other half of the key for exactly that case.
+        names = ("resolve-provider", "classify", "protected-receipt-reuse",
+                 "seed-cache", "emit-manifest")
+        served = [self.preamble(26 + i, n) for i, n in enumerate(names)]
+        one_run = (served
+                   + busy_siblings("studio-11-", 6)
+                   + busy_siblings("m5-pulp-gate-01-", 6)
+                   + busy_siblings("m1-pulp-gate-01-", 3)
+                   + [job("GitHub Actions 1000071044", 2.0, name=n,
+                          labels=["macos-15"], run_id="34801701064")
+                      for n in names])
+        found = self.lane(one_run)
+        self.assertEqual([f.kind for f in found], ["host-silent"])
+        self.assertIn("5 a job only it is observed to run", found[0].detail)
+        # CONTROL: the same five rows under one name, one run, is one piece
+        # of work however many rows it takes, and stays under the gate.
+        same_name = (served
+                     + busy_siblings("studio-11-", 6)
+                     + busy_siblings("m5-pulp-gate-01-", 6)
+                     + busy_siblings("m1-pulp-gate-01-", 3)
+                     + [job("GitHub Actions 100007104%d" % i, 2.0,
+                            name="resolve-provider", labels=["macos-15"],
+                            run_id="34801701064")
+                        for i in range(5)])
+        self.assertEqual([f.kind for f in self.lane(same_name)], ["host-idle"])
 
     def test_a_lane_no_witness_can_reach_is_unmeasurable_not_idle(self):
         # No sibling serves a label set it serves, and every job name it ran
