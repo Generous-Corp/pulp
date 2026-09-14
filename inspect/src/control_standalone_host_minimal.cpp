@@ -146,6 +146,16 @@ create_standalone_control_author_hooks(format::Processor&) {
     return {};
 }
 
+bool install_standalone_sequencer_state_channel_factory(
+    StandaloneSequencerStateChannelFactory) noexcept {
+    return false;
+}
+
+std::shared_ptr<state::SequencerStateChannel>
+create_standalone_sequencer_state_channel(format::Processor&) {
+    return {};
+}
+
 bool install_standalone_runtime_evaluator_factory(
     StandaloneRuntimeEvaluatorFactory) noexcept {
     return false;
