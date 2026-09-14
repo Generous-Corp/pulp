@@ -275,6 +275,21 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # ctest label-exclusion guard: a Catch2 suite whose every registration
+    # carries a label the coverage policy excludes reaches neither lane that
+    # gates a PR. The required macos gate drops those labels with `-LE` and the
+    # diff-coverage lane drops them with `--label-exclude`, so the suite's cases
+    # are enforced by nothing while the lines they cover report as uncovered --
+    # the coverage gate calls the change untested and the required gate never
+    # runs the tests that test it. Nothing else detects this, because the gate
+    # that would complain is the gate the label removed. The selftest is the
+    # load-bearing half: it proves the shipped ledger is checked against a live
+    # scan rather than trusted, so a green run cannot come from an empty one.
+    add_test(NAME ctest-label-exclusion-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/ctest_label_exclusion_guard.py")
+    add_test(NAME ctest-label-exclusion-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_label_exclusion_guard.py")
+
     # GPU span categories: a span named `gpu_*` must be emitted under the `gpu`
     # category. The trace-SQL GPU queries select `category GLOB 'gpu*'`, so a
     # `gpu_*` span filed elsewhere is invisible to them rather than merely
