@@ -1665,6 +1665,13 @@ jobs:
       - name: Provision pinned trace_processor (self-hosted macOS)
         if: runner.os == 'macOS' && matrix.key == 'macos' && runner.environment == 'self-hosted'
         continue-on-error: true
+        # `pulp trace fetch` shells `curl -fL --retry 2` with no --max-time and
+        # no --connect-timeout, and this job declares no timeout-minutes of its
+        # own. A blackholed route would stall the serialized required macOS gate
+        # for the workflow default rather than fail. Bound it: a timed-out fetch
+        # is the same outcome as a failed one — the suite skips, and the
+        # non-run summary below records that it did.
+        timeout-minutes: 5
         shell: bash
         run: |
           set -uo pipefail
