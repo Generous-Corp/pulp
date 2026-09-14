@@ -235,6 +235,44 @@ context, and never execute the candidate's verifier as the authority.
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
 
+### A green ctest job proves nothing about a label its event excludes
+
+`build.yml` computes `label_exclude` from the event, and the two values are far
+apart. A `push` (and the nightly) excludes only `validation`. A `pull_request`,
+`workflow_dispatch`, or **`merge_group`** excludes
+`validation|slow|performance|bench|quality-lab`. So the lane that reports on a
+queued merge deliberately does not run the CPU-budget, benchmark, or `slow`
+tests at all — a perf ratio cannot gate a merge on a runner that correctly hosts
+two concurrent build VMs.
+
+The trap is that this is invisible in the result. A merge-group Linux job prints
+
+```
+100% tests passed, 0 tests failed out of 20587
+```
+
+which reads as total coverage, and the excluded tests leave no line behind
+saying they were skipped. Three tests under investigation as live main failures
+appeared 1, 0 and 0 times in that job's 90k-line log, against 8, 2 and 4 hits
+for the identical greps on a `push`-event log from the same day — and the single
+hit was the workflow step's own comment text, not a test result.
+
+Before reading any ctest job as evidence about a specific test, check the event
+and the label:
+
+```sh
+ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>" --jq .event   # push? merge_group?
+grep -a "label_exclude=" <job.log> | tail -2                          # what it actually excluded
+grep -ac "<test-name>" <job.log>                                      # 0 means NOT RUN, not passed
+```
+
+A zero from that last grep is the instrument, not the finding. Pair it with the
+same grep against a `push`-event log, which must return non-zero: if both are
+zero the test name is wrong, and if only the first is zero the test was excluded
+and the green job says nothing about it. To confirm a `slow`/`performance` fix
+actually landed, read the `push` run created by the merge commit, never the
+merge-group run that admitted it.
+
 ### An advisory check that names a main-breaking defect is worse than none
 
 `api-contracts.yml` runs the public-header doc-contract pass on its own
@@ -443,6 +481,30 @@ what the script asserts after hydrating, and what its
 `gpu-provenance-hydration: PASS total=<n> fetched=<n> cap=128` line reports. A
 guard written against the shallow flag alone passes on a hydrated clone and on a
 warm dirty one alike.
+
+#### What the shallow checkout looks like in the log
+
+A shallow checkout does not announce itself. What a failing lane prints is a
+test error, and the nine GPU selftests that walk history print four
+different-looking ones — a missing revision, a `git log` that returns nothing, an
+empty provenance set, and:
+
+```
+error: pathspec 'HEAD^' did not match any file(s) known to git
+```
+
+That last line is the unambiguous one. A repository with exactly one commit has
+no `HEAD^`, so a lane emitting it has a depth-1 `actions/checkout` and is missing
+the hydration step above — it is not a defect in the test that printed it. Check
+the lane's checkout before reading any of the other three as a real failure; a
+single missing hydration step accounts for all of them at once.
+
+Hydration is not a bounded fetch of the named revisions. The script fetches with
+`--unshallow`, which reconnects the entire event history, so every ancestor is
+reachable afterwards, not just the pinned set. `MAX_COMMITS` bounds the
+*verification* set — the revisions the script proves resolvable and ancestral —
+and says nothing about fetch depth. A selftest that walks `HEAD^` is therefore
+covered by the same step that covers one naming an explicit SHA.
 
 ### Browser-source fidelity is a required dependency, not a skip
 
@@ -8611,3 +8673,78 @@ Verify the attestation is actually running on a host rather than assuming it:
 one installed — a distinct condition from stale and from dead, and the one a
 prior incident collapsed when a behind-the-times checker reported every lane on a
 healthy host as missing its heartbeat.
+
+## A CI log and a local worktree each date from somewhere, and neither says so
+
+Two readings that look like live findings are routinely measurements of the
+past. Both produced a confident, wrong "this is broken on main" during the same
+afternoon of GPU-lane triage, and both are cheap to date before believing.
+
+**A downloaded job log is a snapshot of the tree at that run's head SHA.** It
+keeps reading as current long after the defect it shows has landed a fix. Before
+attributing any failure in a log to live code, resolve the run's head and test
+whether the candidate fix is already in it:
+
+```sh
+run_sha=$(ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>" --jq .head_sha)
+git merge-base --is-ancestor <fix-commit> "$run_sha" \
+  && echo "log postdates the fix — the failure is live" \
+  || echo "log predates the fix — re-run before triaging"
+git log --oneline "$run_sha"..origin/main   # everything the log cannot know about
+```
+
+**A repo verifier run from a worktree behind main measures the OLD verifier.**
+This is the sharper trap, because the script and the files it reads come from
+different times: the worktree's copy of the script judges files whose current
+state main's copy judges differently, and the mismatch reads as a real failure in
+the files. `verify_sampler_interpolation_benchmark.py` hashes a declared list of
+source paths; a worktree missing the commit that added an eighth path computed a
+digest that could not match the recorded evidence, on a tree where every declared
+file was byte-identical to main.
+
+The tell is an impossible result: the digest still mismatched at the very commit
+that recorded it. When a verifier disagrees with its own committed evidence at
+the evidence commit, suspect the verifier's *version*, not the data. Confirm by
+checking the script's own history for a commit you do not have:
+
+```sh
+git log --oneline origin/main -- tools/scripts/<verifier>.py
+git merge-base --is-ancestor <that-commit> HEAD || echo "your copy is older than main's"
+```
+
+Re-measure against `origin/main`'s own copy rather than the worktree's — extract
+the constant from `git show origin/main:<script>` and hash `git show
+origin/main:<path>` blobs — before filing anything. Four separate carried-forward
+"open defects" were already fixed on main by the time they were re-examined; each
+would have cost a PR.
+
+## The RTSan lane fails on its runner, not on its tests
+
+`sanitizers.yml`'s `rtsan` job is named `RealtimeSanitizer (Linux x86_64, Clang
+18)` and installs its toolchain with `apt.llvm.org`'s `llvm.sh`. It is also the
+one sanitizer whose selector is resolved *only* on `workflow_dispatch` — on every
+other event the job's `if:` skips it, so the repo variable
+`PULP_SANITIZER_RTSAN_RUNS_ON_JSON` takes effect exactly when the job runs and
+never when anything would notice it being wrong. That variable has held
+`"macos-15"` since May 2026, so every dispatch has routed a Linux-only job onto a
+macOS image and died three retries deep in `Install Clang 18`:
+
+```
+./llvm.sh: line 44: lsb_release: command not found
+##[error]Install Clang 18 failed after 3 attempts (exit 127)
+```
+
+Read that as an infrastructure fault, never as a test result — it fails before
+CMake configures, so the job carries zero information about the suite, including
+the GPU provenance selftests it would otherwise run. The three macOS sanitizers
+are unaffected: their selectors resolve independently, which is why the resolver
+deliberately skips RTSan's resolution on non-dispatch events rather than letting
+a bad RTSan variable fail `resolve-runners` and take ASan/TSan/UBSan down with
+it.
+
+Restoring the documented `ubuntu-24.04` default does not make the lane green. The
+job's own comment records that the `apt.llvm.org` Clang 18 package for
+ubuntu-24.04 ships without the compiler-rt realtime runtime, so
+`-fsanitize=realtime` is rejected at configure time. The lane is advisory and
+dispatch-only for that reason; fixing the variable moves the failure from the
+install step to the configure step and nothing else.

@@ -5960,6 +5960,84 @@
           "rationale": "No installed design-time capability is registered or widened; the parameter is consumed entirely by CMake during configure."
         }
       }
+    },
+    {
+      "id": "clap-bundle-package-declaration",
+      "title": "Contents/PkgInfo written into the CLAP bundle pulp_add_plugin() produces, declaring it a package",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "7ec955f8-c18d-4526-b728-d7e6061ed48c",
+      "owned_paths": [
+        "tools/cmake/PulpPluginFormats.cmake",
+        "test/cmake/test_bundle_pkginfo_call_sites.cmake",
+        "test/cmake/cmake_smoke_tests.cmake",
+        "tools/scripts/versioning.json",
+        "docs/status/sequencer-exposure.json"
+      ],
+      "evidence": [
+        {
+          "path": "tools/cmake/PulpPluginFormats.cmake",
+          "needles": [
+            "$<TARGET_BUNDLE_DIR:${target}_CLAP>/Contents/PkgInfo",
+            "Writing PkgInfo into ${name}.clap bundle"
+          ]
+        },
+        {
+          "path": "test/cmake/test_bundle_pkginfo_call_sites.cmake",
+          "needles": [
+            "bundle_pkginfo_call_sites_verified=true"
+          ]
+        },
+        {
+          "path": "test/cmake/cmake_smoke_tests.cmake",
+          "needles": [
+            "cmake-bundle-pkginfo-call-sites"
+          ]
+        },
+        {
+          "path": "tools/scripts/versioning.json",
+          "needles": [
+            "tools/cmake/PulpPluginFormats.cmake"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "pulp_add_plugin() builds the CLAP bundle for every SDK consumer, and on Apple it now writes the BNDL???? package declaration to Contents/PkgInfo, byte-identical to what the VST3 and AU paths in the same installed helper already emit: the eight declaration characters plus the newline `cmake -E echo` appends, nine bytes on disk. Measured on bundles built before this change, a linked .vst3 and .component each carry that exact PkgInfo while the .clap beside them carries none. Before this a Pulp-built .clap carried no declaration, so Launch Services reported it as public.folder while the .vst3 from the same build reported com.apple.generic-bundle: Finder let the bundle be browsed into and taken apart, and it could never render a bundle icon. The omission bites CLAP hardest because .vst3 and .component are extensions Launch Services already recognises, whereas .clap it does not recognise at all, leaving PkgInfo as the only signal that the directory is one opaque artifact. The scope is deliberately narrow and the limits are worth stating plainly: it is Apple-only, sitting inside the helper's existing if(APPLE) branch; it changes Finder and Launch Services semantics only -- a CLAP with no PkgInfo already loaded, hosted, validated and signed identically, and still does, so nothing here fixes a loading or hosting defect; and it applies to newly produced bundles, retrofitting nothing already built. No consumer CMake change is required and no existing call site is altered. The same change registers PulpPluginFormats.cmake as an SDK version-trigger path, which it was not: the helper that emits every plug-in bundle could previously be changed without the bot assigning an SDK version, so a consumer had no version boundary to pin this behaviour to.",
+          "evidence": [
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpPluginFormats.cmake",
+              "needles": [
+                "$<TARGET_BUNDLE_DIR:${target}_CLAP>/Contents/PkgInfo"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "A POST_BUILD step inside a CMake format helper. It registers no Timeline command, verb, argument or handler, and produces nothing the offline CLI reads -- PkgInfo is interpreted by Launch Services, never by pulp seq."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No Timeline MCP tool, schema or handler is added or widened. The write executes once while a consumer builds their plug-in and is not reachable from an MCP session at all."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The declaration is fixed at build time and nothing reads them at run time -- not the plug-in, not the host, not Pulp. There is no parameter, operation or observable state here to control, automate or inspect."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No installed design-time capability is registered, widened or removed. The change is consumed entirely by CMake while a consumer builds, so no agent-facing manifest entry describes or admits it."
+        }
+      }
     }
   ],
   "tombstones": []

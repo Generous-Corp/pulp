@@ -187,6 +187,19 @@ set_tests_properties(cmake-runtime-staging-call-sites PROPERTIES
     LABELS "cmake;sdk;runtime;lint"
     TIMEOUT 30)
 
+# SOURCE LINT: every macOS plug-in bundle helper writes Contents/PkgInfo, so a
+# produced bundle is declared a package rather than a browsable folder. Needed
+# because the omission is invisible from inside the build — a bundle missing
+# PkgInfo links, loads, validates and hosts identically, and differs only in
+# Finder — so a format that forgets it ships that way unnoticed.
+add_test(NAME cmake-bundle-pkginfo-call-sites
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_bundle_pkginfo_call_sites.cmake)
+set_tests_properties(cmake-bundle-pkginfo-call-sites PROPERTIES
+    LABELS "cmake;sdk;bundle;lint"
+    TIMEOUT 30)
+
 # Installed-SDK runtime-sidecar proof (WAH-3). Installs this build as an SDK,
 # configures and BUILDS tools/validation/sdk-smoke against it with Standalone +
 # VST3 + CLAP, and lets the SDK's own pulp_verify_runtime_dependencies_staged()

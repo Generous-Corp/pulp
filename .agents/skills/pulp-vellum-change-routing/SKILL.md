@@ -293,6 +293,45 @@ source commit, because the pin-refresh commit touches only paths the inventory
 excludes. So the cascade above terminates after exactly one round — a second
 regeneration is not needed, and running one only produces an empty diff.
 
+## Merging `origin/main` preserves the pin; rebasing onto it orphans it
+
+A receipt names one `source_commit`, and `check` requires that commit to be an
+ancestor of HEAD. A **merge** of `origin/main` keeps the pinned commit in the
+history, so the receipt stays valid and needs no repair. A **rebase**, an
+`--amend`, or a squash rewrites it, and the receipt now names a commit that no
+longer exists on the branch.
+
+The repair that suggests itself is the one that cannot converge: regenerating
+writes the commit the regeneration is about to create, which is not an ancestor
+of HEAD either, so the next `check` fails the same way. Record a commit that
+**already exists** — the newest commit reachable from HEAD that touched a pinned
+path. `resolve_source_commit` names that commit in the failure text, so the
+error is the answer rather than the start of a search:
+
+```
+source commit <sha> is not an ancestor of HEAD; identities generated from it
+cannot satisfy the handoff validator. A rebase, amend, or squash of the pinned
+commit is the usual cause; merging origin/main preserves the pin where rebasing
+onto it does not. Record a commit that already exists rather than the one
+regeneration is about to create, such as <sha>
+```
+
+Two mechanics that cost time on the way to that error:
+
+- **`check | tail` reports the pipeline's status, not the checker's.** A run
+  that prints `exit=0` under a pipe may have exited 1. Read `${PIPESTATUS[0]}`,
+  or drop the pipe.
+- **`write --source-commit` refuses on an unclean canonical path** (rc=2). So a
+  repair cannot precede the merge commit that resolves the conflict: take
+  `--theirs` on the generated ledgers, commit the merge, and regenerate from the
+  merge sha.
+
+A receipt conflict is also not always pointer churn. One case reported
+`102 rows unchanged` while `handoff_sha256` moved to a value matching **neither**
+parent — the ledger bytes were equal and the receipt hash was not, which means
+the hash was computed over a tree that no longer existed. Regenerate from the
+merge sha rather than picking a side.
+
 ## The watch-family selectors match PATHS, so a one-line include can demand an event
 
 `tools/scripts/vellum_expansion_watch_check.py` decides which capability
