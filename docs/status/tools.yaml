@@ -549,6 +549,18 @@ tools:
     skill: screenshot
     docs: guides/testing-advanced.md
 
+  - name: visual-harness-raster-digest
+    path: tools/harness/visual/raster.py
+    category: harness
+    use_when: "A `kind: render` golden mismatches and you need to know WHICH host's bytes moved."
+    invocation: python3 tools/harness/visual/raster.py --fixture <fixture.json>
+    inputs: "A visual-harness `kind: render` fixture, plus the pinned skia-python wheel."
+    outputs: This host's platform key, byte count and SHA-256, printed whether the comparison passes or fails, so a mismatch is attributable to a host and a value.
+    caveat: Reports a digest and adjudicates nothing — it holds no expectation, so it can never fail. It rasterizes through the pinned skia-python wheel, NOT through `pulp::view::render_to_png`, so its bytes say nothing about what the C++ renderer draws. Without the pinned wheel it exits non-zero rather than degrading to another rasterizer.
+    availability: always
+    skill: screenshot
+    docs: guides/testing-advanced.md
+
   - name: gpu-trace-overhead-acceptance
     path: tools/scripts/gpu_trace_overhead_acceptance.py
     category: harness
