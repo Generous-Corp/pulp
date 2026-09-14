@@ -8,10 +8,16 @@ discovery; never guess an instance, choose "newest", or add a host/port/raw
 protocol fallback.
 
 ```bash
+pulp control capabilities --json
 pulp control profiles --json
 pulp control instances --json
 pulp control status --instance "$INSTANCE_ID" --explain --json
 ```
+
+`capabilities` needs no broker and no live instance: it prints the frozen
+registry, including each operation's gating capability and both JSON Schema
+bodies, so a request can be built before an instance exists. It is a catalog,
+never a grant.
 
 For a typed operation, inspect the exact live instance and request only that
 operation. Do not substitute a design-time agent capability row for runtime

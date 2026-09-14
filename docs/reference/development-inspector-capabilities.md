@@ -42,6 +42,7 @@ default. Capability dispatch is fail-closed before an executor runs.
 The profile columns below are static policy membership, not current runtime
 availability.
 
+<!-- BEGIN GENERATED capability-matrix (python3 tools/scripts/inspector_truth_check.py --write) -->
 | Canonical capability (legacy spelling) | `observe` | `develop` | Current reality |
 |---|---:|---:|---|
 | `dev.pulp.instance/read@1` (`session.describe`) | yes | yes | Broker-owned T0/T1 executor returns the exact active registration, tier, publication generation, build/artifact identity, liveness generation, and declared capabilities after canonical admission |
@@ -66,10 +67,50 @@ availability.
 | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | yes | yes | Main-thread executor copies one `state::SequencerStateChannel` UI-side triple-buffer snapshot and seqlock playhead out of the channel before returning; it never touches the audio-side publication methods and never drains the applied-edit queue the owning UI consumer needs |
 | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | no | yes | Grant-controlled main-thread executor submits one bounded typed step edit into the single-producer command FIFO; a full FIFO refuses with a retryable `ResourceExhausted` rather than blocking or dropping, and no audio-thread method is reachable from the operation |
 | `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
+<!-- END GENERATED capability-matrix -->
 
 `off` grants nothing. `custom` starts from an empty exact allow-list. `develop`
 deliberately excludes `runtime.eval`; no profile or target declaration implies
 that high-risk authority.
+
+## Typed operations
+
+Each row below is one typed operation the frozen control registry declares in
+`inspect/src/control_manifest.cpp`, paired with the capability contract that
+gates it and the evidence kind a successful call returns. A capability may gate
+more than one operation, so documenting the capability alone does not describe
+the callable surface. Input and output JSON Schema bodies stay in the registry;
+`pulp control capabilities --json` prints the same inventory offline.
+
+A listed operation is a frozen contract, never a grant. Effective authority
+still requires every permission term, and an operation whose capability has no
+executor on the target host fails closed.
+
+<!-- BEGIN GENERATED operation-matrix (python3 tools/scripts/inspector_truth_check.py --write) -->
+| Typed operation | Gating capability (legacy spelling) | Result |
+|---|---|---|
+| `dev.pulp.instance/read@1` | `dev.pulp.instance/read@1` (`session.describe`) | `response` |
+| `dev.pulp.session/control@1` | `dev.pulp.session/control@1` (`session.control`) | `receipt` |
+| `dev.pulp.state/read@1` | `dev.pulp.state/read@1` (`state.read`) | `response` |
+| `dev.pulp.gpu/health.read@1` | `dev.pulp.gpu/health.read@1` (`gpu.health.read`) | `response` |
+| `dev.pulp.render/offline@1` | `dev.pulp.render/offline@1` (`render.offline`) | `artifact` |
+| `dev.pulp.ui/observe@1` | `dev.pulp.ui/observe@1` (`ui.read`) | `artifact` |
+| `dev.pulp.diagnostics/read@1` | `dev.pulp.diagnostics/read@1` (`diagnostics.read`) | `artifact` |
+| `dev.pulp.logs/read@1` | `dev.pulp.logs/read@1` (`logs.read`) | `artifact` |
+| `dev.pulp.ui/capture@1` | `dev.pulp.ui/capture@1` (`capture.image`) | `artifact` |
+| `dev.pulp.ui/input@1` | `dev.pulp.ui/input@1` (`ui.input`) | `receipt` |
+| `dev.pulp.trace/control@1` | `dev.pulp.trace/control@1` (`trace.control`) | `receipt` |
+| `dev.pulp.trace/session-control@1` | `dev.pulp.trace/session-control@1` (`trace.session.control`) | `response` |
+| `dev.pulp.state/parameter-gesture@1` | `dev.pulp.state/parameter-gesture@1` (`state.write`) | `receipt` |
+| `dev.pulp.test/input@1` | `dev.pulp.test/input@1` (`test.input`) | `receipt` |
+| `dev.pulp.authoring/tweaks@1` | `dev.pulp.authoring/tweaks@1` (`authoring.tweaks`) | `receipt` |
+| `dev.pulp.telemetry/subscribe@1` | `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | `stream` |
+| `dev.pulp.runtime/reload@1` | `dev.pulp.runtime/reload@1` (`runtime.reload`) | `receipt` |
+| `dev.pulp.runtime/evaluate@1` | `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | `receipt` |
+| `dev.pulp.artifact/read@1` | `dev.pulp.artifact/read@1` (`artifact.read`) | `artifact-chunk` |
+| `dev.pulp.sequencer/state.read@1` | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | `response` |
+| `dev.pulp.sequencer/state.edit@1` | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | `receipt` |
+<!-- END GENERATED operation-matrix -->
 
 ## Canonical control foundation
 
