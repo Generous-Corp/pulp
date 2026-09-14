@@ -2159,6 +2159,31 @@ bisectable.
   `// thread-assert:allow`. Runs as the `thread-safe-assertions` ctest case and
   in `gates.sh`. When graduating any required lane to VMs, expect this class of
   latent UB to surface — fix at the source, don't suppress.
+- **ctest label-exclusion guard (`ctest_label_exclusion_guard.py`).** A Catch2
+  suite whose *every* ctest registration carries a label in
+  `PULP_COVERAGE_CTEST_LABEL_EXCLUDE` (`validation|slow|performance|bench|quality-lab`,
+  defined in `scripts/coverage_ctest_policy.sh`) is enforced by nothing: the
+  required `macos` gate drops those labels with `ctest -LE "$label_exclude"`
+  (`build.yml`), and the diff-coverage lane drops the same list with
+  `--label-exclude` (`tools/scripts/local_diff_cover.sh`). Both lanes are
+  individually correct and together they read as a *missing test* rather than a
+  missing lane — the suite never runs on the merge-blocking gate, and its lines
+  report 0% covered, so the obvious next move is to write a test that already
+  exists. Nothing else detects it, because the gate that would complain is the
+  gate the label removed. The fix is the TEST_SPEC split already used by
+  `test/cmake/character_delay_tests.cmake`: register the executable once with
+  `TEST_SPEC "~[slow]"` and **no** label (reaches the gate and coverage), and
+  again with `TEST_SPEC "[slow]" TEST_PREFIX "slow::" LABELS slow`. Tag the slow
+  cases, not the fast ones, so a future case defaults to the enforced lane. The
+  guard reads the excluded-label list out of the policy script rather than
+  copying it, so it cannot drift from what the lanes apply. Known blind targets
+  are frozen in `tools/scripts/ctest_label_exclusion_guard.json` with a per-entry
+  reason; the guard fails on a *stale* entry too, so the ledger cannot rot.
+  Runs as the `ctest-label-exclusion-guard` ctest (plus
+  `ctest-label-exclusion-guard-selftest`) and in `gates.sh` — whole-tree there,
+  not diff-scoped, because the condition is a property of a target's entire
+  registration set and the rescuing sibling can live in a manifest the push never
+  touched.
 - **Release builds must pass `-DPULP_BUILD_EXAMPLES=OFF`.** The
   `pulp-design-tool` example hard-fails CMake configure when `PULP_HAS_SKIA`
   is FALSE (belt-and-suspenders, code 78). `sign-and-release.yml` builds on a
