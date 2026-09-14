@@ -4674,6 +4674,30 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
    > pulp import-design --from X --file input \
    >     --validate --reference source.png --fail-below 85
    > ```
+   >
+   > **`--validate` with no `--reference` reaches no verdict at all**, and says
+   > so. It renders, has nothing to compare the render against, and prints:
+   > ```text
+   > Validation: SKIPPED (no reference image)
+   >   NOTE: --validate rendered the generated JS but had nothing to compare it
+   >   against, so no verdict was reached. A render is not a pass. ...
+   > ```
+   > The exit code stays 0 in that state for compatibility with existing
+   > callers, so the printed verdict line is the only thing separating it from a
+   > real pass. Three outcomes, not two: PASS, NEEDS REVIEW, SKIPPED.
+   >
+   > **`--fail-on-unvalidated` turns that skip into exit 6.** Reach for it in a
+   > lane that must not accept "it rendered" as evidence. 6 is deliberately not
+   > 5: 5 means a comparison was made and missed the bar, 6 means nothing was
+   > measured. The flag gates the validation pass, so it requires `--validate`
+   > and exits 2 when named without one — a gate against unvalidated runs that
+   > itself never runs is the false green it exists to prevent. `--reference`
+   > and `--dump-layout` both turn validation on inside the argument parser, so
+   > pairing either with `--fail-on-unvalidated` is accepted:
+   > ```bash
+   > # render-only lane that refuses to look like a pass
+   > pulp import-design --from X --file input --validate --fail-on-unvalidated
+   > ```
 
 4. **Review the diff image** — red highlights show differences
 
@@ -6919,3 +6943,59 @@ pass. Patching a name that does not exist leaves the count at zero on both
 sides, the test passes, and that reads as "the test does not cover this" — a
 dead instrument reported as a finding. The script refuses that case outright
 rather than letting it read as a verdict.
+
+## A `vm` sandbox is a second realm, and the entry notices
+
+Driving the emitted runtime through `vm.createContext` is the only way to test
+what the generator actually ships (above), but the sandbox is a **separate
+JavaScript realm** with its own intrinsics. Two consequences bit a canvas
+owner-resolution test hard enough to be worth writing down, and both fail in the
+direction that reads as success.
+
+**`instanceof` is realm-sensitive, and the entry gates on it.** The emitted
+runtime collects its callback registry with
+`[g.__pulpReactEventCallbacks__, globalThis.__pulpReactEventCallbacks__].filter(map => map instanceof Map …)`.
+A `Map` constructed in the host realm is not an instance of the sandbox's `Map`,
+so that filter silently drops it, `callbackMaps` is empty, and the whole
+behavior-owner cascade — ancestor walk, gesture-channel ownership, geometric
+tiebreak — returns `''` for every canvas. Nothing throws. Positive assertions
+fail with a confusing empty string, but **negative assertions pass vacuously**:
+a case asserting that keyboard and focus handlers do *not* claim a canvas went
+green while measuring nothing at all. Construct the registry **inside** the
+sandbox from plain data:
+
+```js
+sandbox.__pulpCallbackKeys__ = ['btn:click', 'pad:pointerdown'];
+vm.runInContext(
+  'globalThis.__pulpReactEventCallbacks__ = ' +
+  'new Map(__pulpCallbackKeys__.map(key => [key, () => {}]));' + source,
+  sandbox, { filename: 'materialized-entry.js' });
+```
+
+The general rule: pass **primitives and plain data** across the boundary and
+build anything the entry type-checks (`Map`, `Set`, `Array`, `Error`) on the far
+side.
+
+**`node:assert/strict`'s `deepEqual` compares prototypes.** An array or object
+the sandbox produced is not `instanceof` the host `Array`/`Object`, so
+`assert.deepEqual([...ready], [false, true])` against a sandbox-owned array
+fails with `Values have same structure but are not reference-equal` and prints
+two *visually identical* values — which reads as a harness bug, not a realm
+boundary. Spread anything crossing out: `[...sandbox.arr]`, `{ ...sandbox.obj }`.
+
+**Assert the entry published its entry points before asserting anything else.**
+A module that threw partway through evaluation leaves every later assertion
+unreached while the run still looks clean. One line buys the whole file:
+
+```js
+assert.equal(typeof sandbox.__pulpBindMaterializedCanvases__, 'function',
+  'entry did not evaluate far enough to publish the canvas binder');
+```
+
+**A fixture with no bindings measures nothing.** `canvasBindings: []` skips the
+cascade entirely and leaves every counter at zero, which is indistinguishable
+from a perfect score. Pass a non-empty binding table, and break-confirm each
+clause: the cascade's clauses overlap, so a case with a *single* registered
+handler owner is answered identically by the ancestor walk and by the later
+single-owner shortcut — break the walk and the test still passes. Registering a
+second, unrelated owner is what makes such a case falsifiable.

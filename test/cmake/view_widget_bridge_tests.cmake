@@ -20,12 +20,22 @@ pulp_add_test_suite(pulp-test-widgets-label LIBRARIES pulp::view)
 # Hot-reload tests
 add_executable(pulp-test-hot-reload test_hot_reload.cpp)
 target_link_libraries(pulp-test-hot-reload PRIVATE pulp::view Catch2::Catch2WithMain)
-# `slow`: each HotReloader scenario sleeps on file-watcher
-# debounce + filesystem mtime resolution (~1-1.5 sec each).
+# Registered twice. The `[slow]` scenarios each wait on file-watcher debounce
+# plus filesystem mtime resolution (~1-1.5 sec apiece), so they carry the
+# `slow` label that both the required macOS gate and the diff-coverage lane
+# exclude. The rest run in milliseconds and stay unlabelled so they reach
+# both. Tagging the slow cases rather than the fast ones is deliberate: an
+# untagged future case lands on the enforced lane instead of vanishing from it.
 catch_discover_tests(pulp-test-hot-reload
+    TEST_SPEC "~[slow]"
     PROPERTIES
-        RESOURCE_LOCK hot-reload-file-watcher
-        LABELS slow)
+        RESOURCE_LOCK hot-reload-file-watcher)
+catch_discover_tests(pulp-test-hot-reload
+    TEST_SPEC "[slow]"
+    TEST_PREFIX "slow::"
+    LABELS slow
+    PROPERTIES
+        RESOURCE_LOCK hot-reload-file-watcher)
 
 # The model/provider registrations in this owner file are intentionally visible
 # when the optional Inspector component is disabled. Inspector-only fixtures in
@@ -523,6 +533,14 @@ target_link_libraries(pulp-test-control-main-thread-executor PRIVATE
     pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-main-thread-executor
     PROPERTIES LABELS "inspect;control;main-thread;executor")
+
+add_executable(pulp-test-control-sequencer-state-executor
+    test_control_sequencer_state_executor.cpp)
+target_link_libraries(pulp-test-control-sequencer-state-executor PRIVATE
+    pulp::inspect-runtime pulp::inspect-control pulp::state pulp::events
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-sequencer-state-executor
+    PROPERTIES LABELS "inspect;control;sequencer;main-thread;mutation")
 
 add_executable(pulp-test-control-state-write-executor
     test_control_state_write_executor.cpp)

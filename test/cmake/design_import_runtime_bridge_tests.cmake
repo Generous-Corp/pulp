@@ -205,12 +205,13 @@ catch_discover_tests(pulp-test-widget-promotion
 # WidgetBridge to evaluate the same prelude stack the runtime ships.
 add_executable(pulp-test-web-compat-react-shims test_web_compat_react_shims.cpp)
 target_link_libraries(pulp-test-web-compat-react-shims PRIVATE pulp::view Catch2::Catch2WithMain)
-# Bound-pump test runs the 1M-job cap; budget headroom for slow
-# CI runners and sanitizer builds. Default discover timeout is too tight
-# when a regression of the bound would hang indefinitely. Other shim
-# scenarios in this binary stay in fast-CI — they're cheap and
-# important — so this binary is *not* labeled `slow` even though one
-# of its tests pays a 1-3 sec wall cost.
+# Bound-pump test runs the 1M-job cap; budget headroom for slow CI runners.
+# Default discover timeout is too tight when a regression of the bound would
+# hang indefinitely. Instrumented builds get their multiplier from the resolver
+# rather than from padding baked into this number. Other shim scenarios in this
+# binary stay in fast-CI — they're cheap and important — so this binary is *not*
+# labeled `slow` even though one of its tests pays a 1-3 sec wall cost.
+pulp_scaled_test_timeout(_pulp_react_shims_timeout 180)
 catch_discover_tests(pulp-test-web-compat-react-shims
-    PROPERTIES TIMEOUT 180
+    PROPERTIES TIMEOUT "${_pulp_react_shims_timeout}"
 )

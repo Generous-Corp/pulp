@@ -78,7 +78,13 @@ bool subtree_contains_view(View& node, const View* target) {
 // Element.prototype._registerNativeEvent does for addEventListener
 // callers, but on the lower-level `on()` channel that @pulp/react and
 // other native bridges use directly.
-static const char* kJSPreamble = R"(
+// MSVC caps a single string literal at 16380 bytes (C2026), and this preamble
+// grew past it, so it is stored in two parts and joined at the call site.
+// The ARM64 cross-compiler enforces the cap where the x64 host compiler does
+// not, so an over-long preamble breaks only the windows-arm64 build. The split
+// point is arbitrary and only has to avoid cutting a token; keep each part well
+// under the cap when adding to the preamble.
+static const char* kJSPreamblePart1 = R"(
 var __callbacks__ = {};
 var __nativeRegistered__ = {};
 var __pulpEventPropagation__ = {};
@@ -308,6 +314,9 @@ function __dispatch__(id, eventName) {
         }
     }
 }
+)";
+
+static const char* kJSPreamblePart2 = R"(
 function __ensureNativeRegistered__(id, group) {
     var key = id + ':' + group;
     __nativeRegistered__[key] = true;
@@ -321,6 +330,28 @@ function __ensureNativeRegistered__(id, group) {
         registerGesture(id);
     } else if (group === 'wheel' && typeof registerWheel === 'function') {
         registerWheel(id);
+    } else if (group === 'contextmenu' && typeof registerContextMenu === 'function') {
+        // registerContextMenu evaluates `<cb>(x, y)`, so `cb` has to be an
+        // EXPRESSION THAT YIELDS A FUNCTION. web-compat passes the call
+        // `__dispatch__('id', 'contextmenu', 0)` instead: its arguments are
+        // evaluated -- which dispatches, but with a literal 0 where the event
+        // belongs -- it returns undefined, and the appended (x, y) then throws
+        // a TypeError that safe_dispatch_eval swallows. The press coordinates
+        // were discarded on that path. The IIFE below receives them.
+        //
+        // The point arrives in the widget's LOCAL space. clientX/clientY are
+        // rebased through getLayoutRect so they land in whatever space
+        // getBoundingClientRect() reports, which makes the idiomatic
+        // `e.clientX - el.getBoundingClientRect().left` cancel exactly rather
+        // than depending on the two agreeing by luck. offsetX/offsetY keep the
+        // local point, matching pointer_payload's split.
+        registerContextMenu(id, '(function(x,y){'
+            + 'var r=(typeof getLayoutRect===\'function\')?getLayoutRect(\'' + id + '\'):null;'
+            + '__dispatch__(\'' + id + '\',\'contextmenu\',{'
+            + 'clientX:(r&&typeof r.left===\'number\'?r.left:0)+x,'
+            + 'clientY:(r&&typeof r.top===\'number\'?r.top:0)+y,'
+            + 'offsetX:x,offsetY:y,button:2,buttons:2,'
+            + 'pointerType:\'mouse\',isPrimary:true});})');
     }
 }
 function on(id, eventName, fn) {
@@ -343,6 +374,17 @@ function on(id, eventName, fn) {
         // critical for trackpad zoom on any wrapper div that subscribes via
         // 'wheel'.
         __ensureNativeRegistered__(id, 'wheel');
+    } else if (eventName === 'contextmenu') {
+        // Context-menu subscriptions route through on(id, 'contextmenu', fn):
+        // React's onContextMenu prop reaches here via prop-applier, and
+        // web-compat's addEventListener('contextmenu') reaches here too.
+        // Without this case the callback is stored in __callbacks__ and
+        // registerContextMenu(id, ...) is never invoked, so
+        // View::on_context_menu stays null and the platform right-click
+        // (rightMouseDown: -> route_context_press -> dispatch_context_menu)
+        // finds no handler and returns false. Same shape, and the same class
+        // of defect, as the wheel case above.
+        __ensureNativeRegistered__(id, 'contextmenu');
     }
 }
 )";
@@ -480,7 +522,8 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     // most as long as the bridge.
     repaint_callback_ = [&root] { root.request_repaint(); };
     register_api();
-    eval_or_throw(engine_, "kJSPreamble", kJSPreamble);
+    eval_or_throw(engine_, "kJSPreamble",
+                  std::string(kJSPreamblePart1) + kJSPreamblePart2);
     eval_or_throw(engine_, "css_colors", preludes::css_colors);
     eval_or_throw(engine_, "css_parser", preludes::css_parser);
     eval_or_throw(engine_, "web_compat_element", preludes::web_compat_element);

@@ -981,6 +981,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Measure installed CLI/MCP GPU trace-analysis latency and prove both surfaces consume one sibling artifact pair. → `tools/scripts/gpu_trace_overhead_acceptance.py`
   - ⚠ **Cannot see:** Measures offline analyzer overhead only. It cannot grade trace-producer capture cost; new producer call sites require separate compile-out, idle-session, and active-capture product trials.
 - Build the visual-harness Docker image — use this, not a raw docker build. → `tools/harness/visual/docker-build.sh`
+- A `kind: render` golden mismatches and you need to know WHICH host's bytes moved. → `tools/harness/visual/raster.py`
+  - ⚠ **Cannot see:** Reports a digest and adjudicates nothing — it holds no expectation, so it can never fail. It rasterizes through the pinned skia-python wheel, NOT through `pulp::view::render_to_png`, so its bytes say nothing about what the C++ renderer draws. Without the pinned wheel it exits non-zero rather than degrading to another rasterizer.
 - Run the deterministic visual layout snapshots. → `python3 -m tools.harness.visual.runner`
 
 **audio** — prove what the audio actually did
@@ -1913,9 +1915,20 @@ advisory unless explicitly required by branch protection.
 Saturation is possible (a real burst, or a wedged runner), but the required
 `macos` gate runs on the local M1/M3/M5 event-class JIT pool, so confirm it
 rather than assume it. Before concluding capacity:
-(1) check the required checks even registered — a Shipyard-App-opened PR does NOT
-auto-trigger `pull_request` workflows, so `ghapp workflow run build.yml --ref
-<branch>` + `… version-skill-check.yml --ref <branch>` are often needed;
+(1) check whether a `pull_request` run exists **on the head SHA**
+(`ghapp api 'repos/Generous-Corp/pulp/actions/runs?head_sha=<sha>'`). If none
+does, the trigger did not admit the PR — `shipyard landability <PR>` names which
+clause — and the fix is a `synchronize` **push**, not a dispatch. Do **not**
+reach for `ghapp workflow run`: a `workflow_dispatch` run checks out the branch
+tip rather than `refs/pull/N/merge`, so it is the wrong proof under `strict:
+true` even where GitHub accepts the check. (The older claim here — that an
+App-opened PR does not auto-trigger `pull_request` workflows — is **false** and
+was withdrawn: pulp#8277 was opened by `shipyard-local[bot]` and carries 25
+`pull_request` runs plus a `pull_request_target` run on its head; spectr#120 was
+App-authored and its trigger was evaluated exactly as documented, correctly
+refusing on `branches: [main]`.) Also note a run's `pull_requests[]` array can
+be **empty** on a genuine `pull_request` run, so never filter on it — key on
+`head_sha` + `event`;
 (2) check for a version-bump race (PR goes `DIRTY` on the `CMakeLists.txt`
 VERSION line — re-merge `main`); (3) only then verify capacity from queue age,
 host supervisor/lease state, and an exact repository-visible job assignment.

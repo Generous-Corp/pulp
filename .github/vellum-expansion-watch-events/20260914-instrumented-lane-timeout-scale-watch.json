@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260914-instrumented-lane-timeout-scale-watch",
+  "created_at": "2026-09-14T03:47:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Per-test CTest timeouts are now resolved through pulp_scaled_test_timeout, so the sanitizer and coverage lanes get their headroom from a single multiplier instead of from padding baked into every literal. Two of the registrations that change are design-import manifests, which is why this change set crosses the design-source-ingest family: test/cmake/design_import_runtime_bridge_tests.cmake (pulp-test-web-compat-react-shims, 180s) and test/cmake/design_import_tool_cli_tests.cmake (pulp-test-screenshot-compare, 240s) both match the test/cmake/design_import*.cmake selector.\n\nWhat changes in those two files is the wall-clock budget a test is allowed before CTest kills it, and nothing else. No importer, DesignIR, lowering, codegen, capture, or renderer code is touched; no fixture, corpus, or acceptance threshold moves; no test is added, removed, relabelled, or re-scoped. The uninstrumented value each registration already used is preserved exactly (the resolver returns the base number with a multiplier of 1), so the fast-CI lane that gates these suites measures the same budget it measured before. The only observable difference is that an instrumented build stops failing these suites for running slower than an uninstrumented one.\n\nThe disposition is therefore watch-only. This declares that the design-source-ingest surface was crossed and records why, without claiming or expanding any authority over it: the ingest behaviour these suites verify is unchanged, and the suites themselves remain the authority on it.",
+  "tests": [
+    "ctest --test-dir build -R design-import",
+    "ctest --test-dir build -R pulp-test-web-compat-react-shims",
+    "ctest --test-dir build -R catch-discover-timeout-guard",
+    "python3 -B tools/scripts/test_catch_discover_timeout_guard.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base sha> --head <head sha>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

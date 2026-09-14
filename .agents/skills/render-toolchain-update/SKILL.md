@@ -219,6 +219,16 @@ retain those fields in the PR/landing evidence.
   their portable releases with a normal ubuntu-latest artifact.
 - `fetch_skia_for_release.py` platform keys must match the manifest exactly (notably
   `wasm-wasm32`).
+- `fetch_skia_for_release.py` retries the asset download, but only for failures a
+  second attempt can fix: 408/425/429 and 5xx, plus `URLError`, `TimeoutError`,
+  `ConnectionError` and `IncompleteRead`, with exponential backoff from 2s capped at
+  30s and a numeric `Retry-After` taking precedence. A 403/404 raises immediately,
+  because at this stage that means the pin names an asset that is not there, and
+  spending the backoff first buries that error under minutes of silence. A bare
+  `OSError` is deliberately not transient either: it is what a full disk raises on
+  the write side, and retrying re-downloads hundreds of megabytes to fill the same
+  disk. When a pin bump fails here, read which class it was before assuming the
+  network.
 - Keep release-fetch progress output ASCII-safe. Windows release runners can use a
   cp1252 console, where decorative Unicode arrows raise `UnicodeEncodeError` before
   an asset download starts; exercise the full Windows fetch path with cp1252 stdout.
@@ -278,3 +288,19 @@ retain those fields in the PR/landing evidence.
   timestamp granularity and falls back to comparing content; settle the fixture
   with `touch -t 202001010000` plus `git update-index --refresh` or the test
   grades its own homework.
+- The visual harness has two raster pins on two different version lines, and
+  "re-bake CI goldens" only means one of them. The C++ Skia archive rasterizes
+  nothing in `tools/harness/visual/`: its committed PNG golden is produced by the
+  `skia-python` wheel, pinned separately as `determinism.skia_python_smoke_version`
+  in `tools/deps/manifest.json` (mirrored into `pins.SKIA_PYTHON_SMOKE_VERSION`
+  and the Dockerfile `ARG`, cross-checked by `check_skia_pin.py`). That wheel
+  deliberately trails the C++ milestone, so a Skia/Dawn milestone bump leaves the
+  PNG golden and `pins.RASTER_GOLDEN_SHA256` correct and untouched, while bumping
+  only the wheel invalidates both without moving a single release-asset digest.
+  When changing the wheel, regenerate through
+  `python3 -m tools.harness.visual.runner --generate --all --surface canvas2d`
+  and update the recorded sha256 in the same commit: a golden regenerated without
+  its digest fails `tests/test_raster_golden.py` before any raster runs.
+  `pins.RASTER_GOLDEN_VERIFIED_PLATFORMS` records which hosts that identity was
+  actually measured on, so add a platform key only after a run on that platform
+  reported the matching digest.

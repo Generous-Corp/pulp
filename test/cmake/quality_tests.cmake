@@ -13,6 +13,7 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
     pulp::audio
     pulp::midi
     pulp::music
+    pulp::playback
     pulp::sequence
     pulp::signal
     pulp::timebase)
@@ -274,6 +275,41 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/build_parallelism_guard.py")
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
+
+    # MSVC string-literal cap: a single literal over 16380 bytes is C2026. Only
+    # the MSVC ARM64 cross-compiler enforces it, so an over-long literal builds
+    # clean on every machine a developer or reviewer uses and breaks one release
+    # leg -- the one the release job requires before it will publish.
+    add_test(NAME msvc-string-literal-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/msvc_string_literal_guard.py"
+        --repo-root "${CMAKE_SOURCE_DIR}")
+
+    # catch_discover_tests TIMEOUT guard: a budget written as a bare integer
+    # bypasses `pulp_scaled_test_timeout`, so it stays the same number on the
+    # instrumented lanes where the same work takes several times longer. The
+    # test is then killed at a budget only ever sized for an uninstrumented
+    # run, and CTest reports `***Timeout` rather than an assertion -- which
+    # reads as a slow machine, not as a budget that was never scaled. A
+    # literal also tends to sit beside a scaled sibling registration of the
+    # same binary in the same file, so the file looks converted.
+    add_test(NAME catch-discover-timeout-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/catch_discover_timeout_guard.py")
+    add_test(NAME catch-discover-timeout-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_catch_discover_timeout_guard.py")
+    # ctest label-exclusion guard: a Catch2 suite whose every registration
+    # carries a label the coverage policy excludes reaches neither lane that
+    # gates a PR. The required macos gate drops those labels with `-LE` and the
+    # diff-coverage lane drops them with `--label-exclude`, so the suite's cases
+    # are enforced by nothing while the lines they cover report as uncovered --
+    # the coverage gate calls the change untested and the required gate never
+    # runs the tests that test it. Nothing else detects this, because the gate
+    # that would complain is the gate the label removed. The selftest is the
+    # load-bearing half: it proves the shipped ledger is checked against a live
+    # scan rather than trusted, so a green run cannot come from an empty one.
+    add_test(NAME ctest-label-exclusion-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/ctest_label_exclusion_guard.py")
+    add_test(NAME ctest-label-exclusion-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_label_exclusion_guard.py")
 
     # GPU span categories: a span named `gpu_*` must be emitted under the `gpu`
     # category. The trace-SQL GPU queries select `category GLOB 'gpu*'`, so a

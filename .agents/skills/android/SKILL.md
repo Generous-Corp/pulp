@@ -695,6 +695,46 @@ target_link_options(pulp-jni PRIVATE
 )
 ```
 
+### GPU adapter identity — the name Dawn reports on Android is SYNTHETIC
+
+`GpuSurface::adapter_info()` looks like the place to learn which GPU you are on.
+On Android it is not, because Android runs the **Dawn** backend, and
+`gpu_surface_dawn.cpp` overwrites the identity with a label instead of forwarding
+what the adapter said:
+
+```cpp
+info.name = "Native Dawn Adapter (" + info.backend_type + ")";  // "…(Vulkan)"
+info.description = info.name;
+info.vendor = "Dawn";
+```
+
+So `name` is `"Native Dawn Adapter (Vulkan)"` and `vendor` is `"Dawn"` on every
+Android device, and a GPU blocklist keyed on the adapter name matches **nothing**
+— silently, with no error and no log line. The wgpu-native sibling in the same
+file does the opposite (it converts the real `device` / `vendor` / `description`
+`WGPUStringView`s), so reading only that branch gives the wrong impression of
+what Android sees. Anything matching on device identity must also match against
+`description`, and until the Dawn branch forwards `wgpuAdapterGetInfo`'s real
+strings, the match can only succeed on a wgpu-native build.
+
+There is also **no driver version anywhere to match on**: neither Pulp's
+`AdapterInfo` nor Dawn's `wgpu::AdapterInfo` has a numeric driver field
+(`vendor`, `architecture`, `device`, `description`, `backendType`, `adapterType`,
+`vendorID`, `deviceID`, subgroup sizes — that is the whole struct). A blocklist
+entry can therefore only block a whole GPU, not a driver build; a
+`maxDriverVersion` field is unpopulatable and will sit dead.
+
+### The Vulkan policy decision happens BEFORE any adapter exists
+
+`GpuDriverPolicy.shouldUseVulkan()` runs before `nativeOnSurfaceCreated`, so
+there is no adapter to interrogate at the moment of the decision — and creating
+one is the very thing that might crash the driver you are trying to avoid. The
+identity has to be *persisted*: `PulpSurfaceView` records it into
+`SharedPreferences` after Dawn initializes, and the next launch checks the
+remembered adapter. This mirrors the existing crash-flag design, and it is why
+the policy stays unit-testable — a JVM unit test can mock `SharedPreferences`
+but can never call an `external fun`.
+
 ### Skia Build Dependencies
 
 Skia headers reference `src/` and `modules/` from the source tree. Dawn headers need both source and generated includes. The build script `build-skia-android.sh` handles this, but if you're debugging include paths:

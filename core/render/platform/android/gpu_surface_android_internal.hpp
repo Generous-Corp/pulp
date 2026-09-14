@@ -57,6 +57,20 @@ void android_touch_cancel(int pointer_id, float px_x, float px_y);
 // dispatch core (dispatch_drop) — the same path the mac/win/linux/iOS hosts use.
 void android_on_drop(const std::vector<std::string>& paths, float px_x, float px_y);
 
+// ── GPU adapter identity ─────────────────────────────────────────────────
+// Snapshot of the adapter Dawn actually initialized, for the Kotlin driver
+// policy. `available` is false before android_surface_created() finished
+// initialization and after android_surface_destroyed(), so a caller can tell
+// "no adapter yet" apart from "an adapter that reported blank strings".
+struct AndroidGpuAdapterIdentity {
+    bool available = false;
+    std::string name;
+    std::string vendor;
+    std::string driver;
+};
+
+AndroidGpuAdapterIdentity android_gpu_adapter_identity();
+
 // Shared touch-capture pointer. Defined in gpu_surface_android.cpp. Non-owning
 // — valid only while g_root_view exists.
 extern pulp::view::View* g_captured_view;
