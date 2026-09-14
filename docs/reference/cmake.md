@@ -25,6 +25,8 @@ pulp_add_plugin(<target>
     SOURCES         <file-list>
     PROCESSOR_FACTORY <function-name>
     UI_SCRIPT       <path>
+    ICON            <1024x1024 png>
+    ICNS            <path>
     CONTENT_CAPABILITIES <capability-list>
     CONTENT_KINDS   <presets|themes|samples|sample-banks|wavetables...>
     CONTENT_HOT_RELOAD_KINDS <presets|themes|samples|sample-banks|wavetables...>
@@ -51,6 +53,8 @@ pulp_add_plugin(<target>
 | `SOURCES` | No | -- | Source files for the core object library |
 | `PROCESSOR_FACTORY` | No | -- | Factory function name (for generated entry points) |
 | `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Pulp applies it to created format targets via `PULP_UI_SCRIPT_PATH`; the Standalone macOS lane owns runtime validation for live JS/theme reload. |
+| `ICON` | No | -- | A 1024x1024 PNG, converted to an `.icns` and bundled into every macOS bundle the call creates (Standalone, VST3, AU, CLAP, AAX). Mutually exclusive with `ICNS`. |
+| `ICNS` | No | -- | A finished `.icns`, bundled as-is into the same set. Prefer this when the asset is laid out per size; the `ICON` path downscales with `sips`, whose kernel rings small tiles. **Scope:** this fills `CFBundleIconFile` and ships the asset. macOS does not render that key for a non-`.app` bundle, so no icon appears in Finder for the plug-in formats; see the product-icon comment in `PulpUtils.cmake`. |
 | `CONTENT_CAPABILITIES` | No | -- | Runtime content capabilities the plugin actually consumes, such as `content.presets.v1`. Use this when the plugin can load installed content packs. Must be paired with `CONTENT_KINDS`. |
 | `CONTENT_KINDS` | No | -- | Content kinds accepted by the plugin: `presets`, `themes`, `samples`, `sample-banks`, `wavetables`. Use capability `content.sample-banks.v1` for the generic `pulp.sample-bank.v1` contract. This lets users and agents reject mismatched packs before install. Must be paired with `CONTENT_CAPABILITIES`. |
 | `CONTENT_HOT_RELOAD_KINDS` | No | -- | Accepted content kinds the plugin can refresh immediately after install/update. Each value must also appear in `CONTENT_KINDS`. |
@@ -390,11 +394,27 @@ delivered as soon as one is installed.
 
 **Status**: usable
 
-Attach an icon source to an application or standalone target.
+Attach an icon source to an application, standalone, or plugin-format bundle
+target. The plugin bundles `pulp_add_plugin()` generates — `<target>_VST3`,
+`<target>_AU`, `<target>_CLAP`, `<target>_AAX` — are CFBundles and accept an
+icon the same way an app bundle does.
 
 Targets build normally if you never call `pulp_app_icon(...)`. The helper is an
 optional overlay, so removing the call cleanly removes the custom-icon
 behavior.
+
+`SOURCE` takes one PNG of at least 1024x1024 and derives every size from it
+with `sips`. That is fine for soft artwork and poor for a mark with fine
+detail: `sips` uses a Lanczos kernel, which overshoots on hard edges, so a
+1-2px feature at 16x16 smears and a tile edge picks up a visible halo. When
+the icon has crisp geometry, render each size on its own pixel grid, build the
+`.icns` yourself, and pass it as `ICNS` — it is bundled verbatim. `ICNS`
+applies to macOS only; keep `SOURCE` alongside it to cover Windows, Android,
+and Linux.
+
+```cmake
+pulp_app_icon(MyPlugin_VST3 ICNS assets/MyPlugin.icns)
+```
 
 ```cmake
 pulp_app_icon(<target>

@@ -94,6 +94,7 @@ std::string handle_timeline_import(const std::string& params_json);
 std::string handle_timeline_view_outline(const std::string& params_json);
 std::string handle_timeline_view_region(const std::string& params_json);
 std::string handle_timeline_view_diff(const std::string& params_json);
+std::string handle_timeline_device_catalog(const std::string& params_json);
 std::optional<std::string> handle_timeline_tool(std::string_view name,
                                                 const std::string& params_json);
 /// Descriptors for the timeline read-projection tools.

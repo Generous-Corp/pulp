@@ -18,6 +18,10 @@ function CSSStyleDeclaration(el) {
     // adding/removing data-overlay while the CSS shape already claimed)
     // re-claims instead of silently keeping the stale value.
     this._autoOverlayConsume = false;
+    // Whether this element is currently marked as an overlay TRIGGER (the
+    // control that opens a popover, not the popover). Tracked so the bridge
+    // call happens only on a transition.
+    this._autoOverlayTrigger = false;
     // Raw string last APPLIED per property, used to skip a write that would
     // reproduce the state the widget is already in. Keyed on the raw
     // (pre-var-resolution) string because that is what the caller supplies and
@@ -71,6 +75,38 @@ CSSStyleDeclaration.prototype._reevaluateOverlay = function() {
                       zVal >= _PULP_AUTO_OVERLAY_Z_INDEX_THRESHOLD);
 
     var shouldClaim = hinted || shapeClaim;
+
+    // `data-overlay-trigger="true"` marks a control that OPENS an overlay — a
+    // dropdown field, a menu button. A press on one while a DIFFERENT overlay
+    // is open means "switch menus", so the native dismissal policy delivers
+    // that press to the trigger instead of spending it on the close, and the
+    // user changes dropdowns in one tap. Never inferred from CSS shape: an
+    // inference that marked ordinary content would make clicking away from a
+    // menu also operate whatever sits under the click.
+    var triggerHint = el._dataset && el._dataset.overlayTrigger;
+    var isTrigger = (triggerHint === "true" || triggerHint === true);
+    // `aria-haspopup` says the same thing in the vocabulary a document that
+    // cares about assistive technology has already written it in, and it is
+    // the exact counterpart of the ARIA the overlay side already reads:
+    // `role="menu"|"listbox"|"dialog"` and `aria-modal` say "I AM a
+    // dismissable overlay", `aria-haspopup` says "I OPEN one". Honouring only
+    // half of that pair is what makes a correctly-authored app pay two presses
+    // to switch menus. Still a STATEMENT rather than an inference — an author
+    // writes it deliberately — so this stays inside the explicit branch and
+    // never joins the CSS-shape heuristic. The ARIA token set is
+    // true|menu|listbox|tree|grid|dialog; "false" and absent do not mark.
+    if (!isTrigger && el.getAttribute) {
+        var ariaPopup = el.getAttribute("aria-haspopup");
+        if (ariaPopup != null) {
+            var token = String(ariaPopup).toLowerCase();
+            isTrigger = (token !== "" && token !== "false");
+        }
+    }
+    if (this._autoOverlayTrigger !== isTrigger) {
+        if (typeof setOverlayTrigger === "function")
+            setOverlayTrigger(el._id, isTrigger);
+        this._autoOverlayTrigger = isTrigger;
+    }
 
     // Consume the dismissing press only on the EXPLICIT author opt-in.
     // `data-overlay="true"` is a direct statement that the element is a

@@ -184,6 +184,13 @@ python3 tools/scripts/gpu_handoff_provenance.py write --receipt             # re
 Pass `--receipt`. The published receipt is asserted against the ledger's bytes,
 so regenerating without it leaves a second gate red for the next reader.
 
+`gpu_recipe_catalog.py` will not catch that omission. It validates the ledger's
+own identities and reports `OK` while the receipt still names the previous
+ledger bytes, so the check recommended above is green in exactly the state this
+paragraph warns about. Prove the receipt separately — re-run `write --receipt`
+and confirm it rewrites nothing, or compare the receipt's `handoff_sha256`
+against `shasum -a 256 docs/status/gpu-vellum-handoff.yaml`.
+
 `check` names each stale row, its path, and the field-level correction, so a
 drifted pin no longer has to be located by hand. `write` derives `revision`,
 `object_id`, and `object_type` for every declared path from a single commit
@@ -215,6 +222,39 @@ pins.
 The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
 unregenerated ledger fails locally and in CI with the repair command in the
 failure message rather than only as a stale-identity report.
+
+**A capability-registry change stales a handoff pin without touching any GPU or
+Vellum file.** `tools/scripts/test_release_artifact_contents.py` is a pinned
+path *and* one of the sites that hardcodes the control-registry digest, so
+adding a row to `inspect/include/pulp/inspect/capability_definitions.inc`
+re-pins the digest there and stales that row by pure transitivity. The
+resulting `gpu-recipe-catalog-selftest` failure names a GPU catalog and a
+release-artifact script, and nothing in either message mentions the capability
+registry — so the natural reading is that the row belongs to another author's
+change. Before dismissing it, check whether the flagged path is in your own
+diff (`git diff --name-only <base>..HEAD -- <path>`) with a control grep that
+must return non-zero; the answer is frequently yes.
+
+**A pin makes two separable claims, and only one is enforced everywhere.**
+Provenance is "the pinned revision is an ancestor of HEAD and still carries the
+named blob and tree" — a fact about history that no later commit can falsify.
+Currency is "the path at HEAD still holds that same blob" — a fact any commit
+touching the path invalidates. One `require_current` switch selects between
+them, and it has to be honored at all three layers a caller can enter through:
+`validate_handoff_routing()` in `gpu_recipe_catalog.py`, and
+`validate_with_catalog()` plus `resolve_identity()` in
+`gpu_handoff_provenance.py`. The resolver is the easy one to miss, because it
+reads as a lookup rather than a check — and a resolver that refuses stale-at-HEAD
+input makes the strict answer leak back into every consumer above it.
+
+Currency is off by default because the required per-commit gate validates every
+pinned row, not just the rows a branch touched. Asserting currency there means
+one commit landing on a pinned path turns that gate red for every other PR in
+flight until each repins, which serializes concurrent work across the whole
+pinned set. What catches a stale pin instead is
+`gpu_handoff_provenance.py check` and the diff-scoped freshness guard, which
+fires only for the branch that actually moved a pinned path and prints the
+repair command with it.
 
 ## The "Vellum freeze" CI job runs two checks, and the second is the one that fails
 
@@ -270,3 +310,95 @@ The trusted PR gate validates a deterministic synthetic merge tree, but event
 time and emergency-expiry checks are bound to the real PR source head supplied
 with `--source-head`. A synthetic merge intentionally carries a fixed historical
 timestamp and must never become the provenance clock for a newly added event.
+
+## Regenerate against the MERGED tree, not against the base you branched from
+
+`write` derives every identity from one source commit, so a ledger regenerated
+on a branch whose base has moved pins revisions the merged tree no longer agrees
+with. The symptom is not a clear staleness report: it arrives as unrelated-looking
+reds — three `test_gpu_recipe_catalog` failures and a
+`test_gpu_handoff_provenance::test_check_reports_a_clean_ledger` assertion —
+which read as a regression in the change set rather than as a base mismatch.
+
+The order that works is the one the `ci` skill already prescribes for a pinned
+path: land the file edits, bring the branch onto the merged tree, and only then
+run `gpu_handoff_provenance.py write --receipt`. Regenerating before the rebase
+means doing it twice.
+
+**The regenerated ledger survives its own commit.** After committing the YAML
+and receipt, `check` still reports `OK: every pinned identity matches` at the new
+source commit, because the pin-refresh commit touches only paths the inventory
+excludes. So the cascade above terminates after exactly one round — a second
+regeneration is not needed, and running one only produces an empty diff.
+
+## Merging `origin/main` preserves the pin; rebasing onto it orphans it
+
+A receipt names one `source_commit`, and `check` requires that commit to be an
+ancestor of HEAD. A **merge** of `origin/main` keeps the pinned commit in the
+history, so the receipt stays valid and needs no repair. A **rebase**, an
+`--amend`, or a squash rewrites it, and the receipt now names a commit that no
+longer exists on the branch.
+
+The repair that suggests itself is the one that cannot converge: regenerating
+writes the commit the regeneration is about to create, which is not an ancestor
+of HEAD either, so the next `check` fails the same way. Record a commit that
+**already exists** — the newest commit reachable from HEAD that touched a pinned
+path. `resolve_source_commit` names that commit in the failure text, so the
+error is the answer rather than the start of a search:
+
+```
+source commit <sha> is not an ancestor of HEAD; identities generated from it
+cannot satisfy the handoff validator. A rebase, amend, or squash of the pinned
+commit is the usual cause; merging origin/main preserves the pin where rebasing
+onto it does not. Record a commit that already exists rather than the one
+regeneration is about to create, such as <sha>
+```
+
+Two mechanics that cost time on the way to that error:
+
+- **`check | tail` reports the pipeline's status, not the checker's.** A run
+  that prints `exit=0` under a pipe may have exited 1. Read `${PIPESTATUS[0]}`,
+  or drop the pipe.
+- **`write --source-commit` refuses on an unclean canonical path** (rc=2). So a
+  repair cannot precede the merge commit that resolves the conflict: take
+  `--theirs` on the generated ledgers, commit the merge, and regenerate from the
+  merge sha.
+
+A receipt conflict is also not always pointer churn. One case reported
+`102 rows unchanged` while `handoff_sha256` moved to a value matching **neither**
+parent — the ledger bytes were equal and the receipt hash was not, which means
+the hash was computed over a tree that no longer existed. Regenerate from the
+merge sha rather than picking a side.
+
+## The watch-family selectors match PATHS, so a one-line include can demand an event
+
+`tools/scripts/vellum_expansion_watch_check.py` decides which capability
+families a change touches by globbing the changed path list against
+`EXPECTED_SCOPES`. Nothing in that decision reads the diff. So adding
+`#include <array>` to `test/test_browser_capture_tree.cpp` — a portability fix
+that changes no capture behavior at all — matches `test/test_browser_capture*`
+and makes `chromium-authoring-frontend` an affected family, which the trusted
+base executor then requires a watch event to cover.
+
+Two things make this expensive to find late:
+
+- The failing check is **`Trusted base executor`**, which is not one of the five
+  contexts branch protection requires, so a PR can sit `blocked` with that red
+  while every required context is green and nothing names the cause.
+- Its log buries the one useful line, `watch event family coverage differs;
+  affected=[...] covered=[]`, under a full `Updating files:` checkout trace.
+
+Reproduce it locally before pushing, and note that both arguments must be full
+40-character SHAs — a ref name fails with `base: expected full commit SHA`,
+which reads like a broken invocation rather than a real answer:
+
+```bash
+python3 tools/scripts/vellum_expansion_watch_check.py \
+  --repo . --base "$(git rev-parse origin/main)" --head "$(git rev-parse HEAD)"
+```
+
+The event is a new JSON file directly under
+`.github/vellum-expansion-watch-events/`, named exactly for its `event_id`,
+claiming the affected families sorted. Coverage is compared for **equality**,
+not containment: claiming a family the diff does not touch fails the same way
+omitting one does.

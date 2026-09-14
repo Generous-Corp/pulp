@@ -420,6 +420,17 @@ specific test when a fixture needs semantics beyond those shared invariants.
 - The render loop is `requestAnimationFrame`-driven
   (`core/render/src/render_loop_emscripten.cpp`); DOM pointer/key events are
   translated in `core/view/include/pulp/view/web/web_event_translate.hpp`.
+- **`WebInputRouter` must not re-derive overlay dismissal.** The browser host is
+  a platform host like the macOS and Windows ones, and the policy for a
+  `<View overlay>` popover — route a press inside it into its own subtree,
+  honour an overlay that consumes the dismissing press, dismiss on Escape —
+  lives once in `pulp::view::route_press_to_active_overlay` /
+  `route_escape_to_active_overlay`. This host previously hand-rolled a reduced
+  copy against the process-global `View::active_overlay_` shim mirror and lost
+  all three behaviours; `tools/scripts/overlay_dismissal_wiring_guard.py` now
+  rejects any host that reaches past the shared verbs to the slot. Read the
+  root-owned slot (`View::interaction().active_overlay`), never the mirror: the
+  mirror names the most recent claim anywhere in the process.
 
 ### Web-player metadata is text, and links are web-only
 

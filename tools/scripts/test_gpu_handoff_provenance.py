@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import pathlib
 import shlex
 import shutil
@@ -87,12 +88,120 @@ class FixtureRepository(unittest.TestCase):
         self.assertEqual(nested.revision, self.second_commit)
         self.assertEqual(nested.object_type, "tree")
 
+    def test_orphaned_pin_error_names_the_cause_and_a_usable_commit(self) -> None:
+        """The error a rewritten pin produces has to end the search, not start it.
+
+        Three lanes independently spent a day on this because the message said
+        only that the commit was unreachable. Regenerating is the obvious
+        repair and it cannot converge -- the new commit is not an ancestor of
+        HEAD either -- so the message must say which operation orphaned the pin
+        and name a commit that already satisfies the rule.
+        """
+
+        orphan = git(self.root, "rev-parse", "HEAD")
+        git(self.root, "commit", "--quiet", "--amend", "-m", "rewrite nested")
+        self.assertNotEqual(git(self.root, "rev-parse", "HEAD"), orphan)
+
+        with self.assertRaises(provenance.ProvenanceError) as caught:
+            provenance.resolve_source_commit(
+                self.root, orphan, ["leaf.txt", "nested"]
+            )
+        message = str(caught.exception)
+        self.assertIn(orphan, message)
+        for cause in ("rebase", "amend", "merging origin/main"):
+            self.assertIn(cause, message, f"the error does not name {cause!r}")
+        suggested = provenance.newest_pinned_ancestor(
+            self.root, ["leaf.txt", "nested"]
+        )
+        self.assertIsNotNone(suggested)
+        self.assertIn(suggested, message)
+
+    def test_suggested_commit_satisfies_the_rule_it_is_offered_for(self) -> None:
+        """A suggestion that does not resolve is worse than none.
+
+        The commit is correct because nothing later touched a pinned path, so
+        every identity it yields is the identity HEAD yields. Assert both
+        halves: it resolves, and it produces HEAD's identities.
+        """
+
+        (self.root / "unpinned.txt").write_text(
+            "unrelated\n", encoding="utf-8"
+        )
+        git(self.root, "add", "unpinned.txt")
+        git(self.root, "commit", "--quiet", "-m", "land an unrelated commit")
+
+        paths = ["leaf.txt", "nested"]
+        suggested = provenance.newest_pinned_ancestor(self.root, paths)
+        self.assertEqual(suggested, self.second_commit)
+        self.assertNotEqual(
+            suggested,
+            git(self.root, "rev-parse", "HEAD"),
+            "the fixture no longer distinguishes the suggestion from HEAD",
+        )
+        self.assertEqual(
+            provenance.resolve_source_commit(self.root, suggested, paths), suggested
+        )
+        for path in paths:
+            self.assertEqual(
+                provenance.resolve_identity(self.root, suggested, path),
+                provenance.resolve_identity(self.root, "HEAD", path),
+            )
+
+    def test_missing_inventory_still_reports_the_ancestry_failure(self) -> None:
+        """Enrichment must not be able to convert the error into a different one.
+
+        `resolve_source_commit` is called from a test with two positional
+        arguments, and a caller may hold no inventory at all. Both must still
+        get the ancestry refusal.
+        """
+
+        orphan = git(self.root, "rev-parse", "HEAD")
+        git(self.root, "commit", "--quiet", "--amend", "-m", "rewrite nested")
+
+        self.assertIsNone(provenance.newest_pinned_ancestor(self.root, []))
+        for canonical in (None, []):
+            with self.assertRaises(provenance.ProvenanceError) as caught:
+                provenance.resolve_source_commit(self.root, orphan, canonical)
+            self.assertIn("is not an ancestor of HEAD", str(caught.exception))
+
     def test_identity_tracks_a_later_edit(self) -> None:
         (self.root / "leaf.txt").write_text("leaf two\n", encoding="utf-8")
         git(self.root, "add", "leaf.txt")
         git(self.root, "commit", "--quiet", "-m", "edit leaf")
         third = git(self.root, "rev-parse", "HEAD")
         self.assertEqual(self.identity_for("leaf.txt").revision, third)
+
+    def test_identity_from_a_superseded_commit_separates_the_two_tiers(self) -> None:
+        """A commit that a later commit moved past still has an identity.
+
+        This is the shape every commit touching a pinned path produces, and it
+        is the one a reader of a published receipt must be able to resolve: the
+        receipt names the commit its ledger was generated from, so the question
+        is what that commit held, not what HEAD holds now. Only a generator
+        asks the stronger question, and it has to opt in.
+        """
+
+        (self.root / "leaf.txt").write_text("leaf two\n", encoding="utf-8")
+        git(self.root, "add", "leaf.txt")
+        git(self.root, "commit", "--quiet", "-m", "edit leaf")
+
+        historical = provenance.resolve_identity(
+            self.root, self.first_commit, "leaf.txt"
+        )
+        self.assertEqual(historical.revision, self.first_commit)
+        self.assertEqual(
+            historical.object_id,
+            git(self.root, "rev-parse", f"{self.first_commit}:leaf.txt"),
+        )
+        self.assertNotEqual(
+            historical.object_id, git(self.root, "rev-parse", "HEAD:leaf.txt")
+        )
+
+        with self.assertRaises(provenance.ProvenanceError) as caught:
+            provenance.resolve_identity(
+                self.root, self.first_commit, "leaf.txt", require_current=True
+            )
+        self.assertIn("at HEAD", str(caught.exception))
 
     def test_missing_path_fails_closed(self) -> None:
         with self.assertRaises(provenance.ProvenanceError):
@@ -365,11 +474,16 @@ class CheckedInLedger(unittest.TestCase):
     def test_regenerating_the_shipped_ledger_reproduces_it_exactly(self) -> None:
         """Regeneration at HEAD must be a byte-identical no-op.
 
-        This is the drift gate. It goes red when a commit changes a pinned path
-        without regenerating the ledger, and it names the generator as the
-        repair.
+        This is the currency claim, so it is opt-in. It goes red the moment any
+        commit changes a pinned path without regenerating the ledger, which is
+        the correct report for a consumer and the wrong one for a gate that
+        runs on every commit: it would make each edit to a pinned path a
+        two-commit operation and serialize concurrent pull requests. The
+        always-on claim lives in the provenance case below.
         """
 
+        self.require_current_opt_in()
+        self.require_clean_canonical_paths()
         document = provenance.load_handoff(self.handoff)
         inventory = provenance.canonical_inventory(document)
         commit = provenance.resolve_source_commit(self.root, "HEAD")
@@ -393,6 +507,70 @@ class CheckedInLedger(unittest.TestCase):
             self.handoff.read_text(encoding="utf-8"),
         )
 
+    def require_current_opt_in(self) -> None:
+        """Skip unless this run explicitly asked for currency at HEAD.
+
+        Currency is a property of the checkout at a moment: every commit that
+        touches a pinned path falsifies it until the ledger is regenerated. The
+        required merge gate runs this suite on every commit, so asserting
+        currency here would go red for pull requests that have nothing to do
+        with the handoff. Consumers that want the stronger claim set this.
+        """
+
+        if os.environ.get("PULP_GPU_HANDOFF_REQUIRE_CURRENT") != "1":
+            self.skipTest(
+                "currency at HEAD is opt-in: set "
+                "PULP_GPU_HANDOFF_REQUIRE_CURRENT=1, or run "
+                "gpu_handoff_provenance.py check"
+            )
+
+    def test_the_shipped_ledger_satisfies_the_provenance_tier(self) -> None:
+        """The always-on claim, and what the required gate actually asserts.
+
+        Every pinned revision is still an ancestor and still carries the blob
+        or tree it names. Nothing a later commit does can falsify that, so this
+        case is safe to run on every commit -- which is the whole reason
+        currency was separated out of it.
+        """
+
+        self.require_clean_canonical_paths()
+        document = provenance.load_handoff(self.handoff)
+        self.assertEqual(provenance.validate_with_catalog(document, self.root), [])
+
+    def test_a_pin_a_later_commit_moved_past_fails_only_the_currency_tier(self) -> None:
+        """Separate the two tiers on the exact input that used to conflate them.
+
+        Re-pinning a row to an earlier commit that really did carry this blob
+        reproduces the state every commit touching a pinned path produces: the
+        provenance claim is still true, the currency claim is not. Before the
+        split both reported the same stale-identity problem, so an unrelated
+        commit could turn the required gate red.
+        """
+
+        self.require_clean_canonical_paths()
+        document = provenance.load_handoff(self.handoff)
+        path = "tools/scripts/gpu_recipe_catalog.py"
+        row = next(
+            row
+            for entry in document["entries"]
+            for row in entry["pulp_paths"]
+            if row["path"] == path
+        )
+        history = git(
+            self.root, "log", "--format=%H", "HEAD", "--", path
+        ).splitlines()
+        self.assertGreaterEqual(len(history), 2)
+        row["revision"] = history[1]
+        row["object_id"] = git(self.root, "rev-parse", f"{history[1]}:{path}")
+        self.assertEqual(provenance.validate_with_catalog(document, self.root), [])
+        problems = provenance.validate_with_catalog(
+            document, self.root, require_current=True
+        )
+        self.assertTrue(
+            any("pin is not current at HEAD" in problem for problem in problems),
+            f"expected a currency problem, got {problems}",
+        )
+
     def require_clean_canonical_paths(self) -> None:
         """Skip rather than red misleadingly on a developer's local edits.
 
@@ -409,6 +587,7 @@ class CheckedInLedger(unittest.TestCase):
             self.skipTest(f"canonical paths are modified locally: {dirty}")
 
     def test_write_against_a_current_ledger_changes_nothing(self) -> None:
+        self.require_current_opt_in()
         self.require_clean_canonical_paths()
         with tempfile.TemporaryDirectory() as directory:
             copy = pathlib.Path(directory) / "gpu-vellum-handoff.yaml"
@@ -503,6 +682,9 @@ class CheckedInLedger(unittest.TestCase):
         )
         # Naming a reachable commit is not the claim. The claim is that THIS
         # commit produced THESE bytes, so regenerate from it and compare.
+        # Resolving from the receipt's own commit is the provenance question,
+        # so it must not ask whether HEAD still agrees -- a later commit
+        # touching a pinned path does not make the receipt any less true.
         inventory = provenance.canonical_inventory(document)
         try:
             identities = provenance.resolve_inventory_identities(
@@ -524,12 +706,85 @@ class CheckedInLedger(unittest.TestCase):
         )
 
     def test_check_reports_a_clean_ledger(self) -> None:
+        # `check` is a consumer, so it asks for currency; that makes it opt-in
+        # here for the same reason the regeneration case above is.
+        self.require_current_opt_in()
+        self.require_clean_canonical_paths()
         self.assertEqual(
             provenance.main(
                 ["--root", str(self.root), "--handoff", str(self.handoff), "check"]
             ),
             0,
         )
+
+
+
+class TruncatedCheckoutRefusal(unittest.TestCase):
+    """A short history must make the generator refuse, not emit boundary SHAs.
+
+    ``git log -1 --format=%H <commit> -- <path>`` exits 0 on a truncated
+    checkout and answers with the graft boundary. Written through, that is a
+    well-formed SHA pinned to the oldest commit the checkout happens to hold --
+    a correct ledger silently replaced with a wrong one, at exit status 0.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._workspace = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls._workspace.cleanup)
+        base = pathlib.Path(cls._workspace.name)
+        cls.root = base / "truncated"
+        # --no-local is load-bearing: with a local clone Git hardlinks the
+        # source object store and ignores --depth, so the fixture would carry
+        # the full history and every assertion here would be vacuous.
+        git(
+            provenance.ROOT,
+            "clone",
+            "--quiet",
+            "--depth=1",
+            "--no-local",
+            f"file://{provenance.ROOT}",
+            str(cls.root),
+        )
+        cls.handoff = cls.root / "docs/status/gpu-vellum-handoff.yaml"
+
+    def setUp(self) -> None:
+        provenance._BOUNDARY_CACHE.clear()
+        self.assertEqual(git(self.root, "rev-list", "--count", "HEAD"), "1")
+
+    def run_cli(self, *arguments: str) -> tuple[int, str, str]:
+        out = io.StringIO()
+        err = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            exit_code = provenance.main(
+                ["--root", str(self.root), "--handoff", str(self.handoff), *arguments]
+            )
+        return exit_code, out.getvalue(), err.getvalue()
+
+    def test_shallow_write_refuses_and_leaves_the_ledger_byte_identical(self) -> None:
+        before = hashlib.sha256(self.handoff.read_bytes()).hexdigest()
+        exit_code, _, errors = self.run_cli("write")
+        self.assertEqual(exit_code, 2, errors)
+        self.assertIn("history is truncated", errors)
+        self.assertIn("git fetch --unshallow", errors)
+        # The byte comparison is the whole point: an exit code says the tool
+        # reported a problem, only the digest says it did not write first.
+        self.assertEqual(
+            hashlib.sha256(self.handoff.read_bytes()).hexdigest(), before
+        )
+
+    def test_shallow_check_names_the_truncated_checkout(self) -> None:
+        exit_code, _, errors = self.run_cli("check")
+        self.assertEqual(exit_code, 2, errors)
+        self.assertIn("history is truncated", errors)
+        self.assertIn("shallow graft boundary", errors)
+
+    def test_shallow_paths_still_lists_the_inventory(self) -> None:
+        """``paths`` asks no history question and must keep working."""
+
+        exit_code, text, errors = self.run_cli("paths")
+        self.assertEqual(exit_code, 0, errors)
+        self.assertGreater(len(text.split()), 0)
 
 
 if __name__ == "__main__":

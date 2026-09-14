@@ -6,10 +6,12 @@ from __future__ import annotations
 import copy
 import json
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
 
+import connected_git_history
 import gpu_recipe_catalog as catalog
 
 
@@ -556,13 +558,24 @@ class CatalogContract(unittest.TestCase):
             ["git", "rev-parse", f"{row['revision']}:{row['path']}"],
             cwd=catalog.ROOT, text=True,
         ).strip()
+        # A pin naming an older commit that really did carry this blob is the
+        # exact shape every commit touching a pinned path produces. It is true
+        # provenance and stale currency, so it separates the two tiers: the
+        # default validation accepts it, and only the opt-in rejects it.
+        self.assertEqual(catalog.validate_handoff_routing(handoff, catalog.ROOT), [])
         self.assertIn(
-            "stale revision/blob/tree identity",
-            "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+            "pin is not current at HEAD",
+            "\n".join(
+                catalog.validate_handoff_routing(
+                    handoff, catalog.ROOT, require_current=True
+                )
+            ),
         )
 
         handoff = json.loads(catalog.DEFAULT_HANDOFF.read_text(encoding="utf-8"))
         handoff["entries"][0]["pulp_paths"][0]["object_id"] = "0" * 40
+        # A blob that the pinned revision never carried is a provenance defect,
+        # so it has to be rejected by the always-on tier without any opt-in.
         self.assertIn(
             "stale revision/blob/tree identity",
             "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
@@ -573,6 +586,179 @@ class CatalogContract(unittest.TestCase):
         self.assertIn(
             "must be the authoritative",
             "\n".join(catalog.validate_handoff_routing(handoff, catalog.ROOT)),
+        )
+
+
+
+def _git(root, *arguments):
+    # Background maintenance is disabled because it outlives the command that
+    # starts it. `git commit` ends by detaching `git gc --auto` /
+    # `git maintenance run --auto`, which keeps rewriting .git for seconds
+    # after the commit returns. The fixtures below commit a whole working
+    # tree, so the loose-object count clears the threshold every time, and a
+    # teardown that walks that tree concurrently sees entries appear and
+    # vanish under it -- removing .git then fails with ENOTEMPTY. Nothing
+    # here reads a packed object store, so there is nothing to trade away.
+    subprocess.run(
+        ["git", "-c", "user.email=history@example.invalid", "-c", "user.name=History",
+         "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+         *arguments],
+        cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE, check=True,
+    )
+
+
+class TruncatedCheckoutAttribution(unittest.TestCase):
+    """A short history must be named, not misreported as a missing path.
+
+    ``git log -1 --format=%H <commit> -- <path>`` does not fail on a truncated
+    checkout; it answers with the shallow graft boundary, or cannot answer at all
+    because the pinned revision is absent. Either way the pinned row fails for a
+    reason the ledger cannot fix, and the pre-existing "is absent from its pinned
+    Pulp revision" message sends the reader to repair the wrong thing.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        # The git config above removes the writer that makes this racy, but the
+        # workspace is disposable either way: a fixture root that resists
+        # removal is not a defect this suite should report as an error.
+        cls._workspace = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        cls.addClassCleanup(cls._workspace.cleanup)
+        base = pathlib.Path(cls._workspace.name)
+
+        # --no-local is load-bearing. Without it Git hardlinks the source object
+        # store and silently ignores --depth, yielding a complete clone that
+        # would make every assertion here vacuous.
+        cls.truncated = base / "truncated"
+        _git(base, "clone", "--quiet", "--depth=1", "--no-local",
+             f"file://{catalog.ROOT}", str(cls.truncated))
+
+        # A genuinely unshallow checkout, built by re-rooting a second clone's
+        # working tree onto a fresh single-commit history. A real full clone is
+        # not available: this host's only Pulp object store is itself shallow, so
+        # `git clone --no-local` from it dies with "early EOF". The fixture keeps
+        # the property under test -- no graft boundary at all -- and keeps the
+        # pinned revisions absent, which is what makes it prove that the new
+        # guard does not steal the absent-path message.
+        cls.complete = base / "complete"
+        _git(base, "clone", "--quiet", "--depth=1", "--no-local",
+             f"file://{catalog.ROOT}", str(cls.complete))
+        shutil.rmtree(cls.complete / ".git")
+        _git(cls.complete, "init", "--quiet", "--initial-branch=main")
+        _git(cls.complete, "add", ".")
+        _git(cls.complete, "commit", "--quiet", "-m", "complete fixture")
+
+        cls.handoff = json.loads(
+            (cls.truncated / "docs/status/gpu-vellum-handoff.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def test_truncated_checkout_is_named_not_reported_as_a_missing_path(self) -> None:
+        problems = catalog.validate_handoff_routing(
+            copy.deepcopy(self.handoff), self.truncated
+        )
+        shallow = [problem for problem in problems if "history is truncated" in problem]
+        self.assertEqual(len(shallow), 1, problems)
+        self.assertIn("git fetch --unshallow", shallow[0])
+        self.assertIn("hydrate_gpu_provenance_commits.py", shallow[0])
+        self.assertFalse(
+            [
+                problem
+                for problem in problems
+                if "is absent from its pinned Pulp revision" in problem
+            ],
+            problems,
+        )
+
+    def test_truncated_checkout_still_reports_history_free_defects(self) -> None:
+        """The negative control against an early return.
+
+        The routing-owner and delete_paths checks need no history at all. If the
+        shallow branch ever returns early instead of falling through, this test
+        goes red -- which is the only thing standing between a truncated checkout
+        and a fresh vacuous green.
+        """
+
+        document = copy.deepcopy(self.handoff)
+        document["entries"][0]["delete_paths"] = ["core"]
+        problems = catalog.validate_handoff_routing(document, self.truncated)
+        self.assertTrue(
+            [problem for problem in problems if "history is truncated" in problem],
+            problems,
+        )
+        self.assertIn(
+            "handoff entries[0].delete_paths contains broad directory 'core'",
+            problems,
+        )
+
+    def test_full_checkout_reports_no_shallow_problem(self) -> None:
+        """With no graft boundary the original messages survive verbatim."""
+
+        problems = catalog.validate_handoff_routing(
+            copy.deepcopy(self.handoff), self.complete
+        )
+        self.assertFalse(
+            [problem for problem in problems if "history is truncated" in problem],
+            problems,
+        )
+        self.assertTrue(
+            [
+                problem
+                for problem in problems
+                if "is absent from its pinned Pulp revision" in problem
+            ],
+            problems,
+        )
+
+    def test_shallow_marked_but_deep_checkout_reports_no_shallow_problem(self) -> None:
+        """The regression test for the falsified ``--is-shallow-repository`` guard.
+
+        This worktree reports ``true`` for ``git rev-parse
+        --is-shallow-repository`` and still resolves all 102 pinned rows to real
+        owning commits. A guard keyed on that flag would fail it, and would fail
+        every CI runner checkout in the same state -- including the ones that
+        produce the required ``macos`` gate.
+
+        The state cannot be synthesised: being shallow-marked requires Git to
+        have written a ``shallow`` file during a truncated fetch, while resolving
+        past it requires the real deep history. So this asserts against the live
+        worktree and states the two facts it rests on rather than assuming them.
+        If this checkout is ever not shallow-marked, the falsification has
+        nothing to say here, but the assertion that matters -- no shallow problem
+        -- still holds and is still made.
+        """
+
+        marked = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=catalog.ROOT, capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        boundaries = connected_git_history.shallow_boundaries(catalog.ROOT)
+        self.assertEqual(marked == "true", bool(boundaries))
+
+        rows = [
+            row
+            for entry in self.handoff["entries"]
+            for row in entry["pulp_paths"]
+            if isinstance(row, dict)
+        ]
+        self.assertGreater(len(rows), 0)
+        on_boundary = [
+            row["path"]
+            for row in rows
+            if connected_git_history.resolves_to_boundary(
+                catalog.ROOT, str(row["revision"]), row["path"], boundaries
+            )
+        ]
+        self.assertEqual(on_boundary, [])
+
+        problems = catalog.validate_handoff_routing(
+            copy.deepcopy(self.handoff), catalog.ROOT
+        )
+        self.assertFalse(
+            [problem for problem in problems if "history is truncated" in problem],
+            problems,
         )
 
 

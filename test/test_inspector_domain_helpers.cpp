@@ -27,7 +27,7 @@ TEST_CASE("Inspector method registry assigns one stable capability to every meth
           "[inspect][capabilities]") {
     const auto capabilities = inspector_capability_registry();
     const auto registry = inspector_method_registry();
-    REQUIRE(capabilities.size() == 20);
+    REQUIRE(capabilities.size() == 24);
     REQUIRE_FALSE(registry.empty());
 
     for (const auto& descriptor : capabilities) {
@@ -72,6 +72,8 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
         InspectorCapability::DiagnosticsRead,
         InspectorCapability::LogsRead,
         InspectorCapability::CaptureImage,
+        InspectorCapability::SequencerStateRead,
+        InspectorCapability::SequencerTransportRead,
     });
     const auto expected_develop = std::to_array<InspectorCapability>({
         InspectorCapability::SessionDescribe,
@@ -89,6 +91,10 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
         InspectorCapability::TestInput,
         InspectorCapability::AuthoringTweaks,
         InspectorCapability::TelemetryStream,
+        InspectorCapability::SequencerStateRead,
+        InspectorCapability::SequencerStateEdit,
+        InspectorCapability::SequencerTransportRead,
+        InspectorCapability::SequencerTransportWrite,
     });
     REQUIRE(std::ranges::equal(observe, expected_observe));
     REQUIRE(std::ranges::equal(develop, expected_develop));
@@ -102,7 +108,11 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
     REQUIRE_FALSE(contains(observe, InspectorCapability::StateWrite));
     REQUIRE_FALSE(contains(observe, InspectorCapability::RuntimeEval));
 
+    REQUIRE_FALSE(contains(observe, InspectorCapability::SequencerStateEdit));
+
     REQUIRE(contains(develop, InspectorCapability::StateWrite));
+    REQUIRE(contains(develop, InspectorCapability::SequencerStateRead));
+    REQUIRE(contains(develop, InspectorCapability::SequencerStateEdit));
     REQUIRE(contains(develop, InspectorCapability::TestInput));
     REQUIRE(contains(develop, InspectorCapability::TelemetryStream));
     REQUIRE_FALSE(contains(develop, InspectorCapability::RuntimeEval));
@@ -114,6 +124,14 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
             InspectorCapabilityRisk::Sensitive);
     REQUIRE(capability_risk(InspectorCapability::StateWrite) ==
             InspectorCapabilityRisk::Control);
+    REQUIRE(capability_risk(InspectorCapability::SequencerStateRead) ==
+            InspectorCapabilityRisk::Sensitive);
+    REQUIRE(capability_risk(InspectorCapability::SequencerStateEdit) ==
+            InspectorCapabilityRisk::Control);
+    REQUIRE(capability_is_grantable(InspectorCapability::SequencerStateRead));
+    REQUIRE(capability_is_grantable(InspectorCapability::SequencerStateEdit));
+    REQUIRE_FALSE(capability_requires_publication_binding(
+        InspectorCapability::SequencerStateEdit));
     REQUIRE(capability_risk(InspectorCapability::RuntimeEval) ==
             InspectorCapabilityRisk::Critical);
     REQUIRE(capability_requires_controller_lease(

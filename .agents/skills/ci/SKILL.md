@@ -235,6 +235,44 @@ context, and never execute the candidate's verifier as the authority.
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
 
+### A green ctest job proves nothing about a label its event excludes
+
+`build.yml` computes `label_exclude` from the event, and the two values are far
+apart. A `push` (and the nightly) excludes only `validation`. A `pull_request`,
+`workflow_dispatch`, or **`merge_group`** excludes
+`validation|slow|performance|bench|quality-lab`. So the lane that reports on a
+queued merge deliberately does not run the CPU-budget, benchmark, or `slow`
+tests at all — a perf ratio cannot gate a merge on a runner that correctly hosts
+two concurrent build VMs.
+
+The trap is that this is invisible in the result. A merge-group Linux job prints
+
+```
+100% tests passed, 0 tests failed out of 20587
+```
+
+which reads as total coverage, and the excluded tests leave no line behind
+saying they were skipped. Three tests under investigation as live main failures
+appeared 1, 0 and 0 times in that job's 90k-line log, against 8, 2 and 4 hits
+for the identical greps on a `push`-event log from the same day — and the single
+hit was the workflow step's own comment text, not a test result.
+
+Before reading any ctest job as evidence about a specific test, check the event
+and the label:
+
+```sh
+ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>" --jq .event   # push? merge_group?
+grep -a "label_exclude=" <job.log> | tail -2                          # what it actually excluded
+grep -ac "<test-name>" <job.log>                                      # 0 means NOT RUN, not passed
+```
+
+A zero from that last grep is the instrument, not the finding. Pair it with the
+same grep against a `push`-event log, which must return non-zero: if both are
+zero the test name is wrong, and if only the first is zero the test was excluded
+and the green job says nothing about it. To confirm a `slow`/`performance` fix
+actually landed, read the `push` run created by the merge commit, never the
+merge-group run that admitted it.
+
 ### An advisory check that names a main-breaking defect is worse than none
 
 `api-contracts.yml` runs the public-header doc-contract pass on its own
@@ -405,6 +443,68 @@ one interpreter through `tools/ci/find_python311.py`, and use that exact
 interpreter for the base resolver, policy classifier, JSON extraction, and
 protected-base version-bump verifier. A result that depends on whether M3 or M5
 claimed `pulp-preamble` is a fleet fault, not a retryable check failure.
+
+### A lane that runs the GPU provenance selftests must reconnect its history first
+
+The GPU provenance selftests read real per-path Git history, so a shallow
+checkout fails them on the checkout shape rather than on any defect. Every lane
+that runs them therefore carries a hydration step immediately after checkout:
+
+```yaml
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+```
+
+It is wired into `build.yml`, `cross-platform-check.yml`, `intel-portability.yml`,
+`nightly-full-build.yml`, `nightly-intel.yml`, `sanitizers.yml` (asan, ubsan and
+rtsan; tsan does not run the suite) and `validate.yml`. Adding a lane that runs
+a broad `ctest` means adding this step too —
+`tools/scripts/test_gpu_provenance_ci_wiring.py` is the cover that fails when a
+lane is missing it, so the omission surfaces locally instead of as a red lane. It runs in `workflow-lint.yml`, not as a ctest: it parses the workflow
+YAML, and the required macOS CTest hosts carry no PyYAML.
+
+`build-macos.yml` is the exception, and deliberately so: its hardened checkout
+sets `persist-credentials: false` (no credential remains for a fetch) and pins
+`ref: ${{ github.sha }}` (so `GITHUB_REF` no longer names the checked-out
+commit). The hydration script needs both, so that lane clones full history with
+`fetch-depth: 0` instead. This does not reopen the `classify` preamble question
+above — that job classifies changed paths and still wants exact trees at depth 1.
+
+**`git rev-parse --is-shallow-repository` is a remedy trigger, not a failure
+predicate.** A warm self-hosted checkout can retain every object it ever fetched
+while `actions/checkout` rewrites the shallow boundary, so object presence does
+not prove ancestry, and a repository reporting `false` can still be missing the
+connection a selftest walks. The predicate that actually decides the outcome is
+whether each pinned revision resolves *and* is an ancestor of `HEAD` — which is
+what the script asserts after hydrating, and what its
+`gpu-provenance-hydration: PASS total=<n> fetched=<n> cap=128` line reports. A
+guard written against the shallow flag alone passes on a hydrated clone and on a
+warm dirty one alike.
+
+#### What the shallow checkout looks like in the log
+
+A shallow checkout does not announce itself. What a failing lane prints is a
+test error, and the nine GPU selftests that walk history print four
+different-looking ones — a missing revision, a `git log` that returns nothing, an
+empty provenance set, and:
+
+```
+error: pathspec 'HEAD^' did not match any file(s) known to git
+```
+
+That last line is the unambiguous one. A repository with exactly one commit has
+no `HEAD^`, so a lane emitting it has a depth-1 `actions/checkout` and is missing
+the hydration step above — it is not a defect in the test that printed it. Check
+the lane's checkout before reading any of the other three as a real failure; a
+single missing hydration step accounts for all of them at once.
+
+Hydration is not a bounded fetch of the named revisions. The script fetches with
+`--unshallow`, which reconnects the entire event history, so every ancestor is
+reachable afterwards, not just the pinned set. `MAX_COMMITS` bounds the
+*verification* set — the revisions the script proves resolvable and ancestral —
+and says nothing about fetch depth. A selftest that walks `HEAD^` is therefore
+covered by the same step that covers one naming an explicit SHA.
 
 ### Browser-source fidelity is a required dependency, not a skip
 
@@ -8464,3 +8564,187 @@ Two invocation traps when reproducing one of these locally:
   `AttributeError: module ... has no attribute`. Select by test name instead:
   `python3 -B -m unittest test_ci_throughput_workflows -k <test_name>`. Use `-B`
   so a stale `.pyc` cannot survive a break-confirm.
+
+---
+
+## "Green validation" and "can merge" are different questions
+
+`shipyard status` reporting `running: 0 / pending: 0` and `mac: local
+reachable=true`, with `ship-state list` showing the right SHA and one attempt,
+is fully compatible with **every pull request in the repository being
+unmergeable**. On 2026-09-13 that state held for about six hours. The required
+`macos` context was not red and not pending — it was *absent from
+`statusCheckRollup` entirely*, because the runner label its lane asked for
+matched zero runners in either registration scope, so every `build.yml` run
+(`pull_request`, `workflow_dispatch` **and** `merge_group`) queued forever at
+its first job.
+
+**Absence is the failure mode, and absence reads as a clean finding.**
+`mergeStateStatus: BLOCKED` with `reviewDecision: ""` and
+`required_approving_review_count: 0` means there is nothing to approve, nothing
+failing, and no explanation anywhere in the API or the UI for what is missing.
+
+Two detectors now answer the second question. Full operator detail:
+[docs/guides/local-ci.md](../../../docs/guides/local-ci.md).
+
+### First move when a PR sits BLOCKED with nothing red
+
+```sh
+shipyard landability --repo Generous-Corp/pulp
+```
+
+Exit 0 clean, **7** when a required context cannot be scheduled, **1** when the
+command's own control lanes fail to discriminate — in which case every verdict
+it printed is suspect and you must fix the instrument before reading its output.
+
+It resolves each required context to the jobs that render to it **and their
+transitive `needs` closure**. That closure is the check: `macos` is produced by
+an alias job and by a matrix leg, and every path to it passes through
+`resolve-provider` and `classify`. Looking only at the job named `macos` returns
+a clean answer mid-outage. Six lanes gate that one context today.
+
+`shipyard ship` / `shipyard pr` run the same check as a preflight and refuse
+with exit 7 before queueing. Four API calls cold, zero warm.
+
+### Do not re-dispatch. Read the verdict instead.
+
+Decisions contract `[default] #4`: a runnerless required lane is HELD, never a
+retry storm. On 2026-09-13 four blind `workflow run build.yml` re-dispatches
+helped nothing **and created a second wedge** — the extra runs sat `queued`
+holding the concurrency group (`build.yml` declares one with no
+`cancel-in-progress` for that path), so the newest run showed `pending` with
+zero jobs, which reads exactly like runner saturation and is not.
+
+A plain cancel will not move a run whose jobs were never assigned to a runner.
+`POST /actions/runs/{id}/force-cancel` will, and the held run materialises its
+jobs within seconds.
+
+Two verdicts look identical and have opposite fixes:
+
+| verdict | evidence | fix |
+|---|---|---|
+| `Unserved` | no runner in either scope carries the labels, and no host attests the lane | restore the runner, **or** unset the routing variable so the job falls back to the workflow's own literal |
+| `Starved` | an online, not-busy runner **does** carry the labels, and work is queued anyway | runner-group access, ephemeral consumption, or a `workflows` permission — not a runner restore |
+
+### Census both scopes, or do not census
+
+`repos/{owner}/{repo}/actions/runners` omits org-registered runners **entirely**
+and returns the same empty list whether a lane is org-served or dead. A
+repo-scope-only census is why `fleet-status` reported `runners.total=0` while the
+org held two online. `shipyard landability` reads both and says which scope
+satisfied a lane.
+
+Also: a JIT census proves neither idle capacity nor outage. The event-class
+pool registers only while a job is in flight, so an empty census at rest is
+normal — which is why the verdict needs a host attestation, not just a census.
+
+### `launchctl list` cannot see a crash loop
+
+For a `KeepAlive` job, `launchctl list` renders `spawn scheduled` as `- 0` —
+byte-identical to a healthy loaded-but-idle service. M5's preamble runner read
+as healthy through **3,684 respawns** with no `.runner` registration file at
+all. Use `launchctl print gui/$UID/<label>`, which exposes `state` and the
+`runs` counter, and run it first against a job you know is loaded: over SSH the
+GUI domain can be invisible, and an empty answer is then a scope error rather
+than a dead service.
+
+### Trust a sensor only when it can report its own death
+
+Five sensors on this fleet were found dead — one crashing every tick for roughly
+three months, another unloaded for seven weeks — and **none reported itself**.
+So every detector here carries a control that must fail:
+
+- `shipyard landability` assesses two synthetic lanes each run (one nothing can
+  serve, one GitHub always serves) and exits non-zero if they stop
+  discriminating.
+- `landing-watchdog.yml` replays a captured fixture of the 2026-09-13 wedge
+  before every live scan, and fails if the classifier does not fire on it — or
+  if it flags the fixture's healthy control PR.
+- The host attestation writer probes a launchd label that exists and one that
+  cannot, and records `launchd_readable: false` rather than a census of zero.
+
+Verify the attestation is actually running on a host rather than assuming it:
+
+```sh
+~/.local/share/pulp-landing/staging/install_host_attestation.sh --verify
+```
+
+`SKEW` in that receipt means the file was written by a different writer than the
+one installed — a distinct condition from stale and from dead, and the one a
+prior incident collapsed when a behind-the-times checker reported every lane on a
+healthy host as missing its heartbeat.
+
+## A CI log and a local worktree each date from somewhere, and neither says so
+
+Two readings that look like live findings are routinely measurements of the
+past. Both produced a confident, wrong "this is broken on main" during the same
+afternoon of GPU-lane triage, and both are cheap to date before believing.
+
+**A downloaded job log is a snapshot of the tree at that run's head SHA.** It
+keeps reading as current long after the defect it shows has landed a fix. Before
+attributing any failure in a log to live code, resolve the run's head and test
+whether the candidate fix is already in it:
+
+```sh
+run_sha=$(ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>" --jq .head_sha)
+git merge-base --is-ancestor <fix-commit> "$run_sha" \
+  && echo "log postdates the fix — the failure is live" \
+  || echo "log predates the fix — re-run before triaging"
+git log --oneline "$run_sha"..origin/main   # everything the log cannot know about
+```
+
+**A repo verifier run from a worktree behind main measures the OLD verifier.**
+This is the sharper trap, because the script and the files it reads come from
+different times: the worktree's copy of the script judges files whose current
+state main's copy judges differently, and the mismatch reads as a real failure in
+the files. `verify_sampler_interpolation_benchmark.py` hashes a declared list of
+source paths; a worktree missing the commit that added an eighth path computed a
+digest that could not match the recorded evidence, on a tree where every declared
+file was byte-identical to main.
+
+The tell is an impossible result: the digest still mismatched at the very commit
+that recorded it. When a verifier disagrees with its own committed evidence at
+the evidence commit, suspect the verifier's *version*, not the data. Confirm by
+checking the script's own history for a commit you do not have:
+
+```sh
+git log --oneline origin/main -- tools/scripts/<verifier>.py
+git merge-base --is-ancestor <that-commit> HEAD || echo "your copy is older than main's"
+```
+
+Re-measure against `origin/main`'s own copy rather than the worktree's — extract
+the constant from `git show origin/main:<script>` and hash `git show
+origin/main:<path>` blobs — before filing anything. Four separate carried-forward
+"open defects" were already fixed on main by the time they were re-examined; each
+would have cost a PR.
+
+## The RTSan lane fails on its runner, not on its tests
+
+`sanitizers.yml`'s `rtsan` job is named `RealtimeSanitizer (Linux x86_64, Clang
+18)` and installs its toolchain with `apt.llvm.org`'s `llvm.sh`. It is also the
+one sanitizer whose selector is resolved *only* on `workflow_dispatch` — on every
+other event the job's `if:` skips it, so the repo variable
+`PULP_SANITIZER_RTSAN_RUNS_ON_JSON` takes effect exactly when the job runs and
+never when anything would notice it being wrong. That variable has held
+`"macos-15"` since May 2026, so every dispatch has routed a Linux-only job onto a
+macOS image and died three retries deep in `Install Clang 18`:
+
+```
+./llvm.sh: line 44: lsb_release: command not found
+##[error]Install Clang 18 failed after 3 attempts (exit 127)
+```
+
+Read that as an infrastructure fault, never as a test result — it fails before
+CMake configures, so the job carries zero information about the suite, including
+the GPU provenance selftests it would otherwise run. The three macOS sanitizers
+are unaffected: their selectors resolve independently, which is why the resolver
+deliberately skips RTSan's resolution on non-dispatch events rather than letting
+a bad RTSan variable fail `resolve-runners` and take ASan/TSan/UBSan down with
+it.
+
+Restoring the documented `ubuntu-24.04` default does not make the lane green. The
+job's own comment records that the `apt.llvm.org` Clang 18 package for
+ubuntu-24.04 ships without the compiler-rt realtime runtime, so
+`-fsanitize=realtime` is rejected at configure time. The lane is advisory and
+dispatch-only for that reason; fixing the variable moves the failure from the
+install step to the configure step and nothing else.

@@ -22,6 +22,8 @@ PULP_INSPECT_CAPABILITY(TelemetryStream, "telemetry.stream", "dev.pulp.telemetry
 PULP_INSPECT_CAPABILITY(RuntimeReload, "runtime.reload", "dev.pulp.runtime/reload@1", HighRisk, Reload, HostMain, Receipt, 0, 0, 0, 0)
 PULP_INSPECT_CAPABILITY(RuntimeEval, "runtime.eval", "dev.pulp.runtime/evaluate@1", Critical, Evaluation, RuntimeEvaluator, Receipt, 0, 0, 1, 0)
 PULP_INSPECT_CAPABILITY(ArtifactRead, "artifact.read", "dev.pulp.artifact/read@1", Sensitive, ArtifactRead, Background, Artifact, 0, 0, 0, 1)
+PULP_INSPECT_CAPABILITY(SequencerStateRead, "sequencer.state.read", "dev.pulp.sequencer/state.read@1", Sensitive, None, HostMain, Response, 1, 1, 1, 0)
+PULP_INSPECT_CAPABILITY(SequencerStateEdit, "sequencer.state.edit", "dev.pulp.sequencer/state.edit@1", Control, State, HostMain, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(SequencerTransportRead, "sequencer.transport.loop.read", "dev.pulp.sequencer/transport.loop.read@1", Sensitive, None, HostMain, Response, 1, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(SequencerTransportWrite, "sequencer.transport.loop.write", "dev.pulp.sequencer/transport.loop.write@1", Control, State, HostMain, Receipt, 0, 1, 1, 0)
 PULP_INSPECT_CAPABILITY(Unavailable, "unavailable", "dev.pulp.unavailable/operation@1", Unavailable, None, Protocol, Response, 0, 0, 0, 0)

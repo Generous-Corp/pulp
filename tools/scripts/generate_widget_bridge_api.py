@@ -34,7 +34,6 @@ FNV1A64_MASK = 0xFFFFFFFFFFFFFFFF
 
 MOCK_ONLY_FUNCTIONS = [
     "createButton",
-    "insertChild",
     "moveWidget",
 ]
 
@@ -259,6 +258,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "chooseFolder": "(title?: string) => string",
     "claimDocumentNavigationFocus": "() => boolean",
     "claimOverlay": "(id: string) => void",
+    "setOverlayTrigger": "(id: string, isTrigger?: boolean) => void",
     "clearBoxShadow": "(id: string) => void",
     "clearTransform": "(id: string) => void",
     "clearWidgetSchema": "(id: string) => void",
@@ -303,6 +303,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "releaseDocumentNavigationFocus": "() => void",
     "releaseOverlay": "(id: string) => void",
     "removeWidget": "(id: string) => void",
+    "insertChild": "(parentId: string, childId: string, index: number) => boolean",
     "saveStylePreset": "(name: string, payload: unknown) => void",
     "seekWidgetLottie": "(id: string, time01: number) => void",
     "setAICli": "(command: string) => void",

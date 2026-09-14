@@ -974,3 +974,11 @@ When you register a test here:
 tests against each other, but it constrains nothing against tests holding a
 different lock — it is a correctness guard for the manifest rewrite, not a
 concurrency budget.
+
+**Measure on the slowest runner the gate can land on, not the one you have.**
+The required `macos` gate places on either Mac Studio, and M5 runs the same
+suite roughly 1.5x slower than M3. A selftest measured at ~62 s on an idle M3 —
+`gpu-recipe-catalog-selftest`, which builds throwaway clones per equivalence
+class — is already over the 120 s default once that factor and a loaded host are
+applied, even though the local number looks like comfortable headroom. Scale the
+local measurement before deciding a test needs no explicit `TIMEOUT`.

@@ -226,6 +226,22 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
             set_target_properties(${target}_CLAP PROPERTIES
                 MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.clap")
         endif()
+
+        # Write PkgInfo so Finder treats the .clap as an opaque bundle (not a
+        # folder). The VST3 and AU paths above have always done this; CLAP did
+        # not, and the difference is visible: a Pulp-built .clap reports
+        # kMDItemContentType `public.folder` while the .vst3 from the same
+        # build reports `com.apple.generic-bundle`. `.vst3` and `.component`
+        # are extensions Launch Services already knows, so they survive the
+        # omission better than `.clap`, which it does not know at all --
+        # leaving the package declaration as the only signal. A bundle that
+        # reads as a folder can be browsed into and dragged apart in Finder,
+        # and never renders a bundle icon.
+        add_custom_command(TARGET ${target}_CLAP POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E echo "BNDL????" >
+                "$<TARGET_BUNDLE_DIR:${target}_CLAP>/Contents/PkgInfo"
+            COMMENT "Writing PkgInfo into ${name}.clap bundle"
+        )
     endif()
 
     # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and

@@ -12,6 +12,7 @@ import subprocess
 import sys
 from typing import Any
 
+import connected_git_history
 import json_schema_lite
 
 
@@ -682,8 +683,25 @@ def validate_handoff(document: Any) -> list[str]:
     return problems
 
 
-def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> list[str]:
-    """Bind pinned Pulp paths and deletion candidates to routing and Git facts."""
+def validate_handoff_routing(
+    document: dict[str, Any],
+    root: pathlib.Path,
+    require_current: bool = False,
+) -> list[str]:
+    """Bind pinned Pulp paths and deletion candidates to routing and Git facts.
+
+    Two tiers, because a pin makes two separable claims. PROVENANCE is always
+    checked: the pinned revision is an ancestor, and the object it names still
+    carries the handed-off blob or tree. That is true forever once recorded, so
+    an unrelated commit can never falsify it. CURRENCY is checked only when
+    ``require_current`` is set: the path at HEAD still has the handed-off
+    content and no later commit has taken ownership of it. Currency is a
+    property of the checkout at a moment, so every commit touching a pinned
+    path falsifies it until the ledger is regenerated. Gating a merge on
+    currency makes any edit to a pinned path a two-commit operation and
+    serializes concurrent pull requests; consumers that need "current" ask for
+    it here instead.
+    """
 
     projection_value = document.get("ownership_projection")
     if projection_value != ".github/vellum-ownership.json":
@@ -735,6 +753,20 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
     head_revision = git_text(["rev-parse", "HEAD"])
     if head_revision is None:
         return ["handoff repository HEAD cannot be resolved"]
+
+    # A truncated checkout answers "which commit last owned this path?" with its
+    # graft boundary, or cannot answer at all because the pinned revision is not
+    # in the object store. Either way the row below fails for a reason that has
+    # nothing to do with the ledger, and saying "absent from its pinned revision"
+    # sends the reader to repair a file that is not broken. An empty boundary set
+    # -- a complete checkout, or a Git query that could not be run -- leaves every
+    # message below exactly as it was.
+    shallow_boundaries = connected_git_history.shallow_boundaries(root)
+    shallow_problem = (
+        "handoff identities cannot be verified: this checkout's Git history is "
+        f"truncated, so pinned revisions resolve to the shallow graft boundary "
+        f"instead of the real owning commit; {connected_git_history.REMEDY}"
+    )
 
     routed_paths = sorted(
         {
@@ -842,22 +874,43 @@ def validate_handoff_routing(document: dict[str, Any], root: pathlib.Path) -> li
                 pinned_object, pinned_type, head_object, latest_owner,
                 ancestor_code, checkout_dirty,
             ) = git_facts[fact_key]
-            if pinned_object is None:
+            row_is_stale = (
+                ancestor_code != 0
+                or pinned_object != object_id
+                or pinned_type != object_type
+                or checkout_dirty
+            )
+            # Only re-attribute rows that already failed. A green row needs no
+            # explanation, and asking Git per row would add ~100 log queries to
+            # the common case where nothing is wrong.
+            if (
+                (pinned_object is None or row_is_stale)
+                and shallow_boundaries
+                and connected_git_history.resolves_to_boundary(
+                    root, str(revision), path, shallow_boundaries
+                )
+            ):
+                # One truncated checkout is one defect, however many rows it
+                # breaks. Deduplicate so the true cause is not buried under a
+                # hundred copies of itself.
+                if shallow_problem not in problems:
+                    problems.append(shallow_problem)
+            elif pinned_object is None:
                 problems.append(
                     f"handoff entries[{index}].pulp_paths[{row_index}] is absent "
                     "from its pinned Pulp revision"
                 )
-            elif (
-                ancestor_code != 0
-                or pinned_object != object_id
-                or pinned_type != object_type
-                or head_object != object_id
-                or latest_owner != revision
-                or checkout_dirty
-            ):
+            elif row_is_stale:
                 problems.append(
                     f"handoff entries[{index}].pulp_paths[{row_index}] has stale "
                     "revision/blob/tree identity"
+                )
+            elif require_current and (
+                head_object != object_id or latest_owner != revision
+            ):
+                problems.append(
+                    f"handoff entries[{index}].pulp_paths[{row_index}] pin is not "
+                    "current at HEAD; regenerate"
                 )
             try:
                 if path not in route_owners:
@@ -912,6 +965,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--show", metavar="ID", help="print one recipe as JSON")
     parser.add_argument("--symptom", action="append", default=[], help="select exact symptom tag")
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
+    parser.add_argument(
+        "--require-current",
+        action="store_true",
+        help=(
+            "also require every pinned handoff path to still match HEAD. Off by "
+            "default so an unrelated commit cannot invalidate a recorded pin."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.show and args.symptom:
         print("gpu-recipe-catalog: --show and --symptom are mutually exclusive", file=sys.stderr)
@@ -926,7 +987,11 @@ def main(argv: list[str] | None = None) -> int:
             problems.extend(validate_repository_references(document, ROOT))
             handoff = json.loads(args.handoff.read_text(encoding="utf-8"))
             problems.extend(validate_handoff(handoff))
-            problems.extend(validate_handoff_routing(handoff, ROOT))
+            problems.extend(
+                validate_handoff_routing(
+                    handoff, ROOT, require_current=args.require_current
+                )
+            )
         if problems:
             raise ValueError("\n".join(problems))
     except (OSError, json.JSONDecodeError, ValueError, json_schema_lite.UnsupportedKeyword) as exc:

@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -26,13 +27,24 @@ const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
 const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_e9717d78e8f30fdc6b30fbc14cb5795ba8a9e2e92b03f3ef128469b85eda1a58_"
+    "PULP_CONTROL_MANIFEST_SHA256_fd43de3375adbbf8a1344ff0df2b947312cef545d9b1294b0ea738dfb5dd7d00_"
     "V1";
 const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
 
 bool contains_authority_material(std::string_view value) {
     return value.find("admission-1") != std::string_view::npos ||
            value.find("registration-1") != std::string_view::npos;
+}
+
+/// The bootstrap handle is a `void*` on Windows and a file descriptor
+/// elsewhere, while the connection takes a single integral handle value.
+/// Widen through `std::intptr_t` so a 64-bit Windows handle survives whole.
+std::intptr_t native_handle_value(pulp::inspect::ControlHostBootstrapHandle handle) {
+#ifdef _WIN32
+    return reinterpret_cast<std::intptr_t>(handle);
+#else
+    return static_cast<std::intptr_t>(handle);
+#endif
 }
 
 bool send_wrong_nonce(pulp::inspect::ControlHostBootstrapHandle handle) {
@@ -42,7 +54,7 @@ bool send_wrong_nonce(pulp::inspect::ControlHostBootstrapHandle handle) {
             {.payload = pulp::inspect::ControlHostPreflightResponseEnvelope{std::string(64, 'b')}});
         (void)connection.send_message(message);
     });
-    if (!connection.attach_inherited_local_socket(handle))
+    if (!connection.attach_inherited_local_socket(native_handle_value(handle)))
         return false;
 #ifndef _WIN32
     ::close(handle);
@@ -56,7 +68,7 @@ bool send_malformed(pulp::inspect::ControlHostBootstrapHandle handle) {
     connection.set_on_message([&connection](const void*, std::size_t) {
         (void)connection.send_message("not a control envelope");
     });
-    if (!connection.attach_inherited_local_socket(handle))
+    if (!connection.attach_inherited_local_socket(native_handle_value(handle)))
         return false;
 #ifndef _WIN32
     ::close(handle);
@@ -106,7 +118,7 @@ bool finish_without_valid_receipt(pulp::inspect::ControlHostBootstrapHandle hand
         }
         completed.store(true, std::memory_order_release);
     });
-    if (!connection.attach_inherited_local_socket(handle))
+    if (!connection.attach_inherited_local_socket(native_handle_value(handle)))
         return false;
 #ifndef _WIN32
     ::close(handle);

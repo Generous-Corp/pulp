@@ -28,6 +28,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -319,4 +320,339 @@ TEST_CASE("auto-overlay: adding the data-overlay hint upgrades an existing "
     h.eval(R"( d.setAttribute('data-overlay', 'true'); )");
     REQUIRE(View::active_overlay_ != nullptr);
     REQUIRE(View::active_overlay_->overlay_consumes_outside_click());
+}
+
+// ── data-overlay-trigger marks the control that OPENS an overlay ────────────
+//
+// Separate from the claim: the trigger is the dropdown FIELD, the claim is on
+// the menu it opens. Marking it lets a press meant as "switch menus" reach the
+// second dropdown instead of being spent closing the first. Never inferred
+// from CSS shape — an inference that marked ordinary content would make
+// clicking away from a menu also operate whatever sits under the click.
+
+namespace {
+
+// The bridge keys widgets by its own generated id, not the DOM `id`, so these
+// count marks over the built tree instead of looking one up by name.
+int count_views(const View& v) {
+    int n = 1;
+    for (size_t i = 0; i < v.child_count(); ++i) n += count_views(*v.child_at(i));
+    return n;
+}
+
+int count_overlay_triggers(const View& v) {
+    int n = v.overlay_trigger() ? 1 : 0;
+    for (size_t i = 0; i < v.child_count(); ++i)
+        n += count_overlay_triggers(*v.child_at(i));
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("data-overlay-trigger=\"true\" marks the view as an overlay trigger",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.setAttribute('data-overlay-trigger', 'true');
+    )");
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+}
+
+TEST_CASE("an unmarked element is not an overlay trigger",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.style.position = 'absolute';
+        d.style.zIndex = '100';
+    )");
+    // Positive control: the element really reached the bridge and built views,
+    // so the zero below is about the trigger mark and not about an empty tree.
+    REQUIRE(count_views(h.root) > 1);
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+}
+
+TEST_CASE("removing data-overlay-trigger clears the mark",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        d.id = 'toggling';
+        document.body.appendChild(d);
+        d.setAttribute('data-overlay-trigger', 'true');
+    )");
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+
+    h.eval("document.getElementById('toggling').removeAttribute('data-overlay-trigger');");
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+}
+
+// ── Escape must NOTIFY the overlay's owner, not just hide it ────────────────
+//
+// A JS-owned ARIA popup (web-compat-document.js) claims the generalized
+// overlay slot on activate and releases it on dismiss, so it IS an open
+// overlay as far as the native dismissal policy is concerned. Its React state
+// is reconciled by a native `dismiss` event the JS side listens for: without
+// that event the popup would be hidden natively while the app still believes
+// its menu is open, and the next trigger press would toggle the state back to
+// closed with nothing appearing to happen.
+//
+// `route_escape_to_active_overlay` therefore goes through the dismissal path,
+// which fires `on_overlay_dismissed` — the callback `claimOverlay` installs to
+// dispatch that event — and never hides anything itself.
+
+TEST_CASE("Escape fires the overlay's native dismiss event for its JS owner",
+          "[view][web-compat][auto-overlay][escape]") {
+    OverlayGuard g;
+    Harness h;
+    // The dismiss handler marks a SECOND element as an overlay trigger, which
+    // is an observable that already round-trips through the bridge, so the
+    // assertion below is about the event actually reaching JS.
+    h.eval(R"(
+        var witness = document.createElement('div');
+        document.body.appendChild(witness);
+        var popup = document.createElement('div');
+        document.body.appendChild(popup);
+        popup.addEventListener('dismiss', function() {
+            witness.setAttribute('data-overlay-trigger', 'true');
+        });
+        popup.setAttribute('data-overlay', 'true');
+        popup.style.position = 'absolute';
+    )");
+    // Positive controls: the claim really fired and nothing has dismissed yet,
+    // so the count below is about Escape and not about a listener that was
+    // already run or an overlay that never existed.
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+
+    REQUIRE(pulp::view::route_escape_to_active_overlay(h.root) ==
+            pulp::view::OverlayEscapeResult::overlay);
+
+    REQUIRE(h.root.interaction().active_overlay == nullptr);
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+}
+
+TEST_CASE("an outside press fires the overlay's native dismiss event too",
+          "[view][web-compat][auto-overlay][pointer]") {
+    // Same reconciliation obligation on the press path: the JS owner learns
+    // about the dismissal through the event, never by observing a hidden view.
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var witness = document.createElement('div');
+        document.body.appendChild(witness);
+        var popup = document.createElement('div');
+        document.body.appendChild(popup);
+        popup.addEventListener('dismiss', function() {
+            witness.setAttribute('data-overlay-trigger', 'true');
+        });
+        popup.setAttribute('data-overlay', 'true');
+        popup.style.position = 'absolute';
+        popup.style.left = '100px';
+        popup.style.top = '100px';
+        popup.style.width = '80px';
+        popup.style.height = '60px';
+    )");
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+
+    const auto press = pulp::view::route_press_to_active_overlay(
+        h.root, {10.0f, 10.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+}
+
+// ── aria-haspopup marks the trigger too ────────────────────────────────────
+//
+// Same mark, reached from the vocabulary a document that cares about
+// assistive technology has already written. It is the exact counterpart of
+// the ARIA the overlay side above already reads: `role="menu"|"listbox"|
+// "dialog"` and `aria-modal` say "I AM a dismissable overlay",
+// `aria-haspopup` says "I OPEN one". Honouring only the first half is what
+// makes a correctly-authored app pay two presses to switch menus — the first
+// spent closing, the second opening.
+
+TEST_CASE("aria-haspopup marks the view as an overlay trigger",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.setAttribute('aria-haspopup', 'menu');
+    )");
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+}
+
+TEST_CASE("every aria-haspopup token except \"false\" marks",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    // The ARIA token set, plus the one value that must NOT mark. Built in one
+    // tree so the counts are about the tokens and not about six harnesses.
+    h.eval(R"(
+        ['true', 'menu', 'listbox', 'tree', 'grid', 'dialog', 'false']
+            .forEach(function(token) {
+                var d = document.createElement('div');
+                document.body.appendChild(d);
+                d.setAttribute('aria-haspopup', token);
+            });
+    )");
+    // Positive control: seven elements really reached the bridge, so the six
+    // below is about the token set and not about a tree that never built.
+    REQUIRE(count_views(h.root) > 7);
+    REQUIRE(count_overlay_triggers(h.root) == 6);
+}
+
+// React commits `setAttribute` BEFORE `appendChild`, so the re-evaluation that
+// `setAttribute` triggers runs while the element has no native widget and is a
+// no-op. Every freshly mounted button arrives in exactly that state, so without
+// a replay at mount the mark would only land for an author who happened to
+// write the attribute afterwards — which is nobody using React.
+TEST_CASE("aria-haspopup set BEFORE mount still marks (React commit order)",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        d.setAttribute('aria-haspopup', 'listbox');
+        document.body.appendChild(d);
+    )");
+    REQUIRE(count_views(h.root) > 1);
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+}
+
+TEST_CASE("removing aria-haspopup clears the mark",
+          "[view][web-compat][auto-overlay][trigger]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        d.id = 'menubutton';
+        document.body.appendChild(d);
+        d.setAttribute('aria-haspopup', 'listbox');
+    )");
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+
+    h.eval("document.getElementById('menubutton').removeAttribute('aria-haspopup');");
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+}
+
+// The behaviour the mark exists for, measured through the same policy verb
+// every host calls.
+//
+// `layout_children()` is not optional here and is the whole reason this case
+// is worth writing. The style writes below reach Yoga, but nothing lays the
+// tree out until asked, so before that call every child measures `0x0` at the
+// origin and `hit_test` answers with the body for any point at all. A press
+// case written without it cannot distinguish "the trigger was not marked"
+// from "the press hit nothing", and reads as a product failure either way.
+TEST_CASE("a press on an aria-haspopup trigger switches menus in one press",
+          "[view][web-compat][auto-overlay][trigger][pointer]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var trigger = document.createElement('div');
+        document.body.appendChild(trigger);
+        trigger.setAttribute('aria-haspopup', 'menu');
+        trigger.style.position = 'absolute';
+        trigger.style.left = '10px';
+        trigger.style.top = '10px';
+        trigger.style.width = '60px';
+        trigger.style.height = '20px';
+
+        var popup = document.createElement('div');
+        document.body.appendChild(popup);
+        popup.setAttribute('data-overlay', 'true');
+        popup.style.position = 'absolute';
+        popup.style.left = '200px';
+        popup.style.top = '150px';
+        popup.style.width = '120px';
+        popup.style.height = '80px';
+    )");
+    h.root.layout_children();
+
+    // Positive controls: an overlay that really claimed, and really consumes.
+    // A press that "passed through" an overlay which never consumed anything
+    // would prove nothing about the trigger mark.
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+    REQUIRE(h.root.interaction().active_overlay->overlay_consumes_outside_click());
+
+    // And a positive control on the press point itself: it lands on the marked
+    // control, outside the overlay. Without this the assertion below could
+    // pass or fail for reasons that have nothing to do with the mark.
+    //
+    // Non-fatal on purpose. These say WHY the press below is consumed when it
+    // is; aborting the case here would hide the consumed press — the thing the
+    // user actually reports — behind its own cause.
+    CHECK(count_overlay_triggers(h.root) == 1);
+    const Point press_point{40.0f, 20.0f};
+    const auto* hit = h.root.hit_test(press_point);
+    REQUIRE(hit != nullptr);
+    bool hit_is_trigger = false;
+    for (const View* node = hit; node != nullptr; node = node->parent())
+        hit_is_trigger = hit_is_trigger || node->overlay_trigger();
+    CHECK(hit_is_trigger);
+    REQUIRE_FALSE(
+        h.root.interaction().active_overlay->overlay_contains(press_point));
+
+    // The press dismisses WITHOUT consuming, so the host falls through to the
+    // ordinary hit test and the trigger opens its own menu on this same press.
+    const auto on_trigger =
+        pulp::view::route_press_to_active_overlay(h.root, press_point);
+    CHECK(on_trigger.routing == pulp::view::OverlayPressRouting::dismissed);
+    CHECK_FALSE(on_trigger.consume_press);
+}
+
+TEST_CASE("a press on ordinary content still consumes the dismissal",
+          "[view][web-compat][auto-overlay][trigger][pointer]") {
+    // The negative control for the case above, in the direction that matters:
+    // the pass-through is scoped to triggers. Widened to every dismissing
+    // press, closing a menu would also operate whatever sits under the click.
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var plain = document.createElement('div');
+        document.body.appendChild(plain);
+        plain.style.position = 'absolute';
+        plain.style.left = '10px';
+        plain.style.top = '10px';
+        plain.style.width = '60px';
+        plain.style.height = '20px';
+
+        var popup = document.createElement('div');
+        document.body.appendChild(popup);
+        popup.setAttribute('data-overlay', 'true');
+        popup.style.position = 'absolute';
+        popup.style.left = '200px';
+        popup.style.top = '150px';
+        popup.style.width = '120px';
+        popup.style.height = '80px';
+    )");
+    h.root.layout_children();
+
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+    REQUIRE(h.root.interaction().active_overlay->overlay_consumes_outside_click());
+    REQUIRE(count_overlay_triggers(h.root) == 0);
+
+    // Same point, same geometry, same instrument as the case above — the ONLY
+    // difference is that this element declares no `aria-haspopup`. That is
+    // what makes the two a matched pair rather than two unrelated readings.
+    const Point press_point{40.0f, 20.0f};
+    const auto* hit = h.root.hit_test(press_point);
+    REQUIRE(hit != nullptr);
+    for (const View* node = hit; node != nullptr; node = node->parent())
+        CHECK_FALSE(node->overlay_trigger());
+
+    const auto on_plain =
+        pulp::view::route_press_to_active_overlay(h.root, press_point);
+    CHECK(on_plain.routing == pulp::view::OverlayPressRouting::dismissed);
+    CHECK(on_plain.consume_press);
 }

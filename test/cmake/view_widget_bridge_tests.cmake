@@ -524,6 +524,14 @@ target_link_libraries(pulp-test-control-main-thread-executor PRIVATE
 catch_discover_tests(pulp-test-control-main-thread-executor
     PROPERTIES LABELS "inspect;control;main-thread;executor")
 
+add_executable(pulp-test-control-sequencer-state-executor
+    test_control_sequencer_state_executor.cpp)
+target_link_libraries(pulp-test-control-sequencer-state-executor PRIVATE
+    pulp::inspect-runtime pulp::inspect-control pulp::state pulp::events
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-sequencer-state-executor
+    PROPERTIES LABELS "inspect;control;sequencer;main-thread;mutation")
+
 add_executable(pulp-test-control-state-write-executor
     test_control_state_write_executor.cpp)
 target_link_libraries(pulp-test-control-state-write-executor PRIVATE
@@ -800,6 +808,12 @@ endif()
 pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES ${_pulp_widget_bridge_test_libs})
 pulp_add_test_suite(pulp-test-widget-bridge-capabilities LIBRARIES ${_pulp_widget_bridge_test_libs})
 pulp_add_test_suite(pulp-test-widget-bridge-removal-lifetime
+    LIBRARIES ${_pulp_widget_bridge_test_libs})
+# Widget bridge — child ordering. Every createX appends, so a widget that
+# reaches the bridge after its siblings needs insertChild to land where its
+# author put it; covers the reorder, the fail-closed cases, and the View-level
+# move that keeps the child attached instead of rebuilding it.
+pulp_add_test_suite(pulp-test-widget-bridge-child-order
     LIBRARIES ${_pulp_widget_bridge_test_libs})
 # The View lifecycle contract at the bridge boundary: the retained ScrollView
 # upgrade and the ordinary reparent must fail closed rather than dereference a
