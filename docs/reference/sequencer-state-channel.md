@@ -157,6 +157,24 @@ These are part of the frozen contract — build against them:
    that a `Snapshot` may be `memcpy`'d to disk or IPC. Persist via your own codec.
    `Snapshot::schema_version` is engine-defined and channel-opaque.
 
+## Control-platform projection
+
+The channel is also reachable as two typed Product A control operations, so an
+agent or a hosted product reaches live pattern state through the same grantable
+operation surface as every other capability rather than through a private hook:
+
+| Operation | Profiles | What it does |
+|---|---|---|
+| `dev.pulp.sequencer/state.read@1` | `observe`, `develop` | Copies one UI-side snapshot and the seqlock playhead out of an admitted channel. |
+| `dev.pulp.sequencer/state.edit@1` | `develop` | Submits one bounded typed `StepEdit` into the UI→engine command FIFO. |
+
+Both run on the host-main executor, resolve only a `Standalone` or
+`SharedPluginHost` channel, and never call an audio-side method. A full command
+FIFO is a typed retryable refusal (`ResourceExhausted`), never a silent drop —
+the transport's normative rules above are enforced by the operation, not
+restated by it. See
+[development-inspector-capabilities](development-inspector-capabilities.md).
+
 ## Related
 
 - [base-vs-modulated](base-vs-modulated.md) — the parameter modulation model (a

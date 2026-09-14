@@ -624,6 +624,45 @@ def main() -> int:
                 f"sequencer semantics in shared control documentation escaped governance: "
                 f"{transition_errors}"
             )
+        # A row that lists a machine-generated ledger in its owned_paths cannot
+        # govern every PR that regenerates it: the gpu-handoff pin-freshness
+        # gate requires that refresh, so an author would have no way to satisfy
+        # both gates at once.
+        generated_ledger = "docs/status/gpu-vellum-handoff.yaml"
+        annexed_control = "docs/status/annexed-ordinary-path.md"
+        annexed = copy.deepcopy(valid)
+        annexed["rows"][0]["owned_paths"] = sorted(
+            set(annexed["rows"][0].get("owned_paths", []))
+            | {generated_ledger, annexed_control}
+        )
+        transition_errors = validate_transition(annexed, annexed, [generated_ledger])
+        if transition_errors:
+            raise AssertionError(
+                f"regenerating a machine-generated ledger was governed: "
+                f"{transition_errors}"
+            )
+        # Control: the same row annexing an ordinary path still governs it, so
+        # the case above passes because of the exemption and not because
+        # nothing reached the documented-path branch at all.
+        transition_errors = validate_transition(annexed, annexed, [annexed_control])
+        if not any(annexed_control in error for error in transition_errors):
+            raise AssertionError(
+                f"an ordinary annexed path escaped governance, so the "
+                f"generated-ledger case proves nothing: {transition_errors}"
+            )
+        # The exemption covers regeneration only. Sequencer semantics newly
+        # added to a generated ledger is still governed.
+        transition_errors = validate_transition(
+            annexed,
+            annexed,
+            [generated_ledger],
+            semantic_added_paths={generated_ledger},
+        )
+        if not any(generated_ledger in error for error in transition_errors):
+            raise AssertionError(
+                f"sequencer semantics in a generated ledger escaped governance: "
+                f"{transition_errors}"
+            )
         adjacent_checker = "tools/scripts/sequencer_release_check.py"
         transition_errors = validate_transition(valid, valid, [adjacent_checker])
         if not any(adjacent_checker in error for error in transition_errors):
