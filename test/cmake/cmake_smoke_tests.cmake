@@ -86,6 +86,10 @@ add_test(NAME cmake-standalone-document-types
     COMMAND ${CMAKE_COMMAND}
         -DPULP_DOC_TYPE_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/standalone-document-types
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_standalone_document_types.cmake)
+
+add_test(NAME cmake-plugin-bundle-icon
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_plugin_bundle_icon.cmake)
 set_tests_properties(cmake-standalone-document-types PROPERTIES
     LABELS "cmake;app;standalone;plist"
     # Runs in ~1.5s warm; the budget covers three throwaway project configures
@@ -181,6 +185,19 @@ add_test(NAME cmake-runtime-staging-call-sites
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_runtime_staging_call_sites.cmake)
 set_tests_properties(cmake-runtime-staging-call-sites PROPERTIES
     LABELS "cmake;sdk;runtime;lint"
+    TIMEOUT 30)
+
+# SOURCE LINT: every macOS plug-in bundle helper writes Contents/PkgInfo, so a
+# produced bundle is declared a package rather than a browsable folder. Needed
+# because the omission is invisible from inside the build — a bundle missing
+# PkgInfo links, loads, validates and hosts identically, and differs only in
+# Finder — so a format that forgets it ships that way unnoticed.
+add_test(NAME cmake-bundle-pkginfo-call-sites
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_bundle_pkginfo_call_sites.cmake)
+set_tests_properties(cmake-bundle-pkginfo-call-sites PROPERTIES
+    LABELS "cmake;sdk;bundle;lint"
     TIMEOUT 30)
 
 # Installed-SDK runtime-sidecar proof (WAH-3). Installs this build as an SDK,

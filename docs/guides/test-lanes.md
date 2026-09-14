@@ -9,11 +9,11 @@ single source of truth for that model.
 
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
-| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | all core tests **except** `validation` and `slow` labels; an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
+| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
-| **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including `validation` + `slow`; results eyeballed, build failures file an issue |
-| **cross-platform-check** | per PR (Linux/Windows) | advisory | no | core tests, excludes `validation` + `slow` |
+| **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including all five excluded label groups; results eyeballed, build failures file an issue |
+| **cross-platform-check** | per PR (x86-64 Linux, arm64 Linux, x86-64 Windows) | advisory | no | core tests, excludes `validation` + `slow` **only** — so the timing group does run here, off the reference platform |
 
 The required gate is **serialized on self-hosted macOS runners** and takes
 ~30 min. Keeping it lean is why the two label groups below are excluded from it.
@@ -37,12 +37,25 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   ~25-30 min iOS try-compile). **Excluded from the ordinary required corpus**;
   run nightly. A slow test that must gate affected changes needs an explicit
   affected-surface step in the required job.
+- **`performance` / `bench` / `quality-lab`** — a relative-timing, CPU-budget,
+  or benchmark measurement (e.g. the sampler heritage suite's "Representative
+  chain stays within the shipping CPU budget", which asserts a ratio against an
+  in-run baseline). **Excluded from the required gate** since 2026-07-21. These
+  are robust to *steady* load but not to the load **variance** produced when the
+  Studio runs its two concurrent build VMs: a sibling VM's bursty compile
+  inflates the ratio past threshold and the verdict tracks runner load rather
+  than the code. They still run on push, on the nightly, and on
+  `cross-platform-check`. A timing test that must gate belongs in a dedicated
+  cap=1 perf lane, not on the merge path.
 - **no special label** — a normal unit/integration test. Runs on the **required
   gate**. This is where the vast majority of tests belong.
 
-The required gate excludes both groups with one CTest filter,
-`--label-exclude "validation|slow"` — the same filter `build.yml`'s PR ctest and
-`cross-platform-check.yml` already use. It is set in
+The required gate excludes all three groups with one CTest filter,
+`--label-exclude "validation|slow|performance|bench|quality-lab"` — the same
+filter `build.yml`'s PR ctest uses on `pull_request`, `workflow_dispatch`, and
+`merge_group`. The other lanes filter differently and deliberately: a `push` to
+`main` excludes only `validation`, and `cross-platform-check.yml` excludes only
+`validation|slow`. Read the lane you mean; the filters are not uniform. It is set in
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
 
@@ -213,7 +226,8 @@ lane checks its own.
 
 ## The trap to avoid
 
-Labeling a test `slow` or `validation` **removes it from the required gate**. If
+Labeling a test `slow`, `validation`, `performance`, `bench`, or `quality-lab`
+**removes it from the required gate**. If
 nothing else runs it as a *gate*, you have silently disabled it — the nightly
 runs it but does **not** fail on it. Before moving a test off the required gate,
 make sure it is enforced somewhere. During the staged rollout,
