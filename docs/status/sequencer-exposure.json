@@ -6214,6 +6214,7 @@
       "delivery_state": "pending",
       "claim_id": "634a6a40-04e1-4cd0-ad42-90ce9ae30b27",
       "owned_paths": [
+        ".agents/skills/agent-capabilities/SKILL.md",
         "docs/status/agent-capabilities.json",
         "docs/status/agent-capability-surface.json",
         "docs/status/agent-capability-surface.schema.json",
