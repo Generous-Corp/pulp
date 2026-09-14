@@ -1466,6 +1466,34 @@ and only the newest pending run instead of accumulating one hosted job per edit.
 Merge-group runs fall back to their queue ref, so separate queue entries never
 share the PR group. Closed-PR `edited` events are filtered at the job boundary
 and checked again by the resolver before checkout or commit-status mutation.
+### The retarget lane's untrusted root cannot live under `$RUNNER_TEMP`
+
+`build-macos.yml` runs every PR-controlled command as the `nobody` uid: the
+wrapper `cd`s into the isolated untrusted home **as the trusted user** and only
+then `exec sudo -u nobody`. So `nobody` inherits that working directory — and
+if it cannot traverse to it, every untrusted command dies in `getcwd` before it
+runs, with `getcwd: cannot access parent directories`. That message naming
+*parent directories* rather than the cloned tree is the tell: the tree exists
+and is owned correctly, the path to it is unreachable.
+
+`$RUNNER_TEMP` is under the runner account's home, which is mode `700`. Deriving
+the ephemeral root from it therefore kills the entire lane — and because
+`build-macos.yml` is `workflow_dispatch`-only, nothing routine exercises it, so
+the breakage stays invisible until someone reaches for the break-glass recovery
+lever on a wedged macOS gate and finds it dead.
+
+The root is derived from `/private/tmp` instead, at mode `0711` (traversable,
+not enumerable), created **without** `mkdir -p` so a pre-existing path in that
+world-writable sticky directory fails closed instead of being adopted. The
+teardown guard's `case` pattern must carry the same base literal; if the two
+drift, cleanup refuses and the untrusted tree leaks. Both invariants, plus the
+root-off-the-runner-home rule, are pinned by
+`tools/scripts/test_build_macos_workflow_dispatch.py`.
+
+**Do not "fix" this by granting world traversal on the runner account's home.**
+The trusted checkout lives under it; `chmod o+x` there hands the untrusted uid a
+path to exactly what the two-account isolation exists to keep away from it.
+
 ## Codecov "missing lines" is usually a leg that never uploaded
 
 When Codecov shows fewer lines than the repo has, look for a coverage leg
