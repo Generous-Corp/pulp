@@ -288,3 +288,19 @@ retain those fields in the PR/landing evidence.
   timestamp granularity and falls back to comparing content; settle the fixture
   with `touch -t 202001010000` plus `git update-index --refresh` or the test
   grades its own homework.
+- The visual harness has two raster pins on two different version lines, and
+  "re-bake CI goldens" only means one of them. The C++ Skia archive rasterizes
+  nothing in `tools/harness/visual/`: its committed PNG golden is produced by the
+  `skia-python` wheel, pinned separately as `determinism.skia_python_smoke_version`
+  in `tools/deps/manifest.json` (mirrored into `pins.SKIA_PYTHON_SMOKE_VERSION`
+  and the Dockerfile `ARG`, cross-checked by `check_skia_pin.py`). That wheel
+  deliberately trails the C++ milestone, so a Skia/Dawn milestone bump leaves the
+  PNG golden and `pins.RASTER_GOLDEN_SHA256` correct and untouched, while bumping
+  only the wheel invalidates both without moving a single release-asset digest.
+  When changing the wheel, regenerate through
+  `python3 -m tools.harness.visual.runner --generate --all --surface canvas2d`
+  and update the recorded sha256 in the same commit: a golden regenerated without
+  its digest fails `tests/test_raster_golden.py` before any raster runs.
+  `pins.RASTER_GOLDEN_VERIFIED_PLATFORMS` records which hosts that identity was
+  actually measured on, so add a platform key only after a run on that platform
+  reported the matching digest.

@@ -8,6 +8,7 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -49,6 +50,70 @@ TEST_CASE("control operation deadline spends one deterministic wall-clock budget
     const std::chrono::system_clock::time_point system_started{20s};
     CHECK(deadline.unix_deadline_ms(system_started, started) == 23000);
     CHECK(deadline.unix_deadline_ms(system_started + 1250ms, started + 1250ms) == 23000);
+}
+
+TEST_CASE("pulp control capabilities reads the frozen registry with no live instance",
+          "[cli][shellout][inspect][control][capabilities]") {
+    if (!binary_exists()) {
+        SUCCEED("skipped: pulp not built");
+        return;
+    }
+
+    ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
+    update_disabled.set("1");
+
+    const auto machine = run_pulp({"control", "capabilities", "--json"}, 10000);
+    INFO(machine.stderr_output);
+    REQUIRE_FALSE(machine.timed_out);
+    REQUIRE(machine.exit_code == 0);
+    const auto registry = choc::json::parse(machine.stdout_output);
+    CHECK(registry["schema"].getString() == "dev.pulp.control/registry@1");
+    CHECK(registry["schema_version"].getInt64() == 1);
+    const auto capabilities = registry["capabilities"];
+    REQUIRE(capabilities.size() > 0);
+
+    bool saw_state_read = false;
+    for (std::uint32_t index = 0; index < capabilities.size(); ++index) {
+        const auto capability = capabilities[index];
+        // The registry is the offline answer to "how do I call this": the
+        // gating terms and both schema bodies must survive the projection.
+        CHECK_FALSE(capability["id"].getString().empty());
+        CHECK_FALSE(capability["risk"].getString().empty());
+        CHECK_FALSE(capability["executor"].getString().empty());
+        if (capability["id"].getString() != "dev.pulp.state/read@1")
+            continue;
+        saw_state_read = true;
+        const auto operation = capability["operation"];
+        CHECK(operation["id"].getString() == "dev.pulp.state/read@1");
+        CHECK(operation["result_kind"].getString() == "response");
+        CHECK(operation["input_schema"].isObject());
+        CHECK(operation["output_schema"].isObject());
+        CHECK(operation["input_schema_digest"].getString().size() == 64);
+    }
+    CHECK(saw_state_read);
+    // Negative control for the loop above: a capability the registry has never
+    // declared must not be reported present by the same walk.
+    bool saw_absent_capability = false;
+    for (std::uint32_t index = 0; index < capabilities.size(); ++index) {
+        if (capabilities[index]["id"].getString() == "dev.pulp.nonexistent/read@1")
+            saw_absent_capability = true;
+    }
+    CHECK_FALSE(saw_absent_capability);
+
+    const auto human = run_pulp({"control", "capabilities"}, 10000);
+    INFO(human.stderr_output);
+    REQUIRE_FALSE(human.timed_out);
+    REQUIRE(human.exit_code == 0);
+    CHECK(human.stdout_output.find("dev.pulp.state/read@1 (state.read)") != std::string::npos);
+    CHECK(human.stdout_output.find("operation dev.pulp.state/read@1 -> response") !=
+          std::string::npos);
+    CHECK(human.stdout_output.find("profiles: observe develop") != std::string::npos);
+    CHECK(human.stdout_output.find("not a grant") != std::string::npos);
+
+    const auto rejected = run_pulp({"control", "capabilities", "--instance", "wrong"}, 10000);
+    REQUIRE_FALSE(rejected.timed_out);
+    CHECK(rejected.exit_code == 2);
+    CHECK(rejected.stderr_output.find("capabilities accepts only --json") != std::string::npos);
 }
 
 TEST_CASE("pulp control profiles is canonical and inspect profiles is a dated alias",
