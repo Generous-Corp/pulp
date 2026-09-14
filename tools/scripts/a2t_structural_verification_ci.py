@@ -235,10 +235,22 @@ def receipt_change_decision(repository: Path, environment: Mapping[str, str], *,
             for line in commit.splitlines()
             if line.startswith("parent ")
         ]
+        _require(len(parents) == 2, "PR merge head is not a two-parent merge")
         _require(
-            parents == [base, evidence_head],
-            "PR merge head does not bind the exact event base and PR head",
+            parents[1] == evidence_head,
+            "PR merge head does not bind the exact PR head",
         )
+        # GitHub recomputes refs/pull/N/merge against the CURRENT tip of the
+        # protected base, while the event payload's base sha stays pinned to
+        # whatever the tip was when the event fired. Requiring the two to be
+        # equal made every open pull request fail closed the moment anything
+        # landed on the protected branch. The merge head is runtime-supplied,
+        # so its first parent is the protected tip GitHub actually merged, and
+        # it is the only base that attributes the receipt diff to this pull
+        # request rather than to whatever landed in between.
+        base = _exact_sha(parents[0], "PR merge base")
+        if hydrate:
+            _ensure_commit(repository, base)
     changed = _git(repository, "diff-tree", "--no-commit-id", "--name-status", "-r", "--no-renames", base, comparison_head, "--", RECEIPT_PATH.as_posix())
     lines = [line for line in str(changed).splitlines() if line]
     if not lines:

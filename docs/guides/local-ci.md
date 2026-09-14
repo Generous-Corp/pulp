@@ -2302,6 +2302,22 @@ its isolated home before dropping privileges and explicitly forwards only the
 run-unique source path required by setup/build/test; it never inherits the
 protected Actions checkout as its working directory.
 
+That isolated home, and every other run-unique path the lane creates, live under
+a run-unique root beneath `/private/tmp` rather than under `$RUNNER_TEMP`.
+`$RUNNER_TEMP` sits inside the runner account's home directory, which is mode
+`700`, so the `nobody` uid cannot traverse into it: the wrapper changes into the
+isolated home as the trusted user and then drops privileges, and every untrusted
+command inherits a working directory it cannot resolve, failing in `getcwd`
+before the command itself runs. `/private/tmp` and its ancestors are world
+traversable, and the root is created `0711` so `nobody` can traverse into its own
+paths without enumerating anything beside them. Because that base is
+world-writable and sticky, the root is created without `mkdir -p`: a path that
+already exists belongs to someone else and the run fails closed instead of
+adopting it. The `if: always()` teardown step is the only thing that removes the
+root, and its safety guard matches the same `/private/tmp/pulp-retarget-*`
+prefix; the root literal and that guard must move together or cleanup refuses
+and leaks the untrusted tree.
+
 Workflow inputs (visible in `gh workflow run build-macos.yml --help`):
 
 | Input | Default | Effect |
