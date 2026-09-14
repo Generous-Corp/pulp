@@ -853,37 +853,56 @@ class MergeSentinel(unittest.TestCase):
             ],
         )
 
-    def test_the_driver_poisons_every_identity_and_nothing_else(self) -> None:
-        """Byte-level: exactly the identity fields change, and null stays null.
+    def test_the_driver_poisons_only_what_the_generator_can_regenerate(self) -> None:
+        """Structural, per-array, against the parsed documents.
 
-        A null ``object_id`` is the ledger's contract for a Vellum path that
-        does not exist yet, so poisoning one would replace a true statement
-        with a false one rather than with a demand to regenerate.
+        ``write`` derives ``pulp_paths`` identities from this repository's own
+        history, and rewrites nothing else. ``vellum_paths`` rows are constants
+        pinned to a fixed foreign revision and checked against a hardcoded
+        table, so a sentinel there is damage no repair command can undo: the
+        generator refuses the document and names a row it will never rewrite.
+        That is not hypothetical -- a driver that poisoned every ``object_id``
+        in the file left a ledger ``write`` would not repair.
+
+        Counted from the parsed JSON rather than from the driver's own notion
+        of which rows are which, so an expectation cannot shrink along with a
+        bug.
         """
 
         self.assertTrue(os.access(self.driver, os.X_OK), f"{self.driver} is not executable")
-        original = self.handoff.read_text(encoding="utf-8")
+        original = provenance.load_handoff(self.handoff)
         with tempfile.TemporaryDirectory() as directory:
             merged = pathlib.Path(directory) / "ours"
             subprocess.run(
                 [str(self.driver), str(merged), str(self.handoff)],
                 check=True, stdin=subprocess.DEVNULL, timeout=30,
             )
-            text = merged.read_text(encoding="utf-8")
+            # Still a document the validator can read, or the rejection the
+            # design relies on would be a parse error wearing its name.
+            poisoned = json.loads(merged.read_text(encoding="utf-8"))
 
-        quoted = original.count('"object_id": "')
-        self.assertGreater(quoted, 0, "no quoted identities to poison")
-        self.assertEqual(text.count(f'"object_id": "{self.SENTINEL}"'), quoted)
+        pulp_rows = vellum_rows = 0
+        for before, after in zip(original["entries"], poisoned["entries"]):
+            for row_before, row_after in zip(before["pulp_paths"], after["pulp_paths"]):
+                pulp_rows += 1
+                self.assertEqual(row_after["object_id"], self.SENTINEL)
+                self.assertEqual(
+                    {k: v for k, v in row_before.items() if k != "object_id"},
+                    {k: v for k, v in row_after.items() if k != "object_id"},
+                    "the driver changed a field other than the identity",
+                )
+            for row_before, row_after in zip(before["vellum_paths"], after["vellum_paths"]):
+                vellum_rows += 1
+                self.assertEqual(row_before, row_after, "a Vellum constant was poisoned")
+
+        self.assertEqual(pulp_rows, len(provenance.canonical_inventory(original)))
+        self.assertGreater(vellum_rows, 0, "no Vellum rows present to protect")
+        for key in ("entries",):
+            self.assertEqual(len(original[key]), len(poisoned[key]))
         self.assertEqual(
-            text.count('"object_id": null'), original.count('"object_id": null')
+            {k: v for k, v in original.items() if k != "entries"},
+            {k: v for k, v in poisoned.items() if k != "entries"},
         )
-        # The sentinel must leave a document the validator can still read, or
-        # the rejection above would be a parse error wearing its name.
-        json.loads(text)
-        redact = lambda raw: re.sub(  # noqa: E731
-            r'"(object_id|handoff_sha256)": "[^"]*"', '"REDACTED"', raw
-        )
-        self.assertEqual(redact(text), redact(original))
 
     def test_the_driver_poisons_the_receipt_digest(self) -> None:
         """The receipt carries no object id, so its binding digest is the lie.

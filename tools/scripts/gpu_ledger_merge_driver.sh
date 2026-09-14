@@ -12,20 +12,31 @@
 # and git would commit it silently; merge=ours has the same property, because a
 # stale-but-ancestral pin still passes the always-on provenance tier. So this
 # driver deliberately produces a value no tier accepts: "regenerate-me" fails
-# the 40-hex identity check in gpu_recipe_catalog.validate_handoff and the
-# blob comparison in validate_handoff_routing, and gates.sh greps for it before
-# the push. The merge stops being a hand-resolved conflict and becomes one
-# mechanical regeneration, with no way to skip it unnoticed.
+# the 40-hex identity check in gpu_recipe_catalog.validate_handoff and the blob
+# comparison in validate_handoff_routing, and gpu_ledger_sentinel_check.py
+# rejects it from the pre-push hook before it can reach CI. The merge stops
+# being a hand-resolved conflict and becomes one mechanical regeneration, with
+# no way to skip it unnoticed.
 #
-# Two fields carry the lie, one per file: the ledger's "object_id" pins, and
-# the receipt's "handoff_sha256", which binds the receipt to the exact ledger
-# bytes and is the only receipt field that could otherwise merge to a
-# plausible-looking stale digest. Null object_ids are the ledger's "this Vellum
-# path does not exist yet" contract and must survive untouched, which the
-# quoted-value match already guarantees.
+# Poison ONLY what `write` can regenerate. That is the pulp_paths identities --
+# derived from this repository's own history -- plus the receipt's
+# handoff_sha256, which binds the receipt to exact ledger bytes and is
+# otherwise the one receipt field that could merge to a plausible stale digest.
+# vellum_paths rows are CONSTANTS pinned to a fixed foreign revision and are
+# validated against a hardcoded table, so the generator does not rewrite them:
+# poisoning one produces damage no repair command can undo. The rows are told
+# apart by the "repo" key, which the serializer emits first in every row. Null
+# object_ids encode "this Vellum path does not exist yet" and the quoted-value
+# match already leaves them alone.
 #
 # Git calls this from the top of the working tree for merge, rebase,
 # cherry-pick and stash alike, so all four paths get the same resolution.
 # $1 is %A (ours; also the output file), $2 is %B (theirs).
 set -euo pipefail
-sed -E 's/("(object_id|handoff_sha256)"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"regenerate-me"/g' "$2" > "$1"
+awk '
+  /"repo": "Generous-Corp\/pulp"/    { pulp = 1 }
+  /"repo": "Generous-Corp\/vellum"/  { pulp = 0 }
+  pulp && /"object_id": "/           { sub(/"object_id": "[^"]*"/, "\"object_id\": \"regenerate-me\""); pulp = 0 }
+  /"handoff_sha256": "/              { sub(/"handoff_sha256": "[^"]*"/, "\"handoff_sha256\": \"regenerate-me\"") }
+  { print }
+' "$2" > "$1"
