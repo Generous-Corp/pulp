@@ -1401,6 +1401,8 @@ flags.
 
 ```bash
 pulp control profiles --json
+pulp control capabilities
+pulp control capabilities --json
 pulp control instances --json
 pulp control status --instance <id> --explain
 pulp control grant-request --instance <id> --profile inspect-readonly --json
@@ -1418,6 +1420,15 @@ pulp control audit path/to/MyProduct --json
 `profiles` reads the shared declared `off`, `observe`, and `develop` registry
 without connecting to the broker. `pulp inspect profiles` is its deprecated
 compatibility alias and will be removed in Pulp 0.800.0 on 2026-10-01.
+
+`capabilities` answers "what can be called, and what gates it" without a broker
+connection or a live instance. Human output lists every capability with its
+risk, executor, evidence kind, grantability, profile membership, and the typed
+operations it gates. `--json` emits the canonical
+`dev.pulp.control/registry@1` projection, which carries both JSON Schema
+bodies and their digests, so an offline caller can build a request before any
+instance exists. The registry is an upper bound on the callable surface, never
+a grant: an operation still needs a live instance and an effective grant.
 
 `instances` starts the broker-owned `ordinary-standalone` installed host when
 the live inventory is empty, waits within the command's bounded management

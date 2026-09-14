@@ -1203,7 +1203,7 @@ commands:
 
   - name: control
     status: experimental
-    summary: Authenticated local capability control through the canonical broker, including static profile metadata; exposes no host, port, discovery-file, or raw protocol options.
+    summary: Authenticated local capability control through the canonical broker, including static profile and capability-registry metadata; exposes no host, port, discovery-file, or raw protocol options.
     args:
       - name: --json
         kind: flag
@@ -1212,6 +1212,8 @@ commands:
     subcommands:
       - name: profiles
         summary: List the canonical off, observe, and develop profiles and capabilities without connecting to the broker
+      - name: capabilities
+        summary: Print the frozen capability registry offline - risk, executor, evidence, grantability, profile membership, and each gating capability's typed operations; --json emits the canonical dev.pulp.control/registry@1 projection including both JSON Schema bodies. Requires no broker connection and no live instance, and listing an operation is never a grant
       - name: instances
         summary: List broker-owned exact live registrations, starting the broker-owned ordinary Standalone host when inventory is empty
       - name: status

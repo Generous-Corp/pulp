@@ -871,9 +871,43 @@ host/port selector, newest-instance heuristic, or design-time capability claim.
 `cmd_control.cpp` must also remain compilable when `PULP_ENABLE_INSPECTOR=OFF`,
 where the `pulp::inspect-client` target is intentionally absent. Guard broker /
 client headers, helpers, and live execution with the target-derived availability
-macro; keep offline `control profiles` and `control audit` operational, and have
-live commands fail explicitly with `control-unavailable`. Pin both sides with an
-inspector-off shell-out test and a forge-dev SDK build/probe.
+macro; keep offline `control profiles`, `control capabilities`, and `control
+audit` operational, and have live commands fail explicitly with
+`control-unavailable`. Pin both sides with an inspector-off shell-out test and a
+forge-dev SDK build/probe.
+
+`control capabilities` is the offline catalog verb: it answers "what can be
+called and what gates it" with no broker connection and no live instance, the
+same admission shape as `profiles`. Its `--json` prints
+`serialize_control_registry()` verbatim rather than projecting the registry a
+second time, so the CLI cannot drift from the manifest digest; reach for a
+hand-rolled projection only if the canonical one stops carrying a term the CLI
+needs, and then fix the canonical one. That function lives in the
+`pulp::inspect-protocol` target the CLI links unconditionally, which is why the
+verb survives an inspector-off build. Listing an operation is never a grant —
+keep that sentence in the human output, because an offline catalog reads like
+an authority list otherwise.
+
+When a typed operation is added to `control_manifest.cpp`, the operation matrix
+in `docs/reference/development-inspector-capabilities.md` must gain its row.
+`inspector_truth_check.py --write` regenerates it; the same script's `--check`
+mode fails the build without it. A capability row alone no longer satisfies the
+gate, because a second operation on an already-documented capability used to
+ship undescribed.
+
+`confirm_failure.sh` cannot give a verdict on a CLI shell-out test, and it says
+so rather than guessing. It fingerprints the *test* binary to prove the edit
+reached what it runs, but a shell-out test's subject is `pulp-cpp`, which the
+test binary does not contain -- so the fingerprint never moves and the harness
+reports INCONCLUSIVE. `pulp_bind_cli_shellout_target` compiles the CLI path in
+as a define and adds no `add_dependencies`, so `--target pulp-test-cli-*` does
+not rebuild the CLI either. Run that negative control against the CLI binary
+instead: break the source, delete `cmd_control.cpp.o`, rebuild `pulp-cli`,
+confirm the compile line appears in the build log, and compare `pulp-cpp`'s
+hash across the break -- restoring through `git restore`, never a `.bak` copy.
+An aborted harness run leaves `pulp-cpp` built from the broken source, so
+re-establish the baseline before reading the next run's result.
+
 For `control call` and `control watch`, `--timeout-ms`, and for their typed MCP
 operation counterparts, `timeout_ms`, are each one absolute operation deadline,
 not a fresh budget per transport step. Connect, enroll, exact-instance inventory,
