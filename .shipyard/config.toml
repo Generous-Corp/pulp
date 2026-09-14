@@ -575,6 +575,35 @@ auto_handoff = false
 [governance]
 required_status_checks = ["macos", "Enforce version & skill sync"]
 
+# Every workflow that PRODUCES a required status context, so Shipyard's
+# landability preflight can answer "will this gate be requested, and can it be
+# scheduled" for all five rather than for one.
+#
+# Branch protection on `main` requires five contexts. Reading only `build.yml`
+# — the previous default — left four of them `no_producer`: not checked, and
+# reported as a warning that reads identically to a clean result. The list is
+# the map from context to file:
+#
+#   macos                                  build.yml
+#   Enforce version & skill sync           version-skill-check.yml
+#   Build + prove + (owner-gated) deploy   wclap-cloudflare.yml
+#   Vellum freeze                          vellum-freeze-check.yml
+#   Vellum trusted freeze                  vellum-trusted-gate.yml
+#
+# None of the five is path-filtered under `pull_request`
+# (`wclap-cloudflare.yml`'s `paths:` sits under `push`, deliberately: a
+# path-filtered REQUIRED check stays Pending forever and blocks the PR), so all
+# five fire on every pull request to `main`. `shipyard landability` re-derives
+# that on each run rather than trusting this comment.
+[landability]
+workflows = [
+    ".github/workflows/build.yml",
+    ".github/workflows/version-skill-check.yml",
+    ".github/workflows/wclap-cloudflare.yml",
+    ".github/workflows/vellum-freeze-check.yml",
+    ".github/workflows/vellum-trusted-gate.yml",
+]
+
 # Per-branch protection knobs. `require_strict_status = true` means a PR must
 # be up to date with `main` (re-validated on the exact merge-candidate SHA)
 # before it can merge — matching the ruleset's

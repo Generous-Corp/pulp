@@ -17,6 +17,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -1079,6 +1080,135 @@ TEST_CASE("WidgetBridge registerContextMenu dispatches native menu position",
     auto* inert = bridge.widget("menu-inert");
     REQUIRE(inert != nullptr);
     REQUIRE_FALSE(static_cast<bool>(inert->on_context_menu));
+}
+
+// The gesture, end to end, at both seams a real right-click crosses.
+//
+// `on(id, 'contextmenu', fn)` is the EXACT call @pulp/react's prop-applier
+// emits for an `onContextMenu` prop (applyEventHandler -> call('on', id,
+// eventNameFor(key), callback), and eventNameFor lowercases to 'contextmenu').
+// `dispatch_context_menu` is the EXACT function the macOS host reaches from
+// -[PulpView rightMouseDown:] via route_context_press. Nothing between them was
+// arming the native side: `on()` routed 'click', 'hover', 'pointer', 'gesture'
+// and 'wheel' to __ensureNativeRegistered__ and dropped 'contextmenu' on the
+// floor, so the callback sat in __callbacks__ with View::on_context_menu null
+// and the right-click found no handler. Every React onContextMenu prop in
+// every Pulp app was inert -- the same shape as onDoubleClick, which is also
+// stored and never armed.
+TEST_CASE("on(id,'contextmenu') arms the native right-click dispatch",
+          "[view][bridge][context-menu]")
+{
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var ctx_calls = 0;
+        var ctx_clientX = -1, ctx_clientY = -1;
+        var ctx_offsetX = -1, ctx_offsetY = -1;
+        var ctx_button = -1, ctx_buttons = -1;
+        createPanel('surface', '');
+        setPosition('surface', 'absolute');
+        setLeft('surface', 40);
+        setTop('surface', 25);
+        setFlex('surface', 'width', 120);
+        setFlex('surface', 'height', 80);
+        on('surface', 'contextmenu', function(e) {
+            ctx_calls += 1;
+            ctx_clientX = e.clientX; ctx_clientY = e.clientY;
+            ctx_offsetX = e.offsetX; ctx_offsetY = e.offsetY;
+            ctx_button = e.button; ctx_buttons = e.buttons;
+        });
+    )");
+
+    auto* target = bridge.widget("surface");
+    REQUIRE(target != nullptr);
+    // The defect in one line: this was null, so the press below returned false.
+    REQUIRE(static_cast<bool>(target->on_context_menu));
+
+    // Flush the pending layout, and assert the geometry the coordinate
+    // expectations below are built on. Without this the widget still has its
+    // zero bounds and the hit test lands on the root, which fails for a reason
+    // that has nothing to do with the arming this case is about.
+    REQUIRE(engine.evaluate("getLayoutRect('surface').left")
+                .getWithDefault<double>(-1.0) == 40.0);
+    REQUIRE(engine.evaluate("getLayoutRect('surface').top")
+                .getWithDefault<double>(-1.0) == 25.0);
+    REQUIRE(root.hit_test({50.0f, 40.0f}) == target);
+
+    // Press at root (50, 40) -- inside the widget, whose origin is (40, 25).
+    REQUIRE(dispatch_context_menu(root, {50.0f, 40.0f}));
+
+    REQUIRE(engine.evaluate("ctx_calls").getWithDefault<double>(0.0) == 1.0);
+    // clientX/clientY are rebased to the same space getBoundingClientRect()
+    // reports, so `e.clientX - rect.left` cancels to the local point. If the
+    // callback forwarded the raw local point instead, these would read 10/15.
+    REQUIRE_THAT(engine.evaluate("ctx_clientX").getWithDefault<double>(0.0),
+                 WithinAbs(50.0, 1e-3));
+    REQUIRE_THAT(engine.evaluate("ctx_clientY").getWithDefault<double>(0.0),
+                 WithinAbs(40.0, 1e-3));
+    // offsetX/offsetY keep the widget-local point, matching pointer_payload.
+    REQUIRE_THAT(engine.evaluate("ctx_offsetX").getWithDefault<double>(0.0),
+                 WithinAbs(10.0, 1e-3));
+    REQUIRE_THAT(engine.evaluate("ctx_offsetY").getWithDefault<double>(0.0),
+                 WithinAbs(15.0, 1e-3));
+    // A context menu is the secondary button by definition. A handler that
+    // gates on `e.button === 2` has to see it.
+    REQUIRE(engine.evaluate("ctx_button").getWithDefault<double>(-1.0) == 2.0);
+    REQUIRE(engine.evaluate("ctx_buttons").getWithDefault<double>(-1.0) == 2.0);
+
+    // Control: a sibling that never subscribed stays inert, so the arming is
+    // attributable to the on() call and not to something arming every widget.
+    bridge.load_script(R"(
+        createPanel('quiet', '');
+        setPosition('quiet', 'absolute');
+        setLeft('quiet', 200);
+        setTop('quiet', 25);
+        setFlex('quiet', 'width', 80);
+        setFlex('quiet', 'height', 80);
+    )");
+    auto* quiet = bridge.widget("quiet");
+    REQUIRE(quiet != nullptr);
+    REQUIRE_FALSE(static_cast<bool>(quiet->on_context_menu));
+    REQUIRE_FALSE(dispatch_context_menu(root, {240.0f, 40.0f}));
+    REQUIRE(engine.evaluate("ctx_calls").getWithDefault<double>(0.0) == 1.0);
+
+    // The shape real pages actually have: the listener is on a wrapper and the
+    // ink on top is a child (a canvas, an overlay) with no listener of its own.
+    // `contextmenu` bubbles in the DOM, so the press must still reach the
+    // wrapper. Without the target-to-root walk the hit test stops at the child
+    // and the gesture is dropped -- which is the second half of why a
+    // right-click did nothing, and is invisible to a test that presses on a
+    // childless widget.
+    bridge.load_script(R"(
+        createPanel('ink', 'surface');
+        setPosition('ink', 'absolute');
+        setLeft('ink', 0);
+        setTop('ink', 0);
+        setFlex('ink', 'width', 120);
+        setFlex('ink', 'height', 80);
+    )");
+    auto* ink = bridge.widget("ink");
+    REQUIRE(ink != nullptr);
+    REQUIRE(ink->parent() == target);
+    REQUIRE_FALSE(static_cast<bool>(ink->on_context_menu));
+    // Flush the layout the new child is waiting on, and prove it really does
+    // cover the press point -- a zero-sized child would leave the hit test on
+    // the wrapper and this case would pass without ever exercising the walk.
+    REQUIRE(engine.evaluate("getLayoutRect('ink').width")
+                .getWithDefault<double>(-1.0) == 120.0);
+    REQUIRE(root.hit_test({50.0f, 40.0f}) == ink);
+
+    REQUIRE(dispatch_context_menu(root, {50.0f, 40.0f}));
+    REQUIRE(engine.evaluate("ctx_calls").getWithDefault<double>(0.0) == 2.0);
+    // Still reported in the WRAPPER's space -- the handler that ran owns the
+    // coordinates, not the child the press happened to land on.
+    REQUIRE_THAT(engine.evaluate("ctx_offsetX").getWithDefault<double>(0.0),
+                 WithinAbs(10.0, 1e-3));
+    REQUIRE_THAT(engine.evaluate("ctx_clientX").getWithDefault<double>(0.0),
+                 WithinAbs(50.0, 1e-3));
 }
 
 TEST_CASE("WidgetBridge loadFont reports existing and missing paths",
