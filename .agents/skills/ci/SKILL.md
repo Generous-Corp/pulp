@@ -337,6 +337,26 @@ If every hit is prose, the guard is decorative. `tools/scripts/tools_registry_ch
 enforces this property for the tools registry; nothing enforces it for guards named
 in passing.
 
+**The same hole swallows a whole test file.** `tools/scripts/` holds Python suites
+that are executed by being *named* in `.github/workflows/workflow-lint.yml` — there
+is no directory sweep, so a suite is registered or it is dead. A test file can be
+tracked, importable, green when you run it by hand, and invoked by nothing:
+`test_fetch_skia_for_release_extra.py` sat that way while its sibling
+`test_fetch_skia_for_release.py` was named in ten places. Adding a case to an
+existing file is therefore not enough to make it run. Before trusting a
+`tools/scripts/test_*.py` suite as coverage, count its references outside itself,
+and pair that count against a sibling you know is wired:
+
+```bash
+git grep -l "<suite-name>" -- .github tools test | grep -v "tools/scripts/<suite-name>"
+git grep -l "test_fetch_skia_for_release\.py" -- .github tools test   # control: must be many
+```
+
+A zero there is the file never running, not the file having no dependents.
+`tools/scripts/test_workflow_lint.py` asserts the registration of each suite the
+lint gate runs, so a newly registered suite belongs in both the workflow and that
+test.
+
 ### The schema-fixture coverage gate runs on three surfaces, and only one has teeth on every PR
 
 `tools/scripts/timeline_fixture_coverage_check.py` fails when a
