@@ -524,6 +524,14 @@ target_link_libraries(pulp-test-control-main-thread-executor PRIVATE
 catch_discover_tests(pulp-test-control-main-thread-executor
     PROPERTIES LABELS "inspect;control;main-thread;executor")
 
+add_executable(pulp-test-control-sequencer-state-executor
+    test_control_sequencer_state_executor.cpp)
+target_link_libraries(pulp-test-control-sequencer-state-executor PRIVATE
+    pulp::inspect-runtime pulp::inspect-control pulp::state pulp::events
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-sequencer-state-executor
+    PROPERTIES LABELS "inspect;control;sequencer;main-thread;mutation")
+
 add_executable(pulp-test-control-state-write-executor
     test_control_state_write_executor.cpp)
 target_link_libraries(pulp-test-control-state-write-executor PRIVATE
