@@ -233,13 +233,12 @@ class TreeTest(unittest.TestCase):
     and the ledger must still describe it."""
 
     def test_tree_passes_with_the_shipped_allowlist(self):
-        self.assertEqual(guard.main(["ctest_label_exclusion_guard.py"]), 0)
+        self.assertEqual(guard.main([]), 0)
 
     def test_tree_without_the_allowlist_reports_the_frozen_backlog(self):
         """Control: the allowlist is load-bearing. Drop it and the same scan
         must fail, or the shipped OK proves nothing about the guard working."""
-        self.assertEqual(
-            guard.main(["ctest_label_exclusion_guard.py", "--no-allowlist"]), 1)
+        self.assertEqual(guard.main(["--no-allowlist"]), 1)
 
     def test_allowlist_matches_the_tree_exactly(self):
         """No stale entry (a suite that has since been split) and no missing
@@ -258,6 +257,59 @@ class TreeTest(unittest.TestCase):
         names = {p.name for p in guard.iter_default_targets()}
         self.assertIn("view_widget_bridge_tests.cmake", names)
         self.assertGreater(len(names), 50)
+
+
+class ArgumentHandlingTest(unittest.TestCase):
+    """A guard that shrugs at its own command line reports a green run over
+    nothing. Each case below returned 0 before argparse landed."""
+
+    def test_an_unknown_flag_is_rejected(self):
+        """A typo'd flag (--no-allowlists) used to be ignored, so the run
+        silently kept the ledger and still printed OK."""
+        with self.assertRaises(SystemExit) as caught:
+            guard.main(["--no-allowlists"])
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_a_named_target_that_does_not_exist_fails(self):
+        """Scanning a path that is not there proves nothing, so it must not
+        report a pass. The real manifest is named alongside it deliberately:
+        the scan then parses plenty, so only the missing-path check can be
+        what fails, and breaking that check makes this test fail."""
+        real = guard.REPO_ROOT / "test/cmake/character_delay_tests.cmake"
+        self.assertEqual(
+            guard.main([str(real), "/nope/definitely-missing.cmake"]), 1)
+
+    def test_a_scan_that_parses_nothing_fails(self):
+        """Instrument failure wearing the costume of a pass: a manifest with
+        no registrations means the scan read nothing at all."""
+        with tempfile.NamedTemporaryFile("w", suffix=".cmake", delete=False) as fh:
+            fh.write("# no registrations here\n")
+            path = Path(fh.name)
+        try:
+            self.assertEqual(guard.main([str(path)]), 1)
+        finally:
+            path.unlink()
+
+    def test_a_real_manifest_parses_non_zero(self):
+        """The control the case above needs: the same one-file invocation over
+        a manifest that DOES register suites must pass, or the failure above
+        would be indistinguishable from the guard rejecting every file."""
+        real = guard.REPO_ROOT / "test/cmake/character_delay_tests.cmake"
+        self.assertTrue(real.is_file(), real)
+        self.assertGreater(len(guard.scan_file(real)), 0)
+        self.assertEqual(guard.main([str(real)]), 0)
+
+    def test_list_prints_the_scanned_manifests(self):
+        """--list used to be swallowed as an unknown flag and run a full scan
+        instead, printing an OK summary that looked like the listing worked."""
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(guard.main(["--list"]), 0)
+        lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+        self.assertEqual(len(lines), len(list(guard.iter_default_targets())))
+        self.assertTrue(all(ln.endswith(".cmake") for ln in lines), lines[:3])
 
 
 if __name__ == "__main__":

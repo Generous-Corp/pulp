@@ -60,6 +60,7 @@ the ledger, 1 otherwise.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -318,24 +319,59 @@ TEST_PREFIX keeps the two registrations from colliding in ctest, and they hash
 to different generated files so neither clobbers the other. Tag the {label}
 cases rather than the fast ones: a future case then lands on the enforced lane
 by default instead of silently vanishing from it. Prior art:
-test/cmake/character_delay_tests.cmake, test/cmake/app_audio_host_tests.cmake,
-test/cmake/view_widget_bridge_tests.cmake.
+test/cmake/character_delay_tests.cmake, test/cmake/app_audio_host_tests.cmake.
 """
 
 
-def main(argv: list[str]) -> int:
-    args = argv[1:]
-    if "--list" in args:
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Flag Catch2 suites registered ONLY behind a ctest label that both "
+            "the required gate and the coverage lane exclude."
+        )
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="print the manifests this guard scans and exit",
+    )
+    parser.add_argument(
+        "--policy",
+        type=Path,
+        default=REPO_ROOT / POLICY_FILE,
+        help=f"coverage policy to read the excluded-label list from "
+             f"(default: {POLICY_FILE})",
+    )
+    parser.add_argument(
+        "--allowlist",
+        type=Path,
+        default=REPO_ROOT / ALLOWLIST_FILE,
+        help=f"frozen-backlog ledger (default: {ALLOWLIST_FILE})",
+    )
+    parser.add_argument(
+        "--no-allowlist",
+        action="store_true",
+        help="ignore the frozen backlog and report every blind suite",
+    )
+    parser.add_argument(
+        "targets",
+        nargs="*",
+        type=Path,
+        metavar="manifest.cmake",
+        help=f"manifests to scan (default: every .cmake under {SCAN_DIR})",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+
+    if args.list:
         for p in iter_default_targets():
             print(p.relative_to(REPO_ROOT))
         return 0
 
-    policy_path = REPO_ROOT / POLICY_FILE
-    if "--policy" in args:
-        idx = args.index("--policy")
-        policy_path = Path(args[idx + 1])
-        del args[idx:idx + 2]
-
+    policy_path = args.policy
     if not policy_path.is_file():
         print(f"ctest_label_exclusion_guard: FAIL — coverage policy not found at "
               f"{policy_path}. The excluded-label list is read from that file so "
@@ -348,30 +384,46 @@ def main(argv: list[str]) -> int:
         print(f"ctest_label_exclusion_guard: FAIL — {exc}", file=sys.stderr)
         return 1
 
-    allowlist_path = REPO_ROOT / ALLOWLIST_FILE
-    if "--allowlist" in args:
-        idx = args.index("--allowlist")
-        allowlist_path = Path(args[idx + 1])
-        del args[idx:idx + 2]
-    if "--no-allowlist" in args:
-        args.remove("--no-allowlist")
-        allowlist_path = None
-
     allowed: dict[str, str] = {}
-    if allowlist_path is not None:
+    if not args.no_allowlist:
         try:
-            allowed = read_allowlist(allowlist_path)
+            allowed = read_allowlist(args.allowlist)
         except (ValueError, json.JSONDecodeError) as exc:
             print(f"ctest_label_exclusion_guard: FAIL — {exc}", file=sys.stderr)
             return 1
 
-    targets = [Path(a) for a in args] if args else iter_default_targets()
+    explicit = bool(args.targets)
+    targets = args.targets if explicit else iter_default_targets()
+
+    # A path named on the command line that is not a file is an instrument
+    # failure, not an empty scan: skipping it silently is how a typo'd manifest
+    # produced a green run over nothing at all.
+    if explicit:
+        missing = [t for t in targets if not t.is_file()]
+        if missing:
+            print("ctest_label_exclusion_guard: FAIL — named manifest(s) do not "
+                  "exist, so scanning them would prove nothing:", file=sys.stderr)
+            for t in missing:
+                print(f"  {t}", file=sys.stderr)
+            return 1
 
     registrations: list[Registration] = []
     for path in targets:
         if not path.is_file():
             continue
         registrations.extend(scan_file(path))
+
+    # A zero finding is only meaningful against a non-zero control. If nothing
+    # parsed, the scan missed the manifests (wrong root, moved directory) and an
+    # empty result is an instrument failure wearing the costume of a pass.
+    if not registrations:
+        print(
+            f"ctest_label_exclusion_guard: FAIL — parsed 0 Catch2 suite "
+            f"registration(s) across {len(targets)} manifest(s). The scan found "
+            f"nothing to read, so a clean result here would prove nothing.",
+            file=sys.stderr,
+        )
+        return 1
 
     all_blind = find_blind_targets(registrations, excluded)
     blind_names = {t for t, _r, _h in all_blind}
@@ -430,4 +482,4 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(main())

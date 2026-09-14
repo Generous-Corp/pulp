@@ -5,8 +5,11 @@
 # Avoids collision with Shipyard's existing `preflight` namespace,
 # which is exclusively about SSH backend reachability checks.
 #
-# Runs JUST the sub-second gates that `.githooks/pre-push` runs in
-# `--mode=report`:
+# Runs the cheap, offline gates. Most are the same checks
+# `.githooks/pre-push` runs in `--mode=report`; a few self-test lanes
+# (deps-audit, worktree-lineage, shared-cache, setup.sh) run only here,
+# so a green gates.sh is a superset of the hook's fast half, never a
+# subset of it:
 #   - skill-sync (catches missing SKILL.md updates for mapped paths)
 #   - skill-path-map lint (the map's own rules match real files, validate
 #     against its schema, and don't quietly widen a subsystem claim)
