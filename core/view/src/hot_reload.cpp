@@ -73,7 +73,15 @@ HotReloader::HotReloader(const std::filesystem::path& directory,
     );
 }
 
-HotReloader::~HotReloader() = default;
+HotReloader::~HotReloader() {
+    // Release the watcher first. Its background thread keeps dispatching into
+    // `on_file_changed` until `~Watcher` stops it, and that callback writes
+    // `observed_content_hashes_`, `pending_mutex_`, `pending_code_` and
+    // `has_pending_`. Members are destroyed in reverse declaration order, which
+    // destroys all four before `watcher_`, so letting the default destructor run
+    // leaves the thread writing into storage that is already gone.
+    watcher_.reset();
+}
 
 #endif  // TARGET_OS_IPHONE
 
@@ -145,6 +153,7 @@ void HotReloader::seed_observed_content_hashes() {
 
         if (auto content = try_read_file(path)) {
             const auto key = path.lexically_normal().string();
+            std::lock_guard lock(hashes_mutex_);
             observed_content_hashes_[key] = content_hash(*content);
         }
     };
@@ -173,6 +182,11 @@ bool HotReloader::should_reload_for_modified_file(const std::filesystem::path& p
 
     const auto key = path.lexically_normal().string();
     const auto next_hash = content_hash(*content);
+
+    // Compare and claim under one lock. The watcher thread and the owning
+    // thread both enter here, and splitting the two halves would let both
+    // observe the same new content and both report a reload.
+    std::lock_guard lock(hashes_mutex_);
     auto hash_it = observed_content_hashes_.find(key);
     if (hash_it != observed_content_hashes_.end() && next_hash == hash_it->second)
         return false;

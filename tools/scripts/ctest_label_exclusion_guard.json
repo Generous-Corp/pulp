@@ -3,10 +3,6 @@
   "_comment": "Frozen backlog for ctest_label_exclusion_guard.py. Each suite here is registered ONLY behind a ctest label that both the required `macos` gate (-LE) and the diff-coverage lane (--label-exclude) drop, so its cases are enforced by nothing and the lines it exercises report as uncovered. Every entry below predates the guard and was a deliberate, comment-documented exclusion at its registration site -- not an accident. They are frozen rather than repaired because whether a suite can be split is a per-suite judgement (a `~[slow]` spec that matches no case discovers nothing), and because the value of this guard is stopping the population from growing, which it does from the day it lands. Same idiom as hotspot_size_guard.json. An entry whose target is no longer blind is REMOVED, not left to rot: the guard fails on a stale exemption, because a ledger of dead exemptions is the same silent rot this guard exists to catch. To clear an entry, apply the TEST_SPEC split the guard's failure text prints and delete the line here in the same change.",
   "allow": [
     {
-      "target": "pulp-test-hot-reload",
-      "reason": "The suite this guard was filed over. Its repair -- the TEST_SPEC split -- is in flight on PR #8322 and is not on main yet; whichever of the two lands second removes this entry."
-    },
-    {
       "target": "pulp-test-scan-blacklist",
       "reason": "Every scenario waits on filesystem mtime resolution (~1s each). Splitting needs a per-case audit of which assertions actually need the sleep."
     },
