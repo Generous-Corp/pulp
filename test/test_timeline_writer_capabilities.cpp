@@ -585,7 +585,7 @@ TEST_CASE("every command class can be individually denied") {
     // covered here the moment it compiles rather than when someone remembers to
     // extend a hand-written list.
     constexpr std::size_t alternatives = std::variant_size_v<Command>;
-    STATIC_REQUIRE(alternatives == 48);
+    STATIC_REQUIRE(alternatives == 51);
     using Class = CommandClass;
     using Intent = CommandIntent;
     constexpr std::array<CommandAuthority, alternatives> expected{{
@@ -613,6 +613,8 @@ TEST_CASE("every command class can be individually denied") {
         {Class::Device, Intent::Create},     {Class::Device, Intent::Remove},
         {Class::Device, Intent::Modify},     {Class::Device, Intent::Modify},
         {Class::Device, Intent::Modify},     {Class::Annotation, Intent::Modify},
+        {Class::Note, Intent::Create},       {Class::Note, Intent::Remove},
+        {Class::Note, Intent::Modify},
     }};
 
     std::size_t checked = 0;
