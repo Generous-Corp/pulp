@@ -156,6 +156,7 @@ CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
+LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
 
 BASE="${PULP_PREPUSH_BASE:-origin/main}"
 
@@ -524,6 +525,21 @@ if [ -f "$NEG_CAPABILITY" ]; then
         0) ;;
         1) echo "[pre-push] negative-capability registry: an authorable compile refusal lacks a reason, or an allowlist entry has no raise site — run \`python3 tools/scripts/negative_capability_check.py\` for details." >&2; fail=1 ;;
         *) echo "[pre-push] negative_capability_check: internal error" >&2 ;;
+    esac
+fi
+
+# ctest label-exclusion guard — a Catch2 suite whose EVERY registration carries a
+# label the coverage policy excludes runs in neither lane that gates a PR: the
+# required macos gate drops those labels with `-LE`, and the diff-coverage lane
+# drops them with `--label-exclude`. Whole-tree rather than diff-scoped, because
+# the condition is a property of a target's whole registration set and can live
+# in a manifest this push never touched. Sub-second, offline.
+if [ -f "$LABEL_EXCLUSION" ]; then
+    run_gate_captured "$PYTHON" "$LABEL_EXCLUSION"
+    case $? in
+        0) ;;
+        1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; fail=1 ;;
+        *) echo "[pre-push] ctest_label_exclusion_guard: internal error" >&2 ;;
     esac
 fi
 
