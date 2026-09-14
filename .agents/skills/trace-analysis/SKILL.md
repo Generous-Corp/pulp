@@ -677,10 +677,21 @@ correlation with nothing to correlate is not a weaker answer but a different one
 
 Two things follow. A `gpu-startup` breakdown is **not** evidence that the capture
 is tagged, so it does not predict that `gpu-health` or `gpu-probe` will answer at
-all. And a *partially* tagged capture fails closed everywhere: one tagged
-candidate drops the untagged cohort, putting `gpu-startup` back on the exact
-shared-evidence-id requirement rather than letting it fall through to the relaxed
-path.
+all. And the relaxation is all-or-nothing about instrumentation: `gpu-startup`
+admits the untagged cohort only when **no span anywhere in the trace** carries a
+`debug.gpu_evidence_id`. One evidence id — on a startup span, or only on a
+`gpu_probe*` / `gpu_readback*` / `gpu_health_transition` span that is not a
+startup candidate at all — drops the untagged cohort and puts `gpu-startup` back
+on the exact shared-evidence-id requirement.
+
+Absence of evidence is not on its own enough to answer, because an untagged
+cohort has no id to separate one lifecycle from the next. `gpu-startup` also
+fails closed on an untagged capture holding more than one frame-zero anchor, or
+spanning more than one process, and reports `unavailable` /
+`missing-question-category` with no contributors — the same observable answer the
+tagged path gives a capture with two first-visible lifecycles. So an untagged
+`gpu-startup` answer is a claim about one lifecycle, not a merge of whatever the
+capture happened to contain.
 
 ## Correlate a catalog recipe with Perfetto
 
