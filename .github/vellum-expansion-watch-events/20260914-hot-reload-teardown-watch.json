@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260914-hot-reload-teardown-watch",
+  "created_at": "2026-09-14T02:35:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Records a Pulp-owned lifetime fix in the view hot reloader plus the test registration that proves it, and declares the two watch families its file set crosses.\n\nrender-assets-and-backends is crossed only through that family's broad core/view/** selector. The change is confined to HotReloader: the destructor now releases the file watcher explicitly before the members its callback writes, and the content-hash compare-and-claim happens under a single lock instead of two. Members are destroyed in reverse declaration order, so the default destructor tore down observed_content_hashes_, pending_mutex_, pending_code_ and has_pending_ while the watcher's background thread was still dispatching into on_file_changed, and the split hash check let the watcher thread and the owning thread both observe the same new content and both report a reload. Nothing under core/canvas or core/render is touched, no renderer, backend, Skia pin, shader, surface, font or asset changes, and no packaging or asset-resolution behaviour changes.\n\nvisual-proof-harness is crossed by test/cmake/view_widget_bridge_tests.cmake, which the family names by exact path. The registration is split rather than rewritten: pulp-test-hot-reload is now discovered twice, once for ~[slow] with no label and once for [slow] under a slow:: prefix carrying the slow label, so the millisecond cases keep reaching the required macOS gate and the diff-coverage lane while the file-watcher debounce cases stop starving them. No fixture, snapshot, threshold, harness runner or captured output changes, and no test is removed from any lane it already reached.\n\nRegistered watch-only so both families' coverage stays honest about a change that crossed their selectors. No design ingest, captured output, packaging boundary, accepted expansion boundary, or Vellum source authority is affected.",
+  "tests": [
+    "ctest --test-dir build -R hot-reload",
+    "ctest --test-dir build -R 'slow::' -L slow",
+    "tools/scripts/local_diff_cover.sh pulp-test-hot-reload",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

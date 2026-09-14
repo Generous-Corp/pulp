@@ -5,8 +5,11 @@
 # Avoids collision with Shipyard's existing `preflight` namespace,
 # which is exclusively about SSH backend reachability checks.
 #
-# Runs JUST the sub-second gates that `.githooks/pre-push` runs in
-# `--mode=report`:
+# Runs the cheap, offline gates. Most are the same checks
+# `.githooks/pre-push` runs in `--mode=report`; a few self-test lanes
+# (deps-audit, worktree-lineage, shared-cache, setup.sh) run only here,
+# so a green gates.sh is a superset of the hook's fast half, never a
+# subset of it:
 #   - skill-sync (catches missing SKILL.md updates for mapped paths)
 #   - skill-path-map lint (the map's own rules match real files, validate
 #     against its schema, and don't quietly widen a subsystem claim)
@@ -34,6 +37,8 @@
 #     its released evidence still resolves, and removed rows keep tombstones)
 #   - negative-capability (every authorable playback-compile refusal carries a
 #     written reason and an owner, and no allowlist entry outlives its raise)
+#   - ctest label-exclusion (no Catch2 suite is registered only behind a label
+#     that both the required gate and the coverage lane drop)
 #
 # Does NOT run:
 #   - local diff-coverage (slow — builds the cov target, hits ring crate
@@ -107,6 +112,7 @@ FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
 SHIPYARD_WATCHDOG_TEST="$ROOT/tools/scripts/test_shipyard_pr_watchdog.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
+LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -653,6 +659,25 @@ if [ -f "$NEG_CAPABILITY" ]; then
         fail=1
     fi
 fi
+
+# ── 19. ctest label-exclusion guard ────────────────────────────────────────
+# A Catch2 suite whose EVERY registration carries a label the coverage policy
+# excludes reaches neither lane that gates a PR: the required macos gate drops
+# those labels with `-LE`, and the diff-coverage lane drops them with
+# `--label-exclude`. Its cases are then enforced by nothing while the lines they
+# cover report as uncovered, so the coverage gate calls the change untested and
+# the required gate never runs the tests that test it. Both readings are
+# correct, and together they read as a missing test rather than a missing lane.
+# Whole-tree rather than diff-scoped: the condition is a property of a target's
+# whole registration set, which can live in a file this push never touched.
+if [ -f "$LABEL_EXCLUSION" ]; then
+    echo "" >&2
+    echo "▸ ctest label-exclusion guard (a suite must reach the gate or coverage)" >&2
+    if ! "$PYTHON" "$LABEL_EXCLUSION"; then
+        fail=1
+    fi
+fi
+
 
 # ── Summary ────────────────────────────────────────────────────────────────
 echo "" >&2
