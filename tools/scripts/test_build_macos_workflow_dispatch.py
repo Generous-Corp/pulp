@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -189,6 +190,40 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
     ):
         if secret in init:
             raise AssertionError(f"untrusted wrapper passes protected variable {secret}")
+    # The untrusted wrapper cds into $PULP_UNTRUSTED_HOME as the trusted user
+    # and only then drops to `nobody`, so `nobody` inherits that cwd. A root
+    # under $RUNNER_TEMP lives beneath the runner account's mode-700 home,
+    # which `nobody` cannot traverse -- every untrusted command then dies in
+    # getcwd before it runs. The root base and the teardown guard must also
+    # stay the same literal, or cleanup silently refuses and leaks the tree.
+    root_match = re.search(r'^\s*root="([^"]+)"', init, re.MULTILINE)
+    if root_match is None:
+        raise AssertionError("retarget init lost its ephemeral root assignment")
+    root_expr = root_match.group(1)
+    root_base = root_expr.rsplit("/", 1)[0]
+    if "RUNNER_TEMP" in root_expr or root_expr.startswith("/Users/"):
+        raise AssertionError(
+            "ephemeral root must not sit under the runner account home; "
+            "nobody cannot traverse it"
+        )
+    if not root_base.startswith("/"):
+        raise AssertionError("ephemeral root base must be an absolute path")
+    if 'mkdir -p "$root"' in init:
+        raise AssertionError("ephemeral root must fail closed on a pre-existing path")
+    if 'chmod 0711 "$root"' not in init:
+        raise AssertionError("ephemeral root must be traversable but not enumerable")
+    teardown = next(
+        step for step in build["steps"]
+        if step.get("name") == "Remove untrusted writable state"
+    )["run"]
+    guard = re.search(r"^\s*(\S+)/pulp-retarget-\*\)", teardown, re.MULTILINE)
+    if guard is None:
+        raise AssertionError("retarget teardown lost its cleanup path guard")
+    if guard.group(1) != root_base:
+        raise AssertionError(
+            "teardown guard prefix " + guard.group(1)
+            + " drifted from the ephemeral root base " + root_base
+        )
     export = next(
         step for step in build["steps"]
         if step.get("name") == "Export exact head into the untrusted account"
