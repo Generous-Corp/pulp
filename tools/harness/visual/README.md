@@ -17,7 +17,8 @@ same shape without depending on the planning checkout.
 - **B.1 layout snapshots:** run Yoga fixtures through `pulp-test-visual` and
   compare semantic JSON snapshots: DIP rects, z-order, clipping, measured text
   boxes, and hit regions.
-- **Later phases:** add Skia PNG goldens for Canvas2D and view paint fixtures.
+- **Raster goldens:** `canvas2d/raster-determinism` is the first committed
+  PNG golden. Later work extends the same shape to view paint fixtures.
 
 ## Deterministic Inputs
 
@@ -75,8 +76,50 @@ pulp harness visual --verify --all --actuals-dir build/visual-actuals
 
 The runner writes failed actuals to
 `build/visual-actuals/<surface>/<fixture>.<json|png>`. Semantic JSON fixtures
-use the tolerance-aware differ; raster PNG fixtures use exact-byte comparison
-on the canonical macOS arm64 lane.
+use the tolerance-aware differ; raster PNG fixtures use exact-byte comparison.
+
+## Raster Goldens
+
+A fixture with `"kind": "render"` compares a PNG byte-for-byte instead of
+comparing a tolerance-aware JSON snapshot. `tools/harness/visual/spec.py`
+derives the `.png` golden suffix from that kind.
+
+`canvas2d/raster-determinism` additionally declares
+`"driver": "declarative_raster"`, which routes its capture through
+`tools/harness/visual/raster.py` rather than through `pulp-test-visual`. The
+fixture lists its drawing as an `ops` array, so what the golden depicts is
+reviewable in the fixture diff, and the rasterizer is the pinned `skia-python`
+wheel. That matters because it is the only rasterizer that runs on every host
+this harness runs on: `pulp::view::render_to_png` resolves to CoreGraphics on
+Apple and to Skia elsewhere, so its bytes are per-platform by construction, and
+the Linux lane is a Python container with no Pulp C++ build. A declarative
+fixture needs no build at all:
+
+```bash
+python3 -m tools.harness.visual.runner --verify --surface canvas2d
+python3 -m tools.harness.visual.raster \
+  --fixture tools/harness/visual/fixtures/canvas2d/raster-determinism.json
+```
+
+The fixture deliberately contains no text. Font rasterization is the largest
+source of cross-platform divergence, so a text-free fixture means a byte
+mismatch indicts the raster stack rather than font plumbing.
+
+Each golden's sha256 is recorded in `pins.RASTER_GOLDEN_SHA256`, and the hosts
+where that digest has actually been observed are listed in
+`pins.RASTER_GOLDEN_VERIFIED_PLATFORMS`.
+
+**What is proven, and what is not.** The digest was recorded on `darwin-arm64`
+and independently confirmed on `darwin-x86_64` (same pinned wheel, separate
+processes, identical bytes), which settles the instruction-set axis. The
+operating-system axis is NOT settled: no Linux measurement existed when the
+golden was recorded, and fontconfig, libc, and the wheel's own build all differ
+there. Both the Linux and macOS CI lanes run the same comparison and publish the
+digest they computed, so the first Linux run either confirms cross-host byte
+identity or reports the exact value that disproves it. Until then, treat the
+cross-host claim as open. If Linux does diverge, record its digest as a
+per-platform expectation; do not regenerate the shared golden from the host that
+happens to be failing.
 
 Regenerate one golden after an intentional layout contract change:
 
