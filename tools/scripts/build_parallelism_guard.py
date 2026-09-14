@@ -34,6 +34,20 @@ Two distinct failure classes:
   way ``build.yml`` / ``examples-validation.yml`` / ``web-plugins.yml`` /
   ``format-baseline-diff.yml`` already do for their self-hosted macOS legs.
 
+* **ninja-unbounded** -- a ``cmake --build`` carrying *no job flag at all*, in a
+  shell script that configures its build directory with ``-G Ninja``. The two
+  classes above are flag-based: they read the value that follows a
+  ``--parallel``/``-j``, so a command with no flag produces no match and is
+  invisible to them. That reads as harmless, and against the Unix Makefiles
+  generator it is -- no bound means ``make -j1``, serial. Ninja inverts it: with
+  no bound and no ``CMAKE_BUILD_PARALLEL_LEVEL`` its default is **cores + 2**,
+  so the flagless command is the whole machine and then some, written in the
+  shape that looks like the conservative choice. The generator decides which,
+  and that is only statically knowable when the same script both configures the
+  tree and builds it -- so this class is scoped to exactly that, and like
+  whole-machine it is enforced only where the scan can classify the host as
+  shared.
+
 A build should take a *share* of a shared host, not the whole thing: a governed
 path (``pulp build``, or ``tools/ci/governed-build.sh`` which acquires a tartci
 lease) or a derived slice (``-j$(( $(nproc) / 4 ))``) or a literal.
@@ -101,6 +115,11 @@ SHARED_HOST_FILES = [
 ]
 SHARED_HOST_DIRS = {
     ".agents/skills": (".md",),  # read by Claude Code AND Codex, run on the dev box
+    # CTest cases. Where these run is not a guess: the required `macos` gate and
+    # Shipyard's `local` mac lane both run ctest on the shared self-hosted
+    # Studios, so a build command in one of these provably executes there,
+    # beside whatever else that host is doing.
+    "test/cmake": (".sh",),
 }
 
 # Markdown is scanned for *executed* commands only — the fenced shell blocks a
@@ -167,6 +186,27 @@ VALUE_VARIABLE = re.compile(
     r'''[=\s]*["']?(?:\$\{?([A-Za-z_]\w*)\}?|%([A-Za-z_]\w*)%)''')
 ASSIGNMENT = re.compile(r'''^\s*(?:export\s+|set\s+)?([A-Za-z_]\w*)\s*=\s*(\S.*)$''')
 
+# The flagless-Ninja class. A `cmake --build` is only classifiable when the same
+# script picked the generator, so the trigger is a `-G Ninja` configure in the
+# same file: `-G Ninja`, `-GNinja`, or `-G "Ninja Multi-Config"`.
+NINJA_GENERATOR = re.compile(r'-G\s*["\']?Ninja')
+CMAKE_BUILD = re.compile(r'cmake\s+--build')
+
+# Two ways a flagless `cmake --build` is already governed: the wrapper (which
+# exports CMAKE_BUILD_PARALLEL_LEVEL for exactly this reason, and whose contract
+# forbids the command carrying its own -j), or the script exporting that
+# variable itself. Both are file-level facts, so both are read from the whole
+# text rather than from the one command line.
+# "Does this command carry a job flag at all?" -- deliberately NOT DASH_J,
+# whose trailing lookahead rejects a following word character so that `-j8` does
+# not match. That is right for the classifier (an attached literal leaves no
+# separate value token to classify) and wrong here, where an attached literal is
+# precisely the bounded form this class must not flag.
+JOB_FLAG = re.compile(r"--parallel|(?<![\w-])-j(?=[\s\d\"'$]|$)")
+
+GOVERNED_BUILD = re.compile(r'governed-build\.sh')
+BUILD_PARALLEL_LEVEL = re.compile(r'CMAKE_BUILD_PARALLEL_LEVEL')
+
 COMMENT_PREFIXES = ("#", "//", "*", "///")
 
 
@@ -206,6 +246,17 @@ def _logical_lines(text: str):
             i += 1
         yield start, buf
         i += 1
+
+
+def _code_only(text: str, suffix: str) -> str:
+    """Return `text` with every comment removed, for the file-level checks.
+
+    Reading raw text would let a comment launder a file: this very guard's own
+    fixture carries a comment explaining why the build needs
+    CMAKE_BUILD_PARALLEL_LEVEL, and matching that prose would mark the file
+    governed when nothing exports it. The same applies in reverse to `-G Ninja`
+    named in prose."""
+    return "\n".join(_comment_cut(line, suffix) for _lineno, line in _logical_lines(text))
 
 
 def _is_whole_machine(value: str) -> bool:
@@ -280,8 +331,8 @@ def _shell_fenced_lines(text: str) -> set[int]:
 
 def scan_file_kinds(path: Path, shared_host: bool | None = None) -> list[tuple[int, str, str]]:
     """Return [(lineno, snippet, kind)] for every finding, where kind is
-    "bare" or "whole-machine". Whole-machine findings are suppressed unless the
-    surface is a shared host."""
+    "bare", "whole-machine" or "ninja-unbounded". The latter two are suppressed
+    unless the surface is a shared host."""
     findings: list[tuple[int, str, str]] = []
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -294,6 +345,15 @@ def scan_file_kinds(path: Path, shared_host: bool | None = None) -> list[tuple[i
     # Only needed to unmask a laundered core-count read, which is a shared-host
     # finding; skip the pass entirely where that class is not enforced.
     assignments = _variable_assignments(text) if shared_host else {}
+    # A flagless `cmake --build` is only classifiable when this same file chose
+    # the generator, and only a finding if nothing in the file already bounds
+    # it. Both are properties of the whole text, so resolve them once.
+    ninja_code = _code_only(text, suffix) if suffix == ".sh" and shared_host else ""
+    ninja_tree = bool(
+        ninja_code
+        and NINJA_GENERATOR.search(ninja_code)
+        and not BUILD_PARALLEL_LEVEL.search(ninja_code)
+    )
     for lineno, line in _logical_lines(text):
         if fenced is not None and lineno not in fenced:
             continue
@@ -311,6 +371,13 @@ def scan_file_kinds(path: Path, shared_host: bool | None = None) -> list[tuple[i
                     continue
                 if kind:
                     findings.append((lineno, line.strip(), kind))
+        if (
+            ninja_tree
+            and CMAKE_BUILD.search(code)
+            and not GOVERNED_BUILD.search(code)
+            and not JOB_FLAG.search(code)
+        ):
+            findings.append((lineno, line.strip(), "ninja-unbounded"))
     return findings
 
 
@@ -357,13 +424,15 @@ def main(argv: list[str]) -> int:
 
     bare: list[str] = []
     whole: list[str] = []
+    ninja: list[str] = []
+    buckets = {"bare": bare, "whole-machine": whole, "ninja-unbounded": ninja}
     for path in targets:
         for lineno, snippet, kind in scan_file_kinds(path):
             try:
                 rel = path.relative_to(REPO_ROOT)
             except ValueError:
                 rel = path
-            (bare if kind == "bare" else whole).append(f"{rel}:{lineno}: {snippet}")
+            buckets[kind].append(f"{rel}:{lineno}: {snippet}")
 
     if bare:
         print("build_parallelism_guard: FAIL — bare --parallel/-j (no job count):",
@@ -396,7 +465,26 @@ def main(argv: list[str]) -> int:
               "the workflow author's job (route the self-hosted leg through the "
               "governor).", file=sys.stderr)
 
-    if bare or whole:
+    if ninja:
+        print("build_parallelism_guard: FAIL — flagless `cmake --build` in a script "
+              "that configures with -G Ninja:", file=sys.stderr)
+        for f in ninja:
+            print(f"  {f}", file=sys.stderr)
+        print("\nCarrying no --parallel/-j reads as the conservative choice, and "
+              "against Unix Makefiles it is (no bound means make -j1, serial). "
+              "Ninja inverts that: with no job bound and no "
+              "CMAKE_BUILD_PARALLEL_LEVEL its default is cores + 2, so this "
+              "command claims more than the machine has, on a host it shares with "
+              "other agents' builds and the required macos gate. Route it through "
+              "`tools/ci/governed-build.sh` (which exports "
+              "CMAKE_BUILD_PARALLEL_LEVEL from the host lease and whose contract "
+              "is that the build command carries no -j of its own), export that "
+              "variable yourself, or give the command a bounded job count. This "
+              "class needs the generator to be statically known, so it fires only "
+              "where the same file both configures the tree and builds it.",
+              file=sys.stderr)
+
+    if bare or whole or ninja:
         return 1
 
     print(f"build_parallelism_guard: OK — {len(targets)} build surface(s) bounded.")
