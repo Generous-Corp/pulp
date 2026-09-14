@@ -5775,6 +5775,27 @@ on PyPI; the C++ raster harness is the source of truth for goldens. The
 workflow runs that Linux container and also runs the same pytest smoke on
 macOS arm64 so the future canonical raster lane has a platform signal.
 
+**Neither smoke job builds C++.** `linux-docker` and `macos-local` are pytest
+lanes; only `layout-snapshots` builds `pulp-test-visual`, and it is macOS-only.
+So a golden that must be verified on BOTH hosts cannot be produced by
+`pulp::view::render_to_png`: that call resolves to CoreGraphics on Apple and to
+Skia elsewhere, and the Linux lane has no Pulp build to call it with. The one
+rasterizer that executes on both is the pinned `skia-python` wheel, which is
+what `tools/harness/visual/raster.py` uses for fixtures declaring
+`"driver": "declarative_raster"`. Adding a C++ raster to the Linux lane means
+building Pulp plus Skia inside the container; budget for that before proposing
+it.
+
+**The cross-host byte-identity claim is measured, not assumed.** Both smoke jobs
+run `tools/harness/visual/tests/test_raster_golden.py` as a named step (not just
+as part of the directory sweep) and both publish the digest they computed via
+`python -m tools.harness.visual.raster --fixture ...` with `if: always()`. The
+committed golden was recorded on `darwin-arm64` and confirmed on
+`darwin-x86_64`; the operating-system axis was unproven when it landed. A Linux
+mismatch there is a real result, not a flake: record the Linux digest as a
+per-platform expectation rather than regenerating the shared golden from
+whichever host is currently red.
+
 **Pin-drift guards (manifest is source of truth).** The Skia/V8 pin data is
 hand-mirrored into several files; two mirrors are *tooling-consumed*, so a
 hand-sync typo is a silent behavioural bug rather than a doc lag. When bumping
