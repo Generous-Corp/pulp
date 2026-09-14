@@ -94,23 +94,16 @@ E0_INFRASTRUCTURE_PATHS = {
     "tools/scripts/sequencer_exposure_check.py",
     "tools/scripts/test_sequencer_exposure_check.py",
 }
-SHARED_CROSS_DOMAIN_PATHS = {
-    "docs/reference/capability-control.md",
-}
-# Files a repo tool rewrites wholesale. A row that lists one of these in its
-# owned_paths would otherwise govern every unrelated PR that regenerates it,
-# and the author has no way to comply: the gpu-handoff pin-freshness gate
-# *requires* the refresh whenever a pinned path changes, while this gate would
-# reject the refreshed file for lacking a pending row. Exempting them here
-# resolves that contradiction without weakening the semantic check below --
-# sequencer semantics newly added to one of these files is still governed.
+# Files a repo tool rewrites wholesale. The gpu-handoff pin-freshness gate
+# *requires* the refresh whenever a pinned path changes, so watching one of
+# these whole would leave the author no way to satisfy both gates at once:
+# this gate would reject the refreshed file for lacking a pending row. They are
+# excluded from the whole-file watch below; sequencer semantics newly added to
+# one of them is still governed by the semantic check.
 GENERATED_ARTIFACT_PATHS = {
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/validation/gpu-handoff-provenance/receipt.json",
 }
-# A changed path that merely appears in some row's owned_paths is governed,
-# unless it is shared across domains or machine-generated.
-UNGOVERNED_BY_DOCUMENTATION = SHARED_CROSS_DOMAIN_PATHS | GENERATED_ARTIFACT_PATHS
 
 
 def _is_nonempty_string(value: Any) -> bool:
@@ -1067,31 +1060,57 @@ def _rows_by_id(document: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-def _documented_paths(document: Any) -> set[str]:
-    paths: set[str] = set()
-    for row in _rows_by_id(document).values():
+def _is_build_manifest(path: str) -> bool:
+    """Return whether a path is a CMake registration manifest.
+
+    Every slice that registers a target or a test appends to the same manifest,
+    so no ledger row owns one whole: a row owns the line it registered, and its
+    evidence needles are the instrument for a line. The name-based predicate
+    still watches a manifest named for the sequencer.
+    """
+    return PurePosixPath(path).name == "CMakeLists.txt" or path.endswith(".cmake")
+
+
+def _declared_owners(document: Any) -> dict[str, set[str]]:
+    """Map each owned path to the ids of the live rows and tombstones declaring it."""
+    owners: dict[str, set[str]] = {}
+    for row_id, row in _rows_by_id(document).items():
         for path in row.get("owned_paths", []):
             if isinstance(path, str):
-                paths.add(path)
-        for item in row.get("evidence", []):
-            if isinstance(item, dict) and isinstance(item.get("path"), str):
-                paths.add(item["path"])
-        surfaces = row.get("surfaces", {})
-        if isinstance(surfaces, dict):
-            for surface in surfaces.values():
-                if not isinstance(surface, dict):
-                    continue
-                for item in surface.get("evidence", []):
-                    if isinstance(item, dict) and isinstance(item.get("path"), str):
-                        paths.add(item["path"])
+                owners.setdefault(path, set()).add(row_id)
     if isinstance(document, dict) and isinstance(document.get("tombstones"), list):
         for tombstone in document["tombstones"]:
-            if not isinstance(tombstone, dict):
+            if not isinstance(tombstone, dict) or not _is_nonempty_string(tombstone.get("id")):
                 continue
             for path in tombstone.get("owned_paths", []):
                 if isinstance(path, str):
-                    paths.add(path)
-    return paths
+                    owners.setdefault(path, set()).add(tombstone["id"])
+    return owners
+
+
+def _exclusively_owned_paths(base: Any | None, current: Any) -> set[str]:
+    """Paths the ledger watches whole.
+
+    A path is watched when exactly one row or tombstone declares it in every
+    ledger state the transition spans and it is not a registration manifest. Two
+    declaring owners mean the path is shared by construction, and a row that
+    only proves a line in a file lists it as evidence, not as an owned path. A
+    path that a transition drops from its only owner stays watched for that
+    transition, so de-annexation is its own reviewable ledger change rather
+    than a way to change a file unrecorded. A wholesale-regenerated artifact is
+    never watched whole: another required gate compels its refresh, so watching
+    it would leave the author no way to satisfy both.
+    """
+    base_owners = _declared_owners(base)
+    current_owners = _declared_owners(current)
+    return {
+        path
+        for path in set(base_owners) | set(current_owners)
+        if len(base_owners.get(path, ())) <= 1
+        and len(current_owners.get(path, ())) <= 1
+        and not _is_build_manifest(path)
+        and path not in GENERATED_ARTIFACT_PATHS
+    }
 
 
 def _material_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -1127,13 +1146,13 @@ def validate_transition(
         row.get("id"): row for row in current_document.get("tombstones", [])
         if isinstance(row, dict) and _is_nonempty_string(row.get("id"))
     }
-    documented = _documented_paths(base) | _documented_paths(current)
+    watched = _exclusively_owned_paths(base, current)
     sequencer_changes = sorted(
         path for path in changed
         if path not in E0_INFRASTRUCTURE_PATHS and
         (
             is_sequencer_owned_path(path) or
-            (path in documented and path not in UNGOVERNED_BY_DOCUMENTATION) or
+            path in watched or
             path in (semantic_added_paths or set())
         )
     )
