@@ -1093,6 +1093,11 @@
             "subcommands": []
           },
           {
+            "name": "capabilities",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
             "name": "instances",
             "arguments": [],
             "subcommands": []
