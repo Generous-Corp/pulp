@@ -249,6 +249,7 @@ std::optional<std::string> token(std::string_view prefix) {
 void help() {
     std::cout << "pulp control — authenticated local capability control\n\n"
                  "Usage: pulp control profiles [--json]\n"
+                 "       pulp control capabilities [--json]\n"
                  "       pulp control instances [--json]\n"
                  "       pulp control status --instance ID [--explain] [--json]\n"
                  "       pulp control grant-request --instance ID (--profile PROFILE | "
@@ -288,6 +289,43 @@ void print_profiles(bool json) {
         for (const auto capability : profile_capabilities(profile))
             std::cout << "  " << capability_id(capability) << '\n';
     }
+}
+
+void print_capabilities(bool json) {
+    if (json) {
+        // The canonical registry projection already carries every capability
+        // term plus the frozen operation contract and both schema bodies. A
+        // second hand-rolled projection here would be a second source of truth.
+        std::cout << serialize_control_registry() << '\n';
+        return;
+    }
+    for (const auto& descriptor : inspector_capability_registry()) {
+        if (descriptor.capability == InspectorCapability::Unavailable)
+            continue;
+        std::cout << descriptor.contract_id << " (" << descriptor.id << ")\n";
+        std::cout << "  risk " << capability_risk_id(descriptor.risk) << ", executor "
+                  << executor_id(descriptor.executor) << ", evidence "
+                  << evidence_id(descriptor.evidence) << ", grantable "
+                  << (descriptor.grantable ? "yes" : "no") << '\n';
+        std::cout << "  profiles:";
+        if (descriptor.in_observe_profile)
+            std::cout << " observe";
+        if (descriptor.in_develop_profile)
+            std::cout << " develop";
+        if (!descriptor.in_observe_profile && !descriptor.in_develop_profile)
+            std::cout << " none";
+        std::cout << '\n';
+        for (const auto& operation : control_operation_registry()) {
+            if (operation.capability != descriptor.capability)
+                continue;
+            std::cout << "  operation " << operation.id << " -> " << operation.result_kind
+                      << '\n';
+            std::cout << "    input  " << operation.input_schema_id << '\n';
+            std::cout << "    output " << operation.output_schema_id << '\n';
+        }
+    }
+    std::cout << "A listed operation is a frozen contract, not a grant. Calling one needs a "
+                 "live instance and an effective grant.\n";
 }
 
 bool take(const std::vector<std::string>& args, std::size_t& i, std::string& value) {
@@ -421,6 +459,14 @@ int cmd_control(const std::vector<std::string>& args) {
             !baseline.empty())
             return fail("invalid-request", "profiles accepts only --json", json);
         print_profiles(json);
+        return 0;
+    }
+    if (verb == "capabilities") {
+        if (!positional.empty() || explain || !instance_id.empty() || !grant_id.empty() ||
+            !profile.empty() || params_provided || !output.empty() || !artifact_id.empty() ||
+            !baseline.empty())
+            return fail("invalid-request", "capabilities accepts only --json", json);
+        print_capabilities(json);
         return 0;
     }
     if (verb != "instances" && verb != "status" && verb != "grant-request" && verb != "call" &&

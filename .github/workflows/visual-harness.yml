@@ -59,6 +59,26 @@ jobs:
       - name: Run deterministic visual harness tests
         run: docker run --rm --platform linux/amd64 -v "$PWD:/workspace" pulp-visual-harness
 
+      # Named explicitly rather than relying on the image CMD's directory sweep,
+      # so narrowing that sweep later cannot silently drop the byte-identity
+      # gate. The image sets PULP_VISUAL_REQUIRE_SKIA=1, so an absent
+      # rasterizer fails here instead of skipping.
+      - name: Verify the committed raster golden
+        run: |
+          docker run --rm --platform linux/amd64 -v "$PWD:/workspace" pulp-visual-harness \
+            python -m pytest tools/harness/visual/tests/test_raster_golden.py -q
+
+      # The golden was recorded on darwin and confirmed on darwin-x86_64; no
+      # Linux measurement existed when it was committed. Publishing the digest
+      # this lane computes, pass or fail, is what settles whether the raster is
+      # byte-identical across operating systems.
+      - name: Report this host's raster digest
+        if: always()
+        run: |
+          docker run --rm --platform linux/amd64 -v "$PWD:/workspace" pulp-visual-harness \
+            python -m tools.harness.visual.raster \
+              --fixture tools/harness/visual/fixtures/canvas2d/raster-determinism.json
+
   macos-local:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     name: macOS local smoke
@@ -106,6 +126,22 @@ jobs:
         env:
           PULP_VISUAL_REQUIRE_SKIA: '1'
         run: .visual-harness-venv/bin/python -m pytest tools/harness/visual/tests/ -q
+
+      # The same byte-identity gate the Linux lane runs, named explicitly for
+      # the same reason. Both lanes must verify the golden; one lane proves only
+      # that one host is self-consistent.
+      - name: Verify the committed raster golden
+        env:
+          PULP_VISUAL_REQUIRE_SKIA: '1'
+        run: |
+          .visual-harness-venv/bin/python -m pytest \
+            tools/harness/visual/tests/test_raster_golden.py -q
+
+      - name: Report this host's raster digest
+        if: always()
+        run: |
+          .visual-harness-venv/bin/python -m tools.harness.visual.raster \
+            --fixture tools/harness/visual/fixtures/canvas2d/raster-determinism.json
 
   layout-snapshots:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO

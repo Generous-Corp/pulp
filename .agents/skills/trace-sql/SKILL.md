@@ -350,6 +350,45 @@ GROUP BY name ORDER BY avg_all_us DESC;
   dynamic (`SELECT name, COUNT(*) FROM slice WHERE category=... GROUP BY name` will
   show the high-cardinality spread); group by `category` or a name prefix
   (`substr(name, 1, instr(name,'_'))`) instead when you need the aggregate.
+- **A self-join on a nullable key needs `IS`, not `=`.**
+  `pulp_gpu_startup_breakdown.sql` correlates each row to its cold-frame anchor by
+  evidence id. A capture carrying no instrumentation at all is admitted as one
+  untagged cohort whose `evidence_id` is NULL, and `anchor.evidence_id =
+  c.evidence_id` never matches NULL against NULL — the correlation returns no
+  anchor, every row reports a NULL `cold_frame_end_ts`, and the classification
+  degrades silently instead of failing. Use SQLite's null-safe `IS`
+  (`anchor.evidence_id IS c.evidence_id`) on any join key a cohort may
+  legitimately leave NULL.
+- **Gate a relaxation on the ABSENCE of the strict population, never per row —
+  and scope that population to the whole trace, not to the question's own
+  candidate set.** The untagged cohort is admitted by `WHERE NOT EXISTS (SELECT 1
+  FROM trace_evidence)`, where `trace_evidence` scans `args` for
+  `debug.gpu_evidence_id` / `args.debug.gpu_evidence_id` across the entire
+  capture. A per-row `OR evidence_id IS NULL` reads the same in the happy case
+  and admits a capture that carried evidence and then lost some of it. The
+  subtler miss is gating on `identified_candidates`: the startup candidate
+  predicate excludes `gpu_probe*`, `gpu_readback*` and `gpu_health_transition`,
+  so a capture whose probes are tagged while its startup spans are not has an
+  empty `identified_candidates` and reads as uninstrumented — `gpu-probe` answers
+  that same file `pass` with a real evidence id and a bound `category_scope`.
+  Whatever "the strict population" means for your question, measure it where the
+  producer writes it.
+- **A cohort admitted without an identity needs its own boundary.** Absence of
+  evidence is necessary but not sufficient: untagged rows carry no id to group
+  by, so nothing separates two lifecycles the way one distinct `evidence_id` per
+  lifecycle does on the tagged path. `admissible_untagged_cohort` therefore also
+  requires `frame_zero_anchor_count <= 1` and `process_count <= 1`. Without the
+  anchor bound, one single-process capture holding two frame-zero anchors merges
+  the second lifecycle's setup into the first lifecycle's cold answer and ranks
+  it dominant — and a process-scope guard alone (`COUNT(DISTINCT COALESCE(upid,
+  -1)) = 1`) does not catch it, because both lifecycles are in one process.
+- **These `.sql` files are compiled into the Rust tool by `include_str!`.**
+  `experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs` embeds
+  `pulp_gpu_startup_breakdown.sql`, `pulp_gpu_health_transitions.sql`, and
+  `pulp_gpu_probe_correlation.sql` at build time. Two consequences: an
+  **uncommitted** edit to one of them is exactly what `cargo test` exercises (no
+  commit needed before measuring), and each question reads one file — a failing
+  `gpu-probe` test cannot have been caused by an edit to the startup view.
 
 ## Files this skill covers
 
