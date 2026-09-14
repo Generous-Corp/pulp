@@ -336,7 +336,7 @@ TEST_CASE("control registry projects capability and operation metadata",
             CHECK(operation.receipt_binding.receipt_id_field == "receipt_id");
         }
     }
-    CHECK(receipt_binding_count == 8);
+    CHECK(receipt_binding_count == 9);
     std::set<std::string_view> operation_ids;
     std::set<std::string_view> schema_ids;
     for (const auto& operation : control_operation_registry()) {

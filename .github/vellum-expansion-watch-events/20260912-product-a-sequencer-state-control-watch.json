@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260912-product-a-sequencer-state-control-watch",
+  "created_at": "2026-09-13T06:08:10Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Product A projects the existing SequencerStateChannel as two typed, grantable control operations (dev.pulp.sequencer/state.read@1 and dev.pulp.sequencer/state.edit@1) bound to the HostMain executor, so Forge Sequencer and Forge Modular reach live pattern state through the unified control platform rather than through a CLI-only path. The diff adds the executor, its standalone-host channel seam, the two capability rows, the manifest operations and their JSON schemas, re-pins the control registry digest, and adds a dedicated Catch2 suite. One family is crossed by a test-registration file only: visual-proof-harness, via the test/cmake/view_widget_bridge_tests.cmake selector, because that manifest already owns every sibling control-executor test target and the new pulp-test-control-sequencer-state-executor target is registered alongside them. No screenshot, capture, golden, fixture, harness, threshold or visual-proof code is touched, and no import, DesignIR, renderer or asset surface is touched. Registered watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "sequencer state capabilities declare the HostMain executor binding",
+    "sequencer state read copies the published snapshot and playhead",
+    "sequencer state read honours explicit projection selectors",
+    "sequencer state edit submits one exact typed command",
+    "sequencer state edit encodes every declared edit kind",
+    "sequencer state edit refuses a malformed or out-of-range request",
+    "a full sequencer command FIFO is a typed retryable refusal and never a drop",
+    "both sequencer operations refuse an off-host-main-thread call",
+    "sequencer operations refuse an unresolvable or wrongly-tiered channel",
+    "sequencer operations refuse a foreign operation id and honour cancellation",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
