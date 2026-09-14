@@ -148,6 +148,21 @@ void ContextMenu::move_hover(int delta) {
     }
 }
 
+void ContextMenu::move_hover_to_edge(bool last) {
+    // Home / End. Walks inward from the requested end past separators and
+    // disabled rows, so neither key can park the cursor somewhere Enter would
+    // refuse. Matches ComboBox's `move_hover_to_edge`.
+    const int n = static_cast<int>(items_.size());
+    for (int step = 0; step < n; ++step) {
+        const int idx = last ? n - 1 - step : step;
+        if (is_selectable(items_[static_cast<size_t>(idx)])) {
+            hover_index_ = idx;
+            request_repaint();
+            return;
+        }
+    }
+}
+
 void ContextMenu::fire_close(std::optional<int> result) {
     if (closed_) return;
     closed_ = true;
@@ -286,6 +301,8 @@ bool ContextMenu::on_key_event(const KeyEvent& event) {
     switch (event.key) {
         case KeyCode::up:   move_hover(-1); return true;
         case KeyCode::down: move_hover(+1); return true;
+        case KeyCode::home: move_hover_to_edge(false); return true;
+        case KeyCode::end_: move_hover_to_edge(true); return true;
         case KeyCode::escape:
             fire_close(std::nullopt);
             return true;

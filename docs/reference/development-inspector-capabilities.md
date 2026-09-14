@@ -63,6 +63,8 @@ availability.
 | `dev.pulp.runtime/reload@1` (`runtime.reload`) | no | no | Frozen contract; no current executor or grant path |
 | `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | no | no | Research-unsafe acknowledged manifests may inject the bounded exact-instance evaluator; grants require broker-owned single-use consent, and results/errors are size-bounded and redacted |
 | `dev.pulp.artifact/read@1` (`artifact.read`) | no | no | Publication-bound typed client rechecks exact original lineage and broker ACL for every chunk |
+| `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | yes | yes | Main-thread executor copies one `state::SequencerStateChannel` UI-side triple-buffer snapshot and seqlock playhead out of the channel before returning; it never touches the audio-side publication methods and never drains the applied-edit queue the owning UI consumer needs |
+| `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | no | yes | Grant-controlled main-thread executor submits one bounded typed step edit into the single-producer command FIFO; a full FIFO refuses with a retryable `ResourceExhausted` rather than blocking or dropping, and no audio-thread method is reachable from the operation |
 | `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
 
 `off` grants nothing. `custom` starts from an empty exact allow-list. `develop`

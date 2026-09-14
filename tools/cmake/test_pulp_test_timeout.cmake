@@ -102,6 +102,82 @@ else()
     message(STATUS "  ok   a scale below 1 fails configuration")
 endif()
 
+# --- sanitizer build: budget widens ------------------------------------------
+# The sanitizer lanes fall through to a scale of 1 unless this branch fires,
+# which is how a full ASan pass produced 11 `***Timeout` rows against 20,132
+# `Passed`. Reset every knob the cases above left behind so these read only the
+# sanitizer branch.
+set(PULP_TEST_TIMEOUT_SCALE "")
+set(PULP_COVERAGE_ENABLED FALSE)
+
+set(PULP_SANITIZER "")
+pulp_scaled_test_timeout(_out 300)
+expect("no sanitizer leaves a 300s bench budget alone" "300" "${_out}")
+
+set(PULP_SANITIZER "address")
+pulp_scaled_test_timeout(_out 300)
+expect("a sanitizer build scales the 300s bench budget to 2400s" "2400" "${_out}")
+
+# A small budget is where the observed timeouts sit, and it is the case the
+# ceiling never touches.
+pulp_scaled_test_timeout(_out 30)
+expect("a sanitizer build scales a 30s budget to 240s" "240" "${_out}")
+
+# Every sanitizer the tree accepts takes the same branch. One multiplier serves
+# all four lanes; a lane that needs its own pins PULP_TEST_TIMEOUT_SCALE.
+foreach(_san IN ITEMS thread undefined memory realtime)
+    set(PULP_SANITIZER "${_san}")
+    pulp_resolve_test_timeout_scale(_scale)
+    expect("PULP_SANITIZER=${_san} takes the sanitizer branch"
+        "${PULP_TEST_TIMEOUT_SANITIZER_SCALE}" "${_scale}")
+endforeach()
+
+# The scale is derived as a floor over the coverage number, not picked
+# independently: the ASan and TSan lanes build the same `-O0` tree coverage was
+# measured on and then add a costlier check per access. A future edit that
+# drops it below the coverage scale breaks that derivation.
+if(PULP_TEST_TIMEOUT_SANITIZER_SCALE LESS PULP_TEST_TIMEOUT_COVERAGE_SCALE)
+    message(STATUS "  FAIL sanitizer scale ${PULP_TEST_TIMEOUT_SANITIZER_SCALE} is below the coverage scale ${PULP_TEST_TIMEOUT_COVERAGE_SCALE}")
+    math(EXPR _failures "${_failures} + 1")
+else()
+    message(STATUS "  ok   the sanitizer scale is at least the coverage scale it is derived from")
+endif()
+
+# A sanitized budget stays finite. Widening it must not cost the property the
+# ceiling exists for: a wedged test still fails as a test rather than taking
+# the lane down anonymously.
+set(PULP_SANITIZER "address")
+pulp_scaled_test_timeout(_out 900)
+expect("a sanitized budget is still clamped to the ceiling" "3600" "${_out}")
+
+# --- coverage and sanitizers together resolve to the larger scale -------------
+# PulpInstrumentation.cmake refuses this combination with a FATAL_ERROR, so it
+# cannot reach a real build; the branches must still not depend on the order
+# they happen to be written in. The larger scale is never shorter than either
+# lane would have chosen on its own, and it is deliberately NOT the product,
+# which would compound two estimates of the same `-O0` cost.
+set(PULP_COVERAGE_ENABLED TRUE)
+set(PULP_SANITIZER "address")
+pulp_resolve_test_timeout_scale(_scale)
+expect("coverage plus sanitizer resolves to the larger of the two scales"
+    "${PULP_TEST_TIMEOUT_SANITIZER_SCALE}" "${_scale}")
+math(EXPR _product "${PULP_TEST_TIMEOUT_COVERAGE_SCALE} * ${PULP_TEST_TIMEOUT_SANITIZER_SCALE}")
+if(_scale EQUAL _product)
+    message(STATUS "  FAIL coverage and sanitizer scales were multiplied")
+    math(EXPR _failures "${_failures} + 1")
+else()
+    message(STATUS "  ok   the two scales are not multiplied together")
+endif()
+
+# --- explicit configuration still wins over the sanitizer branch --------------
+set(PULP_COVERAGE_ENABLED FALSE)
+set(PULP_SANITIZER "address")
+set(PULP_TEST_TIMEOUT_SCALE 2)
+pulp_scaled_test_timeout(_out 300)
+expect("an explicit scale overrides the sanitizer default" "600" "${_out}")
+set(PULP_TEST_TIMEOUT_SCALE "")
+set(PULP_SANITIZER "")
+
 if(_failures GREATER 0)
     message(FATAL_ERROR "PulpTestTimeout: ${_failures} assertion(s) failed")
 endif()

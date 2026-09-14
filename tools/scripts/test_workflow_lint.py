@@ -76,6 +76,7 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         for path in (
             "tools/scripts/fetch_skia_for_release.py",
             "tools/scripts/test_fetch_skia_for_release.py",
+            "tools/scripts/test_fetch_skia_for_release_extra.py",
             "tools/scripts/verify_skia_m153_capabilities.py",
             "tools/scripts/test_verify_skia_m153_capabilities.py",
             "tools/build-skia.sh",
@@ -205,6 +206,10 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         )
         self.assertIn(
             "python3 tools/scripts/test_fetch_skia_for_release.py",
+            step,
+        )
+        self.assertIn(
+            "python3 tools/scripts/test_fetch_skia_for_release_extra.py",
             step,
         )
         self.assertIn(

@@ -275,6 +275,19 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # catch_discover_tests TIMEOUT guard: a budget written as a bare integer
+    # bypasses `pulp_scaled_test_timeout`, so it stays the same number on the
+    # instrumented lanes where the same work takes several times longer. The
+    # test is then killed at a budget only ever sized for an uninstrumented
+    # run, and CTest reports `***Timeout` rather than an assertion -- which
+    # reads as a slow machine, not as a budget that was never scaled. A
+    # literal also tends to sit beside a scaled sibling registration of the
+    # same binary in the same file, so the file looks converted.
+    add_test(NAME catch-discover-timeout-guard COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/catch_discover_timeout_guard.py")
+    add_test(NAME catch-discover-timeout-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_catch_discover_timeout_guard.py")
+
     # GPU span categories: a span named `gpu_*` must be emitted under the `gpu`
     # category. The trace-SQL GPU queries select `category GLOB 'gpu*'`, so a
     # `gpu_*` span filed elsewhere is invisible to them rather than merely
