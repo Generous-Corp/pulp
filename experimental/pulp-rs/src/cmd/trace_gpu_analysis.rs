@@ -18,8 +18,8 @@ const ROW_MARKER: &str = "__PULP_GPU_ROW__";
 const CATEGORY_MARKER: &str = "__PULP_GPU_CATEGORY__";
 const INTEGRITY_MARKER: &str = "__PULP_GPU_INTEGRITY__";
 const MAX_TRACE_BYTES: u64 = 512 * 1024 * 1024;
-pub(crate) const MAX_PROCESSOR_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
-pub(crate) const PROCESSOR_DEADLINE: Duration = Duration::from_secs(120);
+const MAX_PROCESSOR_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const PROCESSOR_DEADLINE: Duration = Duration::from_secs(120);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const PROCESS_TERMINATION_GRACE: Duration = Duration::from_secs(2);
 const ROW_QUERY: &str = "SELECT '__PULP_GPU_ROW__' || hex(stage) || '|' || duration_ns || '|' || hex(COALESCE(evidence_id,'')) || '|' || hex(COALESCE(diagnostic_code,'')) || '|' || hex(COALESCE(health_state,'')) || '|' || COALESCE(sequence,-1) || '|' || COALESCE(frame_index,-1) || '|' || hex(timing_phase) || '|' || COALESCE(cpu_running_ns,-1) || '|' || has_scheduler_evidence || '|' || is_incomplete || '|' || is_failure FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY timing_phase ORDER BY is_incomplete DESC, is_failure DESC, CASE health_state WHEN 'failed' THEN 4 WHEN 'lost' THEN 4 WHEN 'unavailable' THEN 3 WHEN 'unverified' THEN 2 WHEN 'healthy' THEN 0 ELSE 1 END DESC, CASE WHEN evidence_id IS NULL OR length(evidence_id) != 32 OR lower(evidence_id) GLOB '*[^0-9a-f]*' THEN 1 ELSE 0 END DESC, duration_ns DESC) AS phase_rank FROM {view}) WHERE phase_rank <= 16";
@@ -194,22 +194,22 @@ struct RawCategoryScope {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ProcessorLimits {
-    pub(crate) deadline: Duration,
-    pub(crate) max_output_bytes: usize,
+struct ProcessorLimits {
+    deadline: Duration,
+    max_output_bytes: usize,
 }
 
 #[derive(Debug)]
-pub(crate) struct BoundedOutput {
-    pub(crate) status: ExitStatus,
-    pub(crate) stdout: Vec<u8>,
-    pub(crate) stderr: Vec<u8>,
+struct BoundedOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
 }
 
 #[derive(Debug)]
-pub(crate) struct TraceInputSnapshot {
-    pub(crate) path: PathBuf,
-    pub(crate) bytes: u64,
+struct TraceInputSnapshot {
+    path: PathBuf,
+    bytes: u64,
 }
 
 impl Drop for TraceInputSnapshot {
@@ -514,7 +514,7 @@ fn snapshot_trace_input_with_hook(
     Ok(retained)
 }
 
-pub(crate) fn snapshot_trace_input(path: &Path) -> Result<TraceInputSnapshot> {
+fn snapshot_trace_input(path: &Path) -> Result<TraceInputSnapshot> {
     snapshot_trace_input_with_hook(path, MAX_TRACE_BYTES, || {})
 }
 
@@ -615,7 +615,7 @@ fn pace_disconnected_processor_poll(
     }
 }
 
-pub(crate) fn run_processor_bounded(
+fn run_processor_bounded(
     tp_path: &Path,
     sql_path: &Path,
     trace_path: &Path,
@@ -765,7 +765,7 @@ fn create_exclusive_sql(path: &Path, sql: &str) -> io::Result<()> {
     file.write_all(sql.as_bytes())
 }
 
-pub(crate) fn write_sql_temp(sql: &str) -> io::Result<PathBuf> {
+fn write_sql_temp(sql: &str) -> io::Result<PathBuf> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     for _ in 0..128 {
@@ -786,11 +786,11 @@ pub(crate) fn write_sql_temp(sql: &str) -> io::Result<PathBuf> {
     ))
 }
 
-pub(crate) fn shell_quote(value: &str) -> String {
+fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-pub(crate) fn decode_hex(value: &str) -> Option<String> {
+fn decode_hex(value: &str) -> Option<String> {
     if value.len() % 2 != 0 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }

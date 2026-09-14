@@ -1,11 +1,15 @@
 -- GPU startup attribution over backend-neutral trace events. The closed view
 -- selects the earliest render-frame lifecycle carrying frame_index = 0 (or the
 -- single identified legacy lifecycle) and keeps both its cold/setup work and
--- later indexed steady-state work separate. A capture in which no startup
--- candidate carries an evidence ID is accepted as one untagged cohort whose
--- rows report a NULL evidence_id. As soon as any candidate is tagged, the
--- untagged cohort is dropped and selection requires one exact, valid evidence
--- ID shared by every tagged candidate.
+-- later indexed steady-state work separate. A capture that carries no GPU
+-- evidence ID anywhere in the trace, and whose untagged candidates form one
+-- single-process lifecycle, is accepted as one untagged cohort whose rows
+-- report a NULL evidence_id. Any evidence ID anywhere in the trace drops the
+-- untagged cohort, so a partially tagged capture is answered only from its
+-- tagged lifecycle and selection requires one exact, valid evidence ID shared
+-- by every tagged candidate. An untagged cohort spanning more than one
+-- frame-zero anchor or more than one process is dropped too, because nothing
+-- in it can separate the lifecycles the tagged path separates by evidence ID.
 --
 -- `duration_ns` is wall-clock time. `cpu_running_ns` is populated only when
 -- Perfetto thread_state intervals cover the complete slice on its stable utid;
@@ -86,6 +90,34 @@ WITH candidates AS (
   FROM singleton_unindexed_lifecycle
   JOIN identified_evidence USING (evidence_id)
   WHERE NOT EXISTS (SELECT 1 FROM first_indexed_anchor)
+), trace_evidence AS (
+  -- Evidence presence is a property of the whole capture, not of the startup
+  -- candidate set: probe, readback and health spans are excluded from
+  -- `candidates`, so gating on `identified_candidates` alone would read a
+  -- capture whose probes are tagged as one that carries no instrumentation.
+  SELECT 1 AS present
+  FROM args
+  WHERE key IN ('debug.gpu_evidence_id', 'args.debug.gpu_evidence_id')
+  LIMIT 1
+), untagged_scope AS (
+  SELECT
+    (SELECT COUNT(*)
+     FROM unidentified_candidates
+     WHERE stage = 'frame'
+       AND frame_index = 0) AS frame_zero_anchor_count,
+    (SELECT COUNT(DISTINCT COALESCE(th.upid, -1))
+     FROM unidentified_candidates AS c
+     LEFT JOIN thread_track AS tt ON c.track_id = tt.id
+     LEFT JOIN thread AS th ON tt.utid = th.utid) AS process_count
+), admissible_untagged_cohort AS (
+  -- An untagged cohort has no identity to group by, so it is admitted only
+  -- when it cannot be hiding more than one lifecycle: no evidence anywhere in
+  -- the capture, at most one frame-zero anchor, and one process.
+  SELECT 1 AS admissible
+  FROM untagged_scope
+  WHERE NOT EXISTS (SELECT 1 FROM trace_evidence)
+    AND frame_zero_anchor_count <= 1
+    AND process_count <= 1
 ), admitted_candidates AS (
   SELECT identified_candidates.*
   FROM identified_candidates
@@ -93,7 +125,7 @@ WITH candidates AS (
   UNION ALL
   SELECT unidentified_candidates.*
   FROM unidentified_candidates
-  WHERE NOT EXISTS (SELECT 1 FROM identified_candidates)
+  WHERE EXISTS (SELECT 1 FROM admissible_untagged_cohort)
 ), selected_rows AS (
   SELECT
     c.*,

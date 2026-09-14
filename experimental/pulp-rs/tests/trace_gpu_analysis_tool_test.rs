@@ -819,3 +819,155 @@ fn untagged_startup_tagged_in_order(ids: &[Option<&str>]) -> tempfile::NamedTemp
     std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
     trace
 }
+
+#[test]
+fn startup_rejects_multiple_untagged_first_visible_lifecycles() {
+    // Two frame-zero anchors inside ONE process. Without an evidence ID there
+    // is nothing to group rows by, so admitting this cohort would merge the
+    // second lifecycle's work into the first lifecycle's cold answer. The
+    // tagged form of this capture is rejected, and so is this one.
+    let merged = untagged_two_lifecycle_trace();
+    let result = run_path("gpu-startup", merged.path(), 2);
+    assert_eq!(result["verdict"], "unavailable");
+    assert_eq!(result["capture_complete"], false);
+    assert_eq!(result["unavailable_reason"], "missing-question-category");
+    assert_eq!(result["contributors"], serde_json::json!([]));
+    assert_eq!(result["evidence_ids"], serde_json::json!([]));
+
+    // Control: the same capture with the second lifecycle removed is one
+    // untagged lifecycle and still answers, so the rejection above is the
+    // extra anchor and not the absent evidence ID.
+    let single = tempfile::NamedTempFile::new().expect("single untagged lifecycle trace");
+    let mut fixture = untagged_two_lifecycle_events();
+    fixture["traceEvents"].as_array_mut().unwrap().truncate(4);
+    std::fs::write(single.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+    let control = run_path("gpu-startup", single.path(), 2);
+    assert_eq!(control["verdict"], "unverified");
+    assert_eq!(control["capture_complete"], true);
+    assert_eq!(control["dominant_stage"], "pipeline-prepare");
+    assert_eq!(control["evidence_ids"], serde_json::json!([]));
+    let cold = control["cold_start_contributors"]
+        .as_array()
+        .expect("cold contributors");
+    assert!(cold
+        .iter()
+        .all(|row| row["duration_ns"].as_i64().expect("duration") <= 700_000));
+}
+
+#[test]
+fn startup_rejects_an_untagged_cohort_spanning_two_processes() {
+    // One frame-zero anchor, two processes. Process identity is the other axis
+    // an evidence ID would have carried, so a cross-process untagged cohort is
+    // dropped even though its anchor count alone would admit it.
+    let trace = tempfile::NamedTempFile::new().expect("cross-process untagged trace");
+    let fixture = serde_json::json!({"traceEvents": [
+        {"name":"gpu_pipeline_prepare","cat":"gpu","ph":"X","ts":1000,
+         "dur":700,"pid":40,"tid":40,
+         "args":{"debug.health_state":"healthy","debug.sequence":1,
+                 "debug.frame_index":0}},
+        {"name":"frame","cat":"render","ph":"X","ts":1700,"dur":50,
+         "pid":40,"tid":40,
+         "args":{"debug.health_state":"healthy","debug.sequence":2,
+                 "debug.frame_index":0}},
+        {"name":"gpu_resource_upload","cat":"gpu","ph":"X","ts":1100,
+         "dur":40000,"pid":41,"tid":41,
+         "args":{"debug.health_state":"healthy","debug.sequence":1}}
+    ]});
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let result = run_path("gpu-startup", trace.path(), 2);
+    assert_eq!(result["verdict"], "unavailable");
+    assert_eq!(result["capture_complete"], false);
+    assert_eq!(result["unavailable_reason"], "missing-question-category");
+    assert_eq!(result["contributors"], serde_json::json!([]));
+    assert_eq!(result["evidence_ids"], serde_json::json!([]));
+}
+
+#[test]
+fn startup_rejects_an_untagged_cohort_when_probe_spans_carry_evidence() {
+    // Probe, readback and health spans are not startup candidates, so a
+    // capture whose instrumentation reached only those spans still carries
+    // evidence. Relaxing here would call an instrumented capture uninstrumented
+    // and answer from rows the evidence requirement exists to reject.
+    let evidence = "0123456789abcdef0123456789abcdef";
+    let trace = tempfile::NamedTempFile::new().expect("probe-tagged startup trace");
+    let fixture = serde_json::json!({"traceEvents": [
+        {"name":"gpu_pipeline_prepare","cat":"gpu","ph":"X","ts":1000,
+         "dur":800,"pid":1,"tid":1,
+         "args":{"debug.health_state":"healthy","debug.sequence":1,
+                 "debug.frame_index":0}},
+        {"name":"gpu_resource_upload","cat":"gpu","ph":"X","ts":1900,
+         "dur":300,"pid":1,"tid":1,
+         "args":{"debug.health_state":"healthy","debug.sequence":2,
+                 "debug.frame_index":0}},
+        {"name":"gpu_health_transition","cat":"gpu","ph":"X","ts":2300,
+         "dur":20,"pid":1,"tid":1,
+         "args":{"debug.gpu_evidence_id":evidence,
+                 "debug.health_state":"healthy","debug.sequence":3}},
+        {"name":"gpu_probe_renderer3d_hardcoded_cube","cat":"gpu","ph":"X",
+         "ts":2400,"dur":500,"pid":1,"tid":1,
+         "args":{"debug.gpu_evidence_id":evidence,
+                 "debug.health_state":"healthy","debug.sequence":4}},
+        {"name":"gpu_readback","cat":"gpu","ph":"X","ts":2950,"dur":120,
+         "pid":1,"tid":1,
+         "args":{"debug.gpu_evidence_id":evidence,
+                 "debug.health_state":"healthy","debug.sequence":5}}
+    ]});
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let startup = run_path("gpu-startup", trace.path(), 2);
+    assert_eq!(startup["verdict"], "unavailable");
+    assert_eq!(startup["capture_complete"], false);
+    assert_eq!(startup["unavailable_reason"], "missing-question-category");
+    assert_eq!(startup["contributors"], serde_json::json!([]));
+    assert_eq!(startup["evidence_ids"], serde_json::json!([]));
+
+    // Control: the same file answers the probe question from a real evidence
+    // ID on a bound process, so "this capture carries no instrumentation" was
+    // never true of it.
+    let probe = run_path("gpu-probe", trace.path(), 0);
+    assert_eq!(probe["verdict"], "pass");
+    assert_eq!(probe["evidence_ids"], serde_json::json!([evidence]));
+    assert_eq!(probe["category_scope"]["evidence_id"], evidence);
+}
+
+/// Two untagged first-visible lifecycles inside one process, as trace events.
+fn untagged_two_lifecycle_events() -> Value {
+    serde_json::json!({"traceEvents": [
+        {"name":"gpu_pipeline_prepare","cat":"gpu","ph":"X","ts":1000,
+         "dur":700,"pid":20,"tid":20,
+         "args":{"debug.health_state":"healthy","debug.sequence":1,
+                 "debug.frame_index":0}},
+        {"name":"gpu_resource_upload","cat":"gpu","ph":"X","ts":1200,
+         "dur":200,"pid":20,"tid":20,
+         "args":{"debug.health_state":"healthy","debug.sequence":2,
+                 "debug.frame_index":0}},
+        {"name":"frame","cat":"render","ph":"X","ts":1700,"dur":50,
+         "pid":20,"tid":20,
+         "args":{"debug.health_state":"healthy","debug.sequence":3,
+                 "debug.frame_index":0}},
+        {"name":"gpu_present_runtime","cat":"gpu","ph":"X","ts":2000,
+         "dur":30000,"pid":20,"tid":20,
+         "args":{"debug.health_state":"healthy","debug.sequence":4,
+                 "debug.frame_index":1}},
+        {"name":"gpu_pipeline_prepare_future_window","cat":"gpu","ph":"X",
+         "ts":500,"dur":40000,"pid":20,"tid":20,
+         "args":{"debug.health_state":"healthy","debug.sequence":1,
+                 "debug.frame_index":0}},
+        {"name":"frame_later","cat":"render","ph":"X","ts":4500,"dur":50,
+         "pid":20,"tid":20,
+         "args":{"debug.health_state":"healthy","debug.sequence":2,
+                 "debug.frame_index":0}}
+    ]})
+}
+
+/// Materialize the two-lifecycle untagged capture as a temporary trace file.
+fn untagged_two_lifecycle_trace() -> tempfile::NamedTempFile {
+    let trace = tempfile::NamedTempFile::new().expect("merged untagged lifecycle trace");
+    std::fs::write(
+        trace.path(),
+        serde_json::to_vec(&untagged_two_lifecycle_events()).unwrap(),
+    )
+    .unwrap();
+    trace
+}

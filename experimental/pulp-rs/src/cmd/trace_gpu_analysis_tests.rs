@@ -344,12 +344,22 @@ fn checked_in_gpu_views_keep_the_safe_sql_contract() {
 
 #[test]
 fn startup_view_admits_an_untagged_cohort_only_when_nothing_is_tagged() {
-    // The untagged cohort exists, and it is gated on the absence of any tagged
-    // candidate so a mixed capture still answers from its tagged lifecycle.
+    // The untagged cohort exists, and it is gated on the absence of evidence
+    // anywhere in the capture. Gating on `identified_candidates` instead would
+    // miss probe, readback and health spans, which are not startup candidates.
     assert!(STARTUP_SQL.contains("), unidentified_candidates AS ("));
     assert!(STARTUP_SQL.contains("), admitted_candidates AS ("));
     assert!(STARTUP_SQL.contains("FROM unidentified_candidates"));
-    assert!(STARTUP_SQL.contains("WHERE NOT EXISTS (SELECT 1 FROM identified_candidates)"));
+    assert!(STARTUP_SQL.contains("), trace_evidence AS ("));
+    assert!(STARTUP_SQL
+        .contains("WHERE key IN ('debug.gpu_evidence_id', 'args.debug.gpu_evidence_id')"));
+    assert!(STARTUP_SQL.contains("WHERE NOT EXISTS (SELECT 1 FROM trace_evidence)"));
+    assert!(!STARTUP_SQL.contains("WHERE NOT EXISTS (SELECT 1 FROM identified_candidates)"));
+    // An untagged cohort has no ID to group by, so more than one frame-zero
+    // anchor or more than one process would silently merge two lifecycles.
+    assert!(STARTUP_SQL.contains("AND frame_zero_anchor_count <= 1"));
+    assert!(STARTUP_SQL.contains("AND process_count <= 1"));
+    assert!(STARTUP_SQL.contains("WHERE EXISTS (SELECT 1 FROM admissible_untagged_cohort)"));
     // The cold-frame anchor compares null to null, which `=` never matches, so
     // untagged pre-first-frame setup would classify as unknown without `IS`.
     assert!(STARTUP_SQL.contains("anchor.evidence_id IS c.evidence_id"));
