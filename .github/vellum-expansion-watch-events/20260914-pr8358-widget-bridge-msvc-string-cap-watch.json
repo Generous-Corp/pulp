@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260914-pr8358-widget-bridge-msvc-string-cap-watch",
+  "created_at": "2026-09-14T12:40:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch",
+    "android/app/src/test/kotlin/com/pulp/render/GpuDriverPolicyTest.kt"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "rationale": "Splits the widget bridge's kJSPreamble into two adjacent string literals joined at the call site. No behaviour changes: the joined text is proved byte-identical to the original apart from one blank line at the seam, and adjacent string-literal concatenation happens in translation phase 6, so the compiled program is unchanged.\n\nThe change exists because MSVC caps a single string literal at 16380 bytes and the preamble reached 16803 -- 423 over -- when the context-menu branches landed. Only the ARM64 cross-compiler enforces the cap: in one release run windows-x64 compiled the identical file with zero C2026 while windows-arm64 reported one, and clang, GCC and the required macos gate all accepted it. windows-arm64 passed on the three prior releases and failed only on the first containing the context-menu work, so the attribution is measured rather than inferred.\n\nBecause that leg gates publication, a tag was cut that shipped no assets. The change therefore also adds an msvc-string-literal-guard ctest, confirmed by control to exit 1 on the pre-fix file and 0 on the fixed one, so the limit now fails on every platform instead of only on the one leg that blocks a release.\n\nNo capability family gains, loses or moves authority. The touched file is in render-assets-and-backends only because the bridge preamble lives there; nothing about what the bridge exposes changes."
+}

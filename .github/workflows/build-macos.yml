@@ -474,13 +474,25 @@ jobs:
       # A workflow_dispatch run is scoped to protected main even after it
       # detaches to a PR head. Never expose that scope's persistent caches to
       # input-selected code. Derive every writable path while trusted control
-      # is still checked out; the runner cleans this root again at teardown.
+      # is still checked out; the teardown step below is the only thing that
+      # removes this root.
+      #
+      # The root must sit under a world-traversable base, NOT $RUNNER_TEMP.
+      # $RUNNER_TEMP lives under the runner account's home, which is mode 700,
+      # so the `nobody` uid cannot traverse into it: every untrusted command
+      # starts with a cwd it cannot resolve and dies in `getcwd`. /private/tmp
+      # and its ancestors are 0755, and the root itself is 0711 so `nobody`
+      # traverses without being able to enumerate siblings.
       - name: Initialize isolated retarget paths
         shell: bash
         run: |
           set -euo pipefail
-          root="$RUNNER_TEMP/pulp-retarget-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          mkdir -p "$root"
+          root="/private/tmp/pulp-retarget-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # No -p: /private/tmp is world-writable and sticky, so a pre-existing
+          # path here is someone else's and must fail closed rather than be
+          # adopted.
+          mkdir "$root"
+          chmod 0711 "$root"
           cat > "$root/run-untrusted" <<'RUNNER'
           #!/bin/bash
           set -euo pipefail
@@ -675,7 +687,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$PULP_EPHEMERAL_ROOT" in
-            "$RUNNER_TEMP"/pulp-retarget-*) sudo /bin/rm -rf -- "$PULP_EPHEMERAL_ROOT" ;;
+            /private/tmp/pulp-retarget-*) sudo /bin/rm -rf -- "$PULP_EPHEMERAL_ROOT" ;;
             *) echo "refusing unsafe retarget cleanup path" >&2; exit 1 ;;
           esac
 
