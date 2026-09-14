@@ -6570,7 +6570,7 @@
               "kind": "test",
               "path": "test/test_control_manifest.cpp",
               "needles": [
-                "CHECK(receipt_binding_count == 9);"
+                "CHECK(receipt_binding_count == 10);"
               ]
             },
             {
