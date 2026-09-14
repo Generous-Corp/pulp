@@ -227,7 +227,7 @@ all) and the `actions/secrets` probe. See
 release-publishing credentials"*, and verify any such test FAILS with the
 scoping removed before trusting it.
 
-### `confirm_failure.sh` cannot reach a shell-out CLI test on its own
+### `confirm_failure.sh` needs `--subject` for a shell-out CLI test
 
 The CLI test binaries exec the built CLI rather than linking it:
 `pulp-test-cli-timeline`, `pulp-test-cli-bake` and `pulp-test-cli-swap-pack` are
@@ -236,22 +236,39 @@ libraries, never the command sources. `cmd_*.cpp` files reach the test through
 `pulp-cli` (output name `pulp-cpp`), a second executable.
 
 `tools/scripts/confirm_failure.sh` guards its verdict by fingerprinting the
-binary named in `--test` and refusing to rule if that binary is unchanged after
-the break — the stale-artifact trap the script exists to catch. For a shell-out
-test the fingerprint is of the harness, not of the subject, so a genuine break in
-a `cmd_*.cpp` leaves it byte-identical and the script exits 2 INCONCLUSIVE. That
-is the guard working correctly on the wrong artifact, not a coverage gap in the
-test, and rerunning it will not change the answer.
+binary that must change when the edit lands and refusing to rule if it is
+unchanged after the break. By default that is the first word of `--test`, which
+for a shell-out suite is the harness, not the subject: a genuine break in a
+`cmd_*.cpp` leaves it byte-identical and the script exits 2 INCONCLUSIVE — the
+guard working correctly on the wrong artifact. Name the subject instead:
 
-Until the script grows a way to name the subject binary, verify a CLI behaviour
-change by applying the same guard to `pulp-cpp`: delete the command's object,
-rebuild `pulp-cli` and the test target through `tools/ci/governed-build.sh`,
-confirm a compile line for your source appears in the build log and that the
-`pulp-cpp` hash moved, then run the test. Repeat after `git checkout` of the
-file; a restored build that hashes byte-identical to the baseline is the proof
-that the source was the only variable. Do not substitute `cp`/`.bak` for the
-`git checkout` — that is the same-second mtime hazard the script was written to
-remove.
+```bash
+tools/scripts/confirm_failure.sh \
+  --file tools/cli/cmd_bake.cpp --break "perl -0pi -e 's/.../.../'" \
+  --build-dir build --target pulp-cli \
+  --subject build/tools/cli/pulp-cpp \
+  --test ./build/test/pulp-test-cli-bake
+```
+
+`--target` is what the loop rebuilds (`pulp-cli`, not the test target), and
+`--subject` is what it fingerprints and deletes before each rebuild. An
+INCONCLUSIVE without `--subject` now says which file it fingerprinted and points
+here; it is not a coverage gap in the test and rerunning it will not change the
+answer. Interpreted tests (`python3 …`, `bash …`) take `--no-build` instead.
+
+### A CLI shell-out suite's build edge lives in `tools/cli/CMakeLists.txt`
+
+`add_subdirectory(test)` runs before `add_subdirectory(tools/cli)`, so a
+`if(TARGET pulp-cli)` guard written in `test/cmake/*.cmake` is **false for every
+line of that file** and silently never fires. For months no CLI shell-out suite
+depended on the binary it drives; each self-skips with `SUCCEED("pulp binary not
+built")` when the CLI is absent, so a stale or never-built `pulp-cpp` turned
+the whole suite green. The edges are attached from the CLI side, after the
+target exists: add a new shell-out suite to the `_cli_shellout_suite` list in
+`tools/cli/CMakeLists.txt`, never to a guard in `test/cmake`. Check the result in
+the generated graph, not the CMake text —
+`grep "pulp-test-cli-<suite>.dir/all: tools/cli/CMakeFiles/pulp-cli.dir/all"
+build/CMakeFiles/Makefile2` must print a line.
 
 ## Adding a CLI Command — Full Checklist
 

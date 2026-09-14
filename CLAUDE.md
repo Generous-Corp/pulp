@@ -713,7 +713,12 @@ The record is branch-local but stored in the repository's common Git config,
 so sibling worktrees can discover it and it survives worktree removal as long
 as the local branch is retained. `superseded` requires a successor; `merged`
 requires a PR unless exact-head ancestry into `origin/main` is provable; and
-`archived` records the archive SHA-256. Never remove a dirty or active worktree.
+`archived` records the archive SHA-256. Note the asymmetry: a `merged` record
+without a PR URL is *valid* but the build reaper below will not act on it,
+because squash merges make ancestry alone insufficient. Close records out
+with the PR URL, or run `tools/scripts/worktree_lineage.sh reconcile`, which
+derives it from `origin/main`'s own merge commit (zero API calls) for every
+registered worktree nobody marked. Never remove a dirty or active worktree.
 For old clean unmerged work, retain the local branch and either prove an exact
 remote ref or create and verify a complete `git bundle` before removal.
 Lineage metadata is a discovery aid, not deletion authorization: always recheck
@@ -1535,7 +1540,10 @@ tools/scripts/clean_worktree_builds.sh --yes      # delete
 It only considers directories `git worktree list` reports for this repository,
 and deletes only when **all five** hold: the exact head is a strict ancestor of
 current `origin/main`; the shared lineage registry records that exact head as
-merged with a PR URL; the build has been idle beyond
+merged **with a PR URL** (ancestry alone never unlocks it - on 2026-09-13
+54 provably merged worktrees held 947 GB because their records were still
+`active`; run `worktree_lineage.sh reconcile` first to back-fill them from
+`origin/main`'s merge commits); the build has been idle beyond
 `PULP_WORKTREE_BUILD_IDLE_HOURS` (default 2) across its entire tree; no live
 process names, has its cwd in, or holds an open file under the worktree; and the
 physical path/common Git directory re-pass a fresh registry check at deletion

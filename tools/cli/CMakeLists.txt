@@ -217,13 +217,27 @@ target_include_directories(pulp-cli PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR})
 
-# Tests are declared before the desktop-only CLI subdirectory. Attach the
-# DESIGN.md shell-out suite now that the real CLI target exists.
-if(TARGET pulp-test-cli-designmd-subcommands)
-    add_dependencies(pulp-test-cli-designmd-subcommands pulp-cli)
-    target_compile_definitions(pulp-test-cli-designmd-subcommands PRIVATE
-        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
-endif()
+# Tests are declared before the desktop-only CLI subdirectory, so a
+# `if(TARGET pulp-cli)` guard written in test/cmake is false for every line of
+# it and the suite it guards never depends on the binary it drives. Those
+# suites self-skip (SUCCEED) when the CLI is absent, so without this edge a
+# stale or never-built pulp-cpp turns the whole suite green. Attach every CLI
+# shell-out suite here, now that the real CLI target exists.
+foreach(_cli_shellout_suite IN ITEMS
+        pulp-test-cli-designmd-subcommands
+        pulp-test-cli-shellout
+        pulp-test-cli-overflow-shellout
+        pulp-test-cli-create-shellout
+        pulp-test-cli-import
+        pulp-test-cli-import-emit
+        pulp-test-cli-import-terms
+        pulp-test-cli-ship-shellout)
+    if(TARGET ${_cli_shellout_suite})
+        add_dependencies(${_cli_shellout_suite} pulp-cli)
+        target_compile_definitions(${_cli_shellout_suite} PRIVATE
+            PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+    endif()
+endforeach()
 
 # The real-process inspector test is declared before this top-level-only CLI.
 # Attach the shell-out binary only after pulp-cli exists so vendored Pulp test

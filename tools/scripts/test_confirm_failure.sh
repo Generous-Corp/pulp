@@ -168,6 +168,65 @@ else
     printf '  SKIP script-test lane (no node on PATH)\n'
 fi
 
+# A test that drives another binary: the fingerprint must follow the edit,
+# not the test's own executable. Here the "test" is a shell script that runs
+# the compiled subject, the shape of every CLI shell-out suite (the suite is
+# one binary, the edited code is compiled into pulp-cpp).
+make_shellout_project() {
+    local root="$1"
+    mkdir -p "$root"
+    cat > "$root/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.20)
+project(confirm_failure_shellout_fixture CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_library(fixture_lib value.cpp)
+add_executable(fixture_subject subject.cpp)
+target_link_libraries(fixture_subject PRIVATE fixture_lib)
+EOF
+    cat > "$root/value.hpp" <<'EOF'
+int answer();
+EOF
+    cat > "$root/value.cpp" <<'EOF'
+#include "value.hpp"
+int answer() { return 42; }
+EOF
+    cat > "$root/subject.cpp" <<'EOF'
+#include "value.hpp"
+int main() { return answer() == 42 ? 0 : 1; }
+EOF
+    cat > "$root/run_test.sh" <<'EOF'
+#!/bin/sh
+exec ./build/fixture_subject
+EOF
+    ( cd "$root" \
+      && git init -q . \
+      && git config user.email t@example.com \
+      && git config user.name test \
+      && git add -A \
+      && git commit -qm fixture ) >/dev/null 2>&1
+    cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+}
+
+run_shellout_under_test() {
+    local root="$1"; shift
+    ( cd "$root" && "$UNDER_TEST" \
+        --file value.cpp \
+        --break "perl -pi -e 's/return 42;/return 7;/'" \
+        --build-dir build \
+        --target fixture_subject \
+        --test "sh ./run_test.sh" \
+        --jobs 2 "$@" ) >/dev/null 2>&1
+    echo $?
+}
+
+make_shellout_project "$TMP/shellout"
+# Without --subject the loop fingerprints `sh`, which never changes, and must
+# refuse a verdict rather than bless or blame the test.
+check "a shell-out test without --subject is INCONCLUSIVE" 2 \
+    "$(run_shellout_under_test "$TMP/shellout")"
+check "a shell-out test with --subject is CONFIRMED" 0 \
+    "$(run_shellout_under_test "$TMP/shellout" --subject ./build/fixture_subject)"
+
 # The tree must be left exactly as it was found, whatever the verdict.
 if git -C "$TMP/uncovered" diff --quiet; then
     printf '  ok   the tree is restored after a NOT CONFIRMED run\n'
