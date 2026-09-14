@@ -8,8 +8,9 @@
 // a cancelled release before capture clears. Surface creation, destruction,
 // and file drops also manage JNI references, drag backend state, and Java-array
 // marshalling at this boundary. Lifecycle exports bridge C++ exceptions to
-// Java; nativeOnDrop logs instead of throwing, and trivial setters/touch
-// forwarders rely on their callees to stay non-throwing.
+// Java; nativeOnDrop logs instead of throwing, nativeGetGpuAdapterInfo answers
+// null on any failure so a query can never crash the caller, and trivial
+// setters/touch forwarders rely on their callees to stay non-throwing.
 
 #if defined(__ANDROID__)
 
@@ -220,6 +221,47 @@ Java_com_pulp_render_PulpSurfaceView_nativeOnDrop(
     } catch (...) {
         PULP_LOGE("Unknown C++ exception in nativeOnDrop");
     }
+}
+
+// GPU adapter identity for the Kotlin driver policy: {name, vendor, driver}.
+// Returns null until Dawn has initialized an adapter, so Kotlin can tell "not
+// known yet" apart from an adapter that reported blank strings. Queries answer
+// with null rather than throwing, matching nativeOnDrop's non-throwing style;
+// only the lifecycle exports bridge C++ exceptions to Java.
+JNIEXPORT jobjectArray JNICALL
+Java_com_pulp_render_PulpSurfaceView_nativeGetGpuAdapterInfo(
+    JNIEnv* env, jobject) {
+    pulp::render::AndroidGpuAdapterIdentity identity;
+    try {
+        identity = pulp::render::android_gpu_adapter_identity();
+    } catch (const std::exception& e) {
+        PULP_LOGE("nativeGetGpuAdapterInfo threw: %s", e.what());
+        return nullptr;
+    } catch (...) {
+        PULP_LOGE("Unknown C++ exception in nativeGetGpuAdapterInfo");
+        return nullptr;
+    }
+    if (!identity.available) return nullptr;
+
+    jclass str_cls = env->FindClass("java/lang/String");
+    if (!str_cls) { env->ExceptionClear(); return nullptr; }
+    jobjectArray arr = env->NewObjectArray(3, str_cls, nullptr);
+    env->DeleteLocalRef(str_cls);
+    if (!arr) { env->ExceptionClear(); return nullptr; }
+
+    const std::string* fields[3] = {
+        &identity.name, &identity.vendor, &identity.driver};
+    for (jsize i = 0; i < 3; ++i) {
+        jstring s = env->NewStringUTF(fields[i]->c_str());
+        if (!s) {  // OOM → a pending exception; bail before the next JNI call aborts
+            env->ExceptionClear();
+            env->DeleteLocalRef(arr);
+            return nullptr;
+        }
+        env->SetObjectArrayElement(arr, i, s);
+        env->DeleteLocalRef(s);
+    }
+    return arr;
 }
 
 // ── Accessibility (TalkBack) ─────────────────────────────────────────────
