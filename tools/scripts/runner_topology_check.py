@@ -913,45 +913,123 @@ def classify_host_silence(
                 continue
 
             assert last is not None
+            silent_hours = (now - last).total_seconds() / 3600.0
             served_sets = {frozenset(r.labels) for r in completed}
-            demand = [
+            others = [
                 r
                 for other_rows in mapped.values()
                 for r in other_rows
                 if not r.runner_name.startswith(prefix)
-                and r.status == "completed" and r.completed_at
+            ]
+
+            # Demand asks one question -- did work this lane serves keep
+            # flowing while the lane itself was quiet? -- and two independent
+            # witnesses can answer it. Neither subsumes the other, so both are
+            # counted and the verdict reads their union.
+            #
+            # By LABEL SET: another declared lane completed a job carrying a
+            # label set this lane is observed to serve. This is the witness
+            # for work that stayed inside the self-hosted fleet.
+            #
+            # By JOB NAME: a job definition only this lane is observed to run
+            # completed somewhere else, hosted runners included. This is the
+            # only witness that survives a reroute, because a reroute changes
+            # the label set by definition, and rerouting a broken lane's jobs
+            # to a hosted runner is the most common way its silence gets
+            # hidden. It is also the only witness a lane with no sibling has
+            # at all: m5's preamble lane serves a label set no other lane
+            # serves, so the label-set witness scores zero against it however
+            # broken it is.
+            #
+            # Both are read over the silence window only. An earlier shape
+            # gated the name witness on the label witness being structurally
+            # impossible across the whole observation window, which let one
+            # stale sibling completion -- from a lane that had itself since
+            # died -- switch the name witness off for the entire sweep.
+            sibling_demand = [
+                r for r in others
+                if r.status == "completed" and r.completed_at
                 and r.completed_at > silence_cutoff
                 and frozenset(r.labels) in served_sets
             ]
-            silent_hours = (now - last).total_seconds() / 3600.0
 
-            if len(demand) < contract.host_demand_min_jobs:
-                # Idle night / weekend. Nothing this lane serves was being
-                # served anywhere else either, so silence is the fleet being
-                # quiet.
+            # A name another declared lane also COMPLETED is not this lane's
+            # signature, so its appearance elsewhere proves nothing about this
+            # lane -- and a generic name ("build", "test") is exactly the one
+            # that would otherwise manufacture displacement out of unrelated
+            # work. Only completions disown: a queued or in-flight record on a
+            # sibling is not evidence that the sibling owns the name, and
+            # letting it disown would hand any concurrent job a veto over this
+            # lane's verdict. Ownership is judged among declared self-hosted
+            # lanes only, so the hosted runner that just took the work cannot
+            # disown the name it took.
+            elsewhere = {r.name for r in others if r.status == "completed"}
+            owned_names = {r.name for r in completed} - elsewhere
+
+            # Keyed by (name, runner) so the threshold counts distinct work
+            # rather than rows: five reruns of one job on one runner are one
+            # job's worth of demand, not five.
+            displaced: dict[tuple[str, str], ServiceRecord] = {}
+            for r in records:
+                if (r.status == "completed" and r.completed_at
+                        and r.completed_at > silence_cutoff
+                        and r.name in owned_names
+                        and not r.runner_name.startswith(prefix)):
+                    displaced.setdefault((r.name, r.runner_name), r)
+
+            demand = sibling_demand + list(displaced.values())
+            if len(demand) >= contract.host_demand_min_jobs:
+                proof = "; ".join(
+                    # A runner outside the prefix map is where the work
+                    # WENT, so it is the half of the proof that matters
+                    # most, and it has no host by construction. Naming it
+                    # "off-fleet" rather than guessing "hosted" keeps an
+                    # unmapped self-hosted runner -- a partial lane rename
+                    # -- from reading as a GitHub-hosted one.
+                    f"{_host_of(r.runner_name, hosts) or 'off-fleet'} "
+                    f"{r.runner_name} {r.name} "
+                    f"{_stamp(r.completed_at)} [{' '.join(sorted(r.labels))}]"
+                    for r in sorted(
+                        demand, key=lambda r: r.completed_at, reverse=True
+                    )[:8]
+                )
                 findings.append(Finding(
-                    INFO, "host-idle", lane,
-                    f"silent for {silent_hours:.1f}h but only {len(demand)} "
-                    f"sibling job(s) in the last {contract.host_silence_hours}h "
-                    f"carried a label set it serves (needs "
-                    f"{contract.host_demand_min_jobs}). No demand, no verdict.",
+                    level, "host-silent", lane,
+                    f"served no jobs for {silent_hours:.1f}h while {len(demand)} "
+                    f"job(s) it serves completed elsewhere "
+                    f"({len(sibling_demand)} carrying a label set it serves, "
+                    f"{len(displaced)} a job only it is observed to run). "
+                    f"Last served {_stamp(last)} (episode key). "
+                    f"Registration: {registration}. "
+                    f"Demand that proves the work was still flowing: {proof}",
                 ))
                 continue
 
-            proof = "; ".join(
-                f"{_host_of(r.runner_name, hosts)} {r.runner_name} {r.name} "
-                f"{_stamp(r.completed_at)} [{' '.join(sorted(r.labels))}]"
-                for r in sorted(
-                    demand, key=lambda r: r.completed_at, reverse=True
-                )[:8]
+            # No demand, no verdict -- but WHICH of those two sentences is
+            # true matters to whoever reads the line. A lane with no sibling
+            # and no name of its own is one this rule cannot measure at all,
+            # and saying that in the same words as "the fleet was quiet" is
+            # how a structural blind spot gets read as a clean bill of health.
+            has_sibling = any(
+                frozenset(r.labels) in served_sets
+                for r in others if r.status == "completed"
             )
+            if not has_sibling and not owned_names:
+                findings.append(Finding(
+                    INFO, "host-unmeasurable", lane,
+                    f"silent for {silent_hours:.1f}h. No other declared lane "
+                    f"serves a label set it serves, and every job name it ran "
+                    f"was also run by a declared lane, so neither demand "
+                    f"witness exists for it. Not idle -- unmeasurable.",
+                ))
+                continue
+
             findings.append(Finding(
-                level, "host-silent", lane,
-                f"served no jobs for {silent_hours:.1f}h while siblings "
-                f"served {len(demand)}. Last served {_stamp(last)} "
-                f"(episode key). Registration: {registration}. "
-                f"Demand that proves siblings were serving work this lane "
-                f"also serves: {proof}",
+                INFO, "host-idle", lane,
+                f"silent for {silent_hours:.1f}h but only {len(demand)} job(s) "
+                f"it serves completed elsewhere in the last "
+                f"{contract.host_silence_hours}h (needs "
+                f"{contract.host_demand_min_jobs}). No demand, no verdict.",
             ))
 
     return findings

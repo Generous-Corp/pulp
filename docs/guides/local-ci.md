@@ -1761,10 +1761,10 @@ disabling overflow. Nothing about either failure is visible without asking.
 | `profile-contract-drift` | A supplied TartCI source profile does not serve the contracted event classes, scope, or post-transform labels, or incorrectly fixes one priority for both classes. |
 | `profile-receipt-drift` | A supplied installed-profile receipt does not bind to the exact supplied source-profile digest. |
 | `source-manifest-drift` | A supplied private desired-fleet manifest disagrees with the Pulp contract or source profile, including its declared `tart_home`. |
-| `host-silent` | A declared fleet LANE completed no `build.yml` job for `silence_hours` while sibling lanes completed at least `demand_min_jobs` carrying a label set it is observed to serve. Reported at the level in `hosts.severity`, which ships as `info` (see the per-lane census below). |
+| `host-silent` | A declared fleet LANE completed no `build.yml` job for `silence_hours` while at least `demand_min_jobs` of the work it serves completed elsewhere, counted across two independent witnesses: jobs carrying a label set it is observed to serve, plus distinct pieces of work for a job name only it is observed to run. Reported at the level in `hosts.severity`, which ships as `info` (see the per-lane census below). |
 | `host-map-broken` | Self-hosted jobs ran in the window and not one runner name matched any declared host prefix. A lane rename, not a silent fleet. Silence is not evaluated while the map cannot identify a host. |
 | `host-silence-degraded` | A jobs read failed or the run walk was cut short, so the window was not fully read and every silence verdict is suppressed rather than reported on evidence that does not support it. |
-| `host-unobserved`, `host-last-served`, `host-serving-inflight`, `host-idle`, `host-map-unmapped`, `host-lane-census` | Census state for the step summary, always `info`. They record what the sweep saw so a would-be verdict can be counted against real traffic before anything pages. |
+| `host-unobserved`, `host-last-served`, `host-serving-inflight`, `host-idle`, `host-unmeasurable`, `host-map-unmapped`, `host-lane-census` | Census state for the step summary, always `info`. They record what the sweep saw so a would-be verdict can be counted against real traffic before anything pages. |
 
 Label matching is **subset containment**: GitHub dispatches to a runner only if
 it carries *every* label in the array. A lane requesting
@@ -1869,9 +1869,14 @@ boots while the full name is not. That prefix map is the one reviewed datum;
 everything else the census computes from observation.
 
 ```
-silent(host) := observed(host)
-                AND (now - last_served(host)) > silence_hours
-                AND sibling_demand(host, silence_hours) >= demand_min_jobs
+silent(lane) := observed(lane)
+                AND (now - last_served(lane)) > silence_hours
+                AND demand(lane, silence_hours) >= demand_min_jobs
+
+demand(lane, w) := jobs completed elsewhere within w carrying a label set
+                   this lane is observed to serve
+                 + distinct (job name, runner) pairs completed elsewhere
+                   within w for a job name only this lane is observed to run
 ```
 
 **Demand is the clause that makes this survivable.** Silence on its own fires
@@ -1881,8 +1886,47 @@ have taken work and did not. `sibling_demand` counts only label sets the lane
 itself completed jobs for in the window, so m5's `pulp-preamble` traffic, which
 no other lane serves, is never demand against m1 or m3.
 
+**A lane with no sibling is measured against the work instead.** That last
+sentence cuts both ways: if no other declared lane serves any label set this one
+serves, then sibling demand is not low, it is unmeasurable, and the clause
+scores zero however hard the fleet is working. That is not a corner case. It is
+the shape of the lane that stopped on 2026-09-12, which had been the busiest on
+the fleet. For a lane like that the checker asks the same question against the
+work: did the jobs this lane is observed to run keep completing somewhere else?
+The walk is scoped to one workflow, so a job name identifies a job definition
+rather than a category, and only names this lane owns count. A name another
+declared lane also ran in the window is not this lane's signature, and counting
+it would manufacture displacement out of unrelated work. Ownership is judged
+among declared self-hosted lanes only, so a hosted runner cannot disown a name:
+rerouting a broken lane's jobs to a hosted runner is the most common way its
+silence gets hidden, and it is precisely what this is built to see.
 
-Four cases are deliberately not verdicts:
+**Two witnesses, one question, and neither gates the other.** Label set and job
+name are independent readings of the same question, and each survives a case the
+other cannot. A reroute changes the label set by definition, so only the name
+witness sees one. A singleton lane has no sibling at all, so only the name
+witness exists for it. They are summed into one demand count, and the finding
+reports the split so the reader can see which one carried it. Gating either on
+the other is the defect that hid the motivating incident: an earlier build only
+consulted the name witness when the lane had no peer, and "peer" spanned the
+whole 72h observation window while demand is its 6h subset, so a single stale
+40h completion on a lane that had itself since died was enough to switch the
+name witness off for a lane whose work was visibly being taken elsewhere.
+
+Three smaller rules keep the count honest:
+
+- **Only a completion disowns a name.** A job still *running* on a sibling has
+  not established that the name is shared. Counting it would hand any concurrent
+  job a veto over the verdict for as long as it runs.
+- **The threshold counts distinct work, not rows.** A service record carries no
+  run id, so five reruns of one job on one runner are five rows and one job's
+  worth of demand. Displaced work is keyed by `(job name, runner)`.
+- **A runner outside the prefix map is named `off-fleet`.** It is where the work
+  went, so it is the half of the proof that matters most, and it has no declared
+  host by construction. Calling it `hosted` would be a guess, and the wrong one
+  exactly when a lane rename has left a self-hosted runner unmapped.
+
+Five cases are deliberately not verdicts:
 
 - **Bootstrap.** A host with no mapped job at all in the observation window is
   `host-unobserved`, never silent. A host that has never reported cannot page,
@@ -1893,7 +1937,15 @@ Four cases are deliberately not verdicts:
   (the stale-run reaper), so the census reports the state and declines the
   verdict.
 - **Idle fleet.** Silence under the demand threshold is `host-idle`: nothing this
-  lane serves was being served anywhere else either.
+  lane serves was being served anywhere else either. A lane with no sibling
+  reports `host-idle` too when not enough of its own work completed elsewhere,
+  since the name witness is a real measurement that came back low.
+- **A lane neither witness can reach.** If no other declared lane serves a label
+  set this one serves, and every job name it ran was also run by a declared
+  lane, then neither witness exists and nothing about this lane can be measured
+  at all. That is `host-unmeasurable`, and it says so in those words. Reporting
+  a structural blind spot in the same language as a quiet fleet is how the blind
+  spot reads as a clean bill of health.
 - **An unread window.** If any read failed, or the walk hit its run cap before
   covering the window, every silence verdict is suppressed and the sweep reports
   `host-silence-degraded`. This is the same fail-closed discipline the checker

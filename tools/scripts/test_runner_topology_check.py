@@ -1869,7 +1869,12 @@ class TestHostSilenceM5Shape(unittest.TestCase):
     def test_detail_carries_the_hours_and_the_sibling_count(self):
         silent = [f for f in census(self.records()) if f.kind == "host-silent"][0]
         self.assertIn("served no jobs for 11.0h", silent.detail)
-        self.assertIn("siblings served 9", silent.detail)
+        # One count, then the split that says which witness carried it: nine
+        # jobs this lane serves completed elsewhere, all nine of them on a
+        # sibling lane carrying a label set it serves.
+        self.assertIn("while 9 job(s) it serves completed elsewhere", silent.detail)
+        self.assertIn("(9 carrying a label set it serves, 0 a job only it is "
+                      "observed to run)", silent.detail)
 
     def test_detail_carries_the_episode_key(self):
         silent = [f for f in census(self.records()) if f.kind == "host-silent"][0]
@@ -1962,6 +1967,195 @@ class TestHostLaneCensus(unittest.TestCase):
         self.assertEqual(lanes, ["m5"])
 
 
+class TestHostSilenceDemandWitnesses(unittest.TestCase):
+    """One question, two independent witnesses, counted as one total.
+
+    The question is always the same: did the work this lane serves keep
+    flowing while the lane served nothing? "Flowing elsewhere" has two
+    readings, and neither subsumes the other.
+
+    By LABEL SET -- another declared lane completed jobs carrying a label set
+    this lane is observed to serve. It proves the work stayed inside the
+    self-hosted fleet, and it is the only witness available for a lane whose
+    job names its siblings also run.
+
+    By JOB NAME -- a job definition only this lane is observed to run
+    completed off the lane, hosted runners included. It is the only witness
+    that survives a reroute, because a reroute changes the label set by
+    definition; and it is the only witness a singleton lane has at all,
+    because a singleton has no sibling to carry its labels.
+
+    m5's preamble lane is the live singleton: it serves ["self-hosted"
+    "macOS" "ARM64" "pulp-preamble"] and no other declared lane has ever
+    served that set, so the label-set witness scores zero against it however
+    hard the rest of the fleet is working.
+    """
+
+    def preamble(self, hours_ago, name):
+        return job("pulp-preamble-m5", hours_ago,
+                   labels=PREAMBLE_LABELS, name=name)
+
+    def elsewhere(self, count, name="resolve-provider", hours_ago=2.0,
+                  runner="hosted-runner-{i}"):
+        """`count` of this lane's jobs, completing on a hosted runner."""
+        return [job(runner.format(i=i), hours_ago, name=name,
+                    labels=["macos-15"])
+                for i in range(count)]
+
+    def records(self, displaced=6, **kw):
+        # The preamble lane last served 26h ago; every gate lane is busy.
+        return ([self.preamble(26 + i, n) for i, n in
+                 enumerate(("resolve-provider", "classify",
+                            "protected-receipt-reuse"))]
+                + busy_siblings("studio-11-", 6)
+                + busy_siblings("m5-pulp-gate-01-", 6)
+                + busy_siblings("m1-pulp-gate-01-", 3)
+                + self.elsewhere(displaced, **kw))
+
+    def lane(self, records):
+        return [f for f in census(records)
+                if f.variable == "m5/pulp-preamble-m5"]
+
+    def test_work_that_kept_flowing_elsewhere_is_the_demand(self):
+        found = self.lane(self.records(displaced=6))
+        self.assertEqual([f.kind for f in found], ["host-silent"])
+        # One total, then the split that says which witness carried it.
+        self.assertIn("while 6 job(s) it serves completed elsewhere",
+                      found[0].detail)
+        self.assertIn("(0 carrying a label set it serves, 6 a job only it is "
+                      "observed to run)", found[0].detail)
+        # The proof names the runner that took the work, so the claim can be
+        # checked without re-querying. That the thief is a HOSTED runner is
+        # the normal case, not a disqualifier: rerouting a broken lane's jobs
+        # to a hosted runner is the most common way its silence gets hidden.
+        # It matches no declared prefix, so it is named off-fleet rather than
+        # attributed to a host it does not belong to.
+        self.assertIn("off-fleet hosted-runner-0 resolve-provider",
+                      found[0].detail)
+
+    def test_a_busy_fleet_is_not_demand_on_a_lane_nothing_can_substitute_for(self):
+        # Fifteen gate jobs completed inside the silence window and NOT ONE is
+        # demand on this lane, because no gate lane serves the label set it
+        # serves. The label-set witness here is unmeasurable by construction,
+        # not merely unmet, which is why it cannot be the only witness.
+        found = self.lane(self.records(displaced=0))
+        self.assertEqual([f.kind for f in found], ["host-idle"])
+        self.assertIn("only 0 job(s) it serves completed elsewhere",
+                      found[0].detail)
+        # CONTROL: the same instrument, the same fixtures, a lane that DOES
+        # have siblings carrying its label set -- and the verdict fires. The
+        # zero above is the fleet's shape, not a broken measurement.
+        control = ([job("studio-11-0", 11)]
+                   + busy_siblings("m5-pulp-gate-01-", 6)
+                   + busy_siblings("m1-pulp-gate-01-", 3))
+        self.assertEqual(
+            [f.kind for f in census(control) if f.variable == "m3"],
+            ["host-silent"])
+
+    def test_below_the_demand_gate_there_is_still_no_verdict(self):
+        found = self.lane(self.records(displaced=4))
+        self.assertEqual([f.kind for f in found], ["host-idle"])
+        self.assertIn("only 4 job(s)", found[0].detail)
+        self.assertIn("needs 5", found[0].detail)
+
+    def test_a_name_a_sibling_also_runs_is_not_this_lane_s_signature(self):
+        # The preamble lane did run a job named "build" -- but so does every
+        # gate lane, so the name is not its signature and its appearance
+        # elsewhere proves nothing. Without this guard a generic name is
+        # exactly what manufactures displacement out of unrelated work.
+        shared = (self.records(displaced=6, name="build")
+                  + [self.preamble(26, "build")])
+        self.assertEqual([f.kind for f in self.lane(shared)], ["host-idle"])
+        # CONTROL: byte-identical records but for the displaced jobs' name,
+        # same count, same window -- and the verdict fires. The guard
+        # discriminates between names; it does not suppress the witness.
+        owned = (self.records(displaced=6, name="protected-receipt-reuse")
+                 + [self.preamble(26, "build")])
+        self.assertEqual([f.kind for f in self.lane(owned)], ["host-silent"])
+
+    def test_a_lane_with_a_real_sibling_takes_the_label_set_path(self):
+        # Give a gate lane preamble-labelled work and the label sets are no
+        # longer disjoint, so the label-set witness is measurable and carries
+        # the finding on its own.
+        records = (self.records(displaced=0)
+                   + busy_siblings("studio-11-p", 6, labels=PREAMBLE_LABELS))
+        found = self.lane(records)
+        self.assertEqual([f.kind for f in found], ["host-silent"])
+        self.assertIn("(6 carrying a label set it serves, 0 a job only it is "
+                      "observed to run)", found[0].detail)
+
+    def test_a_stale_sibling_completion_cannot_switch_the_name_witness_off(self):
+        # A sibling that carried this lane's label set ONCE, 40h ago, and has
+        # served nothing since. It is history, not demand: it says a sibling
+        # once could have taken this work, and says nothing about the 6h the
+        # lane has been silent. Reading it as a gate let 72h of history
+        # disable a 6h measurement, and one stale row from a lane that had
+        # itself since died was enough to do it.
+        stale = self.records(displaced=6) + [
+            job("m5-pulp-gate-01-stale", 40, labels=PREAMBLE_LABELS,
+                name="macos")]
+        found = self.lane(stale)
+        self.assertEqual([f.kind for f in found], ["host-silent"])
+        self.assertIn("(0 carrying a label set it serves, 6 a job only it is "
+                      "observed to run)", found[0].detail)
+        # CONTROL: the same stale sibling, the displaced work removed. The
+        # finding tracks the evidence, not the code path it arrived by.
+        quiet = self.records(displaced=0) + [
+            job("m5-pulp-gate-01-stale", 40, labels=PREAMBLE_LABELS,
+                name="macos")]
+        self.assertEqual([f.kind for f in self.lane(quiet)], ["host-idle"])
+
+    def test_only_a_completion_disowns_a_job_name(self):
+        # A sibling lane is RUNNING a job named like one of this lane's. It
+        # has not finished it, so it is not yet evidence that the name is
+        # shared -- and treating it as evidence hands any concurrent job a
+        # veto over the whole verdict.
+        inflight = self.records(displaced=6) + [
+            job("m5-pulp-gate-01-9", 0, status="in_progress", conclusion=None,
+                name="resolve-provider")]
+        self.assertEqual([f.kind for f in self.lane(inflight)],
+                         ["host-silent"])
+        # CONTROL: the same record, completed. Now the name genuinely is
+        # shared, ownership is lost, and the name witness must go quiet.
+        completed = self.records(displaced=6) + [
+            job("m5-pulp-gate-01-9", 2, name="resolve-provider")]
+        self.assertEqual([f.kind for f in self.lane(completed)],
+                         ["host-idle"])
+
+    def test_the_threshold_counts_distinct_work_not_rows(self):
+        # Five rows, one job, one runner: a matrix leg re-fired, or somebody
+        # hitting rerun four times. ServiceRecord carries no run id, so rows
+        # are all the checker has -- and five rows of the same work is one
+        # job's worth of demand, not five.
+        reruns = self.records(displaced=5, runner="hosted-runner-0")
+        found = self.lane(reruns)
+        self.assertEqual([f.kind for f in found], ["host-idle"])
+        self.assertIn("only 1 job(s)", found[0].detail)
+        # CONTROL: the same five rows spread over five runners is five
+        # distinct pieces of work, and convicts.
+        self.assertEqual([f.kind for f in self.lane(self.records(displaced=5))],
+                         ["host-silent"])
+
+    def test_a_lane_no_witness_can_reach_is_unmeasurable_not_idle(self):
+        # No sibling serves a label set it serves, and every job name it ran
+        # was also run by a declared lane. Neither witness exists, so nothing
+        # about this lane can be measured at all. Reporting that in the same
+        # words as a quiet fleet is how a structural blind spot reads as a
+        # clean bill of health.
+        blind = ([self.preamble(26, "build")]
+                 + busy_siblings("studio-11-", 6)
+                 + busy_siblings("m1-pulp-gate-01-", 3))
+        found = self.lane(blind)
+        self.assertEqual([f.kind for f in found], ["host-unmeasurable"])
+        self.assertIn("Not idle", found[0].detail)
+        # CONTROL: give the lane one job name of its own and the work to go
+        # with it, and the same fixture convicts. Unmeasurable is a property
+        # of the evidence available, not a lane that can never be judged.
+        seen = (blind + [self.preamble(26, "resolve-provider")]
+                + self.elsewhere(6))
+        self.assertEqual([f.kind for f in self.lane(seen)], ["host-silent"])
+
+
 class TestHostSilenceEpisode(unittest.TestCase):
     def test_the_episode_key_is_stable_across_sweeps(self):
         # A deliberate power-off fires once per episode. The workflow closes on
@@ -2027,11 +2221,16 @@ class TestHostSilenceInFlight(unittest.TestCase):
 class TestHostSilenceLabelScope(unittest.TestCase):
     def test_a_label_set_this_host_never_serves_is_not_demand(self):
         # m5 runs the preamble lane m1 and m3 do not serve. 30 preamble jobs
-        # are not evidence that m1 was passed over.
+        # are not evidence that m1 was passed over. In this fixture m1 is the
+        # only lane serving its own label set AND the only name it ran is a
+        # name the preamble lane ran too, so neither witness exists for it --
+        # which is host-unmeasurable, not host-silent. The claim under test is
+        # the negative one, and it holds: 30 jobs of the wrong shape do not
+        # convict.
         records = ([job("m1-pulp-gate-01-1", 20)]
                    + [job(f"pulp-preamble-m5", 1, labels=PREAMBLE_LABELS)] * 30)
         self.assertEqual([f.kind for f in census(records) if f.variable == "m1"],
-                         ["host-idle"])
+                         ["host-unmeasurable"])
 
     def test_a_label_set_this_host_does_serve_is_demand(self):
         # CONTROL: same host, same silence, same count, and only the label set
