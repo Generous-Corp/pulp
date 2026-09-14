@@ -986,6 +986,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Measure installed CLI/MCP GPU trace-analysis latency and prove both surfaces consume one sibling artifact pair. → `tools/scripts/gpu_trace_overhead_acceptance.py`
   - ⚠ **Cannot see:** Measures offline analyzer overhead only. It cannot grade trace-producer capture cost; new producer call sites require separate compile-out, idle-session, and active-capture product trials.
 - Build the visual-harness Docker image — use this, not a raw docker build. → `tools/harness/visual/docker-build.sh`
+- A `kind: render` golden mismatches and you need to know WHICH host's bytes moved. → `tools/harness/visual/raster.py`
+  - ⚠ **Cannot see:** Reports a digest and adjudicates nothing — it holds no expectation, so it can never fail. It rasterizes through the pinned skia-python wheel, NOT through `pulp::view::render_to_png`, so its bytes say nothing about what the C++ renderer draws. Without the pinned wheel it exits non-zero rather than degrading to another rasterizer.
 - Run the deterministic visual layout snapshots. → `python3 -m tools.harness.visual.runner`
 
 **audio** — prove what the audio actually did

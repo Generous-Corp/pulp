@@ -4674,6 +4674,30 @@ After generating Pulp code, ALWAYS validate by comparing with the source design:
    > pulp import-design --from X --file input \
    >     --validate --reference source.png --fail-below 85
    > ```
+   >
+   > **`--validate` with no `--reference` reaches no verdict at all**, and says
+   > so. It renders, has nothing to compare the render against, and prints:
+   > ```text
+   > Validation: SKIPPED (no reference image)
+   >   NOTE: --validate rendered the generated JS but had nothing to compare it
+   >   against, so no verdict was reached. A render is not a pass. ...
+   > ```
+   > The exit code stays 0 in that state for compatibility with existing
+   > callers, so the printed verdict line is the only thing separating it from a
+   > real pass. Three outcomes, not two: PASS, NEEDS REVIEW, SKIPPED.
+   >
+   > **`--fail-on-unvalidated` turns that skip into exit 6.** Reach for it in a
+   > lane that must not accept "it rendered" as evidence. 6 is deliberately not
+   > 5: 5 means a comparison was made and missed the bar, 6 means nothing was
+   > measured. The flag gates the validation pass, so it requires `--validate`
+   > and exits 2 when named without one — a gate against unvalidated runs that
+   > itself never runs is the false green it exists to prevent. `--reference`
+   > and `--dump-layout` both turn validation on inside the argument parser, so
+   > pairing either with `--fail-on-unvalidated` is accepted:
+   > ```bash
+   > # render-only lane that refuses to look like a pass
+   > pulp import-design --from X --file input --validate --fail-on-unvalidated
+   > ```
 
 4. **Review the diff image** — red highlights show differences
 
