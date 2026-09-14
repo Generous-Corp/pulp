@@ -36,11 +36,12 @@ pulp_add_test_suite(pulp-test-impulse-response LIBRARIES pulp::audio pulp::signa
 pulp_add_test_suite(pulp-test-audio LIBRARIES pulp::audio
     TEST_SPEC "~[hardware]"
     PROPERTIES PROCESSORS 8)
+pulp_scaled_test_timeout(_pulp_audio_hardware_timeout 120)
 catch_discover_tests(pulp-test-audio
     TEST_SPEC "[hardware]"
     TEST_PREFIX "hardware::"
     LABELS "audio;hardware;validation"
-    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE TIMEOUT 120)
+    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE TIMEOUT "${_pulp_audio_hardware_timeout}")
 
 pulp_add_test_suite(pulp-test-system-volume LIBRARIES pulp::audio)
 

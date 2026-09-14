@@ -73,6 +73,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import workflow_runner_selector_audit  # noqa: E402
@@ -85,6 +86,10 @@ SELF_HOSTED = "self-hosted"
 
 ERROR = "error"
 WARN = "warn"
+# INFO reaches the step summary and nothing else: render() prints it, the
+# exit code ignores it, so a finding at this level can never open an issue
+# or turn a scheduled run red.
+INFO = "info"
 OK = "ok"
 
 
@@ -139,6 +144,14 @@ class Contract:
     runs_per_workflow: int
     queued_stall_seconds: int = 1800
     event_class_v2: dict[str, Any] | None = None
+    # Per-host service-silence census. Empty hosts disables it entirely.
+    hosts: dict[str, list[str]] = field(default_factory=dict)
+    host_silence_hours: int = 6
+    host_demand_min_jobs: int = 5
+    host_observation_hours: int = 72
+    host_max_runs: int = 900
+    host_severity: str = INFO
+    host_workflow: str = "build.yml"
 
 
 @dataclass
@@ -147,6 +160,27 @@ class Finding:
     kind: str
     variable: str
     detail: str
+
+
+@dataclass
+class ServiceRecord:
+    """One job a host actually ran, as the jobs API already reports it.
+
+    `runner_name` and `completed_at` are the per-host timestamp the fleet
+    already has; nothing needs to be installed on a host to produce it. Labels
+    travel along because a silent host's verdict needs to know which label sets
+    that host is observed to serve, and that is read from its own history
+    rather than declared a second time in the contract.
+    """
+    runner_name: str
+    labels: set[str]
+    status: str
+    completed_at: datetime | None
+    name: str = ""
+
+    @property
+    def self_hosted(self) -> bool:
+        return SELF_HOSTED in self.labels
 
 
 @dataclass
@@ -184,6 +218,14 @@ def load_contract(path: Path) -> Contract:
     ]
     unset = data.get("must_remain_unset", {}) or {}
     evidence = data.get("service_evidence", {}) or {}
+    host_block = data.get("hosts", {}) or {}
+    # A host entry is the one shape that carries runner_name_prefixes; every
+    # other key in the block is a knob or a reviewed `_why` note.
+    hosts = {
+        name: list(raw.get("runner_name_prefixes", []))
+        for name, raw in host_block.items()
+        if isinstance(raw, dict) and raw.get("runner_name_prefixes")
+    }
     controls = {}
     for name, raw in (data.get("routing_controls", {}) or {}).items():
         if isinstance(raw, str):
@@ -204,6 +246,13 @@ def load_contract(path: Path) -> Contract:
         runs_per_workflow=int(evidence.get("runs_per_workflow", 20)),
         queued_stall_seconds=int(evidence.get("queued_stall_seconds", 1800)),
         event_class_v2=data.get("event_class_v2"),
+        hosts=hosts,
+        host_silence_hours=int(host_block.get("silence_hours", 6)),
+        host_demand_min_jobs=int(host_block.get("demand_min_jobs", 5)),
+        host_observation_hours=int(host_block.get("observation_hours", 72)),
+        host_max_runs=int(host_block.get("max_runs", 900)),
+        host_severity=str(host_block.get("severity", INFO)),
+        host_workflow=str(host_block.get("workflow", "build.yml")),
     )
 
 
@@ -425,6 +474,429 @@ def _parse_ts(value: str) -> datetime:
 
 def parse_served_label_sets(data: Any) -> list[set[str]]:
     return [set(entry) for entry in data]
+
+
+# ── Per-host service records ────────────────────────────────────────────
+
+
+def _service_record(job: dict[str, Any]) -> ServiceRecord | None:
+    """One jobs-API entry as evidence a host served work, or None.
+
+    A job GitHub never placed on a runner reports `runner_name: null`, and most
+    of them are `skipped` conditionals, and they are the majority of the
+    payload on a busy day (369 of 654 jobs in a measured 12h sample). Counting
+    one as service would credit a host for work no host ran.
+    """
+    name = job.get("runner_name")
+    if not name or job.get("conclusion") == "skipped":
+        return None
+    completed = job.get("completed_at")
+    return ServiceRecord(
+        runner_name=str(name),
+        labels=set(job.get("labels", []) or []),
+        status=str(job.get("status", "")),
+        completed_at=_parse_ts(completed) if completed else None,
+        name=str(job.get("name", "")),
+    )
+
+
+def parse_service_records(data: Any) -> list[ServiceRecord]:
+    """Service records from a jobs-API-shaped fixture (list of job objects)."""
+    records = []
+    for job in data or []:
+        record = _service_record(job)
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def static_service_records(records: list[ServiceRecord], degraded: list[str] | None = None):
+    """A service-record provider backed by a fixed list (fixtures, tests).
+
+    Providers take the census clock so a history-reading one cannot drift from
+    the classifier. A fixed list has no history to read, so it ignores it.
+    """
+    return lambda now=None: (list(records), list(degraded or []))
+
+
+def _host_of(runner_name: str, hosts: dict[str, list[str]]) -> str | None:
+    for host, prefixes in hosts.items():
+        if any(runner_name.startswith(prefix) for prefix in prefixes):
+            return host
+    return None
+
+
+def host_last_served(records: list[ServiceRecord], prefixes: list[str]) -> datetime | None:
+    """When this host last COMPLETED a job, or None if it never did here.
+
+    The prefix is the host identity: tartci names an ephemeral runner
+    `<lane>-<supervisor pid>-<boot index>`, so the lane prefix survives every
+    boot while the full name does not.
+    """
+    stamps = [
+        record.completed_at for record in records
+        if record.completed_at is not None
+        and record.status == "completed"
+        and any(record.runner_name.startswith(prefix) for prefix in prefixes)
+    ]
+    return max(stamps) if stamps else None
+
+
+def _every_lane_proven_non_silent(
+    records: list[ServiceRecord],
+    hosts: dict[str, list[str]],
+    silence_cutoff: datetime,
+) -> bool:
+    """Is every declared prefix already known to have served inside the window?
+
+    This, and not "every host has been observed", is the point the walk can
+    stop. Runs are ordered by `created_at` but the predicate is over job
+    `completed_at`, and the two decouple: a queued job or a rerun (a retry
+    keeps its run's original `created_at`) can complete hours after the run was
+    created, so an older run can carry a NEWER completion. A lane whose
+    best-so-far completion is still at or before the cutoff is exactly the lane
+    an older run can rescue, so walking must continue while any lane is in that
+    state. Once a lane has a completion after the cutoff it cannot be silent,
+    and no older run can take that back.
+
+    The bound is per PREFIX even though the verdict is per host, and the
+    difference is load-bearing for a fused host. Proving m5 over the union of
+    its prefixes lets the always-up `pulp-preamble-m5` runner stop the walk,
+    after which the `m5-` gate lane's real last completion is never read and
+    `host-lane-census` reports it as having served nothing all window. That is
+    the one line the shadow week exists to read, and the fused host is exactly
+    the shape where it would have been wrong. A fused host whose gate lane is
+    quiet therefore pays the full walk, which is the cost a host short of the
+    window already pays.
+    """
+    for prefixes in hosts.values():
+        for prefix in prefixes:
+            last = host_last_served(records, [prefix])
+            if last is None or last <= silence_cutoff:
+                return False
+    return True
+
+
+def fetch_service_records(
+    repo: str,
+    workflow: str,
+    observation_hours: int,
+    silence_hours: int,
+    max_runs: int,
+    hosts: dict[str, list[str]],
+    now: datetime | None = None,
+) -> tuple[list[ServiceRecord], list[str]]:
+    """Jobs the fleet ran for `workflow`, newest first, plus what went unread.
+
+    This deliberately does NOT reuse `service_evidence.runs_per_workflow`. That
+    cap is 20 runs, which on this repo measured under an hour of history, so it
+    cannot cover a 6h silence window, let alone establish that a host has been
+    observed at all. So the walk is filtered server-side with `created>=` and
+    paginated, and bounded two ways instead: it stops as soon as it is past the
+    silence window and every declared host is already proven non-silent, and it
+    refuses to exceed `max_runs` in any case. A host that has not served inside
+    the window pays the full walk, which is the one case where the full walk is
+    the evidence: it is also the only case where an older run can still change
+    the answer, because a queued job or a rerun completes long after the run it
+    belongs to was created.
+
+    The second return value names every read that failed or was cut short. It
+    travels as data rather than being swallowed, because a window that was not
+    fully read cannot tell a silent host from an unobserved one.
+
+    `now` is the instant the classifier judges against. It has to be the same
+    one, or the walk can stop on a proof the classifier then computes its
+    cutoff past: a lane proven by less than the walk's own wall time would be
+    re-read as silent on records the walk stopped fetching precisely because of
+    that proof. Narrow, but it is the direction this rule must never fire in.
+    """
+    now = now or datetime.now(timezone.utc)
+    observed_cutoff = now - timedelta(hours=observation_hours)
+    silence_cutoff = now - timedelta(hours=silence_hours)
+    created = "created=" + quote(">=" + observed_cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    records: list[ServiceRecord] = []
+    degraded: list[str] = []
+    walked = 0
+    page = 1
+    reached_window_start = False
+
+    while walked < max_runs and not reached_window_start:
+        try:
+            payload = _api([
+                f"repos/{repo}/actions/workflows/{workflow}/runs"
+                f"?per_page=100&page={page}&{created}",
+            ])
+        except subprocess.CalledProcessError:
+            degraded.append(f"run page {page} of {workflow} could not be read")
+            break
+        runs = payload.get("workflow_runs", []) or []
+        if not runs:
+            reached_window_start = True
+            break
+        for run in runs:
+            created_at = run.get("created_at")
+            run_started = _parse_ts(created_at) if created_at else None
+            if run_started is not None and run_started < observed_cutoff:
+                reached_window_start = True
+                break
+            if walked >= max_runs:
+                break
+            walked += 1
+            try:
+                jobs = _api([f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100"])
+            except subprocess.CalledProcessError:
+                degraded.append(f"jobs for run {run['id']} could not be read")
+                continue
+            for job in jobs.get("jobs", []) or []:
+                record = _service_record(job)
+                if record is not None:
+                    records.append(record)
+            if (run_started is not None and run_started < silence_cutoff
+                    and _every_lane_proven_non_silent(
+                        records, hosts, silence_cutoff)):
+                # Everything the census needs is now in hand: the walk is past
+                # the silence window, and every declared lane already has a
+                # completion inside it, which no older run can undo. A lane
+                # still short of that is why the walk keeps going: its rescuing
+                # completion may sit on an older, longer-queued run. Demand is
+                # only ever consulted for a host that is NOT proven, and such a
+                # host holds the walk open, so a verdict never rests on a
+                # half-read demand count.
+                return records, degraded
+        page += 1
+
+    if not reached_window_start and not degraded:
+        degraded.append(
+            f"the run walk hit its {max_runs}-run cap before reaching back "
+            f"{observation_hours}h, so the window is incomplete"
+        )
+    return records, degraded
+
+
+def _host_registration(
+    host: str, prefixes: list[str], runners: list[Runner]
+) -> str:
+    """Persistent-registration state for a host, the silence discriminator.
+
+    A host that is silent AND unregistered is plausibly powered off. A host
+    that is silent while a persistent runner of its own reports `online` is the
+    m5 shape: up, registered, advertising labels, and serving nothing. The rule
+    does not diagnose either; it reports the discriminator so an operator does
+    not have to go and look.
+    """
+    rows = sorted(
+        f"{runner.name}={runner.status}"
+        for runner in runners
+        if any(runner.name.startswith(prefix) for prefix in prefixes)
+    )
+    return ", ".join(rows) if rows else "no runner registered under this host's prefixes"
+
+
+def _stamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _lane_breakdown(
+    rows: list[ServiceRecord], prefixes: list[str], now: datetime
+) -> str:
+    """Per-prefix last-served for one host, in the order the map declares.
+
+    The rule's unit of identity is the host, but the evidence is the lane, and
+    the motivating incident was a LANE failure: m5's gate lane served nothing
+    while the box stayed up. A host whose prefixes fuse a persistent lane with
+    an ephemeral one can have the persistent lane vouch for the whole host, so
+    the shadow week has to be able to see the lanes separately before anyone
+    argues the host predicate is enough.
+    """
+    parts = []
+    for prefix in prefixes:
+        lane = [
+            r for r in rows
+            if r.status == "completed" and r.completed_at
+            and r.runner_name.startswith(prefix)
+        ]
+        if not lane:
+            parts.append(f"{prefix}: no completion in window")
+            continue
+        newest = max(r.completed_at for r in lane)
+        parts.append(
+            f"{prefix}: {len(lane)} job(s), last "
+            f"{int((now - newest).total_seconds() // 60)}m ago"
+        )
+    return "; ".join(parts)
+
+
+def classify_host_silence(
+    contract: Contract,
+    records: list[ServiceRecord],
+    runners: list[Runner],
+    *,
+    now: datetime | None = None,
+    degraded: list[str] | None = None,
+) -> list[Finding]:
+    """Which declared hosts stopped serving pulp while siblings kept serving?
+
+    silent(host) := observed(host)
+                    AND (now - last_served(host)) > silence_hours
+                    AND sibling_demand(host, silence_hours) >= demand_min_jobs
+
+    Demand is the clause that makes this survivable. Silence on its own fires
+    every quiet night and gets muted within a week; silence beside completed
+    sibling jobs carrying a label set this host is observed to serve is a host
+    that could have taken work and did not.
+    """
+    hosts = contract.hosts
+    if not hosts:
+        return []
+    level = contract.host_severity
+    now = now or datetime.now(timezone.utc)
+    silence_cutoff = now - timedelta(hours=contract.host_silence_hours)
+    findings: list[Finding] = []
+
+    # Guard (a): a window that was not fully read supports no silence verdict.
+    if degraded:
+        findings.append(Finding(
+            level, "host-silence-degraded", "fleet",
+            "per-host silence was NOT evaluated this sweep: "
+            + "; ".join(degraded)
+            + ". A partially read window cannot distinguish a silent host from "
+            "an unread one, so every host-silent verdict is suppressed rather "
+            "than reported on evidence that does not support it.",
+        ))
+        return findings
+
+    fleet = [record for record in records if record.self_hosted]
+    mapped: dict[str, list[ServiceRecord]] = {}
+    unmapped: set[str] = set()
+    for record in fleet:
+        host = _host_of(record.runner_name, hosts)
+        if host is None:
+            unmapped.add(record.runner_name)
+        else:
+            mapped.setdefault(host, []).append(record)
+
+    # Guard (b): self-hosted jobs ran and NONE of them map. That is a renamed
+    # lane, not a silent fleet, and reading it as silence would page for every
+    # host at once. Scoped to self-hosted jobs on purpose: a GitHub-hosted
+    # runner name never matches a fleet prefix, so counting hosted jobs here
+    # would let a hosted-only window declare the map broken.
+    if fleet and not mapped:
+        for host in hosts:
+            findings.append(Finding(
+                level, "host-map-broken", host,
+                f"{len(fleet)} self-hosted job(s) ran in the window and not one "
+                f"runner name matched any declared host prefix "
+                f"(saw {', '.join(sorted(unmapped)[:6])}). The prefix map in "
+                "runner_topology.json is stale, most likely a lane rename. "
+                "Silence is not evaluated while the map cannot identify a host.",
+            ))
+        return findings
+
+    if unmapped:
+        findings.append(Finding(
+            INFO, "host-map-unmapped", "fleet",
+            f"{len(unmapped)} self-hosted runner name(s) matched no declared "
+            f"host prefix: {', '.join(sorted(unmapped)[:8])}. A partial rename "
+            "shows up here every sweep before it can silently shrink the map.",
+        ))
+
+    for host, prefixes in hosts.items():
+        rows = mapped.get(host, [])
+        completed = [r for r in rows if r.status == "completed" and r.completed_at]
+        inflight = [r for r in rows if r.status != "completed"]
+        registration = _host_registration(host, prefixes, runners)
+
+        # Shadow-mode instrumentation, not a verdict: a host with more than one
+        # prefix can have one lane vouch for another, so report the lanes apart
+        # every sweep. This is the number that decides whether the host stays
+        # the unit of identity when the rule is promoted.
+        if len(prefixes) > 1 and rows:
+            findings.append(Finding(
+                INFO, "host-lane-census", host,
+                _lane_breakdown(rows, prefixes, now)
+                + ". Reported so a lane that never stops can be told apart "
+                "from a host that never stops; the verdict below is per host.",
+            ))
+
+        # BOOTSTRAP: a host with no mapped job at all in the observation window
+        # is not silent, it is unobserved. A host that has never reported must
+        # not be able to page, and a host decommissioned for a month falls out
+        # of observation on its own rather than needing to be un-declared.
+        if not completed and not inflight:
+            findings.append(Finding(
+                INFO, "host-unobserved", host,
+                f"no job mapped to this host in the last "
+                f"{contract.host_observation_hours}h, so silence is not "
+                f"evaluated for it. Registration: {registration}.",
+            ))
+            continue
+
+        last = max((r.completed_at for r in completed), default=None)
+        if last is not None and last > silence_cutoff:
+            findings.append(Finding(
+                INFO, "host-last-served", host,
+                f"last served {_stamp(last)} "
+                f"({int((now - last).total_seconds() // 60)}m ago), "
+                f"{len(completed)} job(s) in the window. "
+                f"Registration: {registration}.",
+            ))
+            continue
+
+        # A host mid-job has not stopped serving. A job wedged long enough to
+        # matter is a different failure with a different owner (the stale-run
+        # reaper cancels in_progress jobs past its own budget), so this rule
+        # reports the state and declines the verdict.
+        if inflight:
+            findings.append(Finding(
+                INFO, "host-serving-inflight", host,
+                f"{len(inflight)} job(s) still running on this host "
+                f"({', '.join(sorted(r.runner_name for r in inflight)[:4])}), "
+                f"so it has not stopped serving. Last completion: "
+                f"{_stamp(last) if last else 'none in window'}. "
+                f"Registration: {registration}.",
+            ))
+            continue
+
+        assert last is not None
+        served_sets = {frozenset(r.labels) for r in completed}
+        demand = [
+            r
+            for other, other_rows in mapped.items() if other != host
+            for r in other_rows
+            if r.status == "completed" and r.completed_at
+            and r.completed_at > silence_cutoff
+            and frozenset(r.labels) in served_sets
+        ]
+        silent_hours = (now - last).total_seconds() / 3600.0
+
+        if len(demand) < contract.host_demand_min_jobs:
+            # Idle night / weekend. Nothing this host serves was being served
+            # anywhere else either, so silence is the fleet being quiet.
+            findings.append(Finding(
+                INFO, "host-idle", host,
+                f"silent for {silent_hours:.1f}h but only {len(demand)} sibling "
+                f"job(s) in the last {contract.host_silence_hours}h carried a "
+                f"label set it serves (needs "
+                f"{contract.host_demand_min_jobs}). No demand, no verdict.",
+            ))
+            continue
+
+        proof = "; ".join(
+            f"{_host_of(r.runner_name, hosts)} {r.runner_name} {r.name} "
+            f"{_stamp(r.completed_at)} [{' '.join(sorted(r.labels))}]"
+            for r in sorted(demand, key=lambda r: r.completed_at, reverse=True)[:8]
+        )
+        findings.append(Finding(
+            level, "host-silent", host,
+            f"served no jobs for {silent_hours:.1f}h while siblings served "
+            f"{len(demand)}. Last served {_stamp(last)} (episode key). "
+            f"Registration: {registration}. "
+            f"Demand that proves siblings were serving work this host also "
+            f"serves: {proof}",
+        ))
+
+    return findings
+
 
 
 # ── Matching ────────────────────────────────────────────────────────────
@@ -869,6 +1341,8 @@ def check(
     workflows_dir: Path | None = None,
     unread_scopes: list[str] | None = None,
     queued_ages: Any = None,
+    service_records: Any = None,
+    now: datetime | None = None,
 ) -> list[Finding]:
     """`evidence` is a callable lane -> list of served label sets, invoked ONLY
     when an ephemeral lane has no live runner. A list is accepted for
@@ -886,6 +1360,18 @@ def check(
     `evidence`. It defaults to empty, which reproduces every verdict this
     check made before it existed: no caller that omits it can see a changed
     result.
+
+    `service_records` is a callable (now) -> (records, degraded reasons)
+    feeding the per-host silence census, or a plain list of records. It
+    defaults to None, which skips the census entirely, so every caller that
+    omits it sees exactly the findings it saw before the census existed. It
+    takes the clock rather than reading its own so a provider that walks
+    history bounds that walk against the instant the verdict is judged at.
+
+    `now` is the clock the census reads. It exists so a test can pin it: a
+    fixture anchored on a constant while the code under test reads the wall
+    clock passes only for as long as the window it was written in, which is a
+    test with an expiry date. Production omits it and gets the real clock.
     """
     if not callable(evidence):
         evidence = static_evidence(evidence)
@@ -937,6 +1423,18 @@ def check(
     for lane in contract.lanes:
         findings.extend(_check_lane(lane, contract, runners, variables, evidence,
                                     unread_scopes or [], queued_ages))
+
+    if service_records is not None:
+        if not callable(service_records):
+            service_records = static_service_records(service_records)
+        # One clock for the whole census. The provider walks history against
+        # the same instant the classifier judges against, so a lane the walk
+        # proved non-silent cannot be re-read as silent moments later on the
+        # records the walk stopped fetching because of that proof.
+        now = now or datetime.now(timezone.utc)
+        records, degraded = service_records(now)
+        findings.extend(classify_host_silence(
+            contract, records, runners, now=now, degraded=degraded))
 
     return findings
 
@@ -1214,12 +1712,18 @@ def render(findings: list[Finding]) -> str:
     lines: list[str] = []
     errors = [f for f in findings if f.level == ERROR]
     warns = [f for f in findings if f.level == WARN]
+    infos = [f for f in findings if f.level == INFO]
 
     for f in errors:
         lines.append(f"  ERROR [{f.kind}] {f.variable}")
         lines.append(f"         {f.detail}")
     for f in warns:
         lines.append(f"  WARN  [{f.kind}] {f.variable}")
+        lines.append(f"         {f.detail}")
+    # INFO reaches the step summary and the exit code ignores it, so a census
+    # line can report what it saw without opening an issue or failing a run.
+    for f in infos:
+        lines.append(f"  INFO  [{f.kind}] {f.variable}")
         lines.append(f"         {f.detail}")
 
     if errors:
@@ -1264,6 +1768,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="Fixture of served label sets (list of label lists).")
     ap.add_argument("--queued-jobs-json", type=Path,
                     help="Fixture of queued-job ages in seconds (list of ints).")
+    ap.add_argument("--service-records-json", type=Path,
+                    help="Fixture of jobs-API job objects for the per-host "
+                         "service-silence census (list of job objects).")
     ap.add_argument("--workflows-dir", type=Path,
                     help="Workflow directory used to find a lane's consumers.")
     ap.add_argument("--fleet-profile", type=Path, action="append", default=[],
@@ -1306,6 +1813,9 @@ def main(argv: list[str] | None = None) -> int:
         queued_ages = static_queued_ages(
             [int(v) for v in json.loads(args.queued_jobs_json.read_text())]
             if args.queued_jobs_json else [])
+        service_records = static_service_records(parse_service_records(
+            json.loads(args.service_records_json.read_text()))
+        ) if args.service_records_json else None
     else:
         try:
             inventory = fetch_runner_inventory(args.repo)
@@ -1339,8 +1849,20 @@ def main(argv: list[str] | None = None) -> int:
             # has no live runner, so a healthy fleet pays no API calls.
             return fetch_queued_job_ages(args.repo, labels)
 
+        def service_records(now: datetime) -> tuple[list[ServiceRecord], list[str]]:
+            # Unlike the lane providers this cannot be lazy: whether a host
+            # stopped serving is only answerable from history. The cost is
+            # bounded by the early exit and the run cap instead.
+            return fetch_service_records(
+                args.repo, contract.host_workflow,
+                contract.host_observation_hours, contract.host_silence_hours,
+                contract.host_max_runs, contract.hosts, now=now)
+
+        if not contract.hosts:
+            service_records = None
+
     findings = check(contract, runners, variables, evidence, workflows_dir,
-                     unread_scopes, queued_ages)
+                     unread_scopes, queued_ages, service_records)
     if profile_inputs or receipt_inputs or source_manifest:
         findings.extend(
             finding for finding in check_event_class_evidence(
