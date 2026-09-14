@@ -23,10 +23,6 @@
 #      unique commits must never lose their only warm build by inference.
 #   3. LINEAGE — the local continuity registry records this exact branch and
 #      exact HEAD as `merged`, with the merged PR as immutable provenance.
-#      Ancestry alone never satisfies this (squash merges make it ambiguous),
-#      and a record nobody closed out stays `active` forever; run
-#      `worktree_lineage.sh reconcile` first, which derives the PR from the
-#      merge commit on origin/main whose second parent is that exact HEAD.
 #   4. IDLE — nothing under the build directory modified in the last
 #      PULP_WORKTREE_BUILD_IDLE_HOURS hours (default 2).
 #   5. QUIET — the shared build-directory exclusion lock is held by this
