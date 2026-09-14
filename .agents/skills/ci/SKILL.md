@@ -2075,7 +2075,10 @@ bisectable.
   `Hotspot-Grow: CLAUDE.md reason="..."` trailer on any commit in the range. The
   skills table and the tools digest inside it are GENERATED blocks — regenerate
   them with their `--write` commands rather than hand-editing, or the next
-  `--check` reverts your edit anyway.
+  `--check` reverts your edit anyway. Note the consequence: **adding a skill or a
+  registered tool grows the generated block by a row**, so that change needs the
+  `Hotspot-Grow: CLAUDE.md` trailer too. That is the intended price — a new row
+  is read by every session forever — not a gate misfiring.
 
 - **Inspector hotspots are frozen too.** `hotspot_size_guard.json` watches newly
   added `inspect/**` files and freezes the current inspector overlay, window,
