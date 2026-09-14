@@ -6209,7 +6209,7 @@
     },
     {
       "id": "view-contextmenu-arming-and-bubbling",
-      "title": "Right-click context menus reach their handler, with keyboard navigation",
+      "title": "Right-click context menus reach their handler, with keyboard navigation, within MSVC's string-literal cap",
       "classification": "public_sdk",
       "delivery_state": "pending",
       "claim_id": "pulp-pr-8307-contextmenu",
@@ -6221,8 +6221,10 @@
         "docs/reference/compat/react.md",
         "docs/status/gpu-vellum-handoff.yaml",
         "docs/validation/gpu-handoff-provenance/receipt.json",
+        "test/cmake/quality_tests.cmake",
         "test/test_context_menu.cpp",
-        "test/test_widget_bridge_animation.cpp"
+        "test/test_widget_bridge_animation.cpp",
+        "tools/scripts/msvc_string_literal_guard.py"
       ],
       "evidence": [
         {
@@ -6236,6 +6238,13 @@
           "path": "core/view/src/context_menu.cpp",
           "needles": [
             "void ContextMenu::move_hover_to_edge(bool last)"
+          ]
+        },
+        {
+          "path": "tools/scripts/msvc_string_literal_guard.py",
+          "needles": [
+            "MSVC_LITERAL_CAP_BYTES = 16380",
+            "raw string literal is"
           ]
         }
       ],
