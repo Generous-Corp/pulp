@@ -227,6 +227,28 @@ check "a shell-out test without --subject is INCONCLUSIVE" 2 \
 check "a shell-out test with --subject is CONFIRMED" 0 \
     "$(run_shellout_under_test "$TMP/shellout" --subject ./build/fixture_subject)"
 
+# An INCONCLUSIVE exit must not leave the subject built from broken source.
+# Only the --test binary used to be invalidated on restore, so the next run's
+# "baseline" fingerprint was the contaminated artifact, the hash never moved
+# when the source was broken, and the loop reported a structural failure that
+# read as a harness limitation rather than as stale state. Provoke a restore
+# path (a break that changes nothing) and require the subject to be gone.
+make_shellout_project "$TMP/shellout-stale"
+STALE=$( ( cd "$TMP/shellout-stale" && "$UNDER_TEST" \
+    --file value.cpp \
+    --break "perl -pi -e 's/no_such_text/x/'" \
+    --build-dir build --target fixture_subject \
+    --subject ./build/fixture_subject \
+    --test "sh ./run_test.sh" --jobs 2 \
+  ) >/dev/null 2>&1; echo $? )
+check "a no-op break with --subject is INCONCLUSIVE" 2 "$STALE"
+if [ -e "$TMP/shellout-stale/build/fixture_subject" ]; then
+    printf '  FAIL the subject binary survives an INCONCLUSIVE exit (stale-baseline hazard)\n'
+    FAILURES=$((FAILURES + 1))
+else
+    printf '  ok   the subject binary is invalidated on an INCONCLUSIVE exit\n'
+fi
+
 # The tree must be left exactly as it was found, whatever the verdict.
 if git -C "$TMP/uncovered" diff --quiet; then
     printf '  ok   the tree is restored after a NOT CONFIRMED run\n'

@@ -251,7 +251,15 @@ tools/scripts/confirm_failure.sh \
 ```
 
 `--target` is what the loop rebuilds (`pulp-cli`, not the test target), and
-`--subject` is what it fingerprints and deletes before each rebuild. An
+`--subject` is what it fingerprints and deletes before each rebuild. That
+deletion is load-bearing, not tidiness: `restore()` invalidates before it
+rebuilds, and if the subject survived an INCONCLUSIVE exit it would sit there
+built from *broken* source, the next run's baseline fingerprint would be the
+contaminated artifact, the hash would not move when the source was broken, and
+the loop would report a structural failure that reads as "the tool cannot
+measure this" — the worst shape, because the agent stops trying. Proven on the
+D5 lane (a bad baseline hash byte-identical to the broken build). The
+selftest asserts the subject is gone after an INCONCLUSIVE run. An
 INCONCLUSIVE without `--subject` now says which file it fingerprinted and points
 here; it is not a coverage gap in the test and rerunning it will not change the
 answer. Interpreted tests (`python3 …`, `bash …`) take `--no-build` instead.
