@@ -23,6 +23,8 @@
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
 #   - gpu-handoff-pin (a pinned gpu-vellum-handoff path changed without the
 #     ledger being refreshed in the same range)
+#   - gpu-handoff-sentinel (the pulp-gpu-ledger merge driver resolved a ledger
+#     collision and the result was never regenerated)
 #   - silent-revert (no byte-exact undo of a recently-landed commit)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift, and checks the
 #     attribution text against the license files actually on disk)
@@ -91,6 +93,12 @@ HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
 GHP="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 SRG="$ROOT/tools/scripts/silent_revert_guard.py"
+GPU_LEDGER="$ROOT/docs/status/gpu-vellum-handoff.yaml"
+GPU_RECEIPT="$ROOT/docs/validation/gpu-handoff-provenance/receipt.json"
+# Both files regenerate as a unit, so the repair is one command. Dropping
+# --receipt would fix the ledger and leave the receipt bound to bytes that no
+# longer exist, which is red in CI and green here.
+GPU_REPAIR="python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 MANIFEST_MIRRORS="$ROOT/tools/scripts/check_manifest_mirrors.py"
@@ -308,16 +316,55 @@ fi
 # docs/status/gpu-vellum-handoff.yaml pins referenced Pulp paths to an exact
 # revision, so editing one of those files is inherently a two-commit operation:
 # the change, then a tool-generated identity refresh. Nothing checked that, and
-# on 2026-09-05 three separate PRs each discovered it ~20 minutes later in CI
-# via gpu-recipe-catalog-selftest / gpu-handoff-provenance-selftest.
+# on 2026-09-05 three separate PRs each discovered it ~20 minutes later in CI.
 # Diff-scoped and sub-second: it only looks at whether a changed file is pinned.
 # It deliberately does NOT re-verify the identity fields — that is
 # `gpu_handoff_provenance.py check`, which costs ~25s because it runs a git log
 # per pinned path, and it is named in the failure output.
+# What CI would catch is narrower than it was when this landed: currency at
+# HEAD is now opt-in behind PULP_GPU_HANDOFF_REQUIRE_CURRENT, which nothing in
+# .github sets, so a merely-stale pin no longer turns the required gate red.
+# The always-on provenance tier still does, and so does a ledger this guard
+# never sees — which is what 6b3 below is for.
 if [ -f "$GHP" ]; then
     echo "" >&2
     echo "▸ gpu-handoff pin freshness (pinned path changed => refresh the ledger)" >&2
     if ! "$PYTHON" "$GHP" --base "$BASE" --mode=report; then
+        fail=1
+    fi
+fi
+
+# ── 6b3. gpu-handoff merge sentinel ─────────────────────────────────────────
+# The pulp-gpu-ledger merge driver (.gitattributes + install-githooks.sh)
+# resolves a ledger/receipt collision to the deliberately invalid identity
+# "regenerate-me" rather than to a stale-but-plausible pin git would commit
+# silently. That sentinel has to be caught HERE. 6b2 above cannot: it fires
+# when a pinned path changes and the ledger does NOT, and after a sentinel
+# merge the ledger HAS changed — so it reads the sentinel as a refresh and
+# stays quiet. Without this block the sentinel surfaces only in CI ~20 minutes
+# later, which is the roundtrip the driver exists to remove.
+# Reads the working tree, because the sentinel is a state of the files about to
+# be pushed, not a property of the diff range.
+if [ -f "$GPU_LEDGER" ] || [ -f "$GPU_RECEIPT" ]; then
+    echo "" >&2
+    echo "▸ gpu-handoff merge sentinel (no unregenerated ledger from a merge)" >&2
+    sentinel_hits=""
+    for candidate in "$GPU_LEDGER" "$GPU_RECEIPT"; do
+        if [ -f "$candidate" ] && grep -q regenerate-me "$candidate"; then
+            sentinel_hits="$sentinel_hits ${candidate#$ROOT/}"
+        fi
+    done
+    if [ -n "$sentinel_hits" ]; then
+        echo "" >&2
+        echo "gpu-handoff-sentinel: the merge driver left an unregenerated ledger in:" >&2
+        for hit in $sentinel_hits; do
+            echo "    $hit" >&2
+        done
+        echo "  These identities are invalid on purpose so they cannot be committed" >&2
+        echo "  quietly. Regenerate, then land the result as its own commit — amending" >&2
+        echo "  a commit that touches a pinned path re-stales the row it just repaired." >&2
+        echo "  Repair:  $GPU_REPAIR" >&2
+        echo "  Verify:  python3 tools/scripts/gpu_handoff_provenance.py check" >&2
         fail=1
     fi
 fi
