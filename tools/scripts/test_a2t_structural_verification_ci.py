@@ -148,6 +148,16 @@ class ProducerTest(unittest.TestCase):
     def set_pull_request_event(self, base: str, head: str) -> None:
         self.environment["GITHUB_EVENT_NAME"] = "pull_request"
         self.environment["GITHUB_SHA"] = self.make_merge_head(base, head)
+        self.write_pull_request_payload(base, head)
+
+    def set_pull_request_event_with_merge_head(
+        self, base: str, head: str, merge_head: str,
+    ) -> None:
+        self.environment["GITHUB_EVENT_NAME"] = "pull_request"
+        self.environment["GITHUB_SHA"] = merge_head
+        self.write_pull_request_payload(base, head)
+
+    def write_pull_request_payload(self, base: str, head: str) -> None:
         self.event.write_text(json.dumps({"pull_request": {
             "base": {
                 "sha": base, "ref": MODULE.PROTECTED_TARGET_REF,
@@ -296,6 +306,49 @@ class ProducerTest(unittest.TestCase):
             MODULE.receipt_change_decision(self.root, self.environment),
             (False, False, stale_head),
         )
+
+    def test_moved_protected_tip_still_attributes_the_receipt_to_the_head(self) -> None:
+        moved_tip = self.commit_tree(self.source, self.source)
+        merge_head = self.commit_tree(self.evidence, moved_tip, self.evidence)
+        self.set_pull_request_event_with_merge_head(
+            self.source, self.evidence, merge_head,
+        )
+        self.assertEqual(
+            MODULE.receipt_change_decision(self.root, self.environment),
+            (True, True, self.evidence),
+        )
+
+    def test_receipt_landed_on_the_moved_tip_is_not_attributed_to_the_head(self) -> None:
+        moved_tip = self.commit_tree(self.evidence, self.source)
+        merge_head = self.commit_tree(self.evidence, moved_tip, self.evidence)
+        self.set_pull_request_event_with_merge_head(
+            self.source, self.evidence, merge_head,
+        )
+        self.assertEqual(
+            MODULE.receipt_change_decision(self.root, self.environment),
+            (False, False, self.evidence),
+        )
+
+    def test_merge_head_that_does_not_bind_the_head_fails_closed(self) -> None:
+        foreign_head = self.commit_tree(self.source, self.source)
+        merge_head = self.commit_tree(self.evidence, self.source, foreign_head)
+        self.set_pull_request_event_with_merge_head(
+            self.source, self.evidence, merge_head,
+        )
+        with self.assertRaisesRegex(
+            MODULE.IssuerError, "does not bind the exact PR head",
+        ):
+            MODULE.receipt_change_decision(self.root, self.environment)
+
+    def test_single_parent_merge_head_fails_closed(self) -> None:
+        merge_head = self.commit_tree(self.evidence, self.evidence)
+        self.set_pull_request_event_with_merge_head(
+            self.source, self.evidence, merge_head,
+        )
+        with self.assertRaisesRegex(
+            MODULE.IssuerError, "not a two-parent merge",
+        ):
+            MODULE.receipt_change_decision(self.root, self.environment)
 
     def test_modified_receipt_runs_but_deletion_fails_closed(self) -> None:
         receipt = self.root / MODULE.RECEIPT_PATH
