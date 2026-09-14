@@ -44,6 +44,11 @@ PUBLIC_ROOTS = (
         "install_prefix": "pulp/music",
     },
     {
+        "domain": "playback",
+        "source": "core/playback/include/pulp/playback",
+        "install_prefix": "pulp/playback",
+    },
+    {
         "domain": "sequence",
         "source": "core/sequence/include/pulp/sequence",
         "install_prefix": "pulp/sequence",
