@@ -684,20 +684,29 @@ def fetch_service_records(
 def _host_registration(
     host: str, prefixes: list[str], runners: list[Runner]
 ) -> str:
-    """Persistent-registration state for a host, the silence discriminator.
+    """Persistent-registration state for a lane, the silence discriminator.
 
-    A host that is silent AND unregistered is plausibly powered off. A host
+    A lane that is silent AND unregistered is plausibly powered off. A lane
     that is silent while a persistent runner of its own reports `online` is the
     m5 shape: up, registered, advertising labels, and serving nothing. The rule
     does not diagnose either; it reports the discriminator so an operator does
     not have to go and look.
+
+    Scoped to the prefixes it is given rather than the whole host, so a fused
+    host's ephemeral lane cannot borrow its persistent sibling's registration
+    as an alibi -- which is the same substitution the verdict itself used to
+    make.
     """
     rows = sorted(
         f"{runner.name}={runner.status}"
         for runner in runners
         if any(runner.name.startswith(prefix) for prefix in prefixes)
     )
-    return ", ".join(rows) if rows else "no runner registered under this host's prefixes"
+    if rows:
+        return ", ".join(rows)
+    scope = (f"the prefix {prefixes[0]!r}" if len(prefixes) == 1
+             else "this host's prefixes")
+    return f"no runner registered under {scope}"
 
 
 def _stamp(value: datetime) -> str:
@@ -754,16 +763,30 @@ def classify_host_silence(
     now: datetime | None = None,
     degraded: list[str] | None = None,
 ) -> list[Finding]:
-    """Which declared hosts stopped serving pulp while siblings kept serving?
+    """Which declared LANES stopped serving pulp while the work kept flowing?
 
-    silent(host) := observed(host)
-                    AND (now - last_served(host)) > silence_hours
-                    AND sibling_demand(host, silence_hours) >= demand_min_jobs
+    silent(lane) := observed(lane)
+                    AND (now - last_served(lane)) > silence_hours
+                    AND demand(lane, silence_hours) >= demand_min_jobs
+
+    The unit is the lane (one declared prefix), not the host. A host that
+    declares two prefixes runs two independent registrations, and the busy one
+    kept the quiet one's verdict at host-last-served for as long as it kept
+    serving: one host, two lanes, one alibi covering both.
 
     Demand is the clause that makes this survivable. Silence on its own fires
-    every quiet night and gets muted within a week; silence beside completed
-    sibling jobs carrying a label set this host is observed to serve is a host
-    that could have taken work and did not.
+    every quiet night and gets muted within a week; silence beside work that
+    was demonstrably being served is a lane that could have taken it and did
+    not. Demand is read two ways, because a lane with a sibling and a lane
+    without one are different questions:
+
+      * sibling demand — another declared lane completed jobs carrying a label
+        set this lane is observed to serve. The normal case.
+      * displaced work — no declared lane serves any label set this one serves,
+        so sibling demand is unmeasurable by construction. Then the question is
+        asked of the work instead: did the jobs this lane runs keep completing
+        somewhere else, hosted runners included? A singleton lane has no
+        redundancy, which is the reason to watch it, not a reason to mute it.
     """
     hosts = contract.hosts
     if not hosts:
@@ -822,98 +845,114 @@ def classify_host_silence(
 
     for host, prefixes in hosts.items():
         rows = mapped.get(host, [])
-        completed = [r for r in rows if r.status == "completed" and r.completed_at]
-        inflight = [r for r in rows if r.status != "completed"]
-        registration = _host_registration(host, prefixes, runners)
 
-        # Shadow-mode instrumentation, not a verdict: a host with more than one
-        # prefix can have one lane vouch for another, so report the lanes apart
-        # every sweep. This is the number that decides whether the host stays
-        # the unit of identity when the rule is promoted.
+        # A fused host's lanes are adjudicated separately below, so this line
+        # is no longer the only place they can be told apart. It stays because
+        # reading one host's lanes side by side is cheaper for an operator than
+        # correlating two findings that arrive in different places.
         if len(prefixes) > 1 and rows:
             findings.append(Finding(
                 INFO, "host-lane-census", host,
                 _lane_breakdown(rows, prefixes, now)
-                + ". Reported so a lane that never stops can be told apart "
-                "from a host that never stops; the verdict below is per host.",
+                + ". Each lane carries its own verdict: a host's always-up "
+                "lane cannot vouch for a lane beside it that stopped.",
             ))
 
-        # BOOTSTRAP: a host with no mapped job at all in the observation window
-        # is not silent, it is unobserved. A host that has never reported must
-        # not be able to page, and a host decommissioned for a month falls out
-        # of observation on its own rather than needing to be un-declared.
-        if not completed and not inflight:
+        for prefix in prefixes:
+            # The lane is the unit of the verdict. A host that declares one
+            # prefix IS its lane, so it keeps its bare name and its episode
+            # key; only a fused host needs the qualifier to tell its lanes
+            # apart. Adding a second prefix to a host therefore re-keys its
+            # episodes once, which is the reviewed cost of declaring it.
+            lane = host if len(prefixes) == 1 else f"{host}/{prefix}"
+            lane_rows = [r for r in rows if r.runner_name.startswith(prefix)]
+            completed = [
+                r for r in lane_rows if r.status == "completed" and r.completed_at
+            ]
+            inflight = [r for r in lane_rows if r.status != "completed"]
+            registration = _host_registration(host, [prefix], runners)
+
+            # BOOTSTRAP: a lane with no mapped job at all in the observation
+            # window is not silent, it is unobserved. A lane that has never
+            # reported must not be able to page, and a lane decommissioned for
+            # a month falls out of observation on its own rather than needing
+            # to be un-declared.
+            if not completed and not inflight:
+                findings.append(Finding(
+                    INFO, "host-unobserved", lane,
+                    f"no job mapped to this lane in the last "
+                    f"{contract.host_observation_hours}h, so silence is not "
+                    f"evaluated for it. Registration: {registration}.",
+                ))
+                continue
+
+            last = max((r.completed_at for r in completed), default=None)
+            if last is not None and last > silence_cutoff:
+                findings.append(Finding(
+                    INFO, "host-last-served", lane,
+                    f"last served {_stamp(last)} "
+                    f"({_age_minutes(now, last)}m ago), "
+                    f"{len(completed)} job(s) in the window. "
+                    f"Registration: {registration}.",
+                ))
+                continue
+
+            # A lane mid-job has not stopped serving. A job wedged long enough
+            # to matter is a different failure with a different owner (the
+            # stale-run reaper cancels in_progress jobs past its own budget),
+            # so this rule reports the state and declines the verdict.
+            if inflight:
+                findings.append(Finding(
+                    INFO, "host-serving-inflight", lane,
+                    f"{len(inflight)} job(s) still running on this lane "
+                    f"({', '.join(sorted(r.runner_name for r in inflight)[:4])}), "
+                    f"so it has not stopped serving. Last completion: "
+                    f"{_stamp(last) if last else 'none in window'}. "
+                    f"Registration: {registration}.",
+                ))
+                continue
+
+            assert last is not None
+            served_sets = {frozenset(r.labels) for r in completed}
+            demand = [
+                r
+                for other_rows in mapped.values()
+                for r in other_rows
+                if not r.runner_name.startswith(prefix)
+                and r.status == "completed" and r.completed_at
+                and r.completed_at > silence_cutoff
+                and frozenset(r.labels) in served_sets
+            ]
+            silent_hours = (now - last).total_seconds() / 3600.0
+
+            if len(demand) < contract.host_demand_min_jobs:
+                # Idle night / weekend. Nothing this lane serves was being
+                # served anywhere else either, so silence is the fleet being
+                # quiet.
+                findings.append(Finding(
+                    INFO, "host-idle", lane,
+                    f"silent for {silent_hours:.1f}h but only {len(demand)} "
+                    f"sibling job(s) in the last {contract.host_silence_hours}h "
+                    f"carried a label set it serves (needs "
+                    f"{contract.host_demand_min_jobs}). No demand, no verdict.",
+                ))
+                continue
+
+            proof = "; ".join(
+                f"{_host_of(r.runner_name, hosts)} {r.runner_name} {r.name} "
+                f"{_stamp(r.completed_at)} [{' '.join(sorted(r.labels))}]"
+                for r in sorted(
+                    demand, key=lambda r: r.completed_at, reverse=True
+                )[:8]
+            )
             findings.append(Finding(
-                INFO, "host-unobserved", host,
-                f"no job mapped to this host in the last "
-                f"{contract.host_observation_hours}h, so silence is not "
-                f"evaluated for it. Registration: {registration}.",
+                level, "host-silent", lane,
+                f"served no jobs for {silent_hours:.1f}h while siblings "
+                f"served {len(demand)}. Last served {_stamp(last)} "
+                f"(episode key). Registration: {registration}. "
+                f"Demand that proves siblings were serving work this lane "
+                f"also serves: {proof}",
             ))
-            continue
-
-        last = max((r.completed_at for r in completed), default=None)
-        if last is not None and last > silence_cutoff:
-            findings.append(Finding(
-                INFO, "host-last-served", host,
-                f"last served {_stamp(last)} "
-                f"({_age_minutes(now, last)}m ago), "
-                f"{len(completed)} job(s) in the window. "
-                f"Registration: {registration}.",
-            ))
-            continue
-
-        # A host mid-job has not stopped serving. A job wedged long enough to
-        # matter is a different failure with a different owner (the stale-run
-        # reaper cancels in_progress jobs past its own budget), so this rule
-        # reports the state and declines the verdict.
-        if inflight:
-            findings.append(Finding(
-                INFO, "host-serving-inflight", host,
-                f"{len(inflight)} job(s) still running on this host "
-                f"({', '.join(sorted(r.runner_name for r in inflight)[:4])}), "
-                f"so it has not stopped serving. Last completion: "
-                f"{_stamp(last) if last else 'none in window'}. "
-                f"Registration: {registration}.",
-            ))
-            continue
-
-        assert last is not None
-        served_sets = {frozenset(r.labels) for r in completed}
-        demand = [
-            r
-            for other, other_rows in mapped.items() if other != host
-            for r in other_rows
-            if r.status == "completed" and r.completed_at
-            and r.completed_at > silence_cutoff
-            and frozenset(r.labels) in served_sets
-        ]
-        silent_hours = (now - last).total_seconds() / 3600.0
-
-        if len(demand) < contract.host_demand_min_jobs:
-            # Idle night / weekend. Nothing this host serves was being served
-            # anywhere else either, so silence is the fleet being quiet.
-            findings.append(Finding(
-                INFO, "host-idle", host,
-                f"silent for {silent_hours:.1f}h but only {len(demand)} sibling "
-                f"job(s) in the last {contract.host_silence_hours}h carried a "
-                f"label set it serves (needs "
-                f"{contract.host_demand_min_jobs}). No demand, no verdict.",
-            ))
-            continue
-
-        proof = "; ".join(
-            f"{_host_of(r.runner_name, hosts)} {r.runner_name} {r.name} "
-            f"{_stamp(r.completed_at)} [{' '.join(sorted(r.labels))}]"
-            for r in sorted(demand, key=lambda r: r.completed_at, reverse=True)[:8]
-        )
-        findings.append(Finding(
-            level, "host-silent", host,
-            f"served no jobs for {silent_hours:.1f}h while siblings served "
-            f"{len(demand)}. Last served {_stamp(last)} (episode key). "
-            f"Registration: {registration}. "
-            f"Demand that proves siblings were serving work this host also "
-            f"serves: {proof}",
-        ))
 
     return findings
 

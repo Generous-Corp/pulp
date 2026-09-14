@@ -1804,11 +1804,14 @@ class TestHostSilenceHealthyFleet(unittest.TestCase):
                    + busy_siblings("m5-pulp-gate-01-", 4)
                    + busy_siblings("m1-pulp-gate-01-", 4))
         findings = census(records)
-        # m5 declares two prefixes, so it also carries the per-lane census
-        # line. That is instrumentation for the shadow week, not a verdict:
-        # no host is reported silent here.
+        # m5 declares two prefixes, so it carries the per-lane census line AND
+        # two lane verdicts: its gate lane served, its preamble lane has no job
+        # in the window at all. The declared-but-idle lane is reported as
+        # unobserved rather than folded into its sibling's health, which is the
+        # whole point of the lane being the unit. Nothing is silent here.
         self.assertEqual(kinds(findings),
-                         ["host-lane-census"] + ["host-last-served"] * 3)
+                         ["host-lane-census"] + ["host-last-served"] * 3
+                         + ["host-unobserved"])
         # CONTROL: the instrument can fire on this same fixture shape: drop
         # m1's jobs back past the window and it does.
         quiet = (busy_siblings("studio-11-", 6)
@@ -1831,8 +1834,12 @@ class TestHostSilenceIdleNight(unittest.TestCase):
                    + busy_siblings("studio-11-", 2)
                    + busy_siblings("m1-pulp-gate-01-", 2))
         findings = census(records)
+        # The census line is keyed to the host; the verdict is keyed to the
+        # lane that earned it.
         self.assertEqual([f.kind for f in findings if f.variable == "m5"],
-                         ["host-lane-census", "host-idle"])
+                         ["host-lane-census"])
+        self.assertEqual([f.kind for f in findings if f.variable == "m5/m5-"],
+                         ["host-idle"])
         self.assertEqual(kinds(findings, gate.INFO).count("host-silent"), 0)
 
     def test_one_more_sibling_job_crosses_the_demand_gate(self):
@@ -1842,7 +1849,7 @@ class TestHostSilenceIdleNight(unittest.TestCase):
                    + busy_siblings("studio-11-", 3)
                    + busy_siblings("m1-pulp-gate-01-", 2))
         silent = [f for f in census(records) if f.kind == "host-silent"]
-        self.assertEqual([f.variable for f in silent], ["m5"])
+        self.assertEqual([f.variable for f in silent], ["m5/m5-"])
 
 
 class TestHostSilenceM5Shape(unittest.TestCase):
@@ -1853,9 +1860,11 @@ class TestHostSilenceM5Shape(unittest.TestCase):
                 + busy_siblings("studio-11-", 6)
                 + busy_siblings("m1-pulp-gate-01-", 3))
 
-    def test_silent_host_is_reported_once(self):
+    def test_silent_lane_is_reported_once(self):
+        # A fused host must not produce one verdict per prefix when only one
+        # of its lanes stopped. The qualifier names which lane it was.
         silent = [f for f in census(self.records()) if f.kind == "host-silent"]
-        self.assertEqual([f.variable for f in silent], ["m5"])
+        self.assertEqual([f.variable for f in silent], ["m5/m5-"])
 
     def test_detail_carries_the_hours_and_the_sibling_count(self):
         silent = [f for f in census(self.records()) if f.kind == "host-silent"][0]
@@ -1866,12 +1875,23 @@ class TestHostSilenceM5Shape(unittest.TestCase):
         silent = [f for f in census(self.records()) if f.kind == "host-silent"][0]
         self.assertIn(f"Last served {ago(11)} (episode key)", silent.detail)
 
-    def test_detail_carries_the_registration_discriminator(self):
+    def test_the_registration_discriminator_stays_with_its_own_lane(self):
         # Up but not serving vs powered off: the persistent registration is
-        # what separates them, and it is read from the runners API the
-        # checker already queries.
-        silent = [f for f in census(self.records()) if f.kind == "host-silent"][0]
-        self.assertIn("pulp-preamble-m5=online", silent.detail)
+        # what separates them, and it is read from the runners API the checker
+        # already queries. It is scoped to the lane that owns the runner --
+        # m5's online preamble registration is NOT evidence about the ephemeral
+        # gate lane beside it, and reporting it there would restate the
+        # substitution the per-host verdict used to make.
+        findings = census(self.records())
+        silent = [f for f in findings if f.kind == "host-silent"][0]
+        self.assertEqual(silent.variable, "m5/m5-")
+        self.assertIn("no runner registered under the prefix 'm5-'",
+                      silent.detail)
+        self.assertNotIn("pulp-preamble-m5=online", silent.detail)
+        # CONTROL: the discriminator IS reported, on the lane it describes.
+        preamble = [f for f in findings
+                    if f.variable == "m5/pulp-preamble-m5"][0]
+        self.assertIn("pulp-preamble-m5=online", preamble.detail)
 
     def test_detail_carries_the_jobs_that_prove_demand(self):
         silent = [f for f in census(self.records()) if f.kind == "host-silent"][0]
@@ -1881,18 +1901,19 @@ class TestHostSilenceM5Shape(unittest.TestCase):
     def test_a_powered_off_host_is_reported_as_unregistered(self):
         silent = [f for f in census(self.records(), runner_specs=[])
                   if f.kind == "host-silent"][0]
-        self.assertIn("no runner registered under this host's prefixes",
+        self.assertIn("no runner registered under the prefix 'm5-'",
                       silent.detail)
 
 
 class TestHostLaneCensus(unittest.TestCase):
-    """The shadow week has to be able to see a fused host's lanes apart.
+    """A fused host's lanes are judged apart, not as one host.
 
     m5 declares two prefixes: the ephemeral gate lane `m5-` and the persistent
-    `pulp-preamble-m5` runner. A host-scoped predicate reads a completion on
-    either as the host serving, so the cheap always-up lane can vouch for the
-    expensive gate lane that has stopped. That is the shape of the incident the
-    rule exists for, and it is exactly what the host verdict alone cannot show.
+    `pulp-preamble-m5` runner. Under a host-scoped predicate a completion on
+    either read as the host serving, so the cheap always-up lane vouched for
+    the expensive gate lane that had stopped -- the shape of the incident the
+    rule exists for, and the one thing a host verdict cannot show. The lane is
+    therefore the unit of judgment, and the host line is inventory only.
     """
 
     def records(self):
@@ -1902,12 +1923,22 @@ class TestHostLaneCensus(unittest.TestCase):
                 + busy_siblings("studio-11-", 6)
                 + busy_siblings("m1-pulp-gate-01-", 3))
 
-    def test_one_lane_vouches_for_the_host(self):
-        # Not a bug to fix here: it is the consequence of host-scoped identity,
-        # stated so the shadow week can decide whether to keep that scope.
-        kinds = [f.kind for f in census(self.records()) if f.variable == "m5"]
-        self.assertIn("host-last-served", kinds)
-        self.assertNotIn("host-silent", kinds)
+    def test_a_healthy_lane_cannot_vouch_for_the_one_beside_it(self):
+        # The alibi, removed. The preamble runner served an hour ago and the
+        # gate lane beside it has served nothing for 11h; the host is reported
+        # silent on the lane that stopped, not excused by the lane that did not.
+        findings = census(self.records())
+        self.assertEqual([f.kind for f in findings if f.variable == "m5/m5-"],
+                         ["host-silent"])
+        # CONTROL: the sibling lane is separately, honestly reported healthy --
+        # so the verdict above is lane separation, not a blanket pessimism that
+        # would report any fused host silent.
+        self.assertEqual(
+            [f.kind for f in findings if f.variable == "m5/pulp-preamble-m5"],
+            ["host-last-served"])
+        # The host line carries no verdict of its own any more.
+        self.assertEqual([f.kind for f in findings if f.variable == "m5"],
+                         ["host-lane-census"])
 
     def test_the_census_reports_the_lanes_apart(self):
         lane = [f for f in census(self.records())
@@ -2024,7 +2055,8 @@ class TestHostPrefixMapDrift(unittest.TestCase):
                    + [job(f"m5-gate-{i}", 1) for i in range(3)]
                    + [job(f"m1-gate-{i}", 1) for i in range(3)])
         self.assertEqual(kinds(census(records)),
-                         ["host-lane-census"] + ["host-last-served"] * 3)
+                         ["host-lane-census"] + ["host-last-served"] * 3
+                         + ["host-unobserved"])
 
     def test_a_partial_rename_is_visible_every_sweep(self):
         records = (busy_siblings("studio-11-", 4)
@@ -2045,7 +2077,8 @@ class TestHostPrefixMapDrift(unittest.TestCase):
                    "runner_name": f"GitHub Actions {i}", "completed_at": ago(1),
                    "labels": ["ubuntu-latest"]} for i in range(12)]
         findings = census(hosted)
-        self.assertEqual(kinds(findings), ["host-unobserved"] * 3)
+        # Four declared lanes across three hosts, none of them observed.
+        self.assertEqual(kinds(findings), ["host-unobserved"] * 4)
 
 
 class TestHostSilenceDegradedGuard(unittest.TestCase):
@@ -2151,7 +2184,8 @@ class TestHostSilenceWiring(unittest.TestCase):
         after = gate.check(c, runners(), {}, [], now=NOW,
                            service_records=gate.static_service_records(records))
         self.assertEqual(kinds(after).count("host-last-served"), 1)
-        self.assertEqual(kinds(after).count("host-unobserved"), 2)
+        # Three unobserved lanes, not two hosts: m5 declares two prefixes.
+        self.assertEqual(kinds(after).count("host-unobserved"), 3)
 
     def test_the_provider_is_handed_the_clock_the_verdict_is_judged_against(self):
         # One clock, not two. A provider that walks history bounds that walk by

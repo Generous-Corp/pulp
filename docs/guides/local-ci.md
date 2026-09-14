@@ -1761,7 +1761,7 @@ disabling overflow. Nothing about either failure is visible without asking.
 | `profile-contract-drift` | A supplied TartCI source profile does not serve the contracted event classes, scope, or post-transform labels, or incorrectly fixes one priority for both classes. |
 | `profile-receipt-drift` | A supplied installed-profile receipt does not bind to the exact supplied source-profile digest. |
 | `source-manifest-drift` | A supplied private desired-fleet manifest disagrees with the Pulp contract or source profile, including its declared `tart_home`. |
-| `host-silent` | A declared fleet host completed no `build.yml` job for `silence_hours` while its siblings completed at least `demand_min_jobs` carrying a label set it is observed to serve. Reported at the level in `hosts.severity`, which ships as `info` (see the per-host census below). |
+| `host-silent` | A declared fleet LANE completed no `build.yml` job for `silence_hours` while sibling lanes completed at least `demand_min_jobs` carrying a label set it is observed to serve. Reported at the level in `hosts.severity`, which ships as `info` (see the per-lane census below). |
 | `host-map-broken` | Self-hosted jobs ran in the window and not one runner name matched any declared host prefix. A lane rename, not a silent fleet. Silence is not evaluated while the map cannot identify a host. |
 | `host-silence-degraded` | A jobs read failed or the run walk was cut short, so the window was not fully read and every silence verdict is suppressed rather than reported on evidence that does not support it. |
 | `host-unobserved`, `host-last-served`, `host-serving-inflight`, `host-idle`, `host-map-unmapped`, `host-lane-census` | Census state for the step summary, always `info`. They record what the sweep saw so a would-be verdict can be counted against real traffic before anything pages. |
@@ -1876,10 +1876,11 @@ silent(host) := observed(host)
 
 **Demand is the clause that makes this survivable.** Silence on its own fires
 every quiet night and gets muted inside a week. Silence beside completed sibling
-jobs carrying a label set this host is observed to serve is a host that could
-have taken work and did not. `sibling_demand` counts only label sets the host
+jobs carrying a label set this lane is observed to serve is a lane that could
+have taken work and did not. `sibling_demand` counts only label sets the lane
 itself completed jobs for in the window, so m5's `pulp-preamble` traffic, which
-no other host serves, is never demand against m1 or m3.
+no other lane serves, is never demand against m1 or m3.
+
 
 Four cases are deliberately not verdicts:
 
@@ -1892,20 +1893,23 @@ Four cases are deliberately not verdicts:
   (the stale-run reaper), so the census reports the state and declines the
   verdict.
 - **Idle fleet.** Silence under the demand threshold is `host-idle`: nothing this
-  host serves was being served anywhere else either.
+  lane serves was being served anywhere else either.
 - **An unread window.** If any read failed, or the walk hit its run cap before
   covering the window, every silence verdict is suppressed and the sweep reports
   `host-silence-degraded`. This is the same fail-closed discipline the checker
   already applies to an unreadable runners API.
 
-**The identity is the host, and the evidence is the lane.** m5 declares two
+**The identity is the lane, and the host is inventory.** m5 declares two
 prefixes: the ephemeral gate lane `m5-` and the persistent `pulp-preamble-m5`
-runner. A host-scoped predicate reads a completion on either one as the host
-serving, so the cheap always-up lane can vouch for the expensive gate lane that
-has stopped, which is close to the shape of the incident the rule exists for.
-While the rule runs in shadow, any host declaring more than one prefix that has
-any mapped job in the window also reports `host-lane-census`: last-served and
-job count per prefix, side by side.
+runner. A host-scoped predicate read a completion on either one as the host
+serving, so the cheap always-up lane vouched for the expensive gate lane that
+had stopped, which is the shape of the incident the rule exists for. Each lane
+therefore carries its own verdict, keyed `host/prefix` on a host that declares
+more than one. A host's always-up lane cannot vouch for a lane beside it that
+stopped, and evidence stays with the lane it describes: an online registration
+on the preamble runner is not an alibi for the gate lane next to it. Any host
+declaring more than one prefix that has any mapped job in the window also
+reports `host-lane-census`: last-served and job count per prefix, side by side.
 
 Read the `{n} job(s)` counts as counts *down to where the walk stopped*, not
 counts over the window. The walk exits as soon as every declared prefix is
