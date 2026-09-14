@@ -3493,3 +3493,93 @@ TEST_CASE("generic browser HTML supplies the reference for --fail-below",
           std::string::npos);
 #endif
 }
+
+// A --validate run with no --reference renders and then reaches no verdict at
+// all. It used to print "Rendered → <path>" and exit 0, which every caller that
+// read the exit code took for a passing validation. These two cases pin the
+// three-outcome contract: the skip is named, and --fail-on-unvalidated turns it
+// into its own exit code.
+namespace {
+const std::string kValidateSceneJson =
+    R"({"format_version":"2026.05-figma-plugin-v1",)"
+    R"("provenance":{"adapter":"figma-plugin","version":"t",)"
+    R"("source_uri":"figma://x/1:1"},)"
+    R"("root":{"type":"frame","name":"Root","figma_node_id":"1:1"}})";
+}  // namespace
+
+TEST_CASE("pulp-import-design reports an unreferenced --validate run as SKIPPED",
+          "[cli][import-design][tool][validate]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-validate-no-reference");
+    const auto scene = tmp.path / "scene.pulp.json";
+    write_text(scene, kValidateSceneJson);
+    const std::vector<std::string> base = {"--from", "figma-plugin",
+                                          "--file", scene.string(),
+                                          "--output", (tmp.path / "ui.js").string(),
+                                          "--no-tokens", "--validate"};
+
+    auto plain = run_import_design(base);
+    REQUIRE_FALSE(plain.timed_out);
+    if (plain.exit_code != 0) {
+        // Headless render backends are not available in every environment, and
+        // the two assertions below are about what a SUCCESSFUL render reports.
+        SUCCEED("skipped: --validate render unavailable in this environment");
+        return;
+    }
+    INFO("stdout:\n" << plain.stdout_output);
+    // The render happened, nothing was compared. Default behavior keeps the
+    // exit code at 0 for existing callers, so the verdict line is the only
+    // thing separating this from a real pass — it has to be there.
+    REQUIRE(plain.stdout_output.find("Validation: SKIPPED (no reference image)")
+            != std::string::npos);
+    REQUIRE(plain.stdout_output.find("A render is not a pass") != std::string::npos);
+
+    // Same run, opted into the gate. 6 rather than 5: 5 means a comparison was
+    // made and missed the bar, this one was never measured.
+    auto gated = base;
+    gated.push_back("--fail-on-unvalidated");
+    auto r = run_import_design(gated);
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stdout:\n" << r.stdout_output << "\nstderr:\n" << r.stderr_output);
+    REQUIRE(r.exit_code == 6);
+    // A failing run must not end on the upbeat per-stage timing line.
+    REQUIRE(r.stdout_output.find("✓ imported") == std::string::npos);
+}
+
+TEST_CASE("pulp-import-design requires a validation pass for --fail-on-unvalidated",
+          "[cli][import-design][tool][validate]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-validate-gate-needs-validate");
+    const auto scene = tmp.path / "scene.pulp.json";
+    write_text(scene, kValidateSceneJson);
+    const std::vector<std::string> base = {"--from", "figma-plugin",
+                                           "--file", scene.string(),
+                                           "--output", (tmp.path / "ui.js").string(),
+                                           "--no-tokens", "--fail-on-unvalidated"};
+
+    // The flag gates the validation pass, so naming it without one is a caller
+    // error rather than a quiet no-op — a gate against unvalidated runs that
+    // itself never runs is the false green it exists to prevent. It must not
+    // imply --validate either: that would force a render on any run naming it.
+    auto bare = run_import_design(base);
+    REQUIRE_FALSE(bare.timed_out);
+    INFO("stderr:\n" << bare.stderr_output);
+    REQUIRE(bare.exit_code == 2);
+    REQUIRE(bare.stderr_output.find("--fail-on-unvalidated requires --validate")
+            != std::string::npos);
+
+    // --reference turns validation on inside the argument parser, so the guard
+    // must not reject it. The refusal above is this absence's control: the same
+    // search on the same instrument reads non-empty one run earlier.
+    auto implied = base;
+    implied.push_back("--reference");
+    implied.push_back((tmp.path / "ref.png").string());
+    auto r = run_import_design(implied);
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stdout:\n" << r.stdout_output << "\nstderr:\n" << r.stderr_output);
+    CHECK(r.exit_code != 2);
+    CHECK(r.stderr_output.find("--fail-on-unvalidated requires --validate")
+          == std::string::npos);
+}

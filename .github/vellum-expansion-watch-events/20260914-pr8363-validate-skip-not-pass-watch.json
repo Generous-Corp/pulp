@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260914-pr8363-validate-skip-not-pass-watch",
+  "created_at": "2026-09-14T18:20:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Name the unreferenced --validate run of the import-design CLI as a skip rather than letting it read as a pass. Before this change, --validate without --reference rendered the generated JS, printed only the render path, and exited 0, so every caller that checked the exit code read a run that reached no verdict at all as a successful validation. The CLI now carries a third validation outcome alongside pass and needs-review: it prints Validation: SKIPPED (no reference image) with a note explaining that a render is not a pass, and a new opt-in --fail-on-unvalidated flag makes that state exit 6 for a lane that wants it to be fatal. This is exit-code and reporting honesty in the CLI plus its help text and the import-design skill document; no generator, importer, DesignIR, packaging, or shipped output behaviour changes, no accepted expansion boundary moves, and no Vellum source authority is touched, so the disposition is watch-only.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch",
+    "ctest --test-dir build -R ImportDesignTool"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -111,6 +111,10 @@ void print_usage() {
     std::cout << "  --import-report <path>  Write the per-control resolution report (JSON) — rung,\n";
     std::cout << "                    confidence, conflicts, verification — for review or a CI gate\n";
     std::cout << "  --fail-on-unresolved    Exit nonzero (2) when a control is conflicted or inert\n";
+    std::cout << "  --fail-on-unvalidated   Exit nonzero (6) when --validate rendered but had no\n";
+    std::cout << "                    reference to compare against. Without this flag that state\n";
+    std::cout << "                    prints Validation: SKIPPED and leaves the exit code alone,\n";
+    std::cout << "                    so a render-only run can read as a pass. Requires --validate.\n";
     std::cout << "  --fail-below <pct>      Exit nonzero (5) when browser source capture or --reference similarity is below\n";
     std::cout << "                    <pct>, given as a percentage 0-100 (e.g. 85, not 0.85).\n";
     std::cout << "                    Without this flag the similarity is advisory and the exit\n";

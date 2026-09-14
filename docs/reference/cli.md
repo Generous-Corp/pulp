@@ -1401,6 +1401,8 @@ flags.
 
 ```bash
 pulp control profiles --json
+pulp control capabilities
+pulp control capabilities --json
 pulp control instances --json
 pulp control status --instance <id> --explain
 pulp control grant-request --instance <id> --profile inspect-readonly --json
@@ -1418,6 +1420,15 @@ pulp control audit path/to/MyProduct --json
 `profiles` reads the shared declared `off`, `observe`, and `develop` registry
 without connecting to the broker. `pulp inspect profiles` is its deprecated
 compatibility alias and will be removed in Pulp 0.800.0 on 2026-10-01.
+
+`capabilities` answers "what can be called, and what gates it" without a broker
+connection or a live instance. Human output lists every capability with its
+risk, executor, evidence kind, grantability, profile membership, and the typed
+operations it gates. `--json` emits the canonical
+`dev.pulp.control/registry@1` projection, which carries both JSON Schema
+bodies and their digests, so an offline caller can build a request before any
+instance exists. The registry is an upper bound on the callable surface, never
+a grant: an operation still needs a live instance and an effective grant.
 
 `instances` starts the broker-owned `ordinary-standalone` installed host when
 the live inventory is empty, waits within the command's bounded management
@@ -1508,7 +1519,7 @@ Subcommands:
 | `open <file.pftrace> [--no-browser] [--keep-alive-seconds N]` | client-side | Serve the trace from a loopback-only HTTP server and open it in the Perfetto UI via `?url=` (browsers block `file://`). `--no-browser` prints the URLs to paste; `--keep-alive-seconds` bounds how long the server waits for the UI to fetch. `--json` emits `{trace_path, serve_url, perfetto_url, browser_opened, served}`. |
 
 Named GPU analysis emits `pulp.trace-gpu-analysis.v1`: a verdict, capture
-completeness, ranked contributors, stable evidence IDs, concrete next actions,
+completeness, ranked contributors, evidence IDs, concrete next actions,
 and a Perfetto UI open command/search terms. Startup exposes separate
 `cold_start_contributors` and `steady_state_contributors`; contributor CPU and
 non-running durations/classification appear only when scheduler `thread_state`
@@ -1520,7 +1531,24 @@ whole-trace slice, unfinished-slice, data-loss, and no-flush counts.
 supplied by a scenario adapter. `category_scope` binds those categories to the
 single evidence ID and stable Perfetto process instance (`process_upid` plus
 OS PID) selected by the named question; categories from another process or
-evidence cohort cannot satisfy an acceptance requirement. Probe diagnostics
+evidence cohort cannot satisfy an acceptance requirement.
+
+`gpu-startup` is the one question that answers a capture recorded without GPU
+evidence instrumentation. When no span anywhere in the trace carries a
+`debug.gpu_evidence_id`, it admits a single untagged cohort and reports
+`evidence_ids: []` with `category_scope: null` — there is no ID to scope
+categories by, so `observed_categories` is empty as well, and the breakdown is a
+ranking claim rather than a correlation claim. That relaxation is all-or-nothing:
+one evidence ID anywhere in the capture — including on a `gpu_probe*`,
+`gpu_readback*` or `gpu_health_transition` span, none of which are startup
+candidates — drops the untagged cohort and restores the exact
+shared-evidence-ID requirement. An untagged capture holding more than one
+frame-zero anchor, or spanning more than one process, also fails closed, because
+untagged rows carry no ID to separate one startup lifecycle from the next.
+`gpu-health` and `gpu-probe` never relax; an untagged capture is `unavailable`
+there.
+
+Probe diagnostics
 `cpu_oracle_mismatch` and `magnitude_dispatch_failed` are closed causal
 failures even if an inconsistent producer also labels adapter health healthy.
 Every tooling-owned `gpu_probe*`/`gpu_readback*` candidate must carry an
