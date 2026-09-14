@@ -2810,8 +2810,18 @@ class TestShippedHostsBlock(unittest.TestCase):
     def test_the_shipped_map_declares_the_three_fleet_hosts(self):
         self.assertEqual(sorted(self.c.hosts), ["m1", "m3", "m5"])
 
-    def test_m5_maps_both_its_ephemeral_and_persistent_names(self):
-        self.assertEqual(self.c.hosts["m5"], ["m5-", "pulp-preamble-m5"])
+    def test_m5_maps_only_the_prefix_that_can_still_serve(self):
+        # m5 also hosted the persistent `pulp-preamble-m5` runner, and
+        # declaring it was correct while it served. Its registration was
+        # deleted 2026-09-12 and both preamble lanes were contracted to
+        # github-hosted in the same change, so the prefix can never serve
+        # again. The walk bound is per prefix, so a retired prefix holds
+        # every sweep open for the whole observation window -- measured at
+        # 383 API calls and 785s -- and would report a permanent silence for
+        # an intended state once this block leaves shadow mode. Re-declaring
+        # it means restoring the runner AND reversing that lane contract.
+        self.assertEqual(self.c.hosts["m5"], ["m5-"])
+        self.assertNotIn("pulp-preamble-m5", self.c.hosts["m5"])
 
     def test_why_notes_are_not_parsed_as_hosts(self):
         for key in self.c.hosts:

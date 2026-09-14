@@ -562,14 +562,16 @@ def _every_lane_proven_non_silent(
     and no older run can take that back.
 
     The bound is per PREFIX even though the verdict is per host, and the
-    difference is load-bearing for a fused host. Proving m5 over the union of
-    its prefixes lets the always-up `pulp-preamble-m5` runner stop the walk,
-    after which the `m5-` gate lane's real last completion is never read and
-    `host-lane-census` reports it as having served nothing all window. That is
-    the one line the shadow week exists to read, and the fused host is exactly
-    the shape where it would have been wrong. A fused host whose gate lane is
-    quiet therefore pays the full walk, which is the cost a host short of the
-    window already pays.
+    difference is load-bearing for a fused host -- one declaring more than one
+    prefix, as m5 did while it carried both a gate lane and a preamble runner.
+    Proving such a host over the UNION of its prefixes lets its busiest lane
+    stop the walk, after which the quiet lane's real last completion is never
+    read and `host-lane-census` reports that lane as having served nothing all
+    window. That is the one line the shadow week exists to read, and a fused
+    host is exactly the shape where it would have been wrong. The price is
+    symmetric and is why a prefix is dropped from the map once its runner is
+    retired: a fused host whose second lane is quiet pays the full walk on
+    every sweep, the same cost a host short of the window already pays.
     """
     for prefixes in hosts.values():
         for prefix in prefixes:

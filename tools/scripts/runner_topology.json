@@ -84,7 +84,8 @@
     "workflow": "build.yml",
     "_why_workflow": "The fleet's whole macOS build and preamble load runs through build.yml, so it is where every host leaves evidence. Silence is judged on this repo's evidence only: a host also serving other repos' lanes is out of scope, and this rule deliberately does not claim the host is idle, only that it stopped serving pulp.",
     "m3": {"runner_name_prefixes": ["studio-"]},
-    "m5": {"runner_name_prefixes": ["m5-", "pulp-preamble-m5"]},
+    "_why_m5_declares_one_prefix": "m5 also hosted the persistent `pulp-preamble-m5` runner, and declaring it here was correct while it served. It no longer exists: its server-side registration was deleted at 2026-09-12T19:16:47Z, the runner erased its own credentials exactly as designed, and PULP_PREAMBLE_RUNS_ON_JSON and PULP_ALIAS_RUNS_ON_JSON were contracted to github-hosted in the same change, because a lane gating a required check may not depend on a statically named persistent runner. A retired prefix is not free here. The walk bound is per PREFIX, so a prefix that can never serve again holds every sweep open for the whole observation window: measured 2026-09-13, the walk with this prefix declared cost 383 API calls and 785s wall, against the few dozen calls a fleet whose declared prefixes are all live pays. At promotion it would also report a permanent silence for an intended state, which is the standing-red shape the OVERFLOW lane note above already warns about. m5 stays covered by its `m5-` gate lane. Re-declaring this prefix means first restoring the runner AND reversing the lane contract above, which is a decisions-contract reversal rather than a config edit.",
+    "m5": {"runner_name_prefixes": ["m5-"]},
     "m1": {"runner_name_prefixes": ["m1-"]}
   },
   "must_remain_unset": {
