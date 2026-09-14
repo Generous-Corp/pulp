@@ -669,8 +669,10 @@ toolchain snapshots. A direct binary or build-driver assertion cannot pass.
 ### The evidence requirement is question-scoped
 
 `gpu-startup` answers for a capture taken with no instrumentation at all: when no
-startup candidate carries an evidence id, it admits a single untagged cohort and
-reports the setup work the capture plainly contains, with a NULL evidence id.
+span anywhere in the trace carries an evidence id, it admits a single untagged
+cohort and reports the setup work the capture plainly contains, with a NULL
+evidence id. The gate is the whole trace, never the startup candidates alone; a
+capture whose `gpu_probe*` spans are tagged is instrumented, and is not admitted.
 `gpu-health` and `gpu-probe` do **not** relax — an untagged capture stays
 `unavailable` there, because each of those answers is a correlation claim, and a
 correlation with nothing to correlate is not a weaker answer but a different one.
@@ -690,8 +692,10 @@ fails closed on an untagged capture holding more than one frame-zero anchor, or
 spanning more than one process, and reports `unavailable` /
 `missing-question-category` with no contributors — the same observable answer the
 tagged path gives a capture with two first-visible lifecycles. So an untagged
-`gpu-startup` answer is a claim about one lifecycle, not a merge of whatever the
-capture happened to contain.
+`gpu-startup` answer is bounded by at most one frame-zero anchor in one process.
+That bound is weaker than the tagged path's, which separates lifecycles by id: a
+second lifecycle carrying no frame-zero anchor of its own cannot be told apart
+from concurrent setup work, so it is reported with the rest rather than refused.
 
 ## Correlate a catalog recipe with Perfetto
 
