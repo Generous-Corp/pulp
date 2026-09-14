@@ -6427,11 +6427,13 @@
       "claim_id": "e4a6dc69-a3ab-4d77-8e2c-fcd266bc3fb8",
       "owned_paths": [
         ".agents/skills/timeline/SKILL.md",
+        ".github/vellum-expansion-watch-events/20260914-pr8385-timeline-render-tail-watch.json",
         "core/timeline/schema/timeline_mcp_tools.json",
         "core/timeline/tools/schema_mcp_emit.py",
         "core/timeline/tools/test_schema_mcp_emit.py",
         "docs/reference/cli.md",
         "docs/status/cli-commands.yaml",
+        "docs/status/pulp-tooling-disposition.json",
         "docs/status/sequencer-exposure.json",
         "test/cmake/cli_tests.cmake",
         "test/test_cli_timeline_render_shellout.cpp",
