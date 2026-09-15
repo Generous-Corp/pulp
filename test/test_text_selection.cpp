@@ -16,8 +16,8 @@
 //    defect and is used below to prove the Label path reads SHAPED offsets
 //    rather than re-summing glyph widths.
 //  * These assertions are over BOXES, not ink. A defect that leaves every box
-//    correct and moves the glyphs inside them (pulp #8390's shape) is BELOW
-//    THIS FLOOR and would pass every test in this file. Ink-extent coverage
+//    correct and moves the glyphs inside them is BELOW THIS FLOOR and would
+//    pass every test in this file. Ink-extent coverage
 //    for Label lives in the text-metrics suites; nothing here substitutes for
 //    it, and no assertion here should be read as proving where ink landed.
 //  * Vertical assertions are band-membership only, never exact baselines: the
