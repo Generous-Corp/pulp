@@ -83,6 +83,13 @@ struct LoweredClip {
     // matching part of the source under the same map. No document clip can say
     // that — narrowing the reference would re-conform the narrowed source over
     // the whole window — so the range travels beside the clip instead.
+    //
+    // This states in source frames what `authored_window_start` /
+    // `authored_duration` state in ticks, because the two serve different
+    // consumers: the tick pair windows generated content after a renderer
+    // returned it, while the phase map needs the source-frame ends themselves.
+    // The value is derivable from that pair, and collapsing the two is a
+    // deliberate follow-up rather than something to do inside a merge.
     double source_frame_phase_end = 0.0;
 };
 

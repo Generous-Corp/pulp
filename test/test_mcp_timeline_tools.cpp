@@ -466,6 +466,200 @@ TEST_CASE("timeline MCP authors and edits an expression lane but refuses to aban
     require_contains(permitted, R"JSON("revision":"1")JSON");
 }
 
+TEST_CASE("timeline MCP retunes a project and corrects a section role under the default profile",
+          "[mcp][tools][timeline]") {
+    using namespace pulp::timeline;
+    auto clip = require_timeline_result(Clip::create({4}, {0}, {960}, EmptyContent{}));
+    auto track = require_timeline_result(Track::create({3}, "track", {clip}));
+    auto sequence = require_timeline_result(Sequence::create(
+        {2}, "root", pulp::timebase::TickDuration{960}, {}, {track}, {},
+        {SequenceRegion{{15}, "section", pulp::timebase::TickPosition{0},
+                        pulp::timebase::TickDuration{480}, {}, SectionRole::Verse}}));
+    auto project_value = require_timeline_result(
+        Project::create(ProjectInput{{1}, "mcp-sections", 20, {2}, {}, {sequence}}));
+    auto registry = require_timeline_result(make_builtin_timeline_registry());
+    const auto project = require_timeline_result(serialize_project(project_value, registry)).json;
+
+    // The default MCP authority is the non-destructive proposal profile, and
+    // that is the whole point of this family: before it existed, such a writer
+    // could author a region carrying a role and never correct it, because the
+    // only correction was remove-then-insert and the remove is the axis this
+    // profile is denied.
+    const std::string retune =
+        R"JSON([{"data":{"replacement":{"keyboard_map_content":null,"reference_pitch_millihertz":432000,"scale_content":null,"system":"equal_temperament"}},"type_name":"pulp.timeline.command.set_project_tuning","version":1}])JSON";
+    const auto retuned = handle_timeline_command_apply(
+        "{\"commands\":" + retune + ",\"project\":" +
+        pulp::timeline::quote_json_string(project) + "}");
+    require_contains(retuned, R"JSON("revision":"1")JSON");
+    const auto retuned_project = timeline_project_from_response(retuned);
+    require_contains(retuned_project, R"JSON("reference_pitch_millihertz":432000)JSON");
+
+    // The returned document reopens, so the edit is reachable by the next call
+    // rather than only visible in this response.
+    const auto reopened = handle_timeline_project_open(
+        "{\"project\":" + pulp::timeline::quote_json_string(retuned_project) + "}");
+    require_contains(reopened, R"JSON("ok":true)JSON");
+    REQUIRE(timeline_project_from_response(reopened) == retuned_project);
+
+    const std::string correct =
+        R"JSON([{"data":{"expected":{"data":{"duration":"480","id":"15","name":"section","position":"0","role":"verse"},"type_name":"pulp.timeline.region","version":1},"replacement":{"data":{"duration":"480","id":"15","name":"section","position":"0","role":"chorus"},"type_name":"pulp.timeline.region","version":1},"sequence_id":"2"},"type_name":"pulp.timeline.command.set_region","version":1}])JSON";
+    const auto corrected = handle_timeline_command_apply(
+        "{\"commands\":" + correct + ",\"project\":" +
+        pulp::timeline::quote_json_string(retuned_project) + "}");
+    require_contains(timeline_project_from_response(corrected), R"JSON("role":"chorus")JSON");
+
+    // The removal this correction replaces is still denied to the same profile,
+    // so the reachability the family adds did not come from widening the mask.
+    const std::string remove =
+        R"JSON([{"data":{"region_id":"15","sequence_id":"2"},"type_name":"pulp.timeline.command.remove_region","version":1}])JSON";
+    const auto refused = handle_timeline_command_apply(
+        "{\"commands\":" + remove + ",\"project\":" +
+        pulp::timeline::quote_json_string(retuned_project) + "}");
+    require_contains(refused, R"JSON("isError":true)JSON");
+
+    // Control: the editor profile holds the destructive axis, so the same
+    // payload lands. The refusal above is the authority and not a malformed
+    // command.
+    const auto permitted = handle_timeline_command_apply(
+        "{\"commands\":" + remove + ",\"project\":" +
+        pulp::timeline::quote_json_string(retuned_project) +
+        ",\"writer_profile\":\"editor\"}");
+    require_contains(permitted, R"JSON("revision":"1")JSON");
+}
+
+TEST_CASE("timeline MCP authors a modulator and moves a macro but refuses to remove either",
+          "[mcp][tools][timeline]") {
+    using namespace pulp::timeline;
+    auto clip = require_timeline_result(Clip::create({4}, {0}, {960}, EmptyContent{}));
+    TrackInput input;
+    input.id = {3};
+    input.name = "track";
+    input.clips = {clip};
+    input.macros = {MacroControl{{16}, "brightness", 0.5f}};
+    auto track = require_timeline_result(Track::create(std::move(input)));
+    auto sequence = require_timeline_result(
+        Sequence::create({2}, "root", pulp::timebase::TickDuration{960}, {}, {track}));
+    auto project_value = require_timeline_result(
+        Project::create(ProjectInput{{1}, "mcp-modulation", 20, {2}, {}, {sequence}}));
+    auto registry = require_timeline_result(make_builtin_timeline_registry());
+    const auto project = require_timeline_result(serialize_project(project_value, registry)).json;
+
+    // The default MCP authority is the non-destructive proposal profile. It
+    // holds every class and no destructive intent, so it can author a
+    // modulation source and correct it without escalating.
+    const std::string author =
+        R"JSON([{"data":{"modulator":{"data":{"id":"20","kind":"envelope","name":"attack"},"type_name":"pulp.timeline.modulator","version":1},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.insert_modulator","version":1}])JSON";
+    const auto authored = handle_timeline_command_apply(
+        "{\"commands\":" + author + ",\"project\":" + pulp::timeline::quote_json_string(project) +
+        "}");
+    require_contains(authored, R"JSON("revision":"1")JSON");
+    const auto authored_project = timeline_project_from_response(authored);
+    require_contains(authored_project, R"JSON("kind":"envelope")JSON");
+
+    // The returned document reopens, so the edit is reachable by the next call
+    // rather than only visible in this response.
+    const auto reopened = handle_timeline_project_open(
+        "{\"project\":" + pulp::timeline::quote_json_string(authored_project) + "}");
+    require_contains(reopened, R"JSON("ok":true)JSON");
+    REQUIRE(timeline_project_from_response(reopened) == authored_project);
+
+    // 1056964608 and 1048576000 are the IEEE-754 bit patterns of 0.5 and 0.25.
+    const std::string move =
+        R"JSON([{"data":{"expected_bits":"1056964608","macro_id":"16","replacement_bits":"1048576000","sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_macro_value","version":1}])JSON";
+    const auto moved =
+        handle_timeline_command_apply("{\"commands\":" + move + ",\"project\":" +
+                                      pulp::timeline::quote_json_string(authored_project) + "}");
+    require_contains(timeline_project_from_response(moved), R"JSON("value_bits":"1048576000")JSON");
+
+    // The destructive half stays denied to the same profile, so the
+    // reachability above did not come from widening the mask.
+    const std::string remove =
+        R"JSON([{"data":{"macro_id":"16","sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.remove_macro","version":1}])JSON";
+    const auto refused =
+        handle_timeline_command_apply("{\"commands\":" + remove + ",\"project\":" +
+                                      pulp::timeline::quote_json_string(authored_project) + "}");
+    require_contains(refused, R"JSON("isError":true)JSON");
+
+    // Control: the editor profile holds the destructive axis, so the same
+    // payload lands. The refusal above is the authority and not a malformed
+    // command.
+    const auto permitted = handle_timeline_command_apply(
+        "{\"commands\":" + remove + ",\"project\":" +
+        pulp::timeline::quote_json_string(authored_project) + ",\"writer_profile\":\"editor\"}");
+    require_contains(permitted, R"JSON("revision":"1")JSON");
+}
+
+TEST_CASE("timeline MCP authors a route and rewires it but refuses to remove it",
+          "[mcp][tools][timeline]") {
+    using namespace pulp::timeline;
+    auto clip = require_timeline_result(Clip::create({4}, {0}, {960}, EmptyContent{}));
+    TrackInput input;
+    input.id = {3};
+    input.name = "track";
+    input.clips = {clip};
+    input.macros = {MacroControl{{16}, "brightness", 0.5f}};
+    input.modulators = {Modulator{{17}, ModulatorKind::Lfo, "wobble"}};
+    input.modulation_routes = {ModulationRoute{{18},
+                                               {{17}, ModulationSourceKind::Modulator},
+                                               TrackMixerTarget{TrackMixerParameter::Gain},
+                                               0.5f,
+                                               true}};
+    auto track = require_timeline_result(Track::create(std::move(input)));
+    auto sequence = require_timeline_result(
+        Sequence::create({2}, "root", pulp::timebase::TickDuration{960}, {}, {track}));
+    auto project_value = require_timeline_result(
+        Project::create(ProjectInput{{1}, "mcp-routes", 20, {2}, {}, {sequence}}));
+    auto registry = require_timeline_result(make_builtin_timeline_registry());
+    const auto project = require_timeline_result(serialize_project(project_value, registry)).json;
+
+    // The default MCP authority is the non-destructive proposal profile. It
+    // holds every class and no destructive intent, so it can author a
+    // connection and rewire it without escalating. 1036831949 is the IEEE-754
+    // bit pattern of 0.1.
+    const std::string author =
+        R"JSON([{"data":{"route":{"data":{"depth_bits":"1036831949","enabled":false,"id":"20","source_id":"16","source_kind":"macro","target":{"data":{"parameter":"pan"},"type_name":"pulp.timeline.automation_target.track_mixer","version":1}},"type_name":"pulp.timeline.modulation_route","version":1},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.insert_modulation_route","version":1}])JSON";
+    const auto authored = handle_timeline_command_apply(
+        "{\"commands\":" + author + ",\"project\":" + pulp::timeline::quote_json_string(project) +
+        "}");
+    require_contains(authored, R"JSON("revision":"1")JSON");
+    const auto authored_project = timeline_project_from_response(authored);
+    require_contains(authored_project, R"JSON("depth_bits":"1036831949")JSON");
+
+    // The returned document reopens, so the edit is reachable by the next call
+    // rather than only visible in this response.
+    const auto reopened = handle_timeline_project_open(
+        "{\"project\":" + pulp::timeline::quote_json_string(authored_project) + "}");
+    require_contains(reopened, R"JSON("ok":true)JSON");
+    REQUIRE(timeline_project_from_response(reopened) == authored_project);
+
+    // 3212836864 is the bit pattern of -1.0: a route inverts by carrying a
+    // negative depth, which is a rewiring the proposal profile may perform.
+    const std::string rewire =
+        R"JSON([{"data":{"expected":{"data":{"depth_bits":"1056964608","enabled":true,"id":"18","source_id":"17","source_kind":"modulator","target":{"data":{"parameter":"gain"},"type_name":"pulp.timeline.automation_target.track_mixer","version":1}},"type_name":"pulp.timeline.modulation_route","version":1},"replacement":{"data":{"depth_bits":"3212836864","enabled":true,"id":"18","source_id":"16","source_kind":"macro","target":{"data":{"parameter":"gain"},"type_name":"pulp.timeline.automation_target.track_mixer","version":1}},"type_name":"pulp.timeline.modulation_route","version":1},"route_id":"18","sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_modulation_route","version":1}])JSON";
+    const auto rewired =
+        handle_timeline_command_apply("{\"commands\":" + rewire + ",\"project\":" +
+                                      pulp::timeline::quote_json_string(authored_project) + "}");
+    require_contains(timeline_project_from_response(rewired),
+                     R"JSON("depth_bits":"3212836864")JSON");
+
+    // The destructive half stays denied to the same profile, so the
+    // reachability above did not come from widening the mask.
+    const std::string remove =
+        R"JSON([{"data":{"route_id":"18","sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.remove_modulation_route","version":1}])JSON";
+    const auto refused =
+        handle_timeline_command_apply("{\"commands\":" + remove + ",\"project\":" +
+                                      pulp::timeline::quote_json_string(authored_project) + "}");
+    require_contains(refused, R"JSON("isError":true)JSON");
+
+    // Control: the editor profile holds the destructive axis, so the same
+    // payload lands. The refusal above is the authority and not a malformed
+    // command.
+    const auto permitted = handle_timeline_command_apply(
+        "{\"commands\":" + remove + ",\"project\":" +
+        pulp::timeline::quote_json_string(authored_project) + ",\"writer_profile\":\"editor\"}");
+    require_contains(permitted, R"JSON("revision":"1")JSON");
+}
+
 TEST_CASE("timeline MCP confines package-relative media to the project base",
           "[mcp][tools][timeline]") {
     TempDir temp;

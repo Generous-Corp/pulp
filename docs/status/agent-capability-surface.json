@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 72,
+  "inventory_version": 73,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -1974,7 +1974,7 @@
     {
       "domain": "playback",
       "source": "core/playback/include/pulp/playback/program_compiler.hpp",
-      "fingerprint": "sha256:33a618bdbd376918f992f842abb25c536c3e3374d25763a7febe8917572416ff",
+      "fingerprint": "sha256:ff4c9febf95f0752b9c77e3ac113fce02cb3bff99c2cdc5e1a870b0135bb6412",
       "include": "pulp/playback/program_compiler.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],

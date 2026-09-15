@@ -1,0 +1,59 @@
+{
+  "id": "sequencer-exposure-per-row-ledger",
+  "title": "The sequencer exposure ledger is carried as one file per row",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "cfd7315a-fe09-4de1-acf3-8314314500ee",
+  "owned_paths": [
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/sequencer-exposure-per-row-ledger.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/scripts/sequencer_exposure_check.py",
+      "needles": [
+        "def assemble_ledger",
+        "def load_ledger_from_worktree",
+        "def _read_ledger_at_anchor",
+        "def is_ledger_path",
+        "LEDGER_ROWS_DIR"
+      ]
+    },
+    {
+      "path": "tools/scripts/test_sequencer_exposure_check.py",
+      "needles": [
+        "two branches adding different rows merge without conflict",
+        "control: the same two rows appended to one document conflicted",
+        "a row file named for a different row was rejected"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "docs/status/sequencer-exposure/rows/"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The ledger and its checker are repository governance artifacts. No installed header, target, or exported symbol changes; the offline writer-profile sources the gate reads are untouched."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler is added or changed. The checker is a repository gate invoked by the pre-push hook and CI, not a shipped command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler is added or changed. Nothing in tools/mcp reads the ledger."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, or profile policy changes. The ledger records exposure; it is not itself reachable from a live product control."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged. Changing where the ledger stores its rows publishes no design-time capability."
+    }
+  }
+}

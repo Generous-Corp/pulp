@@ -2272,23 +2272,25 @@ TEST_CASE("Nested child processing names the construct that blocks flattening") 
         return compiler.status().last_error;
     };
 
-    const auto device = refusal({.device_chain = true, .automation_lane = false});
+    const auto device = refusal({.device_chain = true, .gain_automation = false});
     REQUIRE(device.code == CompileErrorCode::NestedDeviceChainUnsupported);
     // The child track, not the clip: the chain is the track's, and an author
     // fixing this moves or removes processing on that track.
     REQUIRE(device.item == ItemId{11});
 
-    const auto automation = refusal({.device_chain = false, .automation_lane = true});
-    REQUIRE(automation.code == CompileErrorCode::NestedAutomationLaneUnsupported);
-    REQUIRE(automation.item == ItemId{11});
+    const auto automation = refusal({.device_chain = false, .gain_automation = true});
+    REQUIRE(automation.code == CompileErrorCode::NestedAutomationGainEventLeafUnsupported);
+    // The leaf, not the child track: which leaf the curve reached is what chose
+    // this code over the media one, so that is the item an author looks at.
+    REQUIRE(automation.item == ItemId{12});
 
     REQUIRE(device.code != automation.code);
 
     // A document carrying both is still refused, and reports one of the two
     // rather than a third code standing for the pair.
-    const auto both = refusal({.device_chain = true, .automation_lane = true});
+    const auto both = refusal({.device_chain = true, .gain_automation = true});
     REQUIRE((both.code == CompileErrorCode::NestedDeviceChainUnsupported ||
-             both.code == CompileErrorCode::NestedAutomationLaneUnsupported));
+             both.code == CompileErrorCode::NestedAutomationGainEventLeafUnsupported));
 
     // Neither construct present compiles, so the refusals above are caused by
     // the construct under test and not by the shape of the fixture. The child's
@@ -2300,6 +2302,61 @@ TEST_CASE("Nested child processing names the construct that blocks flattening") 
     REQUIRE(events.size() == 2);
     REQUIRE(events[0].tick == TickPosition{600});
     REQUIRE(events[1].tick == TickPosition{840});
+}
+
+TEST_CASE("Automated child pan and child gain are refused by separate codes") {
+    const auto refusal = [](NestedChildProcessing processing) {
+        auto store = PlaybackProgramStore{};
+        InlineExecutor executor;
+        PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+        ProgramCompileRequest request;
+        request.project = shared(nested_child_processing_project(processing));
+        request.sequence_id = {2};
+        request.tempo_map = map_120();
+        request.sample_rate = request.tempo_map->sample_rate();
+        request.document_revision = 1;
+        request.dirty.all = true;
+        request.max_expanded_note_events = 1'000'000;
+        REQUIRE(compiler.submit(std::move(request)));
+        REQUIRE(compiler.status().has_error);
+        return compiler.status().last_error;
+    };
+
+    // Pan is decided on entry to the child track, before any leaf is read: no
+    // leaf carries a stereo placement at any level, so no leaf kind could
+    // change the answer. The child track is the item because the lane is its.
+    const auto pan = refusal({.pan_automation = true});
+    REQUIRE(pan.code == CompileErrorCode::NestedAutomationPanUnsupported);
+    REQUIRE(pan.item == ItemId{11});
+
+    // The same authored gain curve splits by the leaf it reaches. A note leaf
+    // compiles to events no renderer scales by clip gain, so it would need a
+    // renderer change before an envelope meant anything; an empty leaf already
+    // consumes clip gain, and needs only that the scalar field become a curve.
+    const auto event_leaf = refusal({.gain_automation = true});
+    const auto gain_consuming = refusal({.gain_automation = true, .gain_consuming_leaf = true});
+    REQUIRE(event_leaf.code == CompileErrorCode::NestedAutomationGainEventLeafUnsupported);
+    REQUIRE(gain_consuming.code == CompileErrorCode::NestedAutomationGainMediaUnsupported);
+    REQUIRE(event_leaf.code != gain_consuming.code);
+    REQUIRE(pan.code != event_leaf.code);
+    REQUIRE(pan.code != gain_consuming.code);
+
+    // Pan outranks gain when a track carries both, and it is reported without
+    // descending: a document with both lanes still names one construct.
+    const auto both = refusal({.gain_automation = true, .pan_automation = true});
+    REQUIRE(both.code == CompileErrorCode::NestedAutomationPanUnsupported);
+}
+
+TEST_CASE("A child track with no automation lane lowers both leaf kinds") {
+    // The control for the refusals above. Each leaf kind compiles when no curve
+    // is authored over it, so the codes are caused by the lane and not by the
+    // leaf the fixture happens to carry.
+    auto notes = compile(shared(nested_child_processing_project({})));
+    const auto events = notes->find_track({3})->arrangement_note_events();
+    REQUIRE(events.size() == 2);
+
+    auto empty = compile(shared(nested_child_processing_project({.gain_consuming_leaf = true})));
+    REQUIRE(empty->find_track({3})->arrangement_note_events().empty());
 }
 
 // A leaf whose position is defined in samples cannot be placed on the musical

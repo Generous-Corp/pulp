@@ -901,6 +901,15 @@ Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {
     return Project(std::make_shared<const Data>(std::move(next_data)));
 }
 
+runtime::Result<Project, ModelError>
+Project::replace_tuning(std::optional<TuningReference> tuning) const {
+    if (tuning && !valid_tuning_reference(*tuning))
+        return fail<Project>(ModelErrorCode::InvalidTuningReference, data_->id);
+    auto next_data = *data_;
+    next_data.tuning = std::move(tuning);
+    return runtime::Ok(Project(std::make_shared<const Data>(std::move(next_data))));
+}
+
 Project Project::replace_meter_map(timebase::MeterMap meter_map) const {
     auto next_data = *data_;
     next_data.meter_map = std::move(meter_map);
