@@ -25,7 +25,15 @@
 # Usage:
 #   confirm_failure.sh --file <path> --break <sed/perl cmd> \
 #                      --build-dir <dir> --target <cmake target> \
-#                      --test <command> [--jobs N] [--object <basename>]
+#                      --test <command> [--jobs N] [--object <basename>] \
+#                      [--subject <binary>]
+#
+# --subject names the compiled binary the edit must reach when it is not the
+# test's own executable: a CLI shell-out suite fingerprints as
+# pulp-test-cli-shellout while the edited code is compiled into pulp-cpp.
+# Without it the loop fingerprints the wrong file, never sees the edit land,
+# and reports INCONCLUSIVE by construction - which reads as "the test does not
+# cover this" when the truth is "the wrong file was fingerprinted".
 #
 #   confirm_failure.sh --file <path> --break <sed/perl cmd> \
 #                      --no-build --test <command>
@@ -66,6 +74,7 @@ BREAK_CMD=""
 BUILD_DIR=""
 TARGET=""
 TEST_CMD=""
+SUBJECT=""
 JOBS=""
 OBJECT=""
 NO_BUILD=0
@@ -76,6 +85,7 @@ while [ $# -gt 0 ]; do
         --break)     BREAK_CMD="$2"; shift 2 ;;
         --build-dir) BUILD_DIR="$2"; shift 2 ;;
         --target)    TARGET="$2"; shift 2 ;;
+        --subject)   SUBJECT="$2"; shift 2 ;;
         --test)      TEST_CMD="$2"; shift 2 ;;
         --jobs)      JOBS="$2"; shift 2 ;;
         --object)    OBJECT="$2"; shift 2 ;;
@@ -149,6 +159,9 @@ OBJ_BASE="${OBJECT:-$BASE}"
 # same second. That leaves the test running old code with a fresh object beside
 # it — the same stale-artifact trap this script exists to catch, one level up.
 TEST_BINARY="$(printf '%s' "$TEST_CMD" | awk '{print $1}')"
+# What must change when the edit lands: the subject when the test drives
+# another binary, otherwise the test executable itself.
+FINGERPRINTED="${SUBJECT:-$TEST_BINARY}"
 
 binary_fingerprint() {
     # An interpreted test runs through a shared interpreter whose bytes never
@@ -157,11 +170,11 @@ binary_fingerprint() {
     # file's own content hash is the evidence in that lane, and it is checked
     # for both lanes at the break step.
     [ "$NO_BUILD" -eq 1 ] && { echo "source-is-the-artifact"; return; }
-    [ -f "$TEST_BINARY" ] || { echo "absent"; return; }
+    [ -f "$FINGERPRINTED" ] || { echo "absent"; return; }
     if command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$TEST_BINARY" | awk '{print $1}'
+        shasum -a 256 "$FINGERPRINTED" | awk '{print $1}'
     else
-        cksum "$TEST_BINARY" | awk '{print $1 $2}'
+        cksum "$FINGERPRINTED" | awk '{print $1 $2}'
     fi
 }
 
@@ -200,6 +213,7 @@ bump_mtime() {
 invalidate() {
     [ "$NO_BUILD" -eq 1 ] && return 0
     rm -f "$TEST_BINARY" 2>/dev/null || true
+    [ -z "$SUBJECT" ] || rm -f "$SUBJECT" 2>/dev/null || true
     find "$BUILD_DIR" \( -name '*.a' -o -name '*.dylib' -o -name '*.so' \) \
         -delete 2>/dev/null || true
     if [ "$IS_HEADER" -eq 1 ]; then
@@ -268,8 +282,14 @@ if ! run_test; then
     die_inconclusive "the test already fails before any edit; fix that first"
 fi
 BASELINE_BINARY="$(binary_fingerprint)"
-[ "$BASELINE_BINARY" = "absent" ] &&
-    die_inconclusive "cannot find the test binary '$TEST_BINARY' to fingerprint"
+if [ "$BASELINE_BINARY" = "absent" ]; then
+    [ -z "$SUBJECT" ] ||
+        die_inconclusive "cannot find the subject binary '$SUBJECT' to fingerprint"
+    die_inconclusive "cannot find the test binary '$TEST_BINARY' to fingerprint -
+    if the test shells out to another compiled binary, name it with
+    --subject <path> (e.g. build/tools/cli/pulp-cpp); if it is a script, use
+    --no-build"
+fi
 
 # ── 2. Break the fix ─────────────────────────────────────────────────────────
 say "breaking the fix in $FILE"
@@ -300,8 +320,9 @@ if [ "$BUILD_STATUS" -eq 0 ]; then
     if [ "$NO_BUILD" -eq 0 ] &&
        [ "$(binary_fingerprint)" = "$BASELINE_BINARY" ]; then
         restore
-        die_inconclusive "the test binary is unchanged after breaking $BASE — the
-    edit did not reach what the test runs, so no verdict is possible"
+        die_inconclusive "'$FINGERPRINTED' is unchanged after breaking $BASE - the
+    edit did not reach what the test runs, so no verdict is possible. If the
+    test drives a different compiled binary, name it with --subject <path>"
     fi
     if run_test; then BROKEN_PASSES=1; fi
 fi

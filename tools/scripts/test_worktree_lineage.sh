@@ -68,6 +68,47 @@ git -C "${tmp}/repo" bundle create "${tmp}/archive.bundle" refs/heads/feature/ex
 expected_sha="$(shasum -a 256 "${tmp}/archive.bundle" | awk '{print $1}')"
 test "$(git -C "${tmp}/repo" config branch.feature/example.pulpWorktreeArchiveSha256)" = "${expected_sha}"
 
+# reconcile: a record nobody closed out gets its PR from origin/main's own
+# merge commit, which is the proof the build reaper requires and the one the
+# documented `mark --status merged` (ancestry only, no --pr) never supplied.
+git init -q --bare "${tmp}/origin.git"
+git -C "${tmp}/repo" remote add origin "${tmp}/origin.git"
+git -C "${tmp}/repo" branch feature/landed
+git -C "${tmp}/repo" worktree add -q "${tmp}/landed" feature/landed
+printf 'landed\n' > "${tmp}/landed/landed.txt"
+git -C "${tmp}/landed" add landed.txt
+git -C "${tmp}/landed" commit -qm "landed work"
+landed_head="$(git -C "${tmp}/landed" rev-parse HEAD)"
+git -C "${tmp}/repo" merge -q --no-ff -m "Merge pull request #12 from example/feature/landed" feature/landed
+# A fast-forward landing leaves no merge commit naming the head: ancestry alone
+# is not a PR, and reconcile must say so rather than guess.
+git -C "${tmp}/repo" branch feature/fastforward
+git -C "${tmp}/repo" worktree add -q "${tmp}/fastforward" feature/fastforward
+printf 'ff\n' > "${tmp}/fastforward/ff.txt"
+git -C "${tmp}/fastforward" add ff.txt
+git -C "${tmp}/fastforward" commit -qm "fast-forward work"
+git -C "${tmp}/repo" merge -q --ff-only feature/fastforward
+git -C "${tmp}/repo" push -q origin HEAD:refs/heads/main
+git -C "${tmp}/repo" fetch -q origin
+test -z "$(cfgval feature/landed Status)"
+if (cd "${tmp}/repo" && "${TOOL}" reconcile >/dev/null 2>&1); then
+    echo "reconcile without a github origin or --repo unexpectedly succeeded" >&2
+    exit 1
+fi
+dry_output="$(cd "${tmp}/repo" && "${TOOL}" reconcile --repo example/pulp --dry-run)"
+grep -q $'^would-mark\tfeature/landed\t' <<<"${dry_output}"
+test -z "$(cfgval feature/landed Status)"
+reconcile_output="$(cd "${tmp}/repo" && "${TOOL}" reconcile --repo example/pulp)"
+grep -q $'^merged\tfeature/landed\t' <<<"${reconcile_output}"
+grep -q $'^unresolved\tfeature/fastforward\t' <<<"${reconcile_output}"
+test "$(cfgval feature/landed Status)" = merged
+test "$(cfgval feature/landed Pr)" = https://github.com/example/pulp/pull/12
+test "$(cfgval feature/landed DurableSha)" = "${landed_head}"
+test -z "$(cfgval feature/fastforward Status)"
+# Re-running is idempotent and says the record is already closed out.
+grep -q $'^already\tfeature/landed\t' <<<"$(cd "${tmp}/repo" && "${TOOL}" reconcile --repo example/pulp)"
+assert_list_row feature/landed "$(cd "${tmp}/repo" && "${TOOL}" list)"
+
 list_output="$(cd "${tmp}/repo" && "${TOOL}" list)"
 grep -q $'archived\t' <<<"${list_output}"
 grep -q $'archived\tyes\t' <<<"${list_output}"
