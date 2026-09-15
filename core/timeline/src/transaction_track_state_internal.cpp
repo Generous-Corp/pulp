@@ -141,6 +141,50 @@ reduce_set_track_name(const Project& project, const SetTrackName& set,
         {set.track_id, set.track_id, set.sequence_id, DirtyFlags::Content}});
 }
 
+runtime::Result<TrackStateCommandReduction, TransactionError>
+reduce_set_track_tuning(const Project& project, const SetTrackTuning& set,
+                        const Transaction& transaction, CommandId command) {
+    const ItemLocation expected{
+        ItemKind::Track,
+        immediate_parent_id(ItemKind::Track, project.id(), set.sequence_id, set.track_id, {}),
+        set.sequence_id,
+        set.track_id,
+        {},
+        true};
+    if (const auto code = target_error(project, set.track_id, expected))
+        return reject_reduction<TrackStateCommandReduction>(*code, transaction, command,
+                                                            set.track_id, set.sequence_id);
+    const auto* sequence = project.find_sequence(set.sequence_id);
+    const auto* track = sequence ? sequence->find_track(set.track_id) : nullptr;
+    if (!track)
+        return reject_reduction<TrackStateCommandReduction>(
+            ConflictCode::TargetMissing, transaction, command, set.track_id, set.sequence_id);
+    // Absence is a value the gate compares, not a wildcard: a writer that
+    // expected no override and finds one is refused rather than overwriting it.
+    if (track->tuning() != set.expected)
+        return reject_reduction<TrackStateCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                            transaction, command, set.track_id);
+
+    // Validity lives in the model, reached through the same helper Track::create
+    // applies, so a stray payload hash or an out-of-range reference pitch
+    // surfaces as a model failure rather than a silently seated tuning.
+    auto next_track = track->with_tuning(set.replacement);
+    if (!next_track)
+        return runtime::Err(model_failure(transaction, command, next_track.error()));
+    auto next_sequence = sequence->replace_track(std::move(next_track).value());
+    if (!next_sequence)
+        return runtime::Err(model_failure(transaction, command, next_sequence.error()));
+    auto next_project =
+        ProjectEditAccess::replace_sequence(project, std::move(next_sequence).value());
+    if (!next_project)
+        return runtime::Err(model_failure(transaction, command, next_project.error()));
+
+    return runtime::Ok(TrackStateCommandReduction{
+        std::move(next_project).value(),
+        SetTrackTuning{set.sequence_id, set.track_id, set.replacement, set.expected},
+        {set.track_id, set.track_id, set.sequence_id, DirtyFlags::Content}});
+}
+
 } // namespace
 
 bool is_track_state_command(const Command& command) noexcept {
@@ -163,6 +207,8 @@ reduce_track_state_command(const Project& project, const Command& command,
                 return reduce_set_track_mixer(project, value, transaction, command_id);
             else if constexpr (std::is_same_v<T, SetTrackName>)
                 return reduce_set_track_name(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, SetTrackTuning>)
+                return reduce_set_track_tuning(project, value, transaction, command_id);
             else {
                 static_assert(!is_track_state_command_type<T>,
                               "a command claimed by is_track_state_command_type in "

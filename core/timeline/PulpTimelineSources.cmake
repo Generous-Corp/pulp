@@ -31,6 +31,7 @@ function(pulp_resolve_timeline_sources root output)
         transaction_automation_internal.cpp
         transaction_device_internal.cpp
         transaction_marker_internal.cpp
+        transaction_modulation_internal.cpp
         transaction_scene_internal.cpp
         transaction_sequence_internal.cpp
         transaction_note_internal.cpp

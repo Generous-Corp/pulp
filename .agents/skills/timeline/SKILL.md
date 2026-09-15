@@ -229,8 +229,11 @@ missing here or carries the wrong result kind.
   that trims a conforming clip fails with `NestedConformedTrimUnsupported`
   until playback has a conform-aware source-range mapping, and a trimmed
   `Stretch` clip additionally needs a windowed artifact. A nested child track
-  carrying a device chain or an automation lane fails with
-  `NestedDeviceChainUnsupported` or `NestedAutomationLaneUnsupported`, and an
+  carrying a device chain fails with `NestedDeviceChainUnsupported`; one
+  automating its pan fails with `NestedAutomationPanUnsupported`, and one
+  automating its gain with `NestedAutomationGainEventLeafUnsupported` or
+  `NestedAutomationGainMediaUnsupported` according to whether the leaf that
+  curve reaches consumes clip gain. An
   absolute-anchored leaf inside a nested sequence fails with
   `NestedAbsoluteChildUnsupported`; each names its own cause rather than
   sharing one umbrella code. Expansion
@@ -3194,6 +3197,192 @@ is the document correctly refusing to reissue an identity. Compare the clip's
 lane vector instead — it is stricter than a count on every axis that matters
 (identity, address, order, per-point value) and blind to bookkeeping that is
 supposed to change.
+
+## A Create/Remove pair with no Modify is unreachable, not merely awkward
+
+`CommandIntent::Remove` is the destructive axis a capability mask denies by
+default, and the MCP default proposal profile holds every class with no
+destructive intent. So a vocabulary that ships only Insert and Remove is not
+"a bit inconvenient" for that profile — the only way to change a value is
+remove-then-insert, and the remove is refused, so the capability is **write-once
+for the writer class it exists for**. Regions had exactly this shape: a
+proposal-profile writer could author a region carrying a `SectionRole` and never
+correct it.
+
+The fix is a third command at `Modify` whose payload pins identity. Two things
+make it a real Modify rather than a laundered pair:
+
+- `expected` and `replacement` must carry the same identity, refused in the
+  reducer *and* in the decoder. A Modify that can swap identity is a removal and
+  a creation wearing a signature that declares neither, which is a way around the
+  denial the profile is built on.
+- Nothing is retired, so the command plans no identity mutation and its inverse
+  reduces through the public `reduce_transaction` unchanged — unlike a lane or
+  point removal, whose undo needs a real `DocumentSession`.
+
+`InsertMarker`/`RemoveMarker` and `Class::Automation` still have the defective
+shape. Three instances is a pattern: **any lane or annotation vocabulary shipping
+Create and Remove without Modify is unreachable for the untrusted writer profile
+Forge uses.**
+
+## A collection the model validates end to end needs no second validator in its commands
+
+`TrackInput`'s three modulation collections arrived complete on every axis but
+mutation: registered document schemas, an encoder, a decoder, and
+`validate_attached_modulation`, which already refuses an out-of-range macro
+position, an undeclared modulator kind, a route whose depth leaves
+`[-kMaximumModulationDepth, +kMaximumModulationDepth]`, a route naming a source
+the track does not hold, and a source removal that would orphan one.
+
+A command family over such a collection should reach that validator rather than
+restate any part of it. The cheap way is a whole-collection replace that revalidates
+through `Track::create`, exactly as `Track::with_device_chain` already did:
+
+```cpp
+auto input = detail::track_input_of(*this);
+input.modulators = std::move(modulators);
+auto validated = Track::create(std::move(input));   // the only validator
+// ... then copy only the replaced storage into a copy of *data_
+```
+
+Copying only the one field back is the load-bearing half. `Track::create` rebuilds
+the persistent clip index from scratch, so returning its result directly would
+discard every shared index subtree and silently turn an O(log n) edit into an O(n)
+one. Reach `create` for its refusal; keep your own snapshot for everything it did
+not change.
+
+The payoff is that "removing a modulation source a route still reads is refused"
+needed no code in the command layer at all — the model was already the authority,
+and the reducer surfaces its `ModelError` as `ConflictCode::ModelInvariant`.
+
+## An exact float gate is safe when the wire spells the float in bits
+
+An optimistic gate that compares a `float` with `==` is normally a trap: a value
+that round-trips through a decimal encoding need not compare equal to itself, so
+the gate refuses an edit nobody conflicted on.
+
+It is not a trap when the persisted spelling is the IEEE-754 bit pattern.
+`macro_control.value_bits` and `modulation_route.depth_bits` are `U32`, so a round
+trip is bit-exact by construction and `operator==` holds across it. The naive
+mitigation — gate with a tolerance — would have *softened* every modulation gate
+for a hazard that does not exist, so a command gating one of those floats spells
+its own operands the same way (`expected_bits` / `replacement_bits`), never as a
+decimal.
+
+Prove it rather than reasoning about it, and prove it with a negative control:
+gate on a decoded `0.1f` (a value no decimal spelling at float width preserves)
+and show the **neighbouring bit pattern** is refused. Acceptance without the
+neighbour test is a gate that might accept anything close.
+
+One consequence for idempotency: `equivalent()` compares those operands as bit
+patterns, not with `==`. Idempotency asks whether the same authored command
+arrived twice, which is a question about the bytes — and `==` answers "no" to two
+identical NaN payloads.
+
+## A referencing collection is the one whose removal nothing can refuse
+
+The three modulation collections look symmetric and are not. A `Modulator` and a
+`MacroControl` are *referenced* — `validate_attached_modulation` refuses a track
+whose routes name a source it does not hold, so removing one while a route reads
+it fails as a model invariant. A `ModulationRoute` is referenced by nothing, so
+its removal always succeeds and takes only the connection with it.
+
+That asymmetry is worth knowing before writing the tests, because the
+"a source a route still reads cannot be removed" shape has no route equivalent,
+and looking for one wastes a cycle. What a route command owes instead is the
+opposite proof: that removing a route leaves both of its sources standing.
+
+Two further route-only refusals have no analogue on the source side, and both
+live in the model rather than the command layer:
+
+- A route may name a source identity the track does not hold.
+- A route may name an identity the track *does* hold, of the **other kind** —
+  `ModulationSourceRef` carries `kind` explicitly so a macro can never quietly
+  stand in for a modulator that shared its ID. A `{id}`-only reference would
+  have made this unrepresentable rather than refused.
+
+Both must be tested on `Insert` **and** on the `Set`, because the two reach the
+model through different accessors and a reducer could refuse one and not the
+other.
+
+## A bypass is a gated value, not a state an edit may drop
+
+`ModulationRoute::enabled` is an authored bypass, and `modulation.hpp` is
+explicit that a disabled route keeps its identity, depth, and target so that
+re-enabling restores what was there. Two obligations follow, and both are easy
+to miss because a bypass reads like presentation rather than content:
+
+- A `Remove`'s inverse must carry the route **whole**, bypass included. An
+  inverse that reconstructed a default would bring a silenced route back live.
+- A whole-value gate must compare `enabled` along with the rest, so an edit that
+  believed a route was live cannot land on one an author had disabled.
+
+Neither is visible in a test that only varies `depth`. Vary every member of the
+gated struct in turn — for a route that is source, target, depth, and bypass —
+or the gate is only proved for the field the test author happened to think of.
+
+## A second route from one source to one parameter is its own refusal
+
+Several routes may reach one parameter and their offsets sum, which is exactly
+what separates a route from an automation lane. What the model refuses is the
+*same source* reaching the *same parameter* twice, because that is one
+connection stated twice with two depths and no rule for which wins.
+
+This matters for test construction rather than for the command vocabulary: a
+control that inserts a second route from the seeded source to the seeded
+parameter is refused for that reason, which makes a depth-range or
+source-reference test pass for the wrong cause. Point the control's route at a
+different parameter (`Pan` rather than `Gain`) so the only variable left is the
+one under test.
+
+## A hand-written field-by-field comparison is where a member goes missing
+
+`equal_region` in `command.cpp` named five of `SequenceRegion`'s six members and
+omitted `role` — so two regions differing only in the member a generator
+dispatches on compared equal, in command idempotency *and* in whole-document
+equivalence. Nothing failed, because nothing asked.
+
+Every member of that struct is exactly comparable, so the comparison is now
+`operator<=>(…) = default` on the type and `equal_region` forwards to it. Prefer
+that wherever the members allow it: a partial restatement of "are these the same"
+is a second authority that can silently disagree with the first, and the way it
+fails is by admitting an edit it should have refused.
+
+The exception is real — `equal_marker` and the clip/track comparisons stay
+hand-written because they must skip derived or float members — but "the members
+are all exactly comparable and I wrote it out anyway" is not that exception.
+
+## `Class::Timing` governs pitch as well as time, deliberately
+
+`SetProjectTuning` and `SetTrackTuning` are both `{Timing, Modify}`, which makes
+`Timing` the only class spanning project and track scope. That is the accepted
+cost of two alternatives that were worse:
+
+- A new `CommandClass` renumbers `capability_bit` and silently repurposes every
+  persisted and transmitted writer mask. Never add one; `kCommandClassCount` is
+  11 and the bit literals are asserted in
+  `test_timeline_tuning_region_commands.cpp` so an inserted class fails loudly.
+- Putting the track command on `Class::Track` would mean a grant issued to rename
+  and reorder tracks silently becomes authority to retune them, and it splits the
+  retuning grant across two bits so no mask can say "may not retune" without also
+  forbidding renames.
+
+The class doc comment states what it governs, because a class whose doc does not
+is how the next author picks the wrong one.
+
+## Clearing an optional value is `Modify`, not `Remove`
+
+`std::optional<TuningReference>` absence is a claim — "this document names no
+tuning" — and it is a *different* claim from naming equal temperament. Clearing
+it removes nothing the document owns; the project or track persists unchanged in
+identity, exactly as `SetChordScaleLane`, `SetGroove`, `SetTempoMap`, and
+`SetMeterMap` all replace a whole value including an empty one under `Modify`.
+
+Routing the clear through `Remove` would be the hardening mistake: it is denied
+by default, so a proposal-profile writer could set a tuning it could never
+retract. And the gate compares absence as a value — expecting absence where a
+value stands is refused rather than treated as "no opinion", or a writer would
+overwrite an override it never saw.
 
 ## Every "rebuild a Sequence from its parts" site must carry a new lane
 

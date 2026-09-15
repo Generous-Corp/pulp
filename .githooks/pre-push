@@ -2,7 +2,8 @@
 # Pulp pre-push hook (agent-agnostic).
 #
 # Runs the versioning + skill-sync + compat-sync + compat-aggregate + source-contract +
-# hotspot-size + deps-audit + diff-coverage gates against origin/main before pushing.
+# hotspot-size + deps-audit + diff-coverage gates against origin/main before pushing,
+# plus an advisory diff-scoped clang-format check (touched lines only).
 # **Enforcing by default** as of
 # pulp #1144 — gate failures block the push locally so contributors don't
 # burn 20-min CI roundtrips on the same problem.
@@ -349,6 +350,30 @@ if [ -f "$DNL" ]; then
         0) ;;
         1) fail=1 ;;
         *) echo "[pre-push] docs_noise_lint: internal error" >&2 ;;
+    esac
+fi
+
+# Diff-scoped clang-format check — ADVISORY: warns, never blocks. It judges
+# only the lines this push changes against $BASE; the tree does not round-trip
+# under .clang-format and existing debt is grandfathered. Exit 3 means no
+# clang-format 21 on this machine: an infrastructure condition, never a
+# formatting verdict, and reported as such. Costs 2-4 s (measured on six
+# in-flight branches). Promote to blocking with PULP_ENFORCE_PREPUSH_FORMAT=1
+# — the default flips once open branches are clean on touched lines.
+FMT="$ROOT/tools/scripts/format_changed.sh"
+if [ -f "$FMT" ]; then
+    run_gate_captured bash "$FMT" --check --base "$BASE"
+    case $? in
+        0) ;;
+        1)
+            if [ "${PULP_ENFORCE_PREPUSH_FORMAT:-0}" = "1" ]; then
+                fail=1
+            else
+                echo "[pre-push] format_changed: ADVISORY — touched lines are not clang-format clean (see diff above); run tools/scripts/format_changed.sh. Push allowed." >&2
+            fi
+            ;;
+        3) echo "[pre-push] format_changed: SKIPPED — no clang-format 21 on this machine (INFRASTRUCTURE, not a formatting verdict); brew install llvm@21 or xcode-select --install. Push allowed." >&2 ;;
+        *) echo "[pre-push] format_changed: internal error (not a formatting verdict)" >&2 ;;
     esac
 fi
 
