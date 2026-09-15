@@ -746,6 +746,15 @@ void View::publish_structure_change() noexcept {
     while (root->parent_) root = root->parent_;
     root->structure_generation_.fetch_add(1, std::memory_order_relaxed);
     g_view_structure_generation.fetch_add(1, std::memory_order_relaxed);
+    // A different child set solves to a different set of boxes, so the last
+    // completed pass no longer describes this tree. Both layout gates
+    // (View::layout_children_if_needed and WidgetBridge::ensure_layout) elide
+    // the pass while the tree generation matches the applied one, so without
+    // this the elision serves the PREVIOUS structure's geometry: survivors of a
+    // removal keep the slots the old child set was solved into, a reordered
+    // child keeps its pre-rotation box, and a reparented child keeps the box
+    // its former parent gave it.
+    note_layout_mutation();
     invalidate_subtree_caches_up();
 }
 
@@ -855,6 +864,13 @@ void View::add_child_transactional(std::unique_ptr<View>& child) {
     // Structural change: this view's (and its cached ancestors') recording no
     // longer includes the new child. Stale them so the next frame re-records.
     invalidate_subtree_caches_up();
+    // The solved geometry no longer covers the child set either. A successful
+    // attach does not route through publish_structure_change(), so the layout
+    // generation moves here; otherwise the gate elides the very pass that would
+    // give the new child a box and reflow its siblings around it, and the child
+    // paints at whatever rect it arrived with — the default zero rect for a
+    // fresh view, its previous parent's slot when it is being reparented.
+    note_layout_mutation();
 }
 
 bool View::move_child_to_index(View* child, size_t index) {
