@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/timeline/midi_lane.hpp>
 #include <pulp/timeline/model.hpp>
 
 #include <cstddef>
@@ -528,6 +529,60 @@ struct SetDeviceState {
     std::optional<ContentHash> replacement;
 };
 
+/// Inserts a controller/expression lane into a MIDI clip.
+///
+/// The lane arrives whole — identity, address, and every authored point — and
+/// the content model is the single authority on whether it may join the clip:
+/// identity distinctness across notes, points, and lanes, and one lane per
+/// address, are enforced by `MidiContent::create` and propagated from there.
+struct InsertMidiExpressionLane {
+    /// Sequence owning the track that owns the clip.
+    ItemId sequence_id;
+    /// Track owning the clip.
+    ItemId track_id;
+    /// MIDI clip the lane joins.
+    ItemId clip_id;
+    /// Lane to insert, with its identity, address, and authored points.
+    MidiExpressionLane lane;
+};
+
+/// Removes a controller/expression lane from a MIDI clip by identity.
+///
+/// Removal is the destructive intent a capability mask denies by default, so a
+/// writer that may edit a lane's values does not thereby gain the right to
+/// abandon the stream.
+struct RemoveMidiExpressionLane {
+    /// Sequence owning the track that owns the clip.
+    ItemId sequence_id;
+    /// Track owning the clip.
+    ItemId track_id;
+    /// MIDI clip the lane leaves.
+    ItemId clip_id;
+    /// Identity of the lane to remove.
+    ItemId lane_id;
+};
+
+/// Replaces one lane's authored points under an exact optimistic-value gate.
+///
+/// The lane keeps its identity and its address: this command changes what a
+/// stream says, never which stream it is. Re-addressing a lane is a remove and
+/// an insert, because the two operations a caller means by it — abandoning one
+/// stream and authoring another — carry different authority.
+struct SetMidiExpressionLanePoints {
+    /// Sequence owning the track that owns the clip.
+    ItemId sequence_id;
+    /// Track owning the clip.
+    ItemId track_id;
+    /// MIDI clip owning the lane.
+    ItemId clip_id;
+    /// Identity of the lane whose points change.
+    ItemId lane_id;
+    /// Required current points of that lane, compared in full and in canonical order.
+    std::vector<MidiLanePoint> expected;
+    /// Points written when the gate matches.
+    std::vector<MidiLanePoint> replacement;
+};
+
 /// Exhaustive set of durable Timeline document mutations.
 using Command = std::variant<
     InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip, SetNoteVelocity,
@@ -537,7 +592,8 @@ using Command = std::variant<
     RemoveRegion, SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
     InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer, InsertTrack,
     RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents, InsertNotes, RemoveNotes, InsertDevice,
-    RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState, SetDynamicsLane>;
+    RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState, SetDynamicsLane,
+    InsertMidiExpressionLane, RemoveMidiExpressionLane, SetMidiExpressionLanePoints>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {

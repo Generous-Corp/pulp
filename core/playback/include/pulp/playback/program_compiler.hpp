@@ -142,11 +142,6 @@ enum class CompileErrorCode : std::uint8_t {
     // decide whether displaced events outside the retained source window should
     // chase, clip, or disappear, so it refuses rather than leaking events.
     TrimmedGrooveUnsupported,
-    // A nested SequenceRef exposes only a window of registered content. The
-    // current hook input has no authored source-window offset, so compiling the
-    // shortened leaf would restart any stateful pattern phase at the retained
-    // boundary. Refuse until that provenance is part of the renderer contract.
-    TrimmedRegisteredContentUnsupported,
     UnresolvedRegisteredContent,
     RegisteredContentCompileFailed,
     RegisteredContentFragmentQuotaExceeded,
