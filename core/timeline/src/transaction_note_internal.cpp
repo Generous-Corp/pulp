@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
+#include <span>
 #include <numeric>
 #include <utility>
 #include <variant>
@@ -14,10 +16,50 @@ namespace pulp::timeline::detail {
 namespace {
 
 ItemLocation expected_location(ItemKind kind, const Project& project, ItemId sequence, ItemId track,
-                               ItemId clip) {
-    return {kind,     immediate_parent_id(kind, project.id(), sequence, track, clip),
+                               ItemId clip, ItemId lane = {}) {
+    return {kind,     immediate_parent_id(kind, project.id(), sequence, track, clip, lane),
             sequence, track,
             clip,     true};
+}
+
+// A lane point's `chased` flag is a derivation receipt written only where a
+// nested clip is flattened, so a command payload carrying one would let a
+// caller forge provenance the document promises it never authored. The model
+// does not police the flag -- it is a command-layer rule, not a content
+// invariant -- so this is the single authority for an in-process caller, and
+// the decoder is the matching boundary for a caller on the wire.
+std::optional<ItemId> forged_chase_receipt(std::span<const MidiLanePoint> points) {
+    for (const auto& point : points)
+        if (point.chased)
+            return point.id;
+    return std::nullopt;
+}
+
+// Every arm rebuilds the clip's content through the four-argument create, which
+// is the one authority on lane identity distinctness, address uniqueness, and
+// canonical ordering. Stating the rebuild once keeps the three arms from
+// growing three slightly different opinions about what else a clip carries.
+runtime::Result<MidiContent, ModelError> with_lanes(const MidiContent& content,
+                                                    std::vector<MidiExpressionLane> lanes) {
+    return MidiContent::create(
+        std::vector<NoteEvent>(content.notes().begin(), content.notes().end()),
+        std::vector<NoteModifier>(content.modifiers().begin(), content.modifiers().end()),
+        content.modifier_seed(), std::move(lanes));
+}
+
+// The identities a lane brings with it: the lane itself under the clip, and
+// each of its points under the lane.
+std::vector<OwnedIdentity> lane_identities(const Project& project, ItemId sequence, ItemId track,
+                                           ItemId clip, const MidiExpressionLane& lane) {
+    std::vector<OwnedIdentity> identities;
+    identities.reserve(lane.points.size() + 1);
+    identities.push_back(
+        {lane.id, expected_location(ItemKind::MidiLane, project, sequence, track, clip)});
+    const auto point_location =
+        expected_location(ItemKind::MidiLanePoint, project, sequence, track, clip, lane.id);
+    for (const auto& point : lane.points)
+        identities.push_back({point.id, point_location});
+    return identities;
 }
 
 bool equal_note(const NoteEvent& lhs, const NoteEvent& rhs) noexcept {
@@ -507,6 +549,229 @@ reduce_replace_note_content(const Project& project, const ReplaceNoteContent& re
          DirtyFlags::Content | DirtyFlags::Notes}});
 }
 
+runtime::Result<NoteCommandReduction, TransactionError>
+reduce_insert_midi_expression_lane(const Project& project, const InsertMidiExpressionLane& insert,
+                                   const Transaction& transaction, CommandId command,
+                                   bool allow_tombstone_restore) {
+    if (const auto code =
+            target_error(project, insert.clip_id,
+                         expected_location(ItemKind::Clip, project, insert.sequence_id,
+                                           insert.track_id, insert.clip_id)))
+        return reject_reduction<NoteCommandReduction>(*code, transaction, command, insert.clip_id,
+                                                      insert.track_id);
+    const auto* sequence = project.find_sequence(insert.sequence_id);
+    const auto* track = sequence->find_track(insert.track_id);
+    const auto* clip = track->find_clip(insert.clip_id);
+    const auto* content = std::get_if<MidiContent>(&clip->content());
+    if (!content)
+        return reject_reduction<NoteCommandReduction>(ConflictCode::WrongTargetKind, transaction,
+                                                      command, insert.clip_id);
+    if (const auto forged = forged_chase_receipt(insert.lane.points))
+        return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
+                                                      command, *forged, insert.clip_id);
+
+    std::vector<MidiExpressionLane> next_lanes(content->lanes().begin(), content->lanes().end());
+    next_lanes.push_back(insert.lane);
+    auto next_content = with_lanes(*content, std::move(next_lanes));
+    if (!next_content)
+        return runtime::Err(model_failure(transaction, command, next_content.error()));
+
+    // The identity plan is built from the rebuilt content rather than the
+    // payload, so it reads identities the model has already accepted: a
+    // malformed address, a duplicate address, and an identity collision are all
+    // refused by the create above, and re-checking them here would be a second
+    // authority on the same invariants -- one that this ordering makes
+    // unreachable anyway.
+    const auto identities =
+        lane_identities(project, insert.sequence_id, insert.track_id, insert.clip_id, insert.lane);
+    auto identity_plan =
+        plan_identity_insert(project, identities, allow_tombstone_restore, transaction, command);
+    if (!identity_plan)
+        return runtime::Err(identity_plan.error());
+
+    auto next_project = replace_note_content(
+        project, *sequence, *track, *clip, std::move(next_content).value(),
+        identity_plan->mutations, identity_plan->next_item_id, transaction, command);
+    if (!next_project)
+        return runtime::Err(next_project.error());
+    return runtime::Ok(NoteCommandReduction{
+        std::move(next_project).value(),
+        RemoveMidiExpressionLane{insert.sequence_id, insert.track_id, insert.clip_id,
+                                 insert.lane.id},
+        {insert.clip_id, insert.track_id, insert.sequence_id,
+         DirtyFlags::Content | DirtyFlags::Notes}});
+}
+
+runtime::Result<NoteCommandReduction, TransactionError>
+reduce_remove_midi_expression_lane(const Project& project, const RemoveMidiExpressionLane& remove,
+                                   const Transaction& transaction, CommandId command) {
+    if (const auto code =
+            target_error(project, remove.clip_id,
+                         expected_location(ItemKind::Clip, project, remove.sequence_id,
+                                           remove.track_id, remove.clip_id)))
+        return reject_reduction<NoteCommandReduction>(*code, transaction, command, remove.clip_id,
+                                                      remove.track_id);
+    const auto* sequence = project.find_sequence(remove.sequence_id);
+    const auto* track = sequence->find_track(remove.track_id);
+    const auto* clip = track->find_clip(remove.clip_id);
+    const auto* content = std::get_if<MidiContent>(&clip->content());
+    if (!content)
+        return reject_reduction<NoteCommandReduction>(ConflictCode::WrongTargetKind, transaction,
+                                                      command, remove.clip_id);
+    if (const auto code =
+            target_error(project, remove.lane_id,
+                         expected_location(ItemKind::MidiLane, project, remove.sequence_id,
+                                           remove.track_id, remove.clip_id)))
+        return reject_reduction<NoteCommandReduction>(*code, transaction, command, remove.lane_id,
+                                                      remove.clip_id);
+
+    std::vector<MidiExpressionLane> next_lanes;
+    next_lanes.reserve(content->lanes().size());
+    std::optional<MidiExpressionLane> removed;
+    for (const auto& lane : content->lanes()) {
+        if (lane.id == remove.lane_id)
+            removed = lane;
+        else
+            next_lanes.push_back(lane);
+    }
+    if (!removed)
+        return reject_reduction<NoteCommandReduction>(ConflictCode::TargetMissing, transaction,
+                                                      command, remove.lane_id, remove.clip_id);
+    auto next_content = with_lanes(*content, std::move(next_lanes));
+    if (!next_content)
+        return runtime::Err(model_failure(transaction, command, next_content.error()));
+
+    // The lane and every point it owned leave together, so both kinds are
+    // deactivated. Leaving the points registered would keep identities alive
+    // under an owner the document no longer has.
+    const auto identity_changes = plan_identity_deactivate(lane_identities(
+        project, remove.sequence_id, remove.track_id, remove.clip_id, *removed));
+    auto next_project =
+        replace_note_content(project, *sequence, *track, *clip, std::move(next_content).value(),
+                             identity_changes, std::nullopt, transaction, command);
+    if (!next_project)
+        return runtime::Err(next_project.error());
+    return runtime::Ok(NoteCommandReduction{
+        std::move(next_project).value(),
+        InsertMidiExpressionLane{remove.sequence_id, remove.track_id, remove.clip_id,
+                                 *std::move(removed)},
+        {remove.clip_id, remove.track_id, remove.sequence_id,
+         DirtyFlags::Content | DirtyFlags::Notes}});
+}
+
+runtime::Result<NoteCommandReduction, TransactionError>
+reduce_set_midi_expression_lane_points(const Project& project,
+                                       const SetMidiExpressionLanePoints& set,
+                                       const Transaction& transaction, CommandId command,
+                                       bool allow_tombstone_restore) {
+    if (const auto code = target_error(project, set.clip_id,
+                                       expected_location(ItemKind::Clip, project, set.sequence_id,
+                                                         set.track_id, set.clip_id)))
+        return reject_reduction<NoteCommandReduction>(*code, transaction, command, set.clip_id,
+                                                      set.track_id);
+    const auto* sequence = project.find_sequence(set.sequence_id);
+    const auto* track = sequence->find_track(set.track_id);
+    const auto* clip = track->find_clip(set.clip_id);
+    const auto* content = std::get_if<MidiContent>(&clip->content());
+    if (!content)
+        return reject_reduction<NoteCommandReduction>(ConflictCode::WrongTargetKind, transaction,
+                                                      command, set.clip_id);
+    if (const auto code = target_error(project, set.lane_id,
+                                       expected_location(ItemKind::MidiLane, project,
+                                                         set.sequence_id, set.track_id,
+                                                         set.clip_id)))
+        return reject_reduction<NoteCommandReduction>(*code, transaction, command, set.lane_id,
+                                                      set.clip_id);
+    if (const auto forged = forged_chase_receipt(set.replacement))
+        return reject_reduction<NoteCommandReduction>(ConflictCode::ModelInvariant, transaction,
+                                                      command, *forged, set.clip_id);
+
+    const MidiExpressionLane* current = nullptr;
+    for (const auto& lane : content->lanes())
+        if (lane.id == set.lane_id)
+            current = &lane;
+    if (!current)
+        return reject_reduction<NoteCommandReduction>(ConflictCode::TargetMissing, transaction,
+                                                      command, set.lane_id, set.clip_id);
+
+    // The gate compares the lane's points as the document stores them, which is
+    // canonical order. A caller that lists the same points in another order is
+    // refused rather than silently accepted: the expectation is a statement
+    // about the document, and the document has one order.
+    if (current->points.size() != set.expected.size() ||
+        !std::equal(current->points.begin(), current->points.end(), set.expected.begin()))
+        return reject_reduction<NoteCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                      transaction, command, set.lane_id,
+                                                      set.clip_id);
+
+    // The address is deliberately not in the payload: this command carries the
+    // lane's identity and its points, so the address it had is the address it
+    // keeps, and no caller can re-address a stream through a point edit.
+    std::vector<MidiExpressionLane> next_lanes;
+    next_lanes.reserve(content->lanes().size());
+    for (const auto& lane : content->lanes())
+        next_lanes.push_back(lane.id == set.lane_id
+                                 ? MidiExpressionLane{lane.id, lane.address, set.replacement}
+                                 : lane);
+    auto next_content = with_lanes(*content, std::move(next_lanes));
+    if (!next_content)
+        return runtime::Err(model_failure(transaction, command, next_content.error()));
+
+    // Points are identities, so an edit that drops one retires it and an edit
+    // that introduces one registers it. Computing both sets from the gated
+    // before-state and the replacement is exact; deriving them from live
+    // content would read a document this command has already changed.
+    std::vector<ItemId> before;
+    before.reserve(current->points.size());
+    for (const auto& point : current->points)
+        before.push_back(point.id);
+    std::sort(before.begin(), before.end());
+    std::vector<ItemId> after;
+    after.reserve(set.replacement.size());
+    for (const auto& point : set.replacement)
+        after.push_back(point.id);
+    std::sort(after.begin(), after.end());
+
+    const auto point_location = expected_location(ItemKind::MidiLanePoint, project, set.sequence_id,
+                                                  set.track_id, set.clip_id, set.lane_id);
+    std::vector<OwnedIdentity> retired;
+    std::vector<OwnedIdentity> introduced;
+    for (const auto id : before)
+        if (!std::binary_search(after.begin(), after.end(), id))
+            retired.push_back({id, point_location});
+    for (const auto id : after)
+        if (!std::binary_search(before.begin(), before.end(), id))
+            introduced.push_back({id, point_location});
+
+    auto identity_plan =
+        plan_identity_insert(project, introduced, allow_tombstone_restore, transaction, command);
+    if (!identity_plan)
+        return runtime::Err(identity_plan.error());
+    auto identity_changes = plan_identity_deactivate(retired);
+    identity_changes.insert(identity_changes.end(), identity_plan->mutations.begin(),
+                            identity_plan->mutations.end());
+
+    // The inverse restores the canonical before-state, and its own expectation
+    // is the canonical after-state the rebuild produced, so undo gates on what
+    // the document actually holds rather than on what the payload listed.
+    std::vector<MidiLanePoint> inverse_expected;
+    for (const auto& lane : next_content->lanes())
+        if (lane.id == set.lane_id)
+            inverse_expected.assign(lane.points.begin(), lane.points.end());
+    std::vector<MidiLanePoint> inverse_replacement(current->points.begin(), current->points.end());
+
+    auto next_project = replace_note_content(
+        project, *sequence, *track, *clip, std::move(next_content).value(), identity_changes,
+        identity_plan->next_item_id, transaction, command);
+    if (!next_project)
+        return runtime::Err(next_project.error());
+    return runtime::Ok(NoteCommandReduction{
+        std::move(next_project).value(),
+        SetMidiExpressionLanePoints{set.sequence_id, set.track_id, set.clip_id, set.lane_id,
+                                    std::move(inverse_expected), std::move(inverse_replacement)},
+        {set.clip_id, set.track_id, set.sequence_id, DirtyFlags::Content | DirtyFlags::Notes}});
+}
+
 } // namespace
 
 bool is_note_command(const Command& command) noexcept {
@@ -536,6 +801,15 @@ reduce_note_command(const Project& project, const Command& command, const Transa
                                            allow_tombstone_restore);
             else if constexpr (std::is_same_v<T, RemoveNotes>)
                 return reduce_remove_notes(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, InsertMidiExpressionLane>)
+                return reduce_insert_midi_expression_lane(project, value, transaction, command_id,
+                                                          allow_tombstone_restore);
+            else if constexpr (std::is_same_v<T, RemoveMidiExpressionLane>)
+                return reduce_remove_midi_expression_lane(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, SetMidiExpressionLanePoints>)
+                return reduce_set_midi_expression_lane_points(project, value, transaction,
+                                                              command_id,
+                                                              allow_tombstone_restore);
             else {
                 static_assert(!is_note_command_type<T>,
                               "a note command claimed in transaction_dispatch_internal.hpp has no "
