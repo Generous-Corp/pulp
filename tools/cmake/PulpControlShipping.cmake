@@ -64,7 +64,7 @@ set(_PULP_CONTROL_UNWIRED_CAPABILITIES)
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.
 set(_PULP_CONTROL_REGISTRY_DIGEST_V1
-    "70578eae97288609fe384bd2caa1641e62af016127f3abc6e4a3cd754422d584")
+    "1010e23c360febd946335c5c91d0c8d9ad9a67dca7bfcceedce38a0bf5ebe1c8")
 
 function(_pulp_cache_control_declarations target profile capabilities eval_ack)
     # A target's declarations are configure-time truth, not sticky user
