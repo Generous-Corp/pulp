@@ -906,7 +906,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/playback/program_compiler.hpp",
-        "fingerprint": "sha256:da4c2ce2a937f2001d6abe2e731e6984c8cfbcbe48f47d69d4669f90cd282bf8",
+        "fingerprint": "sha256:33a618bdbd376918f992f842abb25c536c3e3374d25763a7febe8917572416ff",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

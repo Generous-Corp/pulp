@@ -449,9 +449,13 @@ per-track budget are enforced. Returning too much fails with
 `RegisteredContentFragmentQuotaExceeded`, whose diagnostic reports the clip
 `item`, `actual`, and `limit`. Missing exact registration fails with
 `UnresolvedRegisteredContent` rather than producing silence.
-Likewise, a nested `SequenceRef` that trims registered content fails with
-`TrimmedRegisteredContentUnsupported`: the hook input has no source-window
-offset with which to preserve pattern phase.
+A nested `SequenceRef` that trims registered content compiles. The hook is
+invoked over the authored clip, from the authored origin, so a pattern's phase
+is the phase its author wrote; the compiler then keeps the part of the returned
+fragment that lies inside the retained window, cutting a note that straddles an
+edge to that edge and dropping one wholly outside. The registration's fragment
+ceiling therefore bounds generation over the authored extent, not over the
+shorter window a trim retains.
 
 The installed-SDK
 [registered chord renderer](../../examples/timeline-sdk-consumer/registered_chord_renderer.cpp)
