@@ -139,7 +139,18 @@ For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
   even when the consumer contract is unchanged. Increase the surface inventory
-  version.
+  version. `--write` cannot do the first of those for you: it reports the
+  measured digest and exits nonzero, because a generator free to restamp a
+  fingerprint would silently launder every unreviewed header edit. Paste the
+  measured digest over the declared one in `agent_capability_registry.py`, bump
+  `SURFACE_INVENTORY_VERSION` in `agent_capability_manifest.py`, then `--write`.
+- `--write` also appends a full snapshot to
+  `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
+  that dwarf the change that caused them. `--check` does not require it, so for
+  a byte-level fingerprint refresh, revert that file and keep the three-file
+  change; `--check` still reports `fresh`. Reverting it is not free of meaning,
+  so keep the snapshot when the change is a real contract movement whose history
+  someone will read back.
 - Increase the capability minor version for compatible additive contract
   changes.
 - Increase the capability major version when a binding is removed, renamed, or

@@ -149,6 +149,15 @@ struct AudioClipRendererProgram {
     // is what keeps an ordinary clip's per-sample gain exactly the arithmetic it
     // always was.
     std::shared_ptr<const ClipPlacementFadeProgram> placement_fade;
+    // Exclusive source-frame bound of the musical phase map, paired with
+    // `source_frame_offset` as its inclusive start. Zero selects
+    // `source_frame_count`, which is every clip whose placement carries its
+    // whole authored source span. The two differ only when flattening cut a
+    // conforming clip down to a sub-span of that span, which no clip in the
+    // document model can express: a conforming clip maps all of its source
+    // onto all of its placement, so a retained window needs the matching
+    // sub-range named explicitly. Read only under `MusicalPhaseResample`.
+    double source_frame_phase_end = 0.0;
 
     std::int64_t timeline_end() const noexcept;
     bool uses_sample_rate_conversion() const noexcept;
