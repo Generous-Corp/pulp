@@ -83,13 +83,15 @@ different request with an earlier result.
 
 A running host's step grid is reachable through the same unified control
 platform as every other Pulp capability -- no bespoke sequencer verb, no new
-transport. Two typed operations are registered, both gated on their own
-capability and both bound to the host-main executor:
+transport. Four typed operations are registered, each gated on its own
+capability and all bound to the host-main executor:
 
 | Operation | Capability | Result | Profiles |
 |---|---|---|---|
 | `dev.pulp.sequencer/state.read@1` | `sequencer.state.read` | `response` | observe, develop |
 | `dev.pulp.sequencer/state.edit@1` | `sequencer.state.edit` | `receipt` | develop |
+| `dev.pulp.sequencer/transport.loop.read@1` | `sequencer.transport.loop.read` | `response` | observe, develop |
+| `dev.pulp.sequencer/transport.loop.write@1` | `sequencer.transport.loop.write` | `receipt` | develop |
 
 `state.read` copies the UI-side published snapshot and the seqlock playhead out
 of the channel; `pattern`, `include_snapshot`, and `include_playhead` bound what
@@ -100,6 +102,16 @@ comes back, and the response carries `epoch`, `engine_sequence`, and
 or `switch-pattern` -- and submits it to the single-producer command FIFO,
 returning `receipt_id`, `applied`, and `client_sequence`. `gesture_phase` groups
 a drag into one undoable gesture the way a parameter gesture does.
+
+`transport.loop.read@1` takes no parameters and returns the whole loop cell at
+once -- `enabled`, `start_tick`, `end_tick`, `playing`, and the monotonic
+`sequence` that stamps it. `transport.loop.write@1` carries exactly one
+`action`: `set-range` moves the boundaries, `set-enabled` toggles the loop and
+requires an `expected_sequence` so a toggle raced against another writer is
+refused rather than applied to a cell the caller never saw. Both actions require
+an `idempotency_key`, and the receipt echoes the resulting cell alongside
+`receipt_id` and `applied`, so a replayed key is answerable without a second
+read.
 
 Three things about these operations are not obvious from their schemas:
 
@@ -123,9 +135,11 @@ prints the frozen registry offline, and `--json` emits the canonical
 `dev.pulp.control/registry@1` projection with both JSON Schema bodies. Listing
 an operation is never a grant. To call one, use `pulp control call --instance ID
 dev.pulp.sequencer/state.read@1 --params JSON`; through MCP the registry derives
-the tools `pulp_control_sequencer_state_read` and
-`pulp_control_sequencer_state_edit` from the same rows, so Forge Sequencer and
-Forge Modular reach the grid with no bespoke surface. Grants and consent are
+one tool per row -- `pulp_control_sequencer_state_read`,
+`pulp_control_sequencer_state_edit`,
+`pulp_control_sequencer_transport_loop_read`, and
+`pulp_control_sequencer_transport_loop_write` -- so Forge Sequencer and
+Forge Modular reach the grid and its loop with no bespoke surface. Grants and consent are
 broker authority.
 
 Adding a sequencer control operation means updating this section too:
