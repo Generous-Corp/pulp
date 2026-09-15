@@ -745,6 +745,57 @@ struct SetMacroValue {
     float replacement = 0.0f;
 };
 
+/// Inserts one authored source-to-parameter connection.
+///
+/// Identity is authored by the caller, as it is for the source this reads, so a
+/// source and the route that reads it can be stated in one transaction.
+struct InsertModulationRoute {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track that will own the route.
+    ItemId track_id;
+    /// Complete route declaration, carrying its own identity.
+    ModulationRoute route;
+};
+
+/// Removes one authored connection by identity.
+///
+/// Removing a route is the one modulation removal nothing else can refuse: a
+/// route is read by no other document member, so the source it named stays and
+/// only the connection goes.
+struct RemoveModulationRoute {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the route.
+    ItemId track_id;
+    /// Identity of the route to remove.
+    ItemId route_id;
+};
+
+/// Replaces a route's source, target, depth, and bypass under an exact gate.
+///
+/// Identity is pinned the way SetModulator pins it, and for the same reason.
+/// The gate covers the whole route rather than the depth alone: a route has no
+/// performed field, so there is no high-frequency edit for a narrow gate to
+/// protect, and inventing one would be vocabulary bought with nothing.
+///
+/// `enabled` is gated like every other member. A disabled route keeps its
+/// identity, depth, and target so that re-enabling restores what was there,
+/// which is only true if a bypass is a value an edit states rather than a
+/// state an edit discards.
+struct SetModulationRoute {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the route.
+    ItemId track_id;
+    /// Identity of the route whose connection changes.
+    ItemId route_id;
+    /// Required current route, compared in full including its bypass.
+    ModulationRoute expected;
+    /// Route written when the gate matches, carrying the same identity.
+    ModulationRoute replacement;
+};
+
 /// Exhaustive set of durable Timeline document mutations.
 using Command = std::variant<
     InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip, SetNoteVelocity,
@@ -757,7 +808,8 @@ using Command = std::variant<
     RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState, SetDynamicsLane,
     InsertMidiExpressionLane, RemoveMidiExpressionLane, SetMidiExpressionLanePoints,
     SetProjectTuning, SetTrackTuning, SetRegion, InsertModulator, RemoveModulator, SetModulator,
-    InsertMacro, RemoveMacro, SetMacro, SetMacroValue>;
+    InsertMacro, RemoveMacro, SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,
+    SetModulationRoute>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {

@@ -165,6 +165,15 @@ class Track {
     runtime::Result<Track, ModelError> erase_macro(ItemId id) const;
     /// Replaces one macro control without changing its identity.
     runtime::Result<Track, ModelError> replace_macro(MacroControl replacement) const;
+    /// Returns a snapshot with a validated modulation route inserted.
+    runtime::Result<Track, ModelError> insert_modulation_route(ModulationRoute route) const;
+    /// Returns a snapshot without the identified modulation route.
+    ///
+    /// Nothing reads a route, so this is the one modulation removal no other
+    /// member can refuse: the source it named stays and only the connection goes.
+    runtime::Result<Track, ModelError> erase_modulation_route(ItemId id) const;
+    /// Replaces one modulation route without changing its identity.
+    runtime::Result<Track, ModelError> replace_modulation_route(ModulationRoute replacement) const;
     /// Inserts a typed device declaration at an authored position; empty appends.
     runtime::Result<Track, ModelError>
     insert_device(DevicePlacement placement,
@@ -278,6 +287,8 @@ class Track {
     with_device_chain(std::vector<DevicePlacement> device_chain) const;
     runtime::Result<Track, ModelError> with_modulators(std::vector<Modulator> modulators) const;
     runtime::Result<Track, ModelError> with_macros(std::vector<MacroControl> macros) const;
+    runtime::Result<Track, ModelError>
+    with_modulation_routes(std::vector<ModulationRoute> routes) const;
     explicit Track(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };
