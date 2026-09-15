@@ -321,6 +321,12 @@ pulp_add_test_suite(pulp-test-timeline-context-lane
 pulp_add_test_suite(pulp-test-timeline-dynamics-lane
     SOURCES test_timeline_dynamics_lane.cpp
     LIBRARIES pulp::timeline)
+# The clip-scoped controller/expression lane commands: insert, remove, and the
+# gated point edit, plus the authority split that lets a non-destructive writer
+# author and edit a stream without being able to abandon one.
+pulp_add_test_suite(pulp-test-timeline-midi-expression-commands
+    SOURCES test_timeline_midi_expression_commands.cpp
+    LIBRARIES pulp::timeline)
 # The groove a sequence plays with, carried on the same contract: the swing and
 # step-table transform, the document type and its migrations, and the read side
 # that resolves a groove only for a renderer that declared it.

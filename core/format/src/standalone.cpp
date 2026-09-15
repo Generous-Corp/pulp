@@ -1273,7 +1273,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     if (!opts.initially_hidden)
         window->show();
 
-    detail::log_standalone_window_open(w, h, use_gpu, bridge->uses_script_ui(), chrome);
+    detail::log_standalone_window_open(
+        w, h, *window, use_gpu, bridge->uses_script_ui(), chrome);
 
 #if PULP_ENABLE_AUDIO_PROBES
     // ── Programmatic live-probe JSON dump (the agent/CI readout) ──

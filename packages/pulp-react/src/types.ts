@@ -416,7 +416,15 @@ export type ViewProps = BaseProps;
 export type RowProps = BaseProps;
 export type ColProps = BaseProps;
 export type PanelProps = BaseProps;
-export type ScrollViewProps = BaseProps;
+export interface ScrollViewProps extends BaseProps {
+    /// Programmatic scroll offset, named for the DOM property it mirrors.
+    ///
+    /// Wheel, trackpad and scrollbar drag are handled natively and never come
+    /// through props; these exist for keyboard paging, scroll-into-view and
+    /// restoring a saved position.
+    scrollTop?: number | string;
+    scrollLeft?: number | string;
+}
 export type ModalProps = BaseProps & { open?: boolean };
 
 // ── Text intrinsics ────────────────────────────────────────────────

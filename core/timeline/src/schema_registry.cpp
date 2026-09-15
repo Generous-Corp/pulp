@@ -629,6 +629,32 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"expected", SchemaValueKind::Array},
                                {"replacement", SchemaValueKind::Array},
                                {"sequence_id", SchemaValueKind::U64String}}));
+    // The lane arrives as one object rather than as loose address members so a
+    // caller cannot name half a stream, and the points array carries no chased
+    // member: that flag is a derivation receipt the decoder refuses.
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_midi_expression_lane", SchemaDomain::Command,
+                {{"clip_id", SchemaValueKind::U64String},
+                 {"lane", SchemaValueKind::Object},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.remove_midi_expression_lane", SchemaDomain::Command,
+                {{"clip_id", SchemaValueKind::U64String},
+                 {"lane_id", SchemaValueKind::U64String},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    // No address member: this command names a lane by identity and keeps the
+    // address that lane already has, so re-addressing a stream is a remove and
+    // an insert rather than a point edit.
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_midi_expression_lane_points", SchemaDomain::Command,
+                {{"clip_id", SchemaValueKind::U64String},
+                 {"expected", SchemaValueKind::Array},
+                 {"lane_id", SchemaValueKind::U64String},
+                 {"replacement", SchemaValueKind::Array},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(
         builtin("pulp.timeline.command.set_groove", SchemaDomain::Command,
                 {{"expected", SchemaValueKind::Object, true, "pulp.timeline.groove_template"},

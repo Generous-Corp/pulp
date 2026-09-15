@@ -166,6 +166,8 @@ setPlaceholder	widget_value	function	core/view/src/widget_bridge/widget_value_co
 setText	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 getText	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setPanelStyle	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
+scrollTo	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp	prop:ScrollView.scrollTop
+scrollBy	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp	internal
 setScrollContentSize	widget_value	function	core/view/src/widget_bridge/widget_value_content_api.cpp
 setTextRuns	typography	function	core/view/src/widget_bridge/text_runs_api.cpp
 setBackground	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp

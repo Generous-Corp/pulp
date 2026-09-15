@@ -129,6 +129,12 @@ template <class T> constexpr CommandAuthority command_authority_of() noexcept {
         return {Class::Note, Intent::Modify};
     else if constexpr (std::is_same_v<T, SetNoteEvents>)
         return {Class::Note, Intent::Modify};
+    else if constexpr (std::is_same_v<T, InsertMidiExpressionLane>)
+        return {Class::Note, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveMidiExpressionLane>)
+        return {Class::Note, Intent::Remove};
+    else if constexpr (std::is_same_v<T, SetMidiExpressionLanePoints>)
+        return {Class::Note, Intent::Modify};
     else if constexpr (std::is_same_v<T, InsertAutomationLane>)
         return {Class::Automation, Intent::Create};
     else if constexpr (std::is_same_v<T, RemoveAutomationLane>)

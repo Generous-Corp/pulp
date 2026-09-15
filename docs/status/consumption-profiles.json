@@ -35,14 +35,14 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "ON"
+        "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
         "installed_target_count": 70,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 92,
+            "closure_node_count": 91,
             "public_header_count": 73
           },
           {
@@ -71,18 +71,18 @@
             "public_header_count": 136
           },
           {
-            "exported_as": "Pulp::inspect",
-            "closure_node_count": 81,
-            "public_header_count": 73
-          },
-          {
             "exported_as": "Pulp::format-view",
             "closure_node_count": 80,
             "public_header_count": 136
           },
           {
+            "exported_as": "Pulp::inspect",
+            "closure_node_count": 80,
+            "public_header_count": 73
+          },
+          {
             "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 79,
+            "closure_node_count": 78,
             "public_header_count": 73
           },
           {
@@ -172,7 +172,7 @@
           },
           {
             "exported_as": "Pulp::inspect-runtime",
-            "closure_node_count": 29,
+            "closure_node_count": 26,
             "public_header_count": 73
           },
           {
@@ -1916,7 +1916,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 81,
+            "node_count": 80,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -1932,7 +1932,6 @@
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
-              "pulp-timeline",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -2460,17 +2459,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 29,
+            "node_count": 26,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
-              "pulp-music",
               "pulp-platform",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-state",
-              "pulp-timebase",
-              "pulp-timeline",
               "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
@@ -2529,7 +2525,6 @@
             "pulp-inspect-control",
             "pulp-inspect-protocol",
             "pulp-state",
-            "pulp-timeline",
             "pulp-tool-gpu-health-model"
           ]
         },
@@ -2664,7 +2659,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 92,
+            "node_count": 91,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -2685,7 +2680,6 @@
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
-              "pulp-timeline",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -2947,7 +2941,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 79,
+            "node_count": 78,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -2963,7 +2957,6 @@
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
-              "pulp-timeline",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",

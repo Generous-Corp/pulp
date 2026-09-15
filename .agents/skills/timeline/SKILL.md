@@ -3077,6 +3077,65 @@ grep -c chord_scale core/timeline/src/serialize_encode.cpp   # the control
 
 A zero with no control beside it is indistinguishable from a mis-aimed grep.
 
+## A one-struct optimistic-gate command can launder a destructive grant
+
+`command_authority_of<T>()` returns exactly one `{CommandClass, CommandIntent}`
+per command type, so a struct cannot carry three intents. A single
+`{expected, replacement}` command that admits an empty replacement therefore has
+to declare one intent for create, modify, *and* delete — and if it declares
+`Modify`, every writer holding that class's modify bit can delete, because
+`Remove` is the axis a capability mask denies by default for an untrusted
+writer.
+
+The opposite shape has the mirror defect. An `Insert` + `Remove` pair with no
+`Modify` — the shape `Class::Automation` still has — means every value edit has
+to be spelled remove-then-insert, so a proposal-profile writer (every class,
+no destructive intent) can create a lane and then never change a value in it.
+A capability reachable only by granting the destructive axis is not reachable.
+
+Clip expression lanes take the third shape for this reason: `Insert`/`Create`,
+`Remove`/`Remove`, and a separate point-edit command at `Modify` whose payload
+names the lane by identity and carries no address. The test that earns it is the
+profile test — a proposal writer inserts a lane, edits its points, and is
+refused the removal — and it is worth writing before the reducers, because it is
+the only assertion that fails under either of the wrong shapes.
+
+## `chased` is a derivation receipt, and only the command layer can refuse one
+
+`MidiLanePoint::chased` is written by the nested-clip flattening path when the
+value sounding on entry came from before the retained window. An authored
+document never sets it — and nothing in the model enforces that, because the
+model has no way to tell an authored point from a derived one. The project
+encoder does not write the member and the project decoder does not read it, so a
+stored document cannot carry one either.
+
+That leaves the command layer as the only place a caller could forge provenance,
+and it has two doors: `serialize_command_decode.cpp` for a caller on the wire
+and the reducer for one in process. Both refuse, and the pair is not a duplicated
+model check — there is no model check to duplicate. Refusing rather than silently
+dropping the flag is the deliberate half: a caller who believes they authored a
+derivation receipt and did not is worse off than one who is told the field is
+not theirs.
+
+## An identity the reducer just retired cannot be re-inserted by its own inverse
+
+`plan_identity_insert` refuses any identity below `project.next_item_id()` unless
+`allow_tombstone_restore` is set, and the public `reduce_transaction` passes
+`false`. So the inverse of any command that *retires* an identity — a lane
+removal, or a point edit that drops a point — cannot be reduced through the
+public entry point. Undo for those paths is a real `DocumentSession`, which
+passes the flag; the public reducer covers only the inverses that retire nothing.
+
+Two consequences for tests. A fixture inserting a lane must use identities at or
+above the project's `next_item_id`, or the insert is refused as
+`IdentityNotAvailable` and reads like a reducer bug. And "restored exactly"
+cannot be asserted as byte-identical project JSON across an insert-then-remove:
+the identity index keeps the tombstone and `next_item_id` stays advanced, which
+is the document correctly refusing to reissue an identity. Compare the clip's
+lane vector instead — it is stricter than a count on every axis that matters
+(identity, address, order, per-point value) and blind to bookkeeping that is
+supposed to change.
+
 ## Every "rebuild a Sequence from its parts" site must carry a new lane
 
 `SequenceInput` is populated in several places that reconstruct a sequence rather
