@@ -842,6 +842,58 @@ runtime::Result<Track, ModelError> Track::replace_macro(MacroControl replacement
     return with_macros(std::move(macros));
 }
 
+// Routes take the same shape as the two source collections and reach validity
+// the same way. What differs is which rules the revalidation is being asked
+// for: a route is the member that names a source and a target, so
+// validate_attached_modulation is what refuses a depth out of range, a source
+// identity the track does not hold, a source kind that disagrees with the
+// entity holding that identity, a device-parameter target naming a placement
+// the chain does not carry, and a second route stating the same connection
+// twice. None of those rules is restated here, which is why a route command
+// cannot drift from the document rule it is supposed to obey.
+runtime::Result<Track, ModelError>
+Track::with_modulation_routes(std::vector<ModulationRoute> routes) const {
+    auto input = detail::track_input_of(*this);
+    input.modulation_routes = std::move(routes);
+    auto validated = Track::create(std::move(input));
+    if (!validated)
+        return runtime::Err(validated.error());
+    auto next_data = *data_;
+    next_data.modulation_routes = validated.value().data_->modulation_routes;
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError> Track::insert_modulation_route(ModulationRoute route) const {
+    if (find_modulation_route(route.id))
+        return fail<Track>(ModelErrorCode::DuplicateItemId, route.id, data_->id);
+    auto routes = *data_->modulation_routes;
+    routes.push_back(std::move(route));
+    return with_modulation_routes(std::move(routes));
+}
+
+runtime::Result<Track, ModelError> Track::erase_modulation_route(ItemId id) const {
+    auto routes = *data_->modulation_routes;
+    const auto found =
+        std::find_if(routes.begin(), routes.end(),
+                     [id](const ModulationRoute& candidate) { return candidate.id == id; });
+    if (found == routes.end())
+        return fail<Track>(ModelErrorCode::MissingItem, id, data_->id);
+    routes.erase(found);
+    return with_modulation_routes(std::move(routes));
+}
+
+runtime::Result<Track, ModelError>
+Track::replace_modulation_route(ModulationRoute replacement) const {
+    auto routes = *data_->modulation_routes;
+    const auto found = std::find_if(
+        routes.begin(), routes.end(),
+        [&](const ModulationRoute& candidate) { return candidate.id == replacement.id; });
+    if (found == routes.end())
+        return fail<Track>(ModelErrorCode::MissingItem, replacement.id, data_->id);
+    *found = std::move(replacement);
+    return with_modulation_routes(std::move(routes));
+}
+
 runtime::Result<Track, ModelError>
 Track::insert_device(DevicePlacement placement,
                      std::optional<ItemId> before_device_id) const {

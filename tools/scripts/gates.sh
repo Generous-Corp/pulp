@@ -23,6 +23,8 @@
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
 #   - gpu-handoff-pin (a pinned gpu-vellum-handoff path changed without the
 #     ledger being refreshed in the same range)
+#   - gpu-ledger-sentinel (the pulp-gpu-ledger merge driver resolved a ledger
+#     collision and the result was never regenerated)
 #   - silent-revert (no byte-exact undo of a recently-landed commit)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift, and checks the
 #     attribution text against the license files actually on disk)
@@ -91,6 +93,7 @@ HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
 GHP="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 SRG="$ROOT/tools/scripts/silent_revert_guard.py"
+GLS="$ROOT/tools/scripts/gpu_ledger_sentinel_check.py"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 MANIFEST_MIRRORS="$ROOT/tools/scripts/check_manifest_mirrors.py"
@@ -304,20 +307,62 @@ if [ -f "$PGL" ]; then
     fi
 fi
 
+# ── 6c. diff-scoped clang-format (advisory) ─────────────────────────────────
+# Touched lines only; existing formatting debt is grandfathered. Exit 3 (no
+# clang-format 21 here) is infrastructure, not a verdict. Same promotion knob
+# as the pre-push hook: PULP_ENFORCE_PREPUSH_FORMAT=1 makes exit 1 fail.
+FMT="$ROOT/tools/scripts/format_changed.sh"
+if [ -f "$FMT" ]; then
+    echo "" >&2
+    echo "▸ diff-scoped clang-format check (advisory; touched lines only)" >&2
+    bash "$FMT" --check --base "$BASE"
+    case $? in
+        0) ;;
+        1)
+            if [ "${PULP_ENFORCE_PREPUSH_FORMAT:-0}" = "1" ]; then
+                fail=1
+            else
+                echo "format_changed: ADVISORY — touched lines are not clang-format clean; run tools/scripts/format_changed.sh" >&2
+            fi
+            ;;
+        3) echo "format_changed: SKIPPED — no clang-format 21 on this machine (INFRASTRUCTURE, not a formatting verdict)" >&2 ;;
+        *) echo "format_changed: internal error (not a formatting verdict)" >&2 ;;
+    esac
+fi
+
 # ── 6b2. gpu-handoff pin freshness ──────────────────────────────────────────
 # docs/status/gpu-vellum-handoff.yaml pins referenced Pulp paths to an exact
 # revision, so editing one of those files is inherently a two-commit operation:
 # the change, then a tool-generated identity refresh. Nothing checked that, and
-# on 2026-09-05 three separate PRs each discovered it ~20 minutes later in CI
-# via gpu-recipe-catalog-selftest / gpu-handoff-provenance-selftest.
+# on 2026-09-05 three separate PRs each discovered it ~20 minutes later in CI.
 # Diff-scoped and sub-second: it only looks at whether a changed file is pinned.
 # It deliberately does NOT re-verify the identity fields — that is
 # `gpu_handoff_provenance.py check`, which costs ~25s because it runs a git log
 # per pinned path, and it is named in the failure output.
+# What CI would catch is narrower than it was when this landed: currency at
+# HEAD is now opt-in behind PULP_GPU_HANDOFF_REQUIRE_CURRENT, which nothing in
+# .github sets, so a merely-stale pin no longer turns the required gate red.
+# The always-on provenance tier still does, and so does a ledger this guard
+# never sees — which is what 6b3 below is for.
 if [ -f "$GHP" ]; then
     echo "" >&2
     echo "▸ gpu-handoff pin freshness (pinned path changed => refresh the ledger)" >&2
     if ! "$PYTHON" "$GHP" --base "$BASE" --mode=report; then
+        fail=1
+    fi
+fi
+
+# ── 6b3. gpu-handoff merge sentinel ─────────────────────────────────────────
+# The pulp-gpu-ledger merge driver resolves a ledger/receipt collision to an
+# identity that is invalid on purpose, so it cannot be committed in silence the
+# way a merged-looking pin would be. Nothing else catches it: 6b2 fires when a
+# pinned path changes and the ledger does NOT, and a sentinel merge changes the
+# ledger. The pre-push hook runs the same script, so the rule holds whether or
+# not anyone ran this one.
+if [ -f "$GLS" ]; then
+    echo "" >&2
+    echo "▸ gpu-ledger sentinel (no unregenerated ledger from a merge)" >&2
+    if ! "$PYTHON" "$GLS" --root "$ROOT" --mode=report; then
         fail=1
     fi
 fi

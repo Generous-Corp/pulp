@@ -537,6 +537,36 @@
       "flags": [
         {
           "kind": "Object",
+          "name": "route",
+          "ref": "pulp.timeline.modulation_route",
+          "required": true,
+          "schema_field": "route",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:insert-modulation-route",
+      "schema_type": "pulp.timeline.command.insert_modulation_route",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "Object",
           "name": "modulator",
           "ref": "pulp.timeline.modulator",
           "required": true,
@@ -1117,6 +1147,35 @@
       ],
       "name": "timeline:command:remove-midi-expression-lane",
       "schema_type": "pulp.timeline.command.remove_midi_expression_lane",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "route-id",
+          "required": true,
+          "schema_field": "route_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:remove-modulation-route",
+      "schema_type": "pulp.timeline.command.remove_modulation_route",
       "version": 1
     },
     {
@@ -1871,6 +1930,51 @@
       ],
       "name": "timeline:command:set-midi-expression-lane-points",
       "schema_type": "pulp.timeline.command.set_midi_expression_lane_points",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "Object",
+          "name": "expected",
+          "ref": "pulp.timeline.modulation_route",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "json"
+        },
+        {
+          "kind": "Object",
+          "name": "replacement",
+          "ref": "pulp.timeline.modulation_route",
+          "required": true,
+          "schema_field": "replacement",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "route-id",
+          "required": true,
+          "schema_field": "route_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:set-modulation-route",
+      "schema_type": "pulp.timeline.command.set_modulation_route",
       "version": 1
     },
     {

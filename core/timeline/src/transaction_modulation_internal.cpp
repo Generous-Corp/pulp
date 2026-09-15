@@ -29,8 +29,10 @@ ItemLocation track_location(const Project& project, ItemId sequence, ItemId trac
                         true};
 }
 
-// A modulator and a macro are both parented by their track, so one builder
-// serves both and the kind is the only thing that varies.
+// A modulator, a macro, and a route are all parented by their track, so one
+// builder serves all three and the kind is the only thing that varies. A route
+// is parented by the track rather than by the source it reads, so that removing
+// a source is not an ownership question the document answers twice.
 ItemLocation owned_location(const Project& project, ItemKind kind, ItemId sequence, ItemId track) {
     return ItemLocation{kind,     immediate_parent_id(kind, project.id(), sequence, track, {}),
                         sequence, track,
@@ -72,8 +74,8 @@ apply_track_edit(const Project& project, ItemId sequence_id, ItemId track_id, It
         std::move(next_project).value(), std::move(inverse), {item, track_id, sequence_id, flags}});
 }
 
-// Insert differs between the two collections only in the kind it registers, the
-// model edit it runs, and the inverse it names.
+// Insert differs between the three collections only in the kind it registers,
+// the model edit it runs, and the inverse it names.
 template <typename Item, typename EditFn>
 runtime::Result<ModulationCommandReduction, TransactionError>
 reduce_insert_item(const Project& project, ItemKind kind, ItemId sequence_id, ItemId track_id,
@@ -266,6 +268,79 @@ reduce_set_macro_value(const Project& project, const SetMacroValue& set,
         [&](const Track& current) { return current.replace_macro(replacement); });
 }
 
+runtime::Result<ModulationCommandReduction, TransactionError>
+reduce_insert_modulation_route(const Project& project, const InsertModulationRoute& insert,
+                               const Transaction& transaction, CommandId command,
+                               bool allow_tombstone_restore) {
+    return reduce_insert_item(
+        project, ItemKind::ModulationRoute, insert.sequence_id, insert.track_id, insert.route,
+        RemoveModulationRoute{insert.sequence_id, insert.track_id, insert.route.id}, transaction,
+        command, allow_tombstone_restore,
+        [&](const Track& track) { return track.insert_modulation_route(insert.route); });
+}
+
+runtime::Result<ModulationCommandReduction, TransactionError>
+reduce_remove_modulation_route(const Project& project, const RemoveModulationRoute& remove,
+                               const Transaction& transaction, CommandId command) {
+    if (const auto code = target_error(project, remove.route_id,
+                                       owned_location(project, ItemKind::ModulationRoute,
+                                                      remove.sequence_id, remove.track_id)))
+        return reject_reduction<ModulationCommandReduction>(*code, transaction, command,
+                                                            remove.route_id, remove.track_id);
+    const auto* sequence = project.find_sequence(remove.sequence_id);
+    const auto* track = sequence ? sequence->find_track(remove.track_id) : nullptr;
+    const auto* route = track ? track->find_modulation_route(remove.route_id) : nullptr;
+    if (!route)
+        return reject_reduction<ModulationCommandReduction>(ConflictCode::TargetMissing,
+                                                            transaction, command, remove.route_id);
+    // Captured whole before the edit, bypass included: a disabled route keeps
+    // its identity, depth, and target so that re-enabling restores what was
+    // there, and an inverse that reconstructed a default would enable a route
+    // the author had silenced.
+    const ModulationRoute removed = *route;
+    const std::array identity{owned_identity(ItemKind::ModulationRoute, remove.route_id,
+                                             remove.sequence_id, remove.track_id)};
+    return apply_track_edit(
+        project, remove.sequence_id, remove.track_id, remove.route_id,
+        DirtyFlags::Structure | DirtyFlags::Content | DirtyFlags::Removed,
+        plan_identity_deactivate(identity), std::nullopt,
+        InsertModulationRoute{remove.sequence_id, remove.track_id, removed}, transaction, command,
+        [&](const Track& current) { return current.erase_modulation_route(remove.route_id); });
+}
+
+runtime::Result<ModulationCommandReduction, TransactionError>
+reduce_set_modulation_route(const Project& project, const SetModulationRoute& set,
+                            const Transaction& transaction, CommandId command) {
+    if (set.expected.id != set.replacement.id || set.expected.id != set.route_id)
+        return reject_reduction<ModulationCommandReduction>(
+            ConflictCode::ModelInvariant, transaction, command, set.route_id, set.replacement.id);
+    if (const auto code = target_error(
+            project, set.route_id,
+            owned_location(project, ItemKind::ModulationRoute, set.sequence_id, set.track_id)))
+        return reject_reduction<ModulationCommandReduction>(*code, transaction, command,
+                                                            set.route_id, set.track_id);
+    const auto* sequence = project.find_sequence(set.sequence_id);
+    const auto* track = sequence ? sequence->find_track(set.track_id) : nullptr;
+    const auto* route = track ? track->find_modulation_route(set.route_id) : nullptr;
+    if (!route)
+        return reject_reduction<ModulationCommandReduction>(ConflictCode::TargetMissing,
+                                                            transaction, command, set.route_id);
+    // The whole route including its bypass, so an edit that believed a route
+    // was live cannot land on one an author had disabled.
+    if (*route != set.expected)
+        return reject_reduction<ModulationCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                            transaction, command, set.route_id);
+    // Whether the replacement names a source the track holds, of the kind it
+    // claims, and a target the device chain carries, is decided by the model's
+    // own revalidation rather than restated here.
+    return apply_track_edit(
+        project, set.sequence_id, set.track_id, set.route_id, DirtyFlags::Content, {}, std::nullopt,
+        SetModulationRoute{set.sequence_id, set.track_id, set.route_id, set.replacement,
+                           set.expected},
+        transaction, command,
+        [&](const Track& current) { return current.replace_modulation_route(set.replacement); });
+}
+
 } // namespace
 
 bool is_modulation_command(const Command& command) noexcept {
@@ -299,6 +374,13 @@ reduce_modulation_command(const Project& project, const Command& command,
                 return reduce_set_macro(project, value, transaction, command_id);
             else if constexpr (std::is_same_v<T, SetMacroValue>)
                 return reduce_set_macro_value(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, InsertModulationRoute>)
+                return reduce_insert_modulation_route(project, value, transaction, command_id,
+                                                      allow_tombstone_restore);
+            else if constexpr (std::is_same_v<T, RemoveModulationRoute>)
+                return reduce_remove_modulation_route(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, SetModulationRoute>)
+                return reduce_set_modulation_route(project, value, transaction, command_id);
             else {
                 static_assert(!is_modulation_command_type<T>,
                               "a command claimed by is_modulation_command_type in "

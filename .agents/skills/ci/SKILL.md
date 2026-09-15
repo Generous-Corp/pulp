@@ -883,6 +883,44 @@ ship a `[[deprecated]]` alias so downstream keeps compiling — lines containing
 `--selftest` proves the gate can fail (8 cases). A gate that cannot fail is not
 a gate.
 
+## Gate: gpu-ledger-sentinel (`tools/scripts/gpu_ledger_sentinel_check.py`)
+
+Rejects a push whose `docs/status/gpu-vellum-handoff.yaml` or
+`docs/validation/gpu-handoff-provenance/receipt.json` still contains the literal
+`regenerate-me`. That value is written by the `pulp-gpu-ledger` merge driver,
+which resolves the collision those two generated files produce on every branch
+that outlives a main move. The repair is one command, and it is in the failure
+text:
+
+```sh
+python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt
+```
+
+**Why an invalid value rather than a merged one.** A stale-but-ancestral pin
+passes the always-on provenance tier, so any driver that computes a plausible
+merge — `merge=ours` included — produces something Git commits in silence. The
+sentinel is chosen so that nothing accepts it.
+
+**Why it needed its own gate.** The two guards that look closest both miss it,
+and each misses it for a structural reason rather than an oversight:
+
+* `gpu_handoff_pin_freshness.py` fires when a pinned path changes and the ledger
+  does **not**. A sentinel merge changes the ledger, so it reads the sentinel as
+  the refresh it was waiting for.
+* `conflict_marker_check.py` looks for `<<<<<<<`. The driver's entire purpose is
+  that there are none.
+
+Which left CI twenty minutes downstream — the roundtrip the driver exists to
+remove.
+
+**It runs from the pre-push hook as well as `gates.sh`, and that distinction is
+load-bearing.** `gates.sh` is run by convention; it is not invoked by
+`.githooks/pre-push`, and `.shipyard/config.toml [validation.gates]` runs its own
+explicit script list rather than the file. A rule wired only into `gates.sh`
+therefore holds only for whoever remembered to run it — which is why
+`gpu_handoff_pin_freshness.py` (gate 6b2), wired that way, does not actually gate
+a push today.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before shelling out to `pulp` (or `shipyard pr`, which ultimately
@@ -5299,6 +5337,27 @@ build's canonical inventory, then run
 Otherwise the full suite can finish almost entirely green and fail only at the
 inventory self-test, forcing a needless second admission cycle.
 
+`--build-dir` is the whole verification. Run bare, that script skips inventory
+validation entirely and still reports `Ran 28 tests ... OK` in well under a
+second against a contract that is provably stale — a green run proving only
+that the policy tables parse. Treat a sub-second pass as "not yet verified",
+and confirm the validating mode can fail: before re-pinning, the same command
+against the same build directory must report `inventory contract drift` naming
+the stale fields. A refresh whose validating run was never seen red has not
+been checked.
+
+Deriving the inventory needs a complete build, not a configure: discovery
+registers per test case by executing the built binaries, so an incomplete tree
+yields a nonzero `placeholder_count` and junk counts. Verify
+`placeholder_count == 0` before trusting any number. `CMAKE_BUILD_TYPE` also
+feeds the toolchain digest, so the refresh must use the `build_flags` pinned in
+`.shipyard/config.toml` (Debug) — a Release tree cannot reproduce the contract.
+In a fresh worktree note that `setup.sh` configures the shared `build/`
+directory as Release with examples OFF and then runs the entire suite, so
+running it first both costs a full test cycle and leaves the cache wrong for
+this purpose; reconfigure explicitly with the pinned flags afterward and
+confirm the cache reads `Debug` before measuring.
+
 Merge the current target branch before deriving that inventory. A configured
 tree from a stale PR head can be internally consistent and still omit tests
 that landed on `main`; refreshing the pinned count and digest from it merely
@@ -8971,3 +9030,34 @@ ubuntu-24.04 ships without the compiler-rt realtime runtime, so
 `-fsanitize=realtime` is rejected at configure time. The lane is advisory and
 dispatch-only for that reason; fixing the variable moves the failure from the
 install step to the configure step and nothing else.
+
+## Diff-scoped clang-format gate (advisory) — touched lines only
+
+`tools/scripts/format_changed.sh --check --base <ref>` judges only the hunks a
+branch changes; the tree itself does not round-trip under `.clang-format`
+(measured 2026-09-14: clang-format 21 reflows 3,743 of 4,415 committed C++
+files, byte-identical across Xcode / CommandLineTools / Homebrew `llvm@21`;
+v19 differs on two), so a whole-file check would fail every PR and a
+whole-tree reformat is a separate decision. Existing debt is grandfathered.
+
+Three surfaces run the same script, all **advisory** today:
+
+| Surface | Invocation | Exit 1 (verdict) | Exit 3 (no clang-format) |
+|---|---|---|---|
+| `.githooks/pre-push` | `run_gate_captured bash "$FMT" --check --base "$BASE"` | `ADVISORY` line, push allowed; `PULP_ENFORCE_PREPUSH_FORMAT=1` makes it `fail=1` | `SKIPPED … INFRASTRUCTURE`, push allowed |
+| `tools/scripts/gates.sh` | same, unsupervised | same knob | same skip |
+| `.github/workflows/format-changed-check.yml` (`Format (changed lines)`, hosted `ubuntu-latest`, path-filtered to C++ sources) | pip `clang-format==21.1.8`, `--base origin/<base_ref>` | job fails with `::error title=Formatting` | job fails with `::error title=INFRASTRUCTURE` — never worded as a formatting verdict |
+
+The workflow is **not** in `required_status_checks`; it reports. Promote it
+by adding the check to branch protection and flipping the hook default only
+after open branches are clean on touched lines — at wiring time 4 of 6
+sampled in-flight PRs would have failed (26–355 diff lines each), which is
+why both surfaces start advisory. Measured cost: 1.8–3.9 s per branch in
+the hook (the diff-cover build is the slow gate, not this).
+
+Exit 3 is deliberately an *infrastructure* failure with its own wording on
+every surface: a gate that reports "no binary" as "misformatted" is the
+false-verdict class this repo keeps paying for. The wiring — exit codes kept
+apart, the PyPI pin, hosted runner — is asserted by
+`tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).
+
