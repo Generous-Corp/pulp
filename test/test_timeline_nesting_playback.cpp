@@ -2093,7 +2093,12 @@ struct FreezeNesting {
     TimeConform placement_conform = TimeConform::None;
     TrackMixer mixer{};
     bool device_chain = false;
+    // Authors a gain lane. The gain refusal is deferred to the leaf, so this
+    // knob cannot name its own construct under a freeze -- see pan_automation.
     bool automation_lane = false;
+    // Authors a pan lane. Pan needs no leaf to decide it, so it is refused on
+    // entry and does name its construct.
+    bool pan_automation = false;
     bool modulator = false;
     bool macro = false;
     bool modulation_route = false;
@@ -2131,6 +2136,14 @@ Project nested_freeze_project(FreezeNesting nesting, std::size_t frame_count) {
                              0.0f}}));
         child_input.automation_lanes.push_back(take(AutomationLane::create(
             {15}, TrackMixerTarget{TrackMixerParameter::Gain}, std::move(curve))));
+    }
+    if (nesting.pan_automation) {
+        auto curve = take(AutomationCurve::create(
+            {AutomationPoint{{18}, {0}, 1.0f, AutomationInterpolation::Continuous, 0.0f},
+             AutomationPoint{{19}, {kTicksPerQuarter}, 0.5f, AutomationInterpolation::Continuous,
+                             0.0f}}));
+        child_input.automation_lanes.push_back(take(AutomationLane::create(
+            {20}, TrackMixerTarget{TrackMixerParameter::Pan}, std::move(curve))));
     }
     if (nesting.modulator || nesting.modulation_route)
         child_input.modulators.push_back(Modulator{{30}, ModulatorKind::Lfo, "lfo"});
@@ -2338,18 +2351,31 @@ TEST_CASE("A placement can never carry a conform so the predicate entry is a bac
 }
 
 TEST_CASE("A nested freeze under a device chain or automation lane keeps naming that construct") {
-    // The predicate answers for both, but each already has a code that names
-    // the construct and is raised first. Asserting the codes here is what keeps
-    // a later reordering from silently degrading two specific diagnostics into
-    // the generic freeze refusal.
+    // The predicate answers for each of these, and where a construct has a code
+    // that is decidable on entry that code is raised first. Asserting the codes
+    // here is what keeps a later reordering from silently degrading a specific
+    // diagnostic into the generic freeze refusal -- and, for the one refusal
+    // that is decided at the leaf instead, from claiming a specificity the walk
+    // cannot actually deliver under a freeze.
     const auto ramp = unit_ramp();
     const auto assets = pool({{{50}, audio_data({ramp})}});
     REQUIRE(compile_error_with_assets(nested_freeze_project({.device_chain = true}, ramp.size()),
                                       assets)
                 .code == CompileErrorCode::NestedDeviceChainUnsupported);
+    // Pan is decided on entry to the child track, so it still names its own
+    // construct ahead of the freeze.
+    REQUIRE(compile_error_with_assets(nested_freeze_project({.pan_automation = true}, ramp.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedAutomationPanUnsupported);
+    // An automated *gain* is the one automation that cannot name itself here,
+    // and that is a property of the refusal rather than a lost diagnostic: the
+    // gain codes are chosen by the leaf's kind, so naming one means reaching a
+    // leaf, and a freeze refuses before any leaf is reached. The freeze code is
+    // therefore the honest answer, and pinning it keeps a later change from
+    // quietly reordering the two.
     REQUIRE(compile_error_with_assets(nested_freeze_project({.automation_lane = true}, ramp.size()),
                                       assets)
-                .code == CompileErrorCode::NestedAutomationLaneUnsupported);
+                .code == CompileErrorCode::NestedFrozenTrackUnsupported);
 }
 
 namespace {
