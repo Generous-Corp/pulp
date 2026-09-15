@@ -324,6 +324,31 @@ asserting `selectable_index_at_point()` and `char_index_at_point()` return the
 same byte at every x. If you touch either hit-test, that is the test that
 notices.
 
+## A cross-widget selection is scoped to a content REGION
+
+`core/view/src/text_selection.cpp` owns the selection that spans widgets. Two
+coordinate facts there are easy to get backwards, and neither fails loudly:
+
+- **The walk is scoped to the region; the coordinates are not.** A
+  `MouseEvent::window_position` is TREE-root space, so `point_to_local` must be
+  given the tree root even when the document-order walk starts at the content
+  region. Converting relative to the region drops every bounds offset between
+  it and the root — invisible for a region at the origin, and wrong by exactly
+  the region's offset for every other one. A fixture that puts its region at
+  (0,0) cannot see this; `test_text_selection.cpp` keeps one deliberately
+  off-origin for that reason.
+- **A drag is delivered to the widget the press LATCHED, with local
+  coordinates that leave its bounds.** That is the platform hosts' behaviour
+  (`ViewCapture drag_target`), not an accident, and it is why the Label handler
+  reads `window_position` rather than the local point it is handed. The local
+  point describes a position in a Label the pointer left several widgets ago.
+
+`selectable_layout()` reporting `measured == false` matters most for a widget
+the user never dragged over: an intervening block in a multi-widget selection
+must be selected in FULL, so the owner falls back to its whole string rather
+than to "no geometry, no text". Getting that fallback wrong copies a hole where
+the middle paragraph was.
+
 ## How to verify a change here
 
 A baseline change that does not move a number is not a fix. Measure before and

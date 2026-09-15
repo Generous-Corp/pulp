@@ -1458,11 +1458,31 @@ public:
     // root of its own, so it resolves to one process-global FALLBACK slot; that
     // fallback is the documented shim preserving the historical single-focus /
     // single-popup behavior for unhosted widgets. See view.cpp `interaction()`.
+    /// A selection that spans widgets, anchored at one (widget, offset) and
+    /// extending to another. Lives on the tree root for the same reason focus
+    /// does: two editors in one host process each need their own, and a
+    /// selection is a property of a document, not of any one widget in it.
+    /// One tree holds at most one selection, so a press in a second content
+    /// region collapses the first — the behaviour a browser has.
+    ///
+    /// The endpoints are `ViewCapture` rather than raw `View*` so a widget
+    /// unmounted mid-drag (a virtualized list recycling a row) resolves to
+    /// null instead of dangling. Offsets are UTF-8 byte offsets into the
+    /// endpoint's `SelectableText::selectable_text()`.
+    struct TextSelectionState {
+        ViewCapture anchor;
+        ViewCapture focus;
+        int anchor_utf8 = 0;
+        int focus_utf8 = 0;
+        bool dragging = false;
+    };
+
     struct RootInteractionState {
         View* focused_input = nullptr;
         View* active_overlay = nullptr;
         ComboBox* active_popup = nullptr;   // wired from ui_components (migrated last)
         std::vector<OverlayRequest> overlay_queue;
+        TextSelectionState text_selection;
     };
     /// Root-owned interaction state for this view's tree. Root-aware code should
     /// prefer this over the process-global shim statics below.

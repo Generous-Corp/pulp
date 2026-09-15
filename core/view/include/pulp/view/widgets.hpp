@@ -489,7 +489,17 @@ public:
     TextEditor* editor() const { return editor_; }
 
     void on_mouse_down(Point pos) override;
-    bool wants_mouse_input() const override { return edit_trigger_ != EditTrigger::none; }
+    bool wants_mouse_input() const override {
+        return edit_trigger_ != EditTrigger::none || is_selectable();
+    }
+    /// Press / drag / release for text selection. The MODERN channel is used
+    /// rather than `on_mouse_down(Point)` because only it carries
+    /// `window_position` — the root-space point the selection owner needs in
+    /// order to find which OTHER widget the pointer is now over. The local
+    /// point the legacy channel delivers is in this Label's own space, and a
+    /// drag that has left this Label is exactly the case this exists for.
+    void on_mouse_event(const MouseEvent& event) override;
+    bool on_key_event(const KeyEvent& event) override;
 
     // ── SelectableText ──────────────────────────────────────────────────
     // A Label joins a document-level selection (pulp/view/selectable_text.hpp)

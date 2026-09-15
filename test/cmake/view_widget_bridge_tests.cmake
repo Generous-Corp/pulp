@@ -1019,6 +1019,12 @@ pulp_add_test_suite(pulp-test-text-editor-multiline LIBRARIES pulp::view)
 # TextEditor, plus the shared hit-test / rect arithmetic over it.
 pulp_add_test_suite(pulp-test-selectable-text LIBRARIES pulp::view)
 
+# The document-level selection owner: document-order traversal, cross-widget
+# drag, and copy. Takes the system-clipboard lock because the copy cases
+# exercise the real pasteboard — there is no headless clipboard backend.
+pulp_add_test_suite(pulp-test-text-selection LIBRARIES pulp::view
+                    PROPERTIES RESOURCE_LOCK system-clipboard)
+
 # TextEditor input pipeline tests (headless — validates focus, typing, Enter, backspace)
 pulp_add_test_suite(pulp-test-text-input LIBRARIES pulp::view)
 

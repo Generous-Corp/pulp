@@ -4,6 +4,7 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/text_overflow.hpp>
+#include <pulp/view/text_selection.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_shaper.hpp>
@@ -1424,6 +1425,74 @@ void Label::paint_attributed_lines_(canvas::Canvas& canvas,
         }
         ++emitted;
     }
+}
+
+void Label::on_mouse_event(const MouseEvent& event) {
+    View::on_mouse_event(event);
+    if (!enabled() || !is_selectable()) return;
+    // The nearest enclosing content region is the selection's SCOPE: a drag
+    // can extend through everything in it and nothing outside it. Using the
+    // tree root instead would let a drag that started in an About panel reach
+    // into a control strip.
+    View* scope = enclosing_text_selection_region();
+    if (scope == nullptr) {
+        // `SelectionPolicy::always` outside every region — the Label is its own
+        // scope, so selection stays inside it.
+        scope = this;
+    }
+
+    // `window_position` is root-space. The LOCAL position cannot be used here:
+    // once a drag leaves this Label the pointer is over a sibling, and
+    // following it there is the entire point.
+    const Point root_pos = event.window_position;
+
+    // `isDrag()` / `isRelease()` are authoritative only when the host set an
+    // explicit phase, which `pointer_dispatch` always does. An event left on
+    // `automatic` reaches only the press branch — the same limit every other
+    // phase-aware widget carries.
+    if (event.isPress()) {
+        // Focus is what makes Cmd-C arrive. Claim it here rather than at
+        // `set_selection_policy` time: the common case is the `inherit`
+        // default, whose setter is never called at all.
+        set_focusable(true);
+        claim_input_focus();
+        set_focus(true);
+        const auto hit = selection_hit_test(*scope, root_pos);
+        if (hit.target != nullptr)
+            selection_begin(*scope, *hit.target, hit.offset);
+    } else if (event.isDrag()) {
+        if (!selection_is_dragging(*scope)) return;
+        const auto hit = selection_hit_test(*scope, root_pos);
+        if (hit.target != nullptr)
+            selection_extend(*scope, *hit.target, hit.offset);
+    } else if (event.isRelease()) {
+        selection_end_drag(*scope);
+    }
+}
+
+bool Label::on_key_event(const KeyEvent& event) {
+    if (!is_selectable() || !event.is_down) return View::on_key_event(event);
+    View* scope = enclosing_text_selection_region();
+    if (scope == nullptr) scope = this;
+
+    const bool main_modifier =
+#ifdef __APPLE__
+        (event.modifiers & kModCmd) != 0;
+#else
+        (event.modifiers & kModCtrl) != 0;
+#endif
+    if (event.key == KeyCode::c && main_modifier) {
+        if (selection_copy(*scope)) return true;
+    } else if (event.key == KeyCode::a && main_modifier) {
+        selection_select_all(*scope);
+        return true;
+    } else if (event.key == KeyCode::escape) {
+        if (selection_has_range(*scope)) {
+            selection_clear(*scope);
+            return true;
+        }
+    }
+    return View::on_key_event(event);
 }
 
 void Label::set_selection_highlight(int start_utf8, int end_utf8) {

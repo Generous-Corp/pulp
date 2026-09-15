@@ -1,4 +1,5 @@
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/text_selection.hpp>
 #include <pulp/view/widget_metrics.hpp>
 #include <pulp/view/context_menu.hpp>
 #include <pulp/view/frame_clock.hpp>  // caret-blink subscription
@@ -967,7 +968,21 @@ bool TextEditor::on_key_event(const KeyEvent& event) {
             if (main_modifier) { select_all(); return true; }
             break;
         case KeyCode::c:
-            if (main_modifier) { copy_to_clipboard(); return true; }
+            if (main_modifier) {
+                // A read-only editor can be one block of a selection that
+                // spans several widgets. Copying only this editor's slice
+                // would silently drop the rest, which reads as the selection
+                // having been ignored. Prefer the document selection when it
+                // actually covers more than this widget; otherwise the
+                // editor's own selection is the whole answer.
+                View* scope = enclosing_text_selection_region();
+                if (scope != nullptr &&
+                    selection_spans_multiple_widgets(*scope) &&
+                    selection_copy(*scope))
+                    return true;
+                copy_to_clipboard();
+                return true;
+            }
             break;
         case KeyCode::v:
         {
