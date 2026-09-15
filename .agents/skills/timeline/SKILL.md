@@ -1448,6 +1448,17 @@ is `pending` *and* materially changed. Material is exactly `delivery_state`,
 nothing. There is no doc-only carve-out and no skip trailer, so `shipyard pr`
 reports skill-sync and version-bump green and the PR still goes red.
 
+**Write a new row as its own file: `docs/status/sequencer-exposure/rows/<row-id>.json`,
+containing just that row object, named for its `id`.** The checker assembles the
+ledger from `docs/status/sequencer-exposure.json` plus every file in that
+directory, so both forms are one ledger and a row lives in exactly one of them.
+The directory exists because the single document has one append point: two
+branches that each append a row rewrite the same bytes and conflict *with each
+other* even when each merges cleanly against `main` — which is also why the merge
+queue cannot batch them. Two row files conflict with nothing. Edit a row that is
+still in the single document in place; do not move it while amending it, because
+a move plus an edit reads as neither.
+
 Amending the existing pending row is the honest move when that row already claims
 the path and its delivery is unfinished — `validate_transition`'s contract is
 omission prevention, its own wording is "an added **or materially changed**
@@ -3678,9 +3689,15 @@ emits the sealed artifact or the comp instead. `record_armed` and the
 `take_lanes` list do not — arm is document intent the capture engine reads and
 never acts on during lowering, and an unselected lane is inert document data.
 So a nested child carrying arm or a dormant lane lowers to exactly the clips a
-child without them lowers to, while a nested frozen or comped child refuses
-(`NestedFrozenTrackUnsupported`, `NestedActiveTakeUnsupported`). If you add a
-fifth state, the question to answer is "does anything substitute on this?"
+child without them lowers to, while a nested comped child refuses
+(`NestedActiveTakeUnsupported`) and a nested frozen child refuses
+(`NestedFrozenTrackUnsupported`) unless the nesting transforms nothing at all —
+no tick offset, no trimmed window, no gain, fade, fader, pan, modulation,
+tuning, groove, dynamics or chord lane, and no sample-rate conversion. A freeze
+is anchored in absolute samples and cannot follow a nesting that moves or cuts
+its child, so a transformation-free embedding is the only case where the sealed
+artifact is provably still in the right place. If you add a fifth state, the
+question to answer is "does anything substitute on this?"
 
 The fixture trap is in the other direction. `TakeLane::create` imposes **no**
 non-empty-takes requirement, so a lane holding zero takes constructs happily —
