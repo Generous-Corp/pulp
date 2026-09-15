@@ -3,7 +3,7 @@
 
 Asserts:
   * the shipped `.agents/contract.toml` parses and is schema-valid;
-  * every layer is represented and the 20 known decisions are present;
+  * every layer is represented and the 21 known decisions are present;
   * `--mode surface` returns the expected rows for a guarded fleet/CI path and
     is a clean, empty no-op for a non-fleet path (the external-contributor
     guarantee);
@@ -53,7 +53,7 @@ def test_shipped_contract_is_valid() -> None:
     print("test_shipped_contract_is_valid")
     data = dc.load_contract(CONTRACT)  # raises SchemaError on any problem
     ids = sorted(d["id"] for d in data["decision"])
-    check(len(ids) == 20, f"20 decisions present (got {len(ids)})")
+    check(len(ids) == 21, f"21 decisions present (got {len(ids)})")
     check(len(set(ids)) == len(ids), "decision ids are unique")
     layers = {d["layer"] for d in data["decision"]}
     check(layers == {"default", "pulp"}, f"both layers represented (got {layers})")
@@ -61,8 +61,8 @@ def test_shipped_contract_is_valid() -> None:
     proc = run_checker("--mode", "validate", "--json")
     check(proc.returncode == 0, "validate exits 0 on the shipped file")
     payload = json.loads(proc.stdout)
-    check(payload.get("ok") is True and payload.get("decisions") == 20,
-          "validate --json reports ok + 20 decisions")
+    check(payload.get("ok") is True and payload.get("decisions") == 21,
+          "validate --json reports ok + 21 decisions")
 
 
 def test_surface_matches_and_noops() -> None:

@@ -1054,7 +1054,10 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    not your change) vs REGRESSED (green on main, red here). Advisory +
    pre-existing red (e.g. a known-broken sanitizer lane on main) does NOT block
    the merge and is not yours to fix; only a REQUIRED + REGRESSED row needs
-   action. This alone avoids chasing main-side breakage. Its check-run query
+   action. This alone avoids chasing main-side breakage. A cancelled or
+   timed-out lane gets its own **NO-EVIDENCE** verdict, not red: it produced no
+   verdict at all, so rerun it rather than reading it, and a required
+   NO-EVIDENCE row withholds the all-clear instead of counting as a pass. Its check-run query
    must keep `gh api --paginate --slurp`, `filter=latest`, and `per_page=100`:
    bare `--paginate` concatenates page documents and breaks its single-document
    JSON decoding past 100 check runs.
