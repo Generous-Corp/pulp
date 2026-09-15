@@ -433,27 +433,29 @@ python3 tools/scripts/gpu_handoff_provenance.py resolve   # preferred: decides t
 `resolve` runs the whole sequence from a committed merge: it regenerates pinned
 to `HEAD` — a commit that already exists, because the receipt names its own
 source commit and pinning to the commit the write is about to create cannot
-converge — then decides against `--baseline` (default `origin/main`) whether
-anything actually moved, and proves the receipt binds the ledger it was written
-beside, with a control on a mutated ledger that must come back False.
+converge — then decides whether anything actually moved, and proves the receipt
+binds the ledger it was written beside with a control on a mutated ledger that
+must come back False.
 
-The branch it decides is the part that was run by hand on five consecutive
-sweeps, and it has no safe default. Regeneration *always* rewrites the receipt's
-`source_commit`, so a diff is never by itself evidence of movement:
+**The baseline is HEAD, not `origin/main`.** Regeneration always rewrites the
+receipt's `source_commit`, so a diff is never by itself evidence of movement;
+and a branch that already re-pinned its ledger differs from main *for a reason
+that is not movement*, so taking main as the baseline calls an inert merge a
+re-pin and commits the churn it was supposed to prevent. The question is only
+whether regeneration changed what HEAD committed.
 
-| Signal against the baseline | Verdict | What `resolve` does |
+| Signal | Verdict | What `resolve` does |
 |---|---|---|
-| ledger bytes differ | `MOVED` | keeps the regeneration; reports `repaired N identity fields` |
-| ledger identical, receipt differs only in `source_commit` | `CHURN` | restores the baseline's exact bytes — a `source_commit`-only rewrite claims a re-pin that did not happen, and re-collides next sweep |
-| ledger identical, receipt identical | `CLEAN` | writes nothing |
-| ledger identical, receipt differs elsewhere | refuses (exit 3) | a receipt cannot move on an unmoved ledger except at `source_commit`, so that is a human edit |
+| regeneration changes the ledger HEAD committed | `MOVED` | keeps it; reports `repaired N identity fields` |
+| ledger unchanged, HEAD's receipt already binds it | `CHURN` | keeps HEAD's bytes; writes and commits nothing |
+| ledger unchanged, HEAD's receipt does not bind it | `REBIND` | rewrites the receipt only — a text merge that took one side of the pair |
+| ledger unchanged, receipt would change in a field that cannot move on an unmoved ledger | refuses (exit 3) | that is a human edit |
 
 It also refuses (exit 2) while `MERGE_HEAD` is present or the index holds
-unmerged entries, on an unclean canonical path, on a baseline that carries
-neither file, and (exit 3) when `regenerate-me` survives regeneration — which
-means the driver poisoned a field `write` does not rewrite, and no repair
-command clears it. Add `--commit` to land the result, and `--json` for the
-verdict as data.
+unmerged entries, on an unclean canonical path, and (exit 3) when
+`regenerate-me` survives regeneration — which means the driver poisoned a field
+`write` does not rewrite, and no repair command clears it. Add `--commit` to
+land the result, and `--json` for the verdict as data.
 
 The manual form remains available and is what `resolve` performs:
 

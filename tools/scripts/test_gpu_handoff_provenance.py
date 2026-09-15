@@ -1429,20 +1429,23 @@ class MergeResolution(unittest.TestCase):
         blocked = provenance.unresolved_merge(scratch)
         self.assertIsNotNone(blocked, "an in-flight merge was reported as resolved")
 
-    def test_resolve_declines_a_baseline_that_carries_neither_file(self) -> None:
-        """Without a baseline there is no way to tell a re-pin from a move."""
+    def test_the_discriminator_is_head_not_main(self) -> None:
+        """A branch that already re-pinned is not moving; main is the wrong baseline.
 
-        buffer = io.StringIO()
-        with contextlib.redirect_stderr(buffer):
-            status = provenance.main(
-                [
-                    "--root", str(self.root),
-                    "resolve",
-                    "--baseline", "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
-                ]
-            )
-        self.assertEqual(status, 2)
-        self.assertIn("no baseline", buffer.getvalue())
+        Measured on the real branch: against `origin/main` the ledger differs
+        because this branch re-pinned it, so a merge that moved nothing read as
+        MOVED and rewrote source_commit for nothing -- a commit claiming a re-pin
+        that did not happen, which re-collides on the next sweep. The question
+        is "did regeneration change what HEAD committed", and only HEAD answers
+        it.
+        """
+
+        source = (
+            self.root / "tools/scripts/gpu_handoff_provenance.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("--baseline", source, "resolve still takes a baseline ref")
+        self.assertIn('read_revision_text(args.root, "HEAD", ledger_name)', source)
+        self.assertNotIn("args.baseline", source)
 
     def test_resolve_leaves_the_checked_in_pair_bound(self) -> None:
         """End to end on the real ledger: whatever it decides, the pair binds.
@@ -1471,7 +1474,7 @@ class MergeResolution(unittest.TestCase):
             self.skipTest(f"resolve declined on this checkout: {buffer.getvalue()}")
 
         summary = json.loads(buffer.getvalue())
-        self.assertIn(summary["verdict"], {"moved", "churn", "clean"})
+        self.assertIn(summary["verdict"], {"moved", "churn", "rebind"})
         self.assertTrue(summary["binds"], "resolve reported success on an unbound pair")
         self.assertFalse(
             summary["binding_control_binds"],
@@ -1481,6 +1484,15 @@ class MergeResolution(unittest.TestCase):
             handoff.read_text(encoding="utf-8"), receipt.read_text(encoding="utf-8")
         )
         self.assertTrue(binds, "the files resolve left on disk do not bind")
+        if summary["verdict"] == "churn":
+            # The whole point of the churn verdict: no commit is owed, because
+            # rewriting source_commit alone claims a re-pin that did not happen.
+            self.assertFalse(summary["pending"], "churn left a commit pending")
+            self.assertEqual(
+                git(self.root, "status", "--porcelain", "--", *names),
+                "",
+                "a churn resolution dirtied the checkout",
+            )
 
 
 class DriverRegistration(unittest.TestCase):

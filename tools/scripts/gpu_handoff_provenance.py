@@ -785,7 +785,6 @@ def command_resolve(args: argparse.Namespace) -> int:
     real move are both silent.
     """
 
-    baseline_ref = args.baseline
     ledger_name = relative_to_root(args.root, args.handoff)
     receipt_path = args.receipt if args.receipt is not None else args.root / RECEIPT_RELATIVE
     receipt_name = relative_to_root(args.root, receipt_path)
@@ -814,14 +813,18 @@ def command_resolve(args: argparse.Namespace) -> int:
             print(f"  {path}", file=sys.stderr)
         return 2
 
-    baseline_ledger = read_revision_text(args.root, baseline_ref, ledger_name)
-    baseline_receipt = read_revision_text(args.root, baseline_ref, receipt_name)
-    if baseline_ledger is None or baseline_receipt is None:
+    # What HEAD already committed is the baseline, not what main holds. The
+    # question this has to answer is "did anything move?", and a ledger that
+    # legitimately differs from main because this branch re-pinned it is not
+    # movement -- taking main as the baseline calls that a move and rewrites
+    # source_commit for nothing, which is the churn commit this exists to stop.
+    head_ledger = read_revision_text(args.root, "HEAD", ledger_name)
+    head_receipt = read_revision_text(args.root, "HEAD", receipt_name)
+    if head_ledger is None:
         print(
-            f"gpu-handoff-provenance: refusing to resolve: {baseline_ref} does not "
-            f"carry both {ledger_name} and {receipt_name}, so there is no baseline "
-            "to tell a re-pin from a real move. Pass --baseline with a ref that "
-            "has both.",
+            f"gpu-handoff-provenance: refusing to resolve: HEAD does not carry "
+            f"{ledger_name}, so there is nothing to compare a regeneration "
+            "against.",
             file=sys.stderr,
         )
         return 2
@@ -859,62 +862,71 @@ def command_resolve(args: argparse.Namespace) -> int:
             print(
                 f"gpu-handoff-provenance: refusing to resolve: {LEDGER_SENTINEL!r} "
                 f"survives regeneration in {name}. The merge driver poisoned a "
-                "field this tool does not regenerate; resolve that row by hand "
-                f"against {baseline_ref}.",
+                "field this tool does not regenerate; resolve that row by hand.",
                 file=sys.stderr,
             )
             return 3
 
-    ledger_moved = rendered != baseline_ledger
-    receipt_fields = changed_receipt_fields(baseline_receipt, produced_receipt)
     drifts = compare_inventory(document, inventory, identities)
+    ledger_moved = rendered != head_ledger
+    head_binds = (
+        head_receipt is not None
+        and LEDGER_SENTINEL not in head_receipt
+        and binding_proof(head_ledger, head_receipt)[0]
+    )
+    receipt_fields = changed_receipt_fields(head_receipt, produced_receipt)
 
     if ledger_moved:
         verdict = "moved"
-    elif receipt_fields is None:
-        verdict = "ambiguous"
-    elif not receipt_fields:
-        verdict = "clean"
-    elif receipt_fields <= RECEIPT_CHURN_FIELDS:
+    elif head_binds:
+        # Nothing moved and the committed pair already binds. Regenerating here
+        # would rewrite only the receipt's source_commit -- a commit that claims
+        # a re-pin that did not happen, and that re-collides next sweep for the
+        # same reason it collided on this one.
         verdict = "churn"
-    else:
+    elif receipt_fields is not None and not receipt_fields <= RECEIPT_CHURN_FIELDS | {
+        "handoff_sha256",
+        "canonical_paths",
+        "canonical_path_count",
+        "canonical_path_sha256",
+    }:
         verdict = "ambiguous"
+    else:
+        # The ledger is right and its receipt is not: a text merge that took one
+        # side of the pair, or a receipt the driver poisoned. Rebinding is the
+        # whole repair.
+        verdict = "rebind"
 
     if verdict == "ambiguous":
-        extra = sorted(receipt_fields - RECEIPT_CHURN_FIELDS) if receipt_fields else []
+        extra = sorted(receipt_fields or [])
         print(
-            "gpu-handoff-provenance: refusing to resolve: the ledger is identical to "
-            f"{baseline_ref} but its receipt differs in "
-            + (", ".join(extra) if extra else "a way this tool cannot read")
-            + ". A receipt cannot move on an unmoved ledger except at "
-            "source_commit, so this is a human edit, not merge churn; resolve it "
-            "by hand.",
+            "gpu-handoff-provenance: refusing to resolve: regeneration leaves the "
+            "ledger byte-identical to HEAD, but the receipt would change in "
+            + ", ".join(extra)
+            + " -- fields that cannot move on an unmoved ledger. That is a human "
+            "edit, not merge churn; resolve it by hand.",
             file=sys.stderr,
         )
         return 3
 
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
     if verdict == "churn":
-        # Restore the baseline's exact bytes rather than writing the
-        # regeneration. Identical identities plus a rewritten source_commit is a
-        # commit that says a re-pin happened when none did, and it re-collides
-        # on the next sweep for the same reason it collided on this one.
-        args.handoff.write_text(baseline_ledger, encoding="utf-8")
-        receipt_path.parent.mkdir(parents=True, exist_ok=True)
-        receipt_path.write_text(baseline_receipt, encoding="utf-8")
-        final_ledger, final_receipt = baseline_ledger, baseline_receipt
+        args.handoff.write_text(head_ledger, encoding="utf-8")
+        receipt_path.write_text(head_receipt or "", encoding="utf-8")
+        final_ledger, final_receipt = head_ledger, head_receipt or ""
+    elif verdict == "rebind":
+        args.handoff.write_text(head_ledger, encoding="utf-8")
+        receipt_path.write_text(produced_receipt, encoding="utf-8")
+        final_ledger, final_receipt = head_ledger, produced_receipt
     else:
         args.handoff.write_text(rendered, encoding="utf-8")
-        receipt_path.parent.mkdir(parents=True, exist_ok=True)
         receipt_path.write_text(produced_receipt, encoding="utf-8")
         final_ledger, final_receipt = rendered, produced_receipt
 
     # Whether the resolution is a change at all, as Git sees it. A verdict is
-    # about the baseline; this is about the working tree, and the two differ
-    # exactly when the merge already carried the right bytes.
-    pending = any(
-        read_revision_text(args.root, "HEAD", name) != text
-        for name, text in ((ledger_name, final_ledger), (receipt_name, final_receipt))
-    )
+    # about movement; this is about the working tree, and the two differ exactly
+    # when the merge already carried the right bytes.
+    pending = final_ledger != head_ledger or final_receipt != head_receipt
 
     binds, named, actual = binding_proof(final_ledger, final_receipt)
     # A True that cannot be False is not evidence. Prove the comparison
@@ -949,7 +961,6 @@ def command_resolve(args: argparse.Namespace) -> int:
 
     summary = {
         "verdict": verdict,
-        "baseline": baseline_ref,
         "source_commit": commit,
         "row_count": len(inventory),
         "repaired_identity_fields": len(drifts),
@@ -963,23 +974,23 @@ def command_resolve(args: argparse.Namespace) -> int:
         print(json.dumps(summary, indent=2))
         return 0
 
-    print(f"gpu-handoff-provenance: baseline {baseline_ref}, source commit {commit}")
+    print(f"gpu-handoff-provenance: source commit {commit}")
     print(f"gpu-handoff-provenance: {len(inventory)} pinned rows")
     if verdict == "moved":
         print(
             f"gpu-handoff-provenance: MOVED: repaired {len(drifts)} identity fields; "
-            "the ledger differs from the baseline, so this is a real re-pin"
+            "regeneration changed the ledger HEAD committed, so this is a real re-pin"
         )
-    elif verdict == "churn":
+    elif verdict == "rebind":
         print(
-            f"gpu-handoff-provenance: CHURN: every identity already matches "
-            f"{baseline_ref}; restored the baseline's bytes rather than committing a "
-            "source_commit-only rewrite"
+            "gpu-handoff-provenance: REBIND: the ledger is already current but its "
+            "receipt describes other bytes; rewrote the receipt only"
         )
     else:
         print(
-            f"gpu-handoff-provenance: CLEAN: already identical to {baseline_ref}; "
-            "nothing to write"
+            "gpu-handoff-provenance: CHURN: regeneration changes nothing and the "
+            "committed receipt already binds this ledger; kept HEAD's bytes rather "
+            "than committing a source_commit-only rewrite"
         )
     print(f"gpu-handoff-provenance: BINDS: {binds} (control on a mutated ledger: {control_binds})")
     if committed:
@@ -1110,11 +1121,6 @@ def build_parser() -> argparse.ArgumentParser:
     resolve = subparsers.add_parser(
         "resolve",
         help="finish a merge that collided on the ledger and receipt, or refuse",
-    )
-    resolve.add_argument(
-        "--baseline",
-        default="origin/main",
-        help="ref whose ledger and receipt distinguish a re-pin from real movement",
     )
     resolve.add_argument("--receipt", type=pathlib.Path, default=None)
     resolve.add_argument(
