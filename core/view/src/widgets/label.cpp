@@ -1434,7 +1434,7 @@ void Label::on_mouse_event(const MouseEvent& event) {
     // can extend through everything in it and nothing outside it. Using the
     // tree root instead would let a drag that started in an About panel reach
     // into a control strip.
-    View* scope = enclosing_text_selection_region();
+    View* scope = enclosing_text_selection_region(*this);
     if (scope == nullptr) {
         // `SelectionPolicy::always` outside every region — the Label is its own
         // scope, so selection stays inside it.
@@ -1472,7 +1472,7 @@ void Label::on_mouse_event(const MouseEvent& event) {
 
 bool Label::on_key_event(const KeyEvent& event) {
     if (!is_selectable() || !event.is_down) return View::on_key_event(event);
-    View* scope = enclosing_text_selection_region();
+    View* scope = enclosing_text_selection_region(*this);
     if (scope == nullptr) scope = this;
 
     const bool main_modifier =

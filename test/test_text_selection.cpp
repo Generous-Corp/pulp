@@ -412,8 +412,8 @@ TEST_CASE("a drag selects correctly in a content region away from the origin",
     const Point end{rx + 4 * kByteW, ry + 48.0f + 10.0f};
     page.simulate_drag(start, end, 6);
 
-    REQUIRE(selection_has_range(*labels[0]->enclosing_text_selection_region()));
-    REQUIRE(selection_text(*labels[0]->enclosing_text_selection_region()) ==
+    REQUIRE(selection_has_range(*enclosing_text_selection_region(*labels[0])));
+    REQUIRE(selection_text(*enclosing_text_selection_region(*labels[0])) ==
             "pha\nbravo\nchar");
 }
 
@@ -500,7 +500,7 @@ TEST_CASE("an opted-in Label outside every region is its own selection scope",
         RecordingCanvas c;
         l->paint(c);
     }
-    REQUIRE(lone_raw->enclosing_text_selection_region() == nullptr);
+    REQUIRE(enclosing_text_selection_region(*lone_raw) == nullptr);
 
     // Drag from byte 2 down INTO the neighbour's band and far to the right.
     // Past-the-end resolves by clamping to the nearest row and then to the

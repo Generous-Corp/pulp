@@ -975,7 +975,7 @@ bool TextEditor::on_key_event(const KeyEvent& event) {
                 // having been ignored. Prefer the document selection when it
                 // actually covers more than this widget; otherwise the
                 // editor's own selection is the whole answer.
-                View* scope = enclosing_text_selection_region();
+                View* scope = enclosing_text_selection_region(*this);
                 if (scope != nullptr &&
                     selection_spans_multiple_widgets(*scope) &&
                     selection_copy(*scope))
