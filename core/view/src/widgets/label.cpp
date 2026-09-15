@@ -2007,8 +2007,16 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         }
         if (text_overflow_ellipsis())
             draw_text = truncate_to_width(canvas, display_text, available_width);
-        paint_selection_line_(canvas, draw_text, draw_x,
-                              baseline_y - first_line_ascent, single_line_text_height,
+        // The ellipsis is paint, not source text. Recording its three UTF-8
+        // bytes as source offsets would make a hit on it select unrelated
+        // hidden bytes from text_. Keep only the visible source prefix in the
+        // selectable geometry, matching the multi-line clamp path below.
+        std::string selectable_line = draw_text;
+        if (draw_text != display_text && selectable_line.ends_with(kEllipsis)) {
+            selectable_line.resize(selectable_line.size() - std::string_view(kEllipsis).size());
+        }
+        paint_selection_line_(canvas, selectable_line, draw_x, baseline_y - first_line_ascent,
+                              single_line_text_height,
                               /*source_start=*/0, text_color, vertical);
         canvas.fill_text(draw_text, draw_x, baseline_y);
         decorate_plain(draw_text, draw_x, baseline_y,

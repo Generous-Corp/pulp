@@ -140,6 +140,11 @@ public:
             ((has_explicit_height && !baseline_aligned) ||
              (probe_height && intrinsic_height() == height_before));
         if (!text_geometry_is_fixed) invalidate_layout();
+        // selectable_text() already exposes the new source bytes, so geometry
+        // from the previous paint can no longer describe it honestly. Keep
+        // the capability unmeasured until the repaint records the new run.
+        selection_layout_ = {};
+        selection_layout_pending_ = {};
         request_repaint();
     }
     const std::string& text() const { return text_; }

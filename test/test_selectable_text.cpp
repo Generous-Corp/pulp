@@ -145,6 +145,30 @@ TEST_CASE("an empty Label is selectable-but-empty and not unmeasured",
     REQUIRE(selectable_index_at_point(layout, {50.0f, 10.0f}) == 0);
 }
 
+TEST_CASE("Label ellipsis geometry never invents source byte offsets",
+          "[view][widget][label][selection][ellipsis]") {
+    Label label("abcdefghij");
+    label.set_bounds({0, 0, 35, 20});
+    label.set_text_overflow_ellipsis(true);
+    label.set_selection_policy(Label::SelectionPolicy::always);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    const auto layout = label.selectable_layout();
+    REQUIRE(layout.measured);
+    REQUIRE(layout.lines.size() == 1);
+    // RecordingCanvas measures each UTF-8 byte at 7px. A 35px box therefore
+    // paints "ab" plus the three-byte ellipsis. Only "ab" exists at those
+    // painted positions in the source; the synthetic ellipsis bytes must not
+    // masquerade as source offsets 3..5.
+    REQUIRE(layout.lines.front().byte_offsets.back() == 2);
+    REQUIRE(selectable_last_index(layout) == 2);
+
+    label.set_text("x");
+    REQUIRE_FALSE(label.selectable_layout().measured);
+}
+
 TEST_CASE("a wrapped Label reports one entry per visual line",
           "[view][widget][label][selection][wrap]") {
     Label label("the quick brown fox jumps over the lazy dog");
