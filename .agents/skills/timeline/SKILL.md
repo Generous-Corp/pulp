@@ -166,10 +166,12 @@ different request with an earlier result.
   leaves flattening cut it into and multiplies with each leaf's own fade. It
   refuses only when a ramp actually reaches a leaf whose content no renderer
   scales by clip gain, because dropping that ramp would be silently wrong. A complete
-  nested media clip preserves its `TimeConform` intent, but a source window
-  that trims a conforming clip fails with `NestedConformedTrimUnsupported`
-  until playback has a conform-aware source-range mapping, and a trimmed
-  `Stretch` clip additionally needs a windowed artifact. A nested child track
+  nested media clip preserves its `TimeConform` intent. A source window that
+  trims a `Resample` clip maps onto the matching sub-span of the source under
+  the same conform function, so it lowers; one that trims a `Stretch` clip
+  still fails with `NestedConformedTrimUnsupported`, because a stretched clip's
+  audio is an artifact keyed to its authored tick range and a trimmed window
+  needs its own. A nested child track
   carrying a device chain or an automation lane fails with
   `NestedDeviceChainUnsupported` or `NestedAutomationLaneUnsupported`, and an
   absolute-anchored leaf inside a nested sequence fails with

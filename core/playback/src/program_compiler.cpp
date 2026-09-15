@@ -605,7 +605,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
                         request_->audio_limits, lowered_clip.source_frame_offset,
                         lowered_clip.placement_fades, request_->document_revision, generation_,
-                        core_->offline_stretch_cache);
+                        core_->offline_stretch_cache, lowered_clip.source_frame_phase_end);
                     ++work;
                     if (status == detail::TrackAudioClipCompileStatus::Failed) {
                         const auto detail = audio_compiler_.error();

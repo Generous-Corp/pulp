@@ -58,13 +58,21 @@ Gain and anchor-native fade durations live on the immutable Clip. Missing,
 mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.
 When sequence lowering flattens a complete nested media clip, preserve its
-authored `TimeConform` value. Reject a nested source window that trims a
-`Resample` or `Stretch` clip with `NestedConformedTrimUnsupported`; advancing a
-raw source-frame offset is valid only for unconformed media and would corrupt
-the authored phase until playback owns a conform-aware source-range mapping.
-`Stretch` needs a second thing the mapping alone does not give it: its rendered
-artifact is keyed to the clip's own authored tick range, so a trimmed window
-also needs a windowed artifact.
+authored `TimeConform` value. A window that trims a `Resample` clip is lowered,
+not refused: the leaf carries a source RANGE rather than a lone offset, as
+`LoweredClip::source_frame_offset` plus `source_frame_phase_end`, which
+`AudioClipRendererProgram` carries under the same names and
+`musical_phase_source_position` reads as the two ends of its phase map. Both
+ends come from the retained window's own fractions of the clip's authored tick
+span, because that is what the conform function says; an elapsed-samples offset
+agrees only where source frames and timeline frames happen to advance together,
+which is exactly the case a real conform is not. A zero `phase_end` means the
+media reference's own end, so an untrimmed leaf lowers to the program it always
+did.
+`Stretch` still refuses with `NestedConformedTrimUnsupported`, and the range
+does not help it: its audio is a rendered artifact keyed to the clip's own
+authored tick range, so a trimmed window needs a separately windowed artifact
+rather than a different read of the same one.
 
 Each nested refusal names one cause. A child device chain raises
 `NestedDeviceChainUnsupported`, a child automation lane raises

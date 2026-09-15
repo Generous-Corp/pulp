@@ -629,7 +629,7 @@ TEST_CASE("Nested trimming shortens an audio leaf's own fade to the new edge") {
     }
 }
 
-TEST_CASE("Nested conforming audio refuses partial source windows") {
+TEST_CASE("Nested stretched audio refuses partial source windows") {
     std::vector<float> source(24'000, 1.0f);
     const auto data = audio_data({source});
     const auto assets = pool({{{50}, data}});
@@ -645,7 +645,7 @@ TEST_CASE("Nested conforming audio refuses partial source windows") {
         TrimWindow{0, 3 * kTicksPerQuarter / 4},                    // right trim only
         TrimWindow{kTicksPerQuarter / 4, kTicksPerQuarter / 2},     // both sides
     };
-    for (const auto conform : {TimeConform::Resample, TimeConform::Stretch}) {
+    for (const auto conform : {TimeConform::Stretch}) {
         for (const auto [source_start, duration] : windows) {
             auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, source.size(), {},
                                                    conform);
@@ -677,6 +677,167 @@ TEST_CASE("Nested conforming audio refuses partial source windows") {
             REQUIRE_FALSE(store.has_value());
         }
     }
+}
+
+namespace {
+
+// A quarter note of 12'000 source frames at 48 kHz is a genuine conform: the
+// placement is 24'000 timeline frames long, so source and timeline advance at
+// different rates and a mapping that confuses them is visible rather than
+// coincidentally right.
+constexpr std::uint64_t kConformSourceFrames = 12'000;
+
+std::vector<float> conform_ramp() {
+    std::vector<float> source(kConformSourceFrames);
+    for (std::size_t frame = 0; frame < source.size(); ++frame)
+        source[frame] = static_cast<float>(frame) / static_cast<float>(kConformSourceFrames);
+    return source;
+}
+
+// `placement_source_start` doubles as the root tick so the retained window
+// covers the same root ticks it would have covered untrimmed. Anything else
+// would compare two different pieces of the child.
+std::shared_ptr<const Project> resampled_nesting(std::int64_t placement_source_start,
+                                                 std::int64_t placement_duration) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, kConformSourceFrames, {},
+                                          TimeConform::Resample);
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {track(11, {child_media})}));
+    auto root = take(Sequence::create(
+        {2}, "root", std::nullopt,
+        {track(3, {nested_clip(4, 10, placement_source_start, placement_duration,
+                               placement_source_start)})}));
+    return shared(take(Project::create(ProjectInput{
+        {1}, "resampled nesting", 100, {2},
+        {{50, "ramp", kConformSourceFrames, {48'000, 1}, hash}}, {root, child}})));
+}
+
+} // namespace
+
+TEST_CASE("Trimmed nested resampling media reads the conformed sub-span") {
+    const auto ramp = conform_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+
+    struct Geometry {
+        const char* label;
+        std::int64_t source_start;
+        std::int64_t duration;
+        double expected_offset;
+        double expected_phase_end;
+        std::int64_t render_sample;
+    };
+    const std::array geometries{
+        Geometry{"left and right trim", kTicksPerQuarter / 4, kTicksPerQuarter / 2, 3'000.0,
+                 9'000.0, 8'000},
+        Geometry{"right trim only", 0, 3 * kTicksPerQuarter / 4, 0.0, 9'000.0, 8'000},
+        Geometry{"left trim only", kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4, 3'000.0,
+                 12'000.0, 8'000},
+    };
+
+    for (const auto& geometry : geometries) {
+        INFO(geometry.label);
+        auto project = resampled_nesting(geometry.source_start, geometry.duration);
+
+        // The retained window's own fractions of the authored tick span name
+        // the source frames it reads. These are read off the geometry, not off
+        // the lowerer.
+        const auto tempo = map_120();
+        SequenceContentLowerer lowerer(*project, *tempo, 100, 100);
+        std::vector<LoweredClip> lowered;
+        REQUIRE_FALSE(
+            lowerer.begin_track(*project->find_sequence({2})->find_track({3}), lowered).error);
+        for (;;) {
+            const auto step = lowerer.step();
+            REQUIRE_FALSE(step.error);
+            if (step.complete)
+                break;
+        }
+        const auto leaf = std::find_if(lowered.begin(), lowered.end(), [](const LoweredClip& item) {
+            return std::holds_alternative<MediaRef>(item.clip.content());
+        });
+        REQUIRE(leaf != lowered.end());
+        REQUIRE(leaf->clip.time_conform() == TimeConform::Resample);
+        REQUIRE(leaf->source_frame_offset == geometry.expected_offset);
+        REQUIRE(leaf->source_frame_phase_end == geometry.expected_phase_end);
+
+        // The retained window renders exactly what the untrimmed nesting
+        // renders over the same root ticks — the conform function restricted to
+        // a sub-span is the same function.
+        CompiledFixture trimmed(project, map_120(), assets);
+        CompiledFixture whole(resampled_nesting(0, kTicksPerQuarter), map_120(), assets);
+        auto trimmed_program = trimmed.store.read();
+        auto whole_program = whole.store.read();
+        REQUIRE(trimmed_program);
+        REQUIRE(whole_program);
+
+        Output trimmed_output(1, 256);
+        Output whole_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *trimmed_program, snapshot(*trimmed_program, 256, geometry.render_sample),
+                    trimmed_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *whole_program, snapshot(*whole_program, 256, geometry.render_sample),
+                    whole_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(trimmed_output.storage == whole_output.storage);
+        // An independent reading of the same claim, derived from the geometry
+        // rather than from either render: at 120 BPM and 48 kHz the placement
+        // is 24'000 frames long, so sample 8'000 sits a third of the way
+        // through it and a conform that maps the whole source across the whole
+        // placement is reading source frame 4'000 of 12'000. The ramp carries
+        // frame/12'000, so the sample reads about a third. An elapsed-samples
+        // mapping would be reading past frame 7'000 here, which this band
+        // excludes; the band is wide because a variable-rate converter filters
+        // the ramp rather than sampling it.
+        REQUIRE(trimmed_output.storage[0][0] > 0.30f);
+        REQUIRE(trimmed_output.storage[0][0] < 0.37f);
+        // Positive control: the equality above is about two buffers that carry
+        // audio, and the ramp is strictly increasing so the window it came from
+        // is identifiable rather than merely non-silent.
+        REQUIRE(trimmed_output.storage[0][0] != 0.0f);
+        REQUIRE(trimmed_output.storage[0][255] > trimmed_output.storage[0][0]);
+
+        // Negative control: the same comparison at a different point in the
+        // ramp fails, so equality is a statement about the mapping and not
+        // about a buffer that matches everything.
+        Output displaced_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *whole_program, snapshot(*whole_program, 256, geometry.render_sample + 1'024),
+                    displaced_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(displaced_output.storage != whole_output.storage);
+    }
+}
+
+TEST_CASE("Trimmed nested resampling media rejects elapsed-sample source offsets") {
+    // The retained window of the first geometry above starts a quarter of the
+    // way into a placement that is 24'000 timeline frames long, so an elapsed
+    // -samples mapping would offset by 6'000 source frames where the conform
+    // asks for 3'000. Stating both numbers keeps the case a claim about the
+    // conform rather than a restatement of whatever the lowerer computed.
+    const auto ramp = conform_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    auto project = resampled_nesting(kTicksPerQuarter / 4, kTicksPerQuarter / 2);
+    const auto tempo = map_120();
+    SequenceContentLowerer lowerer(*project, *tempo, 100, 100);
+    std::vector<LoweredClip> lowered;
+    REQUIRE_FALSE(
+        lowerer.begin_track(*project->find_sequence({2})->find_track({3}), lowered).error);
+    for (;;) {
+        const auto step = lowerer.step();
+        REQUIRE_FALSE(step.error);
+        if (step.complete)
+            break;
+    }
+    const auto leaf = std::find_if(lowered.begin(), lowered.end(), [](const LoweredClip& item) {
+        return std::holds_alternative<MediaRef>(item.clip.content());
+    });
+    REQUIRE(leaf != lowered.end());
+    REQUIRE(leaf->source_frame_offset == 3'000.0);
+    REQUIRE(leaf->source_frame_offset != 6'000.0);
+    // A conformed window also ends early. Reading to the end of the reference
+    // is the other half of the elapsed-samples answer, and it is equally wrong.
+    REQUIRE(leaf->source_frame_phase_end == 9'000.0);
+    REQUIRE(leaf->source_frame_phase_end != static_cast<double>(kConformSourceFrames));
 }
 
 TEST_CASE("Complete nested media preserves authored time conform intent") {

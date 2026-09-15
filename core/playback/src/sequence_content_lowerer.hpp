@@ -61,6 +61,17 @@ struct LoweredClip {
     // reduce to a third. Hence a list travelling beside the clip rather than
     // extra fields inside it.
     std::vector<LoweredPlacementFade> placement_fades;
+    // Exclusive end of the source span this leaf reads, in its own source-frame
+    // domain, paired with `source_frame_offset` as the inclusive start. Zero
+    // means the leaf reads to the end of its media reference, which is every
+    // leaf a nesting did not cut and every leaf that does not conform.
+    //
+    // A conforming clip maps its whole authored source onto its whole
+    // placement, so a nesting that retains part of that placement retains the
+    // matching part of the source under the same map. No document clip can say
+    // that — narrowing the reference would re-conform the narrowed source over
+    // the whole window — so the range travels beside the clip instead.
+    double source_frame_phase_end = 0.0;
 };
 
 class SequenceContentLowerer {
