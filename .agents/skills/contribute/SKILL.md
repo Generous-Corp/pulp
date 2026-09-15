@@ -86,6 +86,38 @@ can fail on missing `std::jthread`. Pass an explicit modern SDK:
 `-DCMAKE_OSX_SYSROOT=macosx26.2`. This is a local environment workaround, not a
 change to make in the repo.
 
+### Formatting: only the lines you touched, never the whole file
+
+The tree does not round-trip under `.clang-format` and no clang-format version
+makes it: measured 2026-09-14, clang-format 21 (Xcode, CommandLineTools and
+Homebrew `llvm@21` produce byte-identical output) reflows 3,743 of the 4,415
+committed C++ files, and clang-format 19 differs from 21 on two. Existing debt
+is grandfathered; the only check is diff-scoped — the pre-push hook and the
+`Format (changed lines)` workflow run it **advisory** on the lines you touched.
+A whole-file `clang-format -i` (or `pulp fmt` on an existing file) yields
+hundreds of unrelated changed lines that a reviewer must wade through and no
+gate asked for.
+The alternative — hand-matching the surrounding style — is what people fall back
+to, and it is slow and error-prone.
+
+Use the diff-scoped wrapper instead. It formats only the hunks that differ from
+a base ref (`--lines=` per hunk), formats a brand-new file whole, and finds a
+clang-format 21 on its own from Homebrew `llvm@21`, the Xcode toolchain, or
+CommandLineTools:
+
+```bash
+tools/scripts/format_changed.sh              # rewrite touched lines vs origin/main
+tools/scripts/format_changed.sh --check      # report only; exit 1 if any touched line would change
+tools/scripts/format_changed.sh --base main  # different base
+```
+
+Exit 3 with an install hint means no clang-format was found (`brew install
+llvm@21`, or `xcode-select --install`); it is labelled INFRASTRUCTURE and the
+pre-push hook reports it as a skip, never as a formatting failure. A different
+major prints a warning and still runs — output differs on a handful of files,
+not in kind. CI pins `clang-format==21.1.8` from PyPI, measured byte-identical
+to the Xcode, CommandLineTools and Homebrew 21 binaries.
+
 ## 4. Tests ship with the fix — and must fail without it
 
 Non-negotiable in this repo. For every fix, add a test **and prove it fails
