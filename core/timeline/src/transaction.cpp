@@ -8,6 +8,7 @@
 #include "transaction_dispatch_internal.hpp"
 #include "transaction_internal.hpp"
 #include "transaction_marker_internal.hpp"
+#include "transaction_modulation_internal.hpp"
 #include "transaction_scene_internal.hpp"
 #include "transaction_note_internal.hpp"
 #include "transaction_reduction_support.hpp"
@@ -56,6 +57,7 @@ template <typename T>
 constexpr int dispatch_claims() {
     return static_cast<int>(detail::is_automation_command_type<T>) +
            static_cast<int>(detail::is_take_command_type<T>) +
+           static_cast<int>(detail::is_modulation_command_type<T>) +
            static_cast<int>(detail::is_marker_command_type<T>) +
            static_cast<int>(detail::is_scene_command_type<T>) +
            static_cast<int>(detail::is_device_command_type<T>) +
@@ -240,6 +242,15 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             project = std::move(reduced->project);
             inverses.push_back(std::move(reduced->inverse));
             dirty.push_back(reduced->dirty);
+        } else if (detail::is_modulation_command(envelope.command)) {
+            auto reduced = detail::reduce_modulation_command(project, envelope.command, transaction,
+                                                             envelope.id, allow_tombstone_restore);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
         } else if (detail::is_marker_command(envelope.command)) {
             auto reduced = detail::reduce_marker_command(project, envelope.command, transaction,
                                                          envelope.id, allow_tombstone_restore);
@@ -348,6 +359,21 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             project = ProjectEditAccess::replace_meter_map(project, meter->replacement);
             inverses.emplace_back(SetMeterMap{meter->replacement, meter->expected});
             dirty.push_back({project.id(), {}, {}, DirtyFlags::Timing});
+        } else if (const auto* tuning = std::get_if<SetProjectTuning>(&envelope.command)) {
+            if (project.tuning() != tuning->expected)
+                return fail_target(ConflictCode::ExpectedValueMismatch, project.id());
+            // Validity lives in the model, reached through the same helper
+            // Project::create applies, so a replacement the document could not
+            // have been constructed with surfaces as a model failure here.
+            auto next_project = ProjectEditAccess::replace_tuning(project, tuning->replacement);
+            if (!next_project)
+                return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
+            project = std::move(next_project).value();
+            inverses.emplace_back(SetProjectTuning{tuning->replacement, tuning->expected});
+            // Retuning changes what every note means in pitch, not in time, but
+            // the project owns no finer flag than Content for that.
+            dirty.push_back({project.id(), {}, {}, DirtyFlags::Content});
         } else if (const auto* create = std::get_if<CreateAsset>(&envelope.command)) {
             const detail::OwnedIdentity identity{create->asset.id,
                                                  expected_location(ItemKind::Asset, project, {})};
