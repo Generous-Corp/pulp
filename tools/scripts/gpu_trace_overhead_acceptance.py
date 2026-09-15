@@ -144,9 +144,15 @@ A2T_INTEGRATED_PATCH_EQUIVALENT = "bc1cfaa0aacc881da4c3753ca9d3862f55b571c9"
 # further.
 A2T_SCOPE_HISTORY_LIMIT = 512
 
-# The share of the limit that may be consumed before the headroom guard fails,
-# chosen so the remaining room is months of ordinary traffic rather than days.
-A2T_SCOPE_HISTORY_HEADROOM_RATIO = 0.75
+# How many paths the derived A2T scope may carry. Unlike the stamp and producer
+# bounds this shares the history limit's growth shape -- the scope widens as
+# surfaces are added, and nothing announces the approach -- so it carries the
+# same headroom guard. It measured 63 of 128 on 2026-09-15.
+A2T_SCOPE_PATH_LIMIT = 128
+
+# The share of either A2T limit that may be consumed before its headroom guard
+# fails, chosen so the remaining room is months of ordinary traffic, not days.
+A2T_SCOPE_HEADROOM_RATIO = 0.75
 A2T_SEMANTIC_IDENTIFIERS = (
     "pulp.trace-gpu-analysis.v1",
     "pulp_gpu_startup_breakdown",
@@ -195,6 +201,12 @@ A2T_PRODUCER_AUTHORITY_SOURCE_PATHS = {A3_SCOPE_AUTHORITY_PATH}
 PRODUCT_PRODUCER_ROOTS = (
     "core/runtime", "core/render", "core/view", "core/format", "inspect",
 )
+# How many product source files may carry a PULP_TRACE_ call site before
+# discovery is treated as unbounded. This one tracks how widely the product is
+# instrumented, so it climbs only when trace call sites are added: 5 at the
+# scope base and 6 at HEAD on 2026-09-15. Far enough from the limit that naming
+# it is the whole fix.
+PRODUCT_PRODUCER_DISCOVERY_LIMIT = 128
 PRODUCER_SOURCE_ANNOTATION = '"gpu_evidence_id"'
 PRODUCT_TRACE_MACROS = {
     "PULP_TRACE_SCOPE",
@@ -279,6 +291,12 @@ HUMAN_REVIEW_SCHEMA_PATH = (
 HUMAN_REVIEW_PATH_PREFIX = "docs/validation/gpu-trace-overhead/human-reviews/"
 HUMAN_REVIEW_MAX_BYTES = 256 * 1024
 PROVIDER_MANIFEST_PATH = "tools/deps/manifest.json"
+# A generation stamp holds one asset digest and nothing else, so this rejects a
+# file that is something else entirely rather than bounding a growing quantity.
+# A sha256 hex digest is 64 characters whatever the asset, so the real content is
+# 65 bytes with its newline and cannot grow. Fixed by construction: no headroom
+# guard applies, and raising it would only widen what counts as a stamp.
+PROVIDER_STAMP_MAX_BYTES = 128
 SKIA_PROVIDER_TOP_LEVEL = frozenset({
     ".skia-asset-sha256", "VERSION.md", "build", "include", "lib",
     "modules", "share",
@@ -1664,7 +1682,7 @@ def _provider_generation_authority(
     manifest_sha256, pinned_digests = _pinned_provider_asset_digests(
         dependency_name
     )
-    if len(stamp_bytes) > 128 or asset_sha256 not in pinned_digests:
+    if len(stamp_bytes) > PROVIDER_STAMP_MAX_BYTES or asset_sha256 not in pinned_digests:
         raise ValueError(
             f"{dependency_name} provider generation is not pinned by the manifest"
         )
@@ -2925,7 +2943,10 @@ def _product_producer_paths(
         line.removeprefix(prefix) for line in completed.stdout.splitlines()
         if line.startswith(prefix)
     }
-    if len(candidates) > 128 or any(path not in tracked for path in candidates):
+    if (
+        len(candidates) > PRODUCT_PRODUCER_DISCOVERY_LIMIT
+        or any(path not in tracked for path in candidates)
+    ):
         raise ValueError(f"product GPU producer discovery at {revision} is unsafe or unbounded")
     producers: dict[str, tuple[str, ...]] = {}
     for path in candidates:
@@ -3271,7 +3292,7 @@ def authoritative_a2t_scope_paths(
         repository, source_revision, producer_paths
     )
     paths = (accepted_paths | A2T_FIXED_SCOPE_PATHS | discovered) - producer_paths
-    if len(paths) > 128 or any(
+    if len(paths) > A2T_SCOPE_PATH_LIMIT or any(
         path not in base_tracked and path not in source_tracked for path in paths
     ):
         raise ValueError("derived A2T scope is missing, unsafe, or unbounded")
@@ -3491,7 +3512,22 @@ def a2t_scope_history_headroom(
         "count": count,
         "limit": A2T_SCOPE_HISTORY_LIMIT,
         "headroom": A2T_SCOPE_HISTORY_LIMIT - count,
-        "budget": int(A2T_SCOPE_HISTORY_LIMIT * A2T_SCOPE_HISTORY_HEADROOM_RATIO),
+        "budget": int(A2T_SCOPE_HISTORY_LIMIT * A2T_SCOPE_HEADROOM_RATIO),
+    }
+
+
+def a2t_scope_path_headroom(
+    repository: Path, source_revision: str
+) -> dict[str, Any]:
+    """Report the derived A2T scope path count against its bounded limit."""
+    paths, _accepted, _external = authoritative_a2t_scope_paths(
+        repository, source_revision
+    )
+    return {
+        "count": len(paths),
+        "limit": A2T_SCOPE_PATH_LIMIT,
+        "headroom": A2T_SCOPE_PATH_LIMIT - len(paths),
+        "budget": int(A2T_SCOPE_PATH_LIMIT * A2T_SCOPE_HEADROOM_RATIO),
     }
 
 

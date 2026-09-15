@@ -1111,10 +1111,37 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             headroom["count"], headroom["budget"],
             f"A2T scope-touching history is at {headroom['count']} revisions of "
             f"a {headroom['limit']} limit, past the "
-            f"{MODULE.A2T_SCOPE_HISTORY_HEADROOM_RATIO:.0%} mark. Raise "
+            f"{MODULE.A2T_SCOPE_HEADROOM_RATIO:.0%} mark. Raise "
             "A2T_SCOPE_HISTORY_LIMIT in gpu_trace_overhead_acceptance.py, and "
             "re-measure the verifier's row in test_ctest_measured_budgets.py "
             "first: the walk costs about 49ms a revision and the suite runs four.",
+        )
+
+    def test_scope_path_count_keeps_headroom_under_its_limit(self):
+        """The scope-path limit must be raised before surfaces reach it.
+
+        Same growth shape as the history bound and the same silent ending: the
+        derived scope widens as surfaces are added, and the limit announces
+        nothing until a configure fails on it. Measured against the derived
+        scope rather than the manifest, so a scope that grows past its limit
+        fails here whether or not the manifest has been regenerated.
+        """
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        headroom = MODULE.a2t_scope_path_headroom(ROOT, head)
+        # Positive control: discovery against an empty or unreadable tree yields
+        # no paths, and zero satisfies the maximum below while proving nothing
+        # was measured.
+        self.assertGreater(
+            headroom["count"], 0,
+            "derived A2T scope is empty: discovery measured nothing, so the "
+            "bound below proves nothing",
+        )
+        self.assertLessEqual(
+            headroom["count"], headroom["budget"],
+            f"derived A2T scope is at {headroom['count']} paths of a "
+            f"{headroom['limit']} limit, past the "
+            f"{MODULE.A2T_SCOPE_HEADROOM_RATIO:.0%} mark. Raise "
+            "A2T_SCOPE_PATH_LIMIT in gpu_trace_overhead_acceptance.py.",
         )
 
     def test_scope_manifest_matches_authoritative_current_path_contract(self):
