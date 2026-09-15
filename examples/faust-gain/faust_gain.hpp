@@ -1,6 +1,6 @@
 #pragma once
 
-#include "generated_gain.hpp"
+#include "reference_gain.hpp"
 #include <pulp/dsl/faust_processor.hpp>
 
 namespace pulp::examples {

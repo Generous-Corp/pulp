@@ -1,5 +1,5 @@
 # FaustGain — FAUST DSL gain example
-# Validates: FAUST offline codegen → Processor → headless test
+# Validates: Pulp reference DSP → FaustProcessor → headless test
 
 if(PULP_BUILD_TESTS)
     add_executable(pulp-faust-gain-test test_faust_gain.cpp)
