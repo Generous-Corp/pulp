@@ -316,6 +316,17 @@ pulp_add_test_suite(pulp-test-timeline-dynamics-lane
 pulp_add_test_suite(pulp-test-timeline-midi-expression-commands
     SOURCES test_timeline_midi_expression_commands.cpp
     LIBRARIES pulp::timeline)
+# Document tuning on both its owners, and the region edit that makes a section
+# role correctable by the writer profile that authored it.
+pulp_add_test_suite(pulp-test-timeline-tuning-region-commands
+    SOURCES test_timeline_tuning_region_commands.cpp
+    LIBRARIES pulp::timeline)
+# Track-owned modulation sources and macros: the insert/remove pair, the whole
+# value gate, the narrow position gate beside it, and the identity pinning that
+# keeps a Modify from performing the removal a proposal writer is denied.
+pulp_add_test_suite(pulp-test-timeline-modulation-commands
+    SOURCES test_timeline_modulation_commands.cpp
+    LIBRARIES pulp::timeline)
 # The groove a sequence plays with, carried on the same contract: the swing and
 # step-table transform, the document type and its migrations, and the read side
 # that resolves a groove only for a renderer that declared it.
