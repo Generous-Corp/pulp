@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import re
 import subprocess
@@ -88,7 +89,20 @@ WRITER_PROFILE_SOURCE = "tools/timeline/src/writer_profile.cpp"
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# The ledger has two on-disk forms and the checker reads either, or both at
+# once. The single document is the original form; the directory is one file per
+# row. A single document has one append point, so two branches that each add a
+# row rewrite the same bytes and conflict *with each other* even when each
+# merges cleanly against main — which also makes the merge queue refuse to batch
+# them. One file per row gives two such branches disjoint paths. Both forms are
+# read during the migration so moving the already-merged rows is a separate,
+# mechanical change that does not have to happen on the same day.
 LEDGER_PATH = "docs/status/sequencer-exposure.json"
+LEDGER_DIR = "docs/status/sequencer-exposure"
+LEDGER_HEADER_PATH = f"{LEDGER_DIR}/ledger.json"
+LEDGER_ROWS_DIR = f"{LEDGER_DIR}/rows"
+LEDGER_TOMBSTONES_DIR = f"{LEDGER_DIR}/tombstones"
+HEADER_KEYS = ("schema_version", "ledger_id", "audit")
 E0_INFRASTRUCTURE_PATHS = {
     LEDGER_PATH,
     "tools/scripts/sequencer_exposure_check.py",
@@ -955,12 +969,15 @@ def validate_tombstone_provenance(
         if problem:
             errors.append(problem)
             continue
-        snapshot = _read_commit_path(
-            repo_root, merge, LEDGER_PATH, "sequencer_tombstone_snapshot"
+        comparison = resolve_git_comparison(
+            repo_root, merge, merge, source="sequencer_tombstone_snapshot"
+        )
+        snapshot_ledger, _, snapshot_errors, snapshot = _read_ledger_at_anchor(
+            repo_root, comparison
         )
         if snapshot.status == "path_absent":
             errors.append(
-                f"{where}: removal snapshot does not contain {LEDGER_PATH}"
+                f"{where}: removal snapshot does not contain the ledger"
             )
             continue
         if snapshot.status != "available":
@@ -969,10 +986,9 @@ def validate_tombstone_provenance(
                 + git_comparison_receipt(snapshot)
             )
             continue
-        try:
-            snapshot_ledger = json.loads(snapshot.content or "")
-        except json.JSONDecodeError as error:
-            errors.append(f"{where}: removal snapshot ledger is invalid JSON: {error}")
+        if snapshot_errors or not isinstance(snapshot_ledger, dict):
+            for problem in snapshot_errors or ["removal snapshot ledger is unreadable"]:
+                errors.append(f"{where}: {problem}")
             continue
         tombstone_id = tombstone.get("id")
         snapshot_live_ids = {
@@ -1149,7 +1165,7 @@ def validate_transition(
     watched = _exclusively_owned_paths(base, current)
     sequencer_changes = sorted(
         path for path in changed
-        if path not in E0_INFRASTRUCTURE_PATHS and
+        if not is_ledger_path(path) and path not in E0_INFRASTRUCTURE_PATHS and
         (
             is_sequencer_owned_path(path) or
             path in watched or
@@ -1290,13 +1306,15 @@ def _load_base_transition_with_receipt(
             f"{' '.join(diff.stderr.strip().split())[:512]}"
         ], comparison
     changed_paths = [path for path in diff.stdout.split("\0") if path]
-    shown = read_git_path(repo_root, comparison, LEDGER_PATH)
+    base_document, _, ledger_errors, shown = _read_ledger_at_anchor(repo_root, comparison)
     if shown.status == "path_absent":
         # Bootstrap is valid only because the current ledger itself is new in the diff.
-        if LEDGER_PATH not in changed_paths:
+        if not _ledger_fragment_paths(changed_paths):
             errors.append(
-                f"transition: base lacks {LEDGER_PATH} and this change does not add it"
+                "transition: base carries no ledger and this change does not add one"
             )
+        # The comparison itself resolved; only the ledger is absent from it. The
+        # caller still needs a usable anchor to read trailers and added semantics.
         return None, changed_paths, errors, comparison
     if shown.status != "available":
         errors.append(
@@ -1304,10 +1322,8 @@ def _load_base_transition_with_receipt(
             + git_comparison_receipt(shown)
         )
         return None, changed_paths, errors, shown
-    try:
-        base_document = json.loads(shown.content or "")
-    except json.JSONDecodeError as error:
-        errors.append(f"transition: base ledger is invalid JSON: {error}")
+    errors.extend(f"transition: base {problem}" for problem in ledger_errors)
+    if ledger_errors:
         base_document = None
     return base_document, changed_paths, errors, shown
 
@@ -1376,6 +1392,259 @@ def _semantic_added_paths(
     return matched, errors
 
 
+def is_ledger_path(path: str) -> bool:
+    """Return whether a repository path is part of the ledger itself.
+
+    The ledger records what a change exposes; it is not itself a sequencer
+    surface, so a change to it never demands a row covering it. The directory
+    form spreads the same document over many files, and every one of them is
+    the ledger.
+    """
+    return (
+        path == LEDGER_PATH
+        or path == LEDGER_DIR
+        or path.startswith(f"{LEDGER_DIR}/")
+    )
+
+
+def _fragment_role(path: str) -> str | None:
+    """Classify one ledger file, or None when the path is not a ledger file."""
+    if path == LEDGER_PATH:
+        return "document"
+    if path == LEDGER_HEADER_PATH:
+        return "header"
+    for directory, role in ((LEDGER_ROWS_DIR, "row"), (LEDGER_TOMBSTONES_DIR, "tombstone")):
+        prefix = f"{directory}/"
+        if path.startswith(prefix):
+            remainder = path[len(prefix):]
+            return role if remainder and "/" not in remainder else "stray"
+    if path.startswith(f"{LEDGER_DIR}/"):
+        return "stray"
+    return None
+
+
+def assemble_ledger(fragments: list[tuple[str, str]]) -> tuple[Any | None, dict[str, str],
+                                                               list[str]]:
+    """Assemble one ledger document from the files that carry it.
+
+    Returns the document, a map from each assembled row/tombstone position to the
+    file it came from, and any assembly error. A repository carrying only the
+    single legacy document yields it verbatim, so the split layout adds no
+    behaviour to a repository that has not adopted it. Where both forms are
+    present the rows are the union: the legacy document keeps the rows already
+    merged while a new row lands as its own file. Two sources claiming the same
+    row ID, or two headers, are errors rather than a silent winner — a ledger
+    that reads differently depending on which copy you look at is worse than one
+    that refuses to read.
+    """
+    errors: list[str] = []
+    origins: dict[str, str] = {}
+    parsed_by_path: dict[str, Any] = {}
+    roles: dict[str, str] = {}
+    for path, text in sorted(fragments):
+        role = _fragment_role(path)
+        if role is None:
+            continue
+        if role == "stray":
+            errors.append(
+                f"ledger: {path} is not a ledger file; a row belongs in "
+                f"{LEDGER_ROWS_DIR}/<id>.json and a tombstone in "
+                f"{LEDGER_TOMBSTONES_DIR}/<id>.json"
+            )
+            continue
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as error:
+            errors.append(f"ledger: {path} is invalid JSON: {error}")
+            continue
+        if not isinstance(parsed, dict):
+            errors.append(f"ledger: {path} must contain a JSON object")
+            continue
+        parsed_by_path[path] = parsed
+        roles[path] = role
+
+    document_source = parsed_by_path.get(LEDGER_PATH)
+    header_source = parsed_by_path.get(LEDGER_HEADER_PATH)
+    split_paths = [path for path, role in roles.items() if role in {"row", "tombstone"}]
+    if document_source is None and header_source is None and not split_paths:
+        if not errors:
+            errors.append(
+                f"ledger: neither {LEDGER_PATH} nor {LEDGER_DIR}/ carries a ledger"
+            )
+        return None, origins, errors
+    if document_source is not None and header_source is not None:
+        errors.append(
+            f"ledger: {LEDGER_PATH} and {LEDGER_HEADER_PATH} both carry the ledger header; "
+            "exactly one may"
+        )
+        return None, origins, errors
+    if document_source is not None and not split_paths:
+        # Nothing has adopted the split layout, so the document is the ledger.
+        origins["document"] = LEDGER_PATH
+        return document_source, origins, errors
+
+    if header_source is not None:
+        document = dict(header_source)
+        origins["header"] = LEDGER_HEADER_PATH
+        rows: list[Any] = []
+        tombstones: list[Any] = []
+        for key in ("rows", "tombstones"):
+            if key in header_source:
+                errors.append(
+                    f"ledger: {LEDGER_HEADER_PATH} must not carry {key}; each one is its own "
+                    f"file under {LEDGER_DIR}/"
+                )
+                document.pop(key, None)
+    else:
+        assert document_source is not None
+        document = {key: value for key, value in document_source.items()
+                    if key not in {"rows", "tombstones"}}
+        origins["header"] = LEDGER_PATH
+        rows = []
+        tombstones = []
+        for key, container in (("rows", rows), ("tombstones", tombstones)):
+            existing = document_source.get(key)
+            if not isinstance(existing, list):
+                errors.append(f"ledger.{key}: expected array in {LEDGER_PATH}")
+                continue
+            for index, item in enumerate(existing):
+                container.append(item)
+                origins[f"{key}[{len(container) - 1}]"] = f"{LEDGER_PATH}#{key}[{index}]"
+
+    # Seeded with whatever the single document already carries, so a row that is
+    # in both forms is caught rather than silently duplicated.
+    seen: dict[tuple[str, Any], str] = {}
+    for key, container in (("rows", rows), ("tombstones", tombstones)):
+        for item in container:
+            if isinstance(item, dict) and _is_nonempty_string(item.get("id")):
+                seen.setdefault((key, item["id"]), LEDGER_PATH)
+    for path in sorted(split_paths):
+        parsed = parsed_by_path[path]
+        role = roles[path]
+        key = "rows" if role == "row" else "tombstones"
+        container = rows if role == "row" else tombstones
+        stem = PurePosixPath(path).name
+        if not stem.endswith(".json"):
+            errors.append(f"ledger: {path} must be a .json file")
+            continue
+        expected_id = stem[: -len(".json")]
+        actual_id = parsed.get("id")
+        if actual_id != expected_id:
+            errors.append(
+                f"ledger: {path} declares id {actual_id!r}; a ledger file is named for the "
+                f"row it carries, so its name requires {expected_id!r}"
+            )
+            continue
+        previous = seen.get((key, expected_id))
+        if previous is not None:
+            errors.append(f"ledger: {expected_id!r} is carried by both {previous} and {path}")
+            continue
+        seen[(key, expected_id)] = path
+        container.append(parsed)
+        origins[f"{key}[{len(container) - 1}]"] = path
+
+    for key, container in (("rows", rows), ("tombstones", tombstones)):
+        document[key] = container
+    return document, origins, errors
+
+
+def _ledger_fragment_paths(paths: list[str]) -> list[str]:
+    return [path for path in paths if _fragment_role(path) is not None]
+
+
+def load_ledger_from_worktree(
+    repo_root: Path, document_path: Path | None = None, directory: Path | None = None
+) -> tuple[Any | None, dict[str, str], list[str]]:
+    """Read every ledger file present in the working tree and assemble them."""
+    document_path = document_path or repo_root / LEDGER_PATH
+    directory = directory or repo_root / LEDGER_DIR
+    fragments: list[tuple[str, str]] = []
+    errors: list[str] = []
+    if document_path.is_file():
+        try:
+            fragments.append((LEDGER_PATH, document_path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError) as error:
+            errors.append(f"ledger: cannot read {document_path}: {error}")
+    if directory.is_dir():
+        for candidate in sorted(directory.rglob("*")):
+            if not candidate.is_file():
+                continue
+            relative = PurePosixPath(
+                LEDGER_DIR, *candidate.relative_to(directory).parts
+            ).as_posix()
+            try:
+                fragments.append((relative, candidate.read_text(encoding="utf-8")))
+            except (OSError, UnicodeDecodeError) as error:
+                errors.append(f"ledger: cannot read {relative}: {error}")
+    document, origins, assembly_errors = assemble_ledger(fragments)
+    return document, origins, errors + assembly_errors
+
+
+def _read_ledger_at_anchor(
+    repo_root: Path, comparison: GitComparisonProvenance
+) -> tuple[Any | None, dict[str, str], list[str], GitComparisonProvenance]:
+    """Assemble the ledger as it stood at a proven git anchor.
+
+    History is immutable, so a snapshot predating the split still carries the
+    single document and a snapshot after it carries the directory. Reading both
+    forms is therefore permanent, not transitional.
+    """
+    receipt = read_git_path(repo_root, comparison, LEDGER_PATH)
+    fragments: list[tuple[str, str]] = []
+    errors: list[str] = []
+    if receipt.status == "available":
+        fragments.append((LEDGER_PATH, receipt.content or ""))
+    elif receipt.status != "path_absent":
+        return None, {}, [], receipt
+    anchor = comparison.comparison_anchor
+    listed = _git(
+        repo_root, "ls-tree", "-r", "-z", "--name-only", str(anchor), "--", f"{LEDGER_DIR}/"
+    )
+    if listed.returncode != 0:
+        detail = " ".join(listed.stderr.strip().split())[:512]
+        return None, {}, [f"ledger: cannot list {LEDGER_DIR}/ at {anchor}: {detail}"], receipt
+    for name in (path for path in listed.stdout.split("\0") if path):
+        shown = read_git_path(repo_root, comparison, name)
+        if shown.status != "available":
+            return None, {}, [], shown
+        fragments.append((name, shown.content or ""))
+    if not fragments:
+        return None, {}, errors, dataclasses.replace(
+            receipt, status="path_absent", content=None
+        )
+    read_paths = [name for name, _ in fragments]
+    assembled_path = read_paths[0] if len(read_paths) == 1 else LEDGER_DIR
+    document, origins, assembly_errors = assemble_ledger(fragments)
+    return document, origins, errors + assembly_errors, dataclasses.replace(
+        receipt, status="available", path=assembled_path, content=None
+    )
+
+
+def _print_origin_legend(errors: list[str], origins: dict[str, str]) -> None:
+    """Name the file behind every assembled position an error mentions.
+
+    A row is reported by its position in the assembled document, which is not a
+    file when the ledger is a directory of rows. Printing the mapping for the
+    positions that actually failed keeps the error actionable without making the
+    common case noisier.
+    """
+    if not origins:
+        return
+    cited = sorted(
+        {
+            position
+            for position in origins
+            if position not in {"document", "header"}
+            and any(f"ledger.{position}" in error for error in errors)
+        }
+    )
+    if not cited:
+        return
+    print("sequencer exposure check: the failing rows come from", file=sys.stderr)
+    for position in cited:
+        print(f"- ledger.{position}: {origins[position]}", file=sys.stderr)
+
+
 def _load_json(path: Path) -> Any:
     with path.open(encoding="utf-8") as stream:
         return json.load(stream)
@@ -1385,7 +1654,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     default_root = Path(__file__).resolve().parents[2]
     parser.add_argument("--repo-root", type=Path, default=default_root)
-    parser.add_argument("--ledger", type=Path)
+    parser.add_argument(
+        "--ledger", type=Path,
+        help="the single legacy ledger document (defaults to docs/status/sequencer-exposure.json)",
+    )
+    parser.add_argument(
+        "--ledger-dir", type=Path,
+        help="the per-row ledger directory (defaults to docs/status/sequencer-exposure)",
+    )
     parser.add_argument(
         "--schema",
         type=Path,
@@ -1397,12 +1673,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
-    ledger = args.ledger or repo_root / "docs/status/sequencer-exposure.json"
     schema_path = args.schema or repo_root / "docs/status/sequencer-exposure.schema.json"
-    try:
-        document = _load_json(ledger)
-    except (OSError, json.JSONDecodeError) as error:
-        print(f"sequencer exposure check: cannot read {ledger}: {error}", file=sys.stderr)
+    document, origins, load_errors = load_ledger_from_worktree(
+        repo_root, args.ledger, args.ledger_dir
+    )
+    if load_errors or document is None:
+        print("sequencer exposure check: FAILED", file=sys.stderr)
+        for error in load_errors or ["ledger: no ledger could be assembled"]:
+            print(f"- {error}", file=sys.stderr)
         return 1
     try:
         schema = _load_json(schema_path)
@@ -1469,6 +1747,7 @@ def main(argv: list[str] | None = None) -> int:
         print("sequencer exposure check: FAILED", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
+        _print_origin_legend(errors, origins)
         return 1
     print(f"sequencer exposure check: OK ({len(document['rows'])} rows, "
           f"{len(document['tombstones'])} tombstones)")
