@@ -472,6 +472,16 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-gate-supervisor PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 30)
+        # The advisory diff-scoped clang-format gate must never report a missing
+        # binary as a formatting failure. Asserts the pre-push, gates.sh and CI
+        # wiring keep exit 3 (infrastructure) apart from exit 1 (verdict) and pin
+        # the CI binary to the measured-identical clang-format 21.
+        add_test(NAME prepush-format-gate-wiring
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_format_gate.py)
+        set_tests_properties(prepush-format-gate-wiring PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 30)
     endif()
     add_test(NAME wasm-skia-slice-invariants
         COMMAND ${PULP_PYTHON3_FOR_TESTS}
@@ -542,6 +552,14 @@ if(UNIX)
     add_test(NAME contributor-check
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_contributor_check.sh)
     set_tests_properties(contributor-check PROPERTIES TIMEOUT 120)
+    # format_changed.sh is the only formatter invocation that does not rewrite
+    # untouched lines (the tree does not round-trip under .clang-format), so
+    # its hunk-to---lines plumbing is what must not rot. Drives a fake
+    # clang-format in throwaway repos; no real formatter, no dependency on
+    # this checkout's state.
+    add_test(NAME format-changed-selftest
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_format_changed.sh)
+    set_tests_properties(format-changed-selftest PROPERTIES TIMEOUT 120)
     # worktree_lineage.sh is how every agent discovers whether a checkout is
     # safe to remove, so a wrong row is a deletion hazard. Builds a throwaway
     # repo and asserts each emitted column against the config it renders.

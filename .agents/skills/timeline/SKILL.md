@@ -231,8 +231,11 @@ missing here or carries the wrong result kind.
   still fails with `NestedConformedTrimUnsupported`, because a stretched clip's
   audio is an artifact keyed to its authored tick range and a trimmed window
   needs its own. A nested child track
-  carrying a device chain or an automation lane fails with
-  `NestedDeviceChainUnsupported` or `NestedAutomationLaneUnsupported`, and an
+  carrying a device chain fails with `NestedDeviceChainUnsupported`; one
+  automating its pan fails with `NestedAutomationPanUnsupported`, and one
+  automating its gain with `NestedAutomationGainEventLeafUnsupported` or
+  `NestedAutomationGainMediaUnsupported` according to whether the leaf that
+  curve reaches consumes clip gain. An
   absolute-anchored leaf inside a nested sequence fails with
   `NestedAbsoluteChildUnsupported`; each names its own cause rather than
   sharing one umbrella code. Expansion

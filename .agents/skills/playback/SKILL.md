@@ -75,9 +75,16 @@ authored tick range, so a trimmed window needs a separately windowed artifact
 rather than a different read of the same one.
 
 Each nested refusal names one cause. A child device chain raises
-`NestedDeviceChainUnsupported`, a child automation lane raises
-`NestedAutomationLaneUnsupported`, and an absolute-anchored leaf inside a
-nested sequence raises `NestedAbsoluteChildUnsupported`. Do not reach for one
+`NestedDeviceChainUnsupported`, and an absolute-anchored leaf inside a nested
+sequence raises `NestedAbsoluteChildUnsupported`. A child automation lane
+raises one of three, because the constructs that would lift them differ: an
+automated pan raises `NestedAutomationPanUnsupported` on entry to the child
+track, since no leaf carries a stereo placement at any level. An automated gain
+travels to the leaf and is answered by the leaf's own kind — a leaf that reads
+no clip gain raises `NestedAutomationGainEventLeafUnsupported` and needs a
+renderer that scales it before any envelope would matter, while one that does
+read clip gain raises `NestedAutomationGainMediaUnsupported` and needs only
+that `ClipPlaybackProperties::gain_linear` stop being a lone scalar. Do not reach for one
 code to cover several constructs: the code is what tells an author which
 construct is missing, and a generic one hides that. Two guards in
 `validate_reference` are deliberately not capability codes — a nesting depth
