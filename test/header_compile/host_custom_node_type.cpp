@@ -1,10 +1,16 @@
 #include <pulp/host/custom_node_type.hpp>
+#include <pulp/host/sample_kernel.hpp>
 
 #include <type_traits>
 
 static_assert(std::is_default_constructible_v<pulp::host::CustomNodeType>);
 static_assert(std::is_copy_constructible_v<pulp::host::CustomNodeTypeMetadata>);
 static_assert(std::is_copy_assignable_v<pulp::host::CustomNodeTypeMetadata>);
+static_assert(std::is_default_constructible_v<pulp::host::SampleKernelDescriptor>);
+static_assert(
+    std::is_same_v<pulp::host::SampleKernelProcessFn,
+                   void (*)(void*, const pulp::host::PreparedSampleKernelConfig&,
+                            const pulp::host::SampleFrameContext&, const float*, float*) noexcept>);
 
 // Preserve the historical positional prefix. Metadata discovery is a separate
 // type so adding it cannot shift aggregate registrar fields.
