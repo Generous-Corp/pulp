@@ -44,6 +44,11 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   MIDI Files; keep the dependency-minimal model on `Pulp::timeline`.
 - Use the generated schema surfaces to discover command/document shapes; do
   not hand-copy schema vocabularies into a client.
+- Use the **live control plane** when the sequencer you need to read or edit is
+  already running inside a host, rather than sitting on disk as a document. The
+  timeline surfaces above all open a project; `dev.pulp.sequencer/state.read@1`
+  and `dev.pulp.sequencer/state.edit@1` reach a live `SequencerStateChannel` in
+  a running instance and open nothing. See "Live sequencer control operations".
 
 Start with `project_open` or `seq validate` when the source is unfamiliar.
 MCP `project_open` returns a bounded process-local `session_id`; use that
@@ -84,6 +89,60 @@ A retry token is only honoured for the request it first named. Reusing one
 with different commands, or with a different `expected_revision`, is refused
 as `transaction_id_collision`, because the alternative is answering a
 different request with an earlier result.
+
+## Live sequencer control operations
+
+A running host's step grid is reachable through the same unified control
+platform as every other Pulp capability -- no bespoke sequencer verb, no new
+transport. Two typed operations are registered, both gated on their own
+capability and both bound to the host-main executor:
+
+| Operation | Capability | Result | Profiles |
+|---|---|---|---|
+| `dev.pulp.sequencer/state.read@1` | `sequencer.state.read` | `response` | observe, develop |
+| `dev.pulp.sequencer/state.edit@1` | `sequencer.state.edit` | `receipt` | develop |
+
+`state.read` copies the UI-side published snapshot and the seqlock playhead out
+of the channel; `pattern`, `include_snapshot`, and `include_playhead` bound what
+comes back, and the response carries `epoch`, `engine_sequence`, and
+`resync_required_epoch` so a client can tell a fresh read from a stale one.
+`state.edit` encodes exactly one typed step-grid command -- `set-cell`, `clear`
+(scoped `cell`/`lane`/`pattern`/`all`), `randomize-lane`, `set-pattern-length`,
+or `switch-pattern` -- and submits it to the single-producer command FIFO,
+returning `receipt_id`, `applied`, and `client_sequence`. `gesture_phase` groups
+a drag into one undoable gesture the way a parameter gesture does.
+
+Three things about these operations are not obvious from their schemas:
+
+- **The host-main binding is load-bearing, not incidental.** `SequencerStateChannel`
+  is strictly single-producer/single-consumer per side and exactly one UI-side
+  consumer may own the applied-echo queue. Called off the host main thread both
+  operations refuse with `HostUnavailable` rather than racing that cursor, and
+  the refused edit never reaches the FIFO. A background binding would compile
+  and pass every functional test.
+- **A full command FIFO is a typed refusal, never a drop.** `state.edit` returns
+  `ResourceExhausted` with an after-backoff retry hint when the queue is full;
+  draining a slot makes the next submission succeed. Treat it as backpressure,
+  not as failure.
+- **These are not timeline-document operations.** They edit live in-process
+  state, so there is no revision, no undo stack, and no `expected_revision`
+  concurrency token -- the `epoch`/`engine_sequence` pair is the staleness
+  instrument instead. Nothing here is persisted by `pulp seq`.
+
+Reaching them needs no live instance to *discover*: `pulp control capabilities`
+prints the frozen registry offline, and `--json` emits the canonical
+`dev.pulp.control/registry@1` projection with both JSON Schema bodies. Listing
+an operation is never a grant. To call one, use `pulp control call --instance ID
+dev.pulp.sequencer/state.read@1 --params JSON`; through MCP the registry derives
+the tools `pulp_control_sequencer_state_read` and
+`pulp_control_sequencer_state_edit` from the same rows, so Forge Sequencer and
+Forge Modular reach the grid with no bespoke surface. Grants and consent are
+broker authority.
+
+Adding a sequencer control operation means updating this section too:
+`tools/scripts/sequencer_control_skill_check.py` derives every
+`dev.pulp.sequencer/` operation from the frozen registry and fails when one is
+missing here or carries the wrong result kind.
 
 ## Contracts
 
