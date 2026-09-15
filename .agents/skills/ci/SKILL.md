@@ -5299,6 +5299,27 @@ build's canonical inventory, then run
 Otherwise the full suite can finish almost entirely green and fail only at the
 inventory self-test, forcing a needless second admission cycle.
 
+`--build-dir` is the whole verification. Run bare, that script skips inventory
+validation entirely and still reports `Ran 28 tests ... OK` in well under a
+second against a contract that is provably stale — a green run proving only
+that the policy tables parse. Treat a sub-second pass as "not yet verified",
+and confirm the validating mode can fail: before re-pinning, the same command
+against the same build directory must report `inventory contract drift` naming
+the stale fields. A refresh whose validating run was never seen red has not
+been checked.
+
+Deriving the inventory needs a complete build, not a configure: discovery
+registers per test case by executing the built binaries, so an incomplete tree
+yields a nonzero `placeholder_count` and junk counts. Verify
+`placeholder_count == 0` before trusting any number. `CMAKE_BUILD_TYPE` also
+feeds the toolchain digest, so the refresh must use the `build_flags` pinned in
+`.shipyard/config.toml` (Debug) — a Release tree cannot reproduce the contract.
+In a fresh worktree note that `setup.sh` configures the shared `build/`
+directory as Release with examples OFF and then runs the entire suite, so
+running it first both costs a full test cycle and leaves the cache wrong for
+this purpose; reconfigure explicitly with the pinned flags afterward and
+confirm the cache reads `Debug` before measuring.
+
 Merge the current target branch before deriving that inventory. A configured
 tree from a stale PR head can be internally consistent and still omit tests
 that landed on `main`; refreshing the pinned count and digest from it merely
