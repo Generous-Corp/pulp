@@ -397,6 +397,30 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     return true;
 }
 
+std::vector<CustomNodeTypeMetadata> SignalGraph::custom_node_types() const {
+    GraphMutationLock mutation_lock(*this);
+    std::vector<CustomNodeTypeMetadata> snapshot;
+    snapshot.reserve(custom_node_types_.size());
+    for (const auto& [_, type] : custom_node_types_) {
+        snapshot.push_back(CustomNodeTypeMetadata{
+            type.type_id,
+            type.version,
+            type.num_input_ports,
+            type.num_output_ports,
+            type.default_name,
+            type.lowerable,
+            type.baked_params,
+        });
+    }
+    std::sort(snapshot.begin(), snapshot.end(),
+              [](const CustomNodeTypeMetadata& lhs, const CustomNodeTypeMetadata& rhs) {
+                  if (lhs.type_id != rhs.type_id)
+                      return lhs.type_id < rhs.type_id;
+                  return lhs.version < rhs.version;
+              });
+    return snapshot;
+}
+
 std::size_t SignalGraph::custom_node_type_count() const {
     GraphMutationLock mutation_lock(*this);
     return custom_node_types_.size();
