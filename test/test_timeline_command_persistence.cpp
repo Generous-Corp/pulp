@@ -226,6 +226,20 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
                  R"("interpolation":"continuous","position":"0"},)"
                  R"({"intensity_bits":"1065353216","interpolation":"hold","position":"1920"}],)"
                  R"("sequence_id":"5"})"),
+        // The lane address travels as its five raw wire components rather than
+        // a controller-family name, so a controller nobody anticipated needs
+        // new values and not a new type.
+        envelope("pulp.timeline.command.insert_midi_expression_lane",
+                 R"({"clip_id":"7","lane":{"bank":0,"channel":2,"group":0,"id":"11",)"
+                 R"("index":74,"points":[{"id":"12","position_ticks":"0","value":0},)"
+                 R"({"id":"13","position_ticks":"960","value":4294967295}],"status":11},)"
+                 R"("sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.remove_midi_expression_lane",
+                 R"({"clip_id":"7","lane_id":"11","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.set_midi_expression_lane_points",
+                 R"({"clip_id":"7","expected":[{"id":"12","position_ticks":"0","value":0}],)"
+                 R"("lane_id":"11","replacement":[{"id":"12","position_ticks":"0",)"
+                 R"("value":8192}],"sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -327,6 +341,23 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(dynamics.replacement.events()[0].intensity == 0.5f);
     REQUIRE(dynamics.replacement.events()[1].intensity == 1.0f);
     REQUIRE(dynamics.replacement.events()[1].interpolation == AutomationInterpolation::Hold);
+    REQUIRE(std::holds_alternative<InsertMidiExpressionLane>(commands[48]));
+    const auto& inserted_lane = std::get<InsertMidiExpressionLane>(commands[48]).lane;
+    REQUIRE(inserted_lane.id == ItemId{11});
+    REQUIRE(inserted_lane.address == MidiLaneAddress{0, 2, 11, 0, 74});
+    REQUIRE(inserted_lane.points.size() == 2);
+    REQUIRE(inserted_lane.points[1].value == 0xffffffffu);
+    // The flag is a derivation receipt, so a decoded payload never carries one
+    // set even when the document it targets has chased points of its own.
+    REQUIRE_FALSE(inserted_lane.points[0].chased);
+    REQUIRE(std::holds_alternative<RemoveMidiExpressionLane>(commands[49]));
+    REQUIRE(std::get<RemoveMidiExpressionLane>(commands[49]).lane_id == ItemId{11});
+    REQUIRE(std::holds_alternative<SetMidiExpressionLanePoints>(commands[50]));
+    const auto& lane_points = std::get<SetMidiExpressionLanePoints>(commands[50]);
+    REQUIRE(lane_points.lane_id == ItemId{11});
+    REQUIRE(lane_points.expected.size() == 1);
+    REQUIRE(lane_points.replacement.size() == 1);
+    REQUIRE(lane_points.replacement[0].value == 8192u);
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;
