@@ -16,6 +16,7 @@ Usage:
   worktree_lineage.sh mark --status STATUS [options]
   worktree_lineage.sh show [--branch BRANCH | --path PATH]
   worktree_lineage.sh list
+  worktree_lineage.sh reconcile [--branch BRANCH] [--repo OWNER/REPO] [--dry-run]
 
 Statuses: active, superseded, merged, archived
 
@@ -31,6 +32,14 @@ Mark options:
 `superseded` requires --successor. `merged` requires --pr unless the exact head
 is already an ancestor of origin/main. `archived` requires an existing archive;
 its SHA-256 is recorded automatically.
+
+`reconcile` closes out what nobody marked: for every registered worktree whose
+exact head is the second parent of a "Merge pull request #N" commit on
+origin/main's first-parent line, it records `merged` with that PR URL and the
+merge commit as its note. No API call is made; the proof is the merge commit
+itself, which is stronger than a typed URL. Squash-landed heads and heads not in
+origin/main are listed as unresolved and left untouched. `--repo` overrides the
+OWNER/REPO read from the origin remote (required when origin is not github.com).
 EOF
 }
 
@@ -58,6 +67,8 @@ successor=""
 pr=""
 archive=""
 note=""
+repo_slug=""
+dry_run=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -69,6 +80,8 @@ while [[ $# -gt 0 ]]; do
         --pr) [[ $# -ge 2 ]] || die "--pr requires a value"; pr="$2"; shift 2 ;;
         --archive) [[ $# -ge 2 ]] || die "--archive requires a value"; archive="$2"; shift 2 ;;
         --note) [[ $# -ge 2 ]] || die "--note requires a value"; note="$2"; shift 2 ;;
+        --repo) [[ $# -ge 2 ]] || die "--repo requires a value"; repo_slug="$2"; shift 2 ;;
+        --dry-run) dry_run=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument '$1'" ;;
     esac
@@ -132,7 +145,88 @@ show_branch() {
     printf 'note\t%s\n' "$(get_value Note)"
 }
 
+github_slug_from_origin() {
+    local url
+    url="$(git remote get-url origin 2>/dev/null)" || return 1
+    [[ "${url}" =~ github\.com[:/]([^/]+)/([^/]+)$ ]] || return 1
+    local owner="${BASH_REMATCH[1]}" name="${BASH_REMATCH[2]}"
+    name="${name%/}"; name="${name%.git}"
+    [[ -n "${owner}" && -n "${name}" ]] || return 1
+    printf '%s/%s\n' "${owner}" "${name}"
+}
+
+# One row per registered worktree: path, head, branch (empty when detached).
+registered_worktrees() {
+    git worktree list --porcelain | awk '
+        /^worktree / { w = substr($0, 10) }
+        /^HEAD / { h = $2 }
+        /^branch / { b = substr($0, 8); sub("^refs/heads/", "", b) }
+        /^$/ { if (w != "") printf "%s\t%s\t%s\n", w, h, b; w = h = b = "" }
+        END { if (w != "") printf "%s\t%s\t%s\n", w, h, b }'
+}
+
 case "${command_name}" in
+    reconcile)
+        git show-ref --verify --quiet refs/remotes/origin/main ||
+            die "reconcile needs origin/main; fetch it first"
+        [[ -n "${repo_slug}" ]] || repo_slug="$(github_slug_from_origin || true)"
+        [[ "${repo_slug}" =~ ^[^/]+/[^/]+$ ]] ||
+            die "origin is not a github.com remote; pass --repo OWNER/REPO"
+        main_tip="$(git rev-parse refs/remotes/origin/main)"
+        # First-parent merges on main, oldest evidence last: "<merge> <p1> <p2>\t<subject>".
+        merge_table="$(git log --first-parent --merges --format='%H %P%x09%s' refs/remotes/origin/main)"
+        printf 'RESULT\tBRANCH\tHEAD\tDETAIL\n'
+        while IFS=$'\t' read -r wt_path wt_head wt_branch; do
+            [[ -n "${wt_branch}" ]] || continue
+            if [[ -n "${branch}" && "${wt_branch}" != "${branch}" ]]; then continue; fi
+            branch="${wt_branch}"
+            current_status="$(get_value Status)"
+            current_pr="$(get_value Pr)"
+            current_sha="$(get_value DurableSha)"
+            branch=""
+            if [[ "${current_status}" == merged && -n "${current_pr}" && "${current_sha}" == "${wt_head}" ]]; then
+                printf 'already\t%s\t%s\t%s\n' "${wt_branch}" "${wt_head:0:12}" "${current_pr}"
+                continue
+            fi
+            if [[ "${wt_head}" == "${main_tip}" ]]; then
+                printf 'unresolved\t%s\t%s\tat the origin/main tip, no commits of its own\n' \
+                    "${wt_branch}" "${wt_head:0:12}"
+                continue
+            fi
+            if ! git merge-base --is-ancestor "${wt_head}" refs/remotes/origin/main 2>/dev/null; then
+                printf 'unresolved\t%s\t%s\tnot in origin/main\n' "${wt_branch}" "${wt_head:0:12}"
+                continue
+            fi
+            merge_line="$(awk -F'\t' -v h="${wt_head}" '{ split($1, p, " "); if (p[3] == h) { print; exit } }' <<<"${merge_table}")"
+            if [[ -z "${merge_line}" ]]; then
+                printf 'unresolved\t%s\t%s\tno merge commit on origin/main has this head as its second parent (squash- or fast-forward-landed?)\n' \
+                    "${wt_branch}" "${wt_head:0:12}"
+                continue
+            fi
+            merge_sha="${merge_line%% *}"
+            subject="${merge_line#*$'\t'}"
+            if [[ ! "${subject}" =~ ^Merge\ pull\ request\ \#([0-9]+)\  ]]; then
+                printf 'unresolved\t%s\t%s\tmerge commit %s names no pull request: %s\n' \
+                    "${wt_branch}" "${wt_head:0:12}" "${merge_sha:0:12}" "${subject}"
+                continue
+            fi
+            url="https://github.com/${repo_slug}/pull/${BASH_REMATCH[1]}"
+            if [[ "${dry_run}" -eq 1 ]]; then
+                printf 'would-mark\t%s\t%s\t%s\n' "${wt_branch}" "${wt_head:0:12}" "${url}"
+                continue
+            fi
+            branch="${wt_branch}"
+            unset_field Archive; unset_field ArchiveSha256
+            git config --local "$(key Status)" merged
+            git config --local "$(key DurableSha)" "${wt_head}"
+            git config --local "$(key UpdatedAt)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            git config --local "$(key LastPath)" "${wt_path}"
+            git config --local "$(key Pr)" "${url}"
+            git config --local "$(key Note)" "reconciled from origin/main merge commit ${merge_sha:0:12}"
+            branch=""
+            printf 'merged\t%s\t%s\t%s\n' "${wt_branch}" "${wt_head:0:12}" "${url}"
+        done < <(registered_worktrees)
+        ;;
     mark)
         resolve_branch
         case "${status}" in
