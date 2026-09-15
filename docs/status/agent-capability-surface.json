@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 74,
+  "inventory_version": 75,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 487,
-    "reviewed_headers": 197,
+    "public_headers": 488,
+    "reviewed_headers": 198,
     "legacy_unreviewed_headers": 290,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 108,
       "capability_support": 44,
-      "infrastructure": 43,
+      "infrastructure": 44,
       "legacy_unreviewed": 290,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 265,
-        "reviewed_headers": 112,
+        "public_headers": 266,
+        "reviewed_headers": 113,
         "legacy_unreviewed_headers": 153,
         "unsupported_headers": 2
       },
@@ -4515,6 +4515,15 @@
         "signal.unison-voice-primitives"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/unit_delay.hpp",
+      "fingerprint": "sha256:7e91b280e5a3a83b78ed1f84301990eee1b6dcaa8b7736f07287452896d22726",
+      "include": "pulp/signal/unit_delay.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Exact one-sample state primitive for ordinary Processor composition and the sample-region causal cut. The complete sample-region capability is published only after its graph authoring, runtime, persistence, and control surfaces land; this helper makes no standalone generator capability claim."
     },
     {
       "domain": "signal",
