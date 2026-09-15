@@ -2137,6 +2137,22 @@ bisectable.
   `Skill-Update: skip skill=ci reason="ceiling bump only"` trailer on the **tip**
   commit (note: a later `chore: bump versions` commit from `shipyard pr` displaces
   the tip, so updating this SKILL is the more robust path).
+- **`CLAUDE.md` is a tracked hotspot, and it is the one nobody expects.** Every
+  other entry is source; this one is prose an agent edits casually. It is
+  always-resident context, so a line added there is re-read by every session on
+  every turn, and the file already sits far past the client's context budget —
+  which is why the ceiling exists. Adding prose to it now fails the required
+  `Enforce version & skill sync` check with `grows a frozen hotspot <n> -> <m>`.
+  That is the gate working: either make the edit net-neutral by removing as much
+  as you add, or declare the growth with a
+  `Hotspot-Grow: CLAUDE.md reason="..."` trailer on any commit in the range. The
+  skills table and the tools digest inside it are GENERATED blocks — regenerate
+  them with their `--write` commands rather than hand-editing, or the next
+  `--check` reverts your edit anyway. Note the consequence: **adding a skill or a
+  registered tool grows the generated block by a row**, so that change needs the
+  `Hotspot-Grow: CLAUDE.md` trailer too. That is the intended price — a new row
+  is read by every session forever — not a gate misfiring.
+
 - **Inspector hotspots are frozen too.** `hotspot_size_guard.json` watches newly
   added `inspect/**` files and freezes the current inspector overlay, window,
   domain handler, and tweak-store hotspots. When an inspector extraction shrinks
