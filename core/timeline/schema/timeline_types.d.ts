@@ -107,6 +107,14 @@ export interface PulpTimelineCommandInsertMarker {
   sequence_id: number | string;
 }
 
+/** `pulp.timeline.command.insert_midi_expression_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertMidiExpressionLane {
+  clip_id: number | string;
+  lane: Record<string, unknown>;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.command.insert_notes` — domain Command, schema version 1. */
 export interface PulpTimelineCommandInsertNotes {
   clip_id: number | string;
@@ -220,6 +228,14 @@ export interface PulpTimelineCommandRemoveDevice {
 export interface PulpTimelineCommandRemoveMarker {
   marker_id: number | string;
   sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_midi_expression_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveMidiExpressionLane {
+  clip_id: number | string;
+  lane_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
 }
 
 /** `pulp.timeline.command.remove_notes` — domain Command, schema version 1. */
@@ -355,6 +371,16 @@ export interface PulpTimelineCommandSetGroove {
 export interface PulpTimelineCommandSetMeterMap {
   expected: readonly unknown[];
   replacement: readonly unknown[];
+}
+
+/** `pulp.timeline.command.set_midi_expression_lane_points` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetMidiExpressionLanePoints {
+  clip_id: number | string;
+  expected: readonly unknown[];
+  lane_id: number | string;
+  replacement: readonly unknown[];
+  sequence_id: number | string;
+  track_id: number | string;
 }
 
 /** `pulp.timeline.command.set_note_events` — domain Command, schema version 1. */
@@ -624,6 +650,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.insert_clip"
   | "pulp.timeline.command.insert_device"
   | "pulp.timeline.command.insert_marker"
+  | "pulp.timeline.command.insert_midi_expression_lane"
   | "pulp.timeline.command.insert_notes"
   | "pulp.timeline.command.insert_region"
   | "pulp.timeline.command.insert_scene"
@@ -640,6 +667,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.remove_clip"
   | "pulp.timeline.command.remove_device"
   | "pulp.timeline.command.remove_marker"
+  | "pulp.timeline.command.remove_midi_expression_lane"
   | "pulp.timeline.command.remove_notes"
   | "pulp.timeline.command.remove_region"
   | "pulp.timeline.command.remove_scene"
@@ -658,6 +686,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_dynamics_lane"
   | "pulp.timeline.command.set_groove"
   | "pulp.timeline.command.set_meter_map"
+  | "pulp.timeline.command.set_midi_expression_lane_points"
   | "pulp.timeline.command.set_note_events"
   | "pulp.timeline.command.set_note_velocity"
   | "pulp.timeline.command.set_record_arm"
@@ -702,6 +731,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.insert_clip": PulpTimelineCommandInsertClip;
   "pulp.timeline.command.insert_device": PulpTimelineCommandInsertDevice;
   "pulp.timeline.command.insert_marker": PulpTimelineCommandInsertMarker;
+  "pulp.timeline.command.insert_midi_expression_lane": PulpTimelineCommandInsertMidiExpressionLane;
   "pulp.timeline.command.insert_notes": PulpTimelineCommandInsertNotes;
   "pulp.timeline.command.insert_region": PulpTimelineCommandInsertRegion;
   "pulp.timeline.command.insert_scene": PulpTimelineCommandInsertScene;
@@ -718,6 +748,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.remove_clip": PulpTimelineCommandRemoveClip;
   "pulp.timeline.command.remove_device": PulpTimelineCommandRemoveDevice;
   "pulp.timeline.command.remove_marker": PulpTimelineCommandRemoveMarker;
+  "pulp.timeline.command.remove_midi_expression_lane": PulpTimelineCommandRemoveMidiExpressionLane;
   "pulp.timeline.command.remove_notes": PulpTimelineCommandRemoveNotes;
   "pulp.timeline.command.remove_region": PulpTimelineCommandRemoveRegion;
   "pulp.timeline.command.remove_scene": PulpTimelineCommandRemoveScene;
@@ -736,6 +767,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_dynamics_lane": PulpTimelineCommandSetDynamicsLane;
   "pulp.timeline.command.set_groove": PulpTimelineCommandSetGroove;
   "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
+  "pulp.timeline.command.set_midi_expression_lane_points": PulpTimelineCommandSetMidiExpressionLanePoints;
   "pulp.timeline.command.set_note_events": PulpTimelineCommandSetNoteEvents;
   "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;
   "pulp.timeline.command.set_record_arm": PulpTimelineCommandSetRecordArm;

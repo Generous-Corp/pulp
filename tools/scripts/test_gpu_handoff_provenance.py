@@ -413,6 +413,58 @@ class FixtureRepository(unittest.TestCase):
         self.assertEqual(receipt["source_commit"], self.second_commit)
         self.assertEqual(receipt["canonical_paths"], ["leaf.txt"])
 
+    def test_check_binds_the_receipt_to_the_ledger_bytes(self) -> None:
+        """`check` must not exit 0 while the receipt names other bytes.
+
+        The fixture ledger always fails the closed contract, so the exit code
+        alone cannot carry this claim; the receipt field in the report is the
+        discriminating assertion, and the RECEIPT line is what a reader sees.
+        """
+
+        handoff = self.write_fixture_handoff([build_row("leaf.txt")])
+        receipt = self.root / "receipts" / "receipt.json"
+        self.assertEqual(
+            provenance.main(
+                ["--root", str(self.root), "--handoff", str(handoff),
+                 "receipt", "--output", str(receipt)]
+            ),
+            0,
+        )
+        _, text = self.run_cli(handoff, "check", "--json", "--receipt", str(receipt))
+        self.assertEqual(json.loads(text)["receipt"]["state"], "bound")
+        _, text = self.run_cli(handoff, "check", "--receipt", str(receipt))
+        self.assertNotIn("RECEIPT", text)
+
+        # Regenerate the ledger without its receipt: the receipt now describes
+        # bytes that no longer exist, the exact state a `--theirs` merge or a
+        # bare `write` leaves behind.
+        handoff.write_text(
+            provenance.serialize_handoff(self.document([build_row("nested")])),
+            encoding="utf-8",
+        )
+        exit_code, text = self.run_cli(
+            handoff, "check", "--json", "--receipt", str(receipt)
+        )
+        self.assertEqual(exit_code, 1)
+        report = json.loads(text)["receipt"]
+        self.assertEqual(report["state"], "stale")
+        self.assertTrue(any("sha256" in problem for problem in report["problems"]))
+        self.assertTrue(
+            any("canonical_paths" in problem for problem in report["problems"])
+        )
+        exit_code, text = self.run_cli(handoff, "check", "--receipt", str(receipt))
+        self.assertEqual(exit_code, 1)
+        self.assertIn("RECEIPT", text)
+        self.assertIn("repair with:", text)
+
+    def test_check_says_out_loud_when_there_is_no_receipt_to_bind(self) -> None:
+        handoff = self.write_fixture_handoff([build_row("leaf.txt")])
+        missing = self.root / "no-such-receipt.json"
+        _, text = self.run_cli(handoff, "check", "--json", "--receipt", str(missing))
+        self.assertEqual(json.loads(text)["receipt"]["state"], "absent")
+        _, text = self.run_cli(handoff, "check", "--receipt", str(missing))
+        self.assertIn("binding not checked", text)
+
     def test_an_unresolvable_source_commit_is_an_environment_error(self) -> None:
         handoff = self.write_fixture_handoff([build_row("leaf.txt")])
         self.assertEqual(

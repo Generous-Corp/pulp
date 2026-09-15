@@ -1258,6 +1258,42 @@ Rules when touching an adapter's editor-attach path:
 
 See `planning/2026-05-22-gpu-view-host-in-plugins.md` and its `qa/` doc.
 
+### The standalone lane has its own CPU-fallback signal, and it is a different one
+
+`warn_if_unexpected_cpu_fallback` is **plugin-only**: it takes a
+`view::PluginViewHost*` and reads `gpu_surface_state()`. Standalone builds a
+`view::WindowHost` instead, so it cannot call that helper at all — the two lanes
+do not share a host base class. Anything that has to hold on both lanes must be
+implemented twice; check the sibling lane before assuming a GPU-fallback guard
+is global.
+
+Standalone's own signal is the window-open log line. It reports the **resolved**
+class via `WindowHost::is_gpu_backed()` and appends `(skia-unavailable)` when GPU
+was requested and the resolved host is CPU. It used to print the `use_gpu`
+*request*, so a Skia-less fallback still read `gpu=true` — the one line a
+developer greps to decide whether the GPU path is live. When you add a
+GPU-conditional standalone behavior, report what the window **is**, never what
+was asked for; `is_gpu_backed()` defaults to `gpu_surface() != nullptr`, so a
+stub or CPU host answers correctly without extra wiring.
+
+**Asserting a log line needs a seam — `runtime::log_*` has no sink.**
+`pulp::runtime::detail::log_impl` writes straight to `os_log` + `stderr`; there
+is no callback, sink, or redirect to install. So a "does it log the right
+thing?" test has exactly two options, and a helper returning `void` supports
+neither:
+
+- Split the message out as a pure `format_*_message(...)` returning
+  `std::string` and assert that (the "Expose the Pipeline" rule), and/or
+- capture `stderr` over the call with `freopen` + `dup`/`dup2` — the
+  `StderrCapture` pattern in `test/test_design_import_native_common.cpp` and
+  `test/test_standalone_editor_chrome.cpp`.
+
+Assert the pure formatter for message *content* and the stderr capture for the
+*wiring*, because the wiring is where a request-vs-resolved bug actually lives.
+The formatter alone cannot catch a caller that passes the wrong argument. Watch
+for `SUCCEED()`-style log tests: the previous coverage here called the helper
+and asserted nothing, so it passed for the entire life of the bug.
+
 ## The browser host — a fourth host, and the one with no plugin ABI
 
 `core/view/platform/web/` adds `pulp::view::web::BrowserWindowHost`: the same

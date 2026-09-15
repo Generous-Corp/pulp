@@ -3,6 +3,7 @@
 #include <pulp/inspect/capture_source.hpp>
 #include <pulp/inspect/domain_handler.hpp>
 #include <pulp/inspect/protocol.hpp>
+#include <pulp/inspect/skp_capture_source.hpp>
 
 #include <choc/text/choc_JSON.h>
 
@@ -47,6 +48,23 @@ public:
     }
 
     int calls = 0;
+    std::string error;
+    std::string error_code;
+};
+
+class TestSkpCaptureSource final : public SkpCaptureSource {
+public:
+    InspectorSkpCapture capture_skp() override {
+        ++calls;
+        if (!error.empty())
+            return {{}, 0, 0, 0, error, error_code};
+        if (empty_result)
+            return {{}, 800, 600, 0, {}, {}};
+        return {{0x73, 0x6b, 0x69, 0x61, 0x70, 0x69, 0x63, 0x74}, 800, 600, 42, {}, {}};
+    }
+
+    int calls = 0;
+    bool empty_result = false;
     std::string error;
     std::string error_code;
 };
@@ -136,4 +154,46 @@ TEST_CASE("DomainHandler: screenshot uses the selected host capture seam",
         make_request(4, methods::kCaptureScreenshotNode));
     REQUIRE(node.is_error);
     REQUIRE(node.error_code == "method_unavailable");
+}
+
+TEST_CASE("DomainHandler: frame capture uses the selected host .skp seam",
+          "[inspect][domain][capture]") {
+    DomainHandler handler;
+    auto unavailable = handler.handle(
+        make_request(1, methods::kRenderCaptureFrame));
+    REQUIRE(unavailable.is_error);
+    REQUIRE(unavailable.error_code == "capture_unavailable");
+
+    TestSkpCaptureSource source;
+    handler.set_skp_capture_source(&source);
+    auto response = handler.handle(
+        make_request(2, methods::kRenderCaptureFrame));
+    REQUIRE_FALSE(response.is_error);
+    REQUIRE(source.calls == 1);
+    const auto value = choc::json::parse(response.params_json);
+    REQUIRE(value["mimeType"].getString() == "application/x-skia-picture");
+    REQUIRE(value["width"].getInt64() == 800);
+    REQUIRE(value["height"].getInt64() == 600);
+    REQUIRE(value["opCount"].getInt64() == 42);
+    REQUIRE(value["data"].getString() == "c2tpYXBpY3Q=");
+
+    source.error = "frame contains a protected surface";
+    source.error_code = "capture_unavailable";
+    auto dynamic_unavailable = handler.handle(
+        make_request(3, methods::kRenderCaptureFrame));
+    REQUIRE(dynamic_unavailable.is_error);
+    REQUIRE(dynamic_unavailable.error_code == "capture_unavailable");
+
+    // A source that reports no error but hands back nothing is a failure, not
+    // an empty artifact.
+    source.error.clear();
+    source.error_code.clear();
+    source.empty_result = true;
+    auto empty = handler.handle(make_request(4, methods::kRenderCaptureFrame));
+    REQUIRE(empty.is_error);
+    REQUIRE(empty.error_code == "capture_failed");
+    source.empty_result = false;
+
+    auto unknown = handler.handle(make_request(5, "Render.nope"));
+    REQUIRE(unknown.is_error);
 }

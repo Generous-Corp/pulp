@@ -18,6 +18,7 @@ if str(REPO_ROOT_GUESS) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT_GUESS))
 
 from tools.harness.visual import differ  # noqa: E402
+from tools.harness.visual import raster  # noqa: E402
 from tools.harness.visual import spec as visual_spec  # noqa: E402
 
 
@@ -76,6 +77,14 @@ def resolve_fixtures(repo_root: Path, surface: str, entries: Iterable[str] | Non
         known = ", ".join(sorted(by_surface_name))
         raise ValueError(f"unknown visual fixture(s): {', '.join(missing)} (known: {known})")
     return out
+
+
+def _needs_native_binary(surface: str, fixtures: list[Path]) -> bool:
+    for fixture_path in fixtures:
+        fixture = visual_spec.fixture_spec_from_file(fixture_path, default_surface=surface)
+        if fixture.driver != raster.DECLARATIVE_RASTER_DRIVER:
+            return True
+    return False
 
 
 def golden_path_for(repo_root: Path, surface: str, fixture_path: Path) -> Path:
@@ -162,10 +171,30 @@ def write_bytes(path: Path, payload: bytes) -> None:
     path.write_bytes(payload)
 
 
+def _capture_render_fixture(fixture: visual_spec.VisualFixtureSpec) -> bytes:
+    """Rasterize a declarative-raster fixture in-process.
+
+    These fixtures declare their drawing as data and are rasterized by the
+    pinned skia-python wheel, so they need no native binary and produce the same
+    bytes on every host that has the pin installed. Fixtures that name any other
+    driver still capture through the native visual binary. Missing raster
+    dependencies raise rather than returning an empty capture, so an absent
+    rasterizer can never read as a passing comparison.
+    """
+    skia = raster.import_locked_skia()
+    return raster.render_fixture_png(skia, raster.load_fixture(fixture.source_path))
+
+
 def _capture_fixture(
-    binary: Path,
+    binary: Path | None,
     fixture: visual_spec.VisualFixtureSpec,
 ) -> dict[str, Any] | bytes:
+    if fixture.driver == raster.DECLARATIVE_RASTER_DRIVER:
+        return _capture_render_fixture(fixture)
+    if binary is None:
+        raise RuntimeError(
+            f"{fixture.id} needs the native visual binary but none was resolved"
+        )
     payload = run_capture(binary, fixture.source_path)
     if fixture.capture_format == "json":
         return json.loads(payload.decode("utf-8"))
@@ -205,7 +234,12 @@ def _write_actual(
     return out
 
 
-def generate(binary: Path, repo_root: Path, surface: str, fixtures: list[Path]) -> int:
+def generate(
+    binary: Path | None,
+    repo_root: Path,
+    surface: str,
+    fixtures: list[Path],
+) -> int:
     for fixture_path in fixtures:
         fixture = visual_spec.fixture_spec_from_file(fixture_path, default_surface=surface)
         payload = _capture_fixture(binary, fixture)
@@ -216,7 +250,7 @@ def generate(binary: Path, repo_root: Path, surface: str, fixtures: list[Path]) 
 
 
 def verify(
-    binary: Path,
+    binary: Path | None,
     repo_root: Path,
     surface: str,
     fixtures: list[Path],
@@ -464,12 +498,25 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
 
     try:
-        binary = locate_binary(repo_root, args.build_dir, args.binary)
+        plan: list[tuple[str, list[Path]]] = []
         for surface in surfaces:
             fixtures = resolve_fixtures(repo_root, surface, args.entry)
             if not fixtures:
                 print(f"error: no visual fixtures found for surface {surface!r}", file=sys.stderr)
                 return 2
+            plan.append((surface, fixtures))
+
+        # Declarative-raster fixtures rasterize in-process, so resolving the
+        # native binary is deferred until a fixture actually needs it. Selecting
+        # only those fixtures must not require a C++ build that is never
+        # invoked.
+        binary: Path | None = None
+        if any(
+            _needs_native_binary(surface, fixtures) for surface, fixtures in plan
+        ):
+            binary = locate_binary(repo_root, args.build_dir, args.binary)
+
+        for surface, fixtures in plan:
             if mode_generate:
                 rc = generate(binary, repo_root, surface, fixtures)
             elif mode_verify:

@@ -44,6 +44,11 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   MIDI Files; keep the dependency-minimal model on `Pulp::timeline`.
 - Use the generated schema surfaces to discover command/document shapes; do
   not hand-copy schema vocabularies into a client.
+- Use the **live control plane** when the sequencer you need to read or edit is
+  already running inside a host, rather than sitting on disk as a document. The
+  timeline surfaces above all open a project; `dev.pulp.sequencer/state.read@1`
+  and `dev.pulp.sequencer/state.edit@1` reach a live `SequencerStateChannel` in
+  a running instance and open nothing. See "Live sequencer control operations".
 
 Start with `project_open` or `seq validate` when the source is unfamiliar.
 MCP `project_open` returns a bounded process-local `session_id`; use that
@@ -73,6 +78,60 @@ A retry token is only honoured for the request it first named. Reusing one
 with different commands, or with a different `expected_revision`, is refused
 as `transaction_id_collision`, because the alternative is answering a
 different request with an earlier result.
+
+## Live sequencer control operations
+
+A running host's step grid is reachable through the same unified control
+platform as every other Pulp capability -- no bespoke sequencer verb, no new
+transport. Two typed operations are registered, both gated on their own
+capability and both bound to the host-main executor:
+
+| Operation | Capability | Result | Profiles |
+|---|---|---|---|
+| `dev.pulp.sequencer/state.read@1` | `sequencer.state.read` | `response` | observe, develop |
+| `dev.pulp.sequencer/state.edit@1` | `sequencer.state.edit` | `receipt` | develop |
+
+`state.read` copies the UI-side published snapshot and the seqlock playhead out
+of the channel; `pattern`, `include_snapshot`, and `include_playhead` bound what
+comes back, and the response carries `epoch`, `engine_sequence`, and
+`resync_required_epoch` so a client can tell a fresh read from a stale one.
+`state.edit` encodes exactly one typed step-grid command -- `set-cell`, `clear`
+(scoped `cell`/`lane`/`pattern`/`all`), `randomize-lane`, `set-pattern-length`,
+or `switch-pattern` -- and submits it to the single-producer command FIFO,
+returning `receipt_id`, `applied`, and `client_sequence`. `gesture_phase` groups
+a drag into one undoable gesture the way a parameter gesture does.
+
+Three things about these operations are not obvious from their schemas:
+
+- **The host-main binding is load-bearing, not incidental.** `SequencerStateChannel`
+  is strictly single-producer/single-consumer per side and exactly one UI-side
+  consumer may own the applied-echo queue. Called off the host main thread both
+  operations refuse with `HostUnavailable` rather than racing that cursor, and
+  the refused edit never reaches the FIFO. A background binding would compile
+  and pass every functional test.
+- **A full command FIFO is a typed refusal, never a drop.** `state.edit` returns
+  `ResourceExhausted` with an after-backoff retry hint when the queue is full;
+  draining a slot makes the next submission succeed. Treat it as backpressure,
+  not as failure.
+- **These are not timeline-document operations.** They edit live in-process
+  state, so there is no revision, no undo stack, and no `expected_revision`
+  concurrency token -- the `epoch`/`engine_sequence` pair is the staleness
+  instrument instead. Nothing here is persisted by `pulp seq`.
+
+Reaching them needs no live instance to *discover*: `pulp control capabilities`
+prints the frozen registry offline, and `--json` emits the canonical
+`dev.pulp.control/registry@1` projection with both JSON Schema bodies. Listing
+an operation is never a grant. To call one, use `pulp control call --instance ID
+dev.pulp.sequencer/state.read@1 --params JSON`; through MCP the registry derives
+the tools `pulp_control_sequencer_state_read` and
+`pulp_control_sequencer_state_edit` from the same rows, so Forge Sequencer and
+Forge Modular reach the grid with no bespoke surface. Grants and consent are
+broker authority.
+
+Adding a sequencer control operation means updating this section too:
+`tools/scripts/sequencer_control_skill_check.py` derives every
+`dev.pulp.sequencer/` operation from the frozen registry and fails when one is
+missing here or carries the wrong result kind.
 
 ## Contracts
 
@@ -1031,8 +1090,8 @@ that installed consumer whenever schema identity, registered content, context
 dirty semantics, or playback hook declarations change.
 The current compiler contract is notes-only, reset-state-only, and capped at
 4096 fragment notes per clip. A nested `SequenceRef` that trims registered
-content is `TrimmedRegisteredContentUnsupported` because the hook input has no
-source-window offset. Renderer production declarations live with the process;
+content compiles: the hook generates over the authored clip and the compiler
+windows the fragment to the retained span. Renderer production declarations live with the process;
 `ProgramWire` refuses nondefault declarations instead of transporting a claim
 without its trusted hook.
 
@@ -3076,6 +3135,65 @@ grep -c chord_scale core/timeline/src/serialize_encode.cpp   # the control
 ```
 
 A zero with no control beside it is indistinguishable from a mis-aimed grep.
+
+## A one-struct optimistic-gate command can launder a destructive grant
+
+`command_authority_of<T>()` returns exactly one `{CommandClass, CommandIntent}`
+per command type, so a struct cannot carry three intents. A single
+`{expected, replacement}` command that admits an empty replacement therefore has
+to declare one intent for create, modify, *and* delete — and if it declares
+`Modify`, every writer holding that class's modify bit can delete, because
+`Remove` is the axis a capability mask denies by default for an untrusted
+writer.
+
+The opposite shape has the mirror defect. An `Insert` + `Remove` pair with no
+`Modify` — the shape `Class::Automation` still has — means every value edit has
+to be spelled remove-then-insert, so a proposal-profile writer (every class,
+no destructive intent) can create a lane and then never change a value in it.
+A capability reachable only by granting the destructive axis is not reachable.
+
+Clip expression lanes take the third shape for this reason: `Insert`/`Create`,
+`Remove`/`Remove`, and a separate point-edit command at `Modify` whose payload
+names the lane by identity and carries no address. The test that earns it is the
+profile test — a proposal writer inserts a lane, edits its points, and is
+refused the removal — and it is worth writing before the reducers, because it is
+the only assertion that fails under either of the wrong shapes.
+
+## `chased` is a derivation receipt, and only the command layer can refuse one
+
+`MidiLanePoint::chased` is written by the nested-clip flattening path when the
+value sounding on entry came from before the retained window. An authored
+document never sets it — and nothing in the model enforces that, because the
+model has no way to tell an authored point from a derived one. The project
+encoder does not write the member and the project decoder does not read it, so a
+stored document cannot carry one either.
+
+That leaves the command layer as the only place a caller could forge provenance,
+and it has two doors: `serialize_command_decode.cpp` for a caller on the wire
+and the reducer for one in process. Both refuse, and the pair is not a duplicated
+model check — there is no model check to duplicate. Refusing rather than silently
+dropping the flag is the deliberate half: a caller who believes they authored a
+derivation receipt and did not is worse off than one who is told the field is
+not theirs.
+
+## An identity the reducer just retired cannot be re-inserted by its own inverse
+
+`plan_identity_insert` refuses any identity below `project.next_item_id()` unless
+`allow_tombstone_restore` is set, and the public `reduce_transaction` passes
+`false`. So the inverse of any command that *retires* an identity — a lane
+removal, or a point edit that drops a point — cannot be reduced through the
+public entry point. Undo for those paths is a real `DocumentSession`, which
+passes the flag; the public reducer covers only the inverses that retire nothing.
+
+Two consequences for tests. A fixture inserting a lane must use identities at or
+above the project's `next_item_id`, or the insert is refused as
+`IdentityNotAvailable` and reads like a reducer bug. And "restored exactly"
+cannot be asserted as byte-identical project JSON across an insert-then-remove:
+the identity index keeps the tombstone and `next_item_id` stays advanced, which
+is the document correctly refusing to reissue an identity. Compare the clip's
+lane vector instead — it is stricter than a count on every axis that matters
+(identity, address, order, per-point value) and blind to bookkeeping that is
+supposed to change.
 
 ## Every "rebuild a Sequence from its parts" site must carry a new lane
 

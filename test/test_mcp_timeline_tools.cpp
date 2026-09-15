@@ -410,6 +410,62 @@ TEST_CASE("timeline MCP authors a dynamics lane and returns a document that stil
     require_contains(stale, R"JSON("isError":true)JSON");
 }
 
+TEST_CASE("timeline MCP authors and edits an expression lane but refuses to abandon one",
+          "[mcp][tools][timeline]") {
+    using namespace pulp::timeline;
+    auto content = require_timeline_result(MidiContent::create({{{6}, {0}, {96}, 0xffff, 60, 0}}));
+    auto clip = require_timeline_result(Clip::create({4}, {0}, {960}, std::move(content)));
+    auto track = require_timeline_result(Track::create({3}, "midi", {clip}));
+    auto sequence = require_timeline_result(
+        Sequence::create({2}, "root", pulp::timebase::TickDuration{960}, {track}));
+    auto project_value = require_timeline_result(
+        Project::create(ProjectInput{{1}, "mcp-midi", 20, {2}, {}, {sequence}}));
+    auto registry = require_timeline_result(make_builtin_timeline_registry());
+    const auto project = require_timeline_result(serialize_project(project_value, registry)).json;
+    const auto project_argument = pulp::timeline::quote_json_string(project);
+
+    // The default MCP authority is the non-destructive proposal profile. That
+    // profile is the reason this family is three commands: it holds Create and
+    // Modify and no destructive intent, so it must be able to author a stream
+    // and change its values while still being refused the removal.
+    const std::string insert =
+        R"JSON([{"data":{"clip_id":"4","lane":{"bank":0,"channel":0,"group":0,"id":"20","index":74,"points":[{"id":"21","position_ticks":"0","value":0}],"status":11},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.insert_midi_expression_lane","version":1}])JSON";
+    const auto authored = handle_timeline_command_apply("{\"commands\":" + insert +
+                                                        ",\"project\":" + project_argument + "}");
+    require_contains(authored, R"JSON("revision":"1")JSON");
+    const auto changed_project = timeline_project_from_response(authored);
+    require_contains(changed_project, R"JSON("id":"20","index":74)JSON");
+
+    // The returned document reopens, so the edit is reachable by the next call
+    // rather than only visible in this response.
+    const auto reopened = handle_timeline_project_open(
+        "{\"project\":" + pulp::timeline::quote_json_string(changed_project) + "}");
+    require_contains(reopened, R"JSON("ok":true)JSON");
+    REQUIRE(timeline_project_from_response(reopened) == changed_project);
+
+    const std::string edit =
+        R"JSON([{"data":{"clip_id":"4","expected":[{"id":"21","position_ticks":"0","value":0}],"lane_id":"20","replacement":[{"id":"21","position_ticks":"0","value":8192}],"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_midi_expression_lane_points","version":1}])JSON";
+    const auto edited = handle_timeline_command_apply(
+        "{\"commands\":" + edit + ",\"project\":" +
+        pulp::timeline::quote_json_string(changed_project) + "}");
+    require_contains(timeline_project_from_response(edited), R"JSON("value":8192)JSON");
+
+    const std::string remove =
+        R"JSON([{"data":{"clip_id":"4","lane_id":"20","sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.remove_midi_expression_lane","version":1}])JSON";
+    const auto refused = handle_timeline_command_apply(
+        "{\"commands\":" + remove + ",\"project\":" +
+        pulp::timeline::quote_json_string(changed_project) + "}");
+    require_contains(refused, R"JSON("isError":true)JSON");
+
+    // Control: the editor profile holds the destructive axis, so the same
+    // payload lands. The refusal above is the authority and not a malformed
+    // command.
+    const auto permitted = handle_timeline_command_apply(
+        "{\"commands\":" + remove + ",\"project\":" +
+        pulp::timeline::quote_json_string(changed_project) + ",\"writer_profile\":\"editor\"}");
+    require_contains(permitted, R"JSON("revision":"1")JSON");
+}
+
 TEST_CASE("timeline MCP confines package-relative media to the project base",
           "[mcp][tools][timeline]") {
     TempDir temp;
