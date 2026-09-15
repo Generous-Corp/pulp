@@ -36,7 +36,11 @@ void dispatch_dom_pointer_event(View& root, View* target,
 /// Route a right-click at `root_pos` to the view under it. Returns true when a
 /// view had an `on_context_menu` handler and it was invoked.
 ///
-/// Only the hit view is consulted — the callback does not bubble to ancestors.
+/// The callback BUBBLES: the walk runs from the hit view up to `root` and the
+/// nearest listener wins, matching the DOM and matching every other pointer
+/// verb here. Real pages depend on it — the handler is routinely on a wrapper
+/// while the ink on top is a child canvas or an absolutely-positioned overlay
+/// with no listener of its own.
 bool dispatch_context_menu(View& root, Point root_pos);
 
 /// Route a context menu to an already-resolved pointer target. Platform hosts

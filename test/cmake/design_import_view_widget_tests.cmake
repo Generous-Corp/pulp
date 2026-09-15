@@ -95,6 +95,9 @@ pulp_add_test_suite(pulp-test-combo-dropdown LIBRARIES pulp::view)
 # Generalized overlay-click routing (View::active_overlay_)
 pulp_add_test_suite(pulp-test-overlay-routing LIBRARIES pulp::view)
 
+# Press reachability: does a press at the rect a control paints reach it?
+pulp_add_test_suite(pulp-test-press-reach LIBRARIES pulp::view)
+
 # Auto-clearing input-focus slot (View::focused_input_)
 pulp_add_test_suite(pulp-test-focused-input LIBRARIES pulp::view)
 
