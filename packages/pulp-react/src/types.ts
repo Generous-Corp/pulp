@@ -433,6 +433,12 @@ export type ModalProps = BaseProps & { open?: boolean };
 export interface LabelProps extends BaseProps {
     text?: string;
     textColor?: string;
+    /// CSS `user-select`. On a container this declares a TEXT CONTENT region
+    /// and every text node inside becomes selectable with no further wiring;
+    /// on a Label it overrides that region default. Omitted means inherit, so
+    /// text outside every region behaves exactly as it always has — a plugin
+    /// editor's drags on value readouts are not turned into text selections.
+    userSelect?: 'auto' | 'text' | 'none' | 'all' | 'contain';
     /// CSS / RN `text-align`. `'auto'` is writing-direction-relative
     /// (LTR-only today). `'justify'` reaches canvas `TextAlign::justify`;
     /// full paragraph justification is deferred, so backends approximate
@@ -449,6 +455,10 @@ export interface TextEditorProps extends BaseProps {
     text?: string;
     placeholder?: string;
     multiLine?: boolean;
+    /// Non-editable, still selectable and still copyable: selection and
+    /// `copy_to_clipboard()` are gated on having a selection, never on being
+    /// editable. This is the form that joins a cross-widget selection.
+    readOnly?: boolean;
     onChange?: (value: string) => void;
 }
 

@@ -531,6 +531,15 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
                 return call('setPlaceholder', id, String(value));
             }
             return;
+        case 'readOnly':
+            // `TextEditor::read_only` had no JS route at all, so a scripted UI
+            // could not mount a selectable, non-editable text field. A
+            // read-only editor keeps its selection and its Cmd-C — those are
+            // gated on `has_selection()`, never on editability.
+            if (type === 'input' || type === 'textarea' || type === 'TextEditor') {
+                return call('setReadOnly', id, Boolean(value));
+            }
+            return;
         // HTML's boolean `disabled` prop is semantic state, not paint-only
         // opacity.  Forward its inverse to View::enabled() so native controls
         // both reject input and can select their disabled platform skin.

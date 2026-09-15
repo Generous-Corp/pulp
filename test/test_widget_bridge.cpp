@@ -8178,3 +8178,100 @@ TEST_CASE("a hover runs the scripted pointermove and its cursor decision",
     // value a host reads back to tell AppKit what to display.
     CHECK(surface->cursor() == View::CursorStyle::grab);
 }
+
+// ── Text selection reachability from JS ─────────────────────────────────────
+//
+// Before these bindings a scripted UI could not mount selectable body text at
+// all: `TextEditor::read_only` had no JS route, and the content-region
+// declaration did not exist. A materialized document (Spectr's About page is
+// one) drives a NATIVE widget tree through this bridge and paints via the
+// canvas — there is no browser engine underneath to supply selection for free,
+// which is the whole reason this had to be built rather than inherited.
+
+TEST_CASE("userSelect on a container declares a content region from JS",
+          "[widget-bridge][selection][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('about', '');
+        setTextSelectionRegion('about', true);
+        createLabel('para', 'selectable prose', 'about');
+        createLabel('readout', '-12.0 dB', '');
+        layout();
+    )");
+
+    auto* prose = dynamic_cast<Label*>(bridge.widget("para"));
+    auto* readout = dynamic_cast<Label*>(bridge.widget("readout"));
+    REQUIRE(prose != nullptr);
+    REQUIRE(readout != nullptr);
+
+    // Inside the region: selectable with nothing set on the Label itself.
+    CHECK(prose->is_selectable());
+    CHECK(prose->as_selectable_text() == prose);
+    // Outside it: unchanged, which is what keeps a drag on a value readout
+    // from becoming a text selection in every existing plugin editor.
+    CHECK_FALSE(readout->is_selectable());
+}
+
+TEST_CASE("userSelect none opts one label out inside a region",
+          "[widget-bridge][selection][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCol('about', '');
+        setTextSelectionRegion('about', true);
+        createLabel('para', 'prose', 'about');
+        createLabel('live', '-12.0 dB', 'about');
+        setSelectionPolicy('live', 'none');
+        layout();
+    )");
+
+    CHECK(dynamic_cast<Label*>(bridge.widget("para"))->is_selectable());
+    // A live readout sitting inside a prose panel is not prose.
+    CHECK_FALSE(dynamic_cast<Label*>(bridge.widget("live"))->is_selectable());
+
+    // And `text` opts one in with no enclosing region at all.
+    engine.evaluate("createLabel('lone', 'standalone', ''); "
+                    "setSelectionPolicy('lone', 'text');");
+    CHECK(dynamic_cast<Label*>(bridge.widget("lone"))->is_selectable());
+}
+
+TEST_CASE("readOnly is reachable from JS and keeps copy working",
+          "[widget-bridge][selection][text_editor]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createTextEditor('body', '');
+        setText('body', 'hello world');
+        setReadOnly('body', true);
+        layout();
+    )");
+
+    auto* editor = dynamic_cast<TextEditor*>(bridge.widget("body"));
+    REQUIRE(editor != nullptr);
+    CHECK(editor->read_only);
+    // Read-only is what makes it join a document selection; an editable field
+    // owns its own selection the way an HTML <input> does.
+    CHECK(editor->as_selectable_text() == editor);
+    // Not editable, still selectable: the copy gate is `has_selection()`,
+    // never `can_edit()`.
+    CHECK_FALSE(editor->accepts_text_input());
+    editor->set_selection_highlight(0, 5);
+    CHECK(editor->selected_text() == "hello");
+
+    engine.evaluate("setReadOnly('body', false)");
+    CHECK_FALSE(editor->read_only);
+    CHECK(editor->as_selectable_text() == nullptr);
+}

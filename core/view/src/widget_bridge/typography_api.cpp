@@ -143,6 +143,43 @@ void BridgeRegistrars::register_widget_typography_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // Declare a subtree as TEXT CONTENT: prose the reader may select, rather
+    // than controls they operate. Text inside is selectable by default with no
+    // per-node wiring, and text outside every region is untouched — which is
+    // what keeps a drag on a value readout from becoming a text selection.
+    register_bridge_function(api, "setTextSelectionRegion", [&self](choc::javascript::ArgumentList args) {
+        if (auto* v = self.widget(args.get<std::string>(0, "")))
+            v->set_text_selection_region(args.get<double>(1, 0) > 0.5);
+        return choc::value::Value();
+    });
+
+    // Per-Label override of the region default, in CSS `user-select` spelling:
+    // "none" opts one node out inside a region (a live readout in a prose
+    // panel is not prose), "text" opts one in outside every region, "auto"
+    // restores the inherited answer.
+    register_bridge_function(api, "setSelectionPolicy", [&self](choc::javascript::ArgumentList args) {
+        auto* label = dynamic_cast<Label*>(self.widget(args.get<std::string>(0, "")));
+        if (label == nullptr) return choc::value::Value();
+        const std::string mode = args.get<std::string>(1, "auto");
+        if (mode == "none")
+            label->set_selection_policy(Label::SelectionPolicy::never);
+        else if (mode == "text" || mode == "all")
+            label->set_selection_policy(Label::SelectionPolicy::always);
+        else
+            label->set_selection_policy(Label::SelectionPolicy::inherit);
+        return choc::value::Value();
+    });
+
+    // A read-only TextEditor is prose in a field: it keeps its caret-less
+    // selection and its Cmd-C, and it is the form that joins a document
+    // selection. There was no way to reach `TextEditor::read_only` from JS at
+    // all before this, so a scripted UI could not mount selectable body text.
+    register_bridge_function(api, "setReadOnly", [&self](choc::javascript::ArgumentList args) {
+        if (auto* e = dynamic_cast<TextEditor*>(self.widget(args.get<std::string>(0, ""))))
+            e->read_only = args.get<double>(1, 0) > 0.5;
+        return choc::value::Value();
+    });
+
     register_bridge_function(api, "setCapturedLineBoxes", [&self, finite_float](choc::javascript::ArgumentList args) {
         auto* label = dynamic_cast<Label*>(self.widget(args.get<std::string>(0, "")));
         if (!label || args.numArgs < 4 || !args[1] || !args[1]->isArray())

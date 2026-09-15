@@ -108,6 +108,26 @@ export function applyTypographyProp(
         // `'justify'` flows to canvas TextAlign::justify, with backends
         // approximating as left when full justify layout is unavailable.
         case 'textAlign':       call('setTextAlign', id, value as string); return true;
+        // CSS `user-select`, which is the vocabulary a designer's exported
+        // markup already uses. On a CONTAINER it declares a content region:
+        // everything inside becomes selectable with no per-node wiring. On a
+        // Label it overrides that region default in either direction.
+        //
+        // Both calls are issued because the element type is not known here —
+        // the native side ignores the one that does not apply (a non-Label
+        // gets no policy, and a region flag on a leaf Label is harmless).
+        // `'contain'` is accepted as a region declaration; its scoping-only
+        // semantics are not modelled separately.
+        case 'userSelect':
+        case 'selectable': {
+            const mode = value === true ? 'text'
+                       : value === false ? 'none'
+                       : String(value);
+            call('setTextSelectionRegion', id,
+                 mode === 'text' || mode === 'all' || mode === 'contain');
+            call('setSelectionPolicy', id, mode);
+            return true;
+        }
         // Typography. Label widgets honor these via setX bridge functions.
         // The fontFamily bridge picks the first non-empty family from a
         // comma-separated CSS list and stores it on the Label or on the
