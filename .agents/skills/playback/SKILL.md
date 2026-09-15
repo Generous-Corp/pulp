@@ -799,9 +799,12 @@ process-local; they are not persisted in the Timeline document.
 Nondefault renderer production declarations are also process-local:
 `ProgramWire` refuses to serialize a program that carries one. This prevents a
 remote process from inheriting a reproducibility claim without the hook that
-justified it. A nested reference that trims registered content fails as
-`TrimmedRegisteredContentUnsupported`; the compile input does not yet carry the
-source-window offset needed to preserve stateful pattern phase.
+justified it. A nested reference that trims registered content compiles by
+window-after-generate: the hook sees the authored clip duration and an origin
+tick rebased to the authored start, so a stateful pattern keeps its phase, and
+the compiler windows the returned fragment to the retained span with the same
+clamp-and-drop rule a trimmed note leaf uses. The fragment quota is charged
+against what the hook generates, which is the authored extent.
 
 Built-in note compilation applies the owning sequence groove at the original
 owner-sequence onset. Move note-on/off by one shared displacement, intersect the

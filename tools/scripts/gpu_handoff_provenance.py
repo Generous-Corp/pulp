@@ -44,7 +44,8 @@ import connected_git_history  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_HANDOFF = ROOT / "docs/status/gpu-vellum-handoff.yaml"
-DEFAULT_RECEIPT = ROOT / "docs/validation/gpu-handoff-provenance/receipt.json"
+RECEIPT_RELATIVE = pathlib.Path("docs/validation/gpu-handoff-provenance/receipt.json")
+DEFAULT_RECEIPT = ROOT / RECEIPT_RELATIVE
 
 HANDOFF_REPO = "Generous-Corp/pulp"
 HANDOFF_SELF_PATH = "docs/status/gpu-vellum-handoff.yaml"
@@ -535,6 +536,44 @@ def build_receipt(
     }
 
 
+def receipt_binding_problems(
+    handoff: pathlib.Path, receipt_path: pathlib.Path, document: dict[str, Any]
+) -> list[str]:
+    """Say how the receipt fails to describe the ledger on disk, if it does.
+
+    A receipt names one ledger by content hash and canonical-path set. This is
+    bytes and JSON only: no git, and no currency claim, so it holds on every
+    commit and costs nothing. An empty list means the receipt binds this
+    ledger; anything else means the ledger was regenerated (or merged) without
+    its receipt, which `check` must report rather than exit 0 past.
+    """
+
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return [f"receipt {receipt_path} is unreadable: {error}"]
+    if not isinstance(receipt, dict):
+        return [f"receipt {receipt_path} is not a JSON object"]
+    problems: list[str] = []
+    schema = receipt.get("schema")
+    if schema != RECEIPT_SCHEMA:
+        problems.append(f"receipt schema is {schema!r}, expected {RECEIPT_SCHEMA!r}")
+    # Hash the text the same way the receipt writer did, so a receipt written
+    # by `receipt`/`write --receipt` on this platform compares byte-for-byte.
+    actual = hashlib.sha256(
+        handoff.read_text(encoding="utf-8").encode("utf-8")
+    ).hexdigest()
+    named = receipt.get("handoff_sha256")
+    if named != actual:
+        problems.append(
+            f"receipt names ledger sha256 {str(named)[:12]}... but the ledger on "
+            f"disk is {actual[:12]}..."
+        )
+    if receipt.get("canonical_paths") != canonical_paths(document):
+        problems.append("receipt canonical_paths differ from the ledger's")
+    return problems
+
+
 def _iter_drift_lines(drifts: list[Drift]) -> Iterator[str]:
     for drift in drifts:
         yield (
@@ -566,6 +605,20 @@ def command_check(args: argparse.Namespace) -> int:
     drifts = compare_inventory(document, inventory, identities)
     problems = validate_with_catalog(document, args.root, require_current=True)
     command = repair_command(args.handoff, commit)
+    # The receipt is a third, independent claim: that THIS ledger's bytes are
+    # the ones its published receipt describes. Every identity can match while
+    # the receipt names another ledger entirely (a regeneration or a conflicted
+    # merge that shipped without `--receipt`). Until this was checked here,
+    # `check` exited 0 on exactly that state while the selftest that would
+    # have caught it was opt-in.
+    receipt_path = (
+        args.receipt if args.receipt is not None else args.root / RECEIPT_RELATIVE
+    )
+    receipt_problems: list[str] = []
+    receipt_state = "absent"
+    if receipt_path.is_file():
+        receipt_problems = receipt_binding_problems(args.handoff, receipt_path, document)
+        receipt_state = "stale" if receipt_problems else "bound"
 
     if args.json:
         print(
@@ -574,6 +627,11 @@ def command_check(args: argparse.Namespace) -> int:
                     "source_commit": commit,
                     "row_count": len(inventory),
                     "drift_count": len(drifts),
+                    "receipt": {
+                        "path": str(receipt_path),
+                        "state": receipt_state,
+                        "problems": receipt_problems,
+                    },
                     "drifts": [
                         {
                             "location": drift.row.label,
@@ -597,7 +655,16 @@ def command_check(args: argparse.Namespace) -> int:
             print(f"gpu-handoff-provenance: STALE {line}")
         for problem in problems:
             print(f"gpu-handoff-provenance: VALIDATOR {problem}")
-        if drifts:
+        for problem in receipt_problems:
+            print(f"gpu-handoff-provenance: RECEIPT {problem}")
+        if receipt_state == "absent":
+            # Loud, not silent: an absent receipt is a state the reader must
+            # see, never a quiet pass on a claim that was not examined.
+            print(
+                f"gpu-handoff-provenance: receipt: none at {receipt_path}; "
+                "binding not checked"
+            )
+        if drifts or receipt_problems:
             print(f"gpu-handoff-provenance: repair with: {command}")
         elif problems:
             # Contract violations are human edits, not drift. Printing the
@@ -607,9 +674,14 @@ def command_check(args: argparse.Namespace) -> int:
                 "gpu-handoff-provenance: every pinned identity matches; the "
                 "problems above are contract violations regeneration cannot repair"
             )
+        elif receipt_state == "bound":
+            print(
+                "gpu-handoff-provenance: OK: every pinned identity matches and "
+                "the receipt binds this ledger"
+            )
         else:
             print("gpu-handoff-provenance: OK: every pinned identity matches")
-    return 1 if drifts or problems else 0
+    return 1 if drifts or problems or receipt_problems else 0
 
 
 def command_write(args: argparse.Namespace) -> int:
@@ -702,6 +774,13 @@ def build_parser() -> argparse.ArgumentParser:
         "check", help="report every stale identity and the exact repair command"
     )
     check.add_argument("--source-commit", default="HEAD")
+    check.add_argument(
+        "--receipt",
+        type=pathlib.Path,
+        default=None,
+        help="receipt to bind against (default: <root>/"
+        f"{RECEIPT_RELATIVE.as_posix()}; reported loudly when absent)",
+    )
     check.add_argument("--json", action="store_true")
     check.set_defaults(handler=command_check)
 

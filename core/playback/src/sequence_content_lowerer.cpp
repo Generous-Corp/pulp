@@ -306,15 +306,21 @@ class SequenceContentLowerer::Impl {
                       std::optional<timebase::TickPosition> context_start = std::nullopt,
                       std::int64_t groove_pad_left = 0, std::int64_t groove_pad_right = 0,
                       std::vector<LoweredPlacementFade> placement_fades = {},
+                      std::int64_t authored_window_start = 0,
+                      timebase::TickDuration authored_duration = {},
                       double source_frame_phase_end = 0.0) {
         if (expanded_clips_ >= max_expanded_clips_)
             return {.error =
                         SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded, source}};
         ++expanded_clips_;
         const auto authored_start = context_start.value_or(clip.start());
+        // A clip no nesting trimmed is its own authored extent, so the window
+        // is the identity rather than a case the compiler has to special-case.
+        const auto authored = authored_duration.value > 0 ? authored_duration : clip.duration();
         output_->push_back({std::move(clip), source_frame_offset, context_sequence_id,
                             authored_start, groove_pad_left, groove_pad_right,
-                            std::move(placement_fades), source_frame_phase_end});
+                            std::move(placement_fades), authored_window_start, authored,
+                            source_frame_phase_end});
         return {};
     }
 
@@ -464,10 +470,6 @@ class SequenceContentLowerer::Impl {
         const auto right_trim = child.end().value - clipped_end.value;
         // Everything the nesting adds on top of this leaf's own authored gain.
         const auto composed_gain = frame.inherited_gain * frame.track_gain;
-        if (std::holds_alternative<timeline::RegisteredContent>(child.content()) &&
-            (left_trim != 0 || right_trim != 0))
-            return {.error = SequenceLoweringError{
-                        CompileErrorCode::TrimmedRegisteredContentUnsupported, child.id()}};
         // A conforming clip maps its complete authored source span onto its
         // musical placement, so a retained window maps onto the matching
         // sub-span of the source under the same function. Resample gets that
@@ -810,8 +812,8 @@ class SequenceContentLowerer::Impl {
                                                    pending.child.id()}};
         return append(std::move(flattened).value(), pending.child.id(), source_frame_offset,
                       pending.context_sequence_id, pending.clipped_start, pending.pad_left,
-                      pending.pad_right, std::move(pending.placement_fades),
-                      source_frame_phase_end);
+                      pending.pad_right, std::move(pending.placement_fades), pending.left_trim,
+                      pending.child.duration(), source_frame_phase_end);
     }
 
     const timeline::Project& project_;
