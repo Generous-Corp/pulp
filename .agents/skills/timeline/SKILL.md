@@ -3195,6 +3195,82 @@ lane vector instead — it is stricter than a count on every axis that matters
 (identity, address, order, per-point value) and blind to bookkeeping that is
 supposed to change.
 
+## A Create/Remove pair with no Modify is unreachable, not merely awkward
+
+`CommandIntent::Remove` is the destructive axis a capability mask denies by
+default, and the MCP default proposal profile holds every class with no
+destructive intent. So a vocabulary that ships only Insert and Remove is not
+"a bit inconvenient" for that profile — the only way to change a value is
+remove-then-insert, and the remove is refused, so the capability is **write-once
+for the writer class it exists for**. Regions had exactly this shape: a
+proposal-profile writer could author a region carrying a `SectionRole` and never
+correct it.
+
+The fix is a third command at `Modify` whose payload pins identity. Two things
+make it a real Modify rather than a laundered pair:
+
+- `expected` and `replacement` must carry the same identity, refused in the
+  reducer *and* in the decoder. A Modify that can swap identity is a removal and
+  a creation wearing a signature that declares neither, which is a way around the
+  denial the profile is built on.
+- Nothing is retired, so the command plans no identity mutation and its inverse
+  reduces through the public `reduce_transaction` unchanged — unlike a lane or
+  point removal, whose undo needs a real `DocumentSession`.
+
+`InsertMarker`/`RemoveMarker` and `Class::Automation` still have the defective
+shape. Three instances is a pattern: **any lane or annotation vocabulary shipping
+Create and Remove without Modify is unreachable for the untrusted writer profile
+Forge uses.**
+
+## A hand-written field-by-field comparison is where a member goes missing
+
+`equal_region` in `command.cpp` named five of `SequenceRegion`'s six members and
+omitted `role` — so two regions differing only in the member a generator
+dispatches on compared equal, in command idempotency *and* in whole-document
+equivalence. Nothing failed, because nothing asked.
+
+Every member of that struct is exactly comparable, so the comparison is now
+`operator<=>(…) = default` on the type and `equal_region` forwards to it. Prefer
+that wherever the members allow it: a partial restatement of "are these the same"
+is a second authority that can silently disagree with the first, and the way it
+fails is by admitting an edit it should have refused.
+
+The exception is real — `equal_marker` and the clip/track comparisons stay
+hand-written because they must skip derived or float members — but "the members
+are all exactly comparable and I wrote it out anyway" is not that exception.
+
+## `Class::Timing` governs pitch as well as time, deliberately
+
+`SetProjectTuning` and `SetTrackTuning` are both `{Timing, Modify}`, which makes
+`Timing` the only class spanning project and track scope. That is the accepted
+cost of two alternatives that were worse:
+
+- A new `CommandClass` renumbers `capability_bit` and silently repurposes every
+  persisted and transmitted writer mask. Never add one; `kCommandClassCount` is
+  11 and the bit literals are asserted in
+  `test_timeline_tuning_region_commands.cpp` so an inserted class fails loudly.
+- Putting the track command on `Class::Track` would mean a grant issued to rename
+  and reorder tracks silently becomes authority to retune them, and it splits the
+  retuning grant across two bits so no mask can say "may not retune" without also
+  forbidding renames.
+
+The class doc comment states what it governs, because a class whose doc does not
+is how the next author picks the wrong one.
+
+## Clearing an optional value is `Modify`, not `Remove`
+
+`std::optional<TuningReference>` absence is a claim — "this document names no
+tuning" — and it is a *different* claim from naming equal temperament. Clearing
+it removes nothing the document owns; the project or track persists unchanged in
+identity, exactly as `SetChordScaleLane`, `SetGroove`, `SetTempoMap`, and
+`SetMeterMap` all replace a whole value including an empty one under `Modify`.
+
+Routing the clear through `Remove` would be the hardening mistake: it is denied
+by default, so a proposal-profile writer could set a tuning it could never
+retract. And the gate compares absence as a value — expecting absence where a
+value stands is refused rather than treated as "no opinion", or a writer would
+overwrite an override it never saw.
+
 ## Every "rebuild a Sequence from its parts" site must carry a new lane
 
 `SequenceInput` is populated in several places that reconstruct a sequence rather

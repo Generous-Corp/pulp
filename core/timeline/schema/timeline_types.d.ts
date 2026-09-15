@@ -402,12 +402,25 @@ export interface PulpTimelineCommandSetNoteVelocity {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.set_project_tuning` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetProjectTuning {
+  expected?: PulpTimelineTuning;
+  replacement?: PulpTimelineTuning;
+}
+
 /** `pulp.timeline.command.set_record_arm` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetRecordArm {
   expected: boolean;
   replacement: boolean;
   sequence_id: number | string;
   track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_region` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetRegion {
+  expected: PulpTimelineRegion;
+  replacement: PulpTimelineRegion;
+  sequence_id: number | string;
 }
 
 /** `pulp.timeline.command.set_take_comp` — domain Command, schema version 1. */
@@ -445,6 +458,14 @@ export interface PulpTimelineCommandSetTrackMixer {
 export interface PulpTimelineCommandSetTrackName {
   expected: string;
   replacement: string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_track_tuning` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetTrackTuning {
+  expected?: PulpTimelineTuning;
+  replacement?: PulpTimelineTuning;
   sequence_id: number | string;
   track_id: number | string;
 }
@@ -689,12 +710,15 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_midi_expression_lane_points"
   | "pulp.timeline.command.set_note_events"
   | "pulp.timeline.command.set_note_velocity"
+  | "pulp.timeline.command.set_project_tuning"
   | "pulp.timeline.command.set_record_arm"
+  | "pulp.timeline.command.set_region"
   | "pulp.timeline.command.set_take_comp"
   | "pulp.timeline.command.set_tempo_map"
   | "pulp.timeline.command.set_track_freeze"
   | "pulp.timeline.command.set_track_mixer"
   | "pulp.timeline.command.set_track_name"
+  | "pulp.timeline.command.set_track_tuning"
   | "pulp.timeline.content.empty"
   | "pulp.timeline.content.media"
   | "pulp.timeline.content.notes"
@@ -770,12 +794,15 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_midi_expression_lane_points": PulpTimelineCommandSetMidiExpressionLanePoints;
   "pulp.timeline.command.set_note_events": PulpTimelineCommandSetNoteEvents;
   "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;
+  "pulp.timeline.command.set_project_tuning": PulpTimelineCommandSetProjectTuning;
   "pulp.timeline.command.set_record_arm": PulpTimelineCommandSetRecordArm;
+  "pulp.timeline.command.set_region": PulpTimelineCommandSetRegion;
   "pulp.timeline.command.set_take_comp": PulpTimelineCommandSetTakeComp;
   "pulp.timeline.command.set_tempo_map": PulpTimelineCommandSetTempoMap;
   "pulp.timeline.command.set_track_freeze": PulpTimelineCommandSetTrackFreeze;
   "pulp.timeline.command.set_track_mixer": PulpTimelineCommandSetTrackMixer;
   "pulp.timeline.command.set_track_name": PulpTimelineCommandSetTrackName;
+  "pulp.timeline.command.set_track_tuning": PulpTimelineCommandSetTrackTuning;
   "pulp.timeline.content.empty": PulpTimelineContentEmpty;
   "pulp.timeline.content.media": PulpTimelineContentMedia;
   "pulp.timeline.content.notes": PulpTimelineContentNotes;

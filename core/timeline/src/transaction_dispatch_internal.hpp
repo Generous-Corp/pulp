@@ -34,7 +34,7 @@ inline constexpr bool is_take_command_type =
 
 template <typename T>
 inline constexpr bool is_marker_command_type =
-    claimed_by<T, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion>;
+    claimed_by<T, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion, SetRegion>;
 
 template <typename T>
 inline constexpr bool is_scene_command_type =
@@ -49,7 +49,7 @@ inline constexpr bool is_device_command_type =
 
 template <typename T>
 inline constexpr bool is_track_state_command_type =
-    claimed_by<T, SetTrackFreeze, SetTrackMixer, SetTrackName>;
+    claimed_by<T, SetTrackFreeze, SetTrackMixer, SetTrackName, SetTrackTuning>;
 
 template <typename T>
 inline constexpr bool is_sequence_command_type =
@@ -65,8 +65,8 @@ inline constexpr bool is_note_command_type =
 // only statement of the claim.
 template <typename T>
 inline constexpr bool is_inline_command_type =
-    claimed_by<T, InsertClip, RemoveClip, MoveClip, SetTempoMap, SetMeterMap, CreateAsset,
-               RemoveAsset, SetChordScaleLane, SetGroove, SetClipPlaybackProperties,
-               SetDynamicsLane>;
+    claimed_by<T, InsertClip, RemoveClip, MoveClip, SetTempoMap, SetMeterMap, SetProjectTuning,
+               CreateAsset, RemoveAsset, SetChordScaleLane, SetGroove,
+               SetClipPlaybackProperties, SetDynamicsLane>;
 
 } // namespace pulp::timeline::detail
