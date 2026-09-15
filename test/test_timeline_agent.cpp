@@ -200,6 +200,27 @@ std::string modulation_project_json() {
     return project_to_json(project);
 }
 
+// A source and the route that already reads it, so a rewiring command has
+// something to gate on rather than something to create first.
+std::string modulation_route_project_json() {
+    auto clip = take(Clip::create({4}, {0}, {960}, EmptyContent{}));
+    TrackInput input;
+    input.id = {3};
+    input.name = "track";
+    input.clips = {clip};
+    input.macros = {MacroControl{{16}, "brightness", 0.5f}};
+    input.modulators = {Modulator{{17}, ModulatorKind::Lfo, "wobble"}};
+    input.modulation_routes = {ModulationRoute{{18},
+                                               {{17}, ModulationSourceKind::Modulator},
+                                               TrackMixerTarget{TrackMixerParameter::Gain},
+                                               0.5f,
+                                               true}};
+    auto track = take(Track::create(std::move(input)));
+    auto sequence = take(Sequence::create({2}, "root", timebase::TickDuration{960}, {}, {track}));
+    auto project = take(Project::create(ProjectInput{{1}, "routes", 20, {2}, {}, {sequence}}));
+    return project_to_json(project);
+}
+
 std::string project_from_result(const std::string& json) {
     auto parsed = take(parse_json(json));
     const auto* project = parsed->root().find("project");
@@ -388,6 +409,61 @@ TEST_CASE("timeline agent authors a modulation source and moves a macro it alrea
     const auto replayed =
         tools::timeline::command_apply(tools::timeline::ProjectSource::inline_json(moved_project),
                                        move, tools::timeline::editor_writer_profile());
+    REQUIRE_FALSE(replayed);
+}
+
+TEST_CASE("timeline agent authors a route and rewires one it already holds") {
+    // command_apply serializes the project it produced, so a collection the
+    // encoder does not carry would read as a successful edit that changed
+    // nothing. Every assertion below is on the returned document. 1036831949 is
+    // the IEEE-754 bit pattern of 0.1, the depth a decimal wire spelling would
+    // round away.
+    const auto authored = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(modulation_route_project_json()),
+        R"([{"data":{"route":{"data":{"depth_bits":"1036831949","enabled":false,"id":"20",)"
+        R"("source_id":"16","source_kind":"macro","target":{"data":{"parameter":"pan"},)"
+        R"("type_name":"pulp.timeline.automation_target.track_mixer","version":1}},)"
+        R"("type_name":"pulp.timeline.modulation_route","version":1},"sequence_id":"2",)"
+        R"("track_id":"3"},"type_name":"pulp.timeline.command.insert_modulation_route",)"
+        R"("version":1}])",
+        tools::timeline::editor_writer_profile());
+    REQUIRE(authored);
+    const auto authored_project = project_from_result(authored.json);
+    REQUIRE(authored_project.find(R"("depth_bits":"1036831949")") != std::string::npos);
+    // The bypass survives the round trip, so a route authored silent comes back
+    // silent rather than live.
+    REQUIRE(authored_project.find(R"("enabled":false)") != std::string::npos);
+    // The returned document is a document, not just a response: it reopens and
+    // validates, which is what makes the edit reachable by the next call.
+    REQUIRE(tools::timeline::validate(authored_project));
+    REQUIRE(project_from_result(tools::timeline::project_open(authored_project).json) ==
+            authored_project);
+
+    // 1056964608 and 3212836864 are the bit patterns of 0.5 and -1.0.
+    const std::string rewire =
+        R"([{"data":{"expected":{"data":{"depth_bits":"1056964608","enabled":true,"id":"18",)"
+        R"("source_id":"17","source_kind":"modulator","target":{"data":{"parameter":"gain"},)"
+        R"("type_name":"pulp.timeline.automation_target.track_mixer","version":1}},)"
+        R"("type_name":"pulp.timeline.modulation_route","version":1},"replacement":{"data":)"
+        R"({"depth_bits":"3212836864","enabled":true,"id":"18","source_id":"16",)"
+        R"("source_kind":"macro","target":{"data":{"parameter":"gain"},)"
+        R"("type_name":"pulp.timeline.automation_target.track_mixer","version":1}},)"
+        R"("type_name":"pulp.timeline.modulation_route","version":1},"route_id":"18",)"
+        R"("sequence_id":"2","track_id":"3"},)"
+        R"("type_name":"pulp.timeline.command.set_modulation_route","version":1}])";
+    const auto rewired = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(authored_project), rewire,
+        tools::timeline::editor_writer_profile());
+    REQUIRE(rewired);
+    const auto rewired_project = project_from_result(rewired.json);
+    REQUIRE(rewired_project.find(R"("depth_bits":"3212836864")") != std::string::npos);
+    REQUIRE(tools::timeline::validate(rewired_project));
+
+    // Replaying the rewire against the document it already changed is refused
+    // by its own gate rather than applied a second time.
+    const auto replayed =
+        tools::timeline::command_apply(tools::timeline::ProjectSource::inline_json(rewired_project),
+                                       rewire, tools::timeline::editor_writer_profile());
     REQUIRE_FALSE(replayed);
 }
 

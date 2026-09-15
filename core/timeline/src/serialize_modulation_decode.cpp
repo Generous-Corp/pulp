@@ -139,66 +139,61 @@ decode_macro_controls(const JsonValue& value, const DecodeLimits& limits, std::s
         });
 }
 
+runtime::Result<ModulationRoute, PersistenceError> decode_modulation_route(const JsonValue& value,
+                                                                           std::string path) {
+    auto data = validate_exact_envelope(value, "pulp.timeline.modulation_route", 1, path);
+    if (!data)
+        return runtime::Err(data.error());
+    const auto data_path = path + "/data";
+    auto depth = require_member(*data.value(), "depth_bits", JsonValue::Kind::String, data_path);
+    auto enabled = require_member(*data.value(), "enabled", JsonValue::Kind::Boolean, data_path);
+    auto id = require_member(*data.value(), "id", JsonValue::Kind::String, data_path);
+    auto source = require_member(*data.value(), "source_id", JsonValue::Kind::String, data_path);
+    auto source_kind =
+        require_member(*data.value(), "source_kind", JsonValue::Kind::String, data_path);
+    auto target = require_member(*data.value(), "target", JsonValue::Kind::Object, data_path);
+    if (!depth)
+        return runtime::Err(depth.error());
+    if (!enabled)
+        return runtime::Err(enabled.error());
+    if (!id)
+        return runtime::Err(id.error());
+    if (!source)
+        return runtime::Err(source.error());
+    if (!source_kind)
+        return runtime::Err(source_kind.error());
+    if (!target)
+        return runtime::Err(target.error());
+    auto decoded_id = parse_canonical_u64_string(*id.value(), data_path + "/id");
+    if (!decoded_id)
+        return runtime::Err(decoded_id.error());
+    auto decoded_source = parse_canonical_u64_string(*source.value(), data_path + "/source_id");
+    if (!decoded_source)
+        return runtime::Err(decoded_source.error());
+    const auto decoded_source_kind = modulation_source_kind_from_name(source_kind.value()->scalar);
+    if (!decoded_source_kind)
+        return fail<ModulationRoute>(PersistenceErrorCode::InvalidSchema,
+                                     data_path + "/source_kind", source_kind.value()->begin);
+    auto decoded_depth = decode_float_bits(*depth.value(), data_path + "/depth_bits");
+    if (!decoded_depth)
+        return runtime::Err(decoded_depth.error());
+    auto decoded_target = decode_parameter_target(*target.value(), data_path + "/target");
+    if (!decoded_target)
+        return runtime::Err(decoded_target.error());
+    return runtime::Ok(ModulationRoute{{decoded_id.value()},
+                                       {{decoded_source.value()}, *decoded_source_kind},
+                                       std::move(decoded_target).value(),
+                                       decoded_depth.value(),
+                                       enabled.value()->boolean});
+}
+
 runtime::Result<std::vector<ModulationRoute>, PersistenceError>
 decode_modulation_routes(const JsonValue& value, const DecodeLimits& limits, std::size_t& count,
                          std::string path) {
     return decode_governed_array<ModulationRoute>(
         value, count, limits.max_modulation_routes, std::move(path),
-        [](const JsonValue& element,
-           const std::string& element_path) -> runtime::Result<ModulationRoute, PersistenceError> {
-            auto data = validate_exact_envelope(element, "pulp.timeline.modulation_route", 1,
-                                                element_path);
-            if (!data)
-                return runtime::Err(data.error());
-            const auto data_path = element_path + "/data";
-            auto depth =
-                require_member(*data.value(), "depth_bits", JsonValue::Kind::String, data_path);
-            auto enabled =
-                require_member(*data.value(), "enabled", JsonValue::Kind::Boolean, data_path);
-            auto id = require_member(*data.value(), "id", JsonValue::Kind::String, data_path);
-            auto source =
-                require_member(*data.value(), "source_id", JsonValue::Kind::String, data_path);
-            auto source_kind =
-                require_member(*data.value(), "source_kind", JsonValue::Kind::String, data_path);
-            auto target =
-                require_member(*data.value(), "target", JsonValue::Kind::Object, data_path);
-            if (!depth)
-                return runtime::Err(depth.error());
-            if (!enabled)
-                return runtime::Err(enabled.error());
-            if (!id)
-                return runtime::Err(id.error());
-            if (!source)
-                return runtime::Err(source.error());
-            if (!source_kind)
-                return runtime::Err(source_kind.error());
-            if (!target)
-                return runtime::Err(target.error());
-            auto decoded_id = parse_canonical_u64_string(*id.value(), data_path + "/id");
-            if (!decoded_id)
-                return runtime::Err(decoded_id.error());
-            auto decoded_source =
-                parse_canonical_u64_string(*source.value(), data_path + "/source_id");
-            if (!decoded_source)
-                return runtime::Err(decoded_source.error());
-            const auto decoded_source_kind =
-                modulation_source_kind_from_name(source_kind.value()->scalar);
-            if (!decoded_source_kind)
-                return fail<ModulationRoute>(PersistenceErrorCode::InvalidSchema,
-                                             data_path + "/source_kind",
-                                             source_kind.value()->begin);
-            auto decoded_depth = decode_float_bits(*depth.value(), data_path + "/depth_bits");
-            if (!decoded_depth)
-                return runtime::Err(decoded_depth.error());
-            auto decoded_target =
-                decode_parameter_target(*target.value(), data_path + "/target");
-            if (!decoded_target)
-                return runtime::Err(decoded_target.error());
-            return runtime::Ok(ModulationRoute{{decoded_id.value()},
-                                               {{decoded_source.value()}, *decoded_source_kind},
-                                               std::move(decoded_target).value(),
-                                               decoded_depth.value(),
-                                               enabled.value()->boolean});
+        [](const JsonValue& element, const std::string& element_path) {
+            return decode_modulation_route(element, element_path);
         });
 }
 
