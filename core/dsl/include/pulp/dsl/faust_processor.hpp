@@ -146,7 +146,8 @@ private:
     std::map<std::string, std::string> metadata_;
 };
 
-// Template wrapper: T must be a FAUST-generated class derived from ::dsp.
+// Template wrapper: FaustDsp must be default-constructible and implement the
+// FAUST dsp ABI by deriving from ::dsp.
 // This is the concrete FaustProcessor that ships as a Pulp Processor.
 template <typename FaustDsp>
 class FaustProcessor : public DslProcessor {
