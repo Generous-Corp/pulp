@@ -29,6 +29,8 @@ Project command_payload_project() {
         .clips = {clip},
         .device_chain = {{{8}}},
         .automation_lanes = {automation},
+        .modulators = {Modulator{{16}, ModulatorKind::Lfo, "wobble"}},
+        .macros = {MacroControl{{17}, "brightness", 0.5f}},
         .take_lanes = {take_lane},
         .record_armed = true,
         .active_take_lane_id = {12},
@@ -71,6 +73,8 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     const auto& take_lane = member(track_data, "take_lanes").array[0];
     const auto& take_value = member(member(take_lane, "data"), "takes").array[0];
     const auto& freeze = member(track_data, "freeze");
+    const auto& modulator = member(track_data, "modulators").array[0];
+    const auto& macro = member(track_data, "macros").array[0];
     const auto& marker = member(member(sequence, "data"), "markers").array[0];
     const auto& region = member(member(sequence, "data"), "regions").array[0];
     const auto& groove = member(member(sequence, "data"), "groove");
@@ -260,6 +264,29 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
                  R"({"expected":null,"replacement":{"keyboard_map_content":null,)"
                  R"("reference_pitch_millihertz":415000,"scale_content":null,)"
                  R"("system":"mts_esp"},"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.insert_modulator",
+                 "{\"modulator\":" + std::string(parsed->raw(modulator)) +
+                     R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.remove_modulator",
+                 R"({"modulator_id":"16","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.set_modulator",
+                 "{\"expected\":" + std::string(parsed->raw(modulator)) +
+                     R"(,"modulator_id":"16","replacement":)" +
+                     std::string(parsed->raw(modulator)) + R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.insert_macro",
+                 "{\"macro\":" + std::string(parsed->raw(macro)) +
+                     R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.remove_macro",
+                 R"({"macro_id":"17","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.set_macro",
+                 "{\"expected\":" + std::string(parsed->raw(macro)) +
+                     R"(,"macro_id":"17","replacement":)" + std::string(parsed->raw(macro)) +
+                     R"(,"sequence_id":"5","track_id":"6"})"),
+        // Both floats are the IEEE-754 bit patterns of 0.5 and 0.25, the same
+        // spelling the macro document schema uses for the field they gate.
+        envelope("pulp.timeline.command.set_macro_value",
+                 R"({"expected_bits":"1056964608","macro_id":"17",)"
+                 R"("replacement_bits":"1048576000","sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -395,6 +422,30 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE_FALSE(track_tuning.expected.has_value());
     REQUIRE(track_tuning.replacement.has_value());
     REQUIRE(track_tuning.replacement->system == TuningSystem::MtsEsp);
+    REQUIRE(std::holds_alternative<InsertModulator>(commands[54]));
+    REQUIRE(std::get<InsertModulator>(commands[54]).modulator.id == ItemId{16});
+    REQUIRE(std::get<InsertModulator>(commands[54]).modulator.kind == ModulatorKind::Lfo);
+    REQUIRE(std::get<InsertModulator>(commands[54]).modulator.name == "wobble");
+    REQUIRE(std::holds_alternative<RemoveModulator>(commands[55]));
+    REQUIRE(std::get<RemoveModulator>(commands[55]).modulator_id == ItemId{16});
+    REQUIRE(std::holds_alternative<SetModulator>(commands[56]));
+    const auto& modulator_edit = std::get<SetModulator>(commands[56]);
+    REQUIRE(modulator_edit.modulator_id == ItemId{16});
+    REQUIRE(modulator_edit.expected.id == modulator_edit.replacement.id);
+    REQUIRE(std::holds_alternative<InsertMacro>(commands[57]));
+    REQUIRE(std::get<InsertMacro>(commands[57]).macro.id == ItemId{17});
+    // The authored position survives the wire bit-exactly, which is what makes
+    // an exact-value gate over a float safe in this vocabulary.
+    REQUIRE(std::get<InsertMacro>(commands[57]).macro.value == 0.5f);
+    REQUIRE(std::holds_alternative<RemoveMacro>(commands[58]));
+    REQUIRE(std::get<RemoveMacro>(commands[58]).macro_id == ItemId{17});
+    REQUIRE(std::holds_alternative<SetMacro>(commands[59]));
+    REQUIRE(std::get<SetMacro>(commands[59]).macro_id == ItemId{17});
+    REQUIRE(std::holds_alternative<SetMacroValue>(commands[60]));
+    const auto& macro_value = std::get<SetMacroValue>(commands[60]);
+    REQUIRE(macro_value.macro_id == ItemId{17});
+    REQUIRE(macro_value.expected == 0.5f);
+    REQUIRE(macro_value.replacement == 0.25f);
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;

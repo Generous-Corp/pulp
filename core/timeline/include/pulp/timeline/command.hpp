@@ -2,6 +2,7 @@
 
 #include <pulp/timeline/midi_lane.hpp>
 #include <pulp/timeline/model.hpp>
+#include <pulp/timeline/modulation.hpp>
 #include <pulp/timeline/tuning.hpp>
 
 #include <cstddef>
@@ -630,6 +631,120 @@ struct SetRegion {
     SequenceRegion replacement;
 };
 
+/// Inserts a track-owned modulation source.
+///
+/// Identity is authored by the caller rather than minted here, so the route
+/// that will read this source can be written in the same transaction.
+struct InsertModulator {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track that will own the modulator.
+    ItemId track_id;
+    /// Complete modulator declaration, carrying its own identity.
+    Modulator modulator;
+};
+
+/// Removes a track-owned modulation source by identity.
+///
+/// A source a route still reads cannot be removed: the model refuses a track
+/// whose routes name a source it does not hold, so the refusal arrives as a
+/// model failure rather than as a document that silently loses its routing.
+struct RemoveModulator {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the modulator.
+    ItemId track_id;
+    /// Identity of the modulator to remove.
+    ItemId modulator_id;
+};
+
+/// Replaces a modulation source's declaration under an exact value gate.
+///
+/// Identity is pinned: `expected.id`, `replacement.id`, and `modulator_id` must
+/// all be equal. A Modify that could also swap identity is a removal and a
+/// creation wearing a signature that declares neither, and removal is the axis
+/// an untrusted writer is denied by default — so an unpinned identity would
+/// hand a writer holding only Modify the operation its mask refuses.
+struct SetModulator {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the modulator.
+    ItemId track_id;
+    /// Identity of the modulator whose declaration changes.
+    ItemId modulator_id;
+    /// Required current declaration, compared in full.
+    Modulator expected;
+    /// Declaration written when the gate matches, carrying the same identity.
+    Modulator replacement;
+};
+
+/// Inserts a track-owned macro control.
+struct InsertMacro {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track that will own the macro.
+    ItemId track_id;
+    /// Complete macro declaration, carrying its own identity.
+    MacroControl macro;
+};
+
+/// Removes a track-owned macro control by identity.
+///
+/// As with a modulation source, a macro a route still reads cannot be removed;
+/// the model refuses the resulting track rather than dropping the routes.
+struct RemoveMacro {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the macro.
+    ItemId track_id;
+    /// Identity of the macro to remove.
+    ItemId macro_id;
+};
+
+/// Replaces a macro control's declaration under an exact value gate.
+///
+/// Identity is pinned the same way SetModulator pins it, and for the same
+/// reason. The gate covers the whole macro, name and position together, which
+/// is what an authoring edit that rewrites both should gate on.
+struct SetMacro {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the macro.
+    ItemId track_id;
+    /// Identity of the macro whose declaration changes.
+    ItemId macro_id;
+    /// Required current declaration, compared in full.
+    MacroControl expected;
+    /// Declaration written when the gate matches, carrying the same identity.
+    MacroControl replacement;
+};
+
+/// Replaces only a macro's authored position under an exact value gate.
+///
+/// A whole-value gate would make a performer moving a macro also supply its
+/// current name, so a concurrent rename would abort an edit that did not
+/// conflict with it — the gate manufacturing a conflict out of two disjoint
+/// edits. This is the narrow command beside the broad one, the same shape
+/// SetNoteVelocity has beside SetNoteEvents. The overlap is deliberate:
+/// SetMacro may also change the value, and an edit that rewrites the whole
+/// macro should gate on the whole macro.
+///
+/// The float compares exactly rather than within a tolerance, and that is safe
+/// rather than fragile: the persisted spelling is the IEEE-754 bit pattern, so
+/// a value that round-trips through the wire compares equal to itself.
+struct SetMacroValue {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the macro.
+    ItemId track_id;
+    /// Identity of the macro whose position changes.
+    ItemId macro_id;
+    /// Required current normalized position, compared exactly.
+    float expected = 0.0f;
+    /// Normalized position written when the gate matches.
+    float replacement = 0.0f;
+};
+
 /// Exhaustive set of durable Timeline document mutations.
 using Command = std::variant<
     InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip, SetNoteVelocity,
@@ -641,7 +756,8 @@ using Command = std::variant<
     RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents, InsertNotes, RemoveNotes, InsertDevice,
     RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState, SetDynamicsLane,
     InsertMidiExpressionLane, RemoveMidiExpressionLane, SetMidiExpressionLanePoints,
-    SetProjectTuning, SetTrackTuning, SetRegion>;
+    SetProjectTuning, SetTrackTuning, SetRegion, InsertModulator, RemoveModulator, SetModulator,
+    InsertMacro, RemoveMacro, SetMacro, SetMacroValue>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {

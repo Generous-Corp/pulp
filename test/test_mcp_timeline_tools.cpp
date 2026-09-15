@@ -527,6 +527,68 @@ TEST_CASE("timeline MCP retunes a project and corrects a section role under the 
     require_contains(permitted, R"JSON("revision":"1")JSON");
 }
 
+TEST_CASE("timeline MCP authors a modulator and moves a macro but refuses to remove either",
+          "[mcp][tools][timeline]") {
+    using namespace pulp::timeline;
+    auto clip = require_timeline_result(Clip::create({4}, {0}, {960}, EmptyContent{}));
+    TrackInput input;
+    input.id = {3};
+    input.name = "track";
+    input.clips = {clip};
+    input.macros = {MacroControl{{16}, "brightness", 0.5f}};
+    auto track = require_timeline_result(Track::create(std::move(input)));
+    auto sequence = require_timeline_result(
+        Sequence::create({2}, "root", pulp::timebase::TickDuration{960}, {}, {track}));
+    auto project_value = require_timeline_result(
+        Project::create(ProjectInput{{1}, "mcp-modulation", 20, {2}, {}, {sequence}}));
+    auto registry = require_timeline_result(make_builtin_timeline_registry());
+    const auto project = require_timeline_result(serialize_project(project_value, registry)).json;
+
+    // The default MCP authority is the non-destructive proposal profile. It
+    // holds every class and no destructive intent, so it can author a
+    // modulation source and correct it without escalating.
+    const std::string author =
+        R"JSON([{"data":{"modulator":{"data":{"id":"20","kind":"envelope","name":"attack"},"type_name":"pulp.timeline.modulator","version":1},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.insert_modulator","version":1}])JSON";
+    const auto authored = handle_timeline_command_apply(
+        "{\"commands\":" + author + ",\"project\":" + pulp::timeline::quote_json_string(project) +
+        "}");
+    require_contains(authored, R"JSON("revision":"1")JSON");
+    const auto authored_project = timeline_project_from_response(authored);
+    require_contains(authored_project, R"JSON("kind":"envelope")JSON");
+
+    // The returned document reopens, so the edit is reachable by the next call
+    // rather than only visible in this response.
+    const auto reopened = handle_timeline_project_open(
+        "{\"project\":" + pulp::timeline::quote_json_string(authored_project) + "}");
+    require_contains(reopened, R"JSON("ok":true)JSON");
+    REQUIRE(timeline_project_from_response(reopened) == authored_project);
+
+    // 1056964608 and 1048576000 are the IEEE-754 bit patterns of 0.5 and 0.25.
+    const std::string move =
+        R"JSON([{"data":{"expected_bits":"1056964608","macro_id":"16","replacement_bits":"1048576000","sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_macro_value","version":1}])JSON";
+    const auto moved =
+        handle_timeline_command_apply("{\"commands\":" + move + ",\"project\":" +
+                                      pulp::timeline::quote_json_string(authored_project) + "}");
+    require_contains(timeline_project_from_response(moved), R"JSON("value_bits":"1048576000")JSON");
+
+    // The destructive half stays denied to the same profile, so the
+    // reachability above did not come from widening the mask.
+    const std::string remove =
+        R"JSON([{"data":{"macro_id":"16","sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.remove_macro","version":1}])JSON";
+    const auto refused =
+        handle_timeline_command_apply("{\"commands\":" + remove + ",\"project\":" +
+                                      pulp::timeline::quote_json_string(authored_project) + "}");
+    require_contains(refused, R"JSON("isError":true)JSON");
+
+    // Control: the editor profile holds the destructive axis, so the same
+    // payload lands. The refusal above is the authority and not a malformed
+    // command.
+    const auto permitted = handle_timeline_command_apply(
+        "{\"commands\":" + remove + ",\"project\":" +
+        pulp::timeline::quote_json_string(authored_project) + ",\"writer_profile\":\"editor\"}");
+    require_contains(permitted, R"JSON("revision":"1")JSON");
+}
+
 TEST_CASE("timeline MCP confines package-relative media to the project base",
           "[mcp][tools][timeline]") {
     TempDir temp;

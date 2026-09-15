@@ -512,6 +512,38 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                 return left.sequence_id == right.sequence_id &&
                        equal_region(left.expected, right.expected) &&
                        equal_region(left.replacement, right.replacement);
+            } else if constexpr (std::is_same_v<T, InsertModulator>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.modulator == right.modulator;
+            } else if constexpr (std::is_same_v<T, RemoveModulator>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.modulator_id == right.modulator_id;
+            } else if constexpr (std::is_same_v<T, SetModulator>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.modulator_id == right.modulator_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, InsertMacro>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.macro == right.macro;
+            } else if constexpr (std::is_same_v<T, RemoveMacro>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.macro_id == right.macro_id;
+            } else if constexpr (std::is_same_v<T, SetMacro>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.macro_id == right.macro_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, SetMacroValue>) {
+                // Bit comparison, not value comparison: two commands that both
+                // carry a NaN expectation are the same authored command, and
+                // `==` would call them different. Idempotency asks whether the
+                // same command arrived twice, which is a question about the
+                // bytes.
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.macro_id == right.macro_id &&
+                       std::bit_cast<std::uint32_t>(left.expected) ==
+                           std::bit_cast<std::uint32_t>(right.expected) &&
+                       std::bit_cast<std::uint32_t>(left.replacement) ==
+                           std::bit_cast<std::uint32_t>(right.replacement);
             } else if constexpr (std::is_same_v<T, SetProjectTuning>) {
                 return left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, SetTrackTuning>) {
@@ -607,6 +639,19 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(
                     sizeof(T),
                     saturated_add(value.expected.name.size(), value.replacement.name.size()));
+            // A modulator and a macro each carry one heap allocation, their
+            // name, and a value gate carries one on each side. Every other
+            // member is a fixed-width value the struct's own size covers.
+            if constexpr (std::is_same_v<T, InsertModulator>)
+                return saturated_add(sizeof(T), value.modulator.name.size());
+            if constexpr (std::is_same_v<T, SetModulator>)
+                return saturated_add(sizeof(T), saturated_add(value.expected.name.size(),
+                                                              value.replacement.name.size()));
+            if constexpr (std::is_same_v<T, InsertMacro>)
+                return saturated_add(sizeof(T), value.macro.name.size());
+            if constexpr (std::is_same_v<T, SetMacro>)
+                return saturated_add(sizeof(T), saturated_add(value.expected.name.size(),
+                                                              value.replacement.name.size()));
             if constexpr (std::is_same_v<T, InsertScene>)
                 return saturated_add(saturated_add(sizeof(T), value.scene.name.size()),
                                      detail::launcher_slot_list_owned_storage(value.scene.slots));

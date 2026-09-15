@@ -8,6 +8,7 @@
 #include "transaction_dispatch_internal.hpp"
 #include "transaction_internal.hpp"
 #include "transaction_marker_internal.hpp"
+#include "transaction_modulation_internal.hpp"
 #include "transaction_scene_internal.hpp"
 #include "transaction_note_internal.hpp"
 #include "transaction_reduction_support.hpp"
@@ -56,6 +57,7 @@ template <typename T>
 constexpr int dispatch_claims() {
     return static_cast<int>(detail::is_automation_command_type<T>) +
            static_cast<int>(detail::is_take_command_type<T>) +
+           static_cast<int>(detail::is_modulation_command_type<T>) +
            static_cast<int>(detail::is_marker_command_type<T>) +
            static_cast<int>(detail::is_scene_command_type<T>) +
            static_cast<int>(detail::is_device_command_type<T>) +
@@ -234,6 +236,15 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
         } else if (detail::is_take_command(envelope.command)) {
             auto reduced = detail::reduce_take_command(project, envelope.command, transaction,
                                                        envelope.id, allow_tombstone_restore);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
+        } else if (detail::is_modulation_command(envelope.command)) {
+            auto reduced = detail::reduce_modulation_command(project, envelope.command, transaction,
+                                                             envelope.id, allow_tombstone_restore);
             if (!reduced)
                 return runtime::Result<ReducedTransaction, TransactionError>(
                     runtime::Err(reduced.error()));

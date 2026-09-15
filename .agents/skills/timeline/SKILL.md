@@ -3222,6 +3222,60 @@ shape. Three instances is a pattern: **any lane or annotation vocabulary shippin
 Create and Remove without Modify is unreachable for the untrusted writer profile
 Forge uses.**
 
+## A collection the model validates end to end needs no second validator in its commands
+
+`TrackInput`'s three modulation collections arrived complete on every axis but
+mutation: registered document schemas, an encoder, a decoder, and
+`validate_attached_modulation`, which already refuses an out-of-range macro
+position, an undeclared modulator kind, a route whose depth leaves
+`[-kMaximumModulationDepth, +kMaximumModulationDepth]`, a route naming a source
+the track does not hold, and a source removal that would orphan one.
+
+A command family over such a collection should reach that validator rather than
+restate any part of it. The cheap way is a whole-collection replace that revalidates
+through `Track::create`, exactly as `Track::with_device_chain` already did:
+
+```cpp
+auto input = detail::track_input_of(*this);
+input.modulators = std::move(modulators);
+auto validated = Track::create(std::move(input));   // the only validator
+// ... then copy only the replaced storage into a copy of *data_
+```
+
+Copying only the one field back is the load-bearing half. `Track::create` rebuilds
+the persistent clip index from scratch, so returning its result directly would
+discard every shared index subtree and silently turn an O(log n) edit into an O(n)
+one. Reach `create` for its refusal; keep your own snapshot for everything it did
+not change.
+
+The payoff is that "removing a modulation source a route still reads is refused"
+needed no code in the command layer at all — the model was already the authority,
+and the reducer surfaces its `ModelError` as `ConflictCode::ModelInvariant`.
+
+## An exact float gate is safe when the wire spells the float in bits
+
+An optimistic gate that compares a `float` with `==` is normally a trap: a value
+that round-trips through a decimal encoding need not compare equal to itself, so
+the gate refuses an edit nobody conflicted on.
+
+It is not a trap when the persisted spelling is the IEEE-754 bit pattern.
+`macro_control.value_bits` and `modulation_route.depth_bits` are `U32`, so a round
+trip is bit-exact by construction and `operator==` holds across it. The naive
+mitigation — gate with a tolerance — would have *softened* every modulation gate
+for a hazard that does not exist, so a command gating one of those floats spells
+its own operands the same way (`expected_bits` / `replacement_bits`), never as a
+decimal.
+
+Prove it rather than reasoning about it, and prove it with a negative control:
+gate on a decoded `0.1f` (a value no decimal spelling at float width preserves)
+and show the **neighbouring bit pattern** is refused. Acceptance without the
+neighbour test is a gate that might accept anything close.
+
+One consequence for idempotency: `equivalent()` compares those operands as bit
+patterns, not with `==`. Idempotency asks whether the same authored command
+arrived twice, which is a question about the bytes — and `==` answers "no" to two
+identical NaN payloads.
+
 ## A hand-written field-by-field comparison is where a member goes missing
 
 `equal_region` in `command.cpp` named five of `SequenceRegion`'s six members and

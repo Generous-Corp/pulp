@@ -44,7 +44,16 @@ enum class CommandClass : std::uint8_t {
     Clip,
     /// Note content within a clip.
     Note,
-    /// Automation lanes on a track.
+    /// Non-performed control of parameter values on a track: automation lanes,
+    /// modulation sources, macros, and routes. A lane and a route differ in
+    /// mechanism -- a lane authors a parameter's base value, a route adds a
+    /// relative offset on top of it -- but a class partitions by the authority a
+    /// grant confers, and the authority is the same one. This is the broadest
+    /// track-scoped class, which is stated rather than hidden: a writer granted
+    /// Automation/Create to add lanes can also create modulators. The narrower
+    /// alternatives are worse, and adding a class is not available -- an
+    /// enumerator renumbers capability_bit and silently repurposes every
+    /// persisted and transmitted writer mask.
     Automation,
     /// Track existence, order, naming, mix, arm, and freeze.
     Track,
@@ -216,6 +225,20 @@ template <class T> constexpr CommandAuthority command_authority_of() noexcept {
         return {Class::Timing, Intent::Modify};
     else if constexpr (std::is_same_v<T, SetTrackTuning>)
         return {Class::Timing, Intent::Modify};
+    else if constexpr (std::is_same_v<T, InsertModulator>)
+        return {Class::Automation, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveModulator>)
+        return {Class::Automation, Intent::Remove};
+    else if constexpr (std::is_same_v<T, SetModulator>)
+        return {Class::Automation, Intent::Modify};
+    else if constexpr (std::is_same_v<T, InsertMacro>)
+        return {Class::Automation, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveMacro>)
+        return {Class::Automation, Intent::Remove};
+    else if constexpr (std::is_same_v<T, SetMacro>)
+        return {Class::Automation, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetMacroValue>)
+        return {Class::Automation, Intent::Modify};
     else if constexpr (std::is_same_v<T, CreateAsset>)
         return {Class::Asset, Intent::Create};
     else if constexpr (std::is_same_v<T, RemoveAsset>)

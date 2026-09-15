@@ -5373,7 +5373,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 54"
+            "alternatives == 61"
           ]
         },
         {
@@ -6485,7 +6485,7 @@
         {
           "path": "core/timeline/src/transaction_dispatch_internal.hpp",
           "needles": [
-            "SetMidiExpressionLanePoints,"
+            "SetMidiExpressionLanePoints>;"
           ]
         },
         {
@@ -6531,7 +6531,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 54"
+            "alternatives == 61"
           ]
         },
         {
@@ -6828,7 +6828,7 @@
             "struct SetProjectTuning",
             "struct SetTrackTuning",
             "struct SetRegion",
-            "SetProjectTuning, SetTrackTuning, SetRegion>;"
+            "SetProjectTuning, SetTrackTuning, SetRegion,"
           ]
         },
         {
@@ -6941,7 +6941,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 54"
+            "alternatives == 61"
           ]
         },
         {
@@ -6986,7 +6986,7 @@
                 "struct SetProjectTuning",
                 "struct SetTrackTuning",
                 "struct SetRegion",
-                "SetProjectTuning, SetTrackTuning, SetRegion>;"
+                "SetProjectTuning, SetTrackTuning, SetRegion,"
               ]
             },
             {
@@ -7128,6 +7128,360 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "This slice installs no design-time authoring capability. Tuning and section role are document mutations reached through the command vocabulary the CLI and MCP surfaces above already advertise, not a capability an agent manifest declares."
+        }
+      }
+    },
+    {
+      "id": "offline-timeline-modulation-source-macro-commands",
+      "title": "Typed modulation-source and macro mutation commands under exact value gates",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "a4c652ca-81f1-4260-9c2e-329b754a510d",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/PulpTimelineSources.cmake",
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/include/pulp/timeline/document_session.hpp",
+        "core/timeline/include/pulp/timeline/model.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/command.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/serialize_command_decode.cpp",
+        "core/timeline/src/serialize_modulation_decode.cpp",
+        "core/timeline/src/serialize_modulation_decode.hpp",
+        "core/timeline/src/track.cpp",
+        "core/timeline/src/transaction.cpp",
+        "core/timeline/src/transaction_dispatch_internal.hpp",
+        "core/timeline/src/transaction_modulation_internal.cpp",
+        "core/timeline/src/transaction_modulation_internal.hpp",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_mcp_timeline_tools.cpp",
+        "test/test_timeline_agent.cpp",
+        "test/test_timeline_command_persistence.cpp",
+        "test/test_timeline_modulation_commands.cpp",
+        "test/test_timeline_schema_registry.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": [
+            "struct InsertModulator",
+            "struct RemoveModulator",
+            "struct SetModulator",
+            "struct InsertMacro",
+            "struct RemoveMacro",
+            "struct SetMacro",
+            "struct SetMacroValue",
+            "InsertMacro, RemoveMacro, SetMacro, SetMacroValue>;"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+          "needles": [
+            "std::is_same_v<T, InsertModulator>",
+            "std::is_same_v<T, SetModulator>",
+            "std::is_same_v<T, InsertMacro>",
+            "std::is_same_v<T, SetMacroValue>",
+            "modulation sources, macros, and routes"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/model.hpp",
+          "needles": [
+            "insert_modulator(Modulator modulator) const;",
+            "replace_modulator(Modulator replacement) const;",
+            "insert_macro(MacroControl macro) const;",
+            "replace_macro(MacroControl replacement) const;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/track.cpp",
+          "needles": [
+            "Track::with_modulators",
+            "Track::with_macros",
+            "Track::erase_modulator",
+            "Track::replace_macro"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_dispatch_internal.hpp",
+          "needles": [
+            "is_modulation_command_type",
+            "SetMacro, SetMacroValue>;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_modulation_internal.cpp",
+          "needles": [
+            "reduce_insert_modulator",
+            "reduce_remove_macro",
+            "reduce_set_macro_value",
+            "set.expected.id != set.replacement.id || set.expected.id != set.modulator_id",
+            "ConflictCode::ExpectedValueMismatch"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction.cpp",
+          "needles": [
+            "detail::is_modulation_command(envelope.command)",
+            "detail::is_modulation_command_type<T>"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulator",
+            "pulp.timeline.command.set_modulator",
+            "pulp.timeline.command.insert_macro",
+            "pulp.timeline.command.set_macro_value",
+            "expected_bits"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_command_decode.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulator",
+            "pulp.timeline.command.set_macro_value",
+            "decode_command_modulator",
+            "decode_command_macro_control",
+            "decode_command_float_bits"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_modulation_decode.hpp",
+          "needles": [
+            "decode_modulator(const JsonValue& value",
+            "decode_macro_control(const JsonValue& value"
+          ]
+        },
+        {
+          "path": "core/timeline/src/command.cpp",
+          "needles": [
+            "std::is_same_v<T, InsertModulator>",
+            "std::is_same_v<T, SetMacroValue>",
+            "std::is_same_v<T, SetMacro>"
+          ]
+        },
+        {
+          "path": "test/test_timeline_modulation_commands.cpp",
+          "needles": [
+            "a modulation source is authored and corrected in place and removed whole",
+            "a macro is authored and its position moves under a gate that covers only the position",
+            "a stale modulation expectation is refused and the document is unchanged",
+            "a modulation edit may not move identity in either of the two ways it could",
+            "a command addressed at the wrong kind of item is refused",
+            "a source a route still reads cannot be removed",
+            "an out-of-range macro position and an undeclared modulator kind are refused",
+            "modulation commands round trip through their schema envelopes",
+            "a decoded macro position satisfies the gate the encoder wrote it for",
+            "decode refuses a modulation edit that moves identity",
+            "undo through a session restores a removed modulation source whole",
+            "a writer denied removal may author and correct a modulator and a macro",
+            "modulation command identity and retained size answer for their own payloads"
+          ]
+        },
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "pulp-test-timeline-modulation-commands"
+          ]
+        },
+        {
+          "path": "test/test_timeline_writer_capabilities.cpp",
+          "needles": [
+            "alternatives == 61"
+          ]
+        },
+        {
+          "path": "test/test_timeline_schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulator",
+            "pulp.timeline.command.set_macro_value",
+            "pulp.timeline.command.remove_macro"
+          ]
+        },
+        {
+          "path": "test/test_timeline_command_persistence.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulator",
+            "std::holds_alternative<SetMacroValue>(commands[60])"
+          ]
+        },
+        {
+          "path": "test/test_timeline_agent.cpp",
+          "needles": [
+            "timeline agent authors a modulation source and moves a macro it already holds",
+            "pulp.timeline.command.insert_modulator"
+          ]
+        },
+        {
+          "path": "test/test_mcp_timeline_tools.cpp",
+          "needles": [
+            "timeline MCP authors a modulator and moves a macro but refuses to remove either",
+            "pulp.timeline.command.set_macro_value"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The seven commands are public alternatives of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp can author, correct, and retire a track's modulation sources and macros through the same transaction path every other command uses. Before them the three TrackInput collections were storable, encodable, decodable, and validated, and reachable by no mutation at all: the only way to state a modulator was to rebuild the document. All seven are {Automation, *} rather than a new CommandClass, because adding an enumerator renumbers capability_bit and silently repurposes every persisted and transmitted writer mask; kCommandClassCount is still 11 and the three Automation bit literals are asserted rather than assumed. Automation rather than Device, because routes reach a track mixer as well as a device parameter and the sources are owned by the track rather than by any placement; and rather than Track, because folding modulation into \"existence, order, naming, mix, arm, and freeze\" would turn a grant issued to rename and reorder tracks into authority to rewire every parameter on them. The honest cost is stated rather than hidden: Automation becomes the broadest track-scoped class, and a writer granted Automation/Create to add lanes can also create modulators. SetModulator and SetMacro pin identity in the reducer and again in the decoder, because the model is handed one item and cannot see that the caller named another, and a Modify that could relocate identity would let a writer holding only Modify perform the removal its mask denies. SetMacroValue exists beside SetMacro for the reason SetNoteVelocity exists beside SetNoteEvents: a whole-value gate would make a performer moving a macro also supply its current name, so a concurrent rename would abort an edit that did not conflict with it. Its exact float comparison is safe rather than fragile because the persisted spelling is the IEEE-754 bit pattern, which a test proves by gating on a decoded 0.1f and refusing its neighbouring bit pattern. Validity is reached rather than restated: every reducer edits through a Track accessor that revalidates the whole track with the same validate_attached_modulation Track::create applies, so an out-of-range macro position, an undeclared modulator kind, and the removal of a source a route still reads all surface as the model's own refusal. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. The released p0-21-modulation-macros row is untouched and its CLI/MCP gaps stay open: this row delivers sources and macros, not routes, and a row closed on a vocabulary that can create a source and never route it would advertise a modulation surface that does not exist.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/command.hpp",
+              "needles": [
+                "struct InsertModulator",
+                "struct SetModulator",
+                "struct SetMacroValue",
+                "InsertMacro, RemoveMacro, SetMacro, SetMacroValue>;"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+              "needles": [
+                "std::is_same_v<T, InsertModulator>",
+                "std::is_same_v<T, SetMacroValue>"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/model.hpp",
+              "needles": [
+                "insert_modulator(Modulator modulator) const;",
+                "replace_macro(MacroControl replacement) const;"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "platform runtime music timebase timeline"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_modulation_commands.cpp",
+              "needles": [
+                "a modulation source is authored and corrected in place and removed whole",
+                "a modulation edit may not move identity in either of the two ways it could",
+                "a writer denied removal may author and correct a modulator and a macro"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The CLI reaches all seven commands through the canonical command-apply handler in tools/cli/cmd_seq.cpp, and the generated verb table carries their type names because the schema registry does. A registered command alone does not earn this surface, because command_apply applies the decoded commands and then returns serialize_project() of the result, so a mutation the project encoder does not carry is destroyed by the same call that performed it. That floor is measured rather than assumed: test_timeline_agent.cpp drives command_apply end to end, asserts the returned document carries the authored envelope kind and then the moved macro's bit pattern, reopens and validates that document, and asserts a replay of the move is refused by its own gate. The two floats travel as *_bits members spelled exactly as macro_control.value_bits spells the field they gate, so a value that round-trips compares equal to itself rather than to something near it. The authority recorded here is the CLI's declared editor profile and the refusal codes that profile's admission can emit, not the commands' own conflict codes.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": [
+                "pulp.timeline.command.insert_modulator",
+                "pulp.timeline.command.set_modulator",
+                "pulp.timeline.command.set_macro_value"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_agent.cpp",
+              "needles": [
+                "timeline agent authors a modulation source and moves a macro it already holds",
+                "pulp.timeline.command.set_macro_value"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The MCP tool definitions are projected from the same manifest as the CLI verbs, so pulp_timeline_command_apply advertises all seven type names in its type_name enum and its x-pulp-command-types list, and handle_timeline_command_apply binds that tool to the same command_apply the CLI calls. The default MCP authority is the non-destructive proposal profile, which holds every class and no destructive intent, and that profile is why the three Modify commands exist at all: a vocabulary of Insert and Remove alone is write-once for it, because correction would mean remove-then-insert and the remove is the axis it is denied. test_mcp_timeline_tools.cpp authors a modulator and moves a macro under that default profile, reopens the returned document through pulp_timeline_project_open, asserts the macro removal is still refused to the same profile -- so the reachability did not come from widening the mask -- and then applies the identical removal payload under the editor profile as a control, so the refusal is the authority rather than a malformed command.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_command_apply",
+                "pulp.timeline.command.insert_modulator",
+                "pulp.timeline.command.set_macro_value"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline MCP authors a modulator and moves a macro but refuses to remove either",
+                "pulp.timeline.command.insert_modulator"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live operation for a modulation source or a macro and no executor binding for one. These commands are the mutation such a control would execute, so this row is a dependency of that closure rather than a step of it: the live surface additionally needs the timeline document session Product A does not yet hold, and closing it here would make the ledger stop describing the product.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This slice installs no design-time authoring capability. A modulator, a macro, and their declarations are document mutations reached through the command vocabulary the CLI and MCP surfaces above already advertise, not a capability an agent manifest declares."
         }
       }
     }

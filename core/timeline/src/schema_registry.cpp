@@ -693,6 +693,55 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                  {"replacement", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
                  {"sequence_id", SchemaValueKind::U64String},
                  {"track_id", SchemaValueKind::U64String}}));
+    // Both the modulator and the macro commands carry the whole item on the
+    // wire, referencing the document schema that already spells it, so a
+    // command and a document never disagree about what a modulator is.
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_modulator", SchemaDomain::Command,
+                {{"modulator", SchemaValueKind::Object, true, "pulp.timeline.modulator"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_modulator", SchemaDomain::Command,
+                              {{"modulator_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    // The identity rides its own member as well as both sides of the gate. A
+    // decoder that finds the three disagreeing refuses, because a Modify that
+    // relocates identity is a removal and a creation wearing a signature that
+    // declares neither.
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_modulator", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, true, "pulp.timeline.modulator"},
+                 {"modulator_id", SchemaValueKind::U64String},
+                 {"replacement", SchemaValueKind::Object, true, "pulp.timeline.modulator"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_macro", SchemaDomain::Command,
+                {{"macro", SchemaValueKind::Object, true, "pulp.timeline.macro_control"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_macro", SchemaDomain::Command,
+                              {{"macro_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_macro", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, true, "pulp.timeline.macro_control"},
+                 {"macro_id", SchemaValueKind::U64String},
+                 {"replacement", SchemaValueKind::Object, true, "pulp.timeline.macro_control"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    // The two floats are spelled as their IEEE-754 bit patterns, exactly as
+    // macro_control.value_bits spells the field they gate. A decimal spelling
+    // here would reintroduce a round-trip hazard in the one command whose whole
+    // purpose is an exact float gate.
+    schemas.push_back(builtin("pulp.timeline.command.set_macro_value", SchemaDomain::Command,
+                              {{"expected_bits", SchemaValueKind::U32},
+                               {"macro_id", SchemaValueKind::U64String},
+                               {"replacement_bits", SchemaValueKind::U32},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.insert_scene", SchemaDomain::Command,
                               {{"before_scene_id", SchemaValueKind::U64String, false},
                                {"scene", SchemaValueKind::Object, true, "pulp.timeline.scene"},

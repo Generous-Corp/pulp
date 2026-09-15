@@ -153,6 +153,18 @@ class Track {
     runtime::Result<Track, ModelError> insert_automation_lane(AutomationLane lane) const;
     /// Returns a snapshot without the identified automation lane.
     runtime::Result<Track, ModelError> erase_automation_lane(ItemId id) const;
+    /// Returns a snapshot with a validated modulation source inserted.
+    runtime::Result<Track, ModelError> insert_modulator(Modulator modulator) const;
+    /// Removes a modulation source; a route still reading it refuses.
+    runtime::Result<Track, ModelError> erase_modulator(ItemId id) const;
+    /// Replaces one modulation source without changing its identity.
+    runtime::Result<Track, ModelError> replace_modulator(Modulator replacement) const;
+    /// Returns a snapshot with a validated macro control inserted.
+    runtime::Result<Track, ModelError> insert_macro(MacroControl macro) const;
+    /// Removes a macro control; a route still reading it refuses.
+    runtime::Result<Track, ModelError> erase_macro(ItemId id) const;
+    /// Replaces one macro control without changing its identity.
+    runtime::Result<Track, ModelError> replace_macro(MacroControl replacement) const;
     /// Inserts a typed device declaration at an authored position; empty appends.
     runtime::Result<Track, ModelError>
     insert_device(DevicePlacement placement,
@@ -264,6 +276,8 @@ class Track {
     bool shares_compile_structure_with(const Track& other) const noexcept;
     runtime::Result<Track, ModelError>
     with_device_chain(std::vector<DevicePlacement> device_chain) const;
+    runtime::Result<Track, ModelError> with_modulators(std::vector<Modulator> modulators) const;
+    runtime::Result<Track, ModelError> with_macros(std::vector<MacroControl> macros) const;
     explicit Track(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };
