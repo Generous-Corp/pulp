@@ -34,7 +34,7 @@
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
       "status": "live-defect",
-      "reason": "A SequenceRef source window trims a nested MediaRef leaf whose time_conform is Resample or Stretch. Both conform kinds break under a partial view, for different reasons and at different costs. Resample maps source to timeline by tick phase, while the nested trim path advances a raw source-frame offset computed from elapsed timeline samples, so a left trim silently starts the clip at the wrong audio; the checkable condition is a conform-aware source-range mapping owned by the renderer. Stretch additionally keys its rendered artifact to the clip's own authored tick range, and a trimmed window is not that range; the checkable condition there is a windowed stretch artifact. A complete, untrimmed nested conforming clip already lowers correctly, so the refusal is scoped to a cut source window rather than to conforming content."
+      "reason": "A SequenceRef source window trims a nested MediaRef leaf whose time_conform is Stretch. A stretched clip's audio is a rendered artifact keyed to the clip's own authored tick range, and a trimmed window is not that range, so a partial view needs a separately windowed artifact rather than a different read of the same one; that artifact is the checkable condition. Resample no longer refuses: the retained window maps onto the matching sub-span of the source under the same conform function, and the lowerer emits that sub-span as a source range beside the clip. A complete, untrimmed nested stretched clip already lowers correctly, so the refusal is scoped to a cut source window rather than to stretched content."
     },
     {
       "code": "NestedAbsoluteChildUnsupported",

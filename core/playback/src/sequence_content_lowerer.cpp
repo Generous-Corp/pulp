@@ -369,7 +369,8 @@ class SequenceContentLowerer::Impl {
                       std::int64_t groove_pad_left = 0, std::int64_t groove_pad_right = 0,
                       std::vector<LoweredPlacementFade> placement_fades = {},
                       std::int64_t authored_window_start = 0,
-                      timebase::TickDuration authored_duration = {}) {
+                      timebase::TickDuration authored_duration = {},
+                      double source_frame_phase_end = 0.0) {
         if (expanded_clips_ >= max_expanded_clips_)
             return {.error =
                         SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded, source}};
@@ -380,7 +381,8 @@ class SequenceContentLowerer::Impl {
         const auto authored = authored_duration.value > 0 ? authored_duration : clip.duration();
         output_->push_back({std::move(clip), source_frame_offset, context_sequence_id,
                             authored_start, groove_pad_left, groove_pad_right,
-                            std::move(placement_fades), authored_window_start, authored});
+                            std::move(placement_fades), authored_window_start, authored,
+                            source_frame_phase_end});
         return {};
     }
 
@@ -751,16 +753,18 @@ class SequenceContentLowerer::Impl {
         const auto composed_gain_automation =
             frame.inherited_gain_automation || frame.track_gain_automation;
         // A conforming clip maps its complete authored source span onto its
-        // musical placement. The legacy nested-trim path below advances a raw
-        // source-frame offset from elapsed timeline samples, which is only
-        // valid for TimeConform::None. Refuse a partial view until the renderer
-        // owns a conform-aware source-range mapping; otherwise a nested
-        // tempo-ramped clip can silently start at the wrong audio. Stretch
-        // fails a second way: its rendered artifact is keyed to the clip's own
-        // authored tick range, and a trimmed window is not that range, so it
-        // additionally needs a windowed artifact.
+        // musical placement, so a retained window maps onto the matching
+        // sub-span of the source under the same function. Resample gets that
+        // sub-span below, as a source range travelling beside the clip.
+        //
+        // Stretch cannot take the same route: its audio is a rendered artifact
+        // keyed to the clip's own authored tick range, and a trimmed window is
+        // not that range, so a partial view needs a separately windowed
+        // artifact rather than a different read of the same one. Refusing is
+        // the honest answer until that artifact exists — the alternative is a
+        // nested stretched region that silently plays the wrong audio.
         if (std::holds_alternative<timeline::MediaRef>(child.content()) &&
-            child.time_conform() != timeline::TimeConform::None &&
+            child.time_conform() == timeline::TimeConform::Stretch &&
             (left_trim != 0 || right_trim != 0))
             return {.error = SequenceLoweringError{
                         CompileErrorCode::NestedConformedTrimUnsupported, child.id()}};
@@ -916,6 +920,7 @@ class SequenceContentLowerer::Impl {
         pending_leaf_.reset();
         timeline::ClipContent content = pending.child.content();
         double source_frame_offset = 0.0;
+        double source_frame_phase_end = 0.0;
         if (const auto* notes = std::get_if<timeline::MidiContent>(&content)) {
             const auto* owner = project_.find_sequence(pending.context_sequence_id);
             if (!owner)
@@ -1002,6 +1007,36 @@ class SequenceContentLowerer::Impl {
                                                        pending.child.id()}};
             content = std::move(rebuilt).value();
         } else if (auto* media = std::get_if<timeline::MediaRef>(&content);
+                   media && pending.child.time_conform() == timeline::TimeConform::Resample &&
+                   (pending.left_trim > 0 || pending.right_trim > 0)) {
+            // Resample places source frame `f` at the fraction `f / frames` of
+            // the clip's authored tick span, whatever the tempo does in
+            // between. So the retained window's own fractions of that span name
+            // its end points in the source directly, and the flattened leaf
+            // reads exactly what the untrimmed leaf reads over the same ticks.
+            // Elapsed samples answer a different question and would put a
+            // tempo-ramped leaf at the wrong audio.
+            const auto authored_span = pending.child.duration().value;
+            if (authored_span <= 0 || media->frame_count == 0)
+                return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                       pending.child.id()}};
+            const auto span = static_cast<long double>(authored_span);
+            const auto frames = static_cast<long double>(media->frame_count);
+            const auto begin = static_cast<long double>(pending.left_trim) / span * frames;
+            const auto end =
+                static_cast<long double>(authored_span - pending.right_trim) / span * frames;
+            // A window this narrow retains no source frame to read, and a
+            // source range that does not advance is not one the renderer's
+            // phase map can divide by.
+            if (!(begin >= 0.0L) || !(end > begin) || !(end <= frames))
+                return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                       pending.child.id()}};
+            source_frame_offset = static_cast<double>(begin);
+            source_frame_phase_end = static_cast<double>(end);
+            if (!(source_frame_phase_end > source_frame_offset))
+                return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                       pending.child.id()}};
+        } else if (auto* media = std::get_if<timeline::MediaRef>(&content);
                    media && pending.left_trim > 0) {
             if (pending.target_start.value <
                 std::numeric_limits<std::int64_t>::min() + pending.left_trim)
@@ -1072,7 +1107,7 @@ class SequenceContentLowerer::Impl {
         return append(std::move(flattened).value(), pending.child.id(), source_frame_offset,
                       pending.context_sequence_id, pending.clipped_start, pending.pad_left,
                       pending.pad_right, std::move(pending.placement_fades), pending.left_trim,
-                      pending.child.duration());
+                      pending.child.duration(), source_frame_phase_end);
     }
 
     const timeline::Project& project_;

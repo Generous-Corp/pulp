@@ -89,14 +89,14 @@ class AudioSampleRateConverterCache {
                                       const timebase::CompiledTempoMap&,
                                       const DecodedAudioAssetPool&, const AudioRendererLimits&,
                                       AudioSampleRateConverterCache&, double,
-                                      const std::vector<LoweredPlacementFade>&);
+                                      const std::vector<LoweredPlacementFade>&, double);
     friend runtime::Result<AudioClipRendererProgram, AudioRendererError>
     compile_audio_clip_program_cached(const timeline::Clip&, const timeline::Project&,
                                       const timebase::CompiledTempoMap&,
                                       const DecodedAudioAssetPool&, const AudioRendererLimits&,
                                       AudioSampleRateConverterCache&, double,
                                       std::shared_ptr<const OfflineStretchArtifact>,
-                                      const std::vector<LoweredPlacementFade>&);
+                                      const std::vector<LoweredPlacementFade>&, double);
     friend runtime::Result<AudioClipRendererProgram, AudioRendererError>
     compile_take_comp_segment_program_cached(const timeline::TakeLane&, std::size_t,
                                              const timeline::Project&,
@@ -126,14 +126,16 @@ runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_audio_clip
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache,
     double source_frame_offset = 0.0,
-    const std::vector<LoweredPlacementFade>& placement_fades = {});
+    const std::vector<LoweredPlacementFade>& placement_fades = {},
+    double source_frame_phase_end = 0.0);
 
 runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_audio_clip_program_cached(
     const timeline::Clip& clip, const timeline::Project& project,
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache,
     double source_frame_offset, std::shared_ptr<const OfflineStretchArtifact> stretch_artifact,
-    const std::vector<LoweredPlacementFade>& placement_fades = {});
+    const std::vector<LoweredPlacementFade>& placement_fades = {},
+    double source_frame_phase_end = 0.0);
 
 runtime::Result<bool, AudioRendererError> prepare_audio_clip_sample_rate_converters(
     const timeline::Clip& clip, const timeline::Project& project,

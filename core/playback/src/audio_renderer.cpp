@@ -179,13 +179,18 @@ validate_clip_program(const AudioClipRendererProgram& clip,
         return error(AudioRendererErrorCode::InvalidClipRange);
     switch (clip.source_time_mapping) {
     case AudioClipRendererProgram::SourceTimeMapping::NativeRate:
-        if (clip.offline_stretch_artifact || clip.offline_stretch_provenance)
+        if (clip.offline_stretch_artifact || clip.offline_stretch_provenance ||
+            clip.source_frame_phase_end != 0.0)
             return error(AudioRendererErrorCode::InvalidAsset);
         break;
     case AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample:
         if (clip.time_domain != AudioClipRendererProgram::TimeDomain::Musical ||
             clip.renderable_timeline_frames != clip.timeline_frame_count ||
-            clip.offline_stretch_artifact || clip.offline_stretch_provenance)
+            clip.offline_stretch_artifact || clip.offline_stretch_provenance ||
+            (clip.source_frame_phase_end != 0.0 &&
+             (!std::isfinite(clip.source_frame_phase_end) ||
+              clip.source_frame_phase_end <= clip.source_frame_offset ||
+              clip.source_frame_phase_end > static_cast<double>(clip.source_frame_count))))
             return error(AudioRendererErrorCode::InvalidClipRange);
         break;
     case AudioClipRendererProgram::SourceTimeMapping::OfflineStretchArtifact:
@@ -195,7 +200,8 @@ validate_clip_program(const AudioClipRendererProgram& clip,
             clip.offline_stretch_provenance->clip_id != clip.id ||
             clip.source_start != 0 || clip.source_frame_count != clip.timeline_frame_count ||
             clip.renderable_timeline_frames != clip.timeline_frame_count ||
-            clip.source_frame_offset != 0.0 || clip.source_frames_per_timeline_frame != 1.0 ||
+            clip.source_frame_offset != 0.0 || clip.source_frame_phase_end != 0.0 ||
+            clip.source_frames_per_timeline_frame != 1.0 ||
             clip.offline_stretch_artifact->key.target_frame_count != clip.timeline_frame_count ||
             clip.offline_stretch_artifact->key.channel_count != clip.audio->num_channels() ||
             clip.offline_stretch_artifact->key.musical_tick_start != clip.musical_tick_start ||
@@ -437,10 +443,11 @@ detail::compile_audio_clip_program_cached(
     const timeline::Clip& clip, const timeline::Project& project,
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache,
-    double source_frame_offset, const std::vector<LoweredPlacementFade>& placement_fades) {
+    double source_frame_offset, const std::vector<LoweredPlacementFade>& placement_fades,
+    double source_frame_phase_end) {
     return detail::compile_audio_clip_program_cached(clip, project, tempo_map, assets, limits,
                                                      cache, source_frame_offset, nullptr,
-                                                     placement_fades);
+                                                     placement_fades, source_frame_phase_end);
 }
 
 runtime::Result<AudioClipRendererProgram, AudioRendererError>
@@ -449,12 +456,18 @@ detail::compile_audio_clip_program_cached(
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache,
     double source_frame_offset, std::shared_ptr<const OfflineStretchArtifact> stretch_artifact,
-    const std::vector<LoweredPlacementFade>& placement_fades) {
+    const std::vector<LoweredPlacementFade>& placement_fades, double source_frame_phase_end) {
     const auto* media = std::get_if<timeline::MediaRef>(&clip.content());
     if (!media)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
     if (!std::isfinite(source_frame_offset) || source_frame_offset < 0.0 ||
         source_frame_offset >= static_cast<double>(media->frame_count))
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
+    // Zero is the whole reference; anything else must be a real span ending
+    // inside the media, or the phase map would read past the source it names.
+    if (source_frame_phase_end != 0.0 &&
+        (!std::isfinite(source_frame_phase_end) || source_frame_phase_end <= source_frame_offset ||
+         source_frame_phase_end > static_cast<double>(media->frame_count)))
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
     auto resolved = resolve_audio_media(clip.id(), *media, project, assets, limits);
     if (!resolved)
@@ -642,7 +655,9 @@ detail::compile_audio_clip_program_cached(
     if (source_time_mapping == AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample) {
         const auto tick_span = static_cast<long double>(clip.end().value) -
                                static_cast<long double>(clip.start().value);
-        const auto source_span = static_cast<long double>(media->frame_count) -
+        const auto source_span = (source_frame_phase_end != 0.0
+                                      ? static_cast<long double>(source_frame_phase_end)
+                                      : static_cast<long double>(media->frame_count)) -
                                  static_cast<long double>(source_frame_offset);
         const auto maximum_tempo = tempo_map.maximum_tempo_between(clip.start(), clip.end());
         const auto maximum_ticks_per_sample = static_cast<long double>(maximum_tempo) *
@@ -699,7 +714,10 @@ detail::compile_audio_clip_program_cached(
         source_time_mapping,
         nullptr,
         nullptr,
-        std::move(placement_fade)});
+        std::move(placement_fade),
+        source_time_mapping == AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample
+            ? source_frame_phase_end
+            : 0.0});
 }
 
 runtime::Result<bool, AudioRendererError> detail::prepare_audio_clip_sample_rate_converters(
