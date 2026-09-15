@@ -338,6 +338,13 @@ pulp_add_test_suite(pulp-test-timeline-tuning-region-commands
 pulp_add_test_suite(pulp-test-timeline-modulation-commands
     SOURCES test_timeline_modulation_commands.cpp
     LIBRARIES pulp::timeline)
+# The connections those sources drive: the insert/remove pair, the whole-route
+# gate that covers the bypass as well as the depth, the source reference a route
+# may not dangle or mistype, and the identity pinning that keeps a Modify from
+# performing the removal a proposal writer is denied.
+pulp_add_test_suite(pulp-test-timeline-modulation-route-commands
+    SOURCES test_timeline_modulation_route_commands.cpp
+    LIBRARIES pulp::timeline)
 # The groove a sequence plays with, carried on the same contract: the swing and
 # step-table transform, the document type and its migrations, and the read side
 # that resolves a groove only for a renderer that declared it.
