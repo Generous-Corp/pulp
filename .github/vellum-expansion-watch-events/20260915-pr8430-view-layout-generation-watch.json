@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260915-pr8430-view-layout-generation-watch",
+  "created_at": "2026-09-15T21:11:17Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch",
+    "a structural mutation leaves the tree's layout stale",
+    "a child added to a laid-out row reflows the whole row",
+    "removing a child closes the gap it left",
+    "a reparented child is re-boxed by its new parent, not its old one",
+    "reordering children re-solves the row in the new order"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "rationale": "Makes View's structural mutators move the tree layout generation. add_child, remove_child and move_child_to_index all left tree_layout_generation_ untouched, and both layout gates -- View::layout_children_if_needed and WidgetBridge::ensure_layout -- elide the pass while that counter matches the applied one. A structural mutation was therefore invisible to both gates and the pass was skipped, so the next frame painted the previous child set's solve: a new child got no box, the survivors of a removal kept the slots the old child set had been solved into, and a reparented child kept the box its former parent gave it.\n\npublish_structure_change() now moves the layout generation, covering removal, reordering and the realm-reset paths; add_child_transactional does not route through it on success and moves the generation itself. add_child deliberately does not publish a structure change -- structure_generation_ invalidates a cached \"is this view still under root\" lookup, and an add can never detach a cached view -- so routing it through the shared helper would have defeated an O(1) bridge path.\n\nThe touched file is in render-assets-and-backends only because View lives under core/view. Nothing about what the view layer exposes changes: no public API, no new capability, no removed one. The pass this restores is one the iOS and web hosts already run unconditionally every frame; the gate is a macOS-only optimisation that was eliding a pass it should not have.\n\nFive Catch2 cases cover add, remove, reparent and reorder plus the generation itself; each was negative-controlled with tools/scripts/confirm_failure.sh, and both halves of the fix were confirmed independently load-bearing."
+}
