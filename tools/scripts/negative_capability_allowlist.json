@@ -30,13 +30,6 @@
       "reason": "pulp.timeline.command.insert_automation_lane authors a lane targeting TrackMixerParameter::Gain on a nested child track, and the flattened leaf the curve reaches does consume clip gain: a MediaRef or EmptyContent leaf already reads ClipPlaybackProperties::gain_linear, so the destination exists but is a single scalar, and writing a moving value there would freeze it at one point. This is a real gap: the document is authorable today and will not play, and the refusal is a placeholder for work that has not happened rather than a decision that nesting should decline it. Of the three automation refusals it is the one closest to closable, because the sink is the only part missing. The missing primitive is a per-clip automation envelope: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into. Its arrival is the checkable condition, and it closes this refusal on its own."
     },
     {
-      "code": "NestedConformedTrimUnsupported",
-      "file": "core/playback/src/sequence_content_lowerer.cpp",
-      "owner": "playback",
-      "status": "live-defect",
-      "reason": "A SequenceRef source window trims a nested MediaRef leaf whose time_conform is Stretch. A stretched clip's audio is a rendered artifact keyed to the clip's own authored tick range, and a trimmed window is not that range, so a partial view needs a separately windowed artifact rather than a different read of the same one; that artifact is the checkable condition. Resample no longer refuses: the retained window maps onto the matching sub-span of the source under the same conform function, and the lowerer emits that sub-span as a source range beside the clip. A complete, untrimmed nested stretched clip already lowers correctly, so the refusal is scoped to a cut source window rather than to stretched content."
-    },
-    {
       "code": "NestedAbsoluteChildUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
