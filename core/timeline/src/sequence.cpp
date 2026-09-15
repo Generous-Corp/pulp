@@ -424,6 +424,21 @@ runtime::Result<Sequence, ModelError> Sequence::erase_region(ItemId id) const {
     regions.erase(found);
     return with_annotations(data_->markers, std::move(regions));
 }
+runtime::Result<Sequence, ModelError>
+Sequence::replace_region(SequenceRegion replacement) const {
+    auto regions = data_->regions;
+    const auto found =
+        std::find_if(regions.begin(), regions.end(), [&](const SequenceRegion& region) {
+            return region.id == replacement.id;
+        });
+    if (found == regions.end())
+        return fail<Sequence>(ModelErrorCode::MissingItem, replacement.id, data_->id);
+    *found = std::move(replacement);
+    // Reapplied whole rather than trusted: the span and duration rules that gate
+    // an insert gate a replacement too, and re-sorting keeps regions canonical
+    // when the replacement moved.
+    return with_annotations(data_->markers, std::move(regions));
+}
 
 runtime::Result<Sequence, ModelError>
 Sequence::insert_scene(Scene scene, std::optional<ItemId> before_scene_id) const {
