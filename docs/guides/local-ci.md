@@ -2972,6 +2972,26 @@ the `slow` label in `test/CMakeLists.txt` (or the appropriate subdir
 CMakeLists) and reconfigure. There's no separate registry to keep in
 sync.
 
+### Seeing which tests did not run
+
+A CTest skip (`SKIP_RETURN_CODE`) is green, so on the required `macos` check a
+test that has never run once looks exactly like a test that runs and passes
+every time. `build.yml`'s non-Windows test step therefore passes
+`--output-junit`, and an `always()` observation step writes every `notrun` test
+— name, skip reason, labels, and the skipping command's output — into the job
+summary, with `ctest.junit.xml` kept in the `ctest-logs-<key>` artifact even on
+green runs. It observes and never asserts: skipping is frequently the correct
+outcome (no GPU, no device, no vendor SDK), and the summary also prints the
+registered `ctest -N` population beside the report's attempted `tests=` count so
+a gap created by label exclusions or `--exclude-regex` stays visible.
+
+Nothing in CI provisions the pinned `trace_processor_shell`, so
+`pulp-rust-gpu-trace-analysis-integration` skips on every run and the GPU
+trace-analysis acceptance tests do not execute. That gap is now reported rather
+than hidden: the suite appears in the non-run table with
+`SKIP_RETURN_CODE=77`. Provisioning it is a separate decision, because one
+measured run showed the suite has a failure waiting behind the skip.
+
 ## Switching a job's runner without a code change
 
 Provider-switchable build, release, coverage, and sanitizer decisions use
