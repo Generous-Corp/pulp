@@ -1082,6 +1082,32 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "transport surface, not by this header."
         ),
     },
+    {
+        "include": "pulp/signal/convolver.hpp",
+        "fingerprint": "sha256:7b6f5cc6d4bd8a3c71c07149958db256d08aa0f264544df0abfa07eb3a4b5825",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Uniform partitioned convolution engine with a lock-free live IR swap and an "
+            "opt-in swap crossfade. docs/reference/modules.md documents it as a bounded DSP "
+            "primitive a plugin drives from its own process() at a fixed block size, and its "
+            "generator-facing shape is already published through the signal compatibility "
+            "vocabulary, so it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/convolver_messages.hpp",
+        "fingerprint": "sha256:2d4d3361cfa9099d4cd549fc250de196c1053c9c5448fa15b540089433e74e29",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Audio-thread hand-off plumbing behind PartitionedConvolver: the per-IR state, "
+            "the convolver's shared input history, and the lock-free swapper that shuttles "
+            "them between a worker thread and the audio thread over runtime::Handoff. "
+            "Real-time ownership-transfer infrastructure for that engine rather than an "
+            "advertised generator surface; it carries no capability claim of its own."
+        ),
+    },
 ]
 SURFACE_TOMBSTONES: list[dict[str, Any]] = []
 CAPABILITY_TOMBSTONES: list[dict[str, Any]] = []
