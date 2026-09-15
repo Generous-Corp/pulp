@@ -11,11 +11,13 @@ TrackAudioClipCompileStatus TrackAudioProgramCompiler::step(
     const AudioRendererLimits& limits, double source_frame_offset,
     const std::vector<LoweredPlacementFade>& placement_fades, std::uint64_t document_revision,
     std::uint64_t program_generation, OfflineStretchArtifactCache& artifact_cache,
-    double source_frame_phase_end) noexcept {
+    double source_frame_phase_end, std::int64_t authored_window_start,
+    timebase::TickDuration authored_duration) noexcept {
     if (clip.time_conform() == timeline::TimeConform::Stretch) {
         const auto status = offline_stretch_.step(
             clip, project, tempo_map, assets, limits, source_frame_offset, placement_fades,
-            document_revision, program_generation, artifact_cache, converters_);
+            document_revision, program_generation, artifact_cache, converters_,
+            authored_window_start, authored_duration);
         if (status == OfflineStretchProgramCompileStatus::Progress)
             return TrackAudioClipCompileStatus::Progress;
         if (status == OfflineStretchProgramCompileStatus::Failed) {
