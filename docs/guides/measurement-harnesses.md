@@ -54,15 +54,25 @@ pulp audio validate compare /tmp/ref.wav /tmp/cand.wav --mode null --tolerance -
 ```
 
 `pulp audio render` loads a bundle through Pulp's plugin host and runs it
-block by block against a generated or supplied input. `--input-signal` takes
-`silence`, `sine:<hz>[,<dbfs>]`, `noise[:<seed>]`, or `impulse[:<frame>]`; the
-noise seed is explicit precisely so a run reproduces. `--param <id>=<value>[@frame]`
+block by block against a generated or supplied input. `--input-signal` takes exactly four
+things and no more: `silence`, `sine:<hz>[,<dbfs>]`, `noise[:<seed>]`, and
+`impulse[:<frame>]`. The noise seed is explicit precisely so a run reproduces.
+Note what is missing — there is no sweep, no chirp, no multitone, no burst. A
+swept-sine measurement means generating the WAV yourself and passing it with
+`--input`, which is a real limit on how much of the loop the CLI alone closes. `--param <id>=<value>[@frame]`
 sets or automates a parameter, and the values are in the plugin's own units,
 not normalized 0–1. `--midi note:<note>,<vel>,<on>[,<off>]` drives an
 instrument. `--json` puts the metrics on stdout and `--manifest <file.json>`
 writes them to a file; either way what comes back is the same metrics object
-that `pulp audio validate summarize --json` produces, so the render step and
-the measure step speak one schema.
+that `pulp audio validate summarize --json` produces, so the render step and the
+measure step speak one schema. That object is per-channel `peak_dbfs`,
+`rms_dbfs` and `dc_offset`, plus a frequency estimate with its confidence —
+which is what a script branches on.
+
+One limit on the analysis verb worth stating here: `validate doctor --response`
+reports **magnitude only**, at the checkpoint frequencies you name. There is no
+phase in that output. Group delay is a separate analyzer in the C++ lane and is
+not exposed through this verb.
 
 **What `pulp audio render` cannot do: it is bundle-only.** `--plugin` takes a
 compiled VST3, AU, AUv3, CLAP, or LV2 on disk, and there is no flag that
@@ -84,6 +94,20 @@ three states rather than two: **0** means the check ran and passed, **1** means
 it ran and failed (or errored), and **2** means it could not measure. That third
 code is the one worth wiring into a script, because "I could not measure this"
 and "this is fine" are the two outcomes that otherwise look identical.
+
+**One flag in that list is currently misnamed, and you should know before you
+trust it.** `compare --mode spectral` does not compute a spectral distance. Both
+modes run the same sample-residual null check; `spectral` only substitutes a
+looser default tolerance (−60 dBFS instead of the null default). The source says
+so, and so does the CLI manifest — a true spectral-distance metric is described
+there as a later slice. So a pair of files that null badly but have an identical
+magnitude spectrum — a pure delay, an all-pass, a phase rotation — will fail
+`--mode spectral` exactly as hard as they fail `--mode null`, because it *is*
+`--mode null`. If you want a genuinely phase-blind comparison today, the
+long-term-average-spectrum distance in the Python lab is the one that computes
+it. This guide is about instruments that return confident numbers for things
+they cannot resolve, and a flag named for a measurement it does not perform is
+the purest form of that.
 
 ### Looking at a window of the signal
 
@@ -139,9 +163,9 @@ but still reports aggregates. Localized output — a per-frame curve and the
 worst regions, exportable as listenable clips — comes from the `run` subcommand
 with `--out-dir`, not from `compare`. And running several axes at once is the
 `regression-net` subcommand's job: it takes a manifest of before/after WAV pairs
-and runs each pair through a set of axes, reporting `REGRESSION`, `ERROR`,
-`INCONCLUSIVE`, or `CLEAN`. It consumes WAV paths — it does not render them, so
-the rendering step above stays yours.
+and runs each pair through a set of axes, reporting one overall status for the
+run. It consumes WAV paths — it does not render them, so the rendering step
+above stays yours.
 
 ---
 
@@ -235,6 +259,26 @@ zeroes its own confidence rather than returning a lag it does not trust, so a
 caller that ignores the confidence field gets a number that was never claimed
 to be right.
 
+Pulp routes its tests into several **lanes**. Only one of them is the *blocking
+lane* — the set of checks that must pass before a change can merge; the others
+run on a nightly schedule or on push and are informational. Two properties of
+the blocking lane are worth knowing before you trust a green result from it, and
+both are on-thesis.
+
+**It runs `ctest --repeat until-pass:2`.** A failing test is retried once before
+the leg fails. That is a deliberate trade against runner flakiness, and its cost
+is exact: a test that fails half the time passes the blocking lane roughly three
+runs in four. Intermittent failures do not accumulate evidence here; they get
+absorbed.
+
+**A label can take a test off that lane while its name still promises
+otherwise.** Routing is by CTest label, and the blocking lane excludes five
+groups — `validation`, `slow`, `performance`, `bench`, and `quality-lab`. One
+C++ suite carries `quality-lab` alongside a `shipping-gate` label and a
+`[shipping-gate]` test spec. It is a real suite that really runs, on the nightly
+and on push; it is simply not what blocks a merge, despite its name. If you are
+deciding whether something is enforced, read the labels, not the name.
+
 **Why the Python lane cannot hold a blocking check**, concretely and not as a
 matter of taste. It is registered in the test runner, but behind a build option
 that defaults to off and additionally requires you to hand the build a path to
@@ -256,26 +300,57 @@ of the content so a later change is detected. It does not inspect the audio or
 verify that the declared license is true. It prevents an accidental commitment,
 not a determined one.
 
-### Perceptual scoring
+### The pluggable perceptual layer
 
-The lab has a layer for full-reference perceptual quality models — ViSQOL,
-which reports a MOS-LQO, and two implementations of the ITU-R BS.1387 objective
-difference grade. All three are reached only across a process boundary, only
-through an explicit environment variable naming the binary (`PULP_VISQOL_BIN`
-and siblings). Nothing is bundled, imported, or downloaded; when the variable is
-unset each tool independently reports `skipped` with a reason rather than
-failing. The public CI never sets those variables, so in practice the whole
-layer always skips there.
+The lab has a genuine optional layer for full-reference perceptual quality
+models: **ViSQOL**, which reports a MOS-LQO on a 1-5 scale, plus two
+implementations of the ITU-R BS.1387 objective difference grade. You bring the
+binary and point an environment variable at it — `PULP_VISQOL_BIN`,
+`PULP_PEAQ_BIN`, `PULP_AQUATK_BIN` — and the lab shells out and parses the score
+back. Nothing is vendored, imported, or downloaded, which is what keeps the
+licensing clean given two of the three have copyleft implementations. Each tool
+is reached only across a process boundary and each skips independently with a
+stated reason when its variable is unset, so you enable exactly the subset you
+have.
 
-The layer's own description of what it is for is the right one: a coarse global
-guard that says "this got perceptually worse overall" and cannot say "smear at
-42 ms". It is advisory and is never a gate. That restraint is deliberate and
-worth keeping — a MOS estimate is a model of average listener opinion on the
-material the model was fitted to, and turning one into a pass/fail threshold
-laundered into a correctness claim is exactly the failure this guide is about.
-Speech-intelligibility metrics and no-reference neural speech models are
-explicitly out of scope; the lab's contract is reference-versus-candidate over
-musical material.
+Four things to know before turning it on, because nothing will tell you at
+runtime:
+
+It is reachable from the `run` subcommand, via the pipeline's report, and **not**
+from `compare` or `regression-net` — which is where you would instinctively
+look, since those are the reference-versus-candidate commands. Neither of those
+modules references the perceptual layer at all, so an A/B through them will
+never produce a MOS.
+
+Nothing in the repository exercises it against a real binary. The tests are stub
+scripts that echo a MOS line to prove the parsing works, and public CI never
+sets the variables. The wrapper is covered; the models are not.
+
+The wrapper hands the WAVs over verbatim — no sample-rate check, no level match,
+no time alignment. ViSQOL's audio mode is defined at 48 kHz, so feeding it
+anything else is your responsibility, and a level or latency difference between
+reference and candidate will be scored as damage.
+
+The parser takes the first `MOS-LQO`-labelled float it finds and otherwise falls
+back to accepting **any plausible float** in the combined stdout and stderr. A
+tool that prints a version number before failing can therefore return a "score".
+
+**And a judgment, which matters more than any of the above: do not make a
+MOS-LQO a gate for these targets.** For a spectral filter bank the intended
+change *is* a spectral difference — and ViSQOL's pipeline (a neurogram
+similarity index over gammatone patches, mapped to a MOS by a support-vector
+regressor fitted on **codec** impairments) will read a deliberate 6 dB shelf as
+damage, because a codec never does that on purpose. For a time-stretcher at any
+ratio other than 1 the full-reference contract is simply void: patch alignment
+is not time-warp compensation, so the two signals are no longer comparable
+frame for frame. Audio mode was trained with music but still on codec
+degradations, and speech mode does not generalise to music at all.
+
+So the layer's own statement of its role is the right one and worth taking
+literally: a coarse global tripwire for "did this get grossly worse", which
+cannot tell you "smear at 42 ms". Advisory, never a gate. Speech-intelligibility
+metrics and no-reference neural speech models are deliberately out of scope; the
+contract here is reference-versus-candidate over musical material.
 
 ---
 
@@ -301,9 +376,13 @@ fallen to −117. Flat-top buys amplitude accuracy, not dynamic range.
 
 There is a test in the suite that measures exactly this, and the reason it is
 worth describing is that it runs a **leakage-only control** for every window: the
-same measurement with the quiet tone removed. A 0 dB fundamental at bin 1000.5
-and a −100 dBc tone sixteen bins away, at 48 kHz with a 16384-point transform,
-reads like this:
+same measurement with the quiet tone removed. The table below is a recorded run
+preserved in that test's comments rather than the assertions themselves — the
+live checks are deliberately looser bounds, requiring each blind window to sit
+within 3 dB of its own control and the Kaiser reading to land within 1 dB of
+truth with its control at or below −110 dB. Read the numbers as one measurement,
+and the bounds as the contract. A 0 dB fundamental at bin 1000.5 and a −100 dBc
+tone sixteen bins away, at 48 kHz with a 16384-point transform:
 
 | window | with the quiet tone | control (leakage only) | verdict |
 |---|---|---|---|
@@ -421,14 +500,28 @@ false in exactly the cases that matter, because aliases and distortion products
 are discrete lines rather than noise. A residual made of sparse tones has a
 standard deviation that says very little about the tallest line in it.
 
-Prove the floor instead. Run the identical measurement on a signal with the
-defect removed and show the reading collapse. The window table above is one
-instance. Another is a pair of checks in the test suite that exist as a matched
-set: one asserts that a resampler matches an independent offline reference to
-better than −65 dB, and its sibling injects a known −50 dBFS tone into the
-candidate and asserts the residual now reads between −52 and −48 dB. The second
-test is what makes the first one mean anything — it demonstrates the instrument
-responds to a defect of known size, and does so on the scale it claims to read.
+Prove the floor instead, and prove it in **both** directions, because the two
+controls answer different questions and neither substitutes for the other. The
+*negative* control removes the defect and shows the reading collapse — that is
+what says the instrument is not reporting its own noise. The *positive* control
+injects a defect of known size and shows the reading recover it — that is what
+says the instrument's scale is calibrated, rather than merely responsive.
+
+Both are ordinary C++ tests here. One analyzer test builds a pure tone with no
+defect at all and requires its "unexpected component" reading to fall below
+−120 dB, then adds a single tone at −80 dB and again at −100 dB and requires
+the reading to come back within **0.5 dB** of the injected level, at the right
+frequency. An anti-aliasing test does the same shape: a signal that is
+alias-free by construction reads below −140 dBc, and aliases injected at −60,
+−80, −100 and −120 dBc are each recovered to within 1 dB at the predicted fold
+site. The commit that introduced the second states the reasoning directly —
+the floor is proven by a control rather than derived from the analyzer's own
+two-sigma bound, because that bound assumes a white residual and so fails
+exactly here, where the aliases are discrete tones.
+
+Note what the positive control buys that the negative one cannot: an instrument
+that reads every defect as −40 dB regardless of size passes a negative control
+perfectly.
 
 ### Perf is tracked, not gated
 
@@ -454,10 +547,14 @@ The repository does contain exactly one committed audio reference,
 determinism fixture rather than a quality one: 64 samples through a hardcoded
 biquad and a cubic waveshaper, with floating-point contraction disabled, asserted
 byte-for-byte so macOS, Linux, and Windows must produce identical IEEE-754
-output. It does run on the blocking lane. What does not exist is a corpus of
-reference renders that would catch a DSP change sounding worse — there is no
-audio ratchet in continuous integration, and the tool that would ratchet one
-lives in the advisory Python lane.
+output. It does run on the blocking lane, and it is a real golden: committed
+bytes, compared exactly.
+
+Be precise about what that does and does not cover. It is a **determinism**
+ratchet — it catches the three platforms drifting apart, or an optimisation
+changing arithmetic. It is not a **quality** ratchet: no committed corpus of
+reference renders exists that would catch a DSP change merely sounding worse,
+and the tool that could ratchet one lives in the advisory Python lane.
 
 ---
 
@@ -514,14 +611,19 @@ backend. And every captured frame is checked against a deliberately lenient
 returned when the flag is false, so you can save it and look at why.
 
 For a live window rather than a detached tree there is
-`WindowHost::capture_png()`, but be precise about what it returns: it captures
-*what the compositor sees*, preferring the operating system's own window
-capture and the cached content view before falling back to reading the GPU back
-buffer. That ordering makes it faithful to what is on screen and dependent on
-the window actually being on screen — it fails on a hidden window. The sibling
-`capture_back_buffer_png()` skips straight to the back buffer, which is the
-deterministic one to use when you want the pixels the renderer produced rather
-than the pixels the desktop composited.
+`WindowHost::capture_png()`, but be precise about what it returns. Its
+documented semantics are "whatever the compositor sees": on macOS it prefers
+the operating system's own window capture and the cached content view before
+falling back to reading the GPU back buffer. That makes it faithful to what is
+actually on screen, and correspondingly dependent on the window being on screen.
+
+The sibling `capture_back_buffer_png()` is specified as "host-managed pixels,
+deterministically" — an implementation must bypass the compositor paths
+entirely. But the **base implementation simply delegates to `capture_png()`**,
+so you only get those semantics from a host that overrides it. The honest
+discriminator is `supports_compositor_capture()`, which reports whether
+`capture_png()` is returning compositor pixels or deterministic host-managed
+ones. Ask that rather than assuming which path you are on.
 
 Platform support is uneven and the API says so. macOS has native capture;
 Windows and Linux have a built-in Skia raster backend whenever Skia is compiled
@@ -607,6 +709,38 @@ while every headless test that "clicked" it passed, because the tests were
 delivering on a channel the control was not listening to. The tests were real,
 the clicks were real, and they were being delivered to the wrong place.
 
+### Three traps with the same name
+
+`View::simulate_click` / `simulate_drag` / `simulate_hover` hit-test. Three
+things sharing that vocabulary do not, and a C++ reader will meet all of them.
+
+**`PropertyPanel::simulate_click(key)` is a native method with the same name
+that does no hit-testing at all.** It is one of a family of "simulation aliases
+named for headless tests" on the property-panel widget — `simulate_toggle`,
+`simulate_choose`, `simulate_slide`, `simulate_click` — and the click one
+resolves a property by string key and invokes its `on_click` callback directly.
+That is a perfectly reasonable way to test panel plumbing, and it is not
+evidence that anything is clickable. Same verb, different guarantee.
+
+**`simulate_hover` runs no JavaScript.** Of the three simulators it is the one
+that never reached the scripted-UI channel: hover was the only pointer phase
+with no portable delivery function, so hosts open-coded it. The consequence was
+that a scripted UI received pointer-down, pointer-move-while-dragging and
+pointer-up but never a plain hover, so a handler picking the cursor from pointer
+position only ran once a button went down — the defect a user reports as "the
+cursor only changes when I click". The JS-aware verb is `deliver_hover_move`;
+reach for that when the UI is scripted.
+
+**There is no `simulate_key`.** Keyboard tests call `on_key_event` or
+`on_text_input` on the widget directly, which means they bypass focus routing
+entirely — you are testing the handler, not that the key reaches it. That is
+often what you want in a unit test, but it will not catch a focus bug.
+
+When you need the highest-fidelity input path, drive the real binary instead:
+`PULP_TEST_POINTER_DRAG` and `PULP_TEST_KEY_SEQUENCE` are environment variables
+that make a launched standalone perform a synthetic drag or press a sequence of
+keys on its own frame schedule, through the platform host rather than around it.
+
 ### Activating by selector is a different thing
 
 Contrast that with resolving a control by name and invoking its handler
@@ -669,10 +803,20 @@ links none of it.
 
 Rather than restate it, the reference is [Tracing](tracing.md), which covers
 enabling it, the category taxonomy, the real-time-safe fixed-slot path for live
-DSP telemetry, and the analysis surface. One discipline from it generalises to
-everything else in this guide: a build directory named for tracing proves
-nothing about whether tracing is compiled in, and the documented paths verify
-the symbols in the binary rather than trusting the directory's name.
+DSP telemetry, and the analysis surface. Three facts are worth carrying here
+because they bound what you can automate: `PULP_TRACING` is **off by default**,
+so a default build links none of it; capture is driven by an environment
+variable naming the output path, and programmatic start/stop is not reachable
+for a plugin or a shell-launched standalone; and a build directory named for
+tracing proves nothing about whether tracing is compiled in.
+
+That last one has a specific instrument, and it is not symbol counting. A
+tracing-enabled build retains a sentinel string,
+`PULP_TRACING_COMPILED_IN__DO_NOT_SHIP`, which a ship-time guard looks for so a
+traced binary cannot be released by accident; the exported CMake target is the
+other positive signal. Symbol inspection appears in this story only as a
+*negative* check — an assertion that no tracing symbols survive into a shipping
+build. Ask the sentinel, not the directory name and not a symbol tally.
 
 ---
 
@@ -684,42 +828,47 @@ defect it existed to catch was present, which is the only failure mode that
 matters here, because it is the one that looks like success.
 
 We shipped a click detector that scored the **worst sample-to-sample step** in
-the output. It returned an identical number for every condition it was run
-against — including both of its controls. What it was actually measuring was
-the test tone's own slew rate, which dominated any click in the material, so
-the detector could only have fired on a discontinuity *louder than the signal*.
-A metric that reports the same value whether or not the defect is present is
-not a weak metric; it is not measuring the defect at all. The same gate had a
-second problem in the same spirit: it swapped the thing under test exactly once,
-so it could not have observed a failure that only appears across a sequence of
-swaps.
+the output. Its own comment gives the game away in the course of justifying the
+threshold: a 330 Hz tone at those levels steps by at most about 0.1 per sample,
+so the bar was set at 0.5 — "well above the signal". Which means the detector
+could only fire on a discontinuity roughly five times the size of the signal's
+own slew. It returned effectively the same number for every condition it was run
+against, including its controls, because what it was measuring was the test
+tone's own slope. A metric that reports the same value whether or not the defect
+is present is not a weak metric; it is not measuring the defect at all. The same
+gate had a second problem in the same spirit: it swapped the thing under test
+exactly once, so it could not have observed a failure that only appears across a
+sequence of swaps — and the real defect, a convolver discarding its input
+history on each swap, produced a 170 ms disturbance it never saw.
+
+The fix is the more useful half, and it is two moves. The first is in the
+replacement test's comment: drive the thing with a **constant** input, because
+"with a moving signal a genuine step is hidden inside the waveform's own slope,
+and the test would pass on broken code". The second is to stop scoring a proxy
+and assert the actual contract — swap an impulse response for a bit-identical
+copy of itself under a crossfade and require the output not to change. That
+version cannot be fooled by the stimulus, because it no longer measures the
+stimulus.
 
 A coverage metric reported **100%** for a band that measured **18%** within
-−3 dB. During tuning it was set aside as "saturated, cannot pick a width" —
-which is to say the one instrument positioned to catch the loss being introduced
-was discarded for being uninformative, when what it was actually doing was
-failing.
+−3 dB. During tuning it was set aside as "saturated, cannot pick a width" — which
+is to say the one instrument positioned to catch the loss being introduced was
+discarded for being uninformative, when what it was actually doing was failing.
+The general shape is worth more than the instance: a metric that counts whether
+each band is *represented* saturates at full marks long before the bands are
+*resolved*, and the two words are easy to swap without noticing.
 
-A test for a delete confirmation passed because it **injected the exact global
-whose absence was the defect**: it set `globalThis.confirm` before pressing the
-button. Production never set it. The test supplied what production withheld, so
-the code path it exercised was one that could not exist at runtime. The related
-shape is a test that encodes the author's mistaken assumption and then confirms
-it — one such test asserted that an unhydrated panel renders no controls, which
-was precisely the bug.
-
-A lint rule existed, was correct, and had **never once run**. The gate that
-would have invoked it ran a curated list of patterns and the rule's pattern was
-not in the list. Nothing reported an error, because from the gate's point of
-view nothing was wrong: it ran the rules it was asked to run and they passed.
-
-That last one has a mundane cousin worth knowing about, since it applies to
-anyone running the test suite here. Asking the test runner for a pattern that
-matches nothing prints `No tests were found!!!` **and exits 0**. Verified on a
-live build directory: a nonsense filter exits 0 while the same runner reports
-10,754 tests with no filter. A typo in a test name is therefore a silent pass,
-and a script that selects tests by pattern and checks only the exit code cannot
-distinguish "everything passed" from "nothing ran".
+Both of those are measurement failures, and both were invisible from the inside.
+The mundane cousin is worth knowing about too, since it applies to anyone running
+this test suite: asking the test runner for a pattern that matches nothing prints
+`No tests were found!!!` **and exits 0**. Verified on a live build directory — a
+nonsense filter exits 0 while the same runner reports 10,754 tests with no
+filter. A typo in a test name is a silent pass, and a script that selects tests
+by pattern and checks only the exit code cannot distinguish "everything passed"
+from "nothing ran". The repository has since grown guards against exactly this:
+one advisory lane asserts its own selection returns at least a floor count of
+tests, on the reasoning that an empty selection and a silently *shrunken* one are
+different failures and neither covers the other.
 
 ### The generalisation
 
