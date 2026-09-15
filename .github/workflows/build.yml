@@ -1828,21 +1828,56 @@ jobs:
           if not nonruns:
               print("_Every attempted test ran._")
               raise SystemExit(0)
+          # ctest's <skipped message=...> is the MECHANISM ("SKIP_RETURN_CODE=4"),
+          # identical for every Catch2 skip in the suite. The author's reason is
+          # the fact worth reading -- "SheenBidi not linked" and "pulp not built"
+          # are very different statements about a lane -- and it is present, but
+          # in the captured console output rather than in an attribute. Catch2
+          # prints it as:
+          #
+          #     path/to/test.cpp:140: SKIPPED:
+          #     explicitly with message:
+          #       pulp binary not built for this test run; skipping
+          #
+          # Recover it, and fall back to the mechanism for a non-Catch2 skip (a
+          # script exiting SKIP_RETURN_CODE has no such block) so the row still
+          # says something rather than going blank.
+          def catch2_skip(case):
+              lines = (case.findtext("system-out") or "").splitlines()
+              for i, line in enumerate(lines):
+                  if not line.rstrip().endswith(": SKIPPED:"):
+                      continue
+                  where = line.rstrip()[: -len(": SKIPPED:")].strip()
+                  rest = lines[i + 1 :]
+                  if rest and rest[0].strip() == "explicitly with message:":
+                      rest = rest[1:]
+                  message = []
+                  for entry in rest:
+                      if not entry.strip():
+                          break
+                      message.append(entry.strip())
+                  if message:
+                      return " ".join(message), where
+              return "", ""
+
           print("### Tests that did not run")
           print("")
-          print("| test | reason | labels | output |")
+          print("| test | reason | labels | where |")
           print("| --- | --- | --- | --- |")
           for case in sorted(nonruns, key=lambda c: c.get("name") or ""):
               skipped = case.find("skipped")
-              reason = (skipped.get("message") if skipped is not None else None) or case.get("status") or ""
+              mechanism = (skipped.get("message") if skipped is not None else None) or case.get("status") or ""
               labels = ""
               for prop in case.iterfind("properties/property"):
                   if prop.get("name") == "cmake_labels":
                       labels = prop.get("value") or ""
-              out = (case.findtext("system-out") or "").strip().splitlines()
-              detail = out[-1][:160] if out else ""
+              message, where = catch2_skip(case)
+              reason = message or mechanism
+              if not where:
+                  out = (case.findtext("system-out") or "").strip().splitlines()
+                  where = out[-1][:160] if out else ""
               cell = lambda s: s.replace("|", "\\|").replace("\n", " ")
-              print(f"| `{case.get('name')}` | {cell(reason)} | {cell(labels)} | {cell(detail)} |")
+              print(f"| `{case.get('name')}` | {cell(reason[:200])} | {cell(labels)} | {cell(where)} |")
           PYEOF
 
       # Observation, not a gate. Every GPU case in the suite skips when no
