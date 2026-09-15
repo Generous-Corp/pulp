@@ -112,6 +112,40 @@ void BridgeRegistrars::register_widget_value_content_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // A SCROLLVIEW'S OFFSET, SETTABLE FROM SCRIPT.
+    //
+    // Wheel, trackpad and scrollbar drag are handled natively and need nothing
+    // here. What had no route at all was PROGRAMMATIC scrolling: a scripted UI
+    // could create a ScrollView and size its content, but could not move it, so
+    // any surface wanting keyboard scrolling (Arrow / Page / Home / End over a
+    // long document) had to hand-roll the whole thing in React instead -- which
+    // is exactly the workaround this closes, because moving the offset through
+    // React re-renders and re-applies the document on every input sample.
+    //
+    // `animate` defaults TRUE here, the opposite of the wheel path: these are
+    // programmatic jumps, where easing reads as intent rather than lag. A caller
+    // replaying an input stream should pass false.
+    auto scroll_target = [&self](const std::string& id) -> ScrollView* {
+        if (auto* wrapper = self.scroll_wrapper(id)) return wrapper;
+        return dynamic_cast<ScrollView*>(self.widget(id));
+    };
+
+    register_bridge_function(api, "scrollTo", [scroll_target](choc::javascript::ArgumentList args) {
+        if (auto* s = scroll_target(args.get<std::string>(0, "")))
+            s->set_scroll(static_cast<float>(args.get<double>(1, 0)),
+                          static_cast<float>(args.get<double>(2, 0)));
+        return choc::value::Value();
+    });
+
+    register_bridge_function(api, "scrollBy", [scroll_target](choc::javascript::ArgumentList args) {
+        if (auto* s = scroll_target(args.get<std::string>(0, ""))) {
+            const bool animate = args.numArgs > 3 ? args.get<bool>(3, true) : true;
+            s->scroll_by(static_cast<float>(args.get<double>(1, 0)),
+                         static_cast<float>(args.get<double>(2, 0)), animate);
+        }
+        return choc::value::Value();
+    });
+
     register_bridge_function(api, "setScrollContentSize", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* s = self.scroll_wrapper(id);

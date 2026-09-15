@@ -2095,6 +2095,67 @@ TEST_CASE("WidgetBridge getLayoutRect accounts for scroll offsets", "[view][brid
     REQUIRE_THAT(before - after, WithinAbs(60.0, 0.5));
 }
 
+TEST_CASE("WidgetBridge scrolls a ScrollView from script", "[view][bridge][scroll]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createScrollView('sv', '');
+        setFlex('sv', 'direction', 'col');
+        setFlex('sv', 'width', 200);
+        setFlex('sv', 'height', 100);
+        setScrollContentSize('sv', 200, 600);
+        layout();
+    )");
+    auto* scroll = dynamic_cast<ScrollView*>(bridge.widget("sv"));
+    REQUIRE(scroll != nullptr);
+    REQUIRE_THAT(scroll->scroll_y(), WithinAbs(0.0, 0.001));
+
+    // An absolute offset. Wheel and scrollbar drag are handled natively and
+    // never reach these verbs; this is the programmatic route that had none,
+    // which is why keyboard scrolling over a long document previously had to
+    // be hand-rolled in script.
+    bridge.load_script("scrollTo('sv', 0, 120);");
+    REQUIRE_THAT(scroll->scroll_y(), WithinAbs(120.0, 0.5));
+
+    // Back to the top. Zero is the value a "scroll to top" control sends, so a
+    // falsy-guard anywhere on this path would swallow exactly that one.
+    bridge.load_script("scrollTo('sv', 0, 0);");
+    REQUIRE_THAT(scroll->scroll_y(), WithinAbs(0.0, 0.5));
+
+    // A relative delta, instantly: animate=false so the offset is observable
+    // without pumping the animation clock.
+    bridge.load_script("scrollBy('sv', 0, 60, false);");
+    REQUIRE_THAT(scroll->scroll_y(), WithinAbs(60.0, 0.5));
+    bridge.load_script("scrollBy('sv', 0, 30, false);");
+    REQUIRE_THAT(scroll->scroll_y(), WithinAbs(90.0, 0.5));
+
+    // Clamped at the content extent rather than scrolling into empty space:
+    // 600 of content in a 100-tall viewport tops out at 500.
+    bridge.load_script("scrollTo('sv', 0, 99999);");
+    REQUIRE(scroll->scroll_y() <= 500.5f);
+    bridge.load_script("scrollTo('sv', 0, -99999);");
+    REQUIRE(scroll->scroll_y() >= -0.5f);
+}
+
+TEST_CASE("WidgetBridge scroll verbs ignore a widget that cannot scroll",
+          "[view][bridge][scroll]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // A miss must be inert, not a throw: these verbs run from a reconciler
+    // that may apply a prop to a node whose type changed under it.
+    bridge.load_script("createPanel('p', ''); scrollTo('p', 0, 50); scrollBy('p', 0, 50);");
+    bridge.load_script("scrollTo('nope', 0, 50); scrollBy('nope', 0, 50);");
+    REQUIRE(bridge.widget("p") != nullptr);
+}
+
 TEST_CASE("WidgetBridge keeps bounding client and local box coordinate spaces distinct",
           "[view][bridge][layout][transform]") {
     ScriptEngine engine;

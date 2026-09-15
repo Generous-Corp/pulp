@@ -189,13 +189,52 @@ fixing one pin creates the next. The sequence terminates, because a pin-refresh
 commit touches only the YAML, and the YAML excludes itself from the inventory.
 Land the file edits first, then regenerate in a single following commit. Re-run
 `gpu_recipe_catalog.py` after the refresh rather than before, or the second
-stale row goes out unseen. Note that `gates.sh` and the pre-push hook do **not**
-run this check, so a clean `gates: ✓ all gates pass` says nothing about your
-pins.
+stale row goes out unseen.
+
+`gates.sh` and the pre-push hook DO catch a stale pin, but only the cheap half
+of it. A diff-scoped `gpu-handoff pin freshness` guard fails when a changed file
+is pinned and the ledger was not touched, and it names the repair command. It
+deliberately does not re-verify the identity fields, because that costs a `git
+log` per pinned path. So `gates: ✓ all gates pass` proves the ledger was
+*refreshed*, never that its 100+ identities are *correct* — only
+`gpu_handoff_provenance.py check` proves that, and it is not run by any gate.
+Run it yourself after every refresh.
+
+**The cascade can start from a gate you were not thinking about.** A fix in
+`core/` that touches a skill-mapped source path makes `skill_sync_check.py`
+demand a SKILL.md edit; a SKILL.md is frequently a pinned path, so satisfying
+skill-sync stales a handoff row; and the refresh commit touches the YAML, which
+is itself mapped to *this* skill and so re-arms skill-sync. Landing a one-line
+source fix can therefore require touching two skills and the ledger. The way
+out is not to keep chasing it: satisfy skill-sync with a real gotcha where you
+genuinely learned one and the `Skill-Update: skip skill=<name> reason="..."`
+trailer where you did not, then refresh the ledger LAST, in its own commit.
 
 The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
 unregenerated ledger fails locally and in CI with the repair command in the
 failure message rather than only as a stale-identity report.
+
+**Write the receipt in the same run as the ledger, before you commit either.**
+`write --receipt` stamps `source_commit` with whatever HEAD is when it runs, and
+`test_published_receipt_binds_the_checked_in_ledger` re-derives the ledger from
+that commit and compares bytes. A bare `write` that is then committed leaves no
+way to fold the receipt into that commit afterwards: regenerating stamps the
+commit you just made, and `--amend`ing the receipt into it orphans that SHA, so
+the receipt names a commit that is no longer an ancestor of HEAD, and every
+further amend repeats it. Regenerate from a clean tree with `--receipt` first,
+then commit the ledger and the receipt together. To recover from a bare `write`
+that already landed, `git reset --soft` back to the commit that owns the edited
+files, restore the ledger, and regenerate with `--receipt`.
+
+Nothing in the fast path catches that omission. `gates.sh`'s `gpu-handoff pin
+freshness` gate only asserts the ledger was **touched**, so a bare `write` turns
+it green, and `gpu_recipe_catalog.py` validates the ledger's own identities and
+also reports `OK`. The stale receipt surfaces only in
+`gpu-handoff-provenance-selftest`. Run it directly before pushing:
+
+```bash
+python3 -B tools/scripts/test_gpu_handoff_provenance.py -k published_receipt
+```
 
 **A capability-registry change stales a handoff pin without touching any GPU or
 Vellum file.** `tools/scripts/test_release_artifact_contents.py` is a pinned
