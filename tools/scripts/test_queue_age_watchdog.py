@@ -21,6 +21,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import queue_age_watchdog as qaw  # noqa: E402
 
+WATCHDOG_SOURCE = (
+    Path(__file__).resolve().parent / "queue_age_watchdog.py"
+).read_text(encoding="utf-8")
+
 NOW = dt.datetime(2026, 7, 16, 12, 0, 0, tzinfo=dt.timezone.utc)
 MAC = ["self-hosted", "macOS", "pulp-studio"]
 
@@ -694,16 +698,94 @@ class TestWorkflowWiring(unittest.TestCase):
             Path(__file__).resolve().parents[2]
             / ".github/workflows/runner-health-check.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn("echo \"degraded=${degraded}\" >> \"$GITHUB_OUTPUT\"", workflow)
-        self.assertIn(
-            "if: env.DRY_RUN != 'true' && steps.scan.outputs.degraded != 'true'",
-            workflow,
+        self.assertIn('echo "degraded=${degraded}"', workflow)
+        self.assertIn('} >> "$GITHUB_OUTPUT"', workflow)
+        # BOTH tracker steps, not just the queue one.
+        self.assertEqual(
+            workflow.count(
+                "if: env.DRY_RUN != 'true' && steps.scan.outputs.degraded != 'true'"
+            ),
+            2,
         )
-        self.assertIn("s.get('errors') or s.get('truncated')", workflow)
+        # `degraded` comes from the watchdog's own output line, which it derives
+        # from evidence_gaps(). Asserted as a property rather than by pinning
+        # the old inline expression: one definition of "incomplete evidence",
+        # in the module that is tested.
+        self.assertIn("grep -m1 '^degraded=' scan.log", workflow)
+        self.assertIn("degraded={'true' if gaps else 'false'}", WATCHDOG_SOURCE)
+        self.assertIn("gaps = evidence_gaps(snapshot)", WATCHDOG_SOURCE)
+
+    def test_the_step_fails_loudly_if_the_watchdog_emitted_no_counts(self):
+        """A missing count must not read as zero alarms."""
+        workflow = (
+            Path(__file__).resolve().parents[2]
+            / ".github/workflows/runner-health-check.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("did not emit its counts", workflow)
+        self.assertIn('if [ -z "${count}" ]', workflow)
+
+    def test_the_sweep_is_not_triggered_per_gate_completion(self):
+        """Measured ~245 API calls per sweep against a 1000/hr budget.
+
+        Firing on every Build and Test completion exceeds that, and the failure
+        is silent: the sweep starts failing its own calls, which it correctly
+        reads as incomplete evidence and suppresses alarms on. A trigger that
+        turns a detection guard into a quiet one is worse than a slow guard.
+        """
+        # Structural, not textual: the rationale comment in the workflow
+        # mentions `workflow_run` on purpose, and a substring check would read
+        # that prose as a trigger.
+        path = (
+            Path(__file__).resolve().parents[2]
+            / ".github/workflows/runner-health-check.yml"
+        )
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover - lint env without pyyaml
+            self.skipTest("pyyaml not installed")
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # YAML 1.1 parses a bare `on:` key as the boolean True.
+        triggers = parsed.get("on", parsed.get(True))
+        self.assertEqual(sorted(triggers), ["schedule", "workflow_dispatch"])
+        self.assertIn("sweep_cadence", WATCHDOG_SOURCE)
+
+    def test_the_scan_is_not_piped_so_its_exit_status_survives(self):
+        """`cmd | tee` reports tee's status; a failed checker reads green."""
+        workflow = (
+            Path(__file__).resolve().parents[2]
+            / ".github/workflows/runner-health-check.yml"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("| tee scan.log", workflow)
+        self.assertIn("> scan.log", workflow)
+
+    def test_the_contribution_tracker_has_its_own_title(self):
+        workflow = (
+            Path(__file__).resolve().parents[2]
+            / ".github/workflows/runner-health-check.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("CONTRIBUTION_TITLE:", workflow)
+        self.assertIn("--contribution-body-out contribution-body.md", workflow)
+        self.assertIn("--expected-macos-hosts", workflow)
+        # Naming a silent host a "queue stall" is the misattribution this
+        # whole change exists to stop repeating.
+        self.assertNotIn(
+            "CONTRIBUTION_TITLE: 'CI queue stall", workflow
+        )
 
 
 class TestCli(unittest.TestCase):
     """Shell out to the real script — exit codes and files are the contract."""
+
+    def test_no_output_path_defaults_to_a_relative_file(self) -> None:
+        """A relative default writes into the caller's CWD.
+
+        That is how an earlier draft of this change dropped a
+        `contribution-body.md` into the repository root during a test run.
+        """
+        source = WATCHDOG_SOURCE
+        for flag in ("--contribution-body-out", "--snapshot-out", "--summary-out"):
+            with self.subTest(flag=flag):
+                self.assertIn(f'ap.add_argument("{flag}", default="")', source)
 
     def _run(self, snapshot, extra=None):
         tmp = Path(tempfile.mkdtemp())
@@ -719,6 +801,8 @@ class TestCli(unittest.TestCase):
                 str(tmp / "findings.json"),
                 "--body-out",
                 str(tmp / "body.md"),
+                "--contribution-body-out",
+                str(tmp / "contribution-body.md"),
             ]
             + (extra or []),
             capture_output=True,
@@ -800,6 +884,398 @@ class TestCli(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 2)
         self.assertIn("--repo required", proc.stderr)
+
+
+# --------------------------------------------------------------------------
+# Contribution: a host that served nothing while its peers served
+# --------------------------------------------------------------------------
+# Runner names verified against the live jobs API on 2026-09-15:
+# `studio-pulp-gate-01-11393-1` (m3), `m5-pulp-gate-slot2-02-2226-2`, and
+# GitHub's own `GitHub Actions 1000080783`.
+MERGE_GROUP = "pulp-build-merge-group"
+PR_HEAD = "pulp-build-pr-head"
+GATE_LABELS = ["self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm"]
+
+
+def served(minutes: float, runner: str, label: str = PR_HEAD, job: str = "macos"):
+    return {
+        "job": job,
+        "runner_name": runner,
+        "labels": [*GATE_LABELS, label],
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": ago(minutes),
+    }
+
+
+def contribution_snapshot(served_jobs, **extra):
+    snap = {
+        "generated_at": NOW.isoformat(),
+        "queued_jobs": [],
+        "live_jobs": [],
+        "served_jobs": list(served_jobs),
+        "unexpanded_runs": [],
+        "truncated": [],
+        "errors": [],
+    }
+    snap.update(extra)
+    return snap
+
+
+class TestContributionQuietCases(unittest.TestCase):
+    """The load-bearing half. These are the sweeps that must stay silent."""
+
+    def test_every_host_serving_is_silent(self) -> None:
+        snap = contribution_snapshot(
+            [
+                served(10, "m1-pulp-gate-slot1-01-1-1"),
+                served(20, "m5-pulp-gate-slot2-02-2226-2"),
+                served(30, "studio-pulp-gate-01-11393-1"),
+                served(40, "m5-pulp-gate-slot1-02-2227-1"),
+            ]
+        )
+        self.assertEqual(qaw.analyze_contribution(snap, NOW), [])
+
+    def test_an_idle_fleet_never_alarms_however_silent_a_host_is(self) -> None:
+        """The JIT trap, restated as a test.
+
+        Two jobs in three hours is not enough demand to tell a dead host from
+        an unasked one. A label census would fire here every quiet night; this
+        must not, or it gets muted within a week and stops being coverage.
+        """
+        snap = contribution_snapshot(
+            [
+                served(10, "m5-pulp-gate-slot2-02-2226-2"),
+                served(150, "m5-pulp-gate-slot1-02-2227-1"),
+            ]
+        )
+        self.assertEqual(levels(qaw.analyze_contribution(snap, NOW)), [])
+
+    def test_a_completely_idle_window_is_silent(self) -> None:
+        self.assertEqual(qaw.analyze_contribution(contribution_snapshot([]), NOW), [])
+
+    def test_jobs_older_than_the_window_do_not_count_as_contribution(self) -> None:
+        """A host that served four hours ago has not served in a three-hour window."""
+        snap = contribution_snapshot(
+            [
+                served(10, "m1-a"),
+                served(20, "m5-a"),
+                served(30, "m5-b"),
+                served(40, "m1-b"),
+                served(240, "studio-pulp-gate-01-11393-1"),
+            ]
+        )
+        alarms = [
+            f for f in qaw.analyze_contribution(snap, NOW) if f["level"] == "alarm"
+        ]
+        self.assertEqual([f["lane"] for f in alarms], ["studio-"])
+
+    def test_a_different_job_name_is_not_evidence_about_the_gate(self) -> None:
+        snap = contribution_snapshot(
+            [
+                served(10, "m1-a"),
+                served(20, "m5-a"),
+                served(30, "m5-b"),
+                served(5, "studio-x", job="classify"),
+            ]
+        )
+        alarms = [
+            f for f in qaw.analyze_contribution(snap, NOW) if f["level"] == "alarm"
+        ]
+        self.assertEqual([f["lane"] for f in alarms], ["studio-"])
+
+    def test_degraded_evidence_never_alarms(self) -> None:
+        snap = contribution_snapshot(
+            [served(10, "m1-a"), served(20, "m5-a"), served(30, "m5-b")],
+            errors=[{"run_id": 1, "error": "boom"}],
+        )
+        findings = qaw.analyze_contribution(snap, NOW)
+        self.assertTrue(findings, "control: the silent host must still be reported")
+        self.assertEqual(set(levels(findings)), {"warn"})
+
+
+class TestContributionWindowCoverage(unittest.TestCase):
+    """The collector can only see as far back as its run cap allows.
+
+    Measured on Generous-Corp/pulp 2026-09-15: the `completed` listing is
+    always truncated at 60 runs and spanned 2.35 h. A fixed 3 h window over
+    that evidence is a window that can never be filled, and treating the
+    truncation as an evidence gap made the whole check permanently unable to
+    alarm -- green forever, watching nothing.
+    """
+
+    def test_truncation_shrinks_the_window_instead_of_disabling_the_check(self) -> None:
+        snap = contribution_snapshot(
+            [
+                served(20, "m5-a"),
+                served(40, "m5-b"),
+                served(60, "m1-a"),
+                served(140, "m5-c"),
+            ],
+            coverage_since=ago(141),
+            truncated=["completed"],
+        )
+        findings = qaw.analyze_contribution(snap, NOW)
+        alarms = [f for f in findings if f["level"] == "alarm"]
+        self.assertEqual([f["lane"] for f in alarms], ["studio-"])
+        self.assertAlmostEqual(alarms[0]["window_hours"], 141 / 60, places=1)
+        self.assertEqual(alarms[0]["window_requested_hours"], 3.0)
+        self.assertTrue(alarms[0]["window_truncated_by_coverage"])
+        self.assertIn("in 2.4h", alarms[0]["lane_evidence"])
+
+    def test_too_little_coverage_to_judge_is_silent(self) -> None:
+        snap = contribution_snapshot(
+            [served(10, "m5-a"), served(20, "m5-b"), served(30, "m5-c")],
+            coverage_since=ago(40),
+            truncated=["completed"],
+        )
+        self.assertEqual(qaw.analyze_contribution(snap, NOW), [])
+
+    def test_a_failed_jobs_call_still_suppresses_the_alarm(self) -> None:
+        """Truncation costs reach; a failed call can hide a busy host."""
+        snap = contribution_snapshot(
+            [served(20, "m5-a"), served(40, "m5-b"), served(60, "m1-a")],
+            coverage_since=ago(200),
+            errors=[{"run_id": 1, "error": "boom"}],
+        )
+        findings = qaw.analyze_contribution(snap, NOW)
+        self.assertTrue(findings, "control: the silent host is still reported")
+        self.assertEqual(set(levels(findings)), {"warn"})
+
+    def test_coverage_never_claims_more_reach_than_the_evidence(self) -> None:
+        snap = contribution_snapshot(
+            [served(20, "m5-a"), served(40, "m5-b"), served(100, "m1-a")],
+            coverage_since=ago(100),
+        )
+        alarm = [
+            f
+            for f in qaw.analyze_contribution(snap, NOW)
+            if f["kind"] == "host_stopped_contributing"
+        ][0]
+        self.assertLess(alarm["window_hours"], 3.0)
+
+
+class TestContributionAlarmCases(unittest.TestCase):
+    def test_the_2026_09_15_shape_alarms_and_names_the_host(self) -> None:
+        """m3 served nothing from 10:01Z while m1/m5 served throughout."""
+        snap = contribution_snapshot(
+            [
+                served(15, "m5-pulp-gate-slot2-02-2226-2", MERGE_GROUP),
+                served(45, "m5-pulp-gate-slot1-02-2227-1", PR_HEAD),
+                served(80, "m1-pulp-gate-slot1-01-9-1", PR_HEAD),
+                served(120, "m5-pulp-gate-slot2-02-2230-2", MERGE_GROUP),
+            ]
+        )
+        findings = qaw.analyze_contribution(snap, NOW)
+        alarms = [f for f in findings if f["level"] == "alarm"]
+
+        self.assertEqual(len(alarms), 1, findings)
+        alarm = alarms[0]
+        self.assertEqual(alarm["kind"], "host_stopped_contributing")
+        self.assertEqual(alarm["lane"], "studio-")
+        self.assertEqual(alarm["fleet_served"], 4)
+        self.assertEqual(alarm["served_by_host"], {"m1-": 1, "m5-": 3, "studio-": 0})
+        self.assertIn("served 0 `macos` jobs", alarm["lane_evidence"])
+        # It names the class labels the silent host's peers were carrying, so
+        # the reader learns what coverage was lost, not merely that it was.
+        self.assertEqual(alarm["labels"], [MERGE_GROUP, PR_HEAD])
+
+    def test_two_silent_hosts_are_reported_separately(self) -> None:
+        snap = contribution_snapshot(
+            [
+                served(10, "m5-a"),
+                served(20, "m5-b"),
+                served(30, "m5-c"),
+                served(40, "m5-d"),
+            ]
+        )
+        alarms = [
+            f
+            for f in qaw.analyze_contribution(snap, NOW)
+            if f["kind"] == "host_stopped_contributing"
+        ]
+        self.assertEqual(sorted(f["lane"] for f in alarms), ["m1-", "studio-"])
+
+    def test_a_renamed_host_is_loud_in_both_directions(self) -> None:
+        """A rename drops a host out of coverage silently; both halves alarm."""
+        snap = contribution_snapshot(
+            [
+                served(10, "m5-a"),
+                served(20, "m5-b"),
+                served(30, "m1-a"),
+                served(40, "mac-studio-renamed-7-1"),
+            ]
+        )
+        findings = qaw.analyze_contribution(snap, NOW)
+        kinds = {f["kind"] for f in findings if f["level"] == "alarm"}
+        self.assertIn("unknown_fleet_host", kinds)
+        self.assertIn("host_stopped_contributing", kinds)
+        unknown = [f for f in findings if f["kind"] == "unknown_fleet_host"][0]
+        self.assertEqual(unknown["observed_runner_names"], ["mac-studio-renamed-7-1"])
+
+    def test_github_hosted_runners_are_not_unknown_fleet_hosts(self) -> None:
+        snap = contribution_snapshot(
+            [
+                served(10, "m5-a"),
+                served(20, "m5-b"),
+                served(30, "m1-a"),
+                served(40, "studio-a"),
+                served(50, "GitHub Actions 1000080783"),
+            ]
+        )
+        findings = qaw.analyze_contribution(snap, NOW)
+        self.assertEqual([f["level"] for f in findings], ["warn"])
+        self.assertEqual(findings[0]["lane"], "GitHub Actions")
+
+    def test_sole_host_for_a_class_is_a_warning_not_an_alarm(self) -> None:
+        snap = contribution_snapshot(
+            [
+                served(10, "m5-a", MERGE_GROUP),
+                served(20, "m5-b", PR_HEAD),
+                served(30, "m1-a", PR_HEAD),
+                served(40, "studio-a", PR_HEAD),
+            ]
+        )
+        findings = qaw.analyze_contribution(snap, NOW)
+        sole = [f for f in findings if f["kind"] == "sole_host_for_class"]
+        self.assertEqual(len(sole), 1, findings)
+        self.assertEqual(sole[0]["level"], "warn")
+        self.assertEqual(sole[0]["labels"], [MERGE_GROUP])
+        self.assertEqual(sole[0]["lane"], "m5-")
+
+    def test_an_unconfigured_expected_set_reports_itself(self) -> None:
+        """This guard's own silent-failure mode, made visible.
+
+        An empty expected set can never alarm. Going quiet would be
+        indistinguishable from a healthy fleet, which is the exact bug this
+        whole change exists to stop shipping.
+        """
+        snap = contribution_snapshot([served(10, "m5-a")])
+        findings = qaw.analyze_contribution(snap, NOW, expected_prefixes=())
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["kind"], "contribution_guard_unconfigured")
+        self.assertIn("PULP_FLEET_EXPECTED_MACOS_HOSTS", findings[0]["lane_evidence"])
+
+    def test_longest_prefix_wins_so_a_sub_host_is_not_swallowed(self) -> None:
+        kind, host = qaw.classify_runner_host(
+            "m5-alt-pulp-gate-1", ("m1-", "m5-", "m5-alt-", "studio-")
+        )
+        self.assertEqual((kind, host), ("expected", "m5-alt-"))
+
+
+class TestSweepCadence(unittest.TestCase):
+    def test_a_sweep_on_schedule_is_silent(self) -> None:
+        snap = contribution_snapshot([], previous_sweep_at=ago(31))
+        self.assertEqual(qaw.analyze_sweep_cadence(snap, NOW), [])
+
+    def test_the_measured_four_hour_cadence_is_reported(self) -> None:
+        """`*/30` delivering one sweep every ~4 h was live and invisible."""
+        snap = contribution_snapshot([], previous_sweep_at=ago(247))
+        findings = qaw.analyze_sweep_cadence(snap, NOW)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["cadence_level"], "alarm")
+        # Never an issue-opening alarm: a slow watchdog is not a fleet outage.
+        self.assertEqual(findings[0]["level"], "warn")
+        self.assertIn("247 min since the previous sweep", findings[0]["lane_evidence"])
+
+    def test_no_previous_sweep_is_not_a_finding(self) -> None:
+        self.assertEqual(
+            qaw.analyze_sweep_cadence(contribution_snapshot([]), NOW), []
+        )
+
+
+class TestContributionRendering(unittest.TestCase):
+    def test_the_tracker_body_names_the_host_and_where_to_look(self) -> None:
+        snap = contribution_snapshot(
+            [
+                served(15, "m5-a", MERGE_GROUP),
+                served(45, "m5-b", PR_HEAD),
+                served(80, "m1-a", PR_HEAD),
+            ]
+        )
+        body = qaw.render_contribution_body(
+            qaw.analyze_contribution(snap, NOW), NOW
+        )
+        self.assertIn("`studio-`", body)
+        self.assertIn("events.jsonl", body)
+        self.assertIn("scan-blind-escalated", body)
+        # The remedy must match what was observed: the queue was NOT stalled.
+        self.assertIn("This is not a queue stall", body)
+
+    def test_the_summary_keeps_queue_age_and_contribution_apart(self) -> None:
+        contribution = qaw.analyze_contribution(
+            contribution_snapshot(
+                [served(15, "m5-a"), served(45, "m5-b"), served(80, "m1-a")]
+            ),
+            NOW,
+        )
+        summary = qaw.render_summary(contribution, 45.0, [])
+        self.assertIn("Fleet contribution", summary)
+        self.assertIn("host_stopped_contributing", summary)
+        # A contribution alarm must not be counted as a queue-age alarm.
+        self.assertNotIn("stalled before or at job pickup", summary)
+
+
+class TestContributionCollection(unittest.TestCase):
+    def test_served_jobs_record_the_runner_that_served_them(self) -> None:
+        run = {
+            "id": 7,
+            "status": "completed",
+            "name": "Build and Test",
+            "path": ".github/workflows/build.yml",
+            "event": "pull_request",
+            "html_url": "https://example.invalid/run/7",
+            "updated_at": ago(5),
+            "run_started_at": ago(40),
+            "created_at": ago(41),
+            "head_sha": "abc",
+        }
+        jobs = {
+            "total_count": 1,
+            "jobs": [
+                {
+                    "name": "macos",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "started_at": ago(35),
+                    "runner_name": "studio-pulp-gate-01-11393-1",
+                    "labels": [*GATE_LABELS, PR_HEAD],
+                }
+            ],
+        }
+
+        def fake_api(path: str):
+            if "/jobs" in path:
+                return jobs
+            if "/workflows/" in path:
+                return {"workflow_runs": [{"id": 99, "run_started_at": ago(35)}]}
+            if "status=completed" in path:
+                return {"workflow_runs": [run]}
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=fake_api):
+            snap = qaw.collect_snapshot("o/r", NOW)
+
+        self.assertEqual(len(snap["served_jobs"]), 1)
+        entry = snap["served_jobs"][0]
+        self.assertEqual(entry["job"], "macos")
+        self.assertEqual(entry["runner_name"], "studio-pulp-gate-01-11393-1")
+        self.assertEqual(snap["previous_sweep_at"], ago(35))
+
+    def test_a_cadence_lookup_failure_does_not_degrade_the_sweep(self) -> None:
+        """Not knowing the cadence must never suppress a contribution alarm."""
+
+        def fake_api(path: str):
+            if "/workflows/" in path:
+                raise subprocess.CalledProcessError(1, "gh")
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=fake_api):
+            snap = qaw.collect_snapshot("o/r", NOW)
+
+        self.assertEqual(snap["previous_sweep_at"], "")
+        self.assertEqual(snap["errors"], [])
+        self.assertIn("cadence_error", snap)
 
 
 if __name__ == "__main__":
