@@ -20,7 +20,8 @@ OfflineStretchProgramCompileStatus OfflineStretchProgramCompiler::step(
     const AudioRendererLimits& limits, double source_frame_offset,
     const std::vector<LoweredPlacementFade>& placement_fades, std::uint64_t document_revision,
     std::uint64_t program_generation, OfflineStretchArtifactCache& artifact_cache,
-    AudioSampleRateConverterCache& converter_cache) noexcept {
+    AudioSampleRateConverterCache& converter_cache, std::int64_t authored_window_start,
+    timebase::TickDuration authored_duration) noexcept {
 #if defined(__cpp_exceptions)
     try {
 #endif
@@ -31,8 +32,32 @@ OfflineStretchProgramCompileStatus OfflineStretchProgramCompiler::step(
                         OfflineStretchErrorCode::InvalidClip);
 
         if (!started_) {
+            // A nesting can retain part of this leaf's placement. The stretch
+            // is still rendered across the range the leaf was authored over —
+            // re-keying it to the retained window would stretch the whole
+            // source into that window instead — and the leaf reads back the
+            // frames of that render which belong to it.
+            window_ = offline_stretch_artifact_window(clip, tempo_map, authored_window_start,
+                                                      authored_duration);
+            if (!window_)
+                return fail({AudioRendererErrorCode::OfflineStretchFailed, clip.id(), {}, 0, 0},
+                            OfflineStretchErrorCode::InvalidClip);
+            if (window_->authored_start == clip.start() && window_->authored_end == clip.end()) {
+                authored_.reset();
+            } else {
+                auto authored = timeline::Clip::create(
+                    clip.id(), window_->authored_start,
+                    timebase::TickDuration{window_->authored_end.value -
+                                           window_->authored_start.value},
+                    clip.content(), {}, clip.time_conform());
+                if (!authored)
+                    return fail({AudioRendererErrorCode::OfflineStretchFailed, clip.id(), {}, 0, 0},
+                                OfflineStretchErrorCode::InvalidClip);
+                authored_.emplace(std::move(authored).value());
+            }
+            const auto& keyed = authored_ ? *authored_ : clip;
             const auto begun =
-                job_.begin(clip, project, tempo_map, *decoded,
+                job_.begin(keyed, project, tempo_map, *decoded,
                            OfflineStretchLimits{limits.max_offline_stretch_input_frames,
                                                 limits.max_offline_stretch_output_frames,
                                                 limits.max_offline_stretch_input_bytes,
@@ -70,9 +95,9 @@ OfflineStretchProgramCompileStatus OfflineStretchProgramCompiler::step(
                         OfflineStretchErrorCode::ProcessorProtocolError);
 
         if (!host_prepared_) {
-            auto prepared =
-                converter_cache.prepare_host(artifact_->audio, 0, artifact_->key.target_frame_count,
-                                             clip.id(), media->asset_id, limits);
+            auto prepared = converter_cache.prepare_host(artifact_->audio, window_->frame_start,
+                                                         window_->frame_count, clip.id(),
+                                                         media->asset_id, limits);
             if (!prepared)
                 return fail(prepared.error(), OfflineStretchErrorCode::None);
             if (!*prepared)
@@ -80,9 +105,9 @@ OfflineStretchProgramCompileStatus OfflineStretchProgramCompiler::step(
             host_prepared_ = true;
         }
 
-        auto compiled = compile_audio_clip_program_cached(clip, project, tempo_map, assets, limits,
-                                                          converter_cache, source_frame_offset,
-                                                          artifact_, placement_fades);
+        auto compiled = compile_audio_clip_program_cached(
+            clip, project, tempo_map, assets, limits, converter_cache, source_frame_offset,
+            artifact_, placement_fades, 0.0, authored_window_start, authored_duration);
         if (!compiled)
             return fail(compiled.error(), OfflineStretchErrorCode::None);
         program_.emplace(std::move(compiled).value());
@@ -108,6 +133,8 @@ AudioClipRendererProgram OfflineStretchProgramCompiler::take() noexcept {
 }
 
 void OfflineStretchProgramCompiler::reset() noexcept {
+    authored_.reset();
+    window_.reset();
     artifact_.reset();
     program_.reset();
     error_ = {};
