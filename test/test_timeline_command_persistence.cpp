@@ -31,6 +31,11 @@ Project command_payload_project() {
         .automation_lanes = {automation},
         .modulators = {Modulator{{16}, ModulatorKind::Lfo, "wobble"}},
         .macros = {MacroControl{{17}, "brightness", 0.5f}},
+        .modulation_routes = {ModulationRoute{{18},
+                                              {{16}, ModulationSourceKind::Modulator},
+                                              TrackMixerTarget{TrackMixerParameter::Gain},
+                                              0.5f,
+                                              true}},
         .take_lanes = {take_lane},
         .record_armed = true,
         .active_take_lane_id = {12},
@@ -75,6 +80,7 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     const auto& freeze = member(track_data, "freeze");
     const auto& modulator = member(track_data, "modulators").array[0];
     const auto& macro = member(track_data, "macros").array[0];
+    const auto& route = member(track_data, "modulation_routes").array[0];
     const auto& marker = member(member(sequence, "data"), "markers").array[0];
     const auto& region = member(member(sequence, "data"), "regions").array[0];
     const auto& groove = member(member(sequence, "data"), "groove");
@@ -287,6 +293,15 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
         envelope("pulp.timeline.command.set_macro_value",
                  R"({"expected_bits":"1056964608","macro_id":"17",)"
                  R"("replacement_bits":"1048576000","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.insert_modulation_route",
+                 "{\"route\":" + std::string(parsed->raw(route)) +
+                     R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.remove_modulation_route",
+                 R"({"route_id":"18","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.set_modulation_route",
+                 "{\"expected\":" + std::string(parsed->raw(route)) +
+                     R"(,"replacement":)" + std::string(parsed->raw(route)) +
+                     R"(,"route_id":"18","sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -446,6 +461,21 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(macro_value.macro_id == ItemId{17});
     REQUIRE(macro_value.expected == 0.5f);
     REQUIRE(macro_value.replacement == 0.25f);
+    REQUIRE(std::holds_alternative<InsertModulationRoute>(commands[61]));
+    const auto& inserted_route = std::get<InsertModulationRoute>(commands[61]).route;
+    REQUIRE(inserted_route.id == ItemId{18});
+    REQUIRE(inserted_route.source.id == ItemId{16});
+    REQUIRE(inserted_route.source.kind == ModulationSourceKind::Modulator);
+    // The depth survives the wire bit-exactly for the reason a macro position
+    // does: both are persisted as IEEE-754 bit patterns.
+    REQUIRE(inserted_route.depth == 0.5f);
+    REQUIRE(inserted_route.enabled);
+    REQUIRE(std::holds_alternative<RemoveModulationRoute>(commands[62]));
+    REQUIRE(std::get<RemoveModulationRoute>(commands[62]).route_id == ItemId{18});
+    REQUIRE(std::holds_alternative<SetModulationRoute>(commands[63]));
+    const auto& route_edit = std::get<SetModulationRoute>(commands[63]);
+    REQUIRE(route_edit.route_id == ItemId{18});
+    REQUIRE(route_edit.expected.id == route_edit.replacement.id);
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;

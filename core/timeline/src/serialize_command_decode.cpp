@@ -168,6 +168,17 @@ decode_command_macro_control(const JsonValue& value, DecodeContext& context, std
     return decode_macro_control(value, std::move(path));
 }
 
+runtime::Result<ModulationRoute, PersistenceError>
+decode_command_modulation_route(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment =
+        bounded_increment(context.counts.modulation_routes, context.limits.max_modulation_routes);
+    if (!increment)
+        return fail<ModulationRoute>(PersistenceErrorCode::LimitExceeded, std::move(path),
+                                     value.begin, increment.actual,
+                                     context.limits.max_modulation_routes);
+    return decode_modulation_route(value, std::move(path));
+}
+
 // A float member spelled as its IEEE-754 bit pattern, which is how the macro
 // document schema spells the field this command gates. A decimal spelling would
 // let a value fail to compare equal to the one that was written.
@@ -1087,6 +1098,55 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             return runtime::Err(replacement.error());
         return runtime::Ok(Command(SetMacroValue{sequence.value(), track.value(), macro_id.value(),
                                                  expected.value(), replacement.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_modulation_route") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto route = required(command, "route", data_path);
+        if (!sequence || !track || !route)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded =
+            decode_command_modulation_route(*route.value(), context, data_path + "/route");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(Command(
+            InsertModulationRoute{sequence.value(), track.value(), std::move(decoded).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_modulation_route") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto route = decode_command_item_id(command, "route_id", data_path);
+        if (!sequence || !track || !route)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(
+            Command(RemoveModulationRoute{sequence.value(), track.value(), route.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_modulation_route") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto route_id = decode_command_item_id(command, "route_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !track || !route_id || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_command_modulation_route(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement = decode_command_modulation_route(*replacement.value(), context,
+                                                                   data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        // Refused at the wire as well as in the reducer, for the reason
+        // set_modulator states: the model is handed one route and cannot see
+        // that the caller named another.
+        if (decoded_expected.value().id != decoded_replacement.value().id ||
+            decoded_expected.value().id != route_id.value())
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path + "/replacement",
+                                 replacement.value()->begin);
+        return runtime::Ok(Command(SetModulationRoute{
+            sequence.value(), track.value(), route_id.value(), std::move(decoded_expected).value(),
+            std::move(decoded_replacement).value()}));
     }
     if (type.value() == "pulp.timeline.command.set_groove") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);
