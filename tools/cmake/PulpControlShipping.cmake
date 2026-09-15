@@ -29,6 +29,7 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     artifact.read
     sequencer.state.read
     sequencer.state.edit
+    timeline.document.session
     unavailable)
 
 set(_PULP_CONTROL_CAPABILITIES
@@ -53,6 +54,7 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.artifact/read@1
     dev.pulp.sequencer/state.read@1
     dev.pulp.sequencer/state.edit@1
+    dev.pulp.timeline/document-session@1
     dev.pulp.unavailable/operation@1)
 
 # Registry presence pre-stages schema/client compatibility but is not permission
