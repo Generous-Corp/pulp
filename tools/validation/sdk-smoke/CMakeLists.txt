@@ -44,6 +44,9 @@ find_package(Pulp REQUIRED CONFIG)
 add_executable(PulpSDKSmokeSpectralBandMaskProbe spectral_band_mask_probe.cpp)
 target_link_libraries(PulpSDKSmokeSpectralBandMaskProbe PRIVATE Pulp::signal)
 
+add_executable(PulpSDKSmokeUnitDelayProbe unit_delay_probe.cpp)
+target_link_libraries(PulpSDKSmokeUnitDelayProbe PRIVATE Pulp::signal)
+
 # The installed Pulp archives use /MT. CMake initializes this target property
 # from CMAKE_MSVC_RUNTIME_LIBRARY when the target is created, so this checks the
 # real downstream contract rather than merely inspecting PulpConfig.cmake text.
