@@ -1101,8 +1101,8 @@ that installed consumer whenever schema identity, registered content, context
 dirty semantics, or playback hook declarations change.
 The current compiler contract is notes-only, reset-state-only, and capped at
 4096 fragment notes per clip. A nested `SequenceRef` that trims registered
-content is `TrimmedRegisteredContentUnsupported` because the hook input has no
-source-window offset. Renderer production declarations live with the process;
+content compiles: the hook generates over the authored clip and the compiler
+windows the fragment to the retained span. Renderer production declarations live with the process;
 `ProgramWire` refuses nondefault declarations instead of transporting a claim
 without its trusted hook.
 
