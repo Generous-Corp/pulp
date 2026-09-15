@@ -1,15 +1,15 @@
-#include <pulp/view/widgets.hpp>
-#include <pulp/view/text_editor.hpp>
-#include <pulp/view/animation.hpp>
-#include <pulp/view/frame_clock.hpp>
-#include <pulp/view/image_cache.hpp>
-#include <pulp/view/text_overflow.hpp>
-#include <pulp/view/window_host.hpp>
+#include <choc/text/choc_JSON.h>
+#include <pulp/canvas/bundled_fonts.hpp> // font_registration_generation() for the shaped-layout cache key
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <pulp/canvas/text_utf8.hpp>
-#include <pulp/canvas/bundled_fonts.hpp>  // font_registration_generation() for the shaped-layout cache key
-#include <choc/text/choc_JSON.h>
+#include <pulp/view/animation.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/image_cache.hpp>
+#include <pulp/view/text_editor.hpp>
+#include <pulp/view/text_overflow.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -1427,7 +1427,8 @@ void Label::paint_attributed_lines_(canvas::Canvas& canvas,
 }
 
 void Label::set_selection_highlight(int start_utf8, int end_utf8) {
-    if (start_utf8 > end_utf8) std::swap(start_utf8, end_utf8);
+    if (start_utf8 > end_utf8)
+        std::swap(start_utf8, end_utf8);
     const int n = static_cast<int>(text_.size());
     start_utf8 = std::clamp(start_utf8, 0, n);
     end_utf8 = std::clamp(end_utf8, 0, n);
@@ -1444,17 +1445,17 @@ bool Label::selection_highlight(int& start_utf8, int& end_utf8) const {
     return selection_end_utf8_ > selection_start_utf8_;
 }
 
-void Label::paint_selection_line_(canvas::Canvas& canvas,
-                                  const std::string& line, float x, float top,
-                                  float line_height, int source_start,
-                                  const canvas::Color& text_color,
-                                  bool vertical) {
-    if (!is_selectable()) return;
+void Label::paint_selection_line_(canvas::Canvas& canvas, const std::string& line, float x,
+                                  float top, float line_height, int source_start,
+                                  const canvas::Color& text_color, bool vertical) {
+    if (!is_selectable())
+        return;
     // A rotated vertical Label paints through a transformed canvas, so the
     // coordinates recorded here would not be the ones a pointer arrives in.
     // Decline to report rather than report wrong boxes: `measured` stays false
     // and the selection owner treats the Label as unsupported, not as empty.
-    if (vertical) return;
+    if (vertical)
+        return;
 
     SelectableLine rec;
     rec.start_utf8 = source_start;
@@ -1474,24 +1475,26 @@ void Label::paint_selection_line_(canvas::Canvas& canvas,
         // ligatures, and it is the reason the editor's caret sits on the glyph
         // boundary rather than near it.
         rec.x_offsets.push_back(x + canvas.text_x_for_byte(line, i));
-        if (i >= n) break;
+        if (i >= n)
+            break;
         const std::size_t next = canvas::cluster_step(line, i, /*forward=*/true);
         i = next > i ? next : i + 1;
-        if (i > n) i = n;
+        if (i > n)
+            i = n;
     }
 
     if (selection_end_utf8_ > selection_start_utf8_) {
         SelectableLayout one;
         one.measured = true;
         one.lines.push_back(rec);
-        const auto rects = selectable_rects_for_range(one, selection_start_utf8_,
-                                                      selection_end_utf8_);
+        const auto rects =
+            selectable_rects_for_range(one, selection_start_utf8_, selection_end_utf8_);
         if (!rects.empty()) {
             const Rect band = rects.front();
             // Same theme keys the editor's selection uses, so a Label and a
             // TextEditor in one document highlight identically.
-            const auto fill = resolve_color(
-                "text.selection", resolve_color("accent", canvas::Color::hex(0x3b82f6)));
+            const auto fill = resolve_color("text.selection",
+                                            resolve_color("accent", canvas::Color::hex(0x3b82f6)));
             canvas.set_fill_color(fill);
             canvas.fill_rect(band.x, band.y, band.width, band.height);
             canvas.set_fill_color(text_color);
@@ -2072,16 +2075,13 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                 // because `line` may already carry the clamp ellipsis, which
                 // is not in the source at all.
                 {
-                    const std::size_t found =
-                        display_text.find(shaped_line.text, source_cursor);
-                    const int src = static_cast<int>(
-                        found == std::string::npos ? source_cursor : found);
-                    paint_selection_line_(canvas, shaped_line.text,
-                                          x + shaped_line.x_offset,
-                                          line_baseline - first_line_ascent, lh,
-                                          src, text_color, vertical);
-                    source_cursor = static_cast<std::size_t>(src) +
-                                    shaped_line.text.size();
+                    const std::size_t found = display_text.find(shaped_line.text, source_cursor);
+                    const int src =
+                        static_cast<int>(found == std::string::npos ? source_cursor : found);
+                    paint_selection_line_(canvas, shaped_line.text, x + shaped_line.x_offset,
+                                          line_baseline - first_line_ascent, lh, src, text_color,
+                                          vertical);
+                    source_cursor = static_cast<std::size_t>(src) + shaped_line.text.size();
                 }
                 canvas.fill_text(line, x + shaped_line.x_offset, line_baseline);
                 decorate_plain(line, x + shaped_line.x_offset, line_baseline,
@@ -2109,9 +2109,8 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                 if (need_ellipsis && (emitted + 1 == visible_lines)) {
                     line.append("\xe2\x80\xa6");
                 }
-                paint_selection_line_(canvas, display_text.substr(pos, nl - pos),
-                                      x, y - first_line_ascent, lh,
-                                      static_cast<int>(pos), text_color,
+                paint_selection_line_(canvas, display_text.substr(pos, nl - pos), x,
+                                      y - first_line_ascent, lh, static_cast<int>(pos), text_color,
                                       vertical);
                 canvas.fill_text(line, x, y);
                 decorate_plain(line, x, y, false);

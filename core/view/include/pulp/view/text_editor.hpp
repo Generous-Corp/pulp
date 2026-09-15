@@ -4,20 +4,20 @@
 /// Full-featured text editor widget with selection, clipboard, undo/redo.
 /// Inspired by Visage TextEditor patterns (see ~/Code/visage).
 
-#include <pulp/view/view.hpp>
-#include <pulp/view/accessibility.hpp>
-#include <pulp/view/widget_metrics.hpp>
-#include <pulp/view/widget_painter.hpp>
-#include <pulp/view/caret.hpp>
-#include <pulp/view/selectable_text.hpp>
-#include <pulp/view/input_events.hpp>
-#include <pulp/platform/clipboard.hpp>
 #include <cstddef>
 #include <functional>
+#include <pulp/platform/clipboard.hpp>
+#include <pulp/view/accessibility.hpp>
+#include <pulp/view/caret.hpp>
+#include <pulp/view/input_events.hpp>
+#include <pulp/view/selectable_text.hpp>
+#include <pulp/view/view.hpp>
+#include <pulp/view/widget_metrics.hpp>
+#include <pulp/view/widget_painter.hpp>
 #include <string>
 #include <string_view>
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace pulp::view {
 
@@ -44,10 +44,8 @@ namespace pulp::view {
 /// editor->on_return = [&](const std::string& text) { apply_value(text); };
 /// editor->on_escape = [&] { revert(); };
 /// @endcode
-class TextEditor : public View,
-                   public AccessibilityTextInterface,
-                   public SelectableText {
-public:
+class TextEditor : public View, public AccessibilityTextInterface, public SelectableText {
+  public:
     TextEditor() {
         set_access_role(AccessRole::text_field);
         set_focusable(true);
@@ -70,11 +68,15 @@ public:
     SelectableText* as_selectable_text() override {
         return read_only ? this : nullptr;
     }
-    std::string_view selectable_text() const override { return text_; }
+    std::string_view selectable_text() const override {
+        return text_;
+    }
     SelectableLayout selectable_layout() const override;
     void set_selection_highlight(int start_utf8, int end_utf8) override;
     bool selection_highlight(int& start_utf8, int& end_utf8) const override;
-    View* selectable_view() override { return this; }
+    View* selectable_view() override {
+        return this;
+    }
 
     /// Multi-line aware hit-test: local point -> UTF-8 byte offset.
     ///

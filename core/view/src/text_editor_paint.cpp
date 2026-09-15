@@ -726,7 +726,8 @@ SelectableLayout TextEditor::selectable_layout() const {
         dst.top = src.top_y;
         dst.height = src.line_height;
         dst.x_offsets.reserve(src.x_offsets.size());
-        for (float x : src.x_offsets) dst.x_offsets.push_back(src.inner_x + x);
+        for (float x : src.x_offsets)
+            dst.x_offsets.push_back(src.inner_x + x);
         dst.byte_offsets = src.byte_offsets;
         out.lines.push_back(std::move(dst));
     }
@@ -738,7 +739,8 @@ void TextEditor::set_selection_highlight(int start_utf8, int end_utf8) {
     // highlight: a read-only editor inside a document selection must answer
     // `selected_text()` and `copy_to_clipboard()` for its slice, and a second
     // range would let those two disagree.
-    if (start_utf8 > end_utf8) std::swap(start_utf8, end_utf8);
+    if (start_utf8 > end_utf8)
+        std::swap(start_utf8, end_utf8);
     const int n = static_cast<int>(text_.size());
     selection_start_ = std::clamp(start_utf8, 0, n);
     selection_end_ = std::clamp(end_utf8, 0, n);
@@ -752,4 +754,4 @@ bool TextEditor::selection_highlight(int& start_utf8, int& end_utf8) const {
     return end_utf8 > start_utf8;
 }
 
-}  // namespace pulp::view
+} // namespace pulp::view

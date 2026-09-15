@@ -36,8 +36,10 @@ std::size_t row_for_y(const std::vector<SelectableLine>& lines, float y) {
     for (std::size_t i = 0; i < lines.size(); ++i) {
         const auto& row = lines[i];
         float distance = 0.0f;
-        if (y < row.top) distance = row.top - y;
-        else if (y > row.top + row.height) distance = y - (row.top + row.height);
+        if (y < row.top)
+            distance = row.top - y;
+        else if (y > row.top + row.height)
+            distance = y - (row.top + row.height);
         if (distance <= best_distance) {
             best_distance = distance;
             best = i;
@@ -48,7 +50,8 @@ std::size_t row_for_y(const std::vector<SelectableLine>& lines, float y) {
 
 /// Nearest cluster boundary to `x` on one row.
 int boundary_for_x(const SelectableLine& row, float x) {
-    if (row.byte_offsets.empty()) return row.start_utf8;
+    if (row.byte_offsets.empty())
+        return row.start_utf8;
     std::size_t best = 0;
     float best_dist = std::abs(x - row.x_offsets[0]);
     for (std::size_t j = 1; j < row.x_offsets.size(); ++j) {
@@ -68,41 +71,50 @@ bool usable(const SelectableLayout& layout) {
     return layout.measured && !layout.lines.empty();
 }
 
-}  // namespace
+} // namespace
 
 View* enclosing_text_selection_region(View& from) {
     for (View* v = &from; v != nullptr; v = v->parent())
-        if (v->text_selection_region()) return v;
+        if (v->text_selection_region())
+            return v;
     return nullptr;
 }
 
 int selectable_index_at_point(const SelectableLayout& layout, Point local) {
-    if (!usable(layout)) return -1;
+    if (!usable(layout))
+        return -1;
     const auto& row = layout.lines[row_for_y(layout.lines, local.y)];
     return boundary_for_x(row, local.x);
 }
 
 int selectable_first_index(const SelectableLayout& layout) {
-    if (!usable(layout)) return -1;
+    if (!usable(layout))
+        return -1;
     return layout.lines.front().start_utf8;
 }
 
 int selectable_last_index(const SelectableLayout& layout) {
-    if (!usable(layout)) return -1;
+    if (!usable(layout))
+        return -1;
     const auto& last = layout.lines.back();
-    if (!last.byte_offsets.empty()) return last.byte_offsets.back();
+    if (!last.byte_offsets.empty())
+        return last.byte_offsets.back();
     return last.end_utf8;
 }
 
-std::vector<Rect> selectable_rects_for_range(const SelectableLayout& layout,
-                                             int start_utf8, int end_utf8) {
+std::vector<Rect> selectable_rects_for_range(const SelectableLayout& layout, int start_utf8,
+                                             int end_utf8) {
     std::vector<Rect> out;
-    if (!usable(layout)) return out;
-    if (start_utf8 > end_utf8) std::swap(start_utf8, end_utf8);
-    if (start_utf8 == end_utf8) return out;
+    if (!usable(layout))
+        return out;
+    if (start_utf8 > end_utf8)
+        std::swap(start_utf8, end_utf8);
+    if (start_utf8 == end_utf8)
+        return out;
 
     for (const auto& row : layout.lines) {
-        if (row.byte_offsets.empty()) continue;
+        if (row.byte_offsets.empty())
+            continue;
         // A line's selectable span runs to its last recorded boundary, which
         // for a soft-wrapped line is the boundary before the break. Using
         // `end_utf8` of the line instead would include the break character
@@ -111,7 +123,8 @@ std::vector<Rect> selectable_rects_for_range(const SelectableLayout& layout,
         const int row_hi = row.byte_offsets.back();
         const int lo = std::max(start_utf8, row_lo);
         const int hi = std::min(end_utf8, row_hi);
-        if (hi <= lo) continue;
+        if (hi <= lo)
+            continue;
 
         // Map a byte offset to its x by finding the boundary at or before it;
         // an offset that lands mid-cluster (a caller slicing on bytes rather
@@ -119,17 +132,20 @@ std::vector<Rect> selectable_rects_for_range(const SelectableLayout& layout,
         auto x_at = [&](int byte) {
             std::size_t idx = 0;
             for (std::size_t j = 0; j < row.byte_offsets.size(); ++j) {
-                if (row.byte_offsets[j] <= byte) idx = j;
-                else break;
+                if (row.byte_offsets[j] <= byte)
+                    idx = j;
+                else
+                    break;
             }
             return row.x_offsets[idx];
         };
         const float x0 = x_at(lo);
         const float x1 = x_at(hi);
-        if (x1 <= x0) continue;
+        if (x1 <= x0)
+            continue;
         out.push_back(Rect{x0, row.top, x1 - x0, row.height});
     }
     return out;
 }
 
-}  // namespace pulp::view
+} // namespace pulp::view

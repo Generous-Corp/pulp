@@ -625,7 +625,9 @@ public:
     /// vast majority of views, which carry no text. A virtual hook rather than
     /// a `dynamic_cast` because a live drag re-walks the whole subtree per
     /// pointer sample. See `pulp/view/selectable_text.hpp`.
-    virtual SelectableText* as_selectable_text() { return nullptr; }
+    virtual SelectableText* as_selectable_text() {
+        return nullptr;
+    }
     const SelectableText* as_selectable_text() const {
         return const_cast<View*>(this)->as_selectable_text();
     }
@@ -646,8 +648,12 @@ public:
     /// — a free function, because "which region owns this view" is a question
     /// the selection subsystem asks, not state the View carries. Only the flag
     /// lives here.
-    void set_text_selection_region(bool region) { text_selection_region_ = region; }
-    bool text_selection_region() const { return text_selection_region_; }
+    void set_text_selection_region(bool region) {
+        text_selection_region_ = region;
+    }
+    bool text_selection_region() const {
+        return text_selection_region_;
+    }
 
     /// CSS :disabled equivalent — blocks input, reduces opacity
     bool enabled() const { return enabled_; }

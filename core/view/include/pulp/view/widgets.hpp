@@ -1,32 +1,32 @@
 #pragma once
 
 #include <algorithm>
-#include <pulp/view/view.hpp>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <pulp/canvas/attributed_string.hpp>
+#include <pulp/canvas/text_shaper.hpp> // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/accessibility.hpp>
+#include <pulp/view/animation.hpp>
+#include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/caret.hpp>
 #include <pulp/view/custom_shader_host.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/hit_metrics.hpp>
 #include <pulp/view/selectable_text.hpp>
-#include <pulp/canvas/attributed_string.hpp>
-#include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
-#include <pulp/view/audio_bridge.hpp>
-#include <pulp/view/animation.hpp>
 #include <pulp/view/slider_core.hpp>
 #include <pulp/view/sprite_strip.hpp>
-#include <pulp/view/widget_painter.hpp>
 #include <pulp/view/value_source.hpp>
-#include <pulp/view/visualizers.hpp>  // SpectrogramView/MultiMeter/CorrelationMeter — include directly in new code
+#include <pulp/view/view.hpp>
+#include <pulp/view/visualizers.hpp> // SpectrogramView/MultiMeter/CorrelationMeter — include directly in new code
+#include <pulp/view/widget_painter.hpp>
 #include <string>
 #include <string_view>
-#include <cstddef>
-#include <cstdint>
-#include <cmath>
-#include <functional>
-#include <array>
-#include <memory>
 #include <vector>
-#include <optional>
 
 namespace pulp::view {
 
@@ -53,7 +53,7 @@ class TextEditor;   // pulp/view/text_editor.hpp — the Label's inline edit fie
 enum class LabelAlign { left, center, right, auto_, justify, match_parent };
 
 class Label : public View, public SelectableText {
-public:
+  public:
     Label() { set_access_role(AccessRole::label); }
     explicit Label(std::string text) : text_(std::move(text)) {
         set_access_role(AccessRole::label);
@@ -522,12 +522,16 @@ public:
     /// break those everywhere to fix selection in one place.
     enum class SelectionPolicy { inherit, always, never };
     void set_selection_policy(SelectionPolicy policy) {
-        if (selection_policy_ == policy) return;
+        if (selection_policy_ == policy)
+            return;
         selection_policy_ = policy;
-        if (!is_selectable()) set_selection_highlight(0, 0);
+        if (!is_selectable())
+            set_selection_highlight(0, 0);
         request_repaint();
     }
-    SelectionPolicy selection_policy() const { return selection_policy_; }
+    SelectionPolicy selection_policy() const {
+        return selection_policy_;
+    }
 
     /// Resolved answer for this Label right now. Walks to the nearest
     /// enclosing content region, so it changes when the Label is reparented
@@ -539,62 +543,69 @@ public:
     /// honest affordance, and it keeps every region out of the cursor
     /// hit-testing path.
     bool is_selectable() const {
-        if (selection_policy_ == SelectionPolicy::always) return true;
-        if (selection_policy_ == SelectionPolicy::never) return false;
+        if (selection_policy_ == SelectionPolicy::always)
+            return true;
+        if (selection_policy_ == SelectionPolicy::never)
+            return false;
         return enclosing_text_selection_region(*const_cast<Label*>(this)) != nullptr;
     }
 
-    std::string_view selectable_text() const override { return text_; }
-    SelectableLayout selectable_layout() const override { return selection_layout_; }
+    std::string_view selectable_text() const override {
+        return text_;
+    }
+    SelectableLayout selectable_layout() const override {
+        return selection_layout_;
+    }
     void set_selection_highlight(int start_utf8, int end_utf8) override;
     bool selection_highlight(int& start_utf8, int& end_utf8) const override;
-    View* selectable_view() override { return this; }
+    View* selectable_view() override {
+        return this;
+    }
 
 private:
-    SelectionPolicy selection_policy_ = SelectionPolicy::inherit;
-    int selection_start_utf8_ = 0;
-    int selection_end_utf8_ = 0;
-    /// Line geometry captured by the last paint. `measured` stays false for
-    /// the paint paths this capability does not model (attributed runs and
-    /// rotated vertical text), so a caller can tell "not supported" from
-    /// "no text" — the distinction `PaintedTextExtents::measured` exists for.
-    mutable SelectableLayout selection_layout_;
-    mutable SelectableLayout selection_layout_pending_;
+  SelectionPolicy selection_policy_ = SelectionPolicy::inherit;
+  int selection_start_utf8_ = 0;
+  int selection_end_utf8_ = 0;
+  /// Line geometry captured by the last paint. `measured` stays false for
+  /// the paint paths this capability does not model (attributed runs and
+  /// rotated vertical text), so a caller can tell "not supported" from
+  /// "no text" — the distinction `PaintedTextExtents::measured` exists for.
+  mutable SelectableLayout selection_layout_;
+  mutable SelectableLayout selection_layout_pending_;
 
-    /// Record one painted line into `selection_layout_pending_` and, when the
-    /// live highlight touches it, fill its selection band. Called immediately
-    /// before the line's own `fill_text` so the band lands under the glyphs it
-    /// describes, in one paint pass.
-    ///
-    /// `line` is the text as PAINTED (post-transform); `source_start` is where
-    /// that line begins in `text_`. Returns the band this line is selected
-    /// over, or a zero-width rect when none of it is selected.
-    void paint_selection_line_(canvas::Canvas& canvas, const std::string& line,
-                               float x, float top, float line_height,
-                               int source_start, const canvas::Color& text_color,
-                               bool vertical);
+  /// Record one painted line into `selection_layout_pending_` and, when the
+  /// live highlight touches it, fill its selection band. Called immediately
+  /// before the line's own `fill_text` so the band lands under the glyphs it
+  /// describes, in one paint pass.
+  ///
+  /// `line` is the text as PAINTED (post-transform); `source_start` is where
+  /// that line begins in `text_`. Returns the band this line is selected
+  /// over, or a zero-width rect when none of it is selected.
+  void paint_selection_line_(canvas::Canvas& canvas, const std::string& line, float x, float top,
+                             float line_height, int source_start, const canvas::Color& text_color,
+                             bool vertical);
 
-    EditTrigger edit_trigger_ = EditTrigger::none;
-    TextEditor* editor_ = nullptr;      ///< non-owning; the child vector owns it
-    int click_count_ = 0;
-    double last_click_time_ = 0.0;
+  EditTrigger edit_trigger_ = EditTrigger::none;
+  TextEditor* editor_ = nullptr; ///< non-owning; the child vector owns it
+  int click_count_ = 0;
+  double last_click_time_ = 0.0;
 
-    /// Resolved typography + origin shared by paint() and
-    /// text_edit_metrics(). Factoring this out is the WYSIWYG invariant:
-    /// the caret overlay and the painter resolve the SAME inherited
-    /// size/weight/letter-spacing, family fallback, slant, alignment, and
-    /// vertical band so a letter-spaced or center/right-aligned label can't
-    /// drift between the two. `apply_text_transform()` mirrors paint()'s
-    /// transform so the measured run matches the rendered run.
-    struct ResolvedTextStyle {
-        std::string family;
-        float font_size = 14.0f;
-        int font_weight = 400;
-        int font_slant = 0;
-        float letter_spacing = 0.0f;
-        LabelAlign text_align = LabelAlign::left;
-        float baseline_y = 0.0f;   ///< first-line baseline in local space
-    };
+  /// Resolved typography + origin shared by paint() and
+  /// text_edit_metrics(). Factoring this out is the WYSIWYG invariant:
+  /// the caret overlay and the painter resolve the SAME inherited
+  /// size/weight/letter-spacing, family fallback, slant, alignment, and
+  /// vertical band so a letter-spaced or center/right-aligned label can't
+  /// drift between the two. `apply_text_transform()` mirrors paint()'s
+  /// transform so the measured run matches the rendered run.
+  struct ResolvedTextStyle {
+      std::string family;
+      float font_size = 14.0f;
+      int font_weight = 400;
+      int font_slant = 0;
+      float letter_spacing = 0.0f;
+      LabelAlign text_align = LabelAlign::left;
+      float baseline_y = 0.0f; ///< first-line baseline in local space
+  };
     ResolvedTextStyle resolve_text_style() const;
     std::string apply_text_transform(const std::string& in) const;
     /// Translate the CSS `font-variant` CSV (View::font_variant_) into SkShaper

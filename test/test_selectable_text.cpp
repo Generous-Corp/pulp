@@ -19,8 +19,8 @@
 //  * Vertical assertions are band-membership only, never exact baselines: the
 //    ascent a Label resolves depends on whether Skia is present in the build.
 
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 #include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/view/selectable_text.hpp>
@@ -37,7 +37,7 @@ using pulp::canvas::RecordingCanvas;
 namespace {
 /// Width of one byte under RecordingCanvas's text metric. See the floor note.
 constexpr float kByteW = 7.0f;
-}  // namespace
+} // namespace
 
 TEST_CASE("Label exposes painted line geometry through SelectableText",
           "[view][widget][label][selection]") {
@@ -224,7 +224,7 @@ TEST_CASE("a multi-byte Label never offers a boundary inside a codepoint",
         if (offset < static_cast<int>(text.size())) {
             const auto byte = static_cast<unsigned char>(text[static_cast<std::size_t>(offset)]);
             INFO("offset " << offset << " byte 0x" << std::hex << int(byte));
-            REQUIRE((byte & 0xC0) != 0x80);  // never a continuation byte
+            REQUIRE((byte & 0xC0) != 0x80); // never a continuation byte
         }
     }
     // 'a'(1) + 'é'(2) + '漢'(3) + 'z'(1) = 4 clusters, 5 boundaries.
@@ -304,9 +304,9 @@ TEST_CASE("a Label paints a selection band only over the highlighted range",
     // landed (see the ink-extent floor note at the top of this file).
     bool found = false;
     for (const auto& cmd : canvas.commands()) {
-        if (cmd.type != pulp::canvas::DrawCommand::Type::fill_rect) continue;
-        if (cmd.f[0] == Catch::Approx(1 * kByteW) &&
-            cmd.f[2] == Catch::Approx(3 * kByteW))
+        if (cmd.type != pulp::canvas::DrawCommand::Type::fill_rect)
+            continue;
+        if (cmd.f[0] == Catch::Approx(1 * kByteW) && cmd.f[2] == Catch::Approx(3 * kByteW))
             found = true;
     }
     REQUIRE(found);
@@ -423,8 +423,7 @@ TEST_CASE("an unselectable Label records no selection geometry at all",
     REQUIRE_FALSE(label.selectable_layout().lines.empty());
 }
 
-TEST_CASE("row resolution is defined for gapped and zero-height bands",
-          "[view][selection][edge]") {
+TEST_CASE("row resolution is defined for gapped and zero-height bands", "[view][selection][edge]") {
     // `selectable_index_at_point` is a public free function over a
     // caller-supplied `SelectableLayout`, so a layout Label and TextEditor
     // never produce is still inside its contract — a future text widget, or a
@@ -438,14 +437,18 @@ TEST_CASE("row resolution is defined for gapped and zero-height bands",
     layout.measured = true;
 
     SelectableLine top;
-    top.start_utf8 = 0; top.end_utf8 = 2;
-    top.top = 0.0f; top.height = 10.0f;
+    top.start_utf8 = 0;
+    top.end_utf8 = 2;
+    top.top = 0.0f;
+    top.height = 10.0f;
     top.byte_offsets = {0, 1, 2};
     top.x_offsets = {0.0f, 10.0f, 20.0f};
 
     SelectableLine bottom;
-    bottom.start_utf8 = 3; bottom.end_utf8 = 5;
-    bottom.top = 20.0f; bottom.height = 10.0f;   // a 10px GAP above it
+    bottom.start_utf8 = 3;
+    bottom.end_utf8 = 5;
+    bottom.top = 20.0f;
+    bottom.height = 10.0f; // a 10px GAP above it
     bottom.byte_offsets = {3, 4, 5};
     bottom.x_offsets = {0.0f, 10.0f, 20.0f};
 

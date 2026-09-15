@@ -34,8 +34,8 @@ class View;
 /// non-empty for a line that reports any geometry at all: a zero-length line
 /// still carries the single boundary that is its caret position.
 struct SelectableLine {
-    int start_utf8 = 0;  ///< First byte of this line in `selectable_text()`.
-    int end_utf8 = 0;    ///< One past this line's last byte.
+    int start_utf8 = 0; ///< First byte of this line in `selectable_text()`.
+    int end_utf8 = 0;   ///< One past this line's last byte.
     float top = 0.0f;
     float height = 0.0f;
     std::vector<float> x_offsets;
@@ -56,7 +56,7 @@ struct SelectableLayout {
 
 /// A widget whose painted text can join a document-level selection.
 class SelectableText {
-public:
+  public:
     virtual ~SelectableText() = default;
 
     /// The widget's text, in UTF-8. This is the SOURCE string — what a copy
@@ -100,8 +100,8 @@ int selectable_index_at_point(const SelectableLayout& layout, Point local);
 
 /// The painted rects covering `[start_utf8, end_utf8)`, in local coordinates,
 /// one per touched line. A collapsed range yields no rects.
-std::vector<Rect> selectable_rects_for_range(const SelectableLayout& layout,
-                                             int start_utf8, int end_utf8);
+std::vector<Rect> selectable_rects_for_range(const SelectableLayout& layout, int start_utf8,
+                                             int end_utf8);
 
 /// First / last selectable byte offset in `layout`. Both return -1 when the
 /// layout is unmeasured. `selectable_last_index` is the offset one past the
@@ -109,4 +109,4 @@ std::vector<Rect> selectable_rects_for_range(const SelectableLayout& layout,
 int selectable_first_index(const SelectableLayout& layout);
 int selectable_last_index(const SelectableLayout& layout);
 
-}  // namespace pulp::view
+} // namespace pulp::view
