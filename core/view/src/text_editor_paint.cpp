@@ -696,3 +696,60 @@ Rect TextEditor::caret_rect() const {
 }
 
 } // namespace pulp::view
+
+// ── SelectableText ──────────────────────────────────────────────────────────
+//
+// The editor already builds, per paint, exactly the intermediate a selection
+// needs: `LayoutSnapshot` holds each visual row's band and the shaped x of
+// every cluster boundary in it. It was private, so a cross-widget selection had
+// to re-derive it — which is how `char_index_at_point`'s pre-paint fallback
+// (`font_size * 0.6` per character) would have leaked into a second consumer.
+// Publishing it through `SelectableText` keeps one derivation.
+
+namespace pulp::view {
+
+SelectableLayout TextEditor::selectable_layout() const {
+    SelectableLayout out;
+    if (last_layout_.lines.empty()) {
+        // No paint has run yet. Report UNMEASURED rather than falling back to
+        // the estimated-advance path: a selection band drawn from estimated
+        // advances sits visibly off the glyphs, and reporting "unknown" lets
+        // the caller wait for a frame instead of drawing something wrong.
+        return out;
+    }
+    out.measured = true;
+    out.lines.reserve(last_layout_.lines.size());
+    for (const auto& src : last_layout_.lines) {
+        SelectableLine dst;
+        dst.start_utf8 = src.start;
+        dst.end_utf8 = src.end;
+        dst.top = src.top_y;
+        dst.height = src.line_height;
+        dst.x_offsets.reserve(src.x_offsets.size());
+        for (float x : src.x_offsets) dst.x_offsets.push_back(src.inner_x + x);
+        dst.byte_offsets = src.byte_offsets;
+        out.lines.push_back(std::move(dst));
+    }
+    return out;
+}
+
+void TextEditor::set_selection_highlight(int start_utf8, int end_utf8) {
+    // Routed through the editor's OWN selection rather than a parallel
+    // highlight: a read-only editor inside a document selection must answer
+    // `selected_text()` and `copy_to_clipboard()` for its slice, and a second
+    // range would let those two disagree.
+    if (start_utf8 > end_utf8) std::swap(start_utf8, end_utf8);
+    const int n = static_cast<int>(text_.size());
+    selection_start_ = std::clamp(start_utf8, 0, n);
+    selection_end_ = std::clamp(end_utf8, 0, n);
+    caret_position_ = selection_end_;
+    request_repaint();
+}
+
+bool TextEditor::selection_highlight(int& start_utf8, int& end_utf8) const {
+    start_utf8 = std::min(selection_start_, selection_end_);
+    end_utf8 = std::max(selection_start_, selection_end_);
+    return end_utf8 > start_utf8;
+}
+
+}  // namespace pulp::view

@@ -28,6 +28,7 @@ class GestureArbiter; class GestureRecognizer;
 class FrameClock;
 class WidgetPainter;     // pulp/view/widget_painter.hpp — pluggable paint delegate
 class WidgetMetrics;     // pulp/view/widget_metrics.hpp — pluggable sizing delegate
+class SelectableText;    // pulp/view/selectable_text.hpp — cross-widget text selection
 class FrameClockBinding; // pulp/view/value_source_binding.hpp
 struct ViewValueBindings; // pulp/view/src/view.cpp — lazily allocated value-source bindings
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
@@ -619,6 +620,34 @@ public:
     /// ListBox return false so single-key shortcuts still fire after they
     /// take focus.
     virtual bool accepts_text_input() const { return false; }
+
+    /// This view's painted text can join a cross-widget selection; null for the
+    /// vast majority of views, which carry no text. A virtual hook rather than
+    /// a `dynamic_cast` because a live drag re-walks the whole subtree per
+    /// pointer sample. See `pulp/view/selectable_text.hpp`.
+    virtual SelectableText* as_selectable_text() { return nullptr; }
+    const SelectableText* as_selectable_text() const {
+        return const_cast<View*>(this)->as_selectable_text();
+    }
+
+    /// Mark this view as a TEXT CONTENT region — prose the reader may select,
+    /// as opposed to controls they operate.
+    ///
+    /// Text-bearing widgets inside a region are selectable BY DEFAULT, with no
+    /// per-widget wiring; text outside every region behaves exactly as it
+    /// always has. That asymmetry is the whole point. In a plugin editor a drag
+    /// that starts on text is very often a control gesture — dragging a value
+    /// readout, a band label, a knob caption — so a globally selectable tree
+    /// would trade a missing feature for a regression in every existing UI.
+    /// One declaration around the content the author means, and nothing else
+    /// moves.
+    /// The nearest enclosing region is resolved by
+    /// `enclosing_text_selection_region()` in `pulp/view/selectable_text.hpp`
+    /// — a free function, because "which region owns this view" is a question
+    /// the selection subsystem asks, not state the View carries. Only the flag
+    /// lives here.
+    void set_text_selection_region(bool region) { text_selection_region_ = region; }
+    bool text_selection_region() const { return text_selection_region_; }
 
     /// CSS :disabled equivalent — blocks input, reduces opacity
     bool enabled() const { return enabled_; }
@@ -2709,6 +2738,7 @@ private:
     bool hovered_ = false;
     bool default_hover_feedback_ = false;
     bool hit_testable_ = true;
+    bool text_selection_region_ = false;
     HitSlop hit_slop_{};
     PointerEvents pointer_events_ = PointerEvents::auto_;
     bool backface_visible_ = true;

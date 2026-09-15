@@ -1015,6 +1015,10 @@ pulp_add_test_suite(pulp-test-text-editor-policy LIBRARIES pulp::view PROPERTIES
 # so the existing single-line surface stays pinned in isolation.
 pulp_add_test_suite(pulp-test-text-editor-multiline LIBRARIES pulp::view)
 
+# The SelectableText capability: painted-line geometry exposed by Label and
+# TextEditor, plus the shared hit-test / rect arithmetic over it.
+pulp_add_test_suite(pulp-test-selectable-text LIBRARIES pulp::view)
+
 # TextEditor input pipeline tests (headless — validates focus, typing, Enter, backspace)
 pulp_add_test_suite(pulp-test-text-input LIBRARIES pulp::view)
 

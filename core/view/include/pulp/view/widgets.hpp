@@ -7,6 +7,7 @@
 #include <pulp/view/custom_shader_host.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/hit_metrics.hpp>
+#include <pulp/view/selectable_text.hpp>
 #include <pulp/canvas/attributed_string.hpp>
 #include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/audio_bridge.hpp>
@@ -51,7 +52,7 @@ class TextEditor;   // pulp/view/text_editor.hpp — the Label's inline edit fie
 /// from the parent's *computed* (not specified) value.
 enum class LabelAlign { left, center, right, auto_, justify, match_parent };
 
-class Label : public View {
+class Label : public View, public SelectableText {
 public:
     Label() { set_access_role(AccessRole::label); }
     explicit Label(std::string text) : text_(std::move(text)) {
@@ -490,7 +491,84 @@ public:
     void on_mouse_down(Point pos) override;
     bool wants_mouse_input() const override { return edit_trigger_ != EditTrigger::none; }
 
+    // ── SelectableText ──────────────────────────────────────────────────
+    // A Label joins a document-level selection (pulp/view/selectable_text.hpp)
+    // using the line geometry its own paint already computes. The geometry is
+    // recorded during paint rather than re-derived, so the band a selection
+    // draws sits on the glyphs that were actually emitted — including after
+    // text-transform, soft wrap, line-clamp and ellipsis truncation, none of
+    // which a re-measurement from `text_` would reproduce.
+
+    SelectableText* as_selectable_text() override {
+        return is_selectable() ? this : nullptr;
+    }
+
+    /// Whether this Label takes part in text selection.
+    ///
+    /// `inherit` (the default) means "selectable exactly when an enclosing
+    /// `View::set_text_selection_region()` says this is content" — so an author
+    /// declares one region around their prose and every Label in it is
+    /// selectable, with no per-widget wiring. `never` opts one Label back out
+    /// inside a region (a live value readout in a prose panel is not prose);
+    /// `always` opts one in outside every region.
+    ///
+    /// Deliberately NOT globally on. A drag that starts on text in a plugin
+    /// editor is frequently a control gesture, and a tree-wide default would
+    /// break those everywhere to fix selection in one place.
+    enum class SelectionPolicy { inherit, always, never };
+    void set_selection_policy(SelectionPolicy policy) {
+        if (selection_policy_ == policy) return;
+        selection_policy_ = policy;
+        if (!is_selectable()) set_selection_highlight(0, 0);
+        request_repaint();
+    }
+    SelectionPolicy selection_policy() const { return selection_policy_; }
+
+    /// Resolved answer for this Label right now. Walks to the nearest
+    /// enclosing content region, so it changes when the Label is reparented
+    /// without anything having to notify it.
+    ///
+    /// The cursor deliberately does NOT change over selectable text. The text
+    /// is not editable, so an I-beam would promise an insertion point that
+    /// does not exist; a pointer that merely permits highlighting is the
+    /// honest affordance, and it keeps every region out of the cursor
+    /// hit-testing path.
+    bool is_selectable() const {
+        if (selection_policy_ == SelectionPolicy::always) return true;
+        if (selection_policy_ == SelectionPolicy::never) return false;
+        return enclosing_text_selection_region(*const_cast<Label*>(this)) != nullptr;
+    }
+
+    std::string_view selectable_text() const override { return text_; }
+    SelectableLayout selectable_layout() const override { return selection_layout_; }
+    void set_selection_highlight(int start_utf8, int end_utf8) override;
+    bool selection_highlight(int& start_utf8, int& end_utf8) const override;
+    View* selectable_view() override { return this; }
+
 private:
+    SelectionPolicy selection_policy_ = SelectionPolicy::inherit;
+    int selection_start_utf8_ = 0;
+    int selection_end_utf8_ = 0;
+    /// Line geometry captured by the last paint. `measured` stays false for
+    /// the paint paths this capability does not model (attributed runs and
+    /// rotated vertical text), so a caller can tell "not supported" from
+    /// "no text" — the distinction `PaintedTextExtents::measured` exists for.
+    mutable SelectableLayout selection_layout_;
+    mutable SelectableLayout selection_layout_pending_;
+
+    /// Record one painted line into `selection_layout_pending_` and, when the
+    /// live highlight touches it, fill its selection band. Called immediately
+    /// before the line's own `fill_text` so the band lands under the glyphs it
+    /// describes, in one paint pass.
+    ///
+    /// `line` is the text as PAINTED (post-transform); `source_start` is where
+    /// that line begins in `text_`. Returns the band this line is selected
+    /// over, or a zero-width rect when none of it is selected.
+    void paint_selection_line_(canvas::Canvas& canvas, const std::string& line,
+                               float x, float top, float line_height,
+                               int source_start, const canvas::Color& text_color,
+                               bool vertical);
+
     EditTrigger edit_trigger_ = EditTrigger::none;
     TextEditor* editor_ = nullptr;      ///< non-owning; the child vector owns it
     int click_count_ = 0;

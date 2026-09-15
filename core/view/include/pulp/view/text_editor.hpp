@@ -9,6 +9,7 @@
 #include <pulp/view/widget_metrics.hpp>
 #include <pulp/view/widget_painter.hpp>
 #include <pulp/view/caret.hpp>
+#include <pulp/view/selectable_text.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/platform/clipboard.hpp>
 #include <cstddef>
@@ -43,7 +44,9 @@ namespace pulp::view {
 /// editor->on_return = [&](const std::string& text) { apply_value(text); };
 /// editor->on_escape = [&] { revert(); };
 /// @endcode
-class TextEditor : public View, public AccessibilityTextInterface {
+class TextEditor : public View,
+                   public AccessibilityTextInterface,
+                   public SelectableText {
 public:
     TextEditor() {
         set_access_role(AccessRole::text_field);
@@ -54,6 +57,42 @@ public:
     ~TextEditor() override;
 
     bool accepts_text_input() const override { return enabled() && !read_only; }
+
+    // ── SelectableText ───────────────────────────────────────────────────
+    //
+    // Only a READ-ONLY editor joins a document-level selection. An editable
+    // field owns its own selection the way an HTML `<input>` does: a document
+    // selection that swallowed a live text field would fight the field's caret
+    // over the same range, and Cmd-C would then be ambiguous between the two.
+    // Read-only is exactly the case where the field is prose rather than a
+    // control, and it is already the mode `copy_to_clipboard()` supports —
+    // that gate is `has_selection()`, never `can_edit()`.
+    SelectableText* as_selectable_text() override {
+        return read_only ? this : nullptr;
+    }
+    std::string_view selectable_text() const override { return text_; }
+    SelectableLayout selectable_layout() const override;
+    void set_selection_highlight(int start_utf8, int end_utf8) override;
+    bool selection_highlight(int& start_utf8, int& end_utf8) const override;
+    View* selectable_view() override { return this; }
+
+    /// Multi-line aware hit-test: local point -> UTF-8 byte offset.
+    ///
+    /// Public because it is a meaningful intermediate on its own — "which
+    /// character is under this point" is what a selection, a context menu and
+    /// an accessibility hit-test all need, and re-deriving it outside the
+    /// editor is how two consumers end up disagreeing about where the pointer
+    /// is. `selectable_layout()` above exposes the geometry this reads; the
+    /// two must agree, and there is a test that walks the run asserting so.
+    ///
+    /// When `paint()` has populated a layout snapshot the y coordinate selects
+    /// the visual row and x picks the nearest cluster boundary in it. With no
+    /// snapshot it falls back to `char_index_at_x`, whose advance is ESTIMATED
+    /// (`font_size * 0.6` per character) rather than shaped — so a pre-paint
+    /// answer is approximate, and `selectable_layout()` deliberately reports
+    /// unmeasured in that state instead of publishing those numbers.
+    int char_index_at_point(float x, float y) const;
+    int char_index_at_x(float x) const;
 
     // ── AccessibilityTextInterface ───────────────────────────────────────
     //
@@ -517,12 +556,6 @@ private:
     void move_to_start(bool extend_selection);
     void move_to_end(bool extend_selection);
 
-    int char_index_at_x(float x) const;
-    /// Multi-line aware hit-test. When `paint()` has populated a layout
-    /// snapshot the y coordinate selects the visual row; the x coordinate
-    /// then picks the nearest character within that row's measured glyph
-    /// offsets. Falls back to `char_index_at_x` when no snapshot exists.
-    int char_index_at_point(float x, float y) const;
     std::pair<int, int> word_range_at_position(int position) const;
     std::pair<int, int> line_range_at_position(int position) const;
     void show_default_context_menu(Point local_pos);
