@@ -8148,10 +8148,8 @@
         "core/playback/src/track_audio_program_compiler.cpp",
         "core/playback/src/track_audio_program_compiler.hpp",
         "docs/guides/timeline-sdk.md",
-        "docs/status/agent-capability-surface.json",
         "docs/status/sequencer-exposure.json",
         "test/test_timeline_nesting_playback.cpp",
-        "tools/scripts/agent_capability_manifest.py",
         "tools/scripts/negative_capability_allowlist.json"
       ],
       "classification": "engine_internal",
@@ -8223,12 +8221,6 @@
             "Trimmed nested stretched media reads a window of the authored artifact",
             "Nested stretched media placed before its authored origin still windows the artifact",
             "Host-mapped nested stretched media reads the artifact window live"
-          ]
-        },
-        {
-          "path": "tools/scripts/agent_capability_manifest.py",
-          "needles": [
-            "SURFACE_INVENTORY_VERSION = 72"
           ]
         }
       ],
