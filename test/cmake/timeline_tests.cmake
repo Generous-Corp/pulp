@@ -310,6 +310,12 @@ pulp_add_test_suite(pulp-test-timeline-context-lane
 pulp_add_test_suite(pulp-test-timeline-dynamics-lane
     SOURCES test_timeline_dynamics_lane.cpp
     LIBRARIES pulp::timeline)
+# The clip-scoped controller/expression lane commands: insert, remove, and the
+# gated point edit, plus the authority split that lets a non-destructive writer
+# author and edit a stream without being able to abandon one.
+pulp_add_test_suite(pulp-test-timeline-midi-expression-commands
+    SOURCES test_timeline_midi_expression_commands.cpp
+    LIBRARIES pulp::timeline)
 # The groove a sequence plays with, carried on the same contract: the swing and
 # step-table transform, the document type and its migrations, and the read side
 # that resolves a groove only for a renderer that declared it.
@@ -667,5 +673,15 @@ include("${CMAKE_CURRENT_LIST_DIR}/sync_soak_engine.cmake")
 if(PULP_ENABLE_PROJECT_PACKAGE)
     include("${CMAKE_CURRENT_LIST_DIR}/project_package_tests.cmake")
 endif()
+# The timeline skill is the surface an agent reads before touching sequencer
+# work, and it is the one sequencer surface with no generator behind it. This
+# derives every `dev.pulp.sequencer/` operation from the frozen control registry
+# and fails when the skill omits one or records the wrong result kind, so a
+# live sequencer capability cannot ship agent-invisible.
+if(Python3_EXECUTABLE)
+    add_test(NAME sequencer-control-skill-coverage COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/sequencer_control_skill_check.py")
+endif()
+
 # Keep focused Timeline submodule registrations beneath this owner hub.
 include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")

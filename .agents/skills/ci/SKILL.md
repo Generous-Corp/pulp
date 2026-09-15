@@ -689,6 +689,79 @@ runner.environment == 'self-hosted'`. The second clause matters: when
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` is unset the leg falls back to hosted
 `macos-15`, which has no representative GPU and must not opt in.
 
+## A ctest SKIP is green, so a test that never ran reads as a passing one
+
+`SKIP_RETURN_CODE` is the right tool — a test needing a GPU, a device, an absent
+platform or a vendor SDK should skip rather than fail — but the required `macos`
+check reports the skip and the pass identically. A suite that has never executed
+once therefore looks exactly like a suite that executes and passes on every PR,
+and a real failure inside it is invisible for as long as the precondition is
+missing.
+
+`build.yml`'s non-Windows test step makes the non-runs readable without making
+them fail: `--output-junit` writes a report, and an `always()` observation step
+renders the `notrun` tests — name, skip reason, labels, and the skipping
+command's output — into the job summary, with the XML kept in the
+`ctest-logs-<key>` artifact on green runs too. Same shape as the GPU-adapter
+observation above: `continue-on-error: true`, records the answer, asserts
+nothing.
+
+Four things bite when touching this:
+
+- **The `--output-junit` path must be ABSOLUTE.** With `--test-dir`, ctest
+  resolves a relative report path against the *build dir*, so
+  `--output-junit "$PULP_BUILD_DIR/ctest.junit.xml"` lands at
+  `$PULP_BUILD_DIR/$PULP_BUILD_DIR/ctest.junit.xml`. Nothing errors, and the
+  upload step's `if-no-files-found: ignore` swallows the miss — the observation
+  silently observes nothing.
+- **The report's status vocabulary is `run` / `fail` / `notrun` / `disabled`.**
+  A failing test ran; only `notrun` and `disabled` are non-runs. Filtering on
+  `status != "run"` files every failure under "did not run".
+- **`ctest -N` is the control for the flag itself.** It is the registered
+  population; the report's `tests=` is the attempted one. Any gap is created by
+  `-LE` label exclusions, `--exclude-regex`, or configure-time absence, which
+  remove a test from the report entirely — a strictly larger blind spot that a
+  JUnit report cannot see. No `<testcase>` entries at all means the flag did not
+  take.
+- **Never turn exit 77 into a failure to make a skip visible.** That is what
+  `tools/scripts/test_ios_gate_skip_contract.py` exists to prevent, after doing
+  it in the Build step took the iOS gate out. Visibility and enforcement are
+  separate changes; make the skip readable first, and promote only against a
+  measured population.
+
+### Provisioning a skipped dependency is a SEPARATE decision from reporting it
+
+Making a skip visible is safe. Removing the skip is not, and the two must not
+ride in one change — the second can redden the required gate for the whole
+fleet while the first reddens nothing.
+
+`pulp-rust-gpu-trace-analysis-integration` is the worked example. It is the only
+registration that runs the GPU trace-analysis acceptance tests, and it skips
+whenever the pinned `trace_processor_shell` is absent, which is always: nothing
+in `.github/**` or `.shipyard/**` installs it (0 files mention
+`PULP_TRACE_PROCESSOR`, `trace fetch`, or `trace_processor_shell`, against a
+control of 79 workflow files matching `runs-on`).
+
+One measured run with a `pulp trace fetch` step added established the facts,
+and they are worth keeping even though the step was withdrawn:
+
+- **The Studios can reach the download.** `pulp trace fetch` returned success on
+  `studio-pulp-gate-01`. Network access was never the blocker.
+- **29 acceptance tests execute once provisioned; 28 pass.**
+- **One fails**: `untagged_tooling_failure_cannot_hide_behind_a_tagged_healthy_probe`,
+  and it fails on `main` independently of any branch. So provisioning the
+  dependency turns the required `macos` gate red for every PR until that test's
+  probe semantics are settled.
+
+Hence: land the reporting, hold the provisioning until the failure it exposes
+has an owner. A skip that is *reported* costs nothing; a skip that is *removed*
+spends the fleet's merge capacity on somebody else's open question.
+
+Note when reasoning about persistence: the required macOS gate is an
+**ephemeral** lane (`tools/scripts/runner_topology.json` lanes[0]), a Tart clone
+destroyed after one job, so nothing a job writes to `$HOME` — a fetched
+`~/.pulp/tools/...` included — survives into the next run.
+
 ## An opt-in CMake flag hides tests more completely than any label
 
 A `LABELS "slow"` exclusion at least leaves the test visible in a ctest listing.
@@ -2064,6 +2137,22 @@ bisectable.
   `Skill-Update: skip skill=ci reason="ceiling bump only"` trailer on the **tip**
   commit (note: a later `chore: bump versions` commit from `shipyard pr` displaces
   the tip, so updating this SKILL is the more robust path).
+- **`CLAUDE.md` is a tracked hotspot, and it is the one nobody expects.** Every
+  other entry is source; this one is prose an agent edits casually. It is
+  always-resident context, so a line added there is re-read by every session on
+  every turn, and the file already sits far past the client's context budget —
+  which is why the ceiling exists. Adding prose to it now fails the required
+  `Enforce version & skill sync` check with `grows a frozen hotspot <n> -> <m>`.
+  That is the gate working: either make the edit net-neutral by removing as much
+  as you add, or declare the growth with a
+  `Hotspot-Grow: CLAUDE.md reason="..."` trailer on any commit in the range. The
+  skills table and the tools digest inside it are GENERATED blocks — regenerate
+  them with their `--write` commands rather than hand-editing, or the next
+  `--check` reverts your edit anyway. Note the consequence: **adding a skill or a
+  registered tool grows the generated block by a row**, so that change needs the
+  `Hotspot-Grow: CLAUDE.md` trailer too. That is the intended price — a new row
+  is read by every session forever — not a gate misfiring.
+
 - **Inspector hotspots are frozen too.** `hotspot_size_guard.json` watches newly
   added `inspect/**` files and freezes the current inspector overlay, window,
   domain handler, and tweak-store hotspots. When an inspector extraction shrinks
@@ -5867,6 +5956,27 @@ trails the C++ surface because the Python bindings ship one milestone behind
 on PyPI; the C++ raster harness is the source of truth for goldens. The
 workflow runs that Linux container and also runs the same pytest smoke on
 macOS arm64 so the future canonical raster lane has a platform signal.
+
+**Neither smoke job builds C++.** `linux-docker` and `macos-local` are pytest
+lanes; only `layout-snapshots` builds `pulp-test-visual`, and it is macOS-only.
+So a golden that must be verified on BOTH hosts cannot be produced by
+`pulp::view::render_to_png`: that call resolves to CoreGraphics on Apple and to
+Skia elsewhere, and the Linux lane has no Pulp build to call it with. The one
+rasterizer that executes on both is the pinned `skia-python` wheel, which is
+what `tools/harness/visual/raster.py` uses for fixtures declaring
+`"driver": "declarative_raster"`. Adding a C++ raster to the Linux lane means
+building Pulp plus Skia inside the container; budget for that before proposing
+it.
+
+**The cross-host byte-identity claim is measured, not assumed.** Both smoke jobs
+run `tools/harness/visual/tests/test_raster_golden.py` as a named step (not just
+as part of the directory sweep) and both publish the digest they computed via
+`python -m tools.harness.visual.raster --fixture ...` with `if: always()`. The
+committed golden was recorded on `darwin-arm64` and confirmed on
+`darwin-x86_64`; the operating-system axis was unproven when it landed. A Linux
+mismatch there is a real result, not a flake: record the Linux digest as a
+per-platform expectation rather than regenerating the shared golden from
+whichever host is currently red.
 
 **Pin-drift guards (manifest is source of truth).** The Skia/V8 pin data is
 hand-mirrored into several files; two mirrors are *tooling-consumed*, so a

@@ -67,6 +67,7 @@ InspectorMessage DomainHandler::handle(const InspectorMessage& req) {
     if (domain == "Runtime")     return handle_runtime(req);
     if (domain == "Audio")       return handle_audio(req);
     if (domain == "Capture")     return handle_capture(req);
+    if (domain == "Render")      return handle_render(req);
     if (domain == "Motion")      return handle_motion(req);
     if (domain == "Trace")       return handle_trace(req);
     if (domain == "LiveConstant") return handle_live_constant(req);

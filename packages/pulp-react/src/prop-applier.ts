@@ -497,6 +497,22 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (type === 'Spectrum') return call('setSpectrumData', id, value as number[] | Float32Array);
             if (type === 'Waveform') return call('setWaveformData', id, value as number[] | Float32Array);
             return;
+        // A ScrollView's offset. Wheel, trackpad and scrollbar drag are
+        // handled natively and never come through here; this exists for
+        // PROGRAMMATIC scrolling -- keyboard paging over a long document,
+        // scroll-into-view, restoring a saved position. Without it a scripted
+        // UI could create a ScrollView and size its content but not move it,
+        // so any surface wanting keyboard scrolling had to hand-roll scrolling
+        // in React, re-rendering the subtree on every input sample.
+        //
+        // Named for the DOM property it mirrors, so `scrollTop` on a
+        // ScrollView means what a web author expects.
+        case 'scrollTop':
+            if (type === 'ScrollView') return call('scrollTo', id, 0, Number(value));
+            return;
+        case 'scrollLeft':
+            if (type === 'ScrollView') return call('scrollTo', id, Number(value), 0);
+            return;
         case 'level':    return call('setMeterLevel', id, value as number);
         case 'value':
             // Type-aware routing: the bridge has separate setters per

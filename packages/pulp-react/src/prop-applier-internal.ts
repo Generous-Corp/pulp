@@ -13,9 +13,29 @@
 type AnyFn = (...args: unknown[]) => unknown;
 const g = globalThis as unknown as Record<string, AnyFn | undefined>;
 let _pa_count = 0;
+// THE SILENT RETURN BELOW IS DELIBERATE, AND IT IS A FOOTGUN. Read this
+// before adding a prop that routes through it.
+//
+// Effectful bridge groups are capability-scoped during hot reload, so an
+// ungranted group's symbols are genuinely ABSENT rather than installed and
+// guarded -- the generated globals type them `| undefined` for that reason.
+// Skipping those is correct.
+//
+// The hazard is that this helper cannot tell an intentionally-ungranted verb
+// from one that is simply MISSING because the host predates it. `call2` in
+// host-config.ts THROWS in the same situation, so element creation fails loudly
+// against an older host while prop application degrades in total silence: the
+// prop applies, no error is raised anywhere, and the feature is dead. A
+// keyboard-scroll prop forwarded to a host without the scroll verbs would look
+// wired, pass inspection, and do nothing.
+//
+// So: if a verb is NOT capability-gated and its absence means a broken feature
+// rather than a withheld one, route it through `callRequired` instead, or
+// feature-detect at mount and disable the affordance visibly. Do not rely on
+// this helper to tell you.
 export function call(name: string, ...args: unknown[]): void {
     const fn = g[name];
-    if (typeof fn !== 'function') return; // optional bridge fns are fine to skip
+    if (typeof fn !== 'function') return; // capability-gated verbs: see above
     _pa_count++;
     if (_pa_count <= 100) {
         const lg = (g as Record<string, AnyFn | undefined>).__spectrLog;
@@ -27,6 +47,21 @@ export function call(name: string, ...args: unknown[]): void {
         }
     }
     fn(...args);
+}
+
+/// Forward to a bridge verb whose absence is a BUG, not a withheld capability.
+///
+/// Throws rather than returning silently, matching `call2` on the element
+/// creation path. Use it for verbs that are always registered when the host is
+/// new enough, so a version skew surfaces as an error instead of a feature that
+/// quietly does nothing. Do NOT use it for capability-gated groups.
+export function callRequired(name: string, ...args: unknown[]): void {
+    const fn = g[name];
+    if (typeof fn !== 'function') {
+        throw new Error('@pulp/react: bridge function ' + name
+                        + ' is not installed; the host is too old for this prop');
+    }
+    call(name, ...args);
 }
 
 // Resolve `var(--name [, fallback])` references in string-valued style

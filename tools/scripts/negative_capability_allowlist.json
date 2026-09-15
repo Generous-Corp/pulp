@@ -2,13 +2,6 @@
   "$comment": "Refusals the playback compiler raises against constructs a user can author. An entry records who owns the refusal and why it stands; it is not a claim that the refusal is correct. status=live-defect means the document is authorable today and unplayable, and the refusal is a placeholder for work that has not happened; status=intended means the refusal is the answer. Enforced by tools/scripts/negative_capability_check.py.",
   "refusals": [
     {
-      "code": "TrimmedRegisteredContentUnsupported",
-      "file": "core/playback/src/sequence_content_lowerer.cpp",
-      "owner": "playback",
-      "status": "live-defect",
-      "reason": "A nested RegisteredContent leaf refuses when SequenceRef trimming changes its source window, because the trusted compile input carries only the flattened duration and owner context position, not the authored source offset and original duration needed to preserve pattern phase; the refusal stands until source-window provenance is part of the renderer contract."
-    },
-    {
       "code": "NestedDeviceChainUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",

@@ -167,6 +167,15 @@ std::string dynamics_command(std::string_view expected, std::string_view replace
            R"(,"sequence_id":"2"},"type_name":"pulp.timeline.command.set_dynamics_lane","version":1}])";
 }
 
+std::string midi_clip_project_json() {
+    auto content = take(MidiContent::create({{{6}, {0}, {96}, 0xffff, 60, 0}}));
+    auto clip = take(Clip::create({4}, {0}, {960}, std::move(content)));
+    auto track = take(Track::create({3}, "track", {clip}));
+    auto sequence = take(Sequence::create({2}, "root", timebase::TickDuration{960}, {track}));
+    auto project = take(Project::create(ProjectInput{{1}, "midi", 20, {2}, {}, {sequence}}));
+    return project_to_json(project);
+}
+
 std::string project_from_result(const std::string& json) {
     auto parsed = take(parse_json(json));
     const auto* project = parsed->root().find("project");
@@ -272,6 +281,49 @@ TEST_CASE("timeline agent authors a dynamics lane and hands back a document that
         tools::timeline::ProjectSource::inline_json(authored_project),
         dynamics_command("[]", quiet), tools::timeline::editor_writer_profile());
     REQUIRE_FALSE(stale);
+}
+
+TEST_CASE("timeline agent authors an expression lane and hands back a document that carries it") {
+    const auto json = midi_clip_project_json();
+    // command_apply serializes the project it produced, so a lane the encoder
+    // dropped would read as a successful edit that changed nothing. The
+    // assertion is on the returned document rather than on the exit code.
+    const auto insert =
+        R"([{"data":{"clip_id":"4","lane":{"bank":0,"channel":0,"group":0,"id":"20","index":74,)"
+        R"("points":[{"id":"21","position_ticks":"0","value":0}],"status":11},)"
+        R"("sequence_id":"2","track_id":"3"},)"
+        R"("type_name":"pulp.timeline.command.insert_midi_expression_lane","version":1}])";
+    const auto authored = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(json), insert,
+        tools::timeline::editor_writer_profile());
+    REQUIRE(authored);
+    const auto authored_project = project_from_result(authored.json);
+    REQUIRE(authored_project.find(R"("id":"20","index":74)") != std::string::npos);
+    // The returned document is a document, not just a response: it reopens and
+    // validates, which is what makes the edit reachable by the next call.
+    REQUIRE(tools::timeline::validate(authored_project));
+    REQUIRE(project_from_result(tools::timeline::project_open(authored_project).json) ==
+            authored_project);
+
+    // A point edit whose expectation is exactly what the insert wrote, so the
+    // gate is exercised across two separate calls rather than inside one.
+    const auto edit =
+        R"([{"data":{"clip_id":"4","expected":[{"id":"21","position_ticks":"0","value":0}],)"
+        R"("lane_id":"20","replacement":[{"id":"21","position_ticks":"0","value":8192}],)"
+        R"("sequence_id":"2","track_id":"3"},)"
+        R"("type_name":"pulp.timeline.command.set_midi_expression_lane_points","version":1}])";
+    const auto edited = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(authored_project), edit,
+        tools::timeline::editor_writer_profile());
+    REQUIRE(edited);
+    REQUIRE(project_from_result(edited.json).find(R"("value":8192)") != std::string::npos);
+
+    // Replaying the insert against the document it already changed is refused
+    // by the identity rules rather than applied a second time.
+    const auto replayed = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(authored_project), insert,
+        tools::timeline::editor_writer_profile());
+    REQUIRE_FALSE(replayed);
 }
 
 TEST_CASE("timeline agent accepts explicit inline and file project sources") {
