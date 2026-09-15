@@ -1,0 +1,396 @@
+{
+  "schema_version": 1,
+  "_comment": "Frozen backlog for check_skip_not_pass.py. Every entry reports an unmet precondition with SUCCEED()/WARN()/a bare return, which leaves the Catch2 case PASSING -- so the suite's pass count is identical whether the lane ran or the precondition vanished. They are frozen rather than repaired because each remaining shape needs a judgement a sweep cannot make: teardown that SKIP()'s throw would bypass, a SECTION whose siblings did run, an `else` arm inside a case that keeps asserting, or a case that asserted and then added a note. The mechanical shape -- a top-of-case guard whose next statement is `return;` -- is already converted and is NOT listed here. Same idiom as ctest_label_exclusion_guard.json and hotspot_size_guard.json: the value is that the population stops growing from the day it lands. `sites` is a ceiling that may shrink and never grow, and a count that has dropped is an ERROR -- lower it in the same change, or delete the entry at zero. A ledger of dead exemptions is the same silent rot this guard exists to catch.",
+  "allow": [
+    {
+      "file": "examples/moonbase-activation/test_moonbase_activation.cpp",
+      "sites": 1,
+      "reason": "An example suite, built only under PULP_BUILD_EXAMPLES=ON and reported by the advisory example-validation lane, which the required gate excludes. Same defect, but converting it changes a lane this PR does not otherwise touch."
+    },
+    {
+      "file": "examples/spectral-lab/test_spectral_lab.cpp",
+      "sites": 3,
+      "reason": "An example suite, built only under PULP_BUILD_EXAMPLES=ON and reported by the advisory example-validation lane, which the required gate excludes. Same defect, but converting it changes a lane this PR does not otherwise touch."
+    },
+    {
+      "file": "examples/spectral-lab/test_spectral_lab_processor.cpp",
+      "sites": 3,
+      "reason": "An example suite, built only under PULP_BUILD_EXAMPLES=ON and reported by the advisory example-validation lane, which the required gate excludes. Same defect, but converting it changes a lane this PR does not otherwise touch."
+    },
+    {
+      "file": "examples/super-convolver/test_super_convolver.cpp",
+      "sites": 8,
+      "reason": "An example suite, built only under PULP_BUILD_EXAMPLES=ON and reported by the advisory example-validation lane, which the required gate excludes. Same defect, but converting it changes a lane this PR does not otherwise touch."
+    },
+    {
+      "file": "forge-seam/test/test_chrome_no_leak.cpp",
+      "sites": 11,
+      "reason": "Tracked source with no CMake registration anywhere in this repo, so the lint reaches it while no build and no lane does. Converting source nothing compiles would be an unverifiable edit; it lands with whatever wires the seam up."
+    },
+    {
+      "file": "test/integration/real_plugin_runner.cpp",
+      "sites": 1,
+      "reason": "A Catch2 suite outside test/ that the widened scan now reaches for the first time. Registered and running, but the report is a WARN carrying a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/integration/test_real_plugin_fixture.cpp",
+      "sites": 2,
+      "reason": "A Catch2 suite outside test/ that the widened scan now reaches for the first time. Registered and running, but the report is a WARN carrying a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/support/control_runtime_closure_sanitizer.hpp",
+      "sites": 1,
+      "reason": "A bool-returning helper. SKIP() throws, so `return true` and the caller's `if (helper()) return;` both become dead -- the fix is a signature change, not a swap."
+    },
+    {
+      "file": "test/test_accessibility_tree.cpp",
+      "sites": 2,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_alsa_input.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_au_v2_cocoa_ui.mm",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_authoring_capsule_hostile.cpp",
+      "sites": 1,
+      "reason": "Inside a SECTION. Catch2 reports the whole case skipped when any leaf section skips, so converting would hide the sibling sections that ran."
+    },
+    {
+      "file": "test/test_bidi_text.cpp",
+      "sites": 5,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_browser_capture_svg_render.cpp",
+      "sites": 4,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_canvas_emoji.cpp",
+      "sites": 2,
+      "reason": "An `else`/`#else` arm inside a case that keeps asserting afterwards. SKIP() marks the WHOLE case non-run, which would hide the assertions that do run -- trading one blindness for another."
+    },
+    {
+      "file": "test/test_canvas_svg.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_child_process_standard_input.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_clap_midi_events.cpp",
+      "sites": 1,
+      "reason": "An `else`/`#else` arm inside a case that keeps asserting afterwards. SKIP() marks the WHOLE case non-run, which would hide the assertions that do run -- trading one blindness for another."
+    },
+    {
+      "file": "test/test_cli_import_figma_url.cpp",
+      "sites": 1,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_cli_shell_quote.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_cli_shellout.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_cli_shellout_lifecycle.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_cli_ship_shellout.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_cli_tartci_lease.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_cli_validator_discovery.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_control_broker_daemon.cpp",
+      "sites": 8,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_control_client_connection.cpp",
+      "sites": 7,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_control_endpoint.cpp",
+      "sites": 7,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_control_health.cpp",
+      "sites": 3,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_control_phase15_aggregate_e2e.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_control_trusted_host_e2e.cpp",
+      "sites": 2,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_control_trusted_host_inventory.cpp",
+      "sites": 1,
+      "reason": "Owned by the pending `product-a-sequencer-state-control` row, so touching it requires that row to change materially. Converting one guard is not a reason to move an in-flight delivery's exposure ledger; it lands with that row."
+    },
+    {
+      "file": "test/test_coreaudio_input_only.mm",
+      "sites": 3,
+      "reason": "Inside a SECTION. Catch2 reports the whole case skipped when any leaf section skips, so converting would hide the sibling sections that ran."
+    },
+    {
+      "file": "test/test_dbus.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_design_swift_codegen.cpp",
+      "sites": 1,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_font_aa_hinting.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_font_color_mode.cpp",
+      "sites": 8,
+      "reason": "An `else`/`#else` arm inside a case that keeps asserting afterwards. SKIP() marks the WHOLE case non-run, which would hide the assertions that do run -- trading one blindness for another."
+    },
+    {
+      "file": "test/test_font_flight_recorder.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_font_rendering_goldens.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_font_security.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_foreign_framework_coexistence.mm",
+      "sites": 2,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_graph_runtime_worker_pool.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_host.cpp",
+      "sites": 3,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_image_decode.cpp",
+      "sites": 1,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_import_design_tool.cpp",
+      "sites": 1,
+      "reason": "Inside a SECTION. Catch2 reports the whole case skipped when any leaf section skips, so converting would hide the sibling sections that ran."
+    },
+    {
+      "file": "test/test_isolated_scanner.cpp",
+      "sites": 1,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_jack_device.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_js_engine.cpp",
+      "sites": 7,
+      "reason": "Informational or intentionally-unsupported contract, not an unmet precondition -- the vocabulary classifier's residual false-positive set."
+    },
+    {
+      "file": "test/test_lv2_host_discovery.cpp",
+      "sites": 2,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_mac_perform_key_equivalent.mm",
+      "sites": 4,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_parity.cpp",
+      "sites": 1,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_plugin_editor_host_smoke_mac.mm",
+      "sites": 9,
+      "reason": "The report sits above teardown that must run before the case leaves (destroy/deinit/close). SKIP() throws, so a mechanical swap would bypass that teardown and leak a plugin instance or a window. Needs RAII first."
+    },
+    {
+      "file": "test/test_plugin_frame_renderer.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_plugin_slot_au.mm",
+      "sites": 2,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_plugin_view_host_design_viewport.mm",
+      "sites": 1,
+      "reason": "The report sits above teardown that must run before the case leaves (destroy/deinit/close). SKIP() throws, so a mechanical swap would bypass that teardown and leak a plugin instance or a window. Needs RAII first."
+    },
+    {
+      "file": "test/test_plugin_view_host_factory.cpp",
+      "sites": 2,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_plugin_view_host_hover_macos.mm",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_plugin_view_host_key_focus.mm",
+      "sites": 1,
+      "reason": "The report sits above teardown that must run before the case leaves (destroy/deinit/close). SKIP() throws, so a mechanical swap would bypass that teardown and leak a plugin instance or a window. Needs RAII first."
+    },
+    {
+      "file": "test/test_plugin_view_host_text_input.mm",
+      "sites": 2,
+      "reason": "The report sits above teardown that must run before the case leaves (destroy/deinit/close). SKIP() throws, so a mechanical swap would bypass that teardown and leak a plugin instance or a window. Needs RAII first."
+    },
+    {
+      "file": "test/test_retained_layer_store.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_runtime_utils.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_scoped_flush_denormals.cpp",
+      "sites": 1,
+      "reason": "An `else`/`#else` arm inside a case that keeps asserting afterwards. SKIP() marks the WHOLE case non-run, which would hide the assertions that do run -- trading one blindness for another."
+    },
+    {
+      "file": "test/test_screenshot.cpp",
+      "sites": 4,
+      "reason": "Informational or intentionally-unsupported contract, not an unmet precondition -- the vocabulary classifier's residual false-positive set."
+    },
+    {
+      "file": "test/test_scripted_ui.cpp",
+      "sites": 1,
+      "reason": "An `else`/`#else` arm inside a case that keeps asserting afterwards. SKIP() marks the WHOLE case non-run, which would hide the assertions that do run -- trading one blindness for another."
+    },
+    {
+      "file": "test/test_standalone_audio_inspector.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_super_convolver_dsp.cpp",
+      "sites": 5,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_system_volume.cpp",
+      "sites": 4,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_text_accessibility_linux.cpp",
+      "sites": 1,
+      "reason": "The case runs real assertions and then reports a trailing note. It verified something; SKIP() would report it as non-run."
+    },
+    {
+      "file": "test/test_text_accessibility_windows.cpp",
+      "sites": 1,
+      "reason": "The case runs real assertions and then reports a trailing note. It verified something; SKIP() would report it as non-run."
+    },
+    {
+      "file": "test/test_text_editor_policy.cpp",
+      "sites": 1,
+      "reason": "An `else`/`#else` arm inside a case that keeps asserting afterwards. SKIP() marks the WHOLE case non-run, which would hide the assertions that do run -- trading one blindness for another."
+    },
+    {
+      "file": "test/test_timeline_graph_automation_delivery.cpp",
+      "sites": 2,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/test_wasapi_input.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_widget_bridge.cpp",
+      "sites": 2,
+      "reason": "An `else`/`#else` arm inside a case that keeps asserting afterwards. SKIP() marks the WHOLE case non-run, which would hide the assertions that do run -- trading one blindness for another."
+    },
+    {
+      "file": "test/test_workgroup.cpp",
+      "sites": 1,
+      "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
+    },
+    {
+      "file": "test/test_yoga_layout_bench.cpp",
+      "sites": 1,
+      "reason": "WARN() on an unmet precondition. Same defect as SUCCEED, but several of these carry a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/web-compat/test_computed_style_paint.cpp",
+      "sites": 2,
+      "reason": "A Catch2 suite outside test/ that the widened scan now reaches for the first time. Registered and running, but the report is a WARN carrying a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "test/web-compat/test_native_css_probe.cpp",
+      "sites": 1,
+      "reason": "A Catch2 suite outside test/ that the widened scan now reaches for the first time. Registered and running, but the report is a WARN carrying a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    },
+    {
+      "file": "tools/scan-worker/test_scan_worker.cpp",
+      "sites": 2,
+      "reason": "A Catch2 suite outside test/ that the widened scan now reaches for the first time. Registered and running, but the report is a WARN carrying a formatted diagnostic that SKIP()'s single message argument does not reproduce."
+    }
+  ]
+}

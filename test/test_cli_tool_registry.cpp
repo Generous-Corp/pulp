@@ -423,8 +423,7 @@ TEST_CASE("shipped registry registers audio-quality-lab as an in-tree python too
     // (which would break `pulp tool install audio-quality-lab`) fails a test.
     auto reg_path = find_tool_registry_path();
     if (reg_path.empty() || !fs::exists(reg_path)) {
-        SUCCEED("tool-registry.json not locatable in this build layout");
-        return;
+        SKIP("tool-registry.json not locatable in this build layout");
     }
     auto loaded = load_tool_registry(reg_path);
     REQUIRE(loaded.error.empty());

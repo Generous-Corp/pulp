@@ -50,7 +50,7 @@ bool contains(const std::string& haystack, const std::string& needle) {
 
 TEST_CASE("pulp fmt requires a project .clang-format",
           "[cli][shellout][fmt]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto project = write_fmt_project_fixture("pulp-fmt-missing-config", false);
     auto r = run_pulp_in_directory(project, {"fmt"});
@@ -62,7 +62,7 @@ TEST_CASE("pulp fmt requires a project .clang-format",
 
 TEST_CASE("pulp fmt reports an empty project without invoking clang-format",
           "[cli][shellout][fmt]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto project = write_fmt_project_fixture("pulp-fmt-empty");
     auto r = run_pulp_in_directory(project, {"fmt"});
@@ -74,7 +74,7 @@ TEST_CASE("pulp fmt reports an empty project without invoking clang-format",
 
 TEST_CASE("pulp fmt --check invokes clang-format in dry-run mode",
           "[cli][shellout][fmt]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto project = write_fmt_project_fixture("pulp-fmt-check");
     write_text(project / "core" / "demo.cpp", "int main(){return 0;}\n");
@@ -104,7 +104,7 @@ TEST_CASE("pulp fmt --check invokes clang-format in dry-run mode",
 
 TEST_CASE("pulp fmt rewrites explicit source paths with clang-format -i",
           "[cli][shellout][fmt]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto project = write_fmt_project_fixture("pulp-fmt-rewrite");
     write_text(project / "core" / "demo.cpp", "int main(){return 0;}\n");
@@ -134,7 +134,7 @@ TEST_CASE("pulp fmt rewrites explicit source paths with clang-format -i",
 
 TEST_CASE("pulp fmt --check propagates clang-format failures",
           "[cli][shellout][fmt]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto project = write_fmt_project_fixture("pulp-fmt-check-fails");
     write_text(project / "core" / "demo.cpp", "int main(){return 0;}\n");

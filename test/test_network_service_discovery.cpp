@@ -594,8 +594,7 @@ TEST_CASE("NSD loss matching ignores services with the same type but different n
 TEST_CASE("MountedVolumeListChangeDetector returns a sorted platform snapshot",
           "[events][volume][lifecycle]") {
 #ifdef _WIN32
-    SUCCEED("Windows drive probing can throw on unavailable runner drives; covered on POSIX.");
-    return;
+    SKIP("Windows drive probing can throw on unavailable runner drives; covered on POSIX.");
 #endif
 
     auto volumes = MountedVolumeListChangeDetector::get_mounted_volumes();
@@ -616,8 +615,7 @@ TEST_CASE("MountedVolumeListChangeDetector stop before start is idempotent",
 TEST_CASE("MountedVolumeListChangeDetector start and stop are idempotent",
           "[events][volume][lifecycle]") {
 #ifdef _WIN32
-    SUCCEED("Windows drive probing can throw on unavailable runner drives; covered on POSIX.");
-    return;
+    SKIP("Windows drive probing can throw on unavailable runner drives; covered on POSIX.");
 #endif
 
     MountedVolumeListChangeDetector detector;
@@ -643,8 +641,7 @@ TEST_CASE("MountedVolumeListChangeDetector start and stop are idempotent",
 TEST_CASE("MountedVolumeListChangeDetector stop wakes a long poll promptly",
           "[events][volume][lifecycle]") {
 #ifdef _WIN32
-    SUCCEED("Windows drive probing can throw on unavailable runner drives; covered on POSIX.");
-    return;
+    SKIP("Windows drive probing can throw on unavailable runner drives; covered on POSIX.");
 #endif
 
     MountedVolumeListChangeDetector detector;
@@ -912,9 +909,8 @@ TEST_CASE("Avahi backend factory returns nullptr or working backend",
     // the dispatcher must accept install_backend cleanly.
     auto backend = pulp::events::make_avahi_backend();
     if (!backend) {
-        SUCCEED("libavahi-client.so.3 not present on this host; "
-                "make_avahi_backend honestly returned nullptr.");
-        return;
+        SKIP("libavahi-client.so.3 not present on this host; "
+             "make_avahi_backend honestly returned nullptr.");
     }
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::move(backend));
@@ -930,9 +926,8 @@ TEST_CASE("Windows Bonjour factory returns nullptr or working backend",
           "[events][service-discovery][bonjour][platform]") {
     auto backend = pulp::events::make_windows_bonjour_backend();
     if (!backend) {
-        SUCCEED("dnssd.dll not present on this host; "
-                "make_windows_bonjour_backend honestly returned nullptr.");
-        return;
+        SKIP("dnssd.dll not present on this host; "
+             "make_windows_bonjour_backend honestly returned nullptr.");
     }
     NetworkServiceDiscovery nsd;
     nsd.install_backend(std::move(backend));
@@ -951,8 +946,7 @@ TEST_CASE("Windows Bonjour factory returns nullptr or working backend",
 TEST_CASE("Bonjour backend round-trips publish → browse on macOS",
           "[events][service-discovery][bonjour][smoke][.][!mayfail]") {
     if (const char* skip = std::getenv("PULP_SKIP_BONJOUR_SMOKE"); skip && *skip) {
-        SUCCEED("PULP_SKIP_BONJOUR_SMOKE set; skipping Bonjour smoke.");
-        return;
+        SKIP("PULP_SKIP_BONJOUR_SMOKE set; skipping Bonjour smoke.");
     }
 
     const std::string unique_name =

@@ -65,8 +65,7 @@ constexpr Sample kSamples[] = {
 TEST_CASE("font measurement-paint width parity within 0.5px",
           "[font][parity][metrics]") {
 #ifndef PULP_HAS_SKIA
-    SUCCEED("Skia not compiled — parity harness needs SkFont::measureText");
-    return;
+    SKIP("Skia not compiled — parity harness needs SkFont::measureText");
 #else
     auto& shaper = pulp::canvas::global_text_shaper();
     sk_sp<SkFontMgr> mgr = pulp::canvas::platform_font_manager();

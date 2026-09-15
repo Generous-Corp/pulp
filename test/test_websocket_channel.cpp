@@ -145,8 +145,7 @@ TEST_CASE("WebSocketChannel echo round-trip on loopback", "[websocket]") {
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 46401);
     if (!port) {
-        SUCCEED("could not bind loopback; skipping");
-        return;
+        SKIP("could not bind loopback; skipping");
     }
 
     std::atomic<bool> server_ready{false};
@@ -216,8 +215,7 @@ TEST_CASE("WebSocketChannel rejects handshake without upgrade header", "[websock
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 46801);
     if (!port) {
-        SUCCEED("could not bind loopback; skipping");
-        return;
+        SKIP("could not bind loopback; skipping");
     }
 
     std::atomic<bool> ready{false};
@@ -285,7 +283,7 @@ TEST_CASE("WebSocketChannel connect fails gracefully on non-WS peer",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47001);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::thread server_thread([&] {
@@ -314,7 +312,7 @@ TEST_CASE("WebSocketChannel rejects incorrect accept key",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47301);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::atomic<bool> saw_key{false};
@@ -352,7 +350,7 @@ TEST_CASE("WebSocketChannel close flips is_open to false",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47101);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::unique_ptr<WebSocketChannel> server_ws;
@@ -394,7 +392,7 @@ TEST_CASE("WebSocketChannel echoes a >126-byte message (16-bit payload length)",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47201);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::unique_ptr<WebSocketChannel> server_ws;
@@ -447,7 +445,7 @@ TEST_CASE("WebSocketChannel delivers binary send as binary message",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47401);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::atomic<bool> server_accept_done{false};
@@ -500,7 +498,7 @@ TEST_CASE("WebSocketChannel assembles fragmented text frames",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47701);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::atomic<bool> server_accept_done{false};
@@ -563,7 +561,7 @@ TEST_CASE("WebSocketChannel reports unknown frame opcodes",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47801);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::atomic<bool> server_accept_done{false};
@@ -625,7 +623,7 @@ TEST_CASE("WebSocketChannel bounds total reassembled message size",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47851);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::atomic<bool> server_accept_done{false};
@@ -696,7 +694,7 @@ TEST_CASE("WebSocketChannel replies to ping frames with pong",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47901);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::atomic<bool> server_accept_done{false};
@@ -745,7 +743,7 @@ TEST_CASE("WebSocketChannel echoes close frames and closes",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 48001);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::atomic<bool> server_accept_done{false};
@@ -800,7 +798,7 @@ TEST_CASE("WebSocketChannel receives 64-bit payload length frames",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47501);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::atomic<bool> server_accept_done{false};
@@ -861,7 +859,7 @@ TEST_CASE("WebSocketChannel rejects frames above max_payload",
     Socket listener;
     REQUIRE(listener.create(SocketType::TCP));
     auto port = bind_loopback(listener, 47601);
-    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+    if (!port) { SKIP("could not bind loopback; skipping"); }
 
     std::atomic<bool> ready{false};
     std::atomic<bool> server_accept_done{false};

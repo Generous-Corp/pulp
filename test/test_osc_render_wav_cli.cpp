@@ -56,8 +56,7 @@ pulp::platform::ProcessResult run_tool(const std::vector<std::string>& args) {
 TEST_CASE("osc-render-wav writes a non-empty WAV for every --engine",
           "[cli][osc-render-wav]") {
     if (tool_binary().empty()) {
-        SUCCEED("pulp-osc-render-wav not built");
-        return;
+        SKIP("pulp-osc-render-wav not built");
     }
 
     for (const std::string& engine : {"vco", "dco", "wt"}) {
@@ -78,8 +77,7 @@ TEST_CASE("osc-render-wav writes a non-empty WAV for every --engine",
 TEST_CASE("osc-render-wav writes a non-empty WAV with --seed",
           "[cli][osc-render-wav]") {
     if (tool_binary().empty()) {
-        SUCCEED("pulp-osc-render-wav not built");
-        return;
+        SKIP("pulp-osc-render-wav not built");
     }
 
     TempFile out("osc-seed");
@@ -98,8 +96,7 @@ TEST_CASE("osc-render-wav writes a non-empty WAV with --seed",
 TEST_CASE("osc-render-wav rejects --seed on a non-vco engine",
           "[cli][osc-render-wav]") {
     if (tool_binary().empty()) {
-        SUCCEED("pulp-osc-render-wav not built");
-        return;
+        SKIP("pulp-osc-render-wav not built");
     }
 
     TempFile out("osc-seed-rejected");

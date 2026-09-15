@@ -183,8 +183,7 @@ TEST_CASE("follow-default output device tracks the system default live",
     for (auto d : all_devices())
         if (d != orig && has_output(d)) { other = d; break; }
     if (other == kAudioObjectUnknown) {
-        SUCCEED("only one output device present — cannot exercise the follow");
-        return;
+        SKIP("only one output device present — cannot exercise the follow");
     }
 
     std::atomic<std::uint64_t> callbacks{0};

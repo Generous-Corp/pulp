@@ -234,8 +234,7 @@ TEST_CASE("TcpStream round-trips bytes on loopback", "[network_stream]") {
         }
     }
     if (port == 0) {
-        SUCCEED("could not bind loopback port; skipping");
-        return;
+        SKIP("could not bind loopback port; skipping");
     }
 
     std::atomic<bool> server_ready{false};
@@ -300,8 +299,7 @@ TEST_CASE("Socket timed connect resolves IPv4 hostnames",
         }
     }
     if (port == 0) {
-        SUCCEED("could not bind loopback port; skipping");
-        return;
+        SKIP("could not bind loopback port; skipping");
     }
 
     std::thread server_thread([&] {
@@ -397,8 +395,7 @@ TEST_CASE("TcpStream detects peer-close on the next read",
         }
     }
     if (port == 0) {
-        SUCCEED("could not bind loopback; skipping");
-        return;
+        SKIP("could not bind loopback; skipping");
     }
 
     std::atomic<bool> server_ready{false};
@@ -474,8 +471,7 @@ TEST_CASE("UDP socket round-trips datagrams on loopback",
     REQUIRE(receiver.create(SocketType::UDP));
     auto port = try_bind_udp(receiver, 45601);
     if (!port) {
-        SUCCEED("could not bind UDP loopback; skipping");
-        return;
+        SKIP("could not bind UDP loopback; skipping");
     }
 
     Socket sender;
@@ -500,8 +496,7 @@ TEST_CASE("UDP bind accepts empty address as wildcard",
     REQUIRE(receiver.create(SocketType::UDP));
     auto port = try_bind_udp(receiver, 45731, "");
     if (!port) {
-        SUCCEED("could not bind UDP wildcard; skipping");
-        return;
+        SKIP("could not bind UDP wildcard; skipping");
     }
 
     Socket sender;
@@ -524,8 +519,7 @@ TEST_CASE("UDP socket move construction transfers the descriptor",
     REQUIRE(receiver.create(SocketType::UDP));
     auto port = try_bind_udp(receiver, 45861);
     if (!port) {
-        SUCCEED("could not bind UDP loopback; skipping");
-        return;
+        SKIP("could not bind UDP loopback; skipping");
     }
 
     Socket moved(std::move(receiver));
@@ -551,8 +545,7 @@ TEST_CASE("UDP socket move assignment transfers the descriptor",
     REQUIRE(receiver.create(SocketType::UDP));
     auto port = try_bind_udp(receiver, 45991);
     if (!port) {
-        SUCCEED("could not bind UDP loopback; skipping");
-        return;
+        SKIP("could not bind UDP loopback; skipping");
     }
 
     Socket moved;
@@ -582,8 +575,7 @@ TEST_CASE("UDP socket self move assignment preserves descriptor",
     REQUIRE(receiver.create(SocketType::UDP));
     auto port = try_bind_udp(receiver, 46121);
     if (!port) {
-        SUCCEED("could not bind UDP loopback; skipping");
-        return;
+        SKIP("could not bind UDP loopback; skipping");
     }
 
     auto* same = &receiver;
@@ -624,8 +616,7 @@ TEST_CASE("TcpStream can wrap an accepted Socket",
         }
     }
     if (port == 0) {
-        SUCCEED("could not bind loopback port; skipping");
-        return;
+        SKIP("could not bind loopback port; skipping");
     }
 
     std::atomic<bool> ready{false};
@@ -688,8 +679,7 @@ TEST_CASE("TcpStream zero-byte I/O succeeds while connected",
         }
     }
     if (port == 0) {
-        SUCCEED("could not bind loopback port; skipping");
-        return;
+        SKIP("could not bind loopback port; skipping");
     }
 
     std::atomic<bool> ready{false};

@@ -118,8 +118,7 @@ TEST_CASE("macOS GPU WindowHost accepts set_idle_callback (pulp #1387 gap #3)",
         auto host = WindowHost::create(root, opts);
         if (!host) {
             // GPU build path unavailable (no Skia / no Dawn) — skip.
-            SUCCEED("GPU host unavailable in this build");
-            return;
+            SKIP("GPU host unavailable in this build");
         }
 
         // Install + clear must both be no-throw and idempotent. Before
