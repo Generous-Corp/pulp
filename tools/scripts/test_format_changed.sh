@@ -102,6 +102,7 @@ out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="" PULP_CLANG_FORMAT_C
     /bin/bash "$SCRIPT" --base main 2>&1)"; rc=$?
 expect_rc "no clang-format → exit 3" 3
 expect_out "no clang-format → names the pinned major" "pinned major 21"
+expect_out "no clang-format → labelled INFRASTRUCTURE, not a formatting verdict" "INFRASTRUCTURE: no clang-format found"
 rm -rf "$repo"
 
 # ── nothing changed → exit 0, nothing invoked ───────────────────────────────

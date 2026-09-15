@@ -27,7 +27,9 @@
 # not fail, because no gate depends on this and a warning beats hand-formatting.
 #
 # Exit: 0 clean / rewritten · 1 --check found changes · 2 usage or repo error ·
-#       3 no clang-format found.
+#       3 no clang-format found. Only 1 is a formatting verdict; 2 and 3 are
+#       infrastructure and say so on stderr, so a gate can never report a
+#       missing binary as "your code is misformatted".
 #
 # Runs under bash 3.2 (macOS default) — no mapfile, no associative arrays.
 
@@ -103,7 +105,8 @@ resolve_binary() {
 
 bin="$(resolve_binary)" || {
     cat >&2 <<EOF
-format_changed: no clang-format found.
+format_changed: INFRASTRUCTURE: no clang-format found — this is NOT a formatting verdict.
+  Nothing about the touched lines was judged.
   Install one (pinned major ${PULP_CLANG_FORMAT_MAJOR}):
     macOS:  brew install llvm@${PULP_CLANG_FORMAT_MAJOR}   (or: xcode-select --install)
     Linux:  apt install clang-format-${PULP_CLANG_FORMAT_MAJOR}
@@ -115,7 +118,7 @@ EOF
 version_line="$("$bin" --version 2>/dev/null | head -1)"
 major="$(printf '%s\n' "$version_line" | sed -n 's/.*clang-format version \([0-9][0-9]*\)\..*/\1/p')"
 if [ -z "$major" ]; then
-    echo "format_changed: could not parse a version from: $bin ($version_line)" >&2
+    echo "format_changed: INFRASTRUCTURE: could not parse a version from: $bin ($version_line)" >&2
 elif [ "$major" != "$PULP_CLANG_FORMAT_MAJOR" ]; then
     echo "format_changed: WARNING: $bin is clang-format $major; expected clang-format ${PULP_CLANG_FORMAT_MAJOR} (output may differ on a few files)" >&2
 fi

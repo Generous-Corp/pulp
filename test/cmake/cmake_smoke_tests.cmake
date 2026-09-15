@@ -472,6 +472,16 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-gate-supervisor PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 30)
+        # The advisory diff-scoped clang-format gate must never report a missing
+        # binary as a formatting failure. Asserts the pre-push, gates.sh and CI
+        # wiring keep exit 3 (infrastructure) apart from exit 1 (verdict) and pin
+        # the CI binary to the measured-identical clang-format 21.
+        add_test(NAME prepush-format-gate-wiring
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_format_gate.py)
+        set_tests_properties(prepush-format-gate-wiring PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 30)
     endif()
     add_test(NAME wasm-skia-slice-invariants
         COMMAND ${PULP_PYTHON3_FOR_TESTS}

@@ -15,10 +15,12 @@
 # Homebrew llvm@21 — byte-identical to each other) reflows 3,743 files
 # (84.8%), 432,490 lines; clang-format 19 differs from 21 on 2 files.
 # So "my clang-format reflows lines I did not touch" is not a version
-# mismatch and no other version fixes it. Nothing in CI, the pre-push
-# hook, or Shipyard runs clang-format, so a whole-file `clang-format -i`
-# (or `pulp fmt` on an existing file) produces a large unrelated diff
-# that no gate asked for and every reviewer has to wade through.
+# mismatch and no other version fixes it. Existing debt is grandfathered:
+# the only enforcement is the DIFF-SCOPED check below, run advisory by the
+# pre-push hook, `tools/scripts/gates.sh`, and the `Format (changed lines)`
+# workflow. A whole-file `clang-format -i` (or `pulp fmt` on an existing
+# file) produces a large unrelated diff that no gate asked for and every
+# reviewer has to wade through.
 #
 # The supported workflow is DIFF-SCOPED: format only the lines you
 # changed, against a base ref, with
