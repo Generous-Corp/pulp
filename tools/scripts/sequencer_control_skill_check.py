@@ -94,9 +94,16 @@ def check(root: Path) -> list[str]:
         )
         return errors
 
-    skill = (root / SKILL_PATH).read_text(encoding="utf-8")
+    skill_lines = (root / SKILL_PATH).read_text(encoding="utf-8").splitlines()
     for operation, definition in paired:
-        if operation.operation_id not in skill:
+        # The result kind must be bound to its own operation, not merely
+        # present in the document. A skill that names five operations already
+        # contains the words `response` and `receipt` somewhere, so a
+        # whole-document search passes no matter which operation the registry
+        # moved -- it grades the vocabulary rather than the claim. Requiring
+        # both on one line makes the table row the assertion.
+        mentions = [line for line in skill_lines if f"`{operation.operation_id}`" in line]
+        if not mentions:
             errors.append(
                 f"{SKILL_PATH} does not document control operation "
                 f"`{operation.operation_id}` (capability `{definition.contract_id}`); "
@@ -109,10 +116,15 @@ def check(root: Path) -> list[str]:
                 f"result kind in {CONTROL_MANIFEST_PATH}"
             )
             continue
-        if f"`{operation.result_kind}`" not in skill:
+        if not any(f"`{operation.result_kind}`" in line for line in mentions):
             errors.append(
-                f"{SKILL_PATH} documents `{operation.operation_id}` without its "
-                f"registry result kind `{operation.result_kind}`"
+                f"{SKILL_PATH} names `{operation.operation_id}` but never beside "
+                f"its registry result kind `{operation.result_kind}`"
+            )
+        if not any(f"`{definition.legacy_id}`" in line for line in mentions):
+            errors.append(
+                f"{SKILL_PATH} names `{operation.operation_id}` but never beside "
+                f"its gating capability `{definition.legacy_id}`"
             )
     return errors
 
