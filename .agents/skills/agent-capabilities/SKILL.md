@@ -139,7 +139,18 @@ For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
   even when the consumer contract is unchanged. Increase the surface inventory
-  version.
+  version. `--write` cannot do the first of those for you: it reports the
+  measured digest and exits nonzero, because a generator free to restamp a
+  fingerprint would silently launder every unreviewed header edit. Paste the
+  measured digest over the declared one in `agent_capability_registry.py`, bump
+  `SURFACE_INVENTORY_VERSION` in `agent_capability_manifest.py`, then `--write`.
+- `--write` also appends a full snapshot to
+  `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
+  that dwarf the change that caused them. `--check` does not require it, so for
+  a byte-level fingerprint refresh, revert that file and keep the three-file
+  change; `--check` still reports `fresh`. Reverting it is not free of meaning,
+  so keep the snapshot when the change is a real contract movement whose history
+  someone will read back.
 - Increase the capability minor version for compatible additive contract
   changes.
 - Increase the capability major version when a binding is removed, renamed, or
@@ -358,6 +369,30 @@ worth not hand-rolling: **over-bumping is not the safe direction.** Advancing a
 counter whose material is identical fails the opposite rule,
 `... changed without a manifest change`, so "bump both to be safe" trades one
 red gate for another.
+
+**A taken counter does not always announce itself as a conflict.** Re-read both
+counters after *every* merge of the protected base, not only after git reports
+one. When two lanes reserve the same next integer, the two sides hold
+character-identical constant lines, so the merge is clean and silent — and the
+*increase* is what gets annihilated: the surface has changed (your fingerprint)
+while the counter equals the base again. That surfaces much later as
+`STALE: public surface changed without an inventory_version increase`, on every
+platform at once, naming generated files the diff appears not to touch.
+
+Recovery needs the surface document reset **first**. `--write` derives from the
+on-disk artifact, which already carries your fingerprint at the taken counter,
+so raising the counter alone fails the opposite rule instead:
+
+```bash
+git checkout origin/main -- docs/status/agent-capability-surface.json
+python3 tools/scripts/agent_capability_rederive.py
+```
+
+Reset that one document and nothing else. The same digest also lives in
+`REVIEWED_HEADERS` in `tools/scripts/agent_capability_registry.py`, and that copy
+must keep the NEW value — resetting it too restores the stale digest and
+reproduces the original failure. No integer is picked by hand: `rederive.py`
+resolves the protected tip, so it lands on whatever is free.
 
 It refuses rather than guesses when the surface has unresolved problems — a
 changed header with a stale fingerprint has no stable material to derive from,

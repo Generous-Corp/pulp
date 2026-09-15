@@ -44,6 +44,10 @@ struct ProjectEditAccess {
     static Project replace_meter_map(const Project& project, timebase::MeterMap meter_map) {
         return project.replace_meter_map(std::move(meter_map));
     }
+    static runtime::Result<Project, ModelError>
+    replace_tuning(const Project& project, std::optional<TuningReference> tuning) {
+        return project.replace_tuning(std::move(tuning));
+    }
 };
 
 } // namespace pulp::timeline

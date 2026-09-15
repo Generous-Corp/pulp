@@ -264,4 +264,19 @@ struct CustomNodeType {
     }
 };
 
+// Callback-free description returned by SignalGraph's custom-type discovery
+// API. Every field owns its storage, including the nested parameter list, so a
+// caller may retain a snapshot after the registry or graph has been destroyed.
+// Keep this separate from CustomNodeType: registrars commonly initialize that
+// aggregate positionally, and discovery must never expose executable callbacks.
+struct CustomNodeTypeMetadata {
+    std::string type_id;
+    int version = 1;
+    int num_input_ports = 0;
+    int num_output_ports = 0;
+    std::string default_name;
+    bool lowerable = false;
+    std::vector<CustomNodeBakedParam> baked_params;
+};
+
 }  // namespace pulp::host
