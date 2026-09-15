@@ -8053,6 +8053,111 @@
       }
     },
     {
+      "id": "nested-conform-aware-resample-trim",
+      "title": "A trimmed nested Resample leaf reads the sub-span its window maps onto",
+      "delivery_state": "pending",
+      "claim_id": "0f6c1a83-9b42-4d57-8a10-2c4b7e5d9f31",
+      "owned_paths": [
+        ".agents/skills/agent-capabilities/SKILL.md",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/audio_renderer.hpp",
+        "core/playback/src/audio_renderer.cpp",
+        "core/playback/src/audio_renderer_internal.hpp",
+        "core/playback/src/audio_renderer_render.cpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/playback/src/track_audio_program_compiler.cpp",
+        "core/playback/src/track_audio_program_compiler.hpp",
+        "docs/status/agent-capability-surface.json",
+        "docs/status/sequencer-exposure.json",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/agent-capabilities/contract-history.json",
+        "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_registry.py",
+        "tools/scripts/negative_capability_allowlist.json"
+      ],
+      "classification": "engine_internal",
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "source_frame_phase_end",
+            "timeline::TimeConform::Resample",
+            "authored_span"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.hpp",
+          "needles": [
+            "source_frame_phase_end"
+          ]
+        },
+        {
+          "path": "core/playback/include/pulp/playback/audio_renderer.hpp",
+          "needles": [
+            "source_frame_phase_end"
+          ]
+        },
+        {
+          "path": "core/playback/src/audio_renderer_render.cpp",
+          "needles": [
+            "source_frame_phase_end",
+            "musical_phase_source_position"
+          ]
+        },
+        {
+          "path": "core/playback/src/audio_renderer.cpp",
+          "needles": [
+            "source_frame_phase_end"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "Trimmed nested resampling media reads the conformed sub-span",
+            "Trimmed nested resampling media rejects elapsed-sample source offsets",
+            "Nested stretched audio refuses partial source windows"
+          ]
+        },
+        {
+          "path": "tools/scripts/agent_capability_registry.py",
+          "needles": [
+            "sha256:6050c1569f5e90b404fc4dc8a95498964a796a418a1fe62a9ec4929bb8e57e2f"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "Resample no longer refuses"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The source range is produced by flattening and can never be authored. It rides on AudioClipRendererProgram, a compiled-output type an SDK consumer reads rather than writes, as one field beside the source_frame_offset that type already carried; MediaRef and TimeConform are deliberately untouched, because narrowing the reference would re-conform the narrowed source over the whole window and so would mean something different from what the placement says. No schema version moves and no serialized form changes."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. A nested placement that trims a Resample clip previously refused to compile and now compiles, through the same SequenceRef source window pulp seq already writes."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal beneath the nesting and time-conform controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The source range is computed inside the lowerer and is reachable only through the trim an author already wrote on the placement."
+        }
+      }
+    },
+    {
       "id": "control-fixture-manifest-digest-derivation",
       "title": "Control fixture manifests and shipping markers derive from the canonical registry digest",
       "classification": "ci_test_only",
