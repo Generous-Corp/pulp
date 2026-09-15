@@ -229,6 +229,95 @@ decode_command_notes(const JsonValue& value, DecodeContext& context, std::string
         std::vector<NoteEvent>(validated->notes().begin(), validated->notes().end()));
 }
 
+// Decodes a command payload's controller points.
+//
+// `chased` is a derivation receipt the flattening path writes, never something
+// an author states, so a payload carrying it set is refused rather than
+// silently dropped: a caller who believes they authored provenance and did not
+// is worse off than one who is told the field is not theirs to write. The
+// project encoder does not write the member at all, so no stored document is
+// rejected by this rule.
+runtime::Result<std::vector<MidiLanePoint>, PersistenceError>
+decode_command_lane_points(const JsonValue& value, DecodeContext& context, std::string path) {
+    if (value.kind != JsonValue::Kind::Array)
+        return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::UnexpectedType,
+                                                std::move(path), value.begin);
+    auto& count = context.counts.midi_lane_points;
+    if (count > context.limits.max_midi_lane_points ||
+        value.array.size() > context.limits.max_midi_lane_points - count)
+        return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::LimitExceeded,
+                                                std::move(path), value.begin,
+                                                count + value.array.size(),
+                                                context.limits.max_midi_lane_points);
+    std::vector<MidiLanePoint> points;
+    points.reserve(value.array.size());
+    for (std::size_t index = 0; index < value.array.size(); ++index) {
+        const auto item_path = path + "/" + std::to_string(index);
+        const auto& item = value.array[index];
+        if (const auto* chased = item.find("chased");
+            chased && (chased->kind != JsonValue::Kind::Boolean || chased->boolean))
+            return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::UnexpectedType,
+                                                    item_path + "/chased", chased->begin);
+        auto id = required(item, "id", item_path);
+        auto position = required(item, "position_ticks", item_path);
+        auto point_value = required(item, "value", item_path);
+        if (!id || !position || !point_value)
+            return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::MissingField, item_path);
+        auto decoded_id = parse_canonical_u64_string(*id.value(), item_path + "/id");
+        auto decoded_position =
+            parse_canonical_i64_string(*position.value(), item_path + "/position_ticks");
+        auto decoded_value = parse_u32_number(*point_value.value(), item_path + "/value");
+        if (!decoded_id || !decoded_position || !decoded_value)
+            return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::InvalidNumber, item_path);
+        points.push_back(
+            {ItemId{decoded_id.value()}, {decoded_position.value()}, decoded_value.value(), false});
+    }
+    count += points.size();
+    return runtime::Ok(std::move(points));
+}
+
+// Decodes a whole lane: identity, the five raw wire address components, and the
+// points. An address outside the width the wire gives it is refused here rather
+// than reaching a reducer, because a malformed address names no stream.
+runtime::Result<MidiExpressionLane, PersistenceError>
+decode_command_lane(const JsonValue& value, DecodeContext& context, std::string path) {
+    if (value.kind != JsonValue::Kind::Object)
+        return fail<MidiExpressionLane>(PersistenceErrorCode::UnexpectedType, std::move(path),
+                                        value.begin);
+    auto& count = context.counts.midi_lanes;
+    if (count >= context.limits.max_midi_lanes)
+        return fail<MidiExpressionLane>(PersistenceErrorCode::LimitExceeded, path, value.begin,
+                                        count + 1, context.limits.max_midi_lanes);
+    ++count;
+    auto id = decode_command_item_id(value, "id", path);
+    auto points = required(value, "points", path);
+    if (!id || !points)
+        return fail<MidiExpressionLane>(PersistenceErrorCode::MissingField, std::move(path));
+    std::array<std::string_view, 5> names{"group", "channel", "status", "bank", "index"};
+    std::array<std::uint8_t, 5> address{};
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        auto member = required(value, names[index], path);
+        if (!member)
+            return fail<MidiExpressionLane>(PersistenceErrorCode::MissingField, std::move(path));
+        auto decoded =
+            parse_u32_number(*member.value(), path + "/" + std::string(names[index]));
+        if (!decoded || decoded.value() > std::numeric_limits<std::uint8_t>::max())
+            return fail<MidiExpressionLane>(PersistenceErrorCode::InvalidNumber,
+                                            path + "/" + std::string(names[index]));
+        address[index] = static_cast<std::uint8_t>(decoded.value());
+    }
+    const MidiLaneAddress decoded_address{address[0], address[1], address[2], address[3],
+                                          address[4]};
+    if (!midi_lane_address_well_formed(decoded_address))
+        return fail<MidiExpressionLane>(PersistenceErrorCode::InvalidNumber, std::move(path),
+                                        value.begin);
+    auto decoded_points = decode_command_lane_points(*points.value(), context, path + "/points");
+    if (!decoded_points)
+        return runtime::Err(decoded_points.error());
+    return runtime::Ok(MidiExpressionLane{id.value(), decoded_address,
+                                          std::move(decoded_points).value()});
+}
+
 runtime::Result<ClipTimeRange, PersistenceError> decode_command_clip_range(const JsonValue& value,
                                                                            std::string path) {
     auto kind = string_field(value, "kind", path);
@@ -710,6 +799,50 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         return runtime::Ok(
             Command(SetDynamicsLane{sequence.value(), std::move(decoded_expected).value(),
                                     std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_midi_expression_lane") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto clip = decode_command_item_id(command, "clip_id", data_path);
+        auto lane = required(command, "lane", data_path);
+        if (!sequence || !track || !clip || !lane)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_lane = decode_command_lane(*lane.value(), context, data_path + "/lane");
+        if (!decoded_lane)
+            return runtime::Err(decoded_lane.error());
+        return runtime::Ok(Command(InsertMidiExpressionLane{
+            sequence.value(), track.value(), clip.value(), std::move(decoded_lane).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_midi_expression_lane") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto clip = decode_command_item_id(command, "clip_id", data_path);
+        auto lane = decode_command_item_id(command, "lane_id", data_path);
+        if (!sequence || !track || !clip || !lane)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveMidiExpressionLane{sequence.value(), track.value(),
+                                                            clip.value(), lane.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_midi_expression_lane_points") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto clip = decode_command_item_id(command, "clip_id", data_path);
+        auto lane = decode_command_item_id(command, "lane_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !track || !clip || !lane || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_command_lane_points(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement =
+            decode_command_lane_points(*replacement.value(), context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        return runtime::Ok(Command(SetMidiExpressionLanePoints{
+            sequence.value(), track.value(), clip.value(), lane.value(),
+            std::move(decoded_expected).value(), std::move(decoded_replacement).value()}));
     }
     if (type.value() == "pulp.timeline.command.insert_marker") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);

@@ -1,0 +1,15 @@
+{
+  "id": "canvas2d/raster-determinism",
+  "surface": "canvas2d",
+  "kind": "render",
+  "driver": "declarative_raster",
+  "viewport": { "w": 96, "h": 96 },
+  "ops": [
+    { "op": "clear", "color": "#FFFFFFFF" },
+    { "op": "rect", "x": 8, "y": 8, "w": 40, "h": 28, "color": "#FF1E5AC8", "antialias": false },
+    { "op": "rect", "x": 52, "y": 8, "w": 36, "h": 28, "color": "#801E5AC8", "antialias": true },
+    { "op": "circle", "cx": 34.5, "cy": 62.5, "r": 21.25, "color": "#FFE08A1E", "antialias": true },
+    { "op": "line", "x0": 6.5, "y0": 90.5, "x1": 89.5, "y1": 44.5, "color": "#FF203028", "stroke_width": 3, "antialias": false },
+    { "op": "linear_gradient_rect", "x": 56, "y": 52, "w": 34, "h": 34, "x0": 56, "y0": 52, "x1": 90, "y1": 86, "colors": ["#FF104020", "#FFD0F0E0"], "antialias": true }
+  ]
+}

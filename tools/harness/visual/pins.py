@@ -47,3 +47,34 @@ RELEASE_ASSET_SHA256 = {
         "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9"
     ),
 }
+
+
+# Recorded identity of the committed raster goldens, keyed by fixture id. The
+# byte-for-byte golden lives beside its fixture; this digest is the reviewable
+# copy of that identity, so a golden rewritten by mistake shows up as a digest
+# change in the diff rather than as an opaque binary blob.
+#
+# Produced by the pinned skia-python wheel (SKIA_PYTHON_SMOKE_VERSION) rendering
+# the fixture's declared ops. A different pin renders different bytes, which is
+# why the loader refuses to render with an unpinned Skia.
+RASTER_GOLDEN_SHA256 = {
+    "canvas2d/raster-determinism": (
+        "9d6b81079fbbb5ac26fe31d4af8d0b011da661fda4a894b9717f38d32c27add8"
+    ),
+}
+
+# Hosts on which the digests above have actually been observed, keyed the way
+# raster.platform_key() reports them.
+#
+# darwin-arm64 and darwin-x86_64 were both measured directly: the same pinned
+# wheel, rendering the same fixture, in separate processes, produced identical
+# bytes on each. That settles the instruction-set axis on Apple silicon (the
+# x86_64 reading was taken under Rosetta translation).
+#
+# linux-x86_64 is deliberately absent. No Linux execution path existed on the
+# host where the golden was recorded, so cross-operating-system byte identity is
+# UNPROVEN: fontconfig/CoreText, libc, and the wheel's own build differ between
+# the two, and any of them could change the raster. The Linux lane of the visual
+# harness compares against the same golden and reports its computed digest, so
+# the first Linux run settles the question in one direction or the other.
+RASTER_GOLDEN_VERIFIED_PLATFORMS = ("darwin-arm64", "darwin-x86_64")

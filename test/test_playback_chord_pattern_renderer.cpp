@@ -109,6 +109,98 @@ ignore_fragment_quota(const RegisteredContentCompileInput& input, const void*) n
         input.clip_duration);
 }
 
+// One registered pattern clip in a child sequence, referenced by the root
+// through the window the caller names. The windows the tests choose begin and
+// end inside a step rather than on a step boundary, which is the only way a
+// note straddles a cut edge and clamping becomes observable at all.
+std::shared_ptr<const Project> nested_pattern_project(const SchemaRegistry& schemas,
+                                                      TickPosition source_start,
+                                                      TickDuration placement_duration) {
+    auto pattern = take(create_chord_pattern_content(
+        {.seed = 1, .step = {120}, .gate = {120}, .octave = 4, .velocity = 40000}, schemas));
+    auto pattern_clip = take(Clip::create({100}, {0}, {480}, std::move(pattern)));
+    auto child_track = take(Track::create({20}, "pattern", {std::move(pattern_clip)}));
+    SequenceInput child;
+    child.id = {3};
+    child.name = "child";
+    child.musical_duration = TickDuration{480};
+    child.tracks = {std::move(child_track)};
+    child.chord_scale_lane =
+        take(ChordScaleLane::create({{{0}, ChordQuality::Major, 0, ScaleMode::Major, 0}}));
+    auto reference =
+        take(Clip::create({200}, {0}, placement_duration, SequenceRef{{3}, source_start}));
+    auto root_track = take(Track::create({10}, "reference", {std::move(reference)}));
+    SequenceInput root;
+    root.id = {2};
+    root.name = "root";
+    root.tracks = {std::move(root_track)};
+    ProjectInput project_input;
+    project_input.id = {1};
+    project_input.name = "nested registered pattern";
+    project_input.next_item_id = 500;
+    project_input.root_sequence_id = {2};
+    project_input.sequences = {take(Sequence::create(std::move(root))),
+                               take(Sequence::create(std::move(child)))};
+    return std::make_shared<const Project>(take(Project::create(std::move(project_input))));
+}
+
+struct CompiledNote {
+    ItemId id;
+    TickPosition start;
+    TickPosition end;
+    std::uint8_t pitch = 0;
+};
+
+// Pairs each note's on and off by identity rather than by position, so the
+// assertions read as statements about notes and never about event order.
+std::vector<CompiledNote> fold_notes(std::span<const NoteProgramEvent> events) {
+    std::vector<CompiledNote> notes;
+    for (const auto& event : events) {
+        if (event.kind == NoteProgramEventKind::On) {
+            notes.push_back({event.note_id, event.tick, event.tick, event.pitch});
+            continue;
+        }
+        const auto match = std::find_if(notes.begin(), notes.end(), [&](const CompiledNote& note) {
+            return note.id.value == event.note_id.value;
+        });
+        REQUIRE(match != notes.end());
+        match->end = event.tick;
+    }
+    std::sort(notes.begin(), notes.end(), [](const CompiledNote& lhs, const CompiledNote& rhs) {
+        return lhs.id.value < rhs.id.value;
+    });
+    return notes;
+}
+
+struct NestedCompile {
+    bool has_error = false;
+    CompileErrorCode code = CompileErrorCode::InvalidStructure;
+    std::vector<CompiledNote> notes;
+};
+
+NestedCompile compile_nested(const std::shared_ptr<CompileContextRegistry>& registry,
+                             const std::shared_ptr<const Project>& project) {
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = project;
+    request.sequence_id = {2};
+    request.tempo_map = test_tempo_map();
+    request.sample_rate = request.tempo_map->sample_rate();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    request.invalidation = CompileInvalidationInput::baseline(registry, project, 1);
+    REQUIRE(compiler.submit(std::move(request)));
+    NestedCompile result;
+    result.has_error = compiler.status().has_error;
+    result.code = compiler.status().last_error.code;
+    if (result.has_error)
+        return result;
+    result.notes = fold_notes(compiled_track(store, {10})->arrangement_note_events());
+    return result;
+}
+
 ContentRendererRegistration renderer_registration(const SchemaRegistry& schemas) {
     CompileContextRegistry registry;
     REQUIRE_FALSE(declare_chord_pattern_renderer(registry, schemas));
@@ -398,52 +490,74 @@ TEST_CASE("ProgramCompiler realizes registered harmony and leaves authored MIDI 
     REQUIRE(pattern_removed->state_policy() == RendererStatePolicy::CarryByItemId);
 }
 
-TEST_CASE("a trimmed nested registered pattern is explicitly refused",
-          "[playback][chord-pattern][nesting][refusal]") {
+TEST_CASE("an untrimmed nested registered pattern compiles its whole authored extent",
+          "[playback][chord-pattern][nesting]") {
     const auto schemas = chord_registry();
     auto registry = std::make_shared<CompileContextRegistry>();
     REQUIRE_FALSE(declare_chord_pattern_renderer(*registry, schemas));
-    auto pattern = take(create_chord_pattern_content(
-        {.seed = 1, .step = {120}, .gate = {90}, .octave = 4, .velocity = 40000}, schemas));
-    auto pattern_clip = take(Clip::create({100}, {0}, {480}, std::move(pattern)));
-    auto child_track = take(Track::create({20}, "pattern", {std::move(pattern_clip)}));
-    SequenceInput child;
-    child.id = {3};
-    child.name = "child";
-    child.musical_duration = TickDuration{480};
-    child.tracks = {std::move(child_track)};
-    auto reference = take(Clip::create({200}, {0}, {240}, SequenceRef{{3}, TickPosition{120}}));
-    auto root_track = take(Track::create({10}, "reference", {std::move(reference)}));
-    SequenceInput root;
-    root.id = {2};
-    root.name = "root";
-    root.tracks = {std::move(root_track)};
-    ProjectInput project_input;
-    project_input.id = {1};
-    project_input.name = "trimmed registered pattern";
-    project_input.next_item_id = 500;
-    project_input.root_sequence_id = {2};
-    project_input.sequences = {take(Sequence::create(std::move(root))),
-                               take(Sequence::create(std::move(child)))};
-    auto project = std::make_shared<const Project>(take(Project::create(std::move(project_input))));
+    const auto whole = compile_nested(registry, nested_pattern_project(schemas, {0}, {480}));
+    REQUIRE_FALSE(whole.has_error);
+    REQUIRE(whole.notes.size() == 4);
+    const std::array expected_starts{0, 120, 240, 360};
+    const std::array expected_ends{120, 240, 360, 480};
+    const std::array<std::uint8_t, 4> expected_pitches{64, 67, 60, 64};
+    for (std::size_t index = 0; index < whole.notes.size(); ++index) {
+        REQUIRE(whole.notes[index].start.value == expected_starts[index]);
+        REQUIRE(whole.notes[index].end.value == expected_ends[index]);
+        REQUIRE(whole.notes[index].pitch == expected_pitches[index]);
+    }
+}
 
-    PlaybackProgramStore store;
-    InlineExecutor executor;
-    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
-    ProgramCompileRequest request;
-    request.project = project;
-    request.sequence_id = {2};
-    request.tempo_map = test_tempo_map();
-    request.sample_rate = request.tempo_map->sample_rate();
-    request.document_revision = 1;
-    request.dirty.all = true;
-    request.invalidation = CompileInvalidationInput::baseline(registry, project, 1);
-    REQUIRE(compiler.submit(std::move(request)));
-    REQUIRE(compiler.status().has_error);
-    REQUIRE(compiler.status().last_error.code ==
-            CompileErrorCode::TrimmedRegisteredContentUnsupported);
-    REQUIRE(compiler.status().last_error.item == ItemId{100});
-    REQUIRE_FALSE(store.read());
+TEST_CASE("a trimmed nested registered pattern is windowed and keeps its authored phase",
+          "[playback][chord-pattern][nesting]") {
+    const auto schemas = chord_registry();
+    auto registry = std::make_shared<CompileContextRegistry>();
+    REQUIRE_FALSE(declare_chord_pattern_renderer(*registry, schemas));
+    const auto whole = compile_nested(registry, nested_pattern_project(schemas, {0}, {480}));
+    REQUIRE_FALSE(whole.has_error);
+    // Child ticks [60, 300) of a 480-tick authored clip, placed at root tick 0.
+    // Both edges fall mid-step, so one authored step straddles each of them.
+    const auto window = compile_nested(registry, nested_pattern_project(schemas, {60}, {240}));
+    REQUIRE_FALSE(window.has_error);
+
+    // Three of the four authored steps reach the window: one straddling each
+    // edge and one wholly inside. The fourth begins past the window and is
+    // dropped, yet still spends its generated identity, so the retained three
+    // keep the ordinals they were generated with.
+    REQUIRE(window.notes.size() == 3);
+    REQUIRE(window.notes[1].id.value == window.notes[0].id.value + 1);
+    REQUIRE(window.notes[2].id.value == window.notes[0].id.value + 2);
+
+    // Cut to the left edge, interior, cut to the right edge — the same
+    // clamp-and-drop a trim applies to authored note content.
+    REQUIRE(window.notes[0].start.value == 0);
+    REQUIRE(window.notes[0].end.value == 60);
+    REQUIRE(window.notes[1].start.value == 60);
+    REQUIRE(window.notes[1].end.value == 180);
+    REQUIRE(window.notes[2].start.value == 180);
+    REQUIRE(window.notes[2].end.value == 240);
+
+    // The pitches are the authored steps 0, 1 and 2, so the pattern kept the
+    // phase its author wrote. A renderer restarted at the window boundary would
+    // emit two notes here, beginning at step 0 again.
+    for (std::size_t index = 0; index < window.notes.size(); ++index)
+        REQUIRE(window.notes[index].pitch == whole.notes[index].pitch);
+}
+
+TEST_CASE("a trimmed nested registered fragment is bounded by the authored extent",
+          "[playback][chord-pattern][nesting][quota]") {
+    const auto schemas = chord_registry();
+    // The authored clip generates four steps and the retained window would hold
+    // two. Generation happens over the authored extent, so a ceiling that the
+    // window alone would clear still refuses: the bound is charged against what
+    // the hook is asked to produce, not against what survives the window.
+    auto registration = renderer_registration(schemas);
+    registration.maximum_fragment_notes = 3;
+    auto registry = std::make_shared<CompileContextRegistry>();
+    REQUIRE_FALSE(registry->declare(std::move(registration), schemas));
+    const auto window = compile_nested(registry, nested_pattern_project(schemas, {60}, {240}));
+    REQUIRE(window.has_error);
+    REQUIRE(window.code == CompileErrorCode::RegisteredContentCompileFailed);
 }
 
 TEST_CASE("a count-changing fragment rekeys every downstream generated range",

@@ -9,10 +9,20 @@
 #include <pulp/runtime/trace.hpp>
 #include <choc/text/choc_JSON.h>
 
+#ifdef _WIN32
+    #include <io.h>
+    #include <process.h>
+    #define getpid _getpid
+#else
+    #include <unistd.h>
+#endif
+
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -73,6 +83,44 @@ private:
     bool had_prev_ = false;
 };
 
+// Captures stderr for the scope. runtime::log_* always writes to stderr, so
+// this is what turns "and it logs" into an assertion rather than a claim.
+class StderrCapture {
+public:
+    explicit StderrCapture(std::filesystem::path sink) : sink_(std::move(sink)) {
+        std::fflush(stderr);
+#ifdef _WIN32
+        saved_ = ::_dup(::_fileno(stderr));
+#else
+        saved_ = ::dup(::fileno(stderr));
+#endif
+        REQUIRE(std::freopen(sink_.string().c_str(), "w", stderr) != nullptr);
+    }
+
+    ~StderrCapture() {
+        std::fflush(stderr);
+        if (saved_ < 0) return;
+#ifdef _WIN32
+        ::_dup2(saved_, ::_fileno(stderr));
+        ::_close(saved_);
+#else
+        ::dup2(saved_, ::fileno(stderr));
+        ::close(saved_);
+#endif
+    }
+
+    std::string text() const {
+        std::fflush(stderr);
+        std::ifstream in(sink_, std::ios::binary);
+        return {std::istreambuf_iterator<char>(in),
+                std::istreambuf_iterator<char>()};
+    }
+
+private:
+    std::filesystem::path sink_;
+    int saved_ = -1;
+};
+
 class StubWindowHost final : public WindowHost {
 public:
     ContentSize content_size_{640, 360};
@@ -85,6 +133,7 @@ public:
     int repaint_calls_ = 0;
     int close_requests_ = 0;
     std::vector<std::uint8_t> capture_bytes_;
+    bool gpu_backed_ = false;
 
     void show() override {}
     void hide() override {}
@@ -92,6 +141,7 @@ public:
     void repaint() override { ++repaint_calls_; }
     void request_close() override { ++close_requests_; }
     std::vector<std::uint8_t> capture_png() override { return capture_bytes_; }
+    bool is_gpu_backed() const override { return gpu_backed_; }
     ContentSize get_content_size() const override { return content_size_; }
     void set_idle_callback(std::function<void()> cb) override {
         idle_callback_ = std::move(cb);
@@ -1382,14 +1432,113 @@ TEST_CASE("Standalone responsive tab round trip never pins a design viewport",
     REQUIRE(window.content_size_requests_.back().height == 520);
 }
 
-TEST_CASE("Standalone log helper formats the chrome mode",
-          "[standalone][chrome]") {
-    auto editor_root = std::make_unique<View>();
+TEST_CASE("Standalone window-open log reports the RESOLVED gpu class",
+          "[standalone][chrome][gpu]") {
     auto chrome = make_standalone_editor_chrome(
-        std::move(editor_root), StandaloneConfig{}, nullptr, nullptr, nullptr, {});
+        std::make_unique<View>(), StandaloneConfig{}, nullptr, nullptr, nullptr,
+        {});
 
-    log_standalone_window_open(640, 360, false, false, chrome);
-    SUCCEED();
+    SECTION("gpu requested and resolved reports gpu=true with no marker") {
+        const auto msg = format_standalone_window_open_message(
+            640, 360, /*gpu_requested=*/true, /*gpu_resolved=*/true, false,
+            chrome);
+        CHECK(msg.find("gpu=true") != std::string::npos);
+        CHECK(msg.find("skia-unavailable") == std::string::npos);
+    }
+
+    SECTION("gpu requested but CPU-resolved reports the fallback explicitly") {
+        const auto msg = format_standalone_window_open_message(
+            640, 360, /*gpu_requested=*/true, /*gpu_resolved=*/false, false,
+            chrome);
+        CHECK(msg.find("gpu=false (skia-unavailable)") != std::string::npos);
+        CHECK(msg.find("gpu=true") == std::string::npos);
+    }
+
+    SECTION("gpu not requested reports gpu=false without the fallback marker") {
+        const auto msg = format_standalone_window_open_message(
+            640, 360, /*gpu_requested=*/false, /*gpu_resolved=*/false, false,
+            chrome);
+        CHECK(msg.find("gpu=false") != std::string::npos);
+        CHECK(msg.find("skia-unavailable") == std::string::npos);
+    }
+
+    // A GPU host that nobody asked for still reports what it IS. This is the
+    // case that proves the value is read off the window rather than echoed
+    // back from the request.
+    SECTION("gpu not requested but GPU-resolved still reports gpu=true") {
+        const auto msg = format_standalone_window_open_message(
+            640, 360, /*gpu_requested=*/false, /*gpu_resolved=*/true, false,
+            chrome);
+        CHECK(msg.find("gpu=true") != std::string::npos);
+        CHECK(msg.find("skia-unavailable") == std::string::npos);
+    }
+
+    // The default config carries a settings tab, so this chrome labels itself
+    // "tabs"; suppressing the tab is what produces "editor-only".
+    SECTION("chrome mode and dimensions still render") {
+        const auto msg = format_standalone_window_open_message(
+            800, 600, false, false, /*uses_script_ui=*/true, chrome);
+        CHECK(msg.find("800x600") != std::string::npos);
+        CHECK(msg.find("mode=scripted") != std::string::npos);
+        CHECK(msg.find("chrome=tabs") != std::string::npos);
+    }
+
+    SECTION("an editor-only chrome reports its own label") {
+        auto editor_only = make_standalone_editor_chrome(
+            std::make_unique<View>(),
+            StandaloneConfig{.show_settings_tab = false}, nullptr, nullptr,
+            nullptr, {});
+        const auto msg = format_standalone_window_open_message(
+            800, 600, false, false, /*uses_script_ui=*/false, editor_only);
+        CHECK(msg.find("chrome=editor-only") != std::string::npos);
+        CHECK(msg.find("mode=autoui") != std::string::npos);
+    }
+}
+
+TEST_CASE("Standalone window-open log reads gpu class off the window",
+          "[standalone][chrome][gpu]") {
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(), StandaloneConfig{}, nullptr, nullptr, nullptr,
+        {});
+    // Unique per process: ctest may run other suites concurrently and a fixed
+    // /tmp name would let them truncate each other's capture.
+    const auto sink =
+        std::filesystem::temp_directory_path()
+        / ("pulp-standalone-window-open-log-"
+           + std::to_string(static_cast<long long>(::getpid())) + ".txt");
+
+    // The defect this covers: the request was logged instead of the resolved
+    // host, so a Skia-less fallback still claimed gpu=true.
+    SECTION("CPU-backed window logs the fallback even when GPU was requested") {
+        StubWindowHost window;
+        window.gpu_backed_ = false;
+        std::string captured;
+        {
+            StderrCapture capture(sink);
+            log_standalone_window_open(
+                640, 360, window, /*gpu_requested=*/true, false, chrome);
+            captured = capture.text();
+        }
+        CHECK(captured.find("gpu=false (skia-unavailable)") != std::string::npos);
+        CHECK(captured.find("gpu=true") == std::string::npos);
+    }
+
+    SECTION("GPU-backed window logs gpu=true with no marker") {
+        StubWindowHost window;
+        window.gpu_backed_ = true;
+        std::string captured;
+        {
+            StderrCapture capture(sink);
+            log_standalone_window_open(
+                640, 360, window, /*gpu_requested=*/true, false, chrome);
+            captured = capture.text();
+        }
+        CHECK(captured.find("gpu=true") != std::string::npos);
+        CHECK(captured.find("skia-unavailable") == std::string::npos);
+    }
+
+    std::error_code ec;
+    std::filesystem::remove(sink, ec);
 }
 
 TEST_CASE("Standalone environment opts screenshot runs into hidden mode",

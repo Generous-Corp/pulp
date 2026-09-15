@@ -477,6 +477,42 @@
           "value_type": "uint"
         },
         {
+          "kind": "Object",
+          "name": "lane",
+          "required": true,
+          "schema_field": "lane",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:insert-midi-expression-lane",
+      "schema_type": "pulp.timeline.command.insert_midi_expression_lane",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "clip-id",
+          "required": true,
+          "schema_field": "clip_id",
+          "value_type": "uint"
+        },
+        {
           "kind": "Array",
           "name": "modifiers",
           "required": true,
@@ -956,6 +992,42 @@
       ],
       "name": "timeline:command:remove-marker",
       "schema_type": "pulp.timeline.command.remove_marker",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "clip-id",
+          "required": true,
+          "schema_field": "clip_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "lane-id",
+          "required": true,
+          "schema_field": "lane_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:remove-midi-expression-lane",
+      "schema_type": "pulp.timeline.command.remove_midi_expression_lane",
       "version": 1
     },
     {
@@ -1543,6 +1615,56 @@
       ],
       "name": "timeline:command:set-meter-map",
       "schema_type": "pulp.timeline.command.set_meter_map",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "clip-id",
+          "required": true,
+          "schema_field": "clip_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Array",
+          "name": "expected",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "lane-id",
+          "required": true,
+          "schema_field": "lane_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Array",
+          "name": "replacement",
+          "required": true,
+          "schema_field": "replacement",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:set-midi-expression-lane-points",
+      "schema_type": "pulp.timeline.command.set_midi_expression_lane_points",
       "version": 1
     },
     {

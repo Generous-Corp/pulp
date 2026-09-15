@@ -57,7 +57,8 @@ inline constexpr bool is_sequence_command_type =
 
 template <typename T>
 inline constexpr bool is_note_command_type =
-    claimed_by<T, SetNoteVelocity, ReplaceNoteContent, SetNoteEvents, InsertNotes, RemoveNotes>;
+    claimed_by<T, SetNoteVelocity, ReplaceNoteContent, SetNoteEvents, InsertNotes, RemoveNotes,
+               InsertMidiExpressionLane, RemoveMidiExpressionLane, SetMidiExpressionLanePoints>;
 
 // Alternatives reduced by an inline branch in transaction.cpp rather than by a
 // family reducer. They have no predicate of their own, so the list is their

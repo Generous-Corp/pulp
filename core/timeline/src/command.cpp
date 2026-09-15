@@ -491,6 +491,16 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                                  std::is_same_v<T, SetDynamicsLane>) {
                 return left.sequence_id == right.sequence_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, InsertMidiExpressionLane>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id && left.lane == right.lane;
+            } else if constexpr (std::is_same_v<T, RemoveMidiExpressionLane>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id && left.lane_id == right.lane_id;
+            } else if constexpr (std::is_same_v<T, SetMidiExpressionLanePoints>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id && left.lane_id == right.lane_id &&
+                       left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, InsertMarker>) {
                 return left.sequence_id == right.sequence_id &&
                        equal_marker(left.marker, right.marker);
@@ -651,6 +661,18 @@ std::size_t retained_size(const Command& command) noexcept {
                     sizeof(T), saturated_multiply(saturated_add(value.expected.events().size(),
                                                                 value.replacement.events().size()),
                                                   sizeof(DynamicsEvent)));
+            // Charges the payload this command carries, which is a copy the
+            // caller supplied. The live clip's own lane storage is accounted
+            // separately by clip_retained_size, so neither total absorbs the
+            // other's bytes.
+            if constexpr (std::is_same_v<T, InsertMidiExpressionLane>)
+                return saturated_add(sizeof(T), saturated_multiply(value.lane.points.size(),
+                                                                   sizeof(MidiLanePoint)));
+            if constexpr (std::is_same_v<T, SetMidiExpressionLanePoints>)
+                return saturated_add(
+                    sizeof(T), saturated_multiply(saturated_add(value.expected.size(),
+                                                                value.replacement.size()),
+                                                  sizeof(MidiLanePoint)));
             if constexpr (std::is_same_v<T, SetGroove>)
                 return saturated_add(
                     sizeof(T), saturated_add(saturated_multiply(

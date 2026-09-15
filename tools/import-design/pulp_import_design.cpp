@@ -1507,6 +1507,11 @@ struct CliOptions {
     std::string diff_output;         // --diff: output path for visual diff image
     std::string import_report_path;  // --import-report: write the P7 resolution report JSON here
     bool fail_on_unresolved = false; // --fail-on-unresolved: nonzero exit if a control is conflicted/inert
+    // --fail-on-unvalidated: opt-in gate turning "--validate ran but had no
+    // reference to compare against" into a nonzero exit (6). Without it that
+    // state stays a skip, which is what existing callers expect; with it a CI
+    // lane can refuse to treat a render-only run as a passing validation.
+    bool fail_on_unvalidated = false;
     // --fail-below <pct>: opt-in gate turning a low --reference similarity into
     // a nonzero exit. Negative means "not requested" — absent the flag the
     // similarity stays advisory and the exit code is unchanged, so existing
@@ -1666,6 +1671,8 @@ static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt
             opt.param_binding_manifest_path = argv[++i];
         } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
             opt.fail_on_unresolved = true;
+        } else if (std::strcmp(argv[i], "--fail-on-unvalidated") == 0) {
+            opt.fail_on_unvalidated = true;
         } else if (std::strcmp(argv[i], "--fail-below") == 0) {
             // Unit is PERCENT (0-100), matching the "Similarity: NN%" line this
             // gates on. A fraction like 0.85 is rejected rather than silently
@@ -1979,6 +1986,18 @@ int main(int argc, char* argv[]) {
     bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
     bool similarity_failed = false;  // set when --fail-below + reference similarity under the bar
 
+    // What the validation pass actually concluded. `skipped` is the state that
+    // used to be invisible: --validate rendered, printed no verdict, and exited
+    // 0, so a caller reading only the exit code could not tell a passing
+    // comparison from one that never happened. The result is captured here so
+    // the printed verdict and the debug JSON report the same single comparison.
+    // `not_run` is distinct and is NOT a skip: it covers a run that never asked
+    // to validate, and the browser lane, which compares against Chromium during
+    // capture adoption and then turns the generated-JS pass off deliberately.
+    enum class ValidationOutcome { not_run, skipped, pass, needs_review };
+    ValidationOutcome validation_outcome = ValidationOutcome::not_run;
+    CompareResult validation_result{};
+
     // Local references into the parsed options. The pipeline below reads and
     // mutates these names exactly as it did when they were main()'s own locals
     // (the emit-dependent output defaults, the multi-state input_file rewrite,
@@ -1999,6 +2018,7 @@ int main(int argc, char* argv[]) {
     auto& diff_output = cli.diff_output;
     auto& import_report_path = cli.import_report_path;
     auto& fail_on_unresolved = cli.fail_on_unresolved;
+    auto& fail_on_unvalidated = cli.fail_on_unvalidated;
     auto& fail_below_pct = cli.fail_below_pct;
     auto& dry_run = cli.dry_run;
     auto& include_tokens = cli.include_tokens;
@@ -2064,6 +2084,15 @@ int main(int argc, char* argv[]) {
     if (fail_below_pct >= 0.0f && reference_image.empty() &&
         !browser_html_can_supply_reference) {
         std::cerr << "Error: --fail-below requires --reference\n";
+        return 2;
+    }
+
+    // --fail-on-unvalidated gates the validation pass, so it is meaningless
+    // without one. Fail closed rather than implying --validate: implying it
+    // would force a render on every run that names the flag, and the flag is
+    // about honesty in reporting, not about turning rendering on.
+    if (fail_on_unvalidated && !validate) {
+        std::cerr << "Error: --fail-on-unvalidated requires --validate\n";
         return 2;
     }
 
@@ -3645,9 +3674,12 @@ int main(int argc, char* argv[]) {
             // drives what is printed and what is enforced.
             const float gate = fail_below_pct >= 0.0f
                 ? fail_below_pct / 100.0f : pulp::view::kDefaultSimilarityThreshold;
+            validation_result = result;
             if (result.passes(gate)) {
+                validation_outcome = ValidationOutcome::pass;
                 std::cout << "Validation: PASS\n";
             } else {
+                validation_outcome = ValidationOutcome::needs_review;
                 std::cout << "Validation: NEEDS REVIEW (similarity below "
                           << static_cast<int>(gate * 100.0f) << "%)\n";
                 // Only --fail-below turns this into a failure. Absent the flag
@@ -3672,6 +3704,19 @@ int main(int argc, char* argv[]) {
                     std::cout << "Diff image → " << actual_diff_path << "\n";
                 }
             }
+        } else {
+            // Honesty guard: without a reference there is nothing to compare
+            // the render against, so the run reached no verdict at all. Saying
+            // so is the point. Printing only "Rendered → <path>" and exiting 0
+            // read as a passing validation to every caller that checked the
+            // exit code, which is the one thing this run cannot claim.
+            validation_outcome = ValidationOutcome::skipped;
+            std::cout << "Validation: SKIPPED (no reference image)\n";
+            std::cout <<
+                "  NOTE: --validate rendered the generated JS but had nothing to compare it\n"
+                "  against, so no verdict was reached. A render is not a pass. Pass\n"
+                "  --reference <png> for a similarity verdict, or --fail-on-unvalidated to\n"
+                "  make this state exit nonzero (6) instead of looking like a success.\n";
         }
     }
 
@@ -3709,22 +3754,31 @@ int main(int argc, char* argv[]) {
         dbg << "  \"render_size\": \"" << render_width << "x" << render_height << "\",\n";
         dbg << "  \"js_bytes\": " << js.size() << ",\n";
 
-        // Validation results if available
-        if (validate && !reference_image.empty()) {
-            auto result = compare_screenshot_files(reference_image, pulp::import_design::render_artifact_path(output_file, design_name + "-" + source_lower + "-render.png"));
+        // Validation results, reported from the verdict's own comparison. This
+        // block used to re-compare against an independently recomputed render
+        // path with its own threshold expression, so one run could print NEEDS
+        // REVIEW and write "pass": true. One run, one comparison, one answer.
+        if (validate && validation_outcome != ValidationOutcome::not_run) {
+            const char* outcome_name =
+                validation_outcome == ValidationOutcome::pass ? "pass"
+                : validation_outcome == ValidationOutcome::needs_review
+                    ? "needs_review" : "skipped";
             dbg << "  \"validation\": {\n";
-            dbg << "    \"reference\": \"" << reference_image << "\",\n";
-            dbg << "    \"similarity_pct\": " << static_cast<int>(result.similarity * 100) << ",\n";
-            dbg << "    \"diff_pixels\": " << result.diff_pixels << ",\n";
-            dbg << "    \"total_pixels\": " << result.total_pixels << ",\n";
-            dbg << "    \"mean_error\": " << result.mean_error << ",\n";
-            // Same bar as the printed verdict: --fail-below when given, else the
-            // shared default. A hardcoded 0.70 here meant the debug JSON could
-            // report "pass": true for a render the very same run printed as
-            // NEEDS REVIEW — one tool, one run, two answers.
-            const float dbg_gate = fail_below_pct >= 0.0f
-                ? fail_below_pct / 100.0f : pulp::view::kDefaultSimilarityThreshold;
-            dbg << "    \"pass\": " << (result.passes(dbg_gate) ? "true" : "false") << "\n";
+            dbg << "    \"outcome\": \"" << outcome_name << "\",\n";
+            if (validation_outcome == ValidationOutcome::skipped) {
+                // A skip is not a pass. A consumer reading only "pass" has to
+                // fail closed on a run that never compared anything.
+                dbg << "    \"reason\": \"no reference image; --validate rendered without comparing\",\n";
+                dbg << "    \"pass\": false\n";
+            } else {
+                dbg << "    \"reference\": \"" << reference_image << "\",\n";
+                dbg << "    \"similarity_pct\": " << static_cast<int>(validation_result.similarity * 100) << ",\n";
+                dbg << "    \"diff_pixels\": " << validation_result.diff_pixels << ",\n";
+                dbg << "    \"total_pixels\": " << validation_result.total_pixels << ",\n";
+                dbg << "    \"mean_error\": " << validation_result.mean_error << ",\n";
+                dbg << "    \"pass\": "
+                    << (validation_outcome == ValidationOutcome::pass ? "true" : "false") << "\n";
+            }
             dbg << "  },\n";
         }
 
@@ -3762,9 +3816,15 @@ int main(int argc, char* argv[]) {
     if (browser_import_session.has_capture())
         std::cout << "Published " << output_file << "\n";
 
+    // --fail-on-unvalidated: --validate produced a render and no verdict, and
+    // the caller asked for that to be a failure rather than a quiet skip.
+    const bool unvalidated_failed =
+        fail_on_unvalidated && validation_outcome == ValidationOutcome::skipped;
+
     // Per-stage timing summary — printed only when the run is about to exit
     // successfully, so a failing import never ends on an upbeat check mark.
-    if (!fidelity_failed && !similarity_failed && report_exit == 0) {
+    if (!fidelity_failed && !similarity_failed && !unvalidated_failed &&
+        report_exit == 0) {
         std::cout << format_import_timing_line(stage_timings, timing_label,
                                                counts.nodes)
                   << "\n";
@@ -3778,5 +3838,9 @@ int main(int argc, char* argv[]) {
     // (import-time self-check) because this is a render-vs-reference verdict a
     // caller may want to triage differently.
     if (similarity_failed) return 5;
+    // --fail-on-unvalidated: the render happened, the comparison did not. A
+    // distinct code so a caller can tell "missed the bar" (5) from "never
+    // measured". 3 is already taken by the export-path error above.
+    if (unvalidated_failed) return 6;
     return report_exit;  // 0, or 2 under --fail-on-unresolved with a conflicted/inert control
 }

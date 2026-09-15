@@ -150,6 +150,17 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.insert_midi_expression_lane": Object.freeze({
+    schemaType: "pulp.timeline.command.insert_midi_expression_lane",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "lane", kind: "Object", jsType: "object", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.insert_notes": Object.freeze({
     schemaType: "pulp.timeline.command.insert_notes",
     domain: "Command",
@@ -311,6 +322,17 @@ export const timelineSchema = Object.freeze({
     fields: Object.freeze([
       Object.freeze({ name: "marker_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.remove_midi_expression_lane": Object.freeze({
+    schemaType: "pulp.timeline.command.remove_midi_expression_lane",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "lane_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
   "pulp.timeline.command.remove_notes": Object.freeze({
@@ -500,6 +522,19 @@ export const timelineSchema = Object.freeze({
     fields: Object.freeze([
       Object.freeze({ name: "expected", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "replacement", kind: "Array", jsType: "array", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.set_midi_expression_lane_points": Object.freeze({
+    schemaType: "pulp.timeline.command.set_midi_expression_lane_points",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "expected", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "lane_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "replacement", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
   "pulp.timeline.command.set_note_events": Object.freeze({
@@ -855,6 +890,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.insert_clip",
   "pulp.timeline.command.insert_device",
   "pulp.timeline.command.insert_marker",
+  "pulp.timeline.command.insert_midi_expression_lane",
   "pulp.timeline.command.insert_notes",
   "pulp.timeline.command.insert_region",
   "pulp.timeline.command.insert_scene",
@@ -871,6 +907,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.remove_clip",
   "pulp.timeline.command.remove_device",
   "pulp.timeline.command.remove_marker",
+  "pulp.timeline.command.remove_midi_expression_lane",
   "pulp.timeline.command.remove_notes",
   "pulp.timeline.command.remove_region",
   "pulp.timeline.command.remove_scene",
@@ -889,6 +926,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.set_dynamics_lane",
   "pulp.timeline.command.set_groove",
   "pulp.timeline.command.set_meter_map",
+  "pulp.timeline.command.set_midi_expression_lane_points",
   "pulp.timeline.command.set_note_events",
   "pulp.timeline.command.set_note_velocity",
   "pulp.timeline.command.set_record_arm",

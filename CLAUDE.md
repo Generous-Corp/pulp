@@ -713,7 +713,13 @@ The record is branch-local but stored in the repository's common Git config,
 so sibling worktrees can discover it and it survives worktree removal as long
 as the local branch is retained. `superseded` requires a successor; `merged`
 requires a PR unless exact-head ancestry into `origin/main` is provable; and
-`archived` records the archive SHA-256. Never remove a dirty or active worktree.
+`archived` records the archive SHA-256. A `merged` record without a PR URL is
+valid but proves less than one with it: a squash-landed head is not an
+ancestor of `origin/main`, so only the PR can prove it landed, and the build
+reaper below reads that proof from the record. Close records out with the PR
+URL, or run `tools/scripts/worktree_lineage.sh reconcile`, which derives it
+from `origin/main`'s own merge commit (zero API calls) for every registered
+worktree nobody marked. Never remove a dirty or active worktree.
 For old clean unmerged work, retain the local branch and either prove an exact
 remote ref or create and verify a complete `git bundle` before removal.
 Lineage metadata is a discovery aid, not deletion authorization: always recheck
@@ -981,6 +987,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Measure installed CLI/MCP GPU trace-analysis latency and prove both surfaces consume one sibling artifact pair. → `tools/scripts/gpu_trace_overhead_acceptance.py`
   - ⚠ **Cannot see:** Measures offline analyzer overhead only. It cannot grade trace-producer capture cost; new producer call sites require separate compile-out, idle-session, and active-capture product trials.
 - Build the visual-harness Docker image — use this, not a raw docker build. → `tools/harness/visual/docker-build.sh`
+- A `kind: render` golden mismatches and you need to know WHICH host's bytes moved. → `tools/harness/visual/raster.py`
+  - ⚠ **Cannot see:** Reports a digest and adjudicates nothing — it holds no expectation, so it can never fail. It rasterizes through the pinned skia-python wheel, NOT through `pulp::view::render_to_png`, so its bytes say nothing about what the C++ renderer draws. Without the pinned wheel it exits non-zero rather than degrading to another rasterizer.
 - Run the deterministic visual layout snapshots. → `python3 -m tools.harness.visual.runner`
 
 **audio** — prove what the audio actually did
@@ -1534,8 +1542,12 @@ tools/scripts/clean_worktree_builds.sh --yes      # delete
 
 It only considers directories `git worktree list` reports for this repository,
 and deletes only when **all five** hold: the exact head is a strict ancestor of
-current `origin/main`; the shared lineage registry records that exact head as
-merged with a PR URL; the build has been idle beyond
+current `origin/main`; the exact head is proven landed - by the shared
+lineage registry recording it `merged` with a PR URL, which is the only proof
+a squash-landed head can have (on 2026-09-13, 54 provably merged worktrees
+held 947 GB because their records were still `active`; run
+`worktree_lineage.sh reconcile` to back-fill them from `origin/main`'s merge
+commits, zero API calls); the build has been idle beyond
 `PULP_WORKTREE_BUILD_IDLE_HOURS` (default 2) across its entire tree; no live
 process names, has its cwd in, or holds an open file under the worktree; and the
 physical path/common Git directory re-pass a fresh registry check at deletion
