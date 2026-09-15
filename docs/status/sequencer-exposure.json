@@ -6717,6 +6717,75 @@
       }
     },
     {
+      "id": "sequencer-control-skill-reachability",
+      "title": "The timeline skill is compelled to carry the live sequencer control surface",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "92f55d88-47ad-4abf-898b-0ad91288b0e4",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/timeline_tests.cmake",
+        "tools/scripts/sequencer_control_skill_check.py",
+        "tools/scripts/skill_path_map.json"
+      ],
+      "evidence": [
+        {
+          "path": "tools/scripts/sequencer_control_skill_check.py",
+          "needles": [
+            "SEQUENCER_CONTRACT_PREFIX = \"dev.pulp.sequencer/\"",
+            "def sequencer_operations(root: Path):",
+            "does not document control operation",
+            "but never beside"
+          ]
+        },
+        {
+          "path": ".agents/skills/timeline/SKILL.md",
+          "needles": [
+            "## Live sequencer control operations",
+            "`dev.pulp.sequencer/state.read@1`",
+            "`dev.pulp.sequencer/state.edit@1`",
+            "pulp control capabilities"
+          ]
+        },
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "sequencer-control-skill-coverage"
+          ]
+        },
+        {
+          "path": "tools/scripts/skill_path_map.json",
+          "needles": [
+            "inspect/src/control_sequencer_state_executor.cpp",
+            "tools/scripts/sequencer_control_skill_check.py"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "No public SDK header, exported symbol, target, or install rule changes. The slice adds one repository check script, one ctest registration, one skill section, and four path-map entries; none of them is compiled into or installed with the SDK, and the sequencer transport itself remains the already-installed core/state/include/pulp/state/sequencer_state_channel.hpp owned by step-sequencer-state-channel."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Adds no `pulp seq` verb, flag, or document reader, and opens no timeline document. The operations the new check is about are live in-process control operations, whose CLI reachability is the generic `pulp control call` verb recorded under live_product_control by product-a-sequencer-state-control; this slice documents that reachability rather than creating any."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Adds no MCP tool and changes no generated Timeline MCP schema. pulp_control_sequencer_state_read and pulp_control_sequencer_state_edit are derived by the live control tool catalog from registry rows that already exist and are unchanged here."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Registers no capability, operation, executor, grant, or profile membership, and calls nothing. dev.pulp.sequencer/state.read@1 and dev.pulp.sequencer/state.edit@1 were registered by product-a-sequencer-state-control and are byte-identical here. What changes is that the fourth reader of that surface is now gated: the registry has a digest, the reference catalog has inspector_truth_check.py, and `pulp control capabilities` prints it offline, but .agents/skills/timeline/SKILL.md -- the surface an agent actually consults before touching sequencer work -- had no generator and no gate, and carried no reference to either operation. sequencer_control_skill_check.py derives every dev.pulp.sequencer/ operation from the frozen registry and fails when the skill omits one or records a result kind the registry does not declare, so it narrows what can ship agent-invisible rather than widening live authority. It refuses to pass on an empty registry read, because a check that finds no sequencer capability is reading the wrong inventory rather than reporting an absent surface."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Registers no design-time agent capability row and edits no agent-capability manifest. The agent-capabilities ledger describes offline SDK composition contracts; runtime control operations are advertised by the live control registry, which it deliberately does not mirror."
+        }
+      }
+    },
+    {
       "id": "sequencer-transport-loop-control",
       "title": "Live sequencer transport loop read and loop write over Product A",
       "classification": "live_product_control",
