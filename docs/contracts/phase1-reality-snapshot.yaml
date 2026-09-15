@@ -204,8 +204,10 @@ subsystems:
       Future phases 3, 4, 5.
       FAUST offline codegen support is real but still narrow: `core/dsl`
       contains the FAUST wrapper substrate, `tools/cmake/PulpFaust.cmake`
-      supports external regeneration, and checked-in FAUST examples/tests prove
-      the generated-C++ path. This is not yet a first-class CLI/template flow.
+      supports optional external generation, and checked-in FAUST examples/tests
+      prove Pulp-owned reference DSP classes through `FaustProcessor`. This is
+      not yet a first-class CLI/template flow or a real-compiler compatibility
+      gate.
       Cmajor now has an experimental external-toolchain lane via docs, helper,
       and a source-only example, but Pulp still does not ship the official
       Cmajor engine/runtime or a finished Processor adapter. JSFX now has an

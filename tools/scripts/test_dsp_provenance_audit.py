@@ -53,6 +53,13 @@ class DspProvenanceAuditTests(unittest.TestCase):
         path.write_text(path.read_text() + "\nchecked-in generated DSP\n")
         self.assertTrue(any("generation claim" in error for error in AUDIT.audit(root)))
 
+    def test_authoritative_module_claim_is_rejected(self) -> None:
+        root = self.fixture()
+        self.assertEqual(AUDIT.audit(root), [])
+        path = root / "docs/reference/modules.md"
+        path.write_text(path.read_text() + "\nOffline code generation into checked-in C++ headers\n")
+        self.assertTrue(any("generation claim" in error for error in AUDIT.audit(root)))
+
     def test_false_redistribution_notice_is_rejected(self) -> None:
         root = self.fixture()
         self.assertEqual(AUDIT.audit(root), [])
