@@ -11,14 +11,14 @@
 // FaustProcessor acts as both the FAUST UI builder (to reflect parameters)
 // and the Pulp Processor (to map into StateStore and process audio).
 
-#include <pulp/dsl/dsl_processor.hpp>
-#include <pulp/dsl/faust_base.hpp>
 #include <cmath>
 #include <cstring>
 #include <functional>
 #include <limits>
 #include <map>
 #include <memory>
+#include <pulp/dsl/dsl_processor.hpp>
+#include <pulp/dsl/faust_base.hpp>
 #include <string>
 #include <vector>
 
@@ -266,8 +266,7 @@ public:
     {
         int n = ctx.num_samples;
         if (n <= 0) {
-            if (output.num_samples() >
-                static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+            if (output.num_samples() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
                 output.clear();
                 return;
             }
@@ -278,9 +277,8 @@ public:
         const int num_out = bus_layout_.num_outputs;
         const auto frames = static_cast<std::size_t>(n);
         if (!prepared_ || input.num_channels() != input_ptrs_.size() ||
-            output.num_channels() != output_ptrs_.size() ||
-            n > max_block_size_ || frames > output.num_samples() ||
-            (num_in > 0 && frames > input.num_samples())) {
+            output.num_channels() != output_ptrs_.size() || n > max_block_size_ ||
+            frames > output.num_samples() || (num_in > 0 && frames > input.num_samples())) {
             output.clear();
             return;
         }

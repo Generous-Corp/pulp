@@ -31,25 +31,27 @@ namespace {
 template <int NumInputs, int NumOutputs>
 class MockFaustDsp : public dsp {
 public:
-    inline static std::atomic<int> total_compute_calls{0};
+  inline static std::atomic<int> total_compute_calls{0};
 
-    // Parameters exposed to buildUserInterface — mirror FAUST codegen
-    FAUSTFLOAT gain_{0.5f};
-    FAUSTFLOAT level_{0.0f};
-    FAUSTFLOAT mute_{0.0f};
+  // Parameters exposed to buildUserInterface — mirror FAUST codegen
+  FAUSTFLOAT gain_{0.5f};
+  FAUSTFLOAT level_{0.0f};
+  FAUSTFLOAT mute_{0.0f};
 
-    // Observed state so tests can assert against it
-    int init_calls = 0;
-    int compute_calls = 0;
-    int last_sample_rate = 0;
-    int last_compute_count = 0;
-    FAUSTFLOAT last_gain_seen = 0.0f;
-    FAUSTFLOAT last_level_seen = 0.0f;
-    std::string name = "MockSynth";
-    std::string author = "Pulp";
-    std::string version = "1.0.0";
+  // Observed state so tests can assert against it
+  int init_calls = 0;
+  int compute_calls = 0;
+  int last_sample_rate = 0;
+  int last_compute_count = 0;
+  FAUSTFLOAT last_gain_seen = 0.0f;
+  FAUSTFLOAT last_level_seen = 0.0f;
+  std::string name = "MockSynth";
+  std::string author = "Pulp";
+  std::string version = "1.0.0";
 
-    int getNumInputs() override { return NumInputs; }
+  int getNumInputs() override {
+      return NumInputs;
+  }
     int getNumOutputs() override { return NumOutputs; }
     int getSampleRate() override { return last_sample_rate; }
 
@@ -543,17 +545,15 @@ TEST_CASE("FaustProcessor renders accepted ordinary and maximum prepared shapes 
     proc.prepare({48000.0, kMaximumFrames, kMaximumChannels, kMaximumChannels});
 
     auto render = [&](int frames) {
-        pulp::audio::Buffer<float> input(kMaximumChannels,
-                                         static_cast<std::size_t>(frames));
-        pulp::audio::Buffer<float> output(kMaximumChannels,
-                                          static_cast<std::size_t>(frames));
+        pulp::audio::Buffer<float> input(kMaximumChannels, static_cast<std::size_t>(frames));
+        pulp::audio::Buffer<float> output(kMaximumChannels, static_cast<std::size_t>(frames));
         std::vector<const float*> input_ptrs(kMaximumChannels);
         for (int channel = 0; channel < kMaximumChannels; ++channel) {
             input_ptrs[static_cast<std::size_t>(channel)] =
                 input.channel(static_cast<std::size_t>(channel)).data();
         }
-        pulp::audio::BufferView<const float> input_view(
-            input_ptrs.data(), input_ptrs.size(), static_cast<std::size_t>(frames));
+        pulp::audio::BufferView<const float> input_view(input_ptrs.data(), input_ptrs.size(),
+                                                        static_cast<std::size_t>(frames));
         auto output_view = output.view();
         pulp::midi::MidiBuffer midi_in, midi_out;
         pulp::format::ProcessContext context;
@@ -578,11 +578,9 @@ TEST_CASE("FaustProcessor fails closed for unprepared and mismatched runtime sha
           "[dsl][faust-processor][process][rt-safety][negative]") {
     using ShapeDsp = MockFaustDsp<2, 2>;
 
-    auto check_refusal = [](int input_channels, int input_frames,
-                            int output_channels, int output_frames,
-                            int process_frames, bool prepare,
-                            int prepared_inputs = 2,
-                            int prepared_outputs = 2) {
+    auto check_refusal = [](int input_channels, int input_frames, int output_channels,
+                            int output_frames, int process_frames, bool prepare,
+                            int prepared_inputs = 2, int prepared_outputs = 2) {
         pulp::dsl::FaustProcessor<ShapeDsp> proc;
         pulp::state::StateStore store;
         proc.set_state_store(&store);
@@ -591,12 +589,10 @@ TEST_CASE("FaustProcessor fails closed for unprepared and mismatched runtime sha
             proc.prepare({48000.0, 64, prepared_inputs, prepared_outputs});
         }
 
-        pulp::audio::Buffer<float> input(
-            static_cast<std::size_t>(input_channels),
-            static_cast<std::size_t>(input_frames));
-        pulp::audio::Buffer<float> output(
-            static_cast<std::size_t>(output_channels),
-            static_cast<std::size_t>(output_frames));
+        pulp::audio::Buffer<float> input(static_cast<std::size_t>(input_channels),
+                                         static_cast<std::size_t>(input_frames));
+        pulp::audio::Buffer<float> output(static_cast<std::size_t>(output_channels),
+                                          static_cast<std::size_t>(output_frames));
         for (int channel = 0; channel < output_channels; ++channel) {
             std::fill(output.channel(static_cast<std::size_t>(channel)).begin(),
                       output.channel(static_cast<std::size_t>(channel)).end(), 0.75f);
@@ -606,21 +602,19 @@ TEST_CASE("FaustProcessor fails closed for unprepared and mismatched runtime sha
             input_ptrs[static_cast<std::size_t>(channel)] =
                 input.channel(static_cast<std::size_t>(channel)).data();
         }
-        pulp::audio::BufferView<const float> input_view(
-            input_ptrs.data(), input_ptrs.size(), static_cast<std::size_t>(input_frames));
+        pulp::audio::BufferView<const float> input_view(input_ptrs.data(), input_ptrs.size(),
+                                                        static_cast<std::size_t>(input_frames));
         auto output_view = output.view();
         pulp::midi::MidiBuffer midi_in, midi_out;
         pulp::format::ProcessContext context;
         context.num_samples = process_frames;
-        const int calls_before =
-            ShapeDsp::total_compute_calls.load(std::memory_order_relaxed);
+        const int calls_before = ShapeDsp::total_compute_calls.load(std::memory_order_relaxed);
         {
             pulp::test::ScopedRtProcessProbe probe;
             proc.process(output_view, input_view, midi_in, midi_out, context);
             REQUIRE(probe.allocation_count() == 0);
         }
-        REQUIRE(ShapeDsp::total_compute_calls.load(std::memory_order_relaxed) ==
-                calls_before);
+        REQUIRE(ShapeDsp::total_compute_calls.load(std::memory_order_relaxed) == calls_before);
         for (int channel = 0; channel < output_channels; ++channel) {
             for (float sample : output.channel(static_cast<std::size_t>(channel))) {
                 REQUIRE(sample == 0.0f);
