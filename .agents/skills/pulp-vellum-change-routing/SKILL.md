@@ -186,10 +186,18 @@ so regenerating without it leaves a second gate red for the next reader.
 
 `gpu_recipe_catalog.py` will not catch that omission. It validates the ledger's
 own identities and reports `OK` while the receipt still names the previous
-ledger bytes, so the check recommended above is green in exactly the state this
-paragraph warns about. Prove the receipt separately — re-run `write --receipt`
-and confirm it rewrites nothing, or compare the receipt's `handoff_sha256`
-against `shasum -a 256 docs/status/gpu-vellum-handoff.yaml`.
+ledger bytes. `gpu_handoff_provenance.py check` **does** catch it now: it binds
+the published receipt to the ledger's bytes (sha256 + canonical paths, no git,
+no currency claim), prints a `RECEIPT …` line and exits 1 when they disagree,
+and says `receipt: none at …; binding not checked` out loud when there is no
+receipt to bind. It used to exit 0 on exactly the state this paragraph warns
+about, while the selftest that would have caught it
+(`test_published_receipt_binds_the_checked_in_ledger`) is opt-in behind
+`PULP_GPU_HANDOFF_REQUIRE_CURRENT=1` — deliberately, because currency at HEAD
+would go red on every unrelated PR — so a "36 tests, OK" run proved nothing
+about the receipt. Read the RECEIPT line, or `--json` and the `receipt.state`
+field (`bound` / `stale` / `absent`); do not infer binding from a green
+selftest.
 
 `check` names each stale row, its path, and the field-level correction, so a
 drifted pin no longer has to be located by hand. `write` derives `revision`,
