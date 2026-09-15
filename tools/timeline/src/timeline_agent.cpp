@@ -105,8 +105,12 @@ std::string_view compile_error_code_name(playback::CompileErrorCode code) noexce
         return "NestedActiveTakeUnsupported";
     case playback::CompileErrorCode::NestedDeviceChainUnsupported:
         return "NestedDeviceChainUnsupported";
-    case playback::CompileErrorCode::NestedAutomationLaneUnsupported:
-        return "NestedAutomationLaneUnsupported";
+    case playback::CompileErrorCode::NestedAutomationPanUnsupported:
+        return "NestedAutomationPanUnsupported";
+    case playback::CompileErrorCode::NestedAutomationGainEventLeafUnsupported:
+        return "NestedAutomationGainEventLeafUnsupported";
+    case playback::CompileErrorCode::NestedAutomationGainMediaUnsupported:
+        return "NestedAutomationGainMediaUnsupported";
     case playback::CompileErrorCode::NestedConformedTrimUnsupported:
         return "NestedConformedTrimUnsupported";
     case playback::CompileErrorCode::NestedAbsoluteChildUnsupported:

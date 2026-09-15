@@ -742,6 +742,27 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement_bits", SchemaValueKind::U32},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
+    // A route carries the whole connection on the wire, referencing the
+    // document schema that already spells one, so a command and a document
+    // never disagree about what a route is -- including its bypass, which is a
+    // value an edit states rather than a state an edit discards.
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_modulation_route", SchemaDomain::Command,
+                {{"route", SchemaValueKind::Object, true, "pulp.timeline.modulation_route"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_modulation_route",
+                              SchemaDomain::Command,
+                              {{"route_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_modulation_route", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, true, "pulp.timeline.modulation_route"},
+                 {"replacement", SchemaValueKind::Object, true, "pulp.timeline.modulation_route"},
+                 {"route_id", SchemaValueKind::U64String},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.insert_scene", SchemaDomain::Command,
                               {{"before_scene_id", SchemaValueKind::U64String, false},
                                {"scene", SchemaValueKind::Object, true, "pulp.timeline.scene"},

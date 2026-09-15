@@ -27,14 +27,18 @@ template <typename T>
 inline constexpr bool is_automation_command_type =
     claimed_by<T, InsertAutomationLane, RemoveAutomationLane>;
 
-// Modulation sources and macros are track-owned, but they are not track state:
-// a rename or a mixer move replaces a value the track always has, while these
-// are collections whose membership changes, so they carry identity transitions
-// that the track-state family has no shell for.
+// Modulation sources, macros, and the routes that connect them are track-owned,
+// but they are not track state: a rename or a mixer move replaces a value the
+// track always has, while these are collections whose membership changes, so
+// they carry identity transitions that the track-state family has no shell for.
+// The routes share this family rather than starting one because a route is
+// refused or admitted by the same whole-track revalidation its sources are, and
+// two families would mean two statements of one ownership rule.
 template <typename T>
 inline constexpr bool is_modulation_command_type =
     claimed_by<T, InsertModulator, RemoveModulator, SetModulator, InsertMacro, RemoveMacro,
-               SetMacro, SetMacroValue>;
+               SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,
+               SetModulationRoute>;
 
 template <typename T>
 inline constexpr bool is_take_command_type =

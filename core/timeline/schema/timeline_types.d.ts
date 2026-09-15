@@ -122,6 +122,13 @@ export interface PulpTimelineCommandInsertMidiExpressionLane {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.insert_modulation_route` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertModulationRoute {
+  route: PulpTimelineModulationRoute;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.command.insert_modulator` — domain Command, schema version 1. */
 export interface PulpTimelineCommandInsertModulator {
   modulator: PulpTimelineModulator;
@@ -255,6 +262,13 @@ export interface PulpTimelineCommandRemoveMarker {
 export interface PulpTimelineCommandRemoveMidiExpressionLane {
   clip_id: number | string;
   lane_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_modulation_route` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveModulationRoute {
+  route_id: number | string;
   sequence_id: number | string;
   track_id: number | string;
 }
@@ -425,6 +439,15 @@ export interface PulpTimelineCommandSetMidiExpressionLanePoints {
   expected: readonly unknown[];
   lane_id: number | string;
   replacement: readonly unknown[];
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_modulation_route` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetModulationRoute {
+  expected: PulpTimelineModulationRoute;
+  replacement: PulpTimelineModulationRoute;
+  route_id: number | string;
   sequence_id: number | string;
   track_id: number | string;
 }
@@ -728,6 +751,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.insert_macro"
   | "pulp.timeline.command.insert_marker"
   | "pulp.timeline.command.insert_midi_expression_lane"
+  | "pulp.timeline.command.insert_modulation_route"
   | "pulp.timeline.command.insert_modulator"
   | "pulp.timeline.command.insert_notes"
   | "pulp.timeline.command.insert_region"
@@ -747,6 +771,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.remove_macro"
   | "pulp.timeline.command.remove_marker"
   | "pulp.timeline.command.remove_midi_expression_lane"
+  | "pulp.timeline.command.remove_modulation_route"
   | "pulp.timeline.command.remove_modulator"
   | "pulp.timeline.command.remove_notes"
   | "pulp.timeline.command.remove_region"
@@ -769,6 +794,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_macro_value"
   | "pulp.timeline.command.set_meter_map"
   | "pulp.timeline.command.set_midi_expression_lane_points"
+  | "pulp.timeline.command.set_modulation_route"
   | "pulp.timeline.command.set_modulator"
   | "pulp.timeline.command.set_note_events"
   | "pulp.timeline.command.set_note_velocity"
@@ -819,6 +845,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.insert_macro": PulpTimelineCommandInsertMacro;
   "pulp.timeline.command.insert_marker": PulpTimelineCommandInsertMarker;
   "pulp.timeline.command.insert_midi_expression_lane": PulpTimelineCommandInsertMidiExpressionLane;
+  "pulp.timeline.command.insert_modulation_route": PulpTimelineCommandInsertModulationRoute;
   "pulp.timeline.command.insert_modulator": PulpTimelineCommandInsertModulator;
   "pulp.timeline.command.insert_notes": PulpTimelineCommandInsertNotes;
   "pulp.timeline.command.insert_region": PulpTimelineCommandInsertRegion;
@@ -838,6 +865,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.remove_macro": PulpTimelineCommandRemoveMacro;
   "pulp.timeline.command.remove_marker": PulpTimelineCommandRemoveMarker;
   "pulp.timeline.command.remove_midi_expression_lane": PulpTimelineCommandRemoveMidiExpressionLane;
+  "pulp.timeline.command.remove_modulation_route": PulpTimelineCommandRemoveModulationRoute;
   "pulp.timeline.command.remove_modulator": PulpTimelineCommandRemoveModulator;
   "pulp.timeline.command.remove_notes": PulpTimelineCommandRemoveNotes;
   "pulp.timeline.command.remove_region": PulpTimelineCommandRemoveRegion;
@@ -860,6 +888,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_macro_value": PulpTimelineCommandSetMacroValue;
   "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
   "pulp.timeline.command.set_midi_expression_lane_points": PulpTimelineCommandSetMidiExpressionLanePoints;
+  "pulp.timeline.command.set_modulation_route": PulpTimelineCommandSetModulationRoute;
   "pulp.timeline.command.set_modulator": PulpTimelineCommandSetModulator;
   "pulp.timeline.command.set_note_events": PulpTimelineCommandSetNoteEvents;
   "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;
