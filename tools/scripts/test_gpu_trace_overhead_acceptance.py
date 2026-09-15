@@ -1087,6 +1087,36 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.a2t_scope_inventory(Path("/repo"), "HEAD")
 
+    def test_scope_touching_history_keeps_headroom_under_its_limit(self):
+        """The bounded-history limit must be raised before traffic reaches it.
+
+        The count this guards is a property of repository history, not of the
+        contract: the scope covers shared paths that unrelated changes touch, so
+        it climbs whether or not anything GPU-related happens. When it reaches
+        the limit the resulting failure points away from the cause -- a merge ref
+        carries one scope-touching commit more than the main it merges, so main
+        keeps passing at the limit while every pull request fails at once. This
+        fails first, and while there is still room to act.
+        """
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        headroom = MODULE.a2t_scope_history_headroom(ROOT, head)
+        # Positive control: a shallow or disconnected checkout walks to zero, and
+        # a zero would satisfy the bound below while proving nothing ran.
+        self.assertGreater(
+            headroom["count"], 0,
+            "scope-touching walk returned no revisions: the checkout has no "
+            "connected history, so this guard measured nothing",
+        )
+        self.assertLessEqual(
+            headroom["count"], headroom["budget"],
+            f"A2T scope-touching history is at {headroom['count']} revisions of "
+            f"a {headroom['limit']} limit, past the "
+            f"{MODULE.A2T_SCOPE_HISTORY_HEADROOM_RATIO:.0%} mark. Raise "
+            "A2T_SCOPE_HISTORY_LIMIT in gpu_trace_overhead_acceptance.py, and "
+            "re-measure the verifier's row in test_ctest_measured_budgets.py "
+            "first: the walk costs about 49ms a revision and the suite runs four.",
+        )
+
     def test_scope_manifest_matches_authoritative_current_path_contract(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
         manifest = MODULE._load_a2t_scope_manifest(ROOT, head)

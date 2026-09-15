@@ -119,6 +119,34 @@ A2T_ANALYZER_SOURCE_PATHS = {
 A2T_SCOPE_MANIFEST_PATH = "tools/scripts/gpu_trace_overhead_scope.json"
 A2T_SCOPE_BASE = "d694994433aec73396caffd8bb10bdc77e15379f"
 A2T_INTEGRATED_PATCH_EQUIVALENT = "bc1cfaa0aacc881da4c3753ca9d3862f55b571c9"
+
+# How many scope-touching revisions the base-to-source walk may carry. This only
+# keeps the per-revision work finite; it says nothing about whether the scope is
+# right. The distinction matters because the count it bounds is a property of
+# repository history, not of this contract: the 63 scope paths include shared
+# surfaces -- docs/reference/cli.md, docs/status/cli-commands.yaml,
+# docs/status/gpu-vellum-handoff.yaml -- that ordinary unrelated changes touch, so
+# the count climbs on its own. It was 50 when the scope was pinned on 2026-08-29
+# and 128 by 2026-09-15, roughly 4.6 a day.
+#
+# A limit sized to the count of the day is therefore a fuse, and it burns down
+# quietly. At 128 it took seventeen days, and the failure it produced pointed away
+# from the cause: main sits AT the limit and still passes, while every pull request
+# fails, because a merge ref adds its own scope-touching commit on top of an
+# already-full main. That reads as unrelated branches breaking one GPU test.
+# a2t_scope_history_headroom() is the warning this lacked -- it fails while there
+# is still room, naming this constant, rather than letting the limit be discovered
+# by every open pull request at once.
+#
+# The ceiling above it is cost, not correctness: the walk runs about 49ms a
+# revision and the suite drives four of them, so the measured ctest budget in
+# test_ctest_measured_budgets.py must be re-measured before raising this much
+# further.
+A2T_SCOPE_HISTORY_LIMIT = 512
+
+# The share of the limit that may be consumed before the headroom guard fails,
+# chosen so the remaining room is months of ordinary traffic rather than days.
+A2T_SCOPE_HISTORY_HEADROOM_RATIO = 0.75
 A2T_SEMANTIC_IDENTIFIERS = (
     "pulp.trace-gpu-analysis.v1",
     "pulp_gpu_startup_breakdown",
@@ -3390,7 +3418,7 @@ def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any
         cwd=repository, check=False, capture_output=True, text=True,
     )
     revisions = history.stdout.splitlines() if history.returncode == 0 else []
-    if not revisions or len(revisions) > 128 or any(
+    if not revisions or len(revisions) > A2T_SCOPE_HISTORY_LIMIT or any(
         not valid_lower_hex(revision, 40) for revision in revisions
     ):
         raise ValueError("cannot derive bounded A2T scope-touching history")
@@ -3435,6 +3463,35 @@ def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any
         "a2t_scoped_producer_paths": producer_paths,
         "no_a2t_scoped_producer_delta": not producer_paths,
         "non_a2t_product_producers": external_producers,
+    }
+
+
+
+def a2t_scope_history_headroom(
+    repository: Path, source_revision: str
+) -> dict[str, Any]:
+    """Report the scope-touching revision count against its bounded limit.
+
+    Exposed as a value rather than left inside a2t_scope_inventory so the limit
+    can be checked without walking every revision to rebuild the inventory.
+    """
+    manifest = _load_a2t_scope_manifest(repository, source_revision)
+    completed = subprocess.run(
+        [
+            "git", "rev-list", "--first-parent",
+            f"{manifest['base_revision']}..{source_revision}",
+            "--", *manifest["scope_paths"],
+        ],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if completed.returncode != 0:
+        raise ValueError("cannot walk A2T scope-touching history")
+    count = len(completed.stdout.splitlines())
+    return {
+        "count": count,
+        "limit": A2T_SCOPE_HISTORY_LIMIT,
+        "headroom": A2T_SCOPE_HISTORY_LIMIT - count,
+        "budget": int(A2T_SCOPE_HISTORY_LIMIT * A2T_SCOPE_HISTORY_HEADROOM_RATIO),
     }
 
 
