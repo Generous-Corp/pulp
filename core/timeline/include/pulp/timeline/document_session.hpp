@@ -239,6 +239,12 @@ template <class T> constexpr CommandAuthority command_authority_of() noexcept {
         return {Class::Automation, Intent::Modify};
     else if constexpr (std::is_same_v<T, SetMacroValue>)
         return {Class::Automation, Intent::Modify};
+    else if constexpr (std::is_same_v<T, InsertModulationRoute>)
+        return {Class::Automation, Intent::Create};
+    else if constexpr (std::is_same_v<T, RemoveModulationRoute>)
+        return {Class::Automation, Intent::Remove};
+    else if constexpr (std::is_same_v<T, SetModulationRoute>)
+        return {Class::Automation, Intent::Modify};
     else if constexpr (std::is_same_v<T, CreateAsset>)
         return {Class::Asset, Intent::Create};
     else if constexpr (std::is_same_v<T, RemoveAsset>)
