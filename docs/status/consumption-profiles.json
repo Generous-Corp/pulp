@@ -35,14 +35,14 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "ON"
+        "PULP_BUILD_EXAMPLES": "OFF"
       },
       "summary": {
         "installed_target_count": 70,
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 94,
+            "closure_node_count": 91,
             "public_header_count": 73
           },
           {
@@ -53,11 +53,6 @@
           {
             "exported_as": "Pulp::inspect-offline-runtime",
             "closure_node_count": 84,
-            "public_header_count": 73
-          },
-          {
-            "exported_as": "Pulp::inspect",
-            "closure_node_count": 83,
             "public_header_count": 73
           },
           {
@@ -76,14 +71,19 @@
             "public_header_count": 136
           },
           {
-            "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 81,
-            "public_header_count": 73
-          },
-          {
             "exported_as": "Pulp::format-view",
             "closure_node_count": 80,
             "public_header_count": 136
+          },
+          {
+            "exported_as": "Pulp::inspect",
+            "closure_node_count": 80,
+            "public_header_count": 73
+          },
+          {
+            "exported_as": "Pulp::inspect-ui-runtime",
+            "closure_node_count": 78,
+            "public_header_count": 73
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
@@ -141,11 +141,6 @@
             "public_header_count": 3
           },
           {
-            "exported_as": "Pulp::inspect-runtime",
-            "closure_node_count": 39,
-            "public_header_count": 73
-          },
-          {
             "exported_as": "Pulp::format-core",
             "closure_node_count": 38,
             "public_header_count": 136
@@ -174,6 +169,11 @@
             "exported_as": "Pulp::audio",
             "closure_node_count": 32,
             "public_header_count": 113
+          },
+          {
+            "exported_as": "Pulp::inspect-runtime",
+            "closure_node_count": 26,
+            "public_header_count": 73
           },
           {
             "exported_as": "Pulp::inspect-client",
@@ -1916,7 +1916,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 83,
+            "node_count": 80,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -1926,15 +1926,12 @@
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
-              "pulp-playback",
               "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
-              "pulp-timeline",
-              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -2462,22 +2459,14 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 39,
+            "node_count": 26,
             "pulp_targets": [
-              "pulp-audio",
               "pulp-events",
               "pulp-foundation",
-              "pulp-midi",
-              "pulp-music",
               "pulp-platform",
-              "pulp-playback",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
-              "pulp-signal",
               "pulp-state",
-              "pulp-timebase",
-              "pulp-timeline",
-              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
@@ -2495,7 +2484,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 24,
+            "count": 19,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -2512,13 +2501,8 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
-              "Accelerate",
-              "AudioToolbox",
               "Cocoa",
-              "CoreAudio",
-              "CoreBluetooth",
               "CoreFoundation",
-              "CoreMIDI",
               "CoreServices",
               "Foundation",
               "Security",
@@ -2540,9 +2524,7 @@
             "pulp-events",
             "pulp-inspect-control",
             "pulp-inspect-protocol",
-            "pulp-playback",
             "pulp-state",
-            "pulp-timeline-editor",
             "pulp-tool-gpu-health-model"
           ]
         },
@@ -2677,7 +2659,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 94,
+            "node_count": 91,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -2692,15 +2674,12 @@
               "pulp-music",
               "pulp-native-components",
               "pulp-platform",
-              "pulp-playback",
               "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
-              "pulp-timeline",
-              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -2962,7 +2941,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 81,
+            "node_count": 78,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -2972,15 +2951,12 @@
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
-              "pulp-playback",
               "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
               "pulp-signal",
               "pulp-state",
               "pulp-timebase",
-              "pulp-timeline",
-              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",

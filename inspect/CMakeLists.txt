@@ -278,6 +278,7 @@ target_sources(pulp-inspect PRIVATE
     src/audio_inspector.cpp
     src/domain_handler.cpp
     src/domain_handler_capture.cpp
+    src/domain_handler_render.cpp
     src/domain_handler_inspector.cpp
     src/domain_runtime.cpp
     src/editor_url.cpp

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260914-pr8343-scrollview-offset-bridge-watch",
+  "created_at": "2026-09-14T19:59:07Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record a programmatic scroll-offset route for a ScrollView a scripted UI already owns. A script could create a ScrollView and size its content but could not move it, so keyboard paging, scroll-into-view and restoring a saved position had no route and had to be hand-rolled in React by carrying the offset through component state and re-applying the captured document on every input sample. The change registers scrollTo(id, x, y) and scrollBy(id, dx, dy, animate?) in the widget_value bridge group beside the existing setScrollContentSize, reusing its wrapper-or-widget resolution and delegating to ScrollView::set_scroll and ScrollView::scroll_by, and routes scrollTop / scrollLeft props to them from the React prop applier. animate defaults true for these programmatic jumps, the opposite of the wheel path. It also documents at the definition site that prop application returns silently when a bridge verb is absent and adds callRequired as the opt-out for verbs whose absence is a defect rather than a withheld capability; scrollTo deliberately keeps the silent route so an older host degrades instead of tearing down a tree mid-render. Native wheel, trackpad and scrollbar-drag scrolling are untouched, as is capability gating. No render surface abstraction, no Skia or Dawn backend, no asset pipeline, and no captured or serialized output changes. This touches no accepted expansion boundary and no Vellum source authority, so the disposition is watch-only.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch",
+    "test/test_widget_bridge.cpp",
+    "packages/pulp-react/test/prop-applier-scroll-offset.test.ts",
+    "packages/pulp-react/test/prop-applier-required-verb.test.ts"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
