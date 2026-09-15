@@ -6736,7 +6736,7 @@
             "SEQUENCER_CONTRACT_PREFIX = \"dev.pulp.sequencer/\"",
             "def sequencer_operations(root: Path):",
             "does not document control operation",
-            "without its"
+            "but never beside"
           ]
         },
         {
