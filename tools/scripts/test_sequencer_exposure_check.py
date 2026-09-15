@@ -16,6 +16,7 @@ from sequencer_exposure_check import (
     LEDGER_ROWS_DIR,
     LEDGER_TOMBSTONES_DIR,
     _ancestry_problem,
+    _exclusively_owned_paths,
     _load_base_transition,
     _load_base_transition_with_receipt,
     _load_sequencer_trailers,
@@ -37,6 +38,13 @@ from sequencer_exposure_check import (
 
 SHA_A = "1" * 40
 SHA_B = "2" * 40
+
+# Manifests the repository compels unrelated slices to append to: registering a
+# skill's paths is the Skill Maintenance Rule, not a sequencer delivery. A row
+# that owns one whole turns a routine registration into a required-gate failure.
+SHARED_REGISTRATION_MANIFESTS = {
+    "tools/scripts/skill_path_map.json",
+}
 
 _CHECK_TALLY = {"clean": 0, "calibrated": 0}
 
@@ -1184,6 +1192,34 @@ def main() -> int:
                 f"published tombstone rewrite unexpectedly passed: {transition_errors}"
             )
 
+    # The shipped ledger must not annex a shared registration manifest. Every
+    # slice that registers a skill appends to skill_path_map.json, so a row that
+    # owns it whole makes the gate reject unrelated work; a row that only proves
+    # its own lines there lists it as evidence, which is how these manifests are
+    # already governed. The control is the real ledger rather than a fixture,
+    # because the failure mode is a row landing in the checked-in file.
+    shipped_ledger = json.loads(
+        (Path(__file__).resolve().parents[2] / "docs/status/sequencer-exposure.json")
+        .read_text(encoding="utf-8")
+    )
+    watched = _exclusively_owned_paths(shipped_ledger, shipped_ledger)
+    if not watched:
+        raise AssertionError(
+            "shipped ledger watched no path at all; the annexation control is blind"
+        )
+    annexed_registries = sorted(SHARED_REGISTRATION_MANIFESTS & watched)
+    if annexed_registries:
+        raise AssertionError(
+            "shipped ledger annexes a shared registration manifest, so every "
+            "unrelated PR touching it fails this gate; list it as evidence "
+            f"instead of owned_paths: {annexed_registries}"
+        )
+    unwatched_registries = sorted(SHARED_REGISTRATION_MANIFESTS - watched)
+    if unwatched_registries != sorted(SHARED_REGISTRATION_MANIFESTS):
+        raise AssertionError(
+            "shared registration manifest control is inconsistent: "
+            f"{unwatched_registries}"
+        )
 
     # ── The ledger is carried as one file per row ────────────────────────────
     # A single document has one append point, so two branches that each add a

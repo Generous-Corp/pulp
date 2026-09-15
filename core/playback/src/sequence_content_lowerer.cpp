@@ -144,6 +144,14 @@ std::int64_t groove_timing_reach(const timeline::GrooveTemplate& groove) noexcep
 ///
 /// And a composed gain that has nowhere to land is refused rather than dropped
 /// (`NestedGainSinkUnsupported`): see `consumes_clip_gain`.
+///
+/// A child track's *automated* gain does not compose at all, because a curve
+/// has no scalar to fold into. It travels to the leaf as the bare fact that one
+/// exists, and is refused there by the leaf's own kind: a leaf that reads no
+/// clip gain raises `NestedAutomationGainEventLeafUnsupported`, and one that
+/// does raises `NestedAutomationGainMediaUnsupported` because the field it
+/// reads is a single scalar. An automated pan needs no leaf to decide it and is
+/// refused on entry to the child track (`NestedAutomationPanUnsupported`).
 class SequenceContentLowerer::Impl {
   public:
     Impl(const timeline::Project& project, const timebase::CompiledTempoMap& tempo_map,
@@ -251,7 +259,7 @@ class SequenceContentLowerer::Impl {
         auto appended = append(std::move(sentinel).value(), clip.id());
         if (appended.error)
             return appended;
-        push_reference(clip, *reference, 1, 1.0f, {}, clip, 0);
+        push_reference(clip, *reference, 1, 1.0f, false, {}, clip, 0);
         return {};
     }
 
@@ -270,6 +278,15 @@ class SequenceContentLowerer::Impl {
         // The fader of the child track currently being walked, set once when
         // the walk enters it.
         float track_gain = 1.0f;
+        // Whether any enclosing child track automates its gain, down to but
+        // excluding the track being walked. A curve cannot fold into the
+        // scalar the gain product folds into, so this travels as the bare fact
+        // that one exists and is answered at the leaf, where the leaf's own
+        // kind decides which refusal applies.
+        bool inherited_gain_automation = false;
+        // Whether the child track currently being walked automates its gain,
+        // set once when the walk enters it.
+        bool track_gain_automation = false;
         // Every enclosing placement's fade ramps, this frame's own included,
         // already carried into the owner timeline's ticks. Each level appends;
         // nothing folds, because ramps of different shapes have no common
@@ -372,7 +389,7 @@ class SequenceContentLowerer::Impl {
     /// onto the stack is the trimmed, re-placed one whose fades have already
     /// been lifted out of it and into the ramp list.
     void push_reference(const timeline::Clip& placement, const timeline::SequenceRef& reference,
-                        std::size_t depth, float inherited_gain,
+                        std::size_t depth, float inherited_gain, bool inherited_gain_automation,
                         std::vector<LoweredPlacementFade> placement_fades,
                         const timeline::Clip& authored_placement, std::int64_t translation) {
         append_placement_fades(placement_fades, authored_placement, translation);
@@ -380,6 +397,7 @@ class SequenceContentLowerer::Impl {
             placement, reference, project_.find_sequence(reference.sequence_id),
             reference.source_start + timebase::TickDuration{placement.duration().value}, depth});
         frame.inherited_gain = inherited_gain * placement.playback_properties().gain_linear;
+        frame.inherited_gain_automation = inherited_gain_automation;
         frame.placement_fades = std::move(placement_fades);
     }
 
@@ -398,9 +416,29 @@ class SequenceContentLowerer::Impl {
             if (!track.device_chain().empty())
                 return {.error = SequenceLoweringError{
                             CompileErrorCode::NestedDeviceChainUnsupported, track.id()}};
-            if (!track.automation_lanes().empty())
-                return {.error = SequenceLoweringError{
-                            CompileErrorCode::NestedAutomationLaneUnsupported, track.id()}};
+            // The chain is empty by the guard above, and Track::create rejects
+            // a lane whose device placement is absent from that chain, so every
+            // lane reaching this walk targets the track's own mixer. Pan is
+            // refused outright: no leaf carries a stereo placement at any
+            // level, so no leaf kind can change the answer. Gain travels to the
+            // leaf instead, because there the leaf's own kind decides whether
+            // the sink is merely a scalar or absent altogether, and those are
+            // separately closable.
+            bool gain_automation = false;
+            for (const auto& lane : track.automation_lanes()) {
+                const auto* mixer_target = std::get_if<timeline::TrackMixerTarget>(&lane.target());
+                if (!mixer_target)
+                    return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                           lane.id()}};
+                switch (mixer_target->parameter) {
+                case timeline::TrackMixerParameter::Pan:
+                    return {.error = SequenceLoweringError{
+                                CompileErrorCode::NestedAutomationPanUnsupported, track.id()}};
+                case timeline::TrackMixerParameter::Gain:
+                    gain_automation = true;
+                    break;
+                }
+            }
             // Freeze and an active take lane are the two states that replace a
             // track's arrangement with something else. begin_track honours that
             // replacement by returning Freeze or ActiveTake content and
@@ -433,8 +471,11 @@ class SequenceContentLowerer::Impl {
                             SequenceLoweringError{CompileErrorCode::InvalidStructure, track.id()}};
             // The fader enters the product instead of being refused; it leaves
             // the product again when the walk moves to the next track, because
-            // this assignment runs once per track entry.
+            // this assignment runs once per track entry. The gain curve travels
+            // beside it as a bare fact rather than a value, for want of a scalar
+            // it could fold into.
             frame.track_gain = mixer.gain_linear;
+            frame.track_gain_automation = gain_automation;
         }
         if (frame.clip_index == track.clips().size()) {
             ++frame.track_index;
@@ -468,6 +509,11 @@ class SequenceContentLowerer::Impl {
         const auto right_trim = child.end().value - clipped_end.value;
         // Everything the nesting adds on top of this leaf's own authored gain.
         const auto composed_gain = frame.inherited_gain * frame.track_gain;
+        // Whether any level of the nesting reaching this leaf automates gain.
+        // Scalars compose by multiplying; curves cannot, so this composes by
+        // disjunction and is answered once, here, where the leaf kind is known.
+        const auto composed_gain_automation =
+            frame.inherited_gain_automation || frame.track_gain_automation;
         // A conforming clip maps its complete authored source span onto its
         // musical placement. The legacy nested-trim path below advances a raw
         // source-frame offset from elapsed timeline samples, which is only
@@ -511,13 +557,25 @@ class SequenceContentLowerer::Impl {
             if (auto charged = charge_reference(child.id()); charged.error)
                 return charged;
             push_reference(nested_clip.value(), reference, depth, composed_gain,
-                           frame.placement_fades, child, target_start.value - clipped_start.value);
+                           composed_gain_automation, frame.placement_fades, child,
+                           target_start.value - clipped_start.value);
             return {};
         }
 
         if (composed_gain != 1.0f && !consumes_clip_gain(child.content()))
             return {.error = SequenceLoweringError{CompileErrorCode::NestedGainSinkUnsupported,
                                                    child.id()}};
+        // A gain curve somewhere above this leaf. The two ways it fails are
+        // different constructs and close separately, so each names its own
+        // code: a leaf that reads no clip gain needs a renderer that scales it
+        // before any envelope would matter, while a leaf that does read clip
+        // gain needs only that the field it reads stop being a single scalar.
+        if (composed_gain_automation)
+            return {.error = SequenceLoweringError{
+                        consumes_clip_gain(child.content())
+                            ? CompileErrorCode::NestedAutomationGainMediaUnsupported
+                            : CompileErrorCode::NestedAutomationGainEventLeafUnsupported,
+                        child.id()}};
         // Only the ramps this leaf lies within travel with it. One the leaf
         // sits wholly past reads unity for its whole extent, and a leaf that
         // never meets a ramp is a leaf that need not know one exists.
