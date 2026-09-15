@@ -8073,6 +8073,7 @@
         "docs/status/agent-capability-surface.json",
         "docs/status/sequencer-exposure.json",
         "test/test_timeline_nesting_playback.cpp",
+        "tools/agent-capabilities/contract-history.json",
         "tools/scripts/agent_capability_manifest.py",
         "tools/scripts/agent_capability_registry.py",
         "tools/scripts/negative_capability_allowlist.json"
