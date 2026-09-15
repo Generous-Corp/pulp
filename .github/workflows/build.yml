@@ -1744,7 +1744,106 @@ jobs:
           # runner load) self-heals instead of reddening the required `macos`
           # gate and wedging auto-merge. Mirrors sanitizers.yml; each attempt is
           # still bounded by --timeout 120.
-          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude"
+          #
+          # --output-junit records WHICH tests did not run, and why. A ctest
+          # SKIP (SKIP_RETURN_CODE) is otherwise indistinguishable from a PASS
+          # to anyone reading this check: the report carries status="notrun"
+          # plus <skipped message="SKIP_RETURN_CODE=N"/>, the test's labels, and
+          # the skipping command's output. The path must be ABSOLUTE — with
+          # --test-dir, ctest resolves a relative --output-junit against the
+          # build dir, nesting the file at $PULP_BUILD_DIR/$PULP_BUILD_DIR/.
+          # The report is written even when ctest exits nonzero.
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+
+      # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
+      # check, so a test that has never run once is indistinguishable from one
+      # that runs and passes every time. This records the non-runs — names,
+      # reasons, labels — in the job summary. It asserts nothing: skipping is
+      # frequently correct (no GPU, no device, no vendor SDK, wrong platform),
+      # and the defect it addresses is invisibility, not skipping.
+      #
+      # `ctest -N` is the control for the flag itself. It is the REGISTERED
+      # population; the report's `tests=` is the ATTEMPTED one. A gap between
+      # them is real information rather than a fault: label exclusions, the
+      # --exclude-regex list, and configure-time absence remove tests from the
+      # report entirely — a broader class this step measures but does not close.
+      # No <testcase> entries at all means --output-junit did not take.
+      - name: Observe ctest non-runs (non-Windows)
+        if: always() && runner.os != 'Windows'
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_CTEST_LEG: ${{ matrix.name }} [${{ matrix.provider }}]
+        run: |
+          set -uo pipefail
+          junit="$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+          listing="$(ctest --test-dir "$PULP_BUILD_DIR" -N 2>/dev/null)" || listing=""
+          raw_lines="$(printf '%s\n' "$listing" | wc -l | tr -d ' ')"
+          registered="$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p' | tail -1)"
+          # Also echo the control to the job log. $GITHUB_STEP_SUMMARY has no
+          # REST API, so a summary-only number cannot be read back from a
+          # finished run; the log can. Same reason the ctest-failure step below
+          # echoes its names twice.
+          echo "ctest-nonruns: registered(ctest -N raw lines)=$raw_lines registered(total)=${registered:-unknown}"
+          PULP_CTEST_JUNIT="$junit" \
+          PULP_CTEST_RAW_LINES="$raw_lines" \
+          PULP_CTEST_REGISTERED="${registered:-unknown}" \
+          python3 - >> "$GITHUB_STEP_SUMMARY" <<'PYEOF'
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          leg = os.environ.get("PULP_CTEST_LEG", "")
+          junit = os.environ["PULP_CTEST_JUNIT"]
+          print(f"## ctest non-runs — {leg}")
+          if not os.path.isfile(junit):
+              print(
+                  "_No JUnit report — the job did not reach ctest "
+                  "(configure/build failure), or `--output-junit` did not take._"
+              )
+              raise SystemExit(0)
+          suite = ET.parse(junit).getroot()
+          cases = suite.findall("testcase")
+          # ctest statuses: "run", "fail", "notrun" (skipped), "disabled".
+          # A failure ran; only "notrun"/"disabled" are non-runs.
+          nonruns = [c for c in cases if c.get("status") in ("notrun", "disabled")]
+          print("")
+          print("| population | count |")
+          print("| --- | --- |")
+          print(f"| registered (`ctest -N` raw lines) | {os.environ['PULP_CTEST_RAW_LINES']} |")
+          print(f"| registered (`ctest -N` total) | {os.environ['PULP_CTEST_REGISTERED']} |")
+          print(f"| attempted (JUnit `tests=`) | {suite.get('tests')} |")
+          print(f"| reported non-runs (`notrun`/`disabled`) | {len(nonruns)} |")
+          print(f"| `<testcase>` entries in the report | {len(cases)} |")
+          print("")
+          # Same numbers to the job log, which (unlike the summary) is
+          # retrievable from a finished run.
+          print(
+              f"ctest-nonruns: attempted={suite.get('tests')} "
+              f"testcases={len(cases)} nonruns={len(nonruns)}",
+              file=sys.stderr,
+          )
+          if not cases:
+              print("_The report has no `<testcase>` entries: `--output-junit` did not take._")
+          if not nonruns:
+              print("_Every attempted test ran._")
+              raise SystemExit(0)
+          print("### Tests that did not run")
+          print("")
+          print("| test | reason | labels | output |")
+          print("| --- | --- | --- | --- |")
+          for case in sorted(nonruns, key=lambda c: c.get("name") or ""):
+              skipped = case.find("skipped")
+              reason = (skipped.get("message") if skipped is not None else None) or case.get("status") or ""
+              labels = ""
+              for prop in case.iterfind("properties/property"):
+                  if prop.get("name") == "cmake_labels":
+                      labels = prop.get("value") or ""
+              out = (case.findtext("system-out") or "").strip().splitlines()
+              detail = out[-1][:160] if out else ""
+              cell = lambda s: s.replace("|", "\\|").replace("\n", " ")
+              print(f"| `{case.get('name')}` | {cell(reason)} | {cell(labels)} | {cell(detail)} |")
+          PYEOF
 
       # Observation, not a gate. Every GPU case in the suite skips when no
       # adapter is present, so a green `macos` check reads identically whether
@@ -1845,15 +1944,20 @@ jobs:
           # Also echo failed-test names to the (locally-readable) job log.
           { [ -f "$tdir/LastTestsFailed.log" ] && { echo "=== ctest failed tests ==="; cat "$tdir/LastTestsFailed.log"; }; } || true
 
-      - name: Upload ctest logs on failure
+      - name: Upload ctest logs and JUnit report
         # Full Testing/Temporary/ (LastTest.log, LastTestsFailed.log, …) as an
         # artifact — the authoritative per-test output, downloadable from the
-        # run page even for self-hosted legs.
-        if: failure()
+        # run page even for self-hosted legs. `always()` rather than `failure()`
+        # because ctest.junit.xml is the machine-readable record of which tests
+        # did NOT run, and a run where everything skipped is green: the report
+        # is most needed on exactly the runs a failure-only upload discards.
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: ctest-logs-${{ matrix.key }}
-          path: ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
+          path: |
+            ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
+            ${{ env.PULP_BUILD_DIR }}/ctest.junit.xml
           if-no-files-found: ignore
           retention-days: 7
 

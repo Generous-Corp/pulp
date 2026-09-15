@@ -142,11 +142,6 @@ enum class CompileErrorCode : std::uint8_t {
     // decide whether displaced events outside the retained source window should
     // chase, clip, or disappear, so it refuses rather than leaking events.
     TrimmedGrooveUnsupported,
-    // A nested SequenceRef exposes only a window of registered content. The
-    // current hook input has no authored source-window offset, so compiling the
-    // shortened leaf would restart any stateful pattern phase at the retained
-    // boundary. Refuse until that provenance is part of the renderer contract.
-    TrimmedRegisteredContentUnsupported,
     UnresolvedRegisteredContent,
     RegisteredContentCompileFailed,
     RegisteredContentFragmentQuotaExceeded,
@@ -196,15 +191,29 @@ enum class CompileErrorCode : std::uint8_t {
     // child dry, so the chain is refused. Lifting it needs a sub-bus a
     // flattened group can keep its own processing on, not a wider flatten.
     NestedDeviceChainUnsupported,
-    // A nested child track carries automation lanes. A lane is a curve over
-    // the track's own timeline, and the flattened leaf has nowhere to hold a
-    // curve: ClipPlaybackProperties::gain_linear is a scalar, so even the one
-    // lane that could compose has no time-varying sink. Refuse rather than
-    // freeze a moving value at a single point. A per-clip automation sink is
-    // the missing construct; the pan and MIDI-gain lanes are not waiting on
-    // it, because they have no destination at any level and can only ever be
-    // declared intended.
-    NestedAutomationLaneUnsupported,
+    // A nested child track automates its pan. The curve is a moving stereo
+    // balance, and flattening dissolves the child track, leaving only the
+    // parent's single pan — which also serves every other clip on that track.
+    // This is the time-varying form of what NestedMixerPanUnsupported refuses
+    // for a static balance, and it waits on strictly more than that one does:
+    // a clip needs a pan of its own before an envelope over it can mean
+    // anything.
+    NestedAutomationPanUnsupported,
+    // A nested child track automates its gain, over a flattened leaf that
+    // consumes no clip gain. Note, registered and opaque leaves compile to
+    // events no renderer scales by the gain of the clip that carried them, so
+    // the curve has nowhere to land for exactly the reason
+    // NestedGainSinkUnsupported gives a static product. A per-clip gain
+    // envelope would not lift this on its own: the leaf kind would still read
+    // nothing written there.
+    NestedAutomationGainEventLeafUnsupported,
+    // A nested child track automates its gain, over a flattened leaf that does
+    // consume clip gain. Media and empty leaves read
+    // ClipPlaybackProperties::gain_linear, which is a single scalar, so writing
+    // the curve there would freeze a moving value at one point. Of the three
+    // automation refusals this is the one a per-clip gain envelope closes by
+    // itself, because the sink is the only missing part.
+    NestedAutomationGainMediaUnsupported,
     // A nested SequenceRef trims a media leaf whose content conforms to the
     // timeline. Both conform kinds break differently under a partial view.
     // Resample maps source to timeline by tick phase, while the nested trim

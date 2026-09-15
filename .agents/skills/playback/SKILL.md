@@ -67,9 +67,16 @@ artifact is keyed to the clip's own authored tick range, so a trimmed window
 also needs a windowed artifact.
 
 Each nested refusal names one cause. A child device chain raises
-`NestedDeviceChainUnsupported`, a child automation lane raises
-`NestedAutomationLaneUnsupported`, and an absolute-anchored leaf inside a
-nested sequence raises `NestedAbsoluteChildUnsupported`. Do not reach for one
+`NestedDeviceChainUnsupported`, and an absolute-anchored leaf inside a nested
+sequence raises `NestedAbsoluteChildUnsupported`. A child automation lane
+raises one of three, because the constructs that would lift them differ: an
+automated pan raises `NestedAutomationPanUnsupported` on entry to the child
+track, since no leaf carries a stereo placement at any level. An automated gain
+travels to the leaf and is answered by the leaf's own kind — a leaf that reads
+no clip gain raises `NestedAutomationGainEventLeafUnsupported` and needs a
+renderer that scales it before any envelope would matter, while one that does
+read clip gain raises `NestedAutomationGainMediaUnsupported` and needs only
+that `ClipPlaybackProperties::gain_linear` stop being a lone scalar. Do not reach for one
 code to cover several constructs: the code is what tells an author which
 construct is missing, and a generic one hides that. Two guards in
 `validate_reference` are deliberately not capability codes — a nesting depth
@@ -791,9 +798,12 @@ process-local; they are not persisted in the Timeline document.
 Nondefault renderer production declarations are also process-local:
 `ProgramWire` refuses to serialize a program that carries one. This prevents a
 remote process from inheriting a reproducibility claim without the hook that
-justified it. A nested reference that trims registered content fails as
-`TrimmedRegisteredContentUnsupported`; the compile input does not yet carry the
-source-window offset needed to preserve stateful pattern phase.
+justified it. A nested reference that trims registered content compiles by
+window-after-generate: the hook sees the authored clip duration and an origin
+tick rebased to the authored start, so a stateful pattern keeps its phase, and
+the compiler windows the returned fragment to the retained span with the same
+clamp-and-drop rule a trimmed note leaf uses. The fragment quota is charged
+against what the hook generates, which is the authored extent.
 
 Built-in note compilation applies the owning sequence groove at the original
 owner-sequence onset. Move note-on/off by one shared displacement, intersect the

@@ -713,7 +713,13 @@ The record is branch-local but stored in the repository's common Git config,
 so sibling worktrees can discover it and it survives worktree removal as long
 as the local branch is retained. `superseded` requires a successor; `merged`
 requires a PR unless exact-head ancestry into `origin/main` is provable; and
-`archived` records the archive SHA-256. Never remove a dirty or active worktree.
+`archived` records the archive SHA-256. A `merged` record without a PR URL is
+valid but proves less than one with it: a squash-landed head is not an
+ancestor of `origin/main`, so only the PR can prove it landed, and the build
+reaper below reads that proof from the record. Close records out with the PR
+URL, or run `tools/scripts/worktree_lineage.sh reconcile`, which derives it
+from `origin/main`'s own merge commit (zero API calls) for every registered
+worktree nobody marked. Never remove a dirty or active worktree.
 For old clean unmerged work, retain the local branch and either prove an exact
 remote ref or create and verify a complete `git bundle` before removal.
 Lineage metadata is a discovery aid, not deletion authorization: always recheck
@@ -1203,13 +1209,13 @@ Skills in `.agents/skills/` are living documents. When you discover a gotcha, fi
    - `core/view/src/webview*`, `core/view/include/*/webview*` → `webview-ui`
    - Design import paths → `import-design`
 5. **No skill exists**: If you've accumulated 3+ gotchas for a domain with no skill, create one.
-6. **Adding, renaming, or removing a skill** — every skill needs a real `name` + `description` in its SKILL.md frontmatter (the `description` is what makes it activate and what the public catalog shows), and the public catalog must be regenerated:
+6. **Adding, renaming, or removing a skill** — every skill needs a real `name` + `description` in its SKILL.md frontmatter (the `description` is what makes it activate and what the public catalog shows), and both generated catalogs must be regenerated:
 
    ```bash
-   python3 tools/scripts/skills_doc_check.py --write   # regenerate docs/reference/skills.md
+   python3 tools/scripts/skills_doc_check.py --write   # regenerate skills.md + the CLAUDE.md table
    ```
 
-   This is **enforced**: the `skills-doc-sync` ctest (in the required macOS gate) and `tools/check-docs.sh` both fail if `docs/reference/skills.md` is stale or a skill has a missing/too-short description. `docs/reference/skills.md` is generated — never hand-edit it. (Also append the skill's row to the in-context table below and register its paths in `tools/scripts/skill_path_map.json`.)
+   This is **enforced**: the `skills-doc-sync` ctest (in the required macOS gate) and `tools/check-docs.sh` both fail if `docs/reference/skills.md` is stale or a skill has a missing/too-short description. `docs/reference/skills.md` and the in-context skills table below are both generated — never hand-edit either; `--write` regenerates both. (Also register the skill's paths in `tools/scripts/skill_path_map.json`.)
 
 This rule applies to all agents (Claude Code, Codex) and humans. Skills are checked into the repo alongside the code they document.
 
@@ -1536,8 +1542,12 @@ tools/scripts/clean_worktree_builds.sh --yes      # delete
 
 It only considers directories `git worktree list` reports for this repository,
 and deletes only when **all five** hold: the exact head is a strict ancestor of
-current `origin/main`; the shared lineage registry records that exact head as
-merged with a PR URL; the build has been idle beyond
+current `origin/main`; the exact head is proven landed - by the shared
+lineage registry recording it `merged` with a PR URL, which is the only proof
+a squash-landed head can have (on 2026-09-13, 54 provably merged worktrees
+held 947 GB because their records were still `active`; run
+`worktree_lineage.sh reconcile` to back-fill them from `origin/main`'s merge
+commits, zero API calls); the build has been idle beyond
 `PULP_WORKTREE_BUILD_IDLE_HOURS` (default 2) across its entire tree; no live
 process names, has its cwd in, or holds an open file under the worktree; and the
 physical path/common Git directory re-pass a fresh registry check at deletion
@@ -1776,68 +1786,82 @@ When updating existing skills, preserve backward compatibility — don't remove 
 
 Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<name>/SKILL.md` carries the authoritative, full description. `tools/scripts/skill_path_map.json` owns the source-path → skill mapping used by `skill_sync_check.py` to enforce SKILL.md updates on mapped edits.
 
+<!-- generated:start id=skills-digest -->
 | Skill | Purpose |
 |-------|---------|
-| `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
-| `ableton-link` | Optional desktop Link tempo sync: developer-supplied SDK, licensing boundary, realtime host-time mapping, loud-SKIP validation |
-| `agent-capabilities` | Installed design-time capability contracts: explicit registration, typed bindings, versions/digests, partial coverage, public-header ledger, and removal tombstones |
-| `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
-| `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
-| `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD, group delay) |
-| `audio-headless-debug` | Headless Processor scenes and standalone AU probes for DAW-only audio bugs |
-| `auv2` | AU v2 adapter: aufx/aumf/aumi/aumu component types, MIDI input wiring, DAW cache gotchas |
-| `auv3` | AU v3 adapter: AUAudioUnit render block, parameter tree, UMP / sysex, sidechain, iOS extension |
-| `ci` | Local + cloud CI: validate branches, `shipyard pr` ship flow, merge on green, PR triage |
-| `clap` | CLAP adapter: param / mod / sidechain routing, MIDI 1.0 + UMP + sysex + note-expression, ARA hook |
-| `cli-maintenance` | CLI command add/modify/remove checklist — keeps source, slash commands, docs, skills in sync |
-| `cmajor-external` | MIT-safe Cmajor lane: source-owned patches, external `cmaj` toolchain, generated-artifact flow |
-| `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/provenance-breadcrumb rule with concrete rewrite examples |
-| `content` | Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs |
-| `contrib-intake` | Maintainer side of an outside contribution — find it, adopt it into an in-repo branch with authorship intact, review, ship |
-| `contribute` | Contribute to Pulp/Forge without Shipyard/Tart/VMs or write access — routing, local build+test, `contributor_check.sh`, patch/bundle handoff format |
+| `aax` | Optional AAX support for Pulp, including developer-supplied Avid SDK setup, CMake enablement, DigiShell/AAX Validator workflows, and local AAX builds on macOS or Windows. |
+| `ableton-link` | Configure, implement, and test Pulp's optional desktop Ableton Link tempo-sync adapter while preserving the developer-supplied SDK, licensing, realtime, latency-compensation, and no-install boundaries. |
+| `agent-capabilities` | Maintain Pulp's installed design-time agent capability manifest and public-surface ledger. |
+| `android` | Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows, and end-to-end smoke validation. |
+| `ara` | Optional ARA support for Pulp, including developer-supplied ARA SDK setup, CMake enablement, adapter companion APIs, validation, and ARA-aware plugin implementation guidance. |
+| `audio-harness` | The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. |
+| `audio-headless-debug` | Reproduce and debug "only happens in a DAW" audio plugin bugs (cutouts, glitches, parameter-change failures) entirely offline — headless Processor scenes for DSP bugs and a standalone AudioUnit host probe for adapter/host-interaction bugs. |
+| `auv2` | Audio Unit v2 adapter work for Pulp — picking the right AU component type (aufx/aumf/aumi/aumu) and its matching entry macro, wiring MIDI input and output (including the aumi MIDI-processor adapter), sharing the base-class-free adapter surface, and avoiding the DAW-side component cache that silently masks repackaging. |
+| `auv3` | Audio Unit v3 (AUAudioUnit) format adapter for Pulp — render-block wiring, parameter tree bridging, MIDI / sysex via AURenderEvent, sidechain pulls, state persistence, iOS extension surface, and the pitfalls discovered while wiring the adapter. |
+| `ci` | Local and cloud CI for Pulp — validate branches, create PRs, merge on green. |
+| `clap` | CLAP format adapter for Pulp — how Processor bridges to clap_plugin_t, how parameters / modulation / sidechain / MPE / UMP / sysex flow, and the pitfalls discovered while wiring the adapter. |
+| `cli-maintenance` | Checklist and decision tree for adding, modifying, or removing CLI commands. |
+| `cmajor-external` | Use Pulp's MIT-safe Cmajor support lane via source-owned patches, an external `cmaj` toolchain, and explicit generated-artifact workflows. |
+| `code-comments` | How to write source comments, doc comments, and test names/tags that have lasting value — and what to never write. |
+| `content` | Validate, install, update, list, rescan, remove, and reveal data-only Pulp content packs for installed plugins. |
+| `contrib-intake` | Maintainer side of an outside contribution — find what has arrived (fork PR, issue, or patches sent out-of-band), adopt it into an in-repo branch with authorship intact, review it against the repo's bar, and ship it through the normal merge path. |
+| `contribute` | Prepare an outside contribution to Pulp or Forge that a maintainer can land with minimal rework — routing (Core vs Forge), local build and test on a plain Mac, the checks that are worth running without Shipyard/Tart/VMs, and the handoff format. |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
-| `decide` | Put a blocked decision in front of the user as selectable options with a recommendation and honest pros/cons, instead of burying it in prose |
-| `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
-| `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
-| `forge-app-delivery` | Building and shipping a Forge app as an installer somebody else can use: the Forge/Pulp seam, what a green signal does not prove, shipping the runtime not just the binary, wiring gaps |
-| `forge-modular` | Forge Modular generation, Rack SDK/toolchain staging, catalogue-guided patches, physical parameter mapping, packaging boundaries, and validation loops |
-| `handoff` | Coordinate a cross-session / cross-machine handoff: snapshot open work, write a status doc to pulp-planning main, emit a goal prompt linking it, verify monitored work is terminal before retiring |
-| `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |
-| `import-design` | Import designs from Figma / Stitch / v0 / Pencil into Pulp web-compat JS with visual validation |
-| `installable-tools` | Acceptance bar for anything Pulp can install (`pulp tool` / `pulp add`): validate install AND uninstall from OUTSIDE a checkout before the README ships; uninstall-safety contract |
-| `intel-canary` | macOS Intel (x86_64) portability: PULP_INTEL_CANARY lint + allowlist, Tier 0-3 CI (build.yml canary, intel-portability, nightly-intel, release universal gate) |
-| `ios` | iOS platform: AUv3 app extensions, Simulator builds, UIKit host, CoreAudio, touch + Pencil input |
-| `jsfx-subset` | Bounded JSFX subset — source-only examples, explicit exclusions (no `@gfx`), subset validation |
-| `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp kit manifests |
-| `motion` | Trace and validate animations, transitions, scroll geometry, reduced motion, and motion fixtures |
-| `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
-| `packages` | Third-party audio package search, suggest, add, browse |
-| `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially material/large PRs; pre-/post-merge, cross-repo (Pulp + Shipyard) |
-| `pr-batching` | Ship 2+ finished branches as ONE PR when they're related — cuts CI runs; heuristics for when NOT to |
-| `prove-before-showing` | Prove a UI or generation feature works before a human sees it: A/B against the source design, drive every control headlessly, prove the generator spawns, launch the real host, negative-control every gate |
-| `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
-| `pulp-vellum-change-routing` | Route repository-qualified design-import, visual-harness, Chromium, DesignIR, and rendering changes through Pulp's exact Vellum ownership projection |
-| `render-toolchain-update` | Update Skia/built-Dawn/V8 provenance, including an explicit temporary Skia-first lane when matched V8 assets are incomplete |
-| `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
-| `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
-| `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
-| `skia-gpu-build` | Enable Skia+Dawn GPU builds: prebuilt skia-builder libs, headers-only worktree trap, `SKIA_DIR` reuse, `MacGpuWindowHost` verify, raster-fallback + GPU-wedge gotchas |
-| `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
-| `stretch` | Offline time-stretch / pitch / varispeed: character modes, fine-tune presets, A/B eval toolkit, honest quality state |
-| `tart-ci` | Tart golden-VM macOS CI: layered goldens, ephemeral per-job runners, vm-image manifest, caching/rebake, host-keychain safety |
-| `text-metrics` | Label + captured-text metrics: half-leading against real ink, negative leading, measure/paint font-face parity, verifying a baseline change moved a number |
-| `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |
-| `trace-analysis` | "Why is this slow?" investigation harness over a Perfetto `.pftrace`: chain-of-evidence loop, wall-vs-CPU-time, follow-the-blocker, exhaustive verification, Pulp domain hints (dsp/frame/js/gpu/cross-platform) |
-| `trace-sql` | SQL discipline for Pulp traces via `trace_processor`: idempotent `CREATE OR REPLACE PERFETTO` views, `GLOB`/`dur=-1`/`EXTRACT_ARG`, stable-key joins, plus the Pulp trace-stdlib views |
-| `update-demos` | Rebuild / re-pin / republish the downstream demo + example repos against a new or latest SDK via `pulp minos {sweep,update,publish-runbook}` |
-| `upgrade` | `pulp upgrade` guidance: release discovery, migration notes, breaking-change fixes |
-| `video-proof` | Desktop validation videos: record raw proof, render Remotion context, publish/serve report, prepare review issue body |
-| `view-bridge` | Editor lifecycle and multi-view attach — `Processor::create_view()`, open/notify/resize/close protocol |
-| `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
-| `web-plugins` | Pulp in the browser: WAM v2 / WebCLAP adapters, wasm runtime, Skia-Ganesh/WebGL2 browser host, worklet constraints |
-| `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
+| `decide` | Ask Daniel a blocking decision as options with a recommendation and honest pros/cons, rather than prose. |
+| `engine` | Query, recommend, and switch the Pulp JS engine backend (QuickJS, JavaScriptCore, V8). |
+| `faust` | Create FAUST DSP plugins in Pulp using offline codegen, pre-generated C++ headers, and the FaustProcessor template wrapper. |
+| `forge-app-delivery` | Building and shipping a Forge app (Modular, Instrument, MIDI, FX, and the sequencer work to come) as a signed installer somebody else can actually use. |
+| `forge-modular` | Forge Modular's generator, patch checker, module pack and Forge-worktree seam — the traps that make green results untrue |
+| `friction-report` | Turn a moment of friction — a conflicting PR, a wedged runner, a mysterious red check, a repeated manual chore — into a durable, actionable report. |
+| `handoff` | Coordinate a cross-session or cross-machine handoff — snapshot the open work, write a status doc to the pulp-planning repo on main, and emit a ready-to-paste goal prompt that links it, so a fresh session (often on another machine) can pick up and finish. |
+| `heritage-profile` | Research, author, validate, render, and archive data-only Pulp Sample Heritage profiles. |
+| `hosting` | Load, run, and test VST3 / AU / CLAP / LV2 plugins from Pulp code. |
+| `import-design` | Import designs from Figma, Stitch, v0, Pencil, React Native, or Claude Design into Pulp web-compat JS with automated visual validation. |
+| `installable-tools` | The acceptance bar for anything Pulp can install (a `pulp tool` registry entry, `pulp add` package, or any downloadable). |
+| `intel-canary` | Maintain Pulp's macOS Intel (x86_64) portability lint and CI tiering — the PULP_INTEL_CANARY configure gate, intel_canary_lint.py + its allowlist, and the Tier 0-3 workflows (build.yml canary step, intel-portability.yml, nightly-intel.yml, release-cli.yml universal gate). |
+| `ios` | iOS platform development for Pulp — iPhone/iPad AUv3 app extensions, iOS Simulator builds, UIKit window host, CoreAudio IO audio, touch & Apple Pencil input, XcodeBuildMCP automation. |
+| `jsfx-subset` | Work in Pulp's bounded JSFX lane using source-only examples, subset validation, and explicit exclusions like no `@gfx`. |
+| `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp package manifests. |
+| `moonbase` | Optional Moonbase license-activation integration for Pulp — load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, audio-thread gating + click-free fade, async start/pump, the interactive native (no-WebView) activation editor (frame-tick polling + the don't-rebuild-mid-event trap), loadable plugin/standalone formats, and headless screenshots. |
+| `motion` | Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. |
+| `mpe` | Build an MPE-aware Pulp synth — opt into MPE via PluginDescriptor, consume per-note pitch bend / pressure / timbre from MpeBuffer, and route voices through MpeVoiceAllocator without reinventing channel tracking. |
+| `packages` | Search, suggest, add, and browse third-party audio packages. |
+| `playback` | Pulp timeline transport, immutable compiled playback programs, bounded arrangement audio rendering, block-level publication latches, stable shells, and ProcessContext projection. |
+| `pr-batching` | Decide whether several finished branches ship as ONE PR or stay separate. |
+| `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially for material (large / logic-bearing) PRs. |
+| `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. |
+| `prove-before-showing` | Prove a UI or generation feature actually works before asking a human to look at it. |
+| `pulp-vellum-change-routing` | Route repository-qualified changes across Pulp and Vellum using Pulp's exact ownership projection. |
+| `pulp-web-demo` | Generate and maintain browser demos of Pulp audio plugins (both web ABIs — WAM and WCLAP) from one declarative config, so every demo mounts the SAME shared player and the two ABIs stay in lockstep. |
+| `render-toolchain-update` | Update Pulp's pinned Skia, Dawn, and optional V8 prebuilts as one milestone-matched render-toolchain release. |
+| `screenshot` | Capture faithful PNGs of Pulp view trees / imported UIs headlessly. |
+| `screenshot-sync` | Keep a plugin/demo repo's screenshots in sync with its UX. |
+| `sdf-text` | Work with Pulp's SDF / MSDF / PSDF glyph atlases — building, sampling via SkSL, and the shared text-layout helpers. |
+| `ship` | Sign, notarize, package, and distribute Pulp plugins and apps across macOS, Windows, and Android |
+| `skia-gpu-build` | Enable a Skia + Dawn GPU build of Pulp (MacGpuWindowHost, Skia Graphite). |
+| `streams` | Pick the right Pulp Stream for a given I/O task, wire async callbacks correctly without deadlocking the worker, and avoid the backpressure / cancellation footguns in `pulp::runtime::AsyncStream`. |
+| `stretch` | Offline time-stretch / pitch / varispeed — character modes, fine-tune presets, A/B toolkit, and the honest quality state, so an agent can pick a mode, dial it in, and ship a plugin with it. |
+| `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
+| `text-metrics` | Baseline, half-leading, and font-face resolution for Label and captured (browser-imported) text — the arithmetic that decides where a glyph lands and how wide the box must be, plus the measure-vs-paint divergences that make text clip or sit low without any test going red. |
+| `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
+| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, order-preserving groove kernels, coordinate randomness, streaming cursors, and quantization arithmetic. |
+| `timeline` | Build, edit, validate, explain, render, import, or integrate Pulp timeline projects through the CLI, MCP tools, or C++ SDK. |
+| `trace-analysis` | The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). |
+| `trace-sql` | SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. |
+| `update-demos` | Rebuild, re-pin, and republish Pulp's downstream demo/example repos against a new or the latest SDK. |
+| `upgrade` | Guide users through `pulp upgrade` — discover new CLI releases, interpret migration notes for the hop they're performing, and apply breaking-change fixes (CMake macro renames, API surface changes, config file moves). |
+| `video-proof` | Record, compose, publish, serve, and review short desktop validation video proofs for Pulp UX/test-harness work. |
+| `view-bridge` | Editor lifecycle and multi-view attach for Pulp plugins — when to override Processor::create_view(), the open → notify_attached → resize → close protocol, release_view() ownership rules, and secondary-view roles. |
+| `vst3` | VST3 format adapter for Pulp — SingleComponentEffect wiring, bus arrangement negotiation, parameter / MIDI event routing, state round-trip, and the pitfalls discovered while wiring the adapter against Steinberg's SDK. |
+| `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
+| `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
+This table of 66 skills is GENERATED from each
+`.agents/skills/<name>/SKILL.md` frontmatter by
+`tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
+<!-- generated:end id=skills-digest -->
+
+When adding a new skill, register its subsystem in `tools/scripts/skill_path_map.json` and run `python3 tools/scripts/skills_doc_check.py --write` to regenerate this table and `docs/reference/skills.md`.
 
 ### Claude Code Plugin
 
