@@ -34,6 +34,42 @@ name: Runner health check
 # tools/scripts/test_queue_age_watchdog.py (which pins the measured baseline
 # above as a must-stay-quiet regression case).
 #
+# Contribution, which queue age cannot see
+# ----------------------------------------
+# Queue age answers "is the lane alive". It cannot answer "is every host still
+# in it", and on 2026-09-15 one macOS host served nothing for 7h06m while its
+# two peers absorbed the load: every sweep here was correctly quiet, because
+# comparable jobs were in progress the whole time. So this sweep also groups
+# the required `macos` job's runner_name by host prefix over the last 3 h and
+# alarms when an expected host served zero while the fleet served >= 3. The
+# demand condition is what keeps it off the label-census failure above: below
+# that floor there was no work to distinguish an idle host from a dead one.
+# It opens its OWN tracking issue, because a silent host is not a queue stall
+# and naming it one sends readers to audit a healthy queue.
+#
+# This guard's own cadence, and why there is still only one trigger
+# ----------------------------------------------------------------
+# This workflow asks for `*/30` and has been getting roughly one sweep every
+# four hours, which multiplies every detection latency above by eight and
+# reddens nothing. Each sweep now measures the gap since its predecessor and
+# reports `sweep_cadence` in the run summary, so the degradation is visible
+# where the findings are. Measured live 2026-09-15: 193 minutes.
+#
+# A `workflow_run: [Build and Test]` trigger was the obvious second mitigation
+# and is deliberately NOT here. Measured cost of one sweep on this repo:
+# 4 run listings + one jobs call per observed run, up to 240 of them, ~245
+# calls and ~4 minutes wall clock. GITHUB_TOKEN allows 1000 req/hr/repo, so
+# roughly four sweeps an hour is the ceiling. Firing on every gate completion
+# on this repo exceeds that, and an over-triggered sweep does not fail loudly:
+# it starts failing its own API calls, which this watchdog correctly treats as
+# incomplete evidence and suppresses alarms on. A trigger that converts a
+# detection guard into a silent one is worse than a slow guard. Raising the
+# cadence needs the per-run jobs fan-out reduced first.
+#
+# The honest residual: a sweep that never runs cannot report its own absence.
+# What IS visible is that the tracking issues stop being updated and the
+# workflow's own run list goes quiet in public.
+#
 # A pull-request Build and Test run can also stall before job expansion, while
 # its jobs API remains empty and no requested labels exist to compare. The same
 # age thresholds cover that scheduler/concurrency-layer symptom independently
@@ -64,6 +100,10 @@ on:
         description: 'Log findings but do not touch the tracking issue'
         required: false
         default: 'false'
+      contribution_min_fleet_jobs:
+        description: 'Fleet-served jobs required before a silent host is alarmed'
+        required: false
+        default: '3'
 
 permissions:
   contents: read
@@ -84,8 +124,16 @@ jobs:
       WARN_MINUTES: ${{ github.event.inputs.warn_minutes || '30' }}
       ALARM_MINUTES: ${{ github.event.inputs.alarm_minutes || '45' }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      CONTRIBUTION_MIN_FLEET_JOBS: ${{ github.event.inputs.contribution_min_fleet_jobs || '3' }}
       # Keep the established title so recurrence reopens the existing tracker.
       TRACKING_TITLE: 'CI queue stall: jobs waiting with no live runner'
+      # Separate tracker: a host that stopped contributing is a different
+      # observation with a different remedy than a stalled queue.
+      CONTRIBUTION_TITLE: 'CI fleet: a macOS host stopped serving while its peers served'
+      # Runner-name prefixes (TARTCI_RUNNER_NAME_PREFIX) expected to serve the
+      # required macOS gate. Unset falls back to the built-in list rather than
+      # disarming the check; see queue_age_watchdog.py.
+      EXPECTED_MACOS_HOSTS: ${{ vars.PULP_FLEET_EXPECTED_MACOS_HOSTS }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
@@ -99,21 +147,43 @@ jobs:
         run: |
           set -euo pipefail
 
+          # No pipeline here: `| tee` reports tee's exit status, not the
+          # watchdog's, which is the shape that turns a failed checker into a
+          # green step. Redirect and cat instead.
           python3 tools/scripts/queue_age_watchdog.py \
               --repo '${{ github.repository }}' \
               --warn-minutes "${WARN_MINUTES}" \
               --alarm-minutes "${ALARM_MINUTES}" \
+              --expected-macos-hosts "${EXPECTED_MACOS_HOSTS}" \
+              --contribution-min-fleet-jobs "${CONTRIBUTION_MIN_FLEET_JOBS}" \
               --findings-out findings.json \
               --snapshot-out snapshot.json \
               --body-out body.md \
+              --contribution-body-out contribution-body.md \
               --summary-out "${GITHUB_STEP_SUMMARY}" \
-              | tee scan.log
+              > scan.log
+          cat scan.log
 
-          count=$(python3 -c "import json; print(sum(1 for f in json.load(open('findings.json')) if f['level'] == 'alarm'))")
-          degraded=$(python3 -c "import json; s=json.load(open('snapshot.json')); print('true' if s.get('errors') or s.get('truncated') else 'false')")
-          echo "count=${count}" >> "$GITHUB_OUTPUT"
-          echo "degraded=${degraded}" >> "$GITHUB_OUTPUT"
+          # Read the counts the watchdog itself emitted rather than
+          # re-deriving them here: two implementations of "what counts as an
+          # alarm" drift, and the copy in a workflow is the one nobody tests.
+          # `grep -m1 ... || true` keeps a missing line from killing the step;
+          # the emptiness check below is what turns that into a loud failure.
+          count=$(grep -m1 '^alarm_count=' scan.log | cut -d= -f2 || true)
+          contribution=$(grep -m1 '^contribution_alarm_count=' scan.log | cut -d= -f2 || true)
+          degraded=$(grep -m1 '^degraded=' scan.log | cut -d= -f2 || true)
+          if [ -z "${count}" ] || [ -z "${contribution}" ] || [ -z "${degraded}" ]; then
+              echo "queue_age_watchdog did not emit its counts; refusing to" \
+                   "report health off a sweep that did not finish." >&2
+              exit 1
+          fi
+          {
+            echo "count=${count}"
+            echo "contribution=${contribution}"
+            echo "degraded=${degraded}"
+          } >> "$GITHUB_OUTPUT"
           echo "Alarm count: ${count}"
+          echo "Contribution alarm count: ${contribution}"
           echo "Degraded: ${degraded}"
 
       - name: Maintain tracking issue
@@ -171,6 +241,59 @@ jobs:
           else
               echo "Updating tracking issue #${existing} in place."
               gh api -X PATCH "/repos/${repo}/issues/${existing}" -F body=@issue-body.md
+              gh api -X PATCH "/repos/${repo}/issues/${existing}" -f state=open 2>/dev/null || true
+          fi
+
+      - name: Maintain fleet-contribution tracking issue
+        if: env.DRY_RUN != 'true' && steps.scan.outputs.degraded != 'true'
+        shell: bash
+        env:
+          COUNT: ${{ steps.scan.outputs.contribution }}
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          title="${CONTRIBUTION_TITLE}"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          search_json=$(
+              gh api --method GET "/search/issues" \
+                  -f q="repo:${repo} is:issue in:title ${title}"
+          )
+          existing_json=$(printf '%s' "$search_json" | TRACKING_TITLE="$title" python3 -c 'import json, os, sys; title = os.environ["TRACKING_TITLE"]; data = json.load(sys.stdin); match = next((item for item in data.get("items", []) if item.get("title") == title), None); print(json.dumps({"number": match.get("number", ""), "state": str(match.get("state", "")).upper()}) if match else "{}")')
+          existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "$COUNT" -eq 0 ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  echo "Every expected macOS host is serving again — closing tracker #${existing}."
+                  gh api -X POST "/repos/${repo}/issues/${existing}/comments" \
+                      -f body="Sweep on $(date -u '+%Y-%m-%d %H:%M UTC') observed every expected host serving the required macOS job. Closing. (${run_url})"
+                  gh api -X PATCH "/repos/${repo}/issues/${existing}" \
+                      -f state=closed \
+                      -f state_reason=completed
+              else
+                  echo "No silent host and no open tracker — nothing to do."
+              fi
+              exit 0
+          fi
+
+          {
+            cat contribution-body.md
+            echo
+            echo "**Sweep:** ${run_url}"
+          } > contribution-issue-body.md
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating fleet-contribution tracking issue."
+              TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("contribution-issue-body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body, "labels": ["bug", "ci"]}))' > contribution-issue.json
+              gh api -X POST "/repos/${repo}/issues" --input contribution-issue.json 2>&1 || {
+                  TRACKING_TITLE="$title" python3 -c 'import json, os; body = open("contribution-issue-body.md", encoding="utf-8").read(); print(json.dumps({"title": os.environ["TRACKING_TITLE"], "body": body}))' > contribution-issue.json
+                  gh api -X POST "/repos/${repo}/issues" --input contribution-issue.json
+              }
+          else
+              echo "Updating fleet-contribution tracking issue #${existing} in place."
+              gh api -X PATCH "/repos/${repo}/issues/${existing}" -F body=@contribution-issue-body.md
               gh api -X PATCH "/repos/${repo}/issues/${existing}" -f state=open 2>/dev/null || true
           fi
 

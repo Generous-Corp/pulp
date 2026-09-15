@@ -385,13 +385,14 @@ reusing writer-scoped command IDs.
 audio thread. Stage 1 fails closed when a child contains device processing,
 automation, takes, freeze/record state, absolute clips, or when a reference has
 gain/fades. A source window that cuts through a child audio fade also fails
-closed. Complete nested media clips retain their authored time-conform intent;
-a source window that trims a `Resample` or `Stretch` clip fails with
-`NestedConformedTrimUnsupported` until playback can map that partial conforming
-source range without changing its authored phase. `Resample` and `Stretch` fail
-that guard for different reasons: resample maps source to timeline by tick
-phase while the nested trim path advances a raw source-frame offset, and a
-stretch artifact is keyed to the clip's own authored tick range.
+closed. Complete nested media clips retain their authored time-conform intent, and a
+source window that trims a conforming clip lowers rather than refusing. The two
+conforms reach the retained window from opposite ends: `Resample` carries a
+source range, because the retained window's own fractions of the authored tick
+span name its end points in the source directly; `Stretch` keeps its rendered
+artifact keyed to the authored tick range and reads back the frames of that
+render which belong to the window, because re-keying the artifact would stretch
+the whole source into the trimmed range instead.
 Set
 `ProgramCompileRequest::max_expanded_note_events` to bound note expansion and
 `ProgramCompileRequest::max_expanded_clips` to bound total clip materialization
