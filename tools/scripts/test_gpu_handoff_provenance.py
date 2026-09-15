@@ -1474,7 +1474,25 @@ class MergeResolution(unittest.TestCase):
             self.skipTest(f"resolve declined on this checkout: {buffer.getvalue()}")
 
         summary = json.loads(buffer.getvalue())
-        self.assertIn(summary["verdict"], {"moved", "churn", "rebind"})
+
+        # Pin the verdict, do not merely accept one. `check` already answers,
+        # independently, whether every identity is current AND the receipt binds
+        # -- which is exactly the state in which regeneration can change nothing.
+        # So when it exits 0 the only admissible verdict is churn, and resolve
+        # owes no commit. Accepting a set here lets the discriminator invert
+        # without a test noticing.
+        probe = io.StringIO()
+        with contextlib.redirect_stdout(probe), contextlib.redirect_stderr(probe):
+            current = provenance.main(["--root", str(self.root), "check", "--json"])
+        if current == 0:
+            self.assertEqual(
+                summary["verdict"],
+                "churn",
+                "a ledger check reports current and bound, so nothing moved",
+            )
+            self.assertFalse(summary["pending"], "churn left a commit pending")
+        else:
+            self.assertIn(summary["verdict"], {"moved", "rebind"})
         self.assertTrue(summary["binds"], "resolve reported success on an unbound pair")
         self.assertFalse(
             summary["binding_control_binds"],
@@ -1487,7 +1505,6 @@ class MergeResolution(unittest.TestCase):
         if summary["verdict"] == "churn":
             # The whole point of the churn verdict: no commit is owed, because
             # rewriting source_commit alone claims a re-pin that did not happen.
-            self.assertFalse(summary["pending"], "churn left a commit pending")
             self.assertEqual(
                 git(self.root, "status", "--porcelain", "--", *names),
                 "",
