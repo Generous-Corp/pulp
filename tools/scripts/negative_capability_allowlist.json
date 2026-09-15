@@ -16,13 +16,6 @@
       "reason": "set_track_automation_lane authors a curve on a track that a SequenceRef then nests. A lane is a value over the child track's own timeline, and the flattened leaf has nowhere to hold a curve: ClipPlaybackProperties::gain_linear in core/timeline/include/pulp/timeline/clip.hpp is a scalar, so even the one lane whose destination exists has no time-varying sink and would have to freeze at a single point. This was the other half of the former NestedSequenceUnsupported umbrella. The gain-on-media sub-case is genuine pending work and its checkable condition is a per-clip automation sink, an envelope field a renderer reads. The pan and MIDI-gain sub-cases are not waiting on that: pan has no per-clip destination at any level, for the reason NestedMixerPanUnsupported states, and no renderer scales an event by clip gain, for the reason NestedGainSinkUnsupported states, so those two can only ever be closed by declaring them intended rather than by lifting the refusal."
     },
     {
-      "code": "NestedConformedTrimUnsupported",
-      "file": "core/playback/src/sequence_content_lowerer.cpp",
-      "owner": "playback",
-      "status": "live-defect",
-      "reason": "A SequenceRef source window trims a nested MediaRef leaf whose time_conform is Stretch. A stretched clip's audio is a rendered artifact keyed to the clip's own authored tick range, and a trimmed window is not that range, so a partial view needs a separately windowed artifact rather than a different read of the same one; that artifact is the checkable condition. Resample no longer refuses: the retained window maps onto the matching sub-span of the source under the same conform function, and the lowerer emits that sub-span as a source range beside the clip. A complete, untrimmed nested stretched clip already lowers correctly, so the refusal is scoped to a cut source window rather than to stretched content."
-    },
-    {
       "code": "NestedAbsoluteChildUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",

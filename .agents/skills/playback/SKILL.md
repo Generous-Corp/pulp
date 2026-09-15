@@ -69,10 +69,26 @@ agrees only where source frames and timeline frames happen to advance together,
 which is exactly the case a real conform is not. A zero `phase_end` means the
 media reference's own end, so an untrimmed leaf lowers to the program it always
 did.
-`Stretch` still refuses with `NestedConformedTrimUnsupported`, and the range
-does not help it: its audio is a rendered artifact keyed to the clip's own
-authored tick range, so a trimmed window needs a separately windowed artifact
-rather than a different read of the same one.
+`Stretch` is lowered too, and the range is not what does it. Its audio is a
+rendered artifact keyed to an authored tick range, so the artifact stays keyed
+to that range — `LoweredClip::authored_window_start` and `authored_duration`,
+the pair a trim already recorded for generated content, say where the range is —
+and the leaf reads the frame span of the render that belongs to its window, as
+`AudioClipRendererProgram::source_start` plus `source_frame_count` over an
+artifact longer than the clip. `offline_stretch_artifact_window` in
+`audio_renderer_internal.hpp` is the one place that arithmetic lives, and both
+the artifact compiler and the program compiler go through it. Two consequences
+worth knowing: a trimmed leaf and its untrimmed twin produce the same artifact
+key, so they share one cached render and the trimmed leaf is bit-identical to
+the untrimmed one over the same ticks; and the authored range can begin before
+tick zero when a placement sits earlier than the offset it reads, which the
+tempo map extrapolates and no document clip can express.
+A stretched leaf keeps its whole media reference — narrowing it would change
+what gets stretched rather than which part of the result is heard — so the
+lowerer's elapsed-samples rebase is scoped to `TimeConform::None`. Anything
+reading an artifact directly must offset by `source_start`: the realtime
+stretch lane's `artifact_sample` does, and reading from frame zero there is
+silently the wrong audio rather than an error.
 
 Each nested refusal names one cause. A child device chain raises
 `NestedDeviceChainUnsupported`, a child automation lane raises

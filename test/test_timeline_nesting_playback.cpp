@@ -1,10 +1,13 @@
 #include "timeline_nesting_test_support.hpp"
 #include <pulp/playback/program_wire.hpp>
+#include <pulp/playback/realtime_stretch_renderer.hpp>
 #include "../core/playback/src/sequence_content_lowerer.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <utility>
 
@@ -629,56 +632,6 @@ TEST_CASE("Nested trimming shortens an audio leaf's own fade to the new edge") {
     }
 }
 
-TEST_CASE("Nested stretched audio refuses partial source windows") {
-    std::vector<float> source(24'000, 1.0f);
-    const auto data = audio_data({source});
-    const auto assets = pool({{{50}, data}});
-    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
-
-    // Spelled rather than deduced: `std::int64_t` is `long` on LP64 Linux and
-    // `long long` on Darwin, so a bare `0LL` sibling deduces a different
-    // `std::pair` there and class-template argument deduction for the array
-    // fails on one platform only.
-    using TrimWindow = std::pair<std::int64_t, std::int64_t>;
-    const std::array<TrimWindow, 3> windows{
-        TrimWindow{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4}, // left trim only
-        TrimWindow{0, 3 * kTicksPerQuarter / 4},                    // right trim only
-        TrimWindow{kTicksPerQuarter / 4, kTicksPerQuarter / 2},     // both sides
-    };
-    for (const auto conform : {TimeConform::Stretch}) {
-        for (const auto [source_start, duration] : windows) {
-            auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, source.size(), {},
-                                                   conform);
-            auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
-                                               {track(11, {child_media})}));
-            auto root = take(Sequence::create(
-                {2}, "root", std::nullopt,
-                {track(3, {nested_clip(4, 10, 0, duration, source_start)})}));
-            auto project = shared(take(Project::create(
-                ProjectInput{{1}, "partial nested conform", 100, {2},
-                             {{50, "source", source.size(), {48'000, 1}, hash}}, {root, child}})));
-
-            PlaybackProgramStore store;
-            InlineExecutor executor;
-            PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
-            ProgramCompileRequest request;
-            request.project = std::move(project);
-            request.sequence_id = {2};
-            request.tempo_map = map_120();
-            request.sample_rate = request.tempo_map->sample_rate();
-            request.document_revision = 1;
-            request.dirty.all = true;
-            request.audio_assets = assets;
-            REQUIRE(compiler.submit(std::move(request)));
-            REQUIRE(compiler.status().has_error);
-            REQUIRE(compiler.status().last_error.code ==
-                    CompileErrorCode::NestedConformedTrimUnsupported);
-            REQUIRE(compiler.status().last_error.item == ItemId{12});
-            REQUIRE_FALSE(store.has_value());
-        }
-    }
-}
-
 namespace {
 
 // A quarter note of 12'000 source frames at 48 kHz is a genuine conform: the
@@ -838,6 +791,217 @@ TEST_CASE("Trimmed nested resampling media rejects elapsed-sample source offsets
     // is the other half of the elapsed-samples answer, and it is equally wrong.
     REQUIRE(leaf->source_frame_phase_end == 9'000.0);
     REQUIRE(leaf->source_frame_phase_end != static_cast<double>(kConformSourceFrames));
+}
+
+namespace {
+
+// 12'000 source frames under a quarter note is a genuine stretch: at 120 BPM
+// and 48 kHz the placement is 24'000 timeline frames long, so the artifact is
+// twice the source and a window that confused artifact frames with source
+// frames would land in the wrong half of it.
+constexpr std::uint64_t kStretchSourceFrames = 12'000;
+
+// A tone under a strictly rising envelope. The tone gives the stretch something
+// to resolve; the envelope is what makes a position in the render identifiable,
+// because a plain periodic source repeats every few hundred frames and a window
+// reading the wrong period of it looks exactly like one reading the right one.
+std::vector<float> stretch_ramp() {
+    std::vector<float> source(kStretchSourceFrames);
+    for (std::size_t frame = 0; frame < source.size(); ++frame) {
+        const auto phase = static_cast<float>(frame) / static_cast<float>(kStretchSourceFrames);
+        source[frame] = (0.1f + 0.9f * phase) * std::sin(static_cast<float>(frame) * 0.031f);
+    }
+    return source;
+}
+
+std::shared_ptr<const DecodedAudioAssetPool> stretch_assets() {
+    // The stretch path checks the decoded asset against the project's declared
+    // content hash, so the pool cannot be left with the default one.
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    return pool({DecodedAudioAsset{{50}, audio_data({stretch_ramp()}), hash, {}}});
+}
+
+// `placement_source_start` doubles as the root tick, so a retained window
+// covers the same root ticks and reads the same child ticks it would have
+// untrimmed. `shift` instead places the child earlier than the offset it reads,
+// which puts the authored origin before the root's own.
+std::shared_ptr<const Project> stretched_nesting(std::int64_t placement_source_start,
+                                                 std::int64_t placement_duration,
+                                                 std::int64_t placement_start = -1) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, kStretchSourceFrames, {},
+                                          TimeConform::Stretch);
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {track(11, {child_media})}));
+    auto root = take(Sequence::create(
+        {2}, "root", std::nullopt,
+        {track(3, {nested_clip(4, 10,
+                               placement_start < 0 ? placement_source_start : placement_start,
+                               placement_duration, placement_source_start)})}));
+    return shared(take(Project::create(
+        ProjectInput{{1},
+                     "stretched nesting",
+                     100,
+                     {2},
+                     {{50, "ramp", kStretchSourceFrames, {48'000, 1}, hash}},
+                     {root, child}})));
+}
+
+const AudioClipRendererProgram& only_audio_clip(const PlaybackProgram& program) {
+    const auto* found = program.find_track({3});
+    REQUIRE(found);
+    REQUIRE(found->audio_program());
+    REQUIRE(found->audio_program()->clips().size() == 1);
+    return found->audio_program()->clips().front();
+}
+
+LoweredClip lower_only_media_leaf(const Project& project) {
+    const auto tempo = map_120();
+    SequenceContentLowerer lowerer(project, *tempo, 100, 100);
+    std::vector<LoweredClip> lowered;
+    REQUIRE_FALSE(lowerer.begin_track(*project.find_sequence({2})->find_track({3}), lowered).error);
+    for (;;) {
+        const auto step = lowerer.step();
+        REQUIRE_FALSE(step.error);
+        if (step.complete)
+            break;
+    }
+    const auto leaf = std::find_if(lowered.begin(), lowered.end(), [](const LoweredClip& item) {
+        return std::holds_alternative<MediaRef>(item.clip.content());
+    });
+    REQUIRE(leaf != lowered.end());
+    return *leaf;
+}
+
+} // namespace
+
+TEST_CASE("Trimmed nested stretched media reads a window of the authored artifact") {
+    const auto assets = stretch_assets();
+
+    struct Geometry {
+        const char* label;
+        std::int64_t source_start;
+        std::int64_t duration;
+        std::uint64_t expected_artifact_frame_start;
+        std::uint64_t expected_window_frames;
+    };
+    const std::array geometries{
+        Geometry{"left and right trim", kTicksPerQuarter / 4, kTicksPerQuarter / 2, 6'000, 12'000},
+        Geometry{"right trim only", 0, 3 * kTicksPerQuarter / 4, 0, 18'000},
+        Geometry{"left trim only", kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4, 6'000, 18'000},
+    };
+
+    for (const auto& geometry : geometries) {
+        INFO(geometry.label);
+        auto project = stretched_nesting(geometry.source_start, geometry.duration);
+
+        // The leaf keeps its whole media reference and asks for no source
+        // range. Everything about the window is expressed in the authored tick
+        // range instead, which is what the artifact is keyed to.
+        const auto leaf = lower_only_media_leaf(*project);
+        REQUIRE(leaf.clip.time_conform() == TimeConform::Stretch);
+        REQUIRE(leaf.authored_window_start == geometry.source_start);
+        REQUIRE(leaf.authored_duration.value == kTicksPerQuarter);
+        REQUIRE(leaf.source_frame_offset == 0.0);
+        REQUIRE(leaf.source_frame_phase_end == 0.0);
+        const auto* reference = std::get_if<MediaRef>(&leaf.clip.content());
+        REQUIRE(reference);
+        REQUIRE(reference->source_start.value == 0);
+        REQUIRE(reference->frame_count == kStretchSourceFrames);
+
+        CompiledFixture trimmed(project, map_120(), assets);
+        CompiledFixture whole(stretched_nesting(0, kTicksPerQuarter), map_120(), assets);
+        auto trimmed_program = trimmed.store.read();
+        auto whole_program = whole.store.read();
+        REQUIRE(trimmed_program);
+        REQUIRE(whole_program);
+
+        const auto& compiled = only_audio_clip(*trimmed_program);
+        REQUIRE(compiled.source_time_mapping ==
+                AudioClipRendererProgram::SourceTimeMapping::OfflineStretchArtifact);
+        REQUIRE(compiled.offline_stretch_artifact);
+        // The artifact still spans the authored quarter note and still holds
+        // all 24'000 of its frames. A re-keyed artifact would hold only the
+        // retained window's worth and would have stretched the whole source
+        // into it.
+        REQUIRE(compiled.offline_stretch_artifact->key.musical_tick_start == TickPosition{0});
+        REQUIRE(compiled.offline_stretch_artifact->key.musical_tick_end ==
+                TickPosition{kTicksPerQuarter});
+        REQUIRE(compiled.offline_stretch_artifact->key.target_frame_count == 24'000);
+        REQUIRE(compiled.audio->num_frames() == 24'000);
+        REQUIRE(compiled.source_start == geometry.expected_artifact_frame_start);
+        REQUIRE(compiled.source_frame_count == geometry.expected_window_frames);
+        REQUIRE(compiled.timeline_frame_count == geometry.expected_window_frames);
+        // The untrimmed nesting reaches the same artifact, so the two renders
+        // below differ only in which frames of it each leaf reads.
+        REQUIRE(only_audio_clip(*whole_program).offline_stretch_artifact->key ==
+                compiled.offline_stretch_artifact->key);
+
+        // Root sample 8'000 is inside every geometry's retained window and
+        // inside the untrimmed placement, so both programs have audio there.
+        constexpr std::int64_t kRenderSample = 8'000;
+        Output trimmed_output(1, 256);
+        Output whole_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *trimmed_program, snapshot(*trimmed_program, 256, kRenderSample),
+                    trimmed_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *whole_program, snapshot(*whole_program, 256, kRenderSample),
+                    whole_output.view()) == AudioRenderStatus::Rendered);
+        // Bit-identity, not a tolerance: the retained window renders exactly
+        // what the untrimmed nesting renders over the same root ticks.
+        REQUIRE(trimmed_output.storage == whole_output.storage);
+
+        // Positive control: the equality above is about buffers that carry
+        // audio. A window reading the wrong frames of a silent artifact would
+        // satisfy it too, so the render has to be non-silent and non-constant.
+        REQUIRE(std::any_of(trimmed_output.storage[0].begin(), trimmed_output.storage[0].end(),
+                            [](float sample) { return sample != 0.0f; }));
+        REQUIRE(std::adjacent_find(trimmed_output.storage[0].begin(),
+                                   trimmed_output.storage[0].end(),
+                                   std::not_equal_to<>()) != trimmed_output.storage[0].end());
+
+        // Negative control: the same comparison against a different point in
+        // the same artifact fails, so the equality is a statement about which
+        // frames the window selected and not about a buffer that matches
+        // everything.
+        Output displaced_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *whole_program, snapshot(*whole_program, 256, kRenderSample + 1'024),
+                    displaced_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(displaced_output.storage != whole_output.storage);
+    }
+}
+
+TEST_CASE("Nested stretched media placed before its authored origin still windows the artifact") {
+    // The root places the child at tick zero but reads it from a quarter of the
+    // way in, so the authored quarter note begins before the root's own origin.
+    // No document clip can say that, which is why the authored range travels
+    // beside the leaf rather than being recovered from the placement.
+    const auto assets = stretch_assets();
+    auto project = stretched_nesting(kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4, 0);
+    const auto leaf = lower_only_media_leaf(*project);
+    REQUIRE(leaf.authored_window_start == kTicksPerQuarter / 4);
+    REQUIRE(leaf.clip.start() == TickPosition{0});
+
+    CompiledFixture compiled_fixture(project, map_120(), assets);
+    auto program = compiled_fixture.store.read();
+    REQUIRE(program);
+    const auto& compiled = only_audio_clip(*program);
+    REQUIRE(compiled.offline_stretch_artifact);
+    REQUIRE(compiled.offline_stretch_artifact->key.musical_tick_start.value ==
+            -kTicksPerQuarter / 4);
+    REQUIRE(compiled.offline_stretch_artifact->key.musical_tick_end.value ==
+            3 * kTicksPerQuarter / 4);
+    REQUIRE(compiled.audio->num_frames() == 24'000);
+    REQUIRE(compiled.source_start == 6'000);
+    REQUIRE(compiled.source_frame_count == 18'000);
+
+    Output output(1, 256);
+    REQUIRE(ArrangementAudioRenderer::process(*program, snapshot(*program, 256, 2'000),
+                                              output.view()) == AudioRenderStatus::Rendered);
+    REQUIRE(std::any_of(output.storage[0].begin(), output.storage[0].end(),
+                        [](float sample) { return sample != 0.0f; }));
 }
 
 TEST_CASE("Complete nested media preserves authored time conform intent") {
@@ -2172,4 +2336,92 @@ TEST_CASE("Nested absolute leaf is refused by its own code") {
             CompileErrorCode::NestedAbsoluteChildUnsupported);
     REQUIRE(compiler.status().last_error.item == ItemId{12});
     REQUIRE_FALSE(store.has_value());
+}
+
+TEST_CASE("Host-mapped nested stretched media reads the artifact window live") {
+    // The live lane reads the artifact directly rather than through the offline
+    // program's sampler, so it has its own chance to start at frame zero. The
+    // envelope on the source is what makes that visible: the window this leaf
+    // reads is half a quarter note into a rising envelope, and the artifact's
+    // own first frames are effectively silent.
+    const auto assets = stretch_assets();
+    auto project = stretched_nesting(kTicksPerQuarter / 4, kTicksPerQuarter / 2);
+    CompiledFixture fixture(project, map_120(), assets);
+    auto program = fixture.store.read();
+    REQUIRE(program);
+    const auto& compiled = only_audio_clip(*program);
+    REQUIRE(compiled.source_start == 6'000);
+    const auto& artifact = compiled.offline_stretch_artifact->audio->channels[0];
+
+    constexpr std::uint32_t kBlock = 128;
+    auto host_mapped = [&](std::int64_t sample_start) {
+        auto state = snapshot(*program, kBlock, sample_start);
+        auto& range = state.ranges[0];
+        range.timeline_tick_start = program->tempo_map().samples_to_ticks({sample_start});
+        range.timeline_tick_end = program->tempo_map().samples_to_ticks(
+            {sample_start + static_cast<std::int64_t>(kBlock)});
+        range.host_beat_mapping = true;
+        range.has_precise_host_ticks = true;
+        range.host_tick_start = static_cast<double>(range.timeline_tick_start.value);
+        range.host_tick_end = static_cast<double>(range.timeline_tick_end.value);
+        return state;
+    };
+
+    ArrangementAudioTrackRenderer live_renderer({3});
+    PlaybackProgramBlock block(program.get());
+    RealtimeStretchProgramRuntime runtime;
+    REQUIRE(runtime.prepare(*program, 48'000.0, kBlock, 1, program->audio_limits()));
+    // The producer's output lags its input by the declared latency. Blocks are
+    // whole, so the first one carrying steady-state audio is the one after the
+    // block that straddles that boundary.
+    const auto latency_blocks = runtime.latency_samples() / kBlock;
+    const auto settled_block = latency_blocks + 4;
+
+    float rendered_peak = 0.0f;
+    for (std::uint64_t index = 0; index <= settled_block; ++index) {
+        Output out(1, kBlock);
+        out.view().clear();
+        const auto start =
+            compiled.timeline_start + static_cast<std::int64_t>(index * kBlock);
+        const auto status =
+            live_renderer.process(block, host_mapped(start), out.view(), {}, &runtime);
+        if (index != settled_block) {
+            // The producer fills behind the consumer for one latency, so the
+            // pre-roll legitimately reports a gap. Nothing else is legitimate.
+            REQUIRE((status == AudioRenderStatus::Rendered ||
+                     status == AudioRenderStatus::RealtimeStretchGap));
+            continue;
+        }
+        REQUIRE(status == AudioRenderStatus::Rendered);
+        for (const auto sample : out.storage[0])
+            rendered_peak = std::max(rendered_peak, std::abs(sample));
+    }
+
+    // The artifact frames this block's audio came from, and the frames it would
+    // have come from reading the artifact from its own start instead.
+    const auto elapsed = static_cast<std::size_t>((settled_block - latency_blocks) * kBlock);
+    auto peak_over = [&](std::size_t first) {
+        float peak = 0.0f;
+        for (std::size_t frame = 0; frame < kBlock; ++frame)
+            peak = std::max(peak, std::abs(artifact[first + frame]));
+        return peak;
+    };
+    const auto window_peak = peak_over(compiled.source_start + elapsed);
+    const auto origin_peak = peak_over(elapsed);
+
+    // Negative control first, because the comparison below is only meaningful
+    // if the two candidate read positions are distinguishable at all. This is
+    // the same measurement with the defect present: it is what the peak would
+    // read if the lane started at the artifact's own first frame. The reading
+    // collapses by more than an order of magnitude — measured about fifty
+    // times — which is what makes the band below able to reject it.
+    REQUIRE(origin_peak < window_peak / 10.0f);
+    REQUIRE(window_peak > 0.3f);
+    // The live render tracks the window it names. The band is 10%, against a
+    // measured agreement near 2% and a frame-zero read that the control above
+    // shows would miss by more than 99% — so the gate sits an order of
+    // magnitude clear of the defect it is aimed at and five times clear of the
+    // producer's own settling.
+    REQUIRE(rendered_peak > window_peak * 0.9f);
+    REQUIRE(rendered_peak < window_peak * 1.1f);
 }

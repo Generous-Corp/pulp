@@ -472,20 +472,16 @@ class SequenceContentLowerer::Impl {
         const auto composed_gain = frame.inherited_gain * frame.track_gain;
         // A conforming clip maps its complete authored source span onto its
         // musical placement, so a retained window maps onto the matching
-        // sub-span of the source under the same function. Resample gets that
+        // sub-span of the source under the same function. Resample names that
         // sub-span below, as a source range travelling beside the clip.
         //
-        // Stretch cannot take the same route: its audio is a rendered artifact
-        // keyed to the clip's own authored tick range, and a trimmed window is
-        // not that range, so a partial view needs a separately windowed
-        // artifact rather than a different read of the same one. Refusing is
-        // the honest answer until that artifact exists — the alternative is a
-        // nested stretched region that silently plays the wrong audio.
-        if (std::holds_alternative<timeline::MediaRef>(child.content()) &&
-            child.time_conform() == timeline::TimeConform::Stretch &&
-            (left_trim != 0 || right_trim != 0))
-            return {.error = SequenceLoweringError{
-                        CompileErrorCode::NestedConformedTrimUnsupported, child.id()}};
+        // Stretch reaches the same window from the other end. Its audio is a
+        // rendered artifact keyed to the clip's own authored tick range, so the
+        // renderer keeps rendering that range — the authored window already
+        // travelling beside the leaf says where it is — and the leaf reads the
+        // matching frames of the result. Re-keying the artifact to the trimmed
+        // range would re-stretch the whole source into it and play the wrong
+        // audio at every frame.
 
         if (const auto* nested = std::get_if<timeline::SequenceRef>(&child.content())) {
             if (nested->source_start.value > std::numeric_limits<std::int64_t>::max() - left_trim)
@@ -743,7 +739,13 @@ class SequenceContentLowerer::Impl {
                 return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                        pending.child.id()}};
         } else if (auto* media = std::get_if<timeline::MediaRef>(&content);
-                   media && pending.left_trim > 0) {
+                   media && pending.left_trim > 0 &&
+                   pending.child.time_conform() == timeline::TimeConform::None) {
+            // Only a leaf that plays its source at native rate can answer a
+            // trim by moving into the reference. A stretched leaf's artifact is
+            // keyed to the whole reference, so narrowing it here would change
+            // what gets stretched rather than which part of the result is
+            // heard; the artifact window does that instead.
             if (pending.target_start.value <
                 std::numeric_limits<std::int64_t>::min() + pending.left_trim)
                 return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,

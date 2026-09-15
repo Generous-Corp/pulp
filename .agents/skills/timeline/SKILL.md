@@ -228,9 +228,10 @@ missing here or carries the wrong result kind.
   nested media clip preserves its `TimeConform` intent. A source window that
   trims a `Resample` clip maps onto the matching sub-span of the source under
   the same conform function, so it lowers; one that trims a `Stretch` clip
-  still fails with `NestedConformedTrimUnsupported`, because a stretched clip's
-  audio is an artifact keyed to its authored tick range and a trimmed window
-  needs its own. A nested child track
+  lowers as well, by keeping the artifact keyed to the authored tick range and
+  reading back only the frames of that render the window covers. Nothing
+  refuses a trimmed conforming leaf any more, so `NestedConformedTrimUnsupported`
+  is no longer raised. A nested child track
   carrying a device chain or an automation lane fails with
   `NestedDeviceChainUnsupported` or `NestedAutomationLaneUnsupported`, and an
   absolute-anchored leaf inside a nested sequence fails with
