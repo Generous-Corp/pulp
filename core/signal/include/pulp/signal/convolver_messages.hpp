@@ -12,11 +12,68 @@
 
 namespace pulp::signal {
 
+/// The convolver's input-side overlap-save history.
+///
+/// This belongs to the INPUT STREAM, not to any impulse response: it is the ring
+/// of forward FFTs of recent input blocks plus the time-domain overlap buffer,
+/// and what is in it depends only on the audio that has already been fed in.
+/// Its identity therefore does not change when the IR changes.
+///
+/// `PartitionedConvolver` owns exactly one of these and renders EVERY live IR
+/// against it — including both sides of a crossfade — so an IR swap never
+/// restarts the history and the incoming IR never has to convolve against
+/// silence. It is also why a crossfade costs one forward FFT per block rather
+/// than two.
+///
+/// Ring capacity (`spectra.size()`) must be at least the partition count of
+/// every IR rendering against it, so that the ages an IR reads back map to
+/// distinct slots. A `ConvolverIrStateT` carries a pre-allocated history sized
+/// for its own partition count as a SPARE; the convolver adopts that spare only
+/// when it needs a longer ring than it already has, which is what keeps ring
+/// growth allocation-free on the audio thread.
+template <typename SampleType = float>
+struct ConvolverInputHistoryT {
+    int block_size = 0;
+    int fft_size = 0;
+
+    /// Ring of forward FFTs of recent input blocks.
+    ///
+    /// `write_pos` is advanced once per processed block, after every IR has
+    /// rendered, so it means two different things depending on when you look —
+    /// get this wrong and the delay line is silently off by one:
+    ///   - DURING a block, it is the slot the block being processed occupies, so
+    ///     the block of age `a` sits at `(write_pos + capacity - a) % capacity`
+    ///     and partition `p` of an IR reads age `p`;
+    ///   - BETWEEN blocks (where a swap happens), it is the slot the NEXT block
+    ///     will occupy, so the most recently written block is at `write_pos - 1`.
+    std::vector<std::vector<std::complex<SampleType>>> spectra;
+    /// Overlap-save buffer, `fft_size` long: lower half holds the previous
+    /// block, upper half the current one.
+    std::vector<std::complex<SampleType>> overlap;
+    std::size_t write_pos = 0;
+};
+
+using ConvolverInputHistory = ConvolverInputHistoryT<float>;
+using ConvolverInputHistory64 = ConvolverInputHistoryT<double>;
+
 /// Pre-computed, audio-thread-ready state for a single impulse response.
 ///
 /// Built off the audio thread (FFTs of every partition, working buffers
 /// sized to match), then atomically handed to a `PartitionedConvolver`
 /// for zero-pop swap-in at the next block boundary.
+///
+/// Holds only what is genuinely per-IR: the partition spectra, the transform,
+/// and the per-render accumulator. The input delay line is NOT here — it lives
+/// in `ConvolverInputHistoryT`, owned by the convolver, because it outlives any
+/// individual IR (see that type). `history` is a pre-allocated spare sized for
+/// this IR's partition count, which the convolver adopts only if its current
+/// ring is too short or has different geometry; otherwise the spare is handed
+/// back out to be freed off the audio thread.
+///
+/// A state built by hand rather than by `build_convolver_ir_state` must still
+/// populate `history` (with `spectra.size() >= num_partitions` and `overlap`
+/// sized to `fft_size`), or the convolver cannot guarantee a ring long enough
+/// for it and falls back to passing audio through unconvolved.
 ///
 /// Owned by `ConvolverIrSwapper` until claimed by the audio thread.
 template <typename SampleType = float>
@@ -27,9 +84,8 @@ struct ConvolverIrStateT {
 
     std::unique_ptr<FftT<SampleType>> fft;
     std::vector<std::vector<std::complex<SampleType>>> ir_spectra;
-    std::vector<std::vector<std::complex<SampleType>>> input_spectra;
-    std::vector<std::complex<SampleType>> input_buffer;
     std::vector<std::complex<SampleType>> accum;
+    std::unique_ptr<ConvolverInputHistoryT<SampleType>> history;
 };
 
 using ConvolverIrState = ConvolverIrStateT<float>;
@@ -78,63 +134,61 @@ build_convolver_ir_state(const SampleType* ir,
         state->fft->forward(state->ir_spectra[p].data());
     }
 
-    state->input_buffer.assign(state->fft_size, {0.0f, 0.0f});
-    state->input_spectra.assign(
+    state->accum.assign(state->fft_size,
+                        {SampleType{0.0f}, SampleType{0.0f}});
+    state->history = std::make_unique<ConvolverInputHistoryT<SampleType>>();
+    state->history->block_size = state->block_size;
+    state->history->fft_size = state->fft_size;
+    state->history->overlap.assign(state->fft_size, {0.0f, 0.0f});
+    state->history->spectra.assign(
         state->num_partitions,
         std::vector<std::complex<SampleType>>(
             state->fft_size, {SampleType{0.0f}, SampleType{0.0f}}));
-    state->accum.assign(state->fft_size,
-                        {SampleType{0.0f}, SampleType{0.0f}});
 
     return state;
 }
 
-/// Carry the input frequency-domain delay line (and the time-domain overlap
-/// buffer) from a displaced IR state into a freshly-built one during a live swap.
+/// Migrate the recorded input history from `from` into `to`, age-aligned.
 ///
-/// The input FDL is a ring of the FFTs of recent input blocks — it depends only
-/// on the audio, not the IR — so replacing the whole state at swap would zero it
-/// and force the first blocks after the swap to convolve against silent history,
-/// an audible dip / tail truncation. This moves the most recent min(prev, next)
-/// partitions of history into `next` (age-aligned) and carries the overlap
-/// buffer, so a swap is genuinely continuous.
+/// Used when the convolver must move to a longer (or differently-shaped) ring
+/// than the one it is holding: the incoming ring is a freshly-built spare, so
+/// everything the old ring recorded has to be carried across or the input
+/// stream restarts from silence.
 ///
-/// `prev` is the displaced state, which the caller retires immediately after, so
-/// this SWAPS the buffers out of it rather than copying: O(num_partitions) pointer
-/// swaps, no per-sample copy and no allocation, keeping the audio-thread swap
-/// cheap even for a long (many-partition) IR. `prev` is left holding `next`'s old
-/// zero buffers — harmless, it is about to be freed off-thread. Requires matching
-/// block/FFT sizes.
+/// Buffers are SWAPPED, never copied — O(capacity) pointer swaps, no allocation
+/// and no per-sample work, so this is safe on the audio thread even for a long
+/// (many-partition) IR. `from` is left holding `to`'s old zero buffers, which is
+/// harmless: the caller hands `from` off to be freed off the audio thread.
 ///
-/// `old_write_pos` is the convolver's ring cursor at the swap — the slot the NEXT
-/// input block would occupy — so the most-recent written block is at old-1.
-/// Returns the new ring cursor to use after the swap (always 0: the carried
-/// history is laid out so the next write lands at 0).
+/// `from.write_pos` is the slot the next block would be written to, so the
+/// most-recent (age 0) block is at `from.write_pos - 1`. History is laid out in
+/// `to` so that the next write lands at slot 0, and `to.write_pos` is set to 0
+/// accordingly. Ages older than the shorter of the two rings can hold are
+/// dropped; they are beyond the reach of any IR that ring can serve.
+///
+/// A geometry mismatch (different block or FFT size) leaves `to` cold, which is
+/// the only correct answer: spectra taken at one FFT size cannot be reinterpreted
+/// at another.
 template <typename SampleType = float>
-inline std::size_t carry_input_history(ConvolverIrStateT<SampleType>& prev,
-                                       ConvolverIrStateT<SampleType>& next,
-                                       std::size_t old_write_pos) {
-    if (prev.fft_size != next.fft_size || prev.block_size != next.block_size)
-        return 0;  // incompatible geometry — leave `next` fresh (still no crash)
-    const std::size_t P = prev.num_partitions;
-    const std::size_t Q = next.num_partitions;
-    if (P == 0 || Q == 0) return 0;
-    const std::size_t K = std::min(P, Q);
-    // Age 0 = most recently written block. With the next write landing at cursor 0,
-    // an age-a block belongs at ring position (Q - 1 - a); older-than-available
-    // ages stay at the freshly-zeroed value. This keeps process()'s readback
-    // `(cursor + Q - p) % Q` reading the same audio for every partition that exists.
-    // Each `a` maps to a distinct (oldi, newi) in two distinct states, so swapping
+inline void migrate_input_history(ConvolverInputHistoryT<SampleType>& from,
+                                  ConvolverInputHistoryT<SampleType>& to) {
+    if (from.fft_size != to.fft_size || from.block_size != to.block_size)
+        return;
+    const std::size_t old_capacity = from.spectra.size();
+    const std::size_t new_capacity = to.spectra.size();
+    if (old_capacity == 0 || new_capacity == 0) return;
+    const std::size_t carried = std::min(old_capacity, new_capacity);
+    // Each `a` maps to a distinct slot in each of two distinct rings, so a swap
     // never aliases a slot a later iteration reads.
-    for (std::size_t a = 0; a < K; ++a) {
-        const std::size_t oldi = (old_write_pos + P - 1 - a) % P;
-        const std::size_t newi = (Q - 1 - a) % Q;
-        next.input_spectra[newi].swap(prev.input_spectra[oldi]);
+    for (std::size_t a = 0; a < carried; ++a) {
+        const std::size_t oldi = (from.write_pos + old_capacity - 1 - a) % old_capacity;
+        const std::size_t newi = (new_capacity - 1 - a) % new_capacity;
+        to.spectra[newi].swap(from.spectra[oldi]);
     }
     // The overlap buffer's lower half holds the previous block's samples (the
     // overlap the next block's FFT needs); it is IR-independent, so carry it too.
-    next.input_buffer.swap(prev.input_buffer);
-    return 0;
+    to.overlap.swap(from.overlap);
+    to.write_pos = 0;
 }
 
 } // namespace detail
