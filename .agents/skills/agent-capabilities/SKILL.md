@@ -538,6 +538,24 @@ capability header:
    (surface axis — see the next section: this costs no contract bump),
 4. re-run `--check` and confirm it reports `fresh`.
 
+### The fingerprint lives in THREE places, and `--write` adds a fourth file
+
+The recipe above names two. A third holds the value the checker actually
+compares against: the `fingerprint` field of the header's row in
+`REVIEWED_HEADERS` in `tools/scripts/agent_capability_registry.py`. Updating
+only the surface document leaves `--write` and `--check` both reporting the
+same mismatch with the old digest, which reads as "regeneration is broken"
+rather than "one more literal to edit". Grep the old digest across
+`tools/` and `docs/` and replace every hit.
+
+`--write` then also appends a full manifest snapshot to
+`tools/agent-capabilities/contract-history.json` — tens of thousands of lines
+recording the (`manifest_revision`, `inventory_version`) pair. That append is
+not required for freshness: `--check` reports `fresh` on the three-file edit
+alone, so discard the history hunk unless the change is one whose lineage the
+history is meant to carry. Confirm with `--check` rather than assuming either
+way.
+
 ### Adding a function to an existing capability header costs NO contract bump
 
 A binding's identity is `(role, kind, include, qualified_name, target,
