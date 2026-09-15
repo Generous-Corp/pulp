@@ -5170,7 +5170,7 @@
           "path": "core/playback/include/pulp/playback/program_compiler.hpp",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
@@ -5179,7 +5179,7 @@
           "path": "core/playback/src/sequence_content_lowerer.cpp",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
         },
@@ -5187,7 +5187,7 @@
           "path": "tools/scripts/negative_capability_allowlist.json",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
         },
@@ -5195,7 +5195,7 @@
           "path": "tools/timeline/src/timeline_agent.cpp",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
@@ -5211,7 +5211,7 @@
               "path": "core/playback/include/pulp/playback/program_compiler.hpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5227,7 +5227,7 @@
               "path": "tools/timeline/src/timeline_agent.cpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5243,7 +5243,7 @@
               "path": "tools/timeline/src/timeline_agent.cpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5259,7 +5259,7 @@
               "path": "core/playback/src/sequence_content_lowerer.cpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
             }
@@ -5274,7 +5274,7 @@
               "path": "tools/scripts/negative_capability_allowlist.json",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
             }
@@ -8228,7 +8228,7 @@
         {
           "path": "tools/scripts/agent_capability_manifest.py",
           "needles": [
-            "SURFACE_INVENTORY_VERSION = 72"
+            "SURFACE_INVENTORY_VERSION = 73"
           ]
         }
       ],
