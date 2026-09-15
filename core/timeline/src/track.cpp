@@ -746,6 +746,102 @@ Track::with_device_chain(std::vector<DevicePlacement> device_chain) const {
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
 }
 
+// Both collections take the same shape, and both reach validity rather than
+// restate it: a replacement vector is handed to Track::create through
+// track_input_of, so validate_attached_modulation -- the same helper a fresh
+// construction applies -- is what admits or refuses it. That is why removing a
+// source a route still reads refuses here without this file knowing anything
+// about routes.
+//
+// The cost is one throwaway construction per edit, which validates against a
+// copy of every other collection. Calling validate_attached_modulation directly
+// would skip that, but it takes the track's *other* owned identities as a span,
+// and assembling those is precisely what Track::create does -- so the cheaper
+// path means a second statement of the id-collection rule that can silently
+// disagree with the first. Only the replaced storage is copied back, so the
+// persistent clip index the caller holds is neither rebuilt nor unshared.
+runtime::Result<Track, ModelError> Track::with_modulators(std::vector<Modulator> modulators) const {
+    auto input = detail::track_input_of(*this);
+    input.modulators = std::move(modulators);
+    auto validated = Track::create(std::move(input));
+    if (!validated)
+        return runtime::Err(validated.error());
+    auto next_data = *data_;
+    next_data.modulators = validated.value().data_->modulators;
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError> Track::with_macros(std::vector<MacroControl> macros) const {
+    auto input = detail::track_input_of(*this);
+    input.macros = std::move(macros);
+    auto validated = Track::create(std::move(input));
+    if (!validated)
+        return runtime::Err(validated.error());
+    auto next_data = *data_;
+    next_data.macros = validated.value().data_->macros;
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError> Track::insert_modulator(Modulator modulator) const {
+    if (find_modulator(modulator.id))
+        return fail<Track>(ModelErrorCode::DuplicateItemId, modulator.id, data_->id);
+    auto modulators = *data_->modulators;
+    modulators.push_back(std::move(modulator));
+    return with_modulators(std::move(modulators));
+}
+
+runtime::Result<Track, ModelError> Track::erase_modulator(ItemId id) const {
+    auto modulators = *data_->modulators;
+    const auto found =
+        std::find_if(modulators.begin(), modulators.end(),
+                     [id](const Modulator& candidate) { return candidate.id == id; });
+    if (found == modulators.end())
+        return fail<Track>(ModelErrorCode::MissingItem, id, data_->id);
+    modulators.erase(found);
+    return with_modulators(std::move(modulators));
+}
+
+runtime::Result<Track, ModelError> Track::replace_modulator(Modulator replacement) const {
+    auto modulators = *data_->modulators;
+    const auto found =
+        std::find_if(modulators.begin(), modulators.end(),
+                     [&](const Modulator& candidate) { return candidate.id == replacement.id; });
+    if (found == modulators.end())
+        return fail<Track>(ModelErrorCode::MissingItem, replacement.id, data_->id);
+    *found = std::move(replacement);
+    return with_modulators(std::move(modulators));
+}
+
+runtime::Result<Track, ModelError> Track::insert_macro(MacroControl macro) const {
+    if (find_macro(macro.id))
+        return fail<Track>(ModelErrorCode::DuplicateItemId, macro.id, data_->id);
+    auto macros = *data_->macros;
+    macros.push_back(std::move(macro));
+    return with_macros(std::move(macros));
+}
+
+runtime::Result<Track, ModelError> Track::erase_macro(ItemId id) const {
+    auto macros = *data_->macros;
+    const auto found =
+        std::find_if(macros.begin(), macros.end(),
+                     [id](const MacroControl& candidate) { return candidate.id == id; });
+    if (found == macros.end())
+        return fail<Track>(ModelErrorCode::MissingItem, id, data_->id);
+    macros.erase(found);
+    return with_macros(std::move(macros));
+}
+
+runtime::Result<Track, ModelError> Track::replace_macro(MacroControl replacement) const {
+    auto macros = *data_->macros;
+    const auto found =
+        std::find_if(macros.begin(), macros.end(),
+                     [&](const MacroControl& candidate) { return candidate.id == replacement.id; });
+    if (found == macros.end())
+        return fail<Track>(ModelErrorCode::MissingItem, replacement.id, data_->id);
+    *found = std::move(replacement);
+    return with_macros(std::move(macros));
+}
+
 runtime::Result<Track, ModelError>
 Track::insert_device(DevicePlacement placement,
                      std::optional<ItemId> before_device_id) const {
@@ -945,6 +1041,16 @@ runtime::Result<Track, ModelError> Track::with_mixer(TrackMixer mixer) const {
         return fail<Track>(*error, data_->id, data_->id);
     auto next_data = *data_;
     next_data.mixer = mixer;
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError> Track::with_tuning(std::optional<TuningReference> tuning) const {
+    // The same helper Track::create applies, called rather than restated: a
+    // second copy of the rule is a second thing that can disagree with it.
+    if (tuning && !valid_tuning_reference(*tuning))
+        return fail<Track>(ModelErrorCode::InvalidTuningReference, data_->id, data_->id);
+    auto next_data = *data_;
+    next_data.tuning = std::move(tuning);
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
 }
 
