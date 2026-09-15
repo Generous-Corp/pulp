@@ -3,6 +3,7 @@
 #include "serialize_automation_decode.hpp"
 #include "serialize_decode_context.hpp"
 #include "serialize_decode_support.hpp"
+#include "serialize_modulation_decode.hpp"
 
 #include <algorithm>
 #include <array>
@@ -143,6 +144,45 @@ decode_optional_content_hash(const JsonValue& data, std::string_view name,
         return fail<std::optional<ContentHash>>(PersistenceErrorCode::InvalidSchema,
                                                 path + "/" + std::string(name), value->begin);
     return runtime::Ok(std::optional<ContentHash>{*decoded});
+}
+
+// Charged against the same project counters a document decode charges, so a
+// command carrying a modulator cannot buy decode budget a document could not.
+runtime::Result<Modulator, PersistenceError>
+decode_command_modulator(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment =
+        bounded_increment(context.counts.modulators, context.limits.max_modulators);
+    if (!increment)
+        return fail<Modulator>(PersistenceErrorCode::LimitExceeded, std::move(path), value.begin,
+                               increment.actual, context.limits.max_modulators);
+    return decode_modulator(value, std::move(path));
+}
+
+runtime::Result<MacroControl, PersistenceError>
+decode_command_macro_control(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment =
+        bounded_increment(context.counts.macro_controls, context.limits.max_macro_controls);
+    if (!increment)
+        return fail<MacroControl>(PersistenceErrorCode::LimitExceeded, std::move(path), value.begin,
+                                  increment.actual, context.limits.max_macro_controls);
+    return decode_macro_control(value, std::move(path));
+}
+
+// A float member spelled as its IEEE-754 bit pattern, which is how the macro
+// document schema spells the field this command gates. A decimal spelling would
+// let a value fail to compare equal to the one that was written.
+runtime::Result<float, PersistenceError>
+decode_command_float_bits(const JsonValue& data, std::string_view name, const std::string& path) {
+    auto value = required(data, name, path);
+    if (!value)
+        return fail<float>(value.error().code, value.error().path, value.error().byte_offset);
+    const auto member_path = path + "/" + std::string(name);
+    auto bits = parse_canonical_u64_string(*value.value(), member_path);
+    if (!bits)
+        return fail<float>(bits.error().code, bits.error().path, bits.error().byte_offset);
+    if (bits.value() > std::numeric_limits<std::uint32_t>::max())
+        return fail<float>(PersistenceErrorCode::InvalidSchema, member_path, value.value()->begin);
+    return runtime::Ok(std::bit_cast<float>(static_cast<std::uint32_t>(bits.value())));
 }
 
 runtime::Result<ClipPlaybackProperties, PersistenceError>
@@ -878,6 +918,175 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         if (!sequence || !region)
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
         return runtime::Ok(Command(RemoveRegion{sequence.value(), region.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_region") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected = decode_region(*expected.value(), MemberPolicy::Optional, context,
+                                              data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement = decode_region(*replacement.value(), MemberPolicy::Optional,
+                                                 context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        // Refused at the wire as well as in the reducer, because there is no
+        // model rule to lean on: Sequence::replace_region is handed one region
+        // and cannot see that the caller meant a different one. A swap here is a
+        // removal and a creation spelled as a modification.
+        if (decoded_expected.value().id != decoded_replacement.value().id)
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path + "/replacement",
+                                 replacement.value()->begin);
+        return runtime::Ok(Command(SetRegion{sequence.value(),
+                                             std::move(decoded_expected).value(),
+                                             std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_project_tuning" ||
+        type.value() == "pulp.timeline.command.set_track_tuning") {
+        // Absent and null both mean "states no tuning", which is a value this
+        // gate compares rather than a missing member: a command that omits both
+        // asserts the project currently names no tuning and must keep naming
+        // none, and that is a legitimate no-op to replay.
+        const auto decode_side =
+            [&](std::string_view name) -> runtime::Result<std::optional<TuningReference>,
+                                                          PersistenceError> {
+            const auto* value = command.find(name);
+            if (!value || value->kind == JsonValue::Kind::Null)
+                return runtime::Ok(std::optional<TuningReference>{});
+            auto decoded = decode_tuning(*value, data_path + "/" + std::string(name));
+            if (!decoded)
+                return runtime::Err(decoded.error());
+            return runtime::Ok(std::optional<TuningReference>(std::move(decoded).value()));
+        };
+        auto expected = decode_side("expected");
+        if (!expected)
+            return runtime::Err(expected.error());
+        auto replacement = decode_side("replacement");
+        if (!replacement)
+            return runtime::Err(replacement.error());
+        if (type.value() == "pulp.timeline.command.set_project_tuning")
+            return runtime::Ok(Command(SetProjectTuning{std::move(expected).value(),
+                                                        std::move(replacement).value()}));
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        if (!sequence || !track)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(SetTrackTuning{sequence.value(), track.value(),
+                                                  std::move(expected).value(),
+                                                  std::move(replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_modulator") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto modulator = required(command, "modulator", data_path);
+        if (!sequence || !track || !modulator)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded =
+            decode_command_modulator(*modulator.value(), context, data_path + "/modulator");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(
+            Command(InsertModulator{sequence.value(), track.value(), std::move(decoded).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_modulator") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto modulator = decode_command_item_id(command, "modulator_id", data_path);
+        if (!sequence || !track || !modulator)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(
+            Command(RemoveModulator{sequence.value(), track.value(), modulator.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_modulator") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto modulator_id = decode_command_item_id(command, "modulator_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !track || !modulator_id || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_command_modulator(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement =
+            decode_command_modulator(*replacement.value(), context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        // Refused at the wire as well as in the reducer, because there is no
+        // model rule to lean on: Track::replace_modulator is handed one
+        // modulator and cannot see that the caller named another. A swap here is
+        // a removal and a creation spelled as a modification, and removal is the
+        // intent an untrusted writer's mask denies.
+        if (decoded_expected.value().id != decoded_replacement.value().id ||
+            decoded_expected.value().id != modulator_id.value())
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path + "/replacement",
+                                 replacement.value()->begin);
+        return runtime::Ok(Command(SetModulator{
+            sequence.value(), track.value(), modulator_id.value(),
+            std::move(decoded_expected).value(), std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_macro") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto macro = required(command, "macro", data_path);
+        if (!sequence || !track || !macro)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded = decode_command_macro_control(*macro.value(), context, data_path + "/macro");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(
+            Command(InsertMacro{sequence.value(), track.value(), std::move(decoded).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_macro") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto macro = decode_command_item_id(command, "macro_id", data_path);
+        if (!sequence || !track || !macro)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveMacro{sequence.value(), track.value(), macro.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_macro") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto macro_id = decode_command_item_id(command, "macro_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !track || !macro_id || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_command_macro_control(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement =
+            decode_command_macro_control(*replacement.value(), context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        if (decoded_expected.value().id != decoded_replacement.value().id ||
+            decoded_expected.value().id != macro_id.value())
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path + "/replacement",
+                                 replacement.value()->begin);
+        return runtime::Ok(Command(SetMacro{sequence.value(), track.value(), macro_id.value(),
+                                            std::move(decoded_expected).value(),
+                                            std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_macro_value") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto macro_id = decode_command_item_id(command, "macro_id", data_path);
+        auto expected = decode_command_float_bits(command, "expected_bits", data_path);
+        auto replacement = decode_command_float_bits(command, "replacement_bits", data_path);
+        if (!sequence || !track || !macro_id)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        if (!expected)
+            return runtime::Err(expected.error());
+        if (!replacement)
+            return runtime::Err(replacement.error());
+        return runtime::Ok(Command(SetMacroValue{sequence.value(), track.value(), macro_id.value(),
+                                                 expected.value(), replacement.value()}));
     }
     if (type.value() == "pulp.timeline.command.set_groove") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);

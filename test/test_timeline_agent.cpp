@@ -176,6 +176,30 @@ std::string midi_clip_project_json() {
     return project_to_json(project);
 }
 
+std::string region_project_json() {
+    auto clip = take(Clip::create({4}, {0}, {960}, EmptyContent{}));
+    auto track = take(Track::create({3}, "track", {clip}));
+    auto sequence = take(Sequence::create(
+        {2}, "root", timebase::TickDuration{960}, {}, {track}, {},
+        {SequenceRegion{{15}, "section", timebase::TickPosition{0}, timebase::TickDuration{480},
+                        {}, SectionRole::Verse}}));
+    auto project = take(Project::create(ProjectInput{{1}, "sections", 20, {2}, {}, {sequence}}));
+    return project_to_json(project);
+}
+
+std::string modulation_project_json() {
+    auto clip = take(Clip::create({4}, {0}, {960}, EmptyContent{}));
+    TrackInput input;
+    input.id = {3};
+    input.name = "track";
+    input.clips = {clip};
+    input.macros = {MacroControl{{16}, "brightness", 0.5f}};
+    auto track = take(Track::create(std::move(input)));
+    auto sequence = take(Sequence::create({2}, "root", timebase::TickDuration{960}, {}, {track}));
+    auto project = take(Project::create(ProjectInput{{1}, "modulation", 20, {2}, {}, {sequence}}));
+    return project_to_json(project);
+}
+
 std::string project_from_result(const std::string& json) {
     auto parsed = take(parse_json(json));
     const auto* project = parsed->root().find("project");
@@ -322,6 +346,94 @@ TEST_CASE("timeline agent authors an expression lane and hands back a document t
     // by the identity rules rather than applied a second time.
     const auto replayed = tools::timeline::command_apply(
         tools::timeline::ProjectSource::inline_json(authored_project), insert,
+        tools::timeline::editor_writer_profile());
+    REQUIRE_FALSE(replayed);
+}
+
+TEST_CASE("timeline agent authors a modulation source and moves a macro it already holds") {
+    // command_apply serializes the project it produced, so a collection the
+    // encoder does not carry would read as a successful edit that changed
+    // nothing. Every assertion below is on the returned document.
+    const auto authored = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(modulation_project_json()),
+        R"([{"data":{"modulator":{"data":{"id":"20","kind":"envelope","name":"attack"},)"
+        R"("type_name":"pulp.timeline.modulator","version":1},"sequence_id":"2",)"
+        R"("track_id":"3"},"type_name":"pulp.timeline.command.insert_modulator",)"
+        R"("version":1}])",
+        tools::timeline::editor_writer_profile());
+    REQUIRE(authored);
+    const auto authored_project = project_from_result(authored.json);
+    REQUIRE(authored_project.find(R"("kind":"envelope")") != std::string::npos);
+    // The returned document is a document, not just a response: it reopens and
+    // validates, which is what makes the edit reachable by the next call.
+    REQUIRE(tools::timeline::validate(authored_project));
+    REQUIRE(project_from_result(tools::timeline::project_open(authored_project).json) ==
+            authored_project);
+
+    // 1056964608 and 1048576000 are the IEEE-754 bit patterns of 0.5 and 0.25,
+    // the spelling the macro document schema uses for the field this gates.
+    const std::string move = R"([{"data":{"expected_bits":"1056964608","macro_id":"16",)"
+                             R"("replacement_bits":"1048576000","sequence_id":"2","track_id":"3"},)"
+                             R"("type_name":"pulp.timeline.command.set_macro_value","version":1}])";
+    const auto moved = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(authored_project), move,
+        tools::timeline::editor_writer_profile());
+    REQUIRE(moved);
+    const auto moved_project = project_from_result(moved.json);
+    REQUIRE(moved_project.find(R"("value_bits":"1048576000")") != std::string::npos);
+    REQUIRE(tools::timeline::validate(moved_project));
+
+    // Replaying the move against the document it already changed is refused by
+    // its own gate rather than applied a second time.
+    const auto replayed =
+        tools::timeline::command_apply(tools::timeline::ProjectSource::inline_json(moved_project),
+                                       move, tools::timeline::editor_writer_profile());
+    REQUIRE_FALSE(replayed);
+}
+
+TEST_CASE("timeline agent retunes a document and corrects a section role in place") {
+    // command_apply serializes the project it produced, so a member the encoder
+    // does not carry would read as a successful edit that changed nothing. Both
+    // assertions below are on the returned document, not on the exit code.
+    const auto retuned = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(region_project_json()),
+        R"([{"data":{"replacement":{"keyboard_map_content":null,)"
+        R"("reference_pitch_millihertz":432000,"scale_content":null,)"
+        R"("system":"equal_temperament"}},)"
+        R"("type_name":"pulp.timeline.command.set_project_tuning","version":1}])",
+        tools::timeline::editor_writer_profile());
+    REQUIRE(retuned);
+    const auto retuned_project = project_from_result(retuned.json);
+    REQUIRE(retuned_project.find(R"("reference_pitch_millihertz":432000)") != std::string::npos);
+    // The returned document is a document, not just a response: it reopens and
+    // validates, which is what makes the edit reachable by the next call.
+    REQUIRE(tools::timeline::validate(retuned_project));
+    REQUIRE(project_from_result(tools::timeline::project_open(retuned_project).json) ==
+            retuned_project);
+
+    const auto region_envelope = [](std::string_view role) {
+        return std::string(R"({"data":{"duration":"480","id":"15","name":"section",)"
+                           R"("position":"0","role":)") +
+               std::string(role) + R"(},"type_name":"pulp.timeline.region","version":1})";
+    };
+    const auto corrected = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(retuned_project),
+        R"([{"data":{"expected":)" + region_envelope(R"("verse")") + R"(,"replacement":)" +
+            region_envelope(R"("chorus")") +
+            R"(,"sequence_id":"2"},"type_name":"pulp.timeline.command.set_region","version":1}])",
+        tools::timeline::editor_writer_profile());
+    REQUIRE(corrected);
+    const auto corrected_project = project_from_result(corrected.json);
+    REQUIRE(corrected_project.find(R"("role":"chorus")") != std::string::npos);
+    REQUIRE(tools::timeline::validate(corrected_project));
+
+    // Replaying the correction against the document it already changed is
+    // refused by its own gate rather than applied a second time.
+    const auto replayed = tools::timeline::command_apply(
+        tools::timeline::ProjectSource::inline_json(corrected_project),
+        R"([{"data":{"expected":)" + region_envelope(R"("verse")") + R"(,"replacement":)" +
+            region_envelope(R"("chorus")") +
+            R"(,"sequence_id":"2"},"type_name":"pulp.timeline.command.set_region","version":1}])",
         tools::timeline::editor_writer_profile());
     REQUIRE_FALSE(replayed);
 }

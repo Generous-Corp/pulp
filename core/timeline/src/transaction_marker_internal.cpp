@@ -148,6 +148,39 @@ reduce_remove_region(const Project& project, const RemoveRegion& remove,
         [&](const Sequence& current) { return current.erase_region(remove.region_id); });
 }
 
+runtime::Result<MarkerCommandReduction, TransactionError>
+reduce_set_region(const Project& project, const SetRegion& set, const Transaction& transaction,
+                  CommandId command) {
+    // Identity is pinned rather than remapped. A Modify that could also swap
+    // identity would be a removal and a creation wearing a signature that
+    // declares neither, and the removal is the intent an untrusted writer is
+    // denied by default -- so the swap would be a way around that denial.
+    if (set.expected.id != set.replacement.id)
+        return reject_reduction<MarkerCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                        transaction, command, set.expected.id,
+                                                        set.replacement.id);
+    if (const auto code =
+            target_error(project, set.expected.id,
+                         annotation_location(project, ItemKind::Region, set.sequence_id)))
+        return reject_reduction<MarkerCommandReduction>(*code, transaction, command,
+                                                        set.expected.id, set.sequence_id);
+    const auto* sequence = project.find_sequence(set.sequence_id);
+    const auto* region = sequence ? sequence->find_region(set.expected.id) : nullptr;
+    if (!region)
+        return reject_reduction<MarkerCommandReduction>(ConflictCode::TargetMissing, transaction,
+                                                        command, set.expected.id);
+    if (*region != set.expected)
+        return reject_reduction<MarkerCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                        transaction, command, set.expected.id);
+    // No identity is created or retired, so this carries no identity mutation
+    // and its inverse reduces through the public entry point unchanged.
+    return apply_sequence_edit(
+        project, set.sequence_id, set.expected.id, DirtyFlags::Content | DirtyFlags::Marker, {},
+        std::nullopt, SetRegion{set.sequence_id, set.replacement, set.expected}, transaction,
+        command,
+        [&](const Sequence& current) { return current.replace_region(set.replacement); });
+}
+
 } // namespace
 
 bool is_marker_command(const Command& command) noexcept {
@@ -175,6 +208,8 @@ reduce_marker_command(const Project& project, const Command& command,
                                             allow_tombstone_restore);
             else if constexpr (std::is_same_v<T, RemoveRegion>)
                 return reduce_remove_region(project, value, transaction, command_id);
+            else if constexpr (std::is_same_v<T, SetRegion>)
+                return reduce_set_region(project, value, transaction, command_id);
             else {
                 static_assert(!is_marker_command_type<T>,
                               "a command claimed by is_marker_command_type in "
