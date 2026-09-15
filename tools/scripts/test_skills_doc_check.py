@@ -2,8 +2,9 @@
 """Tests for tools/scripts/skills_doc_check.py.
 
 Locks down the stdlib frontmatter parser (inline, quoted, and block-scalar
-descriptions), the one-line summary extraction, the render, and the two quality
-gates — plus a smoke test that the real skill catalog is clean.
+descriptions), the one-line summary extraction, both renders, the CLAUDE.md
+block splice, and the two quality gates — plus a smoke test that the real skill
+catalog is clean and that both generated targets name themselves when stale.
 
 Run:
     python3 tools/scripts/test_skills_doc_check.py
@@ -134,6 +135,106 @@ class RenderAndRealCatalog(unittest.TestCase):
         skills, problems = MOD.load_skills()
         self.assertEqual(problems, [], f"skill catalog problems: {problems}")
         self.assertGreater(len(skills), 1)
+
+
+class SkillsDigest(unittest.TestCase):
+    """Drift between the skills on disk and the CLAUDE.md block must fail.
+
+    The block is the only in-context index of the shipped skills, so a stale one
+    hides skills rather than merely reading out of date.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.doc = pathlib.Path(self.tmp.name) / "CLAUDE.md"
+        self._real_doc = MOD.DIGEST_DOC
+        MOD.DIGEST_DOC = self.doc
+        self.addCleanup(self._restore)
+        self.skills = [{"name": "alpha", "summary": "Does the alpha thing."},
+                       {"name": "beta", "summary": "Does the beta thing."}]
+
+    def _restore(self):
+        MOD.DIGEST_DOC = self._real_doc
+        self.tmp.cleanup()
+
+    def _skeleton(self, body: str = "") -> None:
+        self.doc.write_text(
+            f"# CLAUDE.md\n\n<!-- generated:start id=skills-digest -->\n"
+            f"{body}<!-- generated:end id=skills-digest -->\n\ntail\n")
+
+    def test_row_format_is_name_then_description(self):
+        out = MOD.render_digest(self.skills)
+        self.assertIn("| `alpha` | Does the alpha thing. |", out)
+        self.assertIn("| Skill | Purpose |", out)
+
+    def test_every_skill_gets_a_row(self):
+        out = MOD.render_digest(self.skills)
+        rows = [l for l in out.splitlines() if l.startswith("| `")]
+        self.assertEqual(len(rows), len(self.skills))
+
+    def test_write_then_check_is_in_sync(self):
+        self._skeleton()
+        self.assertEqual(MOD.digest_problems(self.skills, write=True), [])
+        self.assertEqual(MOD.digest_problems(self.skills, write=False), [])
+
+    def test_write_is_idempotent(self):
+        self._skeleton()
+        MOD.digest_problems(self.skills, write=True)
+        first = self.doc.read_text()
+        MOD.digest_problems(self.skills, write=True)
+        self.assertEqual(first, self.doc.read_text())
+
+    def test_a_deleted_row_is_caught(self):
+        self._skeleton()
+        MOD.digest_problems(self.skills, write=True)
+        text = self.doc.read_text()
+        pruned = "\n".join(l for l in text.splitlines()
+                           if not l.startswith("| `beta`")) + "\n"
+        self.doc.write_text(pruned)
+        problems = MOD.digest_problems(self.skills, write=False)
+        self.assertTrue(any("out of sync" in p for p in problems), problems)
+
+    def test_a_new_skill_is_caught(self):
+        self._skeleton()
+        MOD.digest_problems(self.skills, write=True)
+        grown = self.skills + [{"name": "gamma", "summary": "Does the gamma thing."}]
+        problems = MOD.digest_problems(grown, write=False)
+        self.assertTrue(any("skills-digest" in p for p in problems), problems)
+
+    def test_missing_markers_are_caught(self):
+        self.doc.write_text("# CLAUDE.md\n\nno markers here\n")
+        problems = MOD.digest_problems(self.skills, write=False)
+        self.assertTrue(any("missing the generated markers" in p for p in problems))
+
+    def test_write_preserves_surrounding_content(self):
+        self._skeleton()
+        MOD.digest_problems(self.skills, write=True)
+        text = self.doc.read_text()
+        self.assertTrue(text.startswith("# CLAUDE.md"))
+        self.assertTrue(text.rstrip().endswith("tail"))
+
+
+class RealDigest(unittest.TestCase):
+    def test_shipped_claude_md_block_covers_every_skill(self):
+        skills, problems = MOD.load_skills()
+        self.assertEqual(problems, [])
+        text = MOD.DIGEST_DOC.read_text(encoding="utf-8")
+        for s in skills:
+            self.assertIn(f"| `{s['name']}` |", text,
+                          f"{s['name']} is missing from the CLAUDE.md skills index")
+
+    def test_check_names_the_claude_md_block_when_only_it_is_stale(self):
+        # skills.md in sync, CLAUDE.md block stale: the failure must say which.
+        skills = [{"name": "alpha", "summary": "Does the alpha thing."}]
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        doc = pathlib.Path(tmp.name) / "CLAUDE.md"
+        doc.write_text("<!-- generated:start id=skills-digest -->\n"
+                       "stale\n"
+                       "<!-- generated:end id=skills-digest -->\n")
+        with mock.patch.object(MOD, "DIGEST_DOC", doc):
+            problems = MOD.digest_problems(skills, write=False)
+        self.assertTrue(any("CLAUDE.md" in p for p in problems), problems)
 
 
 if __name__ == "__main__":

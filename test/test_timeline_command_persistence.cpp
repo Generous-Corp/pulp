@@ -29,6 +29,13 @@ Project command_payload_project() {
         .clips = {clip},
         .device_chain = {{{8}}},
         .automation_lanes = {automation},
+        .modulators = {Modulator{{16}, ModulatorKind::Lfo, "wobble"}},
+        .macros = {MacroControl{{17}, "brightness", 0.5f}},
+        .modulation_routes = {ModulationRoute{{18},
+                                              {{16}, ModulationSourceKind::Modulator},
+                                              TrackMixerTarget{TrackMixerParameter::Gain},
+                                              0.5f,
+                                              true}},
         .take_lanes = {take_lane},
         .record_armed = true,
         .active_take_lane_id = {12},
@@ -71,6 +78,9 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     const auto& take_lane = member(track_data, "take_lanes").array[0];
     const auto& take_value = member(member(take_lane, "data"), "takes").array[0];
     const auto& freeze = member(track_data, "freeze");
+    const auto& modulator = member(track_data, "modulators").array[0];
+    const auto& macro = member(track_data, "macros").array[0];
+    const auto& route = member(track_data, "modulation_routes").array[0];
     const auto& marker = member(member(sequence, "data"), "markers").array[0];
     const auto& region = member(member(sequence, "data"), "regions").array[0];
     const auto& groove = member(member(sequence, "data"), "groove");
@@ -240,6 +250,58 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
                  R"({"clip_id":"7","expected":[{"id":"12","position_ticks":"0","value":0}],)"
                  R"("lane_id":"11","replacement":[{"id":"12","position_ticks":"0",)"
                  R"("value":8192}],"sequence_id":"5","track_id":"6"})"),
+        // Both sides carry the whole region envelope and differ only in role,
+        // which is the member a generator dispatches on and the one a
+        // member-by-member comparison is most likely to forget.
+        envelope("pulp.timeline.command.set_region",
+                 R"({"expected":{"data":{"duration":"960","id":"15","name":"section",)"
+                 R"("position":"0","role":"verse"},"type_name":"pulp.timeline.region",)"
+                 R"("version":1},"replacement":{"data":{"duration":"960","id":"15",)"
+                 R"("name":"section","position":"0","role":"chorus"},)"
+                 R"("type_name":"pulp.timeline.region","version":1},"sequence_id":"5"})"),
+        // An omitted side is the claim "no tuning", not a missing member, so
+        // this payload states clearing a project from equal temperament to
+        // nothing at all.
+        envelope("pulp.timeline.command.set_project_tuning",
+                 R"({"expected":{"keyboard_map_content":null,)"
+                 R"("reference_pitch_millihertz":432000,"scale_content":null,)"
+                 R"("system":"equal_temperament"}})"),
+        envelope("pulp.timeline.command.set_track_tuning",
+                 R"({"expected":null,"replacement":{"keyboard_map_content":null,)"
+                 R"("reference_pitch_millihertz":415000,"scale_content":null,)"
+                 R"("system":"mts_esp"},"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.insert_modulator",
+                 "{\"modulator\":" + std::string(parsed->raw(modulator)) +
+                     R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.remove_modulator",
+                 R"({"modulator_id":"16","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.set_modulator",
+                 "{\"expected\":" + std::string(parsed->raw(modulator)) +
+                     R"(,"modulator_id":"16","replacement":)" +
+                     std::string(parsed->raw(modulator)) + R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.insert_macro",
+                 "{\"macro\":" + std::string(parsed->raw(macro)) +
+                     R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.remove_macro",
+                 R"({"macro_id":"17","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.set_macro",
+                 "{\"expected\":" + std::string(parsed->raw(macro)) +
+                     R"(,"macro_id":"17","replacement":)" + std::string(parsed->raw(macro)) +
+                     R"(,"sequence_id":"5","track_id":"6"})"),
+        // Both floats are the IEEE-754 bit patterns of 0.5 and 0.25, the same
+        // spelling the macro document schema uses for the field they gate.
+        envelope("pulp.timeline.command.set_macro_value",
+                 R"({"expected_bits":"1056964608","macro_id":"17",)"
+                 R"("replacement_bits":"1048576000","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.insert_modulation_route",
+                 "{\"route\":" + std::string(parsed->raw(route)) +
+                     R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.remove_modulation_route",
+                 R"({"route_id":"18","sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.set_modulation_route",
+                 "{\"expected\":" + std::string(parsed->raw(route)) +
+                     R"(,"replacement":)" + std::string(parsed->raw(route)) +
+                     R"(,"route_id":"18","sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -358,6 +420,62 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(lane_points.expected.size() == 1);
     REQUIRE(lane_points.replacement.size() == 1);
     REQUIRE(lane_points.replacement[0].value == 8192u);
+    REQUIRE(std::holds_alternative<SetRegion>(commands[51]));
+    const auto& region_edit = std::get<SetRegion>(commands[51]);
+    REQUIRE(region_edit.expected.id == region_edit.replacement.id);
+    REQUIRE(region_edit.expected.role == SectionRole::Verse);
+    REQUIRE(region_edit.replacement.role == SectionRole::Chorus);
+    REQUIRE(std::holds_alternative<SetProjectTuning>(commands[52]));
+    const auto& project_tuning = std::get<SetProjectTuning>(commands[52]);
+    REQUIRE(project_tuning.expected.has_value());
+    REQUIRE(project_tuning.expected->reference_pitch_millihertz == 432'000u);
+    // The omitted member decodes as the claim that the project states no
+    // tuning, which is why clearing is expressible at all.
+    REQUIRE_FALSE(project_tuning.replacement.has_value());
+    REQUIRE(std::holds_alternative<SetTrackTuning>(commands[53]));
+    const auto& track_tuning = std::get<SetTrackTuning>(commands[53]);
+    REQUIRE_FALSE(track_tuning.expected.has_value());
+    REQUIRE(track_tuning.replacement.has_value());
+    REQUIRE(track_tuning.replacement->system == TuningSystem::MtsEsp);
+    REQUIRE(std::holds_alternative<InsertModulator>(commands[54]));
+    REQUIRE(std::get<InsertModulator>(commands[54]).modulator.id == ItemId{16});
+    REQUIRE(std::get<InsertModulator>(commands[54]).modulator.kind == ModulatorKind::Lfo);
+    REQUIRE(std::get<InsertModulator>(commands[54]).modulator.name == "wobble");
+    REQUIRE(std::holds_alternative<RemoveModulator>(commands[55]));
+    REQUIRE(std::get<RemoveModulator>(commands[55]).modulator_id == ItemId{16});
+    REQUIRE(std::holds_alternative<SetModulator>(commands[56]));
+    const auto& modulator_edit = std::get<SetModulator>(commands[56]);
+    REQUIRE(modulator_edit.modulator_id == ItemId{16});
+    REQUIRE(modulator_edit.expected.id == modulator_edit.replacement.id);
+    REQUIRE(std::holds_alternative<InsertMacro>(commands[57]));
+    REQUIRE(std::get<InsertMacro>(commands[57]).macro.id == ItemId{17});
+    // The authored position survives the wire bit-exactly, which is what makes
+    // an exact-value gate over a float safe in this vocabulary.
+    REQUIRE(std::get<InsertMacro>(commands[57]).macro.value == 0.5f);
+    REQUIRE(std::holds_alternative<RemoveMacro>(commands[58]));
+    REQUIRE(std::get<RemoveMacro>(commands[58]).macro_id == ItemId{17});
+    REQUIRE(std::holds_alternative<SetMacro>(commands[59]));
+    REQUIRE(std::get<SetMacro>(commands[59]).macro_id == ItemId{17});
+    REQUIRE(std::holds_alternative<SetMacroValue>(commands[60]));
+    const auto& macro_value = std::get<SetMacroValue>(commands[60]);
+    REQUIRE(macro_value.macro_id == ItemId{17});
+    REQUIRE(macro_value.expected == 0.5f);
+    REQUIRE(macro_value.replacement == 0.25f);
+    REQUIRE(std::holds_alternative<InsertModulationRoute>(commands[61]));
+    const auto& inserted_route = std::get<InsertModulationRoute>(commands[61]).route;
+    REQUIRE(inserted_route.id == ItemId{18});
+    REQUIRE(inserted_route.source.id == ItemId{16});
+    REQUIRE(inserted_route.source.kind == ModulationSourceKind::Modulator);
+    // The depth survives the wire bit-exactly for the reason a macro position
+    // does: both are persisted as IEEE-754 bit patterns.
+    REQUIRE(inserted_route.depth == 0.5f);
+    REQUIRE(inserted_route.enabled);
+    REQUIRE(std::holds_alternative<RemoveModulationRoute>(commands[62]));
+    REQUIRE(std::get<RemoveModulationRoute>(commands[62]).route_id == ItemId{18});
+    REQUIRE(std::holds_alternative<SetModulationRoute>(commands[63]));
+    const auto& route_edit = std::get<SetModulationRoute>(commands[63]);
+    REQUIRE(route_edit.route_id == ItemId{18});
+    REQUIRE(route_edit.expected.id == route_edit.replacement.id);
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;

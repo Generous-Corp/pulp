@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""skills_doc_check.py — generate / verify docs/reference/skills.md from the skills.
+"""skills_doc_check.py — generate / verify the skill catalogs from the skills.
 
-`docs/reference/skills.md` is the single public catalog of every skill Pulp
-ships. It is GENERATED from each `.agents/skills/<name>/SKILL.md` frontmatter
-(the `name` + `description` fields), so the catalog can never drift from the
-skills themselves.
+Two targets are generated from the same source, each `.agents/skills/<name>/SKILL.md`
+frontmatter (the `name` + `description` fields), so neither can drift from the
+skills themselves:
+
+* `docs/reference/skills.md` — the public catalog.
+* the `skills-digest` block in `CLAUDE.md` — the in-context index an agent reads
+  on every turn. `.agents/skills` is not directly invocable in every session, so
+  this table is the only index of the shipped skills some agents ever see; a
+  hand-maintained one silently drifted to 58 rows against 66 skills, which made
+  eight skills unreachable from context.
 
     python3 tools/scripts/skills_doc_check.py            # verify (exit 1 if stale)
     python3 tools/scripts/skills_doc_check.py --check     # same, explicit
-    python3 tools/scripts/skills_doc_check.py --write      # regenerate the doc
+    python3 tools/scripts/skills_doc_check.py --write      # regenerate both targets
 
 The verify mode is wired into tools/check-docs.sh and a ctest (`skills-doc-sync`),
-so a new or renamed skill that hasn't been reflected in the catalog fails CI with
+so a new or renamed skill that hasn't been reflected in the catalogs fails CI with
 the exact `--write` command to fix it.
 
 Two light quality gates keep the catalog useful: every skill must have a
@@ -28,6 +34,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = ROOT / ".agents" / "skills"
 DOC = ROOT / "docs" / "reference" / "skills.md"
+
+# The second target: an always-resident index spliced into CLAUDE.md between
+# generated markers, using the same block-splice contract as the tools registry
+# digest so the two behave identically.
+DIGEST_DOC = ROOT / "CLAUDE.md"
+DIGEST_ID = "skills-digest"
+START = re.compile(rf"<!--\s*generated:start\s+id={DIGEST_ID}\s*-->")
+END = re.compile(rf"<!--\s*generated:end\s+id={DIGEST_ID}\s*-->")
 
 # A description shorter than this is treated as missing — a catalog row has to
 # actually explain the skill.
@@ -147,14 +161,75 @@ def render(skills: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def render_digest(skills: list[dict]) -> str:
+    """The in-context skills index spliced into CLAUDE.md.
+
+    A real index, not a pointer: it names every shipped skill, because an agent
+    that cannot see a skill's name has no way to reach it.
+    """
+    lines = [
+        "| Skill | Purpose |",
+        "|-------|---------|",
+    ]
+    for s in skills:
+        lines.append(f"| `{s['name']}` | {s['summary']} |")
+    lines += [
+        "",
+        f"This table of {len(skills)} skills is GENERATED from each",
+        "`.agents/skills/<name>/SKILL.md` frontmatter by",
+        "`tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.",
+    ]
+    return "\n".join(lines)
+
+
+def _splice(doc_text: str, block: str) -> str | None:
+    """Replace the marked region. None if the markers are missing/malformed."""
+    lines = doc_text.splitlines()
+    start = end = None
+    for i, l in enumerate(lines):
+        if START.search(l):
+            start = i
+        elif END.search(l):
+            end = i
+            break
+    if start is None or end is None or end < start:
+        return None
+    return "\n".join(lines[:start + 1] + block.splitlines() + lines[end:]) + "\n"
+
+
+def digest_problems(skills: list[dict], write: bool) -> list[str]:
+    if not DIGEST_DOC.exists():
+        return [f"{DIGEST_DOC.name} is missing; cannot generate the "
+                f"{DIGEST_ID} block"]
+    text = DIGEST_DOC.read_text(encoding="utf-8")
+    block = render_digest(skills)
+    spliced = _splice(text, block)
+    if spliced is None:
+        return [f"CLAUDE.md is missing the generated markers "
+                f"<!-- generated:start id={DIGEST_ID} --> / "
+                f"<!-- generated:end id={DIGEST_ID} -->"]
+    if write:
+        if spliced != text:
+            DIGEST_DOC.write_text(spliced, encoding="utf-8")
+            print(f"wrote the {DIGEST_ID} block in CLAUDE.md ({len(skills)} skills)")
+        else:
+            print(f"{DIGEST_ID} block already up to date")
+        return []
+    if spliced != text:
+        return [f"CLAUDE.md's {DIGEST_ID} block is out of sync with the skills. "
+                "Regenerate it: python3 tools/scripts/skills_doc_check.py --write"]
+    return []
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--write", action="store_true",
-                      help="regenerate docs/reference/skills.md")
+                      help="regenerate docs/reference/skills.md and the "
+                           "CLAUDE.md skills-digest block")
     mode.add_argument("--check", action="store_true",
-                      help="fail if the doc is stale (default)")
+                      help="fail if either target is stale (default)")
     args = ap.parse_args(argv)
 
     skills, problems = load_skills()
@@ -168,20 +243,30 @@ def main(argv: list[str] | None = None) -> int:
     if args.write:
         DOC.write_text(expected, encoding="utf-8")
         print(f"wrote {DOC.relative_to(ROOT)} ({len(skills)} skills)")
+        failures = digest_problems(skills, write=True)
+        if failures:
+            print("ERROR: CLAUDE.md skills digest:", file=sys.stderr)
+            for f in failures:
+                print(f"  - {f}", file=sys.stderr)
+            return 1
         return 0
 
-    # check mode (default)
+    # check mode (default) — BOTH targets, and each names itself when stale.
+    failures: list[str] = []
     if not DOC.exists():
-        print(f"ERROR: {DOC.relative_to(ROOT)} is missing. "
-              "Run: python3 tools/scripts/skills_doc_check.py --write", file=sys.stderr)
+        failures.append(f"{DOC.relative_to(ROOT)} is missing. "
+                        "Run: python3 tools/scripts/skills_doc_check.py --write")
+    elif DOC.read_text(encoding="utf-8") != expected:
+        failures.append(f"{DOC.relative_to(ROOT)} is out of sync with the skills. "
+                        "Regenerate it: python3 tools/scripts/skills_doc_check.py --write")
+    failures += digest_problems(skills, write=False)
+    if failures:
+        print("ERROR: skill catalogs are stale:", file=sys.stderr)
+        for f in failures:
+            print(f"  - {f}", file=sys.stderr)
         return 1
-    actual = DOC.read_text(encoding="utf-8")
-    if actual != expected:
-        print(f"ERROR: {DOC.relative_to(ROOT)} is out of sync with the skills. "
-              "Regenerate it: python3 tools/scripts/skills_doc_check.py --write",
-              file=sys.stderr)
-        return 1
-    print(f"docs/reference/skills.md in sync ({len(skills)} skills)")
+    print(f"docs/reference/skills.md and the CLAUDE.md {DIGEST_ID} block "
+          f"in sync ({len(skills)} skills)")
     return 0
 
 
