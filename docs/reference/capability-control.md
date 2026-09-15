@@ -40,8 +40,21 @@ useful even when a live Product A adapter is not yet appropriate.
 
 ## Sequencer exposure ledger
 
-`docs/status/sequencer-exposure.json` is the durable delivery ledger for
-sequencer and playback slices. A feature change records a `pending` row with
+The durable delivery ledger for sequencer and playback slices is carried in two
+places that assemble into one document: `docs/status/sequencer-exposure.json`
+holds the rows written before the ledger was split, and
+`docs/status/sequencer-exposure/` holds one file per row —
+`rows/<row-id>.json`, `tombstones/<row-id>.json`, and `ledger.json` for the
+schema version, ledger ID, and audit block. A new row is written as its own
+file. Each row lives in exactly one place: a row ID carried by both forms, or a
+header carried by both forms, is an error rather than a silent winner.
+
+The directory exists for a mechanical reason. A single document has one append
+point, so two branches that each add a row rewrite the same bytes and conflict
+with each other even when each merges cleanly against `main`, and the merge
+queue cannot batch them at all. Two row files share no bytes.
+
+A feature change records a `pending` row with
 its durable claim ID and exact owned paths before it can know its protected
 merge identity. A post-merge ledger follow-up promotes that same row to
 `released` and pins the PR, accepted source head, and protected merge SHA.
