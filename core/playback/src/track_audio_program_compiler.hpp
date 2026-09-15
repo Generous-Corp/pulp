@@ -23,7 +23,8 @@ class TrackAudioProgramCompiler {
          const AudioRendererLimits& limits, double source_frame_offset,
          const std::vector<LoweredPlacementFade>& placement_fades,
          std::uint64_t document_revision, std::uint64_t program_generation,
-         OfflineStretchArtifactCache& artifact_cache, double source_frame_phase_end) noexcept;
+         OfflineStretchArtifactCache& artifact_cache, double source_frame_phase_end,
+         std::int64_t authored_window_start, timebase::TickDuration authored_duration) noexcept;
 
     TrackAudioClipCompileStatus
     step_track_freeze(const timeline::Track& track, const timeline::Project& project,

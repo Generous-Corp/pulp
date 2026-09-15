@@ -1160,6 +1160,54 @@ re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
 
+### The same sweep also answers "is every host still in it" — a different question
+
+Queue age is about the **lane**. It goes quiet, correctly, while a lane is
+being served — by anyone. On 2026-09-15 one macOS host stopped serving at
+10:02Z and did not serve again for 7h06m; its two peers absorbed the load, so
+every queue-age sweep in that window was right to say nothing, and six monitors
+read green. Three of them had died of the same cause as the host they watched.
+
+So the sweep also groups the required `macos` job's `runner_name` by host prefix
+(`m1-`, `m5-`, `studio-` — each host's `TARTCI_RUNNER_NAME_PREFIX`) and reports
+`host_stopped_contributing`, `unknown_fleet_host`, `sole_host_for_class`,
+`contribution_guard_unconfigured`, `sweep_cadence`. It opens its **own**
+tracking issue. A silent host is not a stalled queue; filing it as one sends
+the next reader to audit a queue that was working the whole time.
+
+This is *not* the label census the section above forbids, and the difference is
+the demand floor: a host is only called silent while the fleet demonstrably
+served at least 3 `macos` jobs in the same window. Below that there was no work
+to distinguish an idle host from a dead one. Remove that floor and you have
+rebuilt the census in a new costume — the test suite fails 3 cases if you do.
+
+**Three measured numbers worth knowing before you touch this.**
+
+- **Observable history is ~2.3 h, not 3 h.** `MAX_RUNS_PER_STATUS` caps each
+  status listing at 60 runs, and on this repo the `completed` listing is
+  *always* truncated: measured 2026-09-15, those 60 runs spanned 2.35 h. Any
+  fixed window wider than that is a window the collector can never fill. The
+  first draft treated the truncation as an evidence gap, which made the check
+  permanently degraded, permanently unable to alarm, and permanently green.
+  The cutoff is now `max(requested, oldest observed)` and every finding reports
+  the span it was actually computed over.
+- **One sweep costs ~245 API calls and ~4 minutes.** 4 run listings plus one
+  jobs call per observed run. `GITHUB_TOKEN` allows 1000 req/hr/repo, so ~4
+  sweeps an hour is the ceiling. **Do not add a `workflow_run` trigger** to
+  raise the cadence: the sweep would start failing its own API calls, which it
+  correctly reads as incomplete evidence and suppresses alarms on — a trigger
+  that silently converts a detection guard into a quiet one. Raising the cadence
+  needs the per-run jobs fan-out reduced first.
+- **`*/30` is delivered as roughly `*/200`.** Measured twice on 2026-09-15: 193
+  and 201 minutes between sweeps. Every detection latency here is bounded by
+  that number, not by the cron expression. Each sweep now reports the gap since
+  its predecessor as `sweep_cadence`, so the degradation is visible in the run
+  summary instead of being invisible for a week.
+
+Honest limit: a sweep that never runs cannot report its own absence. What is
+visible then is that both tracking issues stop being updated and the workflow's
+run list goes quiet in public.
+
 ### Gotcha: a `*_RUNS_ON_JSON` variable read WITHOUT `fromJSON` becomes one literal label
 
 Same silent-queue failure as below, but the black hole is created by the

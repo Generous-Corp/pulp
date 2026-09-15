@@ -4505,12 +4505,6 @@
           "needles": [
             "Nested trimming shortens an audio leaf's own fade to the new edge"
           ]
-        },
-        {
-          "path": "tools/scripts/negative_capability_allowlist.json",
-          "needles": [
-            "NestedConformedTrimUnsupported"
-          ]
         }
       ],
       "surfaces": {
@@ -5186,7 +5180,6 @@
           "needles": [
             "NestedDeviceChainUnsupported",
             "NestedAutomationPanUnsupported",
-            "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
         },
@@ -5195,7 +5188,6 @@
           "needles": [
             "NestedDeviceChainUnsupported",
             "NestedAutomationPanUnsupported",
-            "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
         },
@@ -5268,7 +5260,6 @@
               "needles": [
                 "NestedDeviceChainUnsupported",
                 "NestedAutomationPanUnsupported",
-                "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
             }
@@ -5284,7 +5275,6 @@
               "needles": [
                 "NestedDeviceChainUnsupported",
                 "NestedAutomationPanUnsupported",
-                "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
             }
@@ -6893,16 +6883,7 @@
         },
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
-          "rationale": "No design-time capability is registered or withdrawn. The allowlist loses the row that recorded why the trim refused, because the refusal is gone; the authored window is an internal lowering fact with no agent-visible surface.",
-          "evidence": [
-            {
-              "kind": "other",
-              "path": "tools/scripts/negative_capability_allowlist.json",
-              "needles": [
-                "NestedConformedTrimUnsupported"
-              ]
-            }
-          ]
+          "rationale": "No design-time capability is registered or withdrawn. The allowlist loses the row that recorded why the trim refused, because the refusal is gone; the authored window is an internal lowering fact with no agent-visible surface."
         }
       }
     },
@@ -8073,7 +8054,6 @@
         "docs/status/agent-capability-surface.json",
         "docs/status/sequencer-exposure.json",
         "test/test_timeline_nesting_playback.cpp",
-        "tools/agent-capabilities/contract-history.json",
         "tools/scripts/agent_capability_manifest.py",
         "tools/scripts/agent_capability_registry.py",
         "tools/scripts/negative_capability_allowlist.json"
@@ -8117,20 +8097,13 @@
           "path": "test/test_timeline_nesting_playback.cpp",
           "needles": [
             "Trimmed nested resampling media reads the conformed sub-span",
-            "Trimmed nested resampling media rejects elapsed-sample source offsets",
-            "Nested stretched audio refuses partial source windows"
+            "Trimmed nested resampling media rejects elapsed-sample source offsets"
           ]
         },
         {
           "path": "tools/scripts/agent_capability_registry.py",
           "needles": [
             "sha256:6050c1569f5e90b404fc4dc8a95498964a796a418a1fe62a9ec4929bb8e57e2f"
-          ]
-        },
-        {
-          "path": "tools/scripts/negative_capability_allowlist.json",
-          "needles": [
-            "Resample no longer refuses"
           ]
         }
       ],
@@ -8237,6 +8210,123 @@
           "dependencies": [
             "nested-substitution-state-refusal-split"
           ]
+        }
+      }
+    },
+    {
+      "id": "nested-stretch-authored-artifact-window",
+      "title": "A trimmed nested Stretch leaf reads a window of the artifact rendered for its authored range",
+      "delivery_state": "pending",
+      "claim_id": "3e7d9b41-5c26-4af8-9d03-71b8e4a26c5f",
+      "owned_paths": [
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/src/audio_renderer.cpp",
+        "core/playback/src/audio_renderer_internal.hpp",
+        "core/playback/src/offline_stretch_program_compiler.cpp",
+        "core/playback/src/offline_stretch_program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/realtime_stretch_renderer.cpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/track_audio_program_compiler.cpp",
+        "core/playback/src/track_audio_program_compiler.hpp",
+        "docs/guides/timeline-sdk.md",
+        "docs/status/sequencer-exposure.json",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json"
+      ],
+      "classification": "engine_internal",
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "Stretch reaches the same window from the other end",
+            "timeline::TimeConform::None) {"
+          ]
+        },
+        {
+          "path": "core/playback/src/audio_renderer_internal.hpp",
+          "needles": [
+            "OfflineStretchArtifactWindow",
+            "offline_stretch_artifact_window"
+          ]
+        },
+        {
+          "path": "core/playback/src/audio_renderer.cpp",
+          "needles": [
+            "offline_stretch_artifact_window",
+            "window->frame_start",
+            "window->authored_start"
+          ]
+        },
+        {
+          "path": "core/playback/src/offline_stretch_program_compiler.cpp",
+          "needles": [
+            "authored_window_start",
+            "window_->frame_start"
+          ]
+        },
+        {
+          "path": "core/playback/src/offline_stretch_program_compiler.hpp",
+          "needles": [
+            "authored_duration",
+            "OfflineStretchArtifactWindow"
+          ]
+        },
+        {
+          "path": "core/playback/src/realtime_stretch_renderer.cpp",
+          "needles": [
+            "clip.source_start",
+            "subspan"
+          ]
+        },
+        {
+          "path": "core/playback/src/track_audio_program_compiler.hpp",
+          "needles": [
+            "authored_window_start"
+          ]
+        },
+        {
+          "path": "core/playback/src/track_audio_program_compiler.cpp",
+          "needles": [
+            "authored_duration"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_compiler.cpp",
+          "needles": [
+            "lowered_clip.authored_window_start"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "Trimmed nested stretched media reads a window of the authored artifact",
+            "Nested stretched media placed before its authored origin still windows the artifact",
+            "Host-mapped nested stretched media reads the artifact window live"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "No installed header changes. The authored range a trimmed leaf is a window onto already travels beside the lowered clip, and the frame span it selects is carried by AudioClipRendererProgram's existing source_start/source_frame_count fields, which a compiled-output consumer reads rather than writes. No schema version moves and no serialized form changes."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. A nested placement that trims a Stretch clip previously refused to compile and now compiles, through the same SequenceRef source window pulp seq already writes."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal beneath the nesting and time-conform controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The artifact window is computed inside the renderer's program compiler and is reachable only through the trim an author already wrote on the placement."
         }
       }
     }

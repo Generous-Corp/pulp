@@ -12,6 +12,7 @@
 #include <cmath>
 #include <limits>
 #include <new>
+#include <span>
 #include <vector>
 
 namespace pulp::playback {
@@ -52,7 +53,13 @@ float artifact_sample(const AudioClipRendererProgram& clip, std::size_t channel,
     const auto relative = document_position - static_cast<long double>(clip.timeline_start);
     if (!(relative >= 0.0L) || !(relative < static_cast<long double>(clip.timeline_frame_count)))
         return 0.0f;
-    const auto& samples = clip.audio->channels[channel];
+    // A stretched leaf a nesting trimmed is a frame window onto an artifact
+    // rendered for the whole authored range, so the artifact's own first frame
+    // is not this clip's. `source_frame_count` is the window length and equals
+    // `timeline_frame_count`, which the bound above already applied.
+    const auto samples = std::span<const float>(clip.audio->channels[channel])
+                             .subspan(static_cast<std::size_t>(clip.source_start),
+                                      static_cast<std::size_t>(clip.source_frame_count));
     const auto base = std::floor(relative);
     const auto first = static_cast<std::size_t>(base);
     const auto second = std::min(first + 1u, samples.size() - 1u);
