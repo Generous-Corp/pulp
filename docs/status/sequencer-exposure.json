@@ -8158,6 +8158,89 @@
       }
     },
     {
+      "id": "nested-freeze-retime-predicate",
+      "title": "A nested freeze refuses only where the nesting actually re-times it",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "7e26afef-066a-4c42-b9da-78d244c479f2",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "nesting_is_transparent",
+            "NestingTransformation",
+            "artifact_rate_differs"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "A transparently nested freeze renders exactly like the same freeze unnested",
+            "Each transformation a nesting can impose refuses the freeze it would re-time"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "renders bit-identically to the same freeze unnested"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "Freeze nests only where the nesting transforms nothing"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "NestedFrozenTrackUnsupported survives with a tighter guard; no CompileErrorCode member is added or removed and no installed header, entry point or SDK type changes. The narrowing is a judgement inside the lowerer about which documents compile, so claiming an installed-SDK surface would advertise a type that did not change."
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "A transformation-free nested freeze now compiles where it previously refused, but no CLI verb authors a track's freeze and none reports in advance whether a nesting will re-time. An author still discovers the verdict at compile time. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to proposal-safe writers.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-substitution-state-refusal-split"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema carries no operation that authors a freeze or reports whether a nesting transforms its child, so the narrowed refusal is not reachable there. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-substitution-state-refusal-split"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A live timeline authority is absent for the sequencer generally, so neither the documents that now compile nor the surviving refusal is reachable as a live control. Owner: NW-D, and only where that source is Pulp-owned.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-sequencer-state-operation",
+            "nested-substitution-state-refusal-split"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises which nestings a sealed artifact survives, so an agent cannot ask before authoring one. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-substitution-state-refusal-split"
+          ]
+        }
+      }
+    },
+    {
       "id": "sequencer-transport-loop-control",
       "title": "Live sequencer transport loop read and loop write over Product A",
       "classification": "live_product_control",
