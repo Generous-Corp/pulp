@@ -158,6 +158,23 @@ constexpr std::array<unsigned char, 32> sha256(std::string_view input) {
 
 } // namespace detail
 
+/// The hex SHA-256 of a manifest, as a validator expectation spells it.
+struct ControlManifestDigest {
+    char bytes[65]; ///< 64 hex characters + NUL.
+};
+
+constexpr ControlManifestDigest control_manifest_digest(std::string_view manifest) {
+    constexpr char hex_digits[] = "0123456789abcdef";
+    ControlManifestDigest digest{};
+    std::size_t out = 0;
+    for (const unsigned char byte : detail::sha256(manifest)) {
+        digest.bytes[out++] = hex_digits[byte >> 4];
+        digest.bytes[out++] = hex_digits[byte & 0x0fu];
+    }
+    digest.bytes[out] = '\0';
+    return digest;
+}
+
 /// A shipping marker is scanned out of the built binary, so it has to be static
 /// bytes in the image rather than something assembled at run time. Holding it in
 /// an aggregate lets a `const volatile` fixture object copy a compile-time value
@@ -170,20 +187,25 @@ struct ControlManifestMarker {
 constexpr ControlManifestMarker control_manifest_marker(std::string_view manifest) {
     constexpr std::string_view prefix = "PULP_CONTROL_MANIFEST_SHA256_";
     constexpr std::string_view suffix = "_V1";
-    constexpr char hex_digits[] = "0123456789abcdef";
     ControlManifestMarker marker{};
     std::size_t out = 0;
     for (const char character : prefix)
         marker.bytes[out++] = character;
-    for (const unsigned char byte : detail::sha256(manifest)) {
-        marker.bytes[out++] = hex_digits[byte >> 4];
-        marker.bytes[out++] = hex_digits[byte & 0x0fu];
-    }
+    const auto digest = control_manifest_digest(manifest);
+    for (std::size_t i = 0; i < 64; ++i)
+        marker.bytes[out++] = digest.bytes[i];
     for (const char character : suffix)
         marker.bytes[out++] = character;
     marker.bytes[out] = '\0';
     return marker;
 }
+
+inline constexpr ControlManifestDigest kTrustedHostFixtureDigest =
+    control_manifest_digest(kTrustedHostFixtureManifest);
+inline constexpr ControlManifestDigest kTrustedHostE2eFixtureDigest =
+    control_manifest_digest(kTrustedHostE2eFixtureManifest);
+inline constexpr ControlManifestDigest kInstalledHostE2eFixtureDigest =
+    control_manifest_digest(kInstalledHostE2eFixtureManifest);
 
 inline constexpr ControlManifestMarker kTrustedHostFixtureMarker =
     control_manifest_marker(kTrustedHostFixtureManifest);

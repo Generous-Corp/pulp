@@ -80,7 +80,7 @@ std::optional<ControlTrustedHostSnapshot> make_snapshot(Directory& directory) {
     const auto validation = validate_control_artifact_bytes(
         binary,
         {.profile_id = "developer-local",
-         .manifest_digest = "4fe8bdb87ce76fdd8eb613140baf9cc2ded9299593260a4f7017c4a2e0e984cb",
+         .manifest_digest = pulp::test::kTrustedHostFixtureDigest.bytes,
          .endpoint_included = true,
          .capability_ids = {"session.describe"}});
     CAPTURE(validation.error);
