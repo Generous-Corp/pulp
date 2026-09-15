@@ -6726,8 +6726,7 @@
         ".agents/skills/timeline/SKILL.md",
         "docs/status/sequencer-exposure.json",
         "test/cmake/timeline_tests.cmake",
-        "tools/scripts/sequencer_control_skill_check.py",
-        "tools/scripts/skill_path_map.json"
+        "tools/scripts/sequencer_control_skill_check.py"
       ],
       "evidence": [
         {
