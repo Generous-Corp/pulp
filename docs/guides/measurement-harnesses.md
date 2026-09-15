@@ -303,54 +303,79 @@ not a determined one.
 ### The pluggable perceptual layer
 
 The lab has a genuine optional layer for full-reference perceptual quality
-models: **ViSQOL**, which reports a MOS-LQO on a 1-5 scale, plus two
-implementations of the ITU-R BS.1387 objective difference grade. You bring the
-binary and point an environment variable at it — `PULP_VISQOL_BIN`,
+models: **ViSQOL** (Apache-2.0), which reports a MOS-LQO on a 1-5 scale, plus
+two implementations of the ITU-R BS.1387 objective difference grade. You bring
+the binary and point an environment variable at it — `PULP_VISQOL_BIN`,
 `PULP_PEAQ_BIN`, `PULP_AQUATK_BIN` — and the lab shells out and parses the score
-back. Nothing is vendored, imported, or downloaded, which is what keeps the
-licensing clean given two of the three have copyleft implementations. Each tool
-is reached only across a process boundary and each skips independently with a
-stated reason when its variable is unset, so you enable exactly the subset you
-have.
+back. Nothing is vendored, imported, or downloaded, which keeps the licensing
+clean given two of the three have copyleft implementations. Each tool is reached
+only across a process boundary and skips independently with a stated reason when
+its variable is unset, so you enable exactly the subset you have.
 
-Four things to know before turning it on, because nothing will tell you at
-runtime:
+Two things about reaching it. It is reachable from the `run` subcommand, via the
+pipeline's export path, and **not** from `compare` or `regression-net` — which is
+where you would instinctively look, since those are the reference-versus-candidate
+commands. That was confirmed both statically and at runtime: instrumented to log
+every binary invocation, `compare` logged zero while genuinely running, and the
+export path logged one. And ViSQOL's input contract is narrow: it reads **16-bit
+PCM only**, rejecting anything else in its WAV header parser, and its audio mode
+is defined at 48 kHz.
 
-It is reachable from the `run` subcommand, via the pipeline's report, and **not**
-from `compare` or `regression-net` — which is where you would instinctively
-look, since those are the reference-versus-candidate commands. Neither of those
-modules references the perceptual layer at all, so an A/B through them will
-never produce a MOS.
+**Then there is what happened when somebody finally ran it, which belongs in this
+guide more than the feature does.**
 
-Nothing in the repository exercises it against a real binary. The tests are stub
-scripts that echo a MOS line to prove the parsing works, and public CI never
-sets the variables. The wrapper is covered; the models are not.
+The adapter had been wired for some time and had never scored anything. Two
+defects, each individually survivable, composed into something worse. The lab
+exports its WAVs as **float32** — deliberately, everywhere else that is the right
+call — and handed those straight to a tool that accepts only 16-bit PCM, so every
+real invocation died in the header parser. Meanwhile ViSQOL's own entry point
+exits **0 even when a comparison fails**: it logs the failure and continues its
+pair loop. And the adapter's MOS parser, having failed to find a `MOS-LQO` line,
+fell back to scanning both stdout and stderr for any float in [1, 5).
 
-The wrapper hands the WAVs over verbatim — no sample-rate check, no level match,
-no time alignment. ViSQOL's audio mode is defined at 48 kHz, so feeding it
-anything else is your responsibility, and a level or latency difference between
-reference and candidate will be scored as damage.
+So a run that scored nothing returned a **confident number**. The fallback
+scraped `3.3` out of the version banner "ViSQOL 3.3.3". In the session that
+caught this, the crash on the float32 exports produced `mos_lqo: 3.12` — lifted
+from `python3.12` in a traceback — and it was **identical for a clean pair and a
+deliberately degraded one**. That is precisely the dead-instrument signature this
+guide is about, and it was generated live: a reading that does not move when the
+defect is maximal, wearing the costume of a plausible perceptual score. No stub
+test could have caught it, because the stubs echo a well-formed MOS line and the
+parsing they exercise is the path that was working.
 
-The parser takes the first `MOS-LQO`-labelled float it finds and otherwise falls
-back to accepting **any plausible float** in the combined stdout and stderr. A
-tool that prints a version number before failing can therefore return a "score".
+A fix is in flight at the time of writing — transcoding to 16-bit PCM, refusing a
+non-48 kHz input with a reason, parsing stdout only with version triples stripped,
+and returning an error carrying ViSQOL's own stderr when a run scores nothing.
+Its test is the interesting part: it asserts **discrimination rather than a
+threshold**, because an adapter that returns a constant passes every stub test
+ever written and fails that one. Its skip message reads "This skip is not a pass."
 
-**And a judgment, which matters more than any of the above: do not make a
-MOS-LQO a gate for these targets.** For a spectral filter bank the intended
-change *is* a spectral difference — and ViSQOL's pipeline (a neurogram
-similarity index over gammatone patches, mapped to a MOS by a support-vector
-regressor fitted on **codec** impairments) will read a deliberate 6 dB shelf as
-damage, because a codec never does that on purpose. For a time-stretcher at any
-ratio other than 1 the full-reference contract is simply void: patch alignment
-is not time-warp compensation, so the two signals are no longer comparable
-frame for frame. Audio mode was trained with music but still on codec
-degradations, and speech mode does not generalise to music at all.
+Be clear about what is and is not established. The **adapter** is now exercised
+against the real command-line tool. **ViSQOL's own DSP has never run on this
+machine** — the scorer is untested here, and its sensitivity to residual level
+mismatch is unquantified. Nothing in this repository has produced a perceptual
+score you should cite.
+
+One correction worth making explicitly, since it is easy to assume the opposite:
+**ViSQOL does its own alignment.** Global alignment and realignment are on by
+default, with a search window, and the lab RMS level-matches before export. So
+the "no alignment, no level match" hazard applies to calling the adapter function
+directly, not to the pipeline path.
+
+**And the judgment that matters most: do not make a MOS-LQO a gate for these
+targets.** For a spectral filter bank the intended change *is* a spectral
+difference — and ViSQOL's pipeline (a neurogram similarity index over gammatone
+patches, mapped to a MOS by a support-vector regressor fitted on **codec**
+impairments) will read a deliberate 6 dB shelf as damage, because a codec never
+does that on purpose. For a time-stretcher at any ratio other than 1 the
+full-reference contract is void: patch alignment is not time-warp compensation,
+so the two signals are no longer comparable frame for frame. Audio mode was
+trained with music but still on codec degradations, and speech mode does not
+generalise to music at all.
 
 So the layer's own statement of its role is the right one and worth taking
 literally: a coarse global tripwire for "did this get grossly worse", which
-cannot tell you "smear at 42 ms". Advisory, never a gate. Speech-intelligibility
-metrics and no-reference neural speech models are deliberately out of scope; the
-contract here is reference-versus-candidate over musical material.
+cannot tell you "smear at 42 ms". Advisory, never a gate.
 
 ---
 
@@ -880,7 +905,13 @@ running it will change that. This is a question you can answer at the point of
 writing the measurement, before it has ever produced a number, and it would have
 caught the click detector and the coverage metric on the day each was written.
 Answering it empirically is better still: make the defect maximal and watch the
-number move.
+number move — which is exactly how the perceptual adapter above was caught,
+returning the same fabricated score for a clean pair and a degraded one.
+
+The corollary for tests: assert **discrimination**, not a threshold. An
+instrument that returns a constant satisfies any single-threshold assertion you
+can write, and fails the moment you require it to tell two known-different inputs
+apart.
 
 **A control that returns non-zero only proves the tool ran.** It does not prove
 the tool ran on the right thing. When the count is knowable, compare it against
