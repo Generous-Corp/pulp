@@ -225,10 +225,12 @@ missing here or carries the wrong result kind.
   leaves flattening cut it into and multiplies with each leaf's own fade. It
   refuses only when a ramp actually reaches a leaf whose content no renderer
   scales by clip gain, because dropping that ramp would be silently wrong. A complete
-  nested media clip preserves its `TimeConform` intent, but a source window
-  that trims a conforming clip fails with `NestedConformedTrimUnsupported`
-  until playback has a conform-aware source-range mapping, and a trimmed
-  `Stretch` clip additionally needs a windowed artifact. A nested child track
+  nested media clip preserves its `TimeConform` intent. A source window that
+  trims a `Resample` clip maps onto the matching sub-span of the source under
+  the same conform function, so it lowers; one that trims a `Stretch` clip
+  still fails with `NestedConformedTrimUnsupported`, because a stretched clip's
+  audio is an artifact keyed to its authored tick range and a trimmed window
+  needs its own. A nested child track
   carrying a device chain fails with `NestedDeviceChainUnsupported`; one
   automating its pan fails with `NestedAutomationPanUnsupported`, and one
   automating its gain with `NestedAutomationGainEventLeafUnsupported` or
@@ -1445,6 +1447,17 @@ is `pending` *and* materially changed. Material is exactly `delivery_state`,
 (`_material_row` in `sequencer_exposure_check.py`); editing a row's `title` does
 nothing. There is no doc-only carve-out and no skip trailer, so `shipyard pr`
 reports skill-sync and version-bump green and the PR still goes red.
+
+**Write a new row as its own file: `docs/status/sequencer-exposure/rows/<row-id>.json`,
+containing just that row object, named for its `id`.** The checker assembles the
+ledger from `docs/status/sequencer-exposure.json` plus every file in that
+directory, so both forms are one ledger and a row lives in exactly one of them.
+The directory exists because the single document has one append point: two
+branches that each append a row rewrite the same bytes and conflict *with each
+other* even when each merges cleanly against `main` — which is also why the merge
+queue cannot batch them. Two row files conflict with nothing. Edit a row that is
+still in the single document in place; do not move it while amending it, because
+a move plus an edit reads as neither.
 
 Amending the existing pending row is the honest move when that row already claims
 the path and its delivery is unfinished — `validate_transition`'s contract is
