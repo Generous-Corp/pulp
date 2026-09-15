@@ -5373,7 +5373,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 51"
+            "alternatives == 54"
           ]
         },
         {
@@ -6462,7 +6462,7 @@
             "struct InsertMidiExpressionLane",
             "struct RemoveMidiExpressionLane",
             "struct SetMidiExpressionLanePoints",
-            "SetMidiExpressionLanePoints>;"
+            "SetMidiExpressionLanePoints,"
           ]
         },
         {
@@ -6531,7 +6531,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 51"
+            "alternatives == 54"
           ]
         },
         {
@@ -6575,7 +6575,7 @@
                 "struct InsertMidiExpressionLane",
                 "struct RemoveMidiExpressionLane",
                 "struct SetMidiExpressionLanePoints",
-                "SetMidiExpressionLanePoints>;"
+                "SetMidiExpressionLanePoints,"
               ]
             },
             {
@@ -6713,6 +6713,352 @@
             "midi-expression-playback"
           ],
           "owner": "sequencer-controller-playback-capability"
+        }
+      }
+    },
+    {
+      "id": "offline-timeline-tuning-region-commands",
+      "title": "Typed document-tuning commands and a gated region edit that makes a section role correctable",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "1f02f669-3023-46ab-9e2f-2538b7f404fc",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/include/pulp/timeline/document_session.hpp",
+        "core/timeline/include/pulp/timeline/model.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/command.cpp",
+        "core/timeline/src/model.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/sequence.cpp",
+        "core/timeline/src/serialize_command_decode.cpp",
+        "core/timeline/src/track.cpp",
+        "core/timeline/src/transaction.cpp",
+        "core/timeline/src/transaction_dispatch_internal.hpp",
+        "core/timeline/src/transaction_marker_internal.cpp",
+        "core/timeline/src/transaction_reduction_support.hpp",
+        "core/timeline/src/transaction_track_state_internal.cpp",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_mcp_timeline_tools.cpp",
+        "test/test_timeline_agent.cpp",
+        "test/test_timeline_command_persistence.cpp",
+        "test/test_timeline_schema_registry.cpp",
+        "test/test_timeline_tuning_region_commands.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": [
+            "struct SetProjectTuning",
+            "struct SetTrackTuning",
+            "struct SetRegion",
+            "SetProjectTuning, SetTrackTuning, SetRegion>;"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+          "needles": [
+            "std::is_same_v<T, SetProjectTuning>",
+            "std::is_same_v<T, SetTrackTuning>",
+            "std::is_same_v<T, SetRegion>",
+            "the tuning a project or one of its tracks plays in"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/model.hpp",
+          "needles": [
+            "with_tuning(std::optional<TuningReference> tuning) const;",
+            "replace_region(SequenceRegion replacement) const;",
+            "replace_tuning(std::optional<TuningReference> tuning) const;",
+            "auto operator<=>(const SequenceRegion&) const = default;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction.cpp",
+          "needles": [
+            "std::get_if<SetProjectTuning>(&envelope.command)"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_track_state_internal.cpp",
+          "needles": [
+            "reduce_set_track_tuning"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_marker_internal.cpp",
+          "needles": [
+            "reduce_set_region",
+            "set.expected.id != set.replacement.id"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_dispatch_internal.hpp",
+          "needles": [
+            "SetTrackName, SetTrackTuning>;",
+            "RemoveRegion, SetRegion>;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/track.cpp",
+          "needles": [
+            "Track::with_tuning",
+            "ModelErrorCode::InvalidTuningReference"
+          ]
+        },
+        {
+          "path": "core/timeline/src/model.cpp",
+          "needles": [
+            "Project::replace_tuning"
+          ]
+        },
+        {
+          "path": "core/timeline/src/sequence.cpp",
+          "needles": [
+            "Sequence::replace_region"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.set_project_tuning",
+            "pulp.timeline.command.set_track_tuning",
+            "pulp.timeline.command.set_region"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_command_decode.cpp",
+          "needles": [
+            "pulp.timeline.command.set_region",
+            "pulp.timeline.command.set_project_tuning",
+            "pulp.timeline.command.set_track_tuning"
+          ]
+        },
+        {
+          "path": "core/timeline/src/command.cpp",
+          "needles": [
+            "std::is_same_v<T, SetRegion>",
+            "std::is_same_v<T, SetProjectTuning>",
+            "std::is_same_v<T, SetTrackTuning>"
+          ]
+        },
+        {
+          "path": "test/test_timeline_tuning_region_commands.cpp",
+          "needles": [
+            "project tuning is authored, replaced, and cleared under an exact gate",
+            "a track override applies to its own track and leaves the project's alone",
+            "a stale tuning expectation is refused and the document is unchanged",
+            "an inconsistent tuning is refused by the model's own helper",
+            "a region's section role is corrected in place and the edit inverts exactly",
+            "a region edit gates on every authored member, role included",
+            "a region edit may not swap identity and may not name a region the sequence lacks",
+            "decode refuses a region edit that swaps identity",
+            "a writer denied removal may still correct a region's role and retune"
+          ]
+        },
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "pulp-test-timeline-tuning-region-commands"
+          ]
+        },
+        {
+          "path": "test/test_timeline_writer_capabilities.cpp",
+          "needles": [
+            "alternatives == 54"
+          ]
+        },
+        {
+          "path": "test/test_timeline_schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.set_project_tuning",
+            "pulp.timeline.command.set_region",
+            "pulp.timeline.command.set_track_tuning"
+          ]
+        },
+        {
+          "path": "test/test_timeline_command_persistence.cpp",
+          "needles": [
+            "pulp.timeline.command.set_region",
+            "std::holds_alternative<SetTrackTuning>(commands[53])"
+          ]
+        },
+        {
+          "path": "test/test_timeline_agent.cpp",
+          "needles": [
+            "timeline agent retunes a document and corrects a section role in place",
+            "pulp.timeline.command.set_project_tuning"
+          ]
+        },
+        {
+          "path": "test/test_mcp_timeline_tools.cpp",
+          "needles": [
+            "timeline MCP retunes a project and corrects a section role under the default profile",
+            "pulp.timeline.command.set_region"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The three commands are public alternatives of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp can state a project's or a track's tuning and correct a region's SectionRole through the same transaction path every other command uses. Both tuning commands are {Timing, Modify} rather than a new CommandClass, because adding a class renumbers capability_bit and silently repurposes every persisted and transmitted writer mask; kCommandClassCount is still 11 and three bit literals are asserted rather than assumed. Timing rather than Track for the track command keeps the retuning grant on one bit, so a mask can forbid retuning without also forbidding renames, and a grant issued to rename and reorder tracks does not silently become authority to retune them. Every intent is Modify, clearing included: a TuningReference is a value field, absence is the distinct claim that the document names no tuning rather than the removal of anything it owns, and routing the clear through Remove would let a writer set a tuning it could never retract. Validity is not restated: each reducer replaces through Project::replace_tuning or Track::with_tuning, which call the same valid_tuning_reference the constructors apply, so a stray payload hash or an out-of-range reference pitch surfaces as the model's own refusal. SetRegion pins identity in both the reducer and the decoder, because a Modify that could swap identity is a removal and a creation wearing a signature that declares neither. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. The released p0-17-section-role-tuning row is untouched; this row records the mutation vocabulary that row's own rationale named as its open owner.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/command.hpp",
+              "needles": [
+                "struct SetProjectTuning",
+                "struct SetTrackTuning",
+                "struct SetRegion",
+                "SetProjectTuning, SetTrackTuning, SetRegion>;"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+              "needles": [
+                "std::is_same_v<T, SetProjectTuning>",
+                "std::is_same_v<T, SetRegion>"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/model.hpp",
+              "needles": [
+                "with_tuning(std::optional<TuningReference> tuning) const;",
+                "replace_region(SequenceRegion replacement) const;"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "platform runtime music timebase timeline"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_tuning_region_commands.cpp",
+              "needles": [
+                "project tuning is authored, replaced, and cleared under an exact gate",
+                "a region's section role is corrected in place and the edit inverts exactly",
+                "a writer denied removal may still correct a region's role and retune"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The CLI reaches all three commands through the canonical command-apply handler in tools/cli/cmd_seq.cpp, and the generated verb table carries their type names because the schema registry does. A registered command alone does not earn this surface, because command_apply applies the decoded commands and then returns serialize_project() of the result, so a mutation the project encoder does not carry is destroyed by the same call that performed it. That floor is measured rather than assumed: test_timeline_agent.cpp drives command_apply end to end, asserts the returned document carries the 432000 millihertz reference pitch and then the corrected chorus role, reopens and validates that document, and asserts a replay of the region correction is refused by its own gate. The tuning members are optional on both sides of the wire, spelled exactly as the project and track document schemas spell the same field, so an omitted side is the claim that the document names no tuning rather than a missing member -- which is what makes clearing expressible at all. The authority recorded here is the CLI's declared editor profile and the refusal codes that profile's admission can emit, not the commands' own conflict codes.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": [
+                "pulp.timeline.command.set_project_tuning",
+                "pulp.timeline.command.set_track_tuning",
+                "pulp.timeline.command.set_region"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_agent.cpp",
+              "needles": [
+                "timeline agent retunes a document and corrects a section role in place",
+                "pulp.timeline.command.set_region"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The MCP tool definitions are projected from the same manifest as the CLI verbs, so pulp_timeline_command_apply advertises all three type names in its type_name enum and its x-pulp-command-types list, and handle_timeline_command_apply binds that tool to the same command_apply the CLI calls. The default MCP authority is the non-destructive proposal profile, which holds every class and no destructive intent, and that profile is the reason SetRegion exists: before it, such a writer could author a region carrying a SectionRole and never correct it, because the only correction was remove-then-insert and the remove is the axis the profile is denied. test_mcp_timeline_tools.cpp retunes the project and corrects the role under that default profile, reopens the returned document through pulp_timeline_project_open, asserts the region removal is still refused to the same profile -- so the reachability did not come from widening the mask -- and then applies the identical removal payload under the editor profile as a control, so the refusal is the authority rather than a malformed command.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_command_apply",
+                "pulp.timeline.command.set_project_tuning",
+                "pulp.timeline.command.set_region"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline MCP retunes a project and corrects a section role under the default profile",
+                "pulp.timeline.command.set_project_tuning"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live operation for document tuning or for a section role, and no executor binding for one. These commands are the mutation such a control would execute, so this row is a dependency of that closure rather than a step of it: the live surface additionally needs the timeline document session Product A does not yet hold, which is why closing it here would make the ledger stop describing the product.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This slice installs no design-time authoring capability. Tuning and section role are document mutations reached through the command vocabulary the CLI and MCP surfaces above already advertise, not a capability an agent manifest declares."
         }
       }
     }

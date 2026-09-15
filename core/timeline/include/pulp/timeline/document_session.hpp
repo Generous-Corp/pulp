@@ -58,7 +58,10 @@ enum class CommandClass : std::uint8_t {
     Device,
     /// Markers, regions, chord/scale lane, and groove.
     Annotation,
-    /// Project tempo and meter maps.
+    /// How the document is interpreted musically: the project tempo and meter
+    /// maps, and the tuning a project or one of its tracks plays in. The only
+    /// class that spans project and track scope, because it partitions by what
+    /// a command governs rather than by where the field is stored.
     Timing,
     /// Project-owned media assets.
     Asset,
@@ -203,9 +206,15 @@ template <class T> constexpr CommandAuthority command_authority_of() noexcept {
         return {Class::Annotation, Intent::Modify};
     else if constexpr (std::is_same_v<T, SetDynamicsLane>)
         return {Class::Annotation, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetRegion>)
+        return {Class::Annotation, Intent::Modify};
     else if constexpr (std::is_same_v<T, SetTempoMap>)
         return {Class::Timing, Intent::Modify};
     else if constexpr (std::is_same_v<T, SetMeterMap>)
+        return {Class::Timing, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetProjectTuning>)
+        return {Class::Timing, Intent::Modify};
+    else if constexpr (std::is_same_v<T, SetTrackTuning>)
         return {Class::Timing, Intent::Modify};
     else if constexpr (std::is_same_v<T, CreateAsset>)
         return {Class::Asset, Intent::Create};

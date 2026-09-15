@@ -879,6 +879,65 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
         return runtime::Ok(Command(RemoveRegion{sequence.value(), region.value()}));
     }
+    if (type.value() == "pulp.timeline.command.set_region") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected = decode_region(*expected.value(), MemberPolicy::Optional, context,
+                                              data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement = decode_region(*replacement.value(), MemberPolicy::Optional,
+                                                 context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        // Refused at the wire as well as in the reducer, because there is no
+        // model rule to lean on: Sequence::replace_region is handed one region
+        // and cannot see that the caller meant a different one. A swap here is a
+        // removal and a creation spelled as a modification.
+        if (decoded_expected.value().id != decoded_replacement.value().id)
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path + "/replacement",
+                                 replacement.value()->begin);
+        return runtime::Ok(Command(SetRegion{sequence.value(),
+                                             std::move(decoded_expected).value(),
+                                             std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_project_tuning" ||
+        type.value() == "pulp.timeline.command.set_track_tuning") {
+        // Absent and null both mean "states no tuning", which is a value this
+        // gate compares rather than a missing member: a command that omits both
+        // asserts the project currently names no tuning and must keep naming
+        // none, and that is a legitimate no-op to replay.
+        const auto decode_side =
+            [&](std::string_view name) -> runtime::Result<std::optional<TuningReference>,
+                                                          PersistenceError> {
+            const auto* value = command.find(name);
+            if (!value || value->kind == JsonValue::Kind::Null)
+                return runtime::Ok(std::optional<TuningReference>{});
+            auto decoded = decode_tuning(*value, data_path + "/" + std::string(name));
+            if (!decoded)
+                return runtime::Err(decoded.error());
+            return runtime::Ok(std::optional<TuningReference>(std::move(decoded).value()));
+        };
+        auto expected = decode_side("expected");
+        if (!expected)
+            return runtime::Err(expected.error());
+        auto replacement = decode_side("replacement");
+        if (!replacement)
+            return runtime::Err(replacement.error());
+        if (type.value() == "pulp.timeline.command.set_project_tuning")
+            return runtime::Ok(Command(SetProjectTuning{std::move(expected).value(),
+                                                        std::move(replacement).value()}));
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        if (!sequence || !track)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(SetTrackTuning{sequence.value(), track.value(),
+                                                  std::move(expected).value(),
+                                                  std::move(replacement).value()}));
+    }
     if (type.value() == "pulp.timeline.command.set_groove") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);
         auto expected = required(command, "expected", data_path);

@@ -148,12 +148,15 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.set_midi_expression_lane_points",
         "pulp.timeline.command.set_note_events",
         "pulp.timeline.command.set_note_velocity",
+        "pulp.timeline.command.set_project_tuning",
         "pulp.timeline.command.set_record_arm",
+        "pulp.timeline.command.set_region",
         "pulp.timeline.command.set_take_comp",
         "pulp.timeline.command.set_tempo_map",
         "pulp.timeline.command.set_track_freeze",
         "pulp.timeline.command.set_track_mixer",
         "pulp.timeline.command.set_track_name",
+        "pulp.timeline.command.set_track_tuning",
     };
     static_assert(expected.size() == std::variant_size_v<Command>);
 

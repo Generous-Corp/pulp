@@ -672,6 +672,27 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     schemas.push_back(builtin(
         "pulp.timeline.command.remove_region", SchemaDomain::Command,
         {{"region_id", SchemaValueKind::U64String}, {"sequence_id", SchemaValueKind::U64String}}));
+    // Both sides carry the whole region, role included, because the gate this
+    // command declares is on the value and not on one member of it.
+    schemas.push_back(builtin("pulp.timeline.command.set_region", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Object, true, "pulp.timeline.region"},
+                               {"replacement", SchemaValueKind::Object, true,
+                                "pulp.timeline.region"},
+                               {"sequence_id", SchemaValueKind::U64String}}));
+    // A tuning member is optional on both sides, spelled exactly as the project
+    // and track document schemas spell the same field: absent means the document
+    // states no tuning, which is a different claim from stating equal
+    // temperament, so a required member with a default would lose it.
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_project_tuning", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
+                 {"replacement", SchemaValueKind::Object, false, "pulp.timeline.tuning"}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_track_tuning", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
+                 {"replacement", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.insert_scene", SchemaDomain::Command,
                               {{"before_scene_id", SchemaValueKind::U64String, false},
                                {"scene", SchemaValueKind::Object, true, "pulp.timeline.scene"},

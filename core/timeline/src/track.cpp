@@ -948,6 +948,16 @@ runtime::Result<Track, ModelError> Track::with_mixer(TrackMixer mixer) const {
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
 }
 
+runtime::Result<Track, ModelError> Track::with_tuning(std::optional<TuningReference> tuning) const {
+    // The same helper Track::create applies, called rather than restated: a
+    // second copy of the rule is a second thing that can disagree with it.
+    if (tuning && !valid_tuning_reference(*tuning))
+        return fail<Track>(ModelErrorCode::InvalidTuningReference, data_->id, data_->id);
+    auto next_data = *data_;
+    next_data.tuning = std::move(tuning);
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
 Track Track::with_name(std::string name) const {
     auto next_data = *data_;
     next_data.name = std::move(name);

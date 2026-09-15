@@ -2,6 +2,7 @@
 
 #include <pulp/timeline/midi_lane.hpp>
 #include <pulp/timeline/model.hpp>
+#include <pulp/timeline/tuning.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -583,6 +584,52 @@ struct SetMidiExpressionLanePoints {
     std::vector<MidiLanePoint> replacement;
 };
 
+/// Replaces the project-wide tuning statement under an exact value gate.
+///
+/// An absent `replacement` states no tuning at all, which is not the same claim
+/// as stating equal temperament: a document that never chose plays in whatever
+/// the host defaults to, while one that chose equal temperament has named it.
+/// Clearing is therefore an authored act on a value the project keeps, not the
+/// removal of anything the document owns, which is why the intent is Modify.
+struct SetProjectTuning {
+    /// Required current project tuning, compared exactly, absence included.
+    std::optional<TuningReference> expected;
+    /// Tuning written when the gate matches.
+    std::optional<TuningReference> replacement;
+};
+
+/// Replaces one track's tuning override under an exact value gate.
+///
+/// Absence means the track plays in whatever the project states, so clearing an
+/// override hands the track back to the project rather than silencing it.
+struct SetTrackTuning {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track whose tuning override changes.
+    ItemId track_id;
+    /// Required current override, compared exactly, absence included.
+    std::optional<TuningReference> expected;
+    /// Override written when the gate matches.
+    std::optional<TuningReference> replacement;
+};
+
+/// Replaces one sequence-owned region under an exact value gate.
+///
+/// Identity is pinned: `expected.id` and `replacement.id` must be equal and must
+/// name a region the sequence owns. A Modify command that could also swap
+/// identity would be a removal and a creation laundered through a signature
+/// that declares neither, and the removal is the axis an untrusted writer is
+/// denied by default. Pinning it is what makes correcting a region's
+/// SectionRole reachable for the writer profile that authored it.
+struct SetRegion {
+    /// Sequence owning the region.
+    ItemId sequence_id;
+    /// Required current region, compared in full including its role.
+    SequenceRegion expected;
+    /// Region written when the gate matches, carrying the same identity.
+    SequenceRegion replacement;
+};
+
 /// Exhaustive set of durable Timeline document mutations.
 using Command = std::variant<
     InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip, SetNoteVelocity,
@@ -593,7 +640,8 @@ using Command = std::variant<
     InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer, InsertTrack,
     RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents, InsertNotes, RemoveNotes, InsertDevice,
     RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState, SetDynamicsLane,
-    InsertMidiExpressionLane, RemoveMidiExpressionLane, SetMidiExpressionLanePoints>;
+    InsertMidiExpressionLane, RemoveMidiExpressionLane, SetMidiExpressionLanePoints,
+    SetProjectTuning, SetTrackTuning, SetRegion>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {

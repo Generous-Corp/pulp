@@ -240,6 +240,26 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
                  R"({"clip_id":"7","expected":[{"id":"12","position_ticks":"0","value":0}],)"
                  R"("lane_id":"11","replacement":[{"id":"12","position_ticks":"0",)"
                  R"("value":8192}],"sequence_id":"5","track_id":"6"})"),
+        // Both sides carry the whole region envelope and differ only in role,
+        // which is the member a generator dispatches on and the one a
+        // member-by-member comparison is most likely to forget.
+        envelope("pulp.timeline.command.set_region",
+                 R"({"expected":{"data":{"duration":"960","id":"15","name":"section",)"
+                 R"("position":"0","role":"verse"},"type_name":"pulp.timeline.region",)"
+                 R"("version":1},"replacement":{"data":{"duration":"960","id":"15",)"
+                 R"("name":"section","position":"0","role":"chorus"},)"
+                 R"("type_name":"pulp.timeline.region","version":1},"sequence_id":"5"})"),
+        // An omitted side is the claim "no tuning", not a missing member, so
+        // this payload states clearing a project from equal temperament to
+        // nothing at all.
+        envelope("pulp.timeline.command.set_project_tuning",
+                 R"({"expected":{"keyboard_map_content":null,)"
+                 R"("reference_pitch_millihertz":432000,"scale_content":null,)"
+                 R"("system":"equal_temperament"}})"),
+        envelope("pulp.timeline.command.set_track_tuning",
+                 R"({"expected":null,"replacement":{"keyboard_map_content":null,)"
+                 R"("reference_pitch_millihertz":415000,"scale_content":null,)"
+                 R"("system":"mts_esp"},"sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -358,6 +378,23 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(lane_points.expected.size() == 1);
     REQUIRE(lane_points.replacement.size() == 1);
     REQUIRE(lane_points.replacement[0].value == 8192u);
+    REQUIRE(std::holds_alternative<SetRegion>(commands[51]));
+    const auto& region_edit = std::get<SetRegion>(commands[51]);
+    REQUIRE(region_edit.expected.id == region_edit.replacement.id);
+    REQUIRE(region_edit.expected.role == SectionRole::Verse);
+    REQUIRE(region_edit.replacement.role == SectionRole::Chorus);
+    REQUIRE(std::holds_alternative<SetProjectTuning>(commands[52]));
+    const auto& project_tuning = std::get<SetProjectTuning>(commands[52]);
+    REQUIRE(project_tuning.expected.has_value());
+    REQUIRE(project_tuning.expected->reference_pitch_millihertz == 432'000u);
+    // The omitted member decodes as the claim that the project states no
+    // tuning, which is why clearing is expressible at all.
+    REQUIRE_FALSE(project_tuning.replacement.has_value());
+    REQUIRE(std::holds_alternative<SetTrackTuning>(commands[53]));
+    const auto& track_tuning = std::get<SetTrackTuning>(commands[53]);
+    REQUIRE_FALSE(track_tuning.expected.has_value());
+    REQUIRE(track_tuning.replacement.has_value());
+    REQUIRE(track_tuning.replacement->system == TuningSystem::MtsEsp);
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;
