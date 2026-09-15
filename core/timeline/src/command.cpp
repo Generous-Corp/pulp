@@ -544,6 +544,16 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                            std::bit_cast<std::uint32_t>(right.expected) &&
                        std::bit_cast<std::uint32_t>(left.replacement) ==
                            std::bit_cast<std::uint32_t>(right.replacement);
+            } else if constexpr (std::is_same_v<T, InsertModulationRoute>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.route == right.route;
+            } else if constexpr (std::is_same_v<T, RemoveModulationRoute>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.route_id == right.route_id;
+            } else if constexpr (std::is_same_v<T, SetModulationRoute>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.route_id == right.route_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, SetProjectTuning>) {
                 return left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, SetTrackTuning>) {
@@ -652,6 +662,11 @@ std::size_t retained_size(const Command& command) noexcept {
             if constexpr (std::is_same_v<T, SetMacro>)
                 return saturated_add(sizeof(T), saturated_add(value.expected.name.size(),
                                                               value.replacement.name.size()));
+            // A route owns no heap storage at all: its source is two fixed-width
+            // fields, its target is a variant of two trivially copyable structs,
+            // and its depth and bypass are scalars. So the struct's own size is
+            // the whole answer and no arm is written for the three route
+            // commands -- the default below is correct rather than missing.
             if constexpr (std::is_same_v<T, InsertScene>)
                 return saturated_add(saturated_add(sizeof(T), value.scene.name.size()),
                                      detail::launcher_slot_list_owned_storage(value.scene.slots));
