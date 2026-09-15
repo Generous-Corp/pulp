@@ -35,9 +35,13 @@ if(PULP_ENABLE_GPU AND PULP_HAS_THREEJS)
                 -DCAPTURE_PATH=${CMAKE_CURRENT_BINARY_DIR}/pulp-threejs-demo-capture-test.png
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/capture_test.cmake
         )
+        # The tolerant path prints this marker and returns 0, so without
+        # SKIP_REGULAR_EXPRESSION CTest records a skipped capture as "Passed" —
+        # the exact skip-reads-as-pass confusion these tests exist to remove.
         set_tests_properties(threejs_native_demo_capture_no_hang PROPERTIES
             TIMEOUT 30
             LABELS "threejs;gpu;headless"
+            SKIP_REGULAR_EXPRESSION "SKIP \\(tolerant mode\\)"
         )
 
         add_test(
@@ -51,6 +55,7 @@ if(PULP_ENABLE_GPU AND PULP_HAS_THREEJS)
         set_tests_properties(threejs_native_demo_gltf_box_capture_no_hang PROPERTIES
             TIMEOUT 30
             LABELS "threejs;gpu;headless;gltf;texture"
+            SKIP_REGULAR_EXPRESSION "SKIP \\(tolerant mode\\)"
         )
 
         # Strict (no skip-pass) capture gate. The two tests above tolerate a

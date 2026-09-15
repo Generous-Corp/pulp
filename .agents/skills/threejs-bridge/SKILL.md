@@ -233,10 +233,17 @@ The default (tolerant) mode exists to guard against the demo *hanging*. If the
 build has no V8, or the host has no native Dawn adapter, the binary prints an
 explanatory line on stderr and exits 1, and the script reports
 `SKIP (tolerant mode): ...` and stops without asserting the PNG. That is the
-right behaviour for a lane that merely wants to know the demo terminates, but it
-means a lane that can never capture anything reports exactly the same green as a
-lane that captured a real frame. Read a green `threejs_native_demo_*_no_hang`
-result as "it did not hang", never as "it rendered".
+right behaviour for a lane that merely wants to know the demo terminates. Read a
+green `threejs_native_demo_*_no_hang` result as "it did not hang", never as "it
+rendered".
+
+A CMake `-P` script that prints a marker and `return()`s exits 0, so CTest scores
+it **Passed** unless the test carries `SKIP_REGULAR_EXPRESSION` — which is how a
+skipped capture came to read as a successful one in the summary. Both tolerant
+tests now set `SKIP_REGULAR_EXPRESSION "SKIP \\(tolerant mode\\)"`, so
+`ctest` prints `***Skipped` and the two outcomes are distinguishable without
+reading per-test stdout. Any new tolerant-return branch in `capture_test.cmake`
+must print that same marker, or it silently becomes a pass again.
 
 Configure with `-DPULP_VALIDATE_CAPTURE_STRICT=ON` on any lane where the capture
 is genuinely expected to produce a PNG. That registers
