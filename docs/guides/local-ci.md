@@ -2477,6 +2477,97 @@ gh workflow run runner-health-check.yml -f alarm_minutes=60
 python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json
 ```
 
+#### Contribution: the host that goes quiet while the lane stays healthy
+
+Queue age answers *is the lane alive*. It cannot answer *is every host still in
+it*, and those are different questions with different answers. On 2026-09-15 one
+macOS host stopped serving at 10:02Z and did not serve again for 7 h 06 min. Its
+two peers absorbed the load, so jobs kept being picked up, so every queue-age
+sweep in that window was **correctly** quiet. Six monitors read green; three of
+them had died of the same cause as the host they were watching.
+
+The same sweep therefore also groups the required `macos` job's `runner_name` by
+host prefix over the last three hours and reports:
+
+| finding | level | means |
+|---|---|---|
+| `host_stopped_contributing` | alarm | an expected host served **zero** `macos` jobs in the window while the fleet served at least 3 |
+| `unknown_fleet_host` | alarm | a self-hosted runner served under a name no expected prefix matches — a rename drops a host out of coverage silently, so it is loud in both directions |
+| `sole_host_for_class` | warn | only one host served a class label; the next silent-host alarm on it is an outage rather than a degradation |
+| `contribution_guard_unconfigured` | warn | the expected-host list is empty, so nothing *can* alarm — the guard reporting its own disarmament |
+| `sweep_cadence` | warn | the gap since the previous sweep, when it exceeds twice the promised interval |
+
+**The demand floor is the whole design.** Below three fleet-served jobs in the
+window there was not enough work to distinguish an idle host from a dead one,
+and the check stays silent. That is what keeps this off the runner-label census
+described above: a census reads zero on a healthy fleet whenever nothing asked
+for that class, so a census-based alarm fires every quiet night and is muted
+within a week.
+
+It opens its **own** tracking issue rather than reusing the queue-stall tracker.
+A silent host is not a stalled queue, and naming it one sends the reader to
+audit a queue that was working the whole time.
+
+Expected prefixes come from the repo variable
+`PULP_FLEET_EXPECTED_MACOS_HOSTS` (for example `m1-,m5-,studio-`, matching each
+host's `TARTCI_RUNNER_NAME_PREFIX`). Unset falls back to the built-in list
+rather than disarming the check; set-but-empty reports
+`contribution_guard_unconfigured`.
+
+**The window adapts to what the collector can actually see.** `MAX_RUNS_PER_STATUS`
+caps each status listing at 60 runs, and on this repo the `completed` listing is
+*always* truncated: measured 2026-09-15, those 60 runs spanned **2.35 h**. A
+fixed 3 h window over that evidence is a window that can never be filled, and
+the first draft of this check treated the truncation as an evidence gap — which
+made it permanently degraded, permanently unable to alarm, and permanently
+green. So the cutoff is `max(requested window, oldest observed job)`, every
+finding reports the span it was actually computed over
+(`window_hours`, `window_truncated_by_coverage`), and a window shorter than 1.5 h
+produces no finding at all. Truncation now costs reach, not correctness. A
+*failed* jobs call is still disqualifying, because that one can hide a host that
+really was working.
+
+**How this guard fails, and how you would know.**
+
+- *Its cadence.* Detection latency is bounded by how often it actually runs, not
+  by its cron expression: GitHub has been delivering this workflow's `*/30` as
+  roughly one sweep every four hours, which multiplied every latency here by
+  eight and reddened nothing. Each sweep now measures the gap since its
+  predecessor and reports `sweep_cadence`, so the degradation is visible where
+  the findings are. Measured live on 2026-09-15: **193 minutes**.
+- *Why there is no second trigger.* `workflow_run` on **Build and Test** is the
+  obvious fix and is deliberately absent. One sweep costs 4 run listings plus one
+  jobs call per observed run — up to ~245 calls and ~4 minutes — against
+  `GITHUB_TOKEN`'s 1000 req/hr/repo, so ~4 sweeps/hour is the ceiling. Firing per
+  gate completion exceeds it, and the failure is silent: the sweep starts failing
+  its own API calls, which it correctly reads as incomplete evidence and
+  suppresses alarms on. A trigger that converts a detection guard into a quiet
+  one is worse than a slow guard. Raising the cadence needs the per-run jobs
+  fan-out reduced first.
+- *Total absence.* A sweep that never runs cannot report its own absence. What is
+  visible is that both tracking issues stop being updated and the workflow's run
+  list goes quiet in public.
+- *A half-finished scan.* If the scan step produces no counts, the step fails
+  rather than reporting zero alarms.
+- *Calibration, openly unresolved.* The demand floor is 3 fleet-served jobs in
+  the window. Under a uniform-assignment model with three hosts, a healthy host
+  drawing zero of 3 jobs has probability (2/3)³ ≈ 30%, so this floor alone is not
+  a strong false-positive bound. Assignment is *not* uniform (JIT polling, lease
+  priorities, m1's deliberate 10-minute delay), so the uniform model overstates
+  the risk — but the true base rate has not been measured. The floor is exposed
+  as `--contribution-min-fleet-jobs` and as a `workflow_dispatch` input so it can
+  be raised without a code change once the base rate is known.
+
+```bash
+# What the sweep would say right now, without touching an issue
+PULP_GH_BIN=ghapp python3 tools/scripts/queue_age_watchdog.py \
+    --repo Generous-Corp/pulp --snapshot-out snapshot.json
+
+# Replay it, or a widened window, offline
+python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json \
+    --contribution-window-hours 6
+```
+
 ### Diagnosing a VM lane: idle looks exactly like dead
 
 The macOS and Linux VM lanes are **JIT** — a runner registers with GitHub only

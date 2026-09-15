@@ -143,6 +143,10 @@ public:
     // can rebuild with the matching process callback. Shape mismatches keep
     // placeholder passthrough semantics instead of attaching the callback.
     bool register_custom_node_type(CustomNodeType type);
+    // Returns a callback-free, value-owned snapshot sorted lexicographically by
+    // (type_id, version). The snapshot remains valid across later registrations
+    // and after this graph is destroyed.
+    std::vector<CustomNodeTypeMetadata> custom_node_types() const;
     const CustomNodeType* custom_node_type(std::string_view type_id) const;
     const CustomNodeType* custom_node_type(std::string_view type_id,
                                            int version) const;
