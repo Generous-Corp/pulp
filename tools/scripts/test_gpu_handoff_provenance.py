@@ -1333,5 +1333,235 @@ def catalog_module():
     return provenance._CATALOG_MODULE
 
 
+class MergeResolution(unittest.TestCase):
+    """Prove `resolve` finishes the mechanical repair and declines the rest.
+
+    The sequence it replaces was run by hand on five consecutive sweeps, and the
+    branch in it is the part that cannot be defaulted: regeneration always
+    rewrites the receipt's self-referential source_commit, so a diff is never by
+    itself evidence that an identity moved.
+    """
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+
+    def scratch_repository(self) -> pathlib.Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        scratch = pathlib.Path(directory.name)
+        git(scratch, "init", "--quiet", "--initial-branch=main")
+        git(scratch, "config", "user.email", "resolve@example.invalid")
+        git(scratch, "config", "user.name", "Resolve Fixture")
+        return scratch
+
+    def test_binding_proof_discriminates(self) -> None:
+        """A True that cannot be False is not evidence.
+
+        The binding is the claim the identity tiers structurally cannot make:
+        every pinned identity can match while the receipt names another ledger
+        entirely. So the proof is asserted together with the control that must
+        return False on the same inputs.
+        """
+
+        ledger = '{"entries": []}\n'
+        digest = hashlib.sha256(ledger.encode("utf-8")).hexdigest()
+        receipt = json.dumps({"handoff_sha256": digest})
+
+        binds, named, actual = provenance.binding_proof(ledger, receipt)
+        self.assertTrue(binds)
+        self.assertEqual(named, actual)
+
+        # Negative control: one byte of ledger movement must flip it.
+        mutated, _, _ = provenance.binding_proof(ledger + "\n", receipt)
+        self.assertFalse(mutated, "the binding check cannot see a changed ledger")
+        unreadable, _, _ = provenance.binding_proof(ledger, "not json")
+        self.assertFalse(unreadable)
+
+    def test_the_discriminator_separates_churn_from_a_real_move(self) -> None:
+        """source_commit alone is churn; anything else is not this tool's call."""
+
+        base = {"schema": "s", "source_commit": "a" * 40, "handoff_sha256": "b" * 64}
+        churn = dict(base, source_commit="c" * 40)
+        self.assertEqual(
+            provenance.changed_receipt_fields(json.dumps(base), json.dumps(churn)),
+            {"source_commit"},
+        )
+        self.assertLessEqual(
+            provenance.changed_receipt_fields(json.dumps(base), json.dumps(churn)),
+            provenance.RECEIPT_CHURN_FIELDS,
+        )
+
+        moved = dict(base, source_commit="c" * 40, handoff_sha256="d" * 64)
+        self.assertFalse(
+            provenance.changed_receipt_fields(json.dumps(base), json.dumps(moved))
+            <= provenance.RECEIPT_CHURN_FIELDS
+        )
+        self.assertIsNone(provenance.changed_receipt_fields(None, json.dumps(base)))
+
+    def test_the_sentinel_literal_matches_every_copy_of_it(self) -> None:
+        """Three modules carry the literal because Git runs the driver bare."""
+
+        driver = (
+            self.root / "tools/scripts/gpu_ledger_merge_driver.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(f'SENTINEL = "{provenance.LEDGER_SENTINEL}"', driver)
+        self.assertEqual(sentinel_check.SENTINEL, provenance.LEDGER_SENTINEL)
+
+    def test_resolve_refuses_while_the_merge_is_uncommitted(self) -> None:
+        """Pinning to the commit the write is about to create cannot converge."""
+
+        scratch = self.scratch_repository()
+        (scratch / "leaf.txt").write_text("base\n", encoding="utf-8")
+        git(scratch, "add", "leaf.txt")
+        git(scratch, "commit", "--quiet", "-m", "base")
+        self.assertIsNone(provenance.unresolved_merge(scratch))
+
+        git(scratch, "checkout", "--quiet", "-b", "side")
+        (scratch / "leaf.txt").write_text("side\n", encoding="utf-8")
+        git(scratch, "commit", "--quiet", "-a", "-m", "side")
+        git(scratch, "checkout", "--quiet", "main")
+        (scratch / "leaf.txt").write_text("main\n", encoding="utf-8")
+        git(scratch, "commit", "--quiet", "-a", "-m", "main")
+        subprocess.run(
+            ["git", "merge", "--no-edit", "side"],
+            cwd=scratch, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=False, timeout=60,
+        )
+        blocked = provenance.unresolved_merge(scratch)
+        self.assertIsNotNone(blocked, "an in-flight merge was reported as resolved")
+
+    def test_resolve_declines_a_baseline_that_carries_neither_file(self) -> None:
+        """Without a baseline there is no way to tell a re-pin from a move."""
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stderr(buffer):
+            status = provenance.main(
+                [
+                    "--root", str(self.root),
+                    "resolve",
+                    "--baseline", "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+                ]
+            )
+        self.assertEqual(status, 2)
+        self.assertIn("no baseline", buffer.getvalue())
+
+    def test_resolve_leaves_the_checked_in_pair_bound(self) -> None:
+        """End to end on the real ledger: whatever it decides, the pair binds.
+
+        `resolve` writes, so the files are restored unconditionally. The claim
+        asserted here is the one a green identity check cannot make.
+        """
+
+        handoff = provenance.DEFAULT_HANDOFF
+        receipt = provenance.DEFAULT_RECEIPT
+        if not handoff.is_file() or not receipt.is_file():
+            self.skipTest("the checked-in ledger pair is not present")
+        names = [str(path.relative_to(self.root)) for path in (handoff, receipt)]
+        # Restore from Git, not from bytes read at test start: a run that
+        # inherits an already-dirty pair would otherwise "restore" the dirt and
+        # leave a modified checkout behind. Skipping on dirt keeps the restore
+        # from discarding somebody's real edit.
+        if git(self.root, "status", "--porcelain", "--", *names):
+            self.skipTest("the checked-in ledger pair is modified locally")
+        self.addCleanup(lambda: git(self.root, "checkout", "--", *names))
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+            status = provenance.main(["--root", str(self.root), "resolve", "--json"])
+        if status != 0:
+            self.skipTest(f"resolve declined on this checkout: {buffer.getvalue()}")
+
+        summary = json.loads(buffer.getvalue())
+        self.assertIn(summary["verdict"], {"moved", "churn", "clean"})
+        self.assertTrue(summary["binds"], "resolve reported success on an unbound pair")
+        self.assertFalse(
+            summary["binding_control_binds"],
+            "the binding control passed, so the proof does not discriminate",
+        )
+        binds, _, _ = provenance.binding_proof(
+            handoff.read_text(encoding="utf-8"), receipt.read_text(encoding="utf-8")
+        )
+        self.assertTrue(binds, "the files resolve left on disk do not bind")
+
+
+class DriverRegistration(unittest.TestCase):
+    """`.gitattributes` names a driver; only local config can answer for it.
+
+    Git does not error on a `merge=<name>` it cannot resolve -- it falls back to
+    the ordinary text merge, in silence. So the repo can ship working merge
+    automation that is inert in a checkout bootstrapped before it landed, and
+    nothing says so. Measured on this machine: the attribute present, the driver
+    absent, the collision back on every sweep.
+    """
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+
+    def scratch_repository(self) -> pathlib.Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        scratch = pathlib.Path(directory.name)
+        git(scratch, "init", "--quiet", "--initial-branch=main")
+        shutil.copyfile(self.root / ".gitattributes", scratch / ".gitattributes")
+        return scratch
+
+    def test_the_routed_paths_are_read_from_gitattributes(self) -> None:
+        """Hardcoding them would keep passing after the routing was removed."""
+
+        routed = sentinel_check.declared_driver_paths(self.root)
+        self.assertEqual(
+            sorted(routed),
+            sorted(
+                [
+                    str(provenance.DEFAULT_HANDOFF.relative_to(self.root)),
+                    str(provenance.DEFAULT_RECEIPT.relative_to(self.root)),
+                ]
+            ),
+        )
+        empty = self.scratch_repository()
+        (empty / ".gitattributes").write_text("*.txt text\n", encoding="utf-8")
+        self.assertEqual(sentinel_check.declared_driver_paths(empty), [])
+
+    def test_an_unregistered_driver_fails_the_gate_and_says_how_to_fix_it(self) -> None:
+        """The condition, and the control that must not fire on the repaired state."""
+
+        scratch = self.scratch_repository()
+        self.assertFalse(sentinel_check.driver_is_registered(scratch))
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stderr(buffer):
+            status = sentinel_check.main(["--root", str(scratch), "--mode=report"])
+        self.assertEqual(status, 1)
+        message = buffer.getvalue()
+        self.assertIn("no driver registered", message)
+        self.assertIn(sentinel_check.INSTALLER, message)
+
+        # Positive control: register it and the same call must go quiet.
+        git(
+            scratch, "config", "merge.pulp-gpu-ledger.driver",
+            "tools/scripts/gpu_ledger_merge_driver.py %O %A %B",
+        )
+        self.assertTrue(sentinel_check.driver_is_registered(scratch))
+        quiet = io.StringIO()
+        with contextlib.redirect_stderr(quiet):
+            self.assertEqual(
+                sentinel_check.main(["--root", str(scratch), "--mode=report"]), 0
+            )
+        self.assertEqual(quiet.getvalue(), "")
+
+    def test_hint_mode_and_the_opt_out_never_block(self) -> None:
+        """Advisory callers must stay advisory, and the scan stay reachable alone."""
+
+        scratch = self.scratch_repository()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(
+                sentinel_check.main(["--root", str(scratch), "--mode=hint"]), 0
+            )
+            self.assertEqual(
+                sentinel_check.main(
+                    ["--root", str(scratch), "--mode=report", "--skip-registration"]
+                ),
+                0,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

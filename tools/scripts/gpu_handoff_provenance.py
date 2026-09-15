@@ -52,6 +52,16 @@ HANDOFF_SELF_PATH = "docs/status/gpu-vellum-handoff.yaml"
 IDENTITY_FIELDS = ("revision", "object_id", "object_type")
 OBJECT_TYPES = frozenset({"blob", "tree"})
 RECEIPT_SCHEMA = "pulp.gpu-handoff-provenance-receipt.v1"
+# Must equal gpu_ledger_merge_driver.SENTINEL. The driver cannot import this
+# module -- Git runs it as a bare command mid-merge -- so a test keeps the three
+# literals in step. `resolve` refuses on any survivor: the driver only poisons
+# fields `write` regenerates, so one left standing means it poisoned a field
+# this tool does not rewrite, and no repair command clears it.
+LEDGER_SENTINEL = "regenerate-me"
+# The receipt fields `write` derives. A churn-only re-pin moves source_commit
+# and nothing else; handoff_sha256 and the canonical-path fields move only when
+# the ledger's bytes move, which is the case this tool calls a real move.
+RECEIPT_CHURN_FIELDS = frozenset({"source_commit"})
 GIT_TIMEOUT_SECONDS = 30
 
 # Identity is immutable for a given (checkout, source commit, HEAD, path), and
@@ -684,6 +694,305 @@ def command_check(args: argparse.Namespace) -> int:
     return 1 if drifts or problems or receipt_problems else 0
 
 
+def read_revision_text(root: pathlib.Path, rev: str, relative: str) -> str | None:
+    """The file's bytes at a revision, or None when that revision lacks it."""
+
+    completed = subprocess.run(
+        ["git", "show", f"{rev}:{relative}"],
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        timeout=GIT_TIMEOUT_SECONDS,
+        check=False,
+    )
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def relative_to_root(root: pathlib.Path, path: pathlib.Path) -> str:
+    """Name a path the way Git addresses it, or fail closed."""
+
+    try:
+        return str(path.resolve().relative_to(root))
+    except ValueError as error:
+        raise ProvenanceError(f"{path} is outside the repository at {root}") from error
+
+
+def unresolved_merge(root: pathlib.Path) -> str | None:
+    """Say why the checkout is mid-merge, or None when the merge is committed.
+
+    Regeneration pins to HEAD, so HEAD has to be the merge commit already. Ask
+    for a pin to the commit the write is about to create and the receipt's
+    self-referential source_commit never converges.
+    """
+
+    if git_output(root, ["rev-parse", "--git-path", "MERGE_HEAD"]) and (
+        root / git_output(root, ["rev-parse", "--git-path", "MERGE_HEAD"])
+    ).exists():
+        return "MERGE_HEAD is present"
+    if git_output(root, ["ls-files", "--unmerged"]):
+        return "the index still holds unmerged entries"
+    return None
+
+
+def changed_receipt_fields(baseline: str | None, produced: str) -> set[str] | None:
+    """Field names whose value differs between two receipts, or None if unreadable."""
+
+    if baseline is None:
+        return None
+    try:
+        before = json.loads(baseline)
+        after = json.loads(produced)
+    except ValueError:
+        return None
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return None
+    return {
+        key
+        for key in set(before) | set(after)
+        if before.get(key) != after.get(key)
+    }
+
+
+def binding_proof(ledger_text: str, receipt_text: str) -> tuple[bool, str, str]:
+    """Answer the one question `check` used to be unable to answer.
+
+    Returns (binds, named, actual). This is the sha256 comparison itself rather
+    than a validator's opinion of it: an identity check can pass on a ledger the
+    receipt does not describe, which is how a green run shipped an unbound
+    receipt. Callers pair it with a mutated-ledger control so a True here is
+    evidence the comparison can also return False.
+    """
+
+    actual = hashlib.sha256(ledger_text.encode("utf-8")).hexdigest()
+    try:
+        named = str(json.loads(receipt_text).get("handoff_sha256"))
+    except (ValueError, AttributeError):
+        named = ""
+    return named == actual, named, actual
+
+
+def command_resolve(args: argparse.Namespace) -> int:
+    """Finish a merge that collided on the two generated files, or refuse.
+
+    The collision is mechanical and so is the repair, but the repair has a
+    branch in it that has been taken by hand on every sweep: regenerating always
+    rewrites the receipt's source_commit, so a diff is not evidence that
+    anything moved. This runs the sequence and decides that branch from the
+    baseline's own bytes, and declines rather than guessing when the signals do
+    not agree -- there is no safe default, because keeping churn and dropping a
+    real move are both silent.
+    """
+
+    baseline_ref = args.baseline
+    ledger_name = relative_to_root(args.root, args.handoff)
+    receipt_path = args.receipt if args.receipt is not None else args.root / RECEIPT_RELATIVE
+    receipt_name = relative_to_root(args.root, receipt_path)
+
+    blocked = unresolved_merge(args.root)
+    if blocked is not None:
+        print(
+            f"gpu-handoff-provenance: refusing to resolve while {blocked}; commit "
+            "the merge first so regeneration can pin to a commit that already "
+            "exists. Pinning to the commit the write is about to create cannot "
+            "converge: the receipt names its own source commit.",
+            file=sys.stderr,
+        )
+        return 2
+
+    document = load_handoff(args.handoff)
+    canonical = canonical_paths(document)
+    dirty = dirty_canonical_paths(args.root, canonical)
+    if dirty:
+        print(
+            "gpu-handoff-provenance: refusing to resolve from an unclean checkout; "
+            "commit or restore these canonical paths first:",
+            file=sys.stderr,
+        )
+        for path in dirty:
+            print(f"  {path}", file=sys.stderr)
+        return 2
+
+    baseline_ledger = read_revision_text(args.root, baseline_ref, ledger_name)
+    baseline_receipt = read_revision_text(args.root, baseline_ref, receipt_name)
+    if baseline_ledger is None or baseline_receipt is None:
+        print(
+            f"gpu-handoff-provenance: refusing to resolve: {baseline_ref} does not "
+            f"carry both {ledger_name} and {receipt_name}, so there is no baseline "
+            "to tell a re-pin from a real move. Pass --baseline with a ref that "
+            "has both.",
+            file=sys.stderr,
+        )
+        return 2
+
+    commit = resolve_source_commit(args.root, "HEAD", canonical)
+    inventory = canonical_inventory(document)
+    identities = resolve_inventory_identities(
+        args.root, commit, inventory, require_current=True
+    )
+    updated = apply_identities(document, inventory, identities)
+    rendered = serialize_handoff(updated)
+
+    problems = validate_with_catalog(updated, args.root, require_current=True)
+    if problems:
+        print(
+            "gpu-handoff-provenance: the regenerated ledger still fails the handoff "
+            "validator; nothing was written:",
+            file=sys.stderr,
+        )
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        return 1
+
+    produced_receipt = (
+        json.dumps(build_receipt(updated, commit, rendered, args.handoff), indent=2)
+        + "\n"
+    )
+
+    # The driver only poisons what `write` regenerates. A survivor therefore
+    # sits in a field this tool never rewrites -- a vellum_paths row, an
+    # object_type -- and shipping it would trade a conflict for an invalid
+    # ledger that no repair command clears.
+    for name, text in ((ledger_name, rendered), (receipt_name, produced_receipt)):
+        if LEDGER_SENTINEL in text:
+            print(
+                f"gpu-handoff-provenance: refusing to resolve: {LEDGER_SENTINEL!r} "
+                f"survives regeneration in {name}. The merge driver poisoned a "
+                "field this tool does not regenerate; resolve that row by hand "
+                f"against {baseline_ref}.",
+                file=sys.stderr,
+            )
+            return 3
+
+    ledger_moved = rendered != baseline_ledger
+    receipt_fields = changed_receipt_fields(baseline_receipt, produced_receipt)
+    drifts = compare_inventory(document, inventory, identities)
+
+    if ledger_moved:
+        verdict = "moved"
+    elif receipt_fields is None:
+        verdict = "ambiguous"
+    elif not receipt_fields:
+        verdict = "clean"
+    elif receipt_fields <= RECEIPT_CHURN_FIELDS:
+        verdict = "churn"
+    else:
+        verdict = "ambiguous"
+
+    if verdict == "ambiguous":
+        extra = sorted(receipt_fields - RECEIPT_CHURN_FIELDS) if receipt_fields else []
+        print(
+            "gpu-handoff-provenance: refusing to resolve: the ledger is identical to "
+            f"{baseline_ref} but its receipt differs in "
+            + (", ".join(extra) if extra else "a way this tool cannot read")
+            + ". A receipt cannot move on an unmoved ledger except at "
+            "source_commit, so this is a human edit, not merge churn; resolve it "
+            "by hand.",
+            file=sys.stderr,
+        )
+        return 3
+
+    if verdict == "churn":
+        # Restore the baseline's exact bytes rather than writing the
+        # regeneration. Identical identities plus a rewritten source_commit is a
+        # commit that says a re-pin happened when none did, and it re-collides
+        # on the next sweep for the same reason it collided on this one.
+        args.handoff.write_text(baseline_ledger, encoding="utf-8")
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(baseline_receipt, encoding="utf-8")
+        final_ledger, final_receipt = baseline_ledger, baseline_receipt
+    else:
+        args.handoff.write_text(rendered, encoding="utf-8")
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(produced_receipt, encoding="utf-8")
+        final_ledger, final_receipt = rendered, produced_receipt
+
+    # Whether the resolution is a change at all, as Git sees it. A verdict is
+    # about the baseline; this is about the working tree, and the two differ
+    # exactly when the merge already carried the right bytes.
+    pending = any(
+        read_revision_text(args.root, "HEAD", name) != text
+        for name, text in ((ledger_name, final_ledger), (receipt_name, final_receipt))
+    )
+
+    binds, named, actual = binding_proof(final_ledger, final_receipt)
+    # A True that cannot be False is not evidence. Prove the comparison
+    # discriminates on this exact input before reporting it.
+    control_binds, _, _ = binding_proof(final_ledger + "\n", final_receipt)
+    if not binds or control_binds:
+        print(
+            "gpu-handoff-provenance: refusing to report success: the receipt does "
+            f"not bind the ledger it was written beside (names {named[:12]}..., "
+            f"ledger is {actual[:12]}...)"
+            if not binds
+            else "gpu-handoff-provenance: refusing to report success: the binding "
+            "check returned True for a mutated ledger, so it is not discriminating",
+            file=sys.stderr,
+        )
+        return 1
+
+    committed = False
+    if args.commit and pending:
+        staged = git_status_code(args.root, ["add", "--", ledger_name, receipt_name])
+        if staged != 0:
+            print("gpu-handoff-provenance: could not stage the resolved files", file=sys.stderr)
+            return 1
+        if git_output(args.root, ["diff", "--cached", "--name-only", "--", ledger_name, receipt_name]):
+            git_output(
+                args.root,
+                ["commit", "--no-verify", "-m",
+                 f"chore(gpu-ledger): regenerate the handoff ledger from {commit[:12]}",
+                 "--", ledger_name, receipt_name],
+            )
+            committed = True
+
+    summary = {
+        "verdict": verdict,
+        "baseline": baseline_ref,
+        "source_commit": commit,
+        "row_count": len(inventory),
+        "repaired_identity_fields": len(drifts),
+        "receipt_fields_changed": sorted(receipt_fields or []),
+        "binds": binds,
+        "binding_control_binds": control_binds,
+        "committed": committed,
+        "pending": pending,
+    }
+    if args.json:
+        print(json.dumps(summary, indent=2))
+        return 0
+
+    print(f"gpu-handoff-provenance: baseline {baseline_ref}, source commit {commit}")
+    print(f"gpu-handoff-provenance: {len(inventory)} pinned rows")
+    if verdict == "moved":
+        print(
+            f"gpu-handoff-provenance: MOVED: repaired {len(drifts)} identity fields; "
+            "the ledger differs from the baseline, so this is a real re-pin"
+        )
+    elif verdict == "churn":
+        print(
+            f"gpu-handoff-provenance: CHURN: every identity already matches "
+            f"{baseline_ref}; restored the baseline's bytes rather than committing a "
+            "source_commit-only rewrite"
+        )
+    else:
+        print(
+            f"gpu-handoff-provenance: CLEAN: already identical to {baseline_ref}; "
+            "nothing to write"
+        )
+    print(f"gpu-handoff-provenance: BINDS: {binds} (control on a mutated ledger: {control_binds})")
+    if committed:
+        print("gpu-handoff-provenance: committed the resolved ledger and receipt")
+    elif pending:
+        print(
+            f"gpu-handoff-provenance: commit with: git commit -- {ledger_name} {receipt_name}"
+        )
+    else:
+        print("gpu-handoff-provenance: nothing to commit; the checkout already holds this")
+    return 0
+
+
 def command_write(args: argparse.Namespace) -> int:
     document = load_handoff(args.handoff)
     inventory = canonical_inventory(document)
@@ -797,6 +1106,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="also write the provenance receipt (default path when bare)",
     )
     write.set_defaults(handler=command_write)
+
+    resolve = subparsers.add_parser(
+        "resolve",
+        help="finish a merge that collided on the ledger and receipt, or refuse",
+    )
+    resolve.add_argument(
+        "--baseline",
+        default="origin/main",
+        help="ref whose ledger and receipt distinguish a re-pin from real movement",
+    )
+    resolve.add_argument("--receipt", type=pathlib.Path, default=None)
+    resolve.add_argument(
+        "--commit", action="store_true", help="commit the resolved files"
+    )
+    resolve.add_argument("--json", action="store_true")
+    resolve.set_defaults(handler=command_resolve)
 
     receipt = subparsers.add_parser(
         "receipt", help="emit the provenance receipt for the checked-in ledger"

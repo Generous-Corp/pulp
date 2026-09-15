@@ -427,6 +427,37 @@ and the regeneration is owed. Regenerating is not optional politeness — the
 identities are invalid until you do, and every tier says so:
 
 ```sh
+python3 tools/scripts/gpu_handoff_provenance.py resolve   # preferred: decides the branch below
+```
+
+`resolve` runs the whole sequence from a committed merge: it regenerates pinned
+to `HEAD` — a commit that already exists, because the receipt names its own
+source commit and pinning to the commit the write is about to create cannot
+converge — then decides against `--baseline` (default `origin/main`) whether
+anything actually moved, and proves the receipt binds the ledger it was written
+beside, with a control on a mutated ledger that must come back False.
+
+The branch it decides is the part that was run by hand on five consecutive
+sweeps, and it has no safe default. Regeneration *always* rewrites the receipt's
+`source_commit`, so a diff is never by itself evidence of movement:
+
+| Signal against the baseline | Verdict | What `resolve` does |
+|---|---|---|
+| ledger bytes differ | `MOVED` | keeps the regeneration; reports `repaired N identity fields` |
+| ledger identical, receipt differs only in `source_commit` | `CHURN` | restores the baseline's exact bytes — a `source_commit`-only rewrite claims a re-pin that did not happen, and re-collides next sweep |
+| ledger identical, receipt identical | `CLEAN` | writes nothing |
+| ledger identical, receipt differs elsewhere | refuses (exit 3) | a receipt cannot move on an unmoved ledger except at `source_commit`, so that is a human edit |
+
+It also refuses (exit 2) while `MERGE_HEAD` is present or the index holds
+unmerged entries, on an unclean canonical path, on a baseline that carries
+neither file, and (exit 3) when `regenerate-me` survives regeneration — which
+means the driver poisoned a field `write` does not rewrite, and no repair
+command clears it. Add `--commit` to land the result, and `--json` for the
+verdict as data.
+
+The manual form remains available and is what `resolve` performs:
+
+```sh
 python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt
 git commit docs/status/gpu-vellum-handoff.yaml \
            docs/validation/gpu-handoff-provenance/receipt.json
@@ -437,14 +468,27 @@ changes that path's owning revision and re-stales the row just repaired. Drop
 `--receipt` and the ledger is repaired while the receipt stays bound to bytes
 that no longer exist — green locally, red in CI.
 
+**`check` answers the binding question, and it is the only thing that does.**
+The identity tiers compare pins against Git; none of them reads the receipt, so
+every pinned identity can match while the receipt names a ledger that no longer
+exists. `check` therefore compares `sha256(ledger)` against the receipt's
+`handoff_sha256` unconditionally — not behind a flag — and prints
+`RECEIPT …` plus a nonzero exit when they disagree, or `the receipt binds this
+ledger` when they agree. When no receipt is present it says so loudly rather
+than exiting 0 on a claim it never examined.
+
 Two limits worth knowing before trusting the driver:
 
-- **A clone that never ran `setup.sh` has no driver**, because Git resolves
-  `merge=<name>` against *local* config that no clone carries. The attribute is
-  still present and the merge still conflicts as text, so such a checkout gets
-  the old hand-resolution rather than anything worse. The failure is silent,
-  which is why `install-githooks.sh` registers the driver every run rather than
-  only on first setup.
+- **A checkout that never ran `setup.sh` has no driver**, because Git resolves
+  `merge=<name>` against *local* config that no clone carries — and it does not
+  error on a name it cannot resolve, it falls back to the ordinary text merge in
+  silence. A checkout bootstrapped *before* the driver landed is the same state
+  and the likelier one: the attribute is there, so the automation looks
+  installed while every sweep re-conflicts. `gpu_ledger_sentinel_check.py` now
+  reports that directly — it reads the routed paths out of `.gitattributes` and
+  asks Git whether the name resolves — so the pre-push hook and `gates.sh` both
+  fail with `install-githooks.sh` as the repair. Re-running the installer is
+  idempotent and takes a second.
 - **GitHub's server-side merge does not run merge drivers.** A pull request can
   still show `CONFLICTING` on github.com while the same merge is clean locally.
   Merge `origin/main` into the branch, regenerate, and push.
