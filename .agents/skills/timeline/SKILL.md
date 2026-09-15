@@ -229,8 +229,11 @@ missing here or carries the wrong result kind.
   that trims a conforming clip fails with `NestedConformedTrimUnsupported`
   until playback has a conform-aware source-range mapping, and a trimmed
   `Stretch` clip additionally needs a windowed artifact. A nested child track
-  carrying a device chain or an automation lane fails with
-  `NestedDeviceChainUnsupported` or `NestedAutomationLaneUnsupported`, and an
+  carrying a device chain fails with `NestedDeviceChainUnsupported`; one
+  automating its pan fails with `NestedAutomationPanUnsupported`, and one
+  automating its gain with `NestedAutomationGainEventLeafUnsupported` or
+  `NestedAutomationGainMediaUnsupported` according to whether the leaf that
+  curve reaches consumes clip gain. An
   absolute-anchored leaf inside a nested sequence fails with
   `NestedAbsoluteChildUnsupported`; each names its own cause rather than
   sharing one umbrella code. Expansion

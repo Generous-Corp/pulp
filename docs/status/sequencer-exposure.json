@@ -5176,7 +5176,7 @@
           "path": "core/playback/include/pulp/playback/program_compiler.hpp",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
@@ -5185,7 +5185,7 @@
           "path": "core/playback/src/sequence_content_lowerer.cpp",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
@@ -5194,7 +5194,7 @@
           "path": "tools/scripts/negative_capability_allowlist.json",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
@@ -5203,7 +5203,7 @@
           "path": "tools/timeline/src/timeline_agent.cpp",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
@@ -5219,7 +5219,7 @@
               "path": "core/playback/include/pulp/playback/program_compiler.hpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5235,7 +5235,7 @@
               "path": "tools/timeline/src/timeline_agent.cpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5251,7 +5251,7 @@
               "path": "tools/timeline/src/timeline_agent.cpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5267,7 +5267,7 @@
               "path": "core/playback/src/sequence_content_lowerer.cpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5283,7 +5283,7 @@
               "path": "tools/scripts/negative_capability_allowlist.json",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -7942,6 +7942,113 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "This slice installs no design-time authoring capability. A route between a track-owned source and a parameter is a document mutation reached through the command vocabulary the CLI and MCP surfaces above already advertise, not a capability an agent manifest declares."
+        }
+      }
+    },
+    {
+      "id": "nested-child-automation-refusal-split",
+      "title": "Nested child-track automation refused by three cause-specific codes, each a named gap",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "4ba74e56-8b5d-4fcf-8cbc-3f3336293ac4",
+      "owned_paths": [
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "docs/status/agent-capability-surface.json",
+        "docs/status/sequencer-exposure.json",
+        "test/test_timeline_nesting_playback.cpp",
+        "test/timeline_nesting_test_support.hpp",
+        "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_registry.py",
+        "tools/scripts/negative_capability_allowlist.json",
+        "tools/timeline/src/timeline_agent.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+          "needles": [
+            "NestedAutomationPanUnsupported",
+            "NestedAutomationGainEventLeafUnsupported",
+            "NestedAutomationGainMediaUnsupported"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "NestedAutomationPanUnsupported",
+            "NestedAutomationGainEventLeafUnsupported",
+            "NestedAutomationGainMediaUnsupported"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "NestedAutomationPanUnsupported",
+            "NestedAutomationGainEventLeafUnsupported",
+            "NestedAutomationGainMediaUnsupported"
+          ]
+        },
+        {
+          "path": "tools/timeline/src/timeline_agent.cpp",
+          "needles": [
+            "NestedAutomationPanUnsupported",
+            "NestedAutomationGainEventLeafUnsupported",
+            "NestedAutomationGainMediaUnsupported"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "gap",
+          "rationale": "A developer using the installed SDK cannot compile a nested sequence whose child track automates its gain or pan; the compile refuses. The three new CompileErrorCode members make the refusal say which construct is missing, but naming a gap precisely is not filling it, so the capability remains absent from the installed surface. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "sequencer-controller-playback-capability"
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "`pulp seq` can author such a document through insert_automation_lane and can report the specific refusal, but it cannot compile or render one. The command vocabulary is ahead of playback here, which is what makes this authorable and unplayable rather than simply unsupported. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The MCP timeline tools read the same wire names from compile_error_code_name and so report the narrower cause automatically, but no tool compiles or renders a nested child track whose gain or pan is automated. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "No live typed operation plays a nested child track's automation, because nothing downstream can evaluate a per-leaf curve. Splitting the refusal changes which code a caller sees, not what a caller can control at runtime. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No design-time capability is declared for nested child-track automation, and the negative-capability allowlist now carries one row per cause, each recording the gap as real and naming what would close it rather than arguing the refusal is intended. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "agent-capability-maintainers"
         }
       }
     }
