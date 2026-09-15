@@ -153,6 +153,27 @@ class Track {
     runtime::Result<Track, ModelError> insert_automation_lane(AutomationLane lane) const;
     /// Returns a snapshot without the identified automation lane.
     runtime::Result<Track, ModelError> erase_automation_lane(ItemId id) const;
+    /// Returns a snapshot with a validated modulation source inserted.
+    runtime::Result<Track, ModelError> insert_modulator(Modulator modulator) const;
+    /// Removes a modulation source; a route still reading it refuses.
+    runtime::Result<Track, ModelError> erase_modulator(ItemId id) const;
+    /// Replaces one modulation source without changing its identity.
+    runtime::Result<Track, ModelError> replace_modulator(Modulator replacement) const;
+    /// Returns a snapshot with a validated macro control inserted.
+    runtime::Result<Track, ModelError> insert_macro(MacroControl macro) const;
+    /// Removes a macro control; a route still reading it refuses.
+    runtime::Result<Track, ModelError> erase_macro(ItemId id) const;
+    /// Replaces one macro control without changing its identity.
+    runtime::Result<Track, ModelError> replace_macro(MacroControl replacement) const;
+    /// Returns a snapshot with a validated modulation route inserted.
+    runtime::Result<Track, ModelError> insert_modulation_route(ModulationRoute route) const;
+    /// Returns a snapshot without the identified modulation route.
+    ///
+    /// Nothing reads a route, so this is the one modulation removal no other
+    /// member can refuse: the source it named stays and only the connection goes.
+    runtime::Result<Track, ModelError> erase_modulation_route(ItemId id) const;
+    /// Replaces one modulation route without changing its identity.
+    runtime::Result<Track, ModelError> replace_modulation_route(ModulationRoute replacement) const;
     /// Inserts a typed device declaration at an authored position; empty appends.
     runtime::Result<Track, ModelError>
     insert_device(DevicePlacement placement,
@@ -185,6 +206,13 @@ class Track {
     runtime::Result<Track, ModelError> with_freeze(std::optional<TrackFreeze> freeze) const;
     /// Returns a snapshot with finite, in-range gain and pan.
     runtime::Result<Track, ModelError> with_mixer(TrackMixer mixer) const;
+    /// Returns a snapshot carrying a replacement tuning override.
+    ///
+    /// An absent override hands the track back to the project's tuning. A
+    /// stated one is admitted only when `valid_tuning_reference` accepts it, the
+    /// same helper Track::create applies, so a snapshot cannot hold a tuning a
+    /// fresh construction would refuse.
+    runtime::Result<Track, ModelError> with_tuning(std::optional<TuningReference> tuning) const;
     /// Returns a snapshot carrying a replacement authored name.
     ///
     /// Owned collection storage and the compile-structure token are shared with
@@ -257,6 +285,10 @@ class Track {
     bool shares_compile_structure_with(const Track& other) const noexcept;
     runtime::Result<Track, ModelError>
     with_device_chain(std::vector<DevicePlacement> device_chain) const;
+    runtime::Result<Track, ModelError> with_modulators(std::vector<Modulator> modulators) const;
+    runtime::Result<Track, ModelError> with_macros(std::vector<MacroControl> macros) const;
+    runtime::Result<Track, ModelError>
+    with_modulation_routes(std::vector<ModulationRoute> routes) const;
     explicit Track(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };
@@ -497,6 +529,14 @@ struct SequenceRegion {
     timebase::TickDuration duration;
     std::optional<std::uint32_t> color;
     SectionRole role = SectionRole::Unspecified;
+
+    /// Compares every authored member, role included.
+    ///
+    /// A hand-written comparison that named the members individually is how the
+    /// role went uncompared once already: every member here is exactly
+    /// comparable, so there is no reason for a second, partial statement of the
+    /// same question to exist.
+    auto operator<=>(const SequenceRegion&) const = default;
 };
 
 /// Per-mille identity scale for deterministic groove strengths and velocity.
@@ -807,6 +847,12 @@ class Sequence {
     runtime::Result<Sequence, ModelError> insert_region(SequenceRegion region) const;
     /// Removes a region by identity and returns a new snapshot.
     runtime::Result<Sequence, ModelError> erase_region(ItemId id) const;
+    /// Replaces a region in place, keeping its identity, and returns a new snapshot.
+    ///
+    /// The replacement's identity must already name a region this sequence owns;
+    /// the annotation validator and canonical ordering are reapplied whole, so a
+    /// replacement that would not have been admitted as an insert is refused.
+    runtime::Result<Sequence, ModelError> replace_region(SequenceRegion replacement) const;
     /// Inserts `scene` before an existing scene, or appends when no position is supplied.
     runtime::Result<Sequence, ModelError>
     insert_scene(Scene scene, std::optional<ItemId> before_scene_id = std::nullopt) const;
@@ -1099,6 +1145,12 @@ class Project {
     remove_asset(ItemId asset_id, std::span<const IdentityMutation> identities = {}) const;
     Project replace_tempo_map(timebase::TempoMap tempo_map) const;
     Project replace_meter_map(timebase::MeterMap meter_map) const;
+    // Unlike the tempo and meter maps this returns a Result: a tuning has a
+    // validity rule (valid_tuning_reference) that Project::create already
+    // applies, and a replacement path that skipped it could seat a tuning a
+    // fresh construction would refuse.
+    runtime::Result<Project, ModelError>
+    replace_tuning(std::optional<TuningReference> tuning) const;
     explicit Project(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };
