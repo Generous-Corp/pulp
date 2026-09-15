@@ -7,6 +7,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/text_shaper.hpp>
+#include <pulp/canvas/text_utf8.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>  // font_registration_generation() for the shaped-layout cache key
 #include <choc/text/choc_JSON.h>
 
@@ -1425,6 +1426,82 @@ void Label::paint_attributed_lines_(canvas::Canvas& canvas,
     }
 }
 
+void Label::set_selection_highlight(int start_utf8, int end_utf8) {
+    if (start_utf8 > end_utf8) std::swap(start_utf8, end_utf8);
+    const int n = static_cast<int>(text_.size());
+    start_utf8 = std::clamp(start_utf8, 0, n);
+    end_utf8 = std::clamp(end_utf8, 0, n);
+    if (start_utf8 == selection_start_utf8_ && end_utf8 == selection_end_utf8_)
+        return;
+    selection_start_utf8_ = start_utf8;
+    selection_end_utf8_ = end_utf8;
+    request_repaint();
+}
+
+bool Label::selection_highlight(int& start_utf8, int& end_utf8) const {
+    start_utf8 = selection_start_utf8_;
+    end_utf8 = selection_end_utf8_;
+    return selection_end_utf8_ > selection_start_utf8_;
+}
+
+void Label::paint_selection_line_(canvas::Canvas& canvas,
+                                  const std::string& line, float x, float top,
+                                  float line_height, int source_start,
+                                  const canvas::Color& text_color,
+                                  bool vertical) {
+    if (!is_selectable()) return;
+    // A rotated vertical Label paints through a transformed canvas, so the
+    // coordinates recorded here would not be the ones a pointer arrives in.
+    // Decline to report rather than report wrong boxes: `measured` stays false
+    // and the selection owner treats the Label as unsupported, not as empty.
+    if (vertical) return;
+
+    SelectableLine rec;
+    rec.start_utf8 = source_start;
+    rec.end_utf8 = source_start + static_cast<int>(line.size());
+    rec.top = top;
+    rec.height = line_height;
+
+    // Cluster boundaries, not byte positions: a boundary inside a multi-byte
+    // codepoint has no x of its own, and offering one would let a selection
+    // slice a UTF-8 sequence in half on its way to the clipboard.
+    const std::size_t n = line.size();
+    std::size_t i = 0;
+    while (true) {
+        rec.byte_offsets.push_back(source_start + static_cast<int>(i));
+        // `text_x_for_byte` is the canvas's SHAPED offset for this byte, not a
+        // sum of isolated glyph advances. The difference is kerning and
+        // ligatures, and it is the reason the editor's caret sits on the glyph
+        // boundary rather than near it.
+        rec.x_offsets.push_back(x + canvas.text_x_for_byte(line, i));
+        if (i >= n) break;
+        const std::size_t next = canvas::cluster_step(line, i, /*forward=*/true);
+        i = next > i ? next : i + 1;
+        if (i > n) i = n;
+    }
+
+    if (selection_end_utf8_ > selection_start_utf8_) {
+        SelectableLayout one;
+        one.measured = true;
+        one.lines.push_back(rec);
+        const auto rects = selectable_rects_for_range(one, selection_start_utf8_,
+                                                      selection_end_utf8_);
+        if (!rects.empty()) {
+            const Rect band = rects.front();
+            // Same theme keys the editor's selection uses, so a Label and a
+            // TextEditor in one document highlight identically.
+            const auto fill = resolve_color(
+                "text.selection", resolve_color("accent", canvas::Color::hex(0x3b82f6)));
+            canvas.set_fill_color(fill);
+            canvas.fill_rect(band.x, band.y, band.width, band.height);
+            canvas.set_fill_color(text_color);
+        }
+    }
+
+    selection_layout_pending_.measured = true;
+    selection_layout_pending_.lines.push_back(std::move(rec));
+}
+
 void Label::paint(canvas::Canvas& canvas) {
     // A Label that also has element children draws its own text inside the
     // anonymous inline box the layout pass reserved for it on the flex line.
@@ -1442,11 +1519,38 @@ void Label::paint(canvas::Canvas& canvas) {
 }
 
 void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
+    // Line geometry for `SelectableText` is rebuilt from scratch every paint
+    // and committed at the end, so a path that does not record leaves
+    // `measured` false rather than serving the previous frame's boxes.
+    selection_layout_pending_ = SelectableLayout{};
+    struct CommitLayout {
+        Label* self;
+        ~CommitLayout() {
+            self->selection_layout_ = std::move(self->selection_layout_pending_);
+            self->selection_layout_pending_ = SelectableLayout{};
+        }
+    } commit_layout{this};
+
     // While the inline editor is open it IS the label's visible surface; the
     // static text underneath would show through the field's own background
-    // wherever that background is transparent.
+    // wherever that background is transparent. The editor is the selectable
+    // surface in that state, so this Label deliberately reports none.
     if (editor_ != nullptr) return;
-    if (text_.empty()) return;
+    if (text_.empty()) {
+        // An empty Label is SELECTABLE-BUT-EMPTY, which is not the same as
+        // unmeasured: a drag crossing it must resolve to offset 0 and
+        // contribute an empty string, not break the document-order walk.
+        if (is_selectable()) {
+            SelectableLine blank;
+            blank.top = 0.0f;
+            blank.height = text_box.height;
+            blank.byte_offsets.push_back(0);
+            blank.x_offsets.push_back(0.0f);
+            selection_layout_pending_.measured = true;
+            selection_layout_pending_.lines.push_back(std::move(blank));
+        }
+        return;
+    }
     // Yoga insets a view's CHILDREN by its padding, but a Label's text is not a
     // child. When layout hands the text its own anonymous inline box that box
     // arrives already inset, so the padding must not be applied a second time;
@@ -1903,6 +2007,9 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
         }
         if (text_overflow_ellipsis())
             draw_text = truncate_to_width(canvas, display_text, available_width);
+        paint_selection_line_(canvas, draw_text, draw_x,
+                              baseline_y - first_line_ascent, single_line_text_height,
+                              /*source_start=*/0, text_color, vertical);
         canvas.fill_text(draw_text, draw_x, baseline_y);
         decorate_plain(draw_text, draw_x, baseline_y,
                        captured_cache_usable);
@@ -1939,6 +2046,7 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
             const float captured_first_top = captured_cache_usable &&
                     !shaped_layout->lines.empty()
                 ? shaped_layout->lines.front().y : 0.0f;
+            std::size_t source_cursor = 0;
             for (const auto& shaped_line : shaped_layout->lines) {
                 if (emitted >= visible_lines) break;
                 std::string line = shaped_line.text;
@@ -1948,6 +2056,25 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                 const float line_baseline = captured_cache_usable
                     ? baseline_y + shaped_line.y - captured_first_top
                     : y;
+                // Map the shaped line back to its origin in `display_text`.
+                // The shaper drops the whitespace it broke at, so byte spans
+                // are not contiguous and cannot be accumulated from line
+                // lengths -- scan forward from the previous line's end
+                // instead. `shaped_line.text` is used rather than `line`
+                // because `line` may already carry the clamp ellipsis, which
+                // is not in the source at all.
+                {
+                    const std::size_t found =
+                        display_text.find(shaped_line.text, source_cursor);
+                    const int src = static_cast<int>(
+                        found == std::string::npos ? source_cursor : found);
+                    paint_selection_line_(canvas, shaped_line.text,
+                                          x + shaped_line.x_offset,
+                                          line_baseline - first_line_ascent, lh,
+                                          src, text_color, vertical);
+                    source_cursor = static_cast<std::size_t>(src) +
+                                    shaped_line.text.size();
+                }
                 canvas.fill_text(line, x + shaped_line.x_offset, line_baseline);
                 decorate_plain(line, x + shaped_line.x_offset, line_baseline,
                                captured_cache_usable);
@@ -1974,6 +2101,10 @@ void Label::paint_text_(canvas::Canvas& canvas, Rect text_box) {
                 if (need_ellipsis && (emitted + 1 == visible_lines)) {
                     line.append("\xe2\x80\xa6");
                 }
+                paint_selection_line_(canvas, display_text.substr(pos, nl - pos),
+                                      x, y - first_line_ascent, lh,
+                                      static_cast<int>(pos), text_color,
+                                      vertical);
                 canvas.fill_text(line, x, y);
                 decorate_plain(line, x, y, false);
                 y += lh;
