@@ -5373,7 +5373,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 61"
+            "alternatives == 64"
           ]
         },
         {
@@ -6531,7 +6531,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 61"
+            "alternatives == 64"
           ]
         },
         {
@@ -7062,7 +7062,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 61"
+            "alternatives == 64"
           ]
         },
         {
@@ -7299,7 +7299,7 @@
             "struct RemoveMacro",
             "struct SetMacro",
             "struct SetMacroValue",
-            "InsertMacro, RemoveMacro, SetMacro, SetMacroValue>;"
+            "InsertMacro, RemoveMacro, SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
           ]
         },
         {
@@ -7334,7 +7334,7 @@
           "path": "core/timeline/src/transaction_dispatch_internal.hpp",
           "needles": [
             "is_modulation_command_type",
-            "SetMacro, SetMacroValue>;"
+            "SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
           ]
         },
         {
@@ -7416,7 +7416,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 61"
+            "alternatives == 64"
           ]
         },
         {
@@ -7461,7 +7461,7 @@
                 "struct InsertModulator",
                 "struct SetModulator",
                 "struct SetMacroValue",
-                "InsertMacro, RemoveMacro, SetMacro, SetMacroValue>;"
+                "InsertMacro, RemoveMacro, SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
               ]
             },
             {
@@ -7603,6 +7603,345 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "This slice installs no design-time authoring capability. A modulator, a macro, and their declarations are document mutations reached through the command vocabulary the CLI and MCP surfaces above already advertise, not a capability an agent manifest declares."
+        }
+      }
+    },
+    {
+      "id": "offline-timeline-modulation-route-commands",
+      "title": "Typed modulation-route mutation commands under whole-route value gates",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "fc9863de-7a51-45e5-a745-0c42481b5eef",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/include/pulp/timeline/document_session.hpp",
+        "core/timeline/include/pulp/timeline/model.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/command.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/serialize_command_decode.cpp",
+        "core/timeline/src/serialize_modulation_decode.cpp",
+        "core/timeline/src/serialize_modulation_decode.hpp",
+        "core/timeline/src/track.cpp",
+        "core/timeline/src/transaction_dispatch_internal.hpp",
+        "core/timeline/src/transaction_modulation_internal.cpp",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_mcp_timeline_tools.cpp",
+        "test/test_timeline_agent.cpp",
+        "test/test_timeline_command_persistence.cpp",
+        "test/test_timeline_modulation_route_commands.cpp",
+        "test/test_timeline_schema_registry.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": [
+            "struct InsertModulationRoute",
+            "struct RemoveModulationRoute",
+            "struct SetModulationRoute",
+            "SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+          "needles": [
+            "std::is_same_v<T, InsertModulationRoute>",
+            "std::is_same_v<T, RemoveModulationRoute>",
+            "std::is_same_v<T, SetModulationRoute>"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/model.hpp",
+          "needles": [
+            "insert_modulation_route(ModulationRoute route) const;",
+            "erase_modulation_route(ItemId id) const;",
+            "replace_modulation_route(ModulationRoute replacement) const;",
+            "with_modulation_routes(std::vector<ModulationRoute> routes) const;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/track.cpp",
+          "needles": [
+            "Track::with_modulation_routes",
+            "Track::insert_modulation_route",
+            "Track::erase_modulation_route",
+            "Track::replace_modulation_route"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_dispatch_internal.hpp",
+          "needles": [
+            "is_modulation_command_type",
+            "SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_modulation_internal.cpp",
+          "needles": [
+            "reduce_insert_modulation_route",
+            "reduce_remove_modulation_route",
+            "reduce_set_modulation_route",
+            "set.expected.id != set.replacement.id || set.expected.id != set.route_id",
+            "ConflictCode::ExpectedValueMismatch"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulation_route",
+            "pulp.timeline.command.remove_modulation_route",
+            "pulp.timeline.command.set_modulation_route",
+            "pulp.timeline.modulation_route"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_command_decode.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulation_route",
+            "pulp.timeline.command.set_modulation_route",
+            "decode_command_modulation_route"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_modulation_decode.hpp",
+          "needles": [
+            "decode_modulation_route(const JsonValue& value"
+          ]
+        },
+        {
+          "path": "core/timeline/src/command.cpp",
+          "needles": [
+            "std::is_same_v<T, InsertModulationRoute>",
+            "std::is_same_v<T, SetModulationRoute>",
+            "A route owns no heap storage at all"
+          ]
+        },
+        {
+          "path": "test/test_timeline_modulation_route_commands.cpp",
+          "needles": [
+            "a modulation route is authored and rewired in place and removed whole",
+            "a route command round trips a document back to the bytes it started from",
+            "a stale route expectation is refused and the document is unchanged",
+            "a route edit may not move identity in either of the two ways it could",
+            "a route command addressed at the wrong kind of item or the wrong track is refused",
+            "a route naming an absent source or the wrong source kind is refused both ways in",
+            "a route depth outside the declared maximum is refused on both paths",
+            "route commands round trip through their schema envelopes",
+            "a decoded route depth satisfies the gate the encoder wrote it for",
+            "decode refuses a route edit that moves identity",
+            "undo through a session restores a removed route with its bypass intact",
+            "a writer denied removal may author and rewire a route",
+            "route command identity and retained size answer for their own payloads"
+          ]
+        },
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "pulp-test-timeline-modulation-route-commands"
+          ]
+        },
+        {
+          "path": "test/test_timeline_writer_capabilities.cpp",
+          "needles": [
+            "alternatives == 64"
+          ]
+        },
+        {
+          "path": "test/test_timeline_schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulation_route",
+            "pulp.timeline.command.set_modulation_route"
+          ]
+        },
+        {
+          "path": "test/test_timeline_command_persistence.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulation_route",
+            "std::holds_alternative<SetModulationRoute>(commands[63])"
+          ]
+        },
+        {
+          "path": "test/test_timeline_agent.cpp",
+          "needles": [
+            "timeline agent authors a route and rewires one it already holds",
+            "pulp.timeline.command.set_modulation_route"
+          ]
+        },
+        {
+          "path": "test/test_mcp_timeline_tools.cpp",
+          "needles": [
+            "timeline MCP authors a route and rewires it but refuses to remove it",
+            "pulp.timeline.command.insert_modulation_route"
+          ]
+        },
+        {
+          "path": ".agents/skills/timeline/SKILL.md",
+          "needles": [
+            "A referencing collection is the one whose removal nothing can refuse",
+            "A bypass is a gated value, not a state an edit may drop"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The three route commands are public alternatives of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp can author a source-to-parameter connection, rewire it, and retire it through the same transaction path every other command uses. They complete the modulation vocabulary the source and macro commands opened: a writer could state a modulator and a macro and could not connect either to anything, so the collection that gives the other two their effect was the one with no mutation. All three are {Automation, *} rather than a new CommandClass, because adding an enumerator renumbers capability_bit and silently repurposes every persisted and transmitted writer mask; kCommandClassCount is still 11 and the three Automation bit literals are asserted rather than assumed. SetModulationRoute pins identity in the reducer and again in the decoder, because the model is handed one route and cannot see that the caller named another, and a Modify that could relocate identity would let a writer holding only Modify perform the removal its mask denies. Its gate covers the whole route rather than the depth alone, bypass included: modulation.hpp states that a disabled route keeps its identity, depth, and target precisely so re-enabling restores what was there, which is only true if a bypass is a value an edit states rather than a state an edit discards -- so a Remove's inverse carries the route whole and a stale-gate test varies all four members in turn. No narrow companion sits beside it the way SetMacroValue sits beside SetMacro, because a route has no performed field and inventing one would be vocabulary bought with nothing. Validity is reached rather than restated: the reducer edits through Track accessors that revalidate the whole track with the same validate_attached_modulation Track::create applies, so a depth outside [-kMaximumModulationDepth, +kMaximumModulationDepth], a source identity the track does not hold, a source kind that disagrees with the entity holding that identity, and a second route stating one connection twice all surface as the model's own refusal -- on Insert and on Set, which reach the model through different accessors. Removing a route is the one modulation removal nothing can refuse, because no document member reads a route; the asymmetry is tested as its own claim rather than assumed from the source-side shape. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. The released p0-21-modulation-macros row is untouched: its evidence resolves against its own merge commit, where these verbs by construction do not exist.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/command.hpp",
+              "needles": [
+                "struct InsertModulationRoute",
+                "struct SetModulationRoute",
+                "SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+              "needles": [
+                "std::is_same_v<T, InsertModulationRoute>",
+                "std::is_same_v<T, SetModulationRoute>"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/model.hpp",
+              "needles": [
+                "insert_modulation_route(ModulationRoute route) const;",
+                "replace_modulation_route(ModulationRoute replacement) const;"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "platform runtime music timebase timeline"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_modulation_route_commands.cpp",
+              "needles": [
+                "a modulation route is authored and rewired in place and removed whole",
+                "a route edit may not move identity in either of the two ways it could",
+                "a writer denied removal may author and rewire a route"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The CLI reaches all three commands through the canonical command-apply handler in tools/cli/cmd_seq.cpp, and the generated verb table carries their type names because the schema registry does. A registered command alone does not earn this surface, because command_apply applies the decoded commands and then returns serialize_project() of the result, so a mutation the project encoder does not carry is destroyed by the same call that performed it. That floor is measured rather than assumed: test_timeline_agent.cpp drives command_apply end to end, asserts the returned document carries the authored route's depth bit pattern and its enabled:false bypass, reopens and validates that document, rewires the route the document already held, and asserts a replay of the rewire is refused by its own gate. The depth travels as a depth_bits member spelled exactly as modulation_route.depth_bits spells the field it gates, so a value that round-trips compares equal to itself rather than to something near it. The authority recorded here is the CLI's declared editor profile and the refusal codes that profile's admission can emit, not the commands' own conflict codes. The CLI and MCP claim is made on this row rather than on the sources-and-macros row because a vocabulary that can create a source and never route it does not close \"no typed modulation mutation\" -- a gap is honest and a premature close is not. The released p0-21-modulation-macros row that names this work as its owner is left untouched, per the in-repo precedent set by program-wire-controller-section: its evidence resolves against its own merge commit, where verbs introduced here cannot exist.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": [
+                "pulp.timeline.command.insert_modulation_route",
+                "pulp.timeline.command.remove_modulation_route",
+                "pulp.timeline.command.set_modulation_route"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_agent.cpp",
+              "needles": [
+                "timeline agent authors a route and rewires one it already holds",
+                "pulp.timeline.command.set_modulation_route"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The MCP tool definitions are projected from the same manifest as the CLI verbs, so pulp_timeline_command_apply advertises all three type names in its type_name enum and its x-pulp-command-types list, and handle_timeline_command_apply binds that tool to the same command_apply the CLI calls. The default MCP authority is the non-destructive proposal profile, which holds every class and no destructive intent, and that profile is why SetModulationRoute ships with its Insert and Remove rather than after them: an Insert/Remove pair alone is write-once for it, because correcting a connection would mean remove-then-insert and the remove is the axis it is denied. test_mcp_timeline_tools.cpp authors a route under that default profile, reopens the returned document through pulp_timeline_project_open, rewires the route to a different source, target, and an inverted depth, asserts the route removal is still refused to the same profile -- so the reachability did not come from widening the mask -- and then applies the identical removal payload under the editor profile as a control, so the refusal is the authority rather than a malformed command.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_command_apply",
+                "pulp.timeline.command.insert_modulation_route",
+                "pulp.timeline.command.set_modulation_route"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline MCP authors a route and rewires it but refuses to remove it",
+                "pulp.timeline.command.insert_modulation_route"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live operation for a modulation route and no executor binding for one. These commands are the mutation such a control would execute, so this row is a dependency of that closure rather than a step of it: the live surface additionally needs the timeline document session Product A does not yet hold, and closing it here would make the ledger stop describing the product.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This slice installs no design-time authoring capability. A route between a track-owned source and a parameter is a document mutation reached through the command vocabulary the CLI and MCP surfaces above already advertise, not a capability an agent manifest declares."
         }
       }
     }
