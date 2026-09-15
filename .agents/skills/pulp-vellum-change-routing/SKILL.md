@@ -397,11 +397,20 @@ merge sha rather than picking a side.
 `.gitattributes` routes `docs/status/gpu-vellum-handoff.yaml` and
 `docs/validation/gpu-handoff-provenance/receipt.json` to the
 `pulp-gpu-ledger` merge driver, which `setup.sh` registers via
-`tools/scripts/install-githooks.sh`. When both sides of a merge have
-regenerated, the driver takes the other side's file and overwrites every
-`object_id` — and the receipt's `handoff_sha256` — with the literal
-`regenerate-me`. The merge then completes with no conflict markers and commits
-itself.
+`tools/scripts/install-githooks.sh`. The driver reads all three sides — base,
+ours and theirs — and overwrites, in each of them, every Pulp row's `revision`
+and `object_id`, plus the receipt's `source_commit` and `handoff_sha256`, with
+the literal `regenerate-me`. Those are exactly the fields `write` regenerates,
+so poisoning them makes the re-pin churn byte-identical on every side, and an
+ordinary three-way merge then runs over the result.
+
+That split is the point. Identity churn cancels out; everything else — a row
+one side added, a comment somebody re-bound — is content, and merges the way
+content does. `vellum_paths` rows are constants pinned to a fixed foreign
+revision and are never touched. When a re-pin was the only difference the merge
+completes with no conflict markers and commits itself; when two authors edited
+the same row it still comes back as conflict markers and a nonzero exit, which
+is what you want.
 
 **The value is invalid on purpose, and that is the entire mechanism.** Every
 resolution that produces something *shaped* like an identity is accepted
@@ -413,8 +422,9 @@ comparison in `validate_handoff_routing`, and
 `tools/scripts/gpu_ledger_sentinel_check.py` rejects it from both the pre-push
 hook and `gates.sh` before it can reach CI.
 
-So when a ledger reads `regenerate-me`, nothing is broken and nothing is lost —
-the merge is done and the regeneration is owed:
+So when a ledger reads `regenerate-me`, nothing is corrupt: the merge is done
+and the regeneration is owed. Regenerating is not optional politeness — the
+identities are invalid until you do, and every tier says so:
 
 ```sh
 python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt

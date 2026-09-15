@@ -50,12 +50,15 @@ fi
 # name with no driver behind it silently falls back to the ordinary text merge
 # — which is the conflict treadmill the driver exists to end. Register it here
 # so the same bootstrap that installs the hooks installs the driver.
-driver="tools/scripts/gpu_ledger_merge_driver.sh"
+driver="tools/scripts/gpu_ledger_merge_driver.py"
 if [ ! -x "$driver" ]; then
     echo "install-githooks: $driver missing or not executable at $ROOT" >&2
     exit 1
 fi
 git config merge.pulp-gpu-ledger.name \
-    "GPU handoff ledger: resolve to a sentinel that must be regenerated"
-git config merge.pulp-gpu-ledger.driver "$driver %A %B"
+    "GPU handoff ledger: three-way merge with regenerable fields sentinelled"
+# %O is base. Without it the driver has only two sides to compare and cannot
+# tell churn from content: it would have to resolve the whole file to one of
+# them, which silently drops whatever rows the other side added.
+git config merge.pulp-gpu-ledger.driver "$driver %O %A %B"
 echo "install-githooks: registered merge driver pulp-gpu-ledger"

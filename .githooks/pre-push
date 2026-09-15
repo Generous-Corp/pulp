@@ -494,7 +494,11 @@ fi
 # marker guard above finds `<<<<<<<`, and the driver's whole point is that there
 # are none. Literal substring scan of two files, offline, sub-second.
 if [ -f "$GPU_LEDGER_SENTINEL" ]; then
-    run_gate_captured "$PYTHON" "$GPU_LEDGER_SENTINEL" --root "$ROOT" --mode=report
+    # --rev, not --root: the push ships the commit, and every source ref was
+    # already proven to be this exact HEAD above. A developer who regenerated
+    # without committing has a clean tree over a sentinel tip, which a
+    # working-tree scan calls clean and CI rejects twenty minutes later.
+    run_gate_captured "$PYTHON" "$GPU_LEDGER_SENTINEL" --root "$ROOT" --rev HEAD --mode=report
     case $? in
         0) ;;
         1) fail=1 ;;
