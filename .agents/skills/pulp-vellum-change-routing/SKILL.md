@@ -189,9 +189,26 @@ fixing one pin creates the next. The sequence terminates, because a pin-refresh
 commit touches only the YAML, and the YAML excludes itself from the inventory.
 Land the file edits first, then regenerate in a single following commit. Re-run
 `gpu_recipe_catalog.py` after the refresh rather than before, or the second
-stale row goes out unseen. Note that `gates.sh` and the pre-push hook do **not**
-run this check, so a clean `gates: ✓ all gates pass` says nothing about your
-pins.
+stale row goes out unseen.
+
+`gates.sh` and the pre-push hook DO catch a stale pin, but only the cheap half
+of it. A diff-scoped `gpu-handoff pin freshness` guard fails when a changed file
+is pinned and the ledger was not touched, and it names the repair command. It
+deliberately does not re-verify the identity fields, because that costs a `git
+log` per pinned path. So `gates: ✓ all gates pass` proves the ledger was
+*refreshed*, never that its 100+ identities are *correct* — only
+`gpu_handoff_provenance.py check` proves that, and it is not run by any gate.
+Run it yourself after every refresh.
+
+**The cascade can start from a gate you were not thinking about.** A fix in
+`core/` that touches a skill-mapped source path makes `skill_sync_check.py`
+demand a SKILL.md edit; a SKILL.md is frequently a pinned path, so satisfying
+skill-sync stales a handoff row; and the refresh commit touches the YAML, which
+is itself mapped to *this* skill and so re-arms skill-sync. Landing a one-line
+source fix can therefore require touching two skills and the ledger. The way
+out is not to keep chasing it: satisfy skill-sync with a real gotcha where you
+genuinely learned one and the `Skill-Update: skip skill=<name> reason="..."`
+trailer where you did not, then refresh the ledger LAST, in its own commit.
 
 The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
 unregenerated ledger fails locally and in CI with the repair command in the

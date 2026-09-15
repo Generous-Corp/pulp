@@ -8,6 +8,8 @@
 #include <pulp/view/command_registry.hpp>
 #include <pulp/view/window_host.hpp>
 
+#include <cstdint>
+#include <format>
 #include <functional>
 #include <memory>
 #include <string>
@@ -433,19 +435,50 @@ inline void install_standalone_idle_callback(
             : std::function<void()>{});
 }
 
+/// Builds the standalone window-open log message.
+///
+/// `gpu_requested` is what the caller asked for; `gpu_resolved` is what the
+/// created window actually is. They diverge when a GPU host was requested but
+/// Skia is unavailable, so the process silently falls back to a CPU-only
+/// host. The reported `gpu=` value is always the RESOLVED one, and a
+/// divergence is called out explicitly, because this line is what a developer
+/// reads to decide whether the GPU path is live.
+///
+/// Pure so the message can be asserted without a logging sink.
+[[nodiscard]] inline std::string format_standalone_window_open_message(
+    uint32_t width,
+    uint32_t height,
+    bool gpu_requested,
+    bool gpu_resolved,
+    bool uses_script_ui,
+    const StandaloneEditorChrome& chrome) {
+    return std::format(
+        "Standalone: editor window open ({}x{}, gpu={}{}, mode={}, chrome={}, "
+        "inspector=ready)",
+        width,
+        height,
+        gpu_resolved,
+        (gpu_requested && !gpu_resolved) ? " (skia-unavailable)" : "",
+        uses_script_ui ? "scripted" : "autoui",
+        chrome.chrome_label());
+}
+
 inline void log_standalone_window_open(
     uint32_t width,
     uint32_t height,
-    bool use_gpu,
+    const view::WindowHost& window,
+    bool gpu_requested,
     bool uses_script_ui,
     const StandaloneEditorChrome& chrome) {
     runtime::log_info(
-        "Standalone: editor window open ({}x{}, gpu={}, mode={}, chrome={}, inspector=ready)",
-        width,
-        height,
-        use_gpu,
-        uses_script_ui ? "scripted" : "autoui",
-        chrome.chrome_label());
+        "{}",
+        format_standalone_window_open_message(
+            width,
+            height,
+            gpu_requested,
+            window.is_gpu_backed(),
+            uses_script_ui,
+            chrome));
 }
 
 } // namespace pulp::format::detail
