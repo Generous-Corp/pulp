@@ -1,3 +1,5 @@
+#include "support/control_manifest_fixtures.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/events/interprocess_connection.hpp>
@@ -28,21 +30,7 @@ using namespace pulp::inspect;
 
 namespace {
 
-constexpr std::string_view kManifest = R"({
-  "schema": "dev.pulp.control/artifact-manifest@1",
-  "schema_version": 1,
-  "profile": "developer-local",
-  "target": "pulp-control-trusted-host-fixture",
-  "product_name": "Pulp Trusted Host Fixture",
-  "bundle_id": "dev.pulp.test.trusted-host-fixture",
-  "build_id": "build:0123456789abcdef0123456789abcdef",
-  "registry_digest": "70578eae97288609fe384bd2caa1641e62af016127f3abc6e4a3cd754422d584",
-  "endpoint_included": true,
-  "unsafe_runtime_eval_acknowledged": false,
-  "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
-  "capabilities": ["dev.pulp.instance/read@1"]
-}
-)";
+constexpr std::string_view kManifest = pulp::test::kTrustedHostFixtureManifest;
 
 struct Directory {
     Directory() {
