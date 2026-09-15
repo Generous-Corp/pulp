@@ -61,6 +61,18 @@ struct LoweredClip {
     // reduce to a third. Hence a list travelling beside the clip rather than
     // extra fields inside it.
     std::vector<LoweredPlacementFade> placement_fades;
+    // The authored clip this one is a window onto. A nesting can trim a leaf,
+    // and content whose renderer generates from the authored origin has to be
+    // generated over that origin or its pattern phase moves with the trim, so
+    // the window travels beside the clip and the compiler applies it to what
+    // the renderer returned rather than asking the renderer to apply it.
+    //
+    // `authored_window_start` is the tick inside the authored clip at which the
+    // retained window begins, and `authored_duration` is the authored clip's
+    // own duration. An untrimmed leaf reads zero and its own duration, which
+    // windows to exactly the clip it lowered to before.
+    std::int64_t authored_window_start = 0;
+    timebase::TickDuration authored_duration{0};
 };
 
 class SequenceContentLowerer {

@@ -87,8 +87,6 @@ std::string_view compile_error_code_name(playback::CompileErrorCode code) noexce
         return "MidiExpressionLaneBudgetExceeded";
     case playback::CompileErrorCode::TrimmedGrooveUnsupported:
         return "TrimmedGrooveUnsupported";
-    case playback::CompileErrorCode::TrimmedRegisteredContentUnsupported:
-        return "TrimmedRegisteredContentUnsupported";
     case playback::CompileErrorCode::UnresolvedRegisteredContent:
         return "UnresolvedRegisteredContent";
     case playback::CompileErrorCode::RegisteredContentCompileFailed:
