@@ -684,5 +684,15 @@ include("${CMAKE_CURRENT_LIST_DIR}/sync_soak_engine.cmake")
 if(PULP_ENABLE_PROJECT_PACKAGE)
     include("${CMAKE_CURRENT_LIST_DIR}/project_package_tests.cmake")
 endif()
+# The timeline skill is the surface an agent reads before touching sequencer
+# work, and it is the one sequencer surface with no generator behind it. This
+# derives every `dev.pulp.sequencer/` operation from the frozen control registry
+# and fails when the skill omits one or records the wrong result kind, so a
+# live sequencer capability cannot ship agent-invisible.
+if(Python3_EXECUTABLE)
+    add_test(NAME sequencer-control-skill-coverage COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/sequencer_control_skill_check.py")
+endif()
+
 # Keep focused Timeline submodule registrations beneath this owner hub.
 include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")
