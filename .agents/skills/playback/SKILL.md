@@ -1535,6 +1535,50 @@ do not share a code, because the construct that would lift them is the same
 one but the reason a reader hits them is not — and a shared code sends you to
 the wrong half of the document.
 
+### Freeze nests only where the nesting transforms nothing
+
+A freeze is a rendered artifact anchored in **absolute samples**, and nothing
+about it can be re-derived: it either lands where it was rendered to land or it
+is a stale render playing at the wrong time or level. So the question the
+lowerer asks is not "can the artifact be mapped through this nesting?" but
+"does this nesting transform its child at all?". Where the answer is no, the
+artifact is already in the right place and lowers as an absolute `MediaRef`
+leaf carrying the same media over the same samples; everywhere else the
+refusal stands, exactly as before.
+
+`nesting_is_transparent` is the whole of that judgement, and it is built to
+fail closed: a `NestingTransformation` enumerator with no case in
+`nesting_imposes` reaches a trailing `return true` and is reported as
+*imposed*, so a transformation nobody has reasoned about refuses rather than
+permits. Adding an enumerator without answering for it cannot widen the
+permit.
+
+Three things about the enumeration are worth knowing before you edit it:
+
+- **It is wider than what the walk applies today.** A placement's
+  `time_conform` and a child track's `modulators` / `macros` /
+  `modulation_routes` are read by neither this walk nor `begin_track`, so a
+  child carrying one is neither honoured nor refused anywhere else. Without an
+  entry here, a modulated fader under a sealed artifact would be silently
+  permitted.
+- **The artifact's sample rate is in the list and is not a transformation the
+  owner applies.** An unnested freeze compiles through
+  `compile_track_freeze_program`, which takes the artifact's projected timeline
+  span as its renderable length; a lowered leaf compiles through the generic
+  absolute-clip path, which takes the source length scaled and rounded up.
+  Those agree only when no rate conversion happens. Do not delete the check as
+  redundant with the freeze compiler's own rate validation — that validation
+  runs on a path the lowered leaf never takes.
+- **Some entries are unreachable backstops.** A `SequenceRef` clip cannot carry
+  a conform or an absolute anchor (`Clip::create` and `create_absolute` reject
+  both), so no refusal test can exercise those entries and none pretends to.
+
+`NestedActiveTakeUnsupported` is unchanged and still refuses unconditionally.
+A comp is the same root cause — a track-scoped sealed artifact anchored in
+absolute samples — but a different payload: N segments each needing take
+resolution, which today exists only inside
+`compile_take_comp_segment_program`. One construct, two payloads.
+
 `record_armed()` and the bare `take_lanes()` list are read by **neither** path,
 and refusing them rejected documents that already compiled correctly. Three
 independent places corroborate this before you trust it:

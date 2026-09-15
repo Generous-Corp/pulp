@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <utility>
 #include <variant>
@@ -96,6 +97,44 @@ std::int64_t groove_timing_reach(const timeline::GrooveTemplate& groove) noexcep
     }
     return reach + widest_step;
 }
+
+/// Every way a nesting can change what a sealed artifact sounds.
+///
+/// A freeze is a rendered artifact anchored in absolute samples, so nothing
+/// about it can be re-derived: it either lands where it was rendered to land or
+/// it is a stale render playing at the wrong time or level. That makes the
+/// question "does this nesting transform its child at all?" rather than "can we
+/// map the artifact through the transform?", and this enum is the answer's
+/// vocabulary — one enumerator per observation, so the predicate below is a
+/// list nobody can shorten by accident.
+///
+/// Membership is deliberately wider than the transformations the walk applies
+/// today. `PlacementConform` and the three modulation entries are read by
+/// neither this walk nor `begin_track`, so a child carrying one is neither
+/// honoured nor refused anywhere else; without an entry here a modulated fader
+/// under a sealed artifact would be silently permitted.
+enum class NestingTransformation : std::uint8_t {
+    PlacementTranslation,
+    PlacementWindowStart,
+    PlacementWindowEnd,
+    PlacementGain,
+    PlacementFade,
+    PlacementConform,
+    PlacementAnchor,
+    TrackFader,
+    TrackPan,
+    TrackDeviceChain,
+    TrackAutomationLane,
+    TrackModulator,
+    TrackMacro,
+    TrackModulationRoute,
+    TrackTuning,
+    SequenceGroove,
+    SequenceDynamics,
+    SequenceChordScale,
+    ArtifactRate,
+    kCount,
+};
 
 } // namespace
 
@@ -275,6 +314,12 @@ class SequenceContentLowerer::Impl {
         // nothing folds, because ramps of different shapes have no common
         // shape to fold into.
         std::vector<LoweredPlacementFade> placement_fades;
+        // The child track this placement was authored on, or null when the
+        // placement sits on the compile root. Only the intermediate tracks are
+        // recorded, because the root track's own state applies to a nested and
+        // an unnested document alike and so is never a difference the nesting
+        // introduced.
+        const timeline::Track* owning_track = nullptr;
     };
 
     struct PendingLeaf {
@@ -374,13 +419,188 @@ class SequenceContentLowerer::Impl {
     void push_reference(const timeline::Clip& placement, const timeline::SequenceRef& reference,
                         std::size_t depth, float inherited_gain,
                         std::vector<LoweredPlacementFade> placement_fades,
-                        const timeline::Clip& authored_placement, std::int64_t translation) {
+                        const timeline::Clip& authored_placement, std::int64_t translation,
+                        const timeline::Track* owning_track = nullptr) {
         append_placement_fades(placement_fades, authored_placement, translation);
         auto& frame = frames_.emplace_back(ReferenceFrame{
             placement, reference, project_.find_sequence(reference.sequence_id),
             reference.source_start + timebase::TickDuration{placement.duration().value}, depth});
         frame.inherited_gain = inherited_gain * placement.playback_properties().gain_linear;
         frame.placement_fades = std::move(placement_fades);
+        frame.owning_track = owning_track;
+    }
+
+    /// Whether the nesting currently on the frame stack imposes `which`.
+    ///
+    /// Every enumerator answers for the whole stack, not just the innermost
+    /// frame: a transparent placement inside a trimmed one is still a trimmed
+    /// nesting, and the artifact underneath cannot tell the two apart.
+    ///
+    /// An enumerator with no case below reaches the trailing `return true` and
+    /// is therefore reported as imposed. That direction is the safe one — a
+    /// transformation nobody has reasoned about refuses the nesting instead of
+    /// permitting it — and it is what makes adding an enumerator fail closed by
+    /// construction rather than by anyone remembering to extend this function.
+    bool nesting_imposes(NestingTransformation which, const timeline::Track& track,
+                         const timeline::TrackFreeze& freeze) const {
+        const auto any_frame = [this](auto&& predicate) {
+            return std::any_of(frames_.begin(), frames_.end(), predicate);
+        };
+        // The track being walked plus every intermediate track the walk passed
+        // through to reach it. A fader or a modulator two levels up transforms
+        // the artifact exactly as much as one directly above it, and only the
+        // compile root's own track state is excluded — that applies to a nested
+        // and an unnested document alike, so it is never a difference the
+        // nesting introduced.
+        const auto any_track = [this, &track](auto&& predicate) {
+            return predicate(track) ||
+                   std::any_of(frames_.begin(), frames_.end(), [&](const ReferenceFrame& frame) {
+                       return frame.owning_track != nullptr && predicate(*frame.owning_track);
+                   });
+        };
+        switch (which) {
+        case NestingTransformation::PlacementTranslation:
+            // Child tick T reaches owner tick placement.start() + (T -
+            // source_start). Anything but the identity moves musical content
+            // that the artifact, having no tick position at all, cannot follow.
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.placement.start().value != frame.reference.source_start.value;
+            });
+        case NestingTransformation::PlacementWindowStart:
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.reference.source_start.value != 0;
+            });
+        case NestingTransformation::PlacementWindowEnd:
+            // A window that ends before the child does cuts content. The cut is
+            // expressed in ticks and the artifact in samples, so there is no
+            // honest way to apply it; a child that declares no duration cannot
+            // prove the window covers it and is refused for that reason.
+            return any_frame([](const ReferenceFrame& frame) {
+                const auto duration = frame.sequence->duration();
+                return !duration || frame.source_end.value < duration->value;
+            });
+        case NestingTransformation::PlacementGain:
+            // Each placement is asked separately rather than reading the
+            // accumulated product, so a 2.0 above a 0.5 is refused instead of
+            // cancelling to a unity nobody authored.
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.placement.playback_properties().gain_linear != 1.0f;
+            });
+        case NestingTransformation::PlacementFade:
+            // append_placement_fades pushes nothing for a fadeless placement, so
+            // an empty accumulated list is exactly "no enclosing placement fades".
+            return !frames_.empty() && !frames_.back().placement_fades.empty();
+        case NestingTransformation::PlacementConform:
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.placement.time_conform() != timeline::TimeConform::None;
+            });
+        case NestingTransformation::PlacementAnchor:
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.placement.time_anchor() != timeline::ClipTimeAnchor::Musical;
+            });
+        case NestingTransformation::TrackFader:
+            return any_track([](const timeline::Track& walked) {
+                return walked.mixer().gain_linear != 1.0f;
+            });
+        case NestingTransformation::TrackPan:
+            return any_track(
+                [](const timeline::Track& walked) { return walked.mixer().pan != 0.0f; });
+        case NestingTransformation::TrackDeviceChain:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.device_chain().empty(); });
+        case NestingTransformation::TrackAutomationLane:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.automation_lanes().empty(); });
+        case NestingTransformation::TrackModulator:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.modulators().empty(); });
+        case NestingTransformation::TrackMacro:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.macros().empty(); });
+        case NestingTransformation::TrackModulationRoute:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.modulation_routes().empty(); });
+        case NestingTransformation::TrackTuning:
+            return any_track(
+                [](const timeline::Track& walked) { return walked.tuning().has_value(); });
+        case NestingTransformation::SequenceGroove:
+            return any_frame([](const ReferenceFrame& frame) {
+                return !frame.sequence->groove().states_no_feel();
+            });
+        case NestingTransformation::SequenceDynamics:
+            return any_frame(
+                [](const ReferenceFrame& frame) { return !frame.sequence->dynamics_lane().empty(); });
+        case NestingTransformation::SequenceChordScale:
+            return any_frame([](const ReferenceFrame& frame) {
+                return !frame.sequence->chord_scale_lane().empty();
+            });
+        case NestingTransformation::ArtifactRate:
+            return artifact_rate_differs(freeze);
+        case NestingTransformation::kCount:
+            break;
+        }
+        return true;
+    }
+
+    /// Whether the freeze's declared rate differs from either rate the two
+    /// emission paths read.
+    ///
+    /// This one is not a transformation the owner applies, and it is here
+    /// because leaving it out silently breaks the identity this predicate
+    /// exists to guarantee. A top-level freeze compiles through
+    /// compile_track_freeze_program, which sets the renderable length to the
+    /// artifact's projected timeline span; a lowered leaf compiles through the
+    /// generic absolute-clip path, which sets it to the source length scaled
+    /// and rounded up. Those two agree only when no rate conversion happens at
+    /// all — otherwise they can differ by a frame, and the nested render stops
+    /// being the unnested one. Do not delete this as redundant with the
+    /// freeze compiler's own rate check: that check runs on a path this leaf
+    /// never takes.
+    bool artifact_rate_differs(const timeline::TrackFreeze& freeze) const {
+        const auto declared = freeze.sample_rate.normalized();
+        if (declared != tempo_map_.sample_rate().normalized())
+            return true;
+        const auto* asset = project_.find_asset(freeze.media.asset_id);
+        return !asset || asset->sample_rate.normalized() != declared;
+    }
+
+    /// Whether this nesting leaves its child exactly as authored.
+    ///
+    /// The loop is the point: permission is granted only by every enumerator
+    /// answering "not imposed", so an unanswered one cannot reach `true`.
+    bool nesting_is_transparent(const timeline::Track& track,
+                                const timeline::TrackFreeze& freeze) const {
+        for (auto index = static_cast<std::uint8_t>(0);
+             index < static_cast<std::uint8_t>(NestingTransformation::kCount); ++index)
+            if (nesting_imposes(static_cast<NestingTransformation>(index), track, freeze))
+                return false;
+        return true;
+    }
+
+    /// Emits a transparently nested freeze as the sealed artifact it already is.
+    ///
+    /// The artifact is absolute, so it lowers to an absolute leaf carrying the
+    /// same media over the same samples rather than to anything derived from
+    /// the child's arrangement. Skipping to the next track is what makes this a
+    /// substitution rather than an addition — the nested analogue of
+    /// begin_track discarding the clips it replaced.
+    StepResult emit_sealed_freeze(ReferenceFrame& frame, const timeline::Track& track) {
+        const auto& freeze = *track.freeze();
+        if (next_generated_id_ == 0 ||
+            next_generated_id_ == std::numeric_limits<std::uint64_t>::max())
+            return {.error =
+                        SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded, track.id()}};
+        auto leaf = timeline::Clip::create_absolute(timeline::ItemId{next_generated_id_++},
+                                                    freeze.placement_start, freeze.media.frame_count,
+                                                    freeze.sample_rate, freeze.media);
+        if (!leaf)
+            return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, track.id()}};
+        auto appended = append(std::move(leaf).value(), track.id());
+        if (appended.error)
+            return appended;
+        ++frame.track_index;
+        frame.clip_index = 0;
+        return {};
     }
 
     StepResult step_reference() {
@@ -405,12 +625,28 @@ class SequenceContentLowerer::Impl {
             // track's arrangement with something else. begin_track honours that
             // replacement by returning Freeze or ActiveTake content and
             // discarding the clips; this walk descends into the clips instead,
-            // so it would play precisely the material the author replaced. Each
-            // names its own code rather than sharing a generic one, because the
-            // construct that would lift it differs.
-            if (track.freeze())
-                return {.error = SequenceLoweringError{
-                            CompileErrorCode::NestedFrozenTrackUnsupported, track.id()}};
+            // so it would play precisely the material the author replaced.
+            //
+            // They keep separate codes because the reason a reader hits each is
+            // different — a freeze is one media placement, an active take is N
+            // comp segments each needing take resolution — not because the
+            // construct that lifts them differs. It does not: both are a
+            // track-scoped sealed artifact anchored in absolute samples,
+            // selected as the alternative to flattening. One construct, two
+            // payloads.
+            //
+            // A sealed artifact carries no tick position, so it cannot follow a
+            // nesting that moves or cuts its child. Where the nesting provably
+            // moves and cuts nothing, the artifact is already in the right
+            // place and lowers as itself; everywhere else the refusal stands.
+            // nesting_is_transparent is the whole of that judgement, and it
+            // grants permission only by affirmative match.
+            if (track.freeze()) {
+                if (!nesting_is_transparent(track, *track.freeze()))
+                    return {.error = SequenceLoweringError{
+                                CompileErrorCode::NestedFrozenTrackUnsupported, track.id()}};
+                return emit_sealed_freeze(frame, track);
+            }
             if (track.active_take_lane_id().valid())
                 return {.error = SequenceLoweringError{CompileErrorCode::NestedActiveTakeUnsupported,
                                                        track.id()}};
@@ -511,7 +747,8 @@ class SequenceContentLowerer::Impl {
             if (auto charged = charge_reference(child.id()); charged.error)
                 return charged;
             push_reference(nested_clip.value(), reference, depth, composed_gain,
-                           frame.placement_fades, child, target_start.value - clipped_start.value);
+                           frame.placement_fades, child, target_start.value - clipped_start.value,
+                           &track);
             return {};
         }
 
