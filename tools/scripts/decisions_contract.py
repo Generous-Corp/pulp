@@ -21,7 +21,17 @@ PreToolUse cannot hard-block). The authoritative boundary is the CLI `validate`
 gate wired into CI + the pre-push gates, plus server-side required checks — not
 this advisory surface. See `.agents/contract.toml` [meta].enforcement_boundary.
 
-Pure stdlib. `tomllib` ships with Python 3.11+.
+Pure stdlib. `tomllib` ships with Python 3.11+, and macOS still ships
+/usr/bin/python3 as 3.9 — so the documented `python3 tools/scripts/...` form in
+CLAUDE.md / AGENTS.md can land on an interpreter that cannot parse TOML. Rather
+than making every caller remember the prerequisite, this script finds a capable
+interpreter itself and re-executes under it. A capable interpreter is one that
+ACTUALLY IMPORTS `tomllib` when run — never one that merely exists, is
+executable, or claims a version number. (A present, executable interpreter that
+fails on every invocation is a real failure mode here: an Xcode licence lapse
+makes /usr/bin/python3 exit 69 while still passing an `-x` test.) If no capable
+interpreter exists the script fails loudly and names the remedy; it never
+degrades to a silent no-op.
 """
 
 from __future__ import annotations
@@ -29,6 +39,8 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -37,6 +49,101 @@ try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
     tomllib = None  # type: ignore[assignment]
+
+# ── Capable-interpreter selection ────────────────────────────────────────────
+# Kept byte-identical (and in the same order) to the candidate list in
+# hooks/scripts/decisions-contract-hint.sh, which solved this first and
+# correctly. `test_decisions_contract.py` asserts the two lists have not
+# drifted, which is cheaper than inventing a shared file for one list.
+#
+# The selection rule is the whole point: a candidate qualifies only by RUNNING
+# and importing tomllib. Existence, executability (`-x`) and a version string
+# are all things a broken interpreter satisfies.
+_PYTHON_CANDIDATES = (
+    "python3", "python3.14", "python3.13", "python3.12", "python3.11",
+    "/opt/homebrew/bin/python3", "/usr/local/bin/python3",
+)
+
+# Set in the child so a re-exec can never recurse, however odd the environment.
+_REEXEC_SENTINEL = "PULP_DECISIONS_CONTRACT_REEXEC"
+
+_REMEDY = (
+    "no TOML-capable Python found. `tomllib` needs Python 3.11+ and this "
+    "interpreter ({exe}) does not have it. Remedy: install a newer Python "
+    "(`brew install python@3.12`) or run this script with one you already "
+    "have, e.g. `python3.12 tools/scripts/decisions_contract.py ...`."
+)
+
+
+def _imports_tomllib(executable: str) -> bool:
+    """True only if `executable` actually runs and imports tomllib.
+
+    Deliberately not `os.access(..., os.X_OK)`: an interpreter can be present
+    and executable and still fail every invocation (a lapsed Xcode licence
+    makes /usr/bin/python3 exit 69). Capability is proven by running it.
+    """
+    try:
+        proc = subprocess.run(
+            [executable, "-c",
+             "import tomllib; print(tomllib.loads('probe = 1')['probe'])"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    # Require the parsed value back, not merely exit 0: a stub that exits 0
+    # without parsing anything would otherwise qualify as "capable".
+    return proc.returncode == 0 and proc.stdout.strip() == "1"
+
+
+def find_toml_capable_python() -> str | None:
+    """First candidate that proves it can parse TOML, else None."""
+    seen: set[str] = set()
+    for candidate in _PYTHON_CANDIDATES:
+        resolved = shutil.which(candidate)
+        if not resolved or resolved in seen:
+            continue
+        seen.add(resolved)
+        if _imports_tomllib(resolved):
+            return resolved
+    # uv keeps managed interpreters outside PATH; same functional test applies.
+    uv = shutil.which("uv")
+    if uv:
+        try:
+            found = subprocess.run(
+                [uv, "python", "find", "3.12"],
+                capture_output=True, text=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        resolved = found.stdout.strip()
+        if found.returncode == 0 and resolved and _imports_tomllib(resolved):
+            return resolved
+    return None
+
+
+def _reexec_under_capable_python(argv: list[str], announce: bool) -> None:
+    """Re-exec this script under a TOML-capable interpreter.
+
+    Returns only when that is impossible — the caller then fails loudly.
+    """
+    if os.environ.get(_REEXEC_SENTINEL):
+        return
+    replacement = find_toml_capable_python()
+    if replacement is None:
+        return
+    if announce:
+        print(
+            f"decisions-contract: note: {sys.executable} lacks tomllib; "
+            f"re-executing under {replacement}",
+            file=sys.stderr,
+        )
+    os.environ[_REEXEC_SENTINEL] = "1"
+    script = str(Path(__file__).resolve())
+    try:
+        os.execv(replacement, [replacement, script, *argv])
+    except OSError:
+        # execv failed after all; fall through to the loud error path.
+        os.environ.pop(_REEXEC_SENTINEL, None)
 
 # Repo-root-relative default; overridable with --contract for tests.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -50,10 +157,19 @@ class SchemaError(Exception):
     """Raised when the contract file is structurally invalid."""
 
 
+class InterpreterError(SchemaError):
+    """No interpreter is available that can actually parse TOML.
+
+    A subclass of SchemaError so existing callers keep their one except-clause
+    and exit code 2, but distinct so the message is not labelled as a problem
+    with the contract file — which would send a reader to the wrong place.
+    """
+
+
 def load_contract(path: Path) -> dict:
     """Parse + schema-validate the contract. Raises SchemaError on any problem."""
     if tomllib is None:
-        raise SchemaError("tomllib unavailable (needs Python 3.11+)")
+        raise InterpreterError(_REMEDY.format(exe=sys.executable))
     if not path.is_file():
         raise SchemaError(f"contract file not found: {path}")
     try:
@@ -207,13 +323,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="Machine-readable output.")
     args = ap.parse_args(argv)
 
+    if tomllib is None:
+        # This interpreter cannot do the job. Find one that can and hand over,
+        # so the bare `python3 tools/scripts/decisions_contract.py ...` form
+        # documented in CLAUDE.md / AGENTS.md is true on a stock macOS shell.
+        # Stay silent in `surface` mode: that path is contractually a clean
+        # no-op for external contributors, and the selftest asserts empty
+        # stderr. Failure is loud in every mode (below).
+        _reexec_under_capable_python(
+            list(argv) if argv is not None else sys.argv[1:],
+            announce=args.mode != "surface",
+        )
+
     try:
         data = load_contract(args.contract)
     except SchemaError as exc:
         if args.json:
             print(json.dumps({"ok": False, "error": str(exc)}))
         else:
-            print(f"decisions-contract: SCHEMA ERROR: {exc}", file=sys.stderr)
+            label = ("INTERPRETER ERROR" if isinstance(exc, InterpreterError)
+                     else "SCHEMA ERROR")
+            print(f"decisions-contract: {label}: {exc}", file=sys.stderr)
         return 2
 
     if args.mode == "validate":
