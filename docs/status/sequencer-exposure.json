@@ -6786,6 +6786,128 @@
       }
     },
     {
+      "id": "trimmed-registered-content-window",
+      "title": "A nested placement that trims registered content compiles by window-after-generate",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "88c93ee4-b0e2-4e74-bf30-3b1ec4e51b1e",
+      "owned_paths": [
+        ".agents/skills/agent-capabilities/SKILL.md",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "docs/guides/timeline-sdk.md",
+        "docs/status/agent-capability-surface.json",
+        "docs/status/sequencer-exposure.json",
+        "test/test_playback_chord_pattern_renderer.cpp",
+        "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_registry.py",
+        "tools/scripts/negative_capability_allowlist.json",
+        "tools/timeline/src/timeline_agent.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.hpp",
+          "needles": [
+            "authored_window_start",
+            "authored_duration"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "authored_window_start",
+            "authored_duration"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_compiler.cpp",
+          "needles": [
+            "authored_window_start",
+            "authored_duration"
+          ]
+        },
+        {
+          "path": "test/test_playback_chord_pattern_renderer.cpp",
+          "needles": [
+            "nested_pattern_project"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "No installed type, entry point or capability is added. The compile hook's input struct is unchanged: the compiler presents the authored clip duration and an origin tick rebased to the authored start, which are values it already computed, so a renderer built against the previous header compiles and links unchanged and now also renders correctly under a trim. One CompileErrorCode member is removed rather than added, because the condition it named no longer occurs anywhere in the compiler; claiming an installed-SDK surface would advertise a capability this change does not add.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/compile_context_registry.hpp",
+              "needles": [
+                "RegisteredContentCompileInput",
+                "maximum_fragment_notes"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "`pulp seq` gains and loses no command, flag or output field. A document that previously reported a compile refusal now compiles, which changes the result of an existing invocation rather than adding an offline capability.",
+          "evidence": [
+            {
+              "kind": "cli_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "compile_error_code_name",
+                "TrimmedGrooveUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The MCP timeline tools read the same compile status through the same name mapping, so no tool, argument or result field changes shape.",
+          "evidence": [
+            {
+              "kind": "mcp_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "compile_error_code_name"
+              ]
+            }
+          ]
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Nothing becomes controllable at runtime. The windowing is computed and consumed entirely inside the compile worker, beneath controls that already exist, and it removes a refusal rather than adding a control surface.",
+          "evidence": [
+            {
+              "kind": "other",
+              "path": "core/playback/src/program_compiler.cpp",
+              "needles": [
+                "authored_window_start"
+              ]
+            }
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or withdrawn. The allowlist loses the row that recorded why the trim refused, because the refusal is gone; the authored window is an internal lowering fact with no agent-visible surface.",
+          "evidence": [
+            {
+              "kind": "other",
+              "path": "tools/scripts/negative_capability_allowlist.json",
+              "needles": [
+                "NestedConformedTrimUnsupported"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "control-fixture-manifest-digest-derivation",
       "title": "Control fixture manifests and shipping markers derive from the canonical registry digest",
       "classification": "ci_test_only",
