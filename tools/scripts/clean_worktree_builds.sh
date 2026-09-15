@@ -13,16 +13,26 @@
 # It removes a worktree's `build/` — never the worktree, never source, never
 # uncommitted work. The worst case is a rebuild.
 #
-# THE GATE — all five must hold, or the directory is kept:
+# THE GATE — all of these must hold, or the directory is kept:
 #
-#   1. STRUCTURE — the path is `<W>/build`, `<W>` is a directory `git worktree
-#      list` reports for THIS repository, `<W>/.git` exists, and the path is a
-#      real directory rather than a symlink.
+#   1. STRUCTURE — the path is `<W>/build` or `<W>/build-*` at depth 1, `<W>`
+#      is a directory `git worktree list` reports for THIS repository,
+#      `<W>/.git` exists, the path is a real directory rather than a symlink,
+#      and git's own ignore rules report the directory as ignored. That last
+#      check is the per-item evidence that the content is regenerable: a name
+#      convention is not proof, an ignore rule is.
 #   2. HISTORY — the exact worktree HEAD is a strict ancestor of the current
 #      default branch. A deleted remote branch is not completion evidence:
 #      unique commits must never lose their only warm build by inference.
-#   3. LINEAGE — the local continuity registry records this exact branch and
-#      exact HEAD as `merged`, with the merged PR as immutable provenance.
+#   3. MERGE PROOF — this exact head landed, proven EITHER by the local
+#      continuity registry (branch + HEAD recorded `merged` with the merged PR
+#      as provenance, which also covers squash merges) OR by git directly, via
+#      strict ancestry of the freshly fetched default tip. The registry alone
+#      used to be mandatory. That made a missing or stale bookkeeping row veto
+#      an ancestry git could prove on demand, and absence of a record is not
+#      evidence of non-merge — it is evidence that nobody wrote one down.
+#   3b. QUIESCENT — no uncommitted tracked work in the worktree. An edit does
+#      not move HEAD, so the merge proof above cannot see one.
 #   4. IDLE — nothing under the build directory modified in the last
 #      PULP_WORKTREE_BUILD_IDLE_HOURS hours (default 2).
 #   5. QUIET — the shared build-directory exclusion lock is held by this
@@ -104,10 +114,14 @@ trap 'rm -rf -- "${SCRATCH}"' EXIT
 assert_reapable_path() {
     local dir="$1" roots_file="$2" parent parent_physical candidate_common
     case "${dir}" in
-        # Absolute, and the last component is exactly `build`. In a case
-        # pattern `*` spans `/`, so this accepts any depth.
-        /*/build) ;;
-        *) echo "REFUSING (not an absolute path ending in /build): ${dir}" >&2; return 1 ;;
+        # Absolute, and the last component is a regenerable build-artifact
+        # directory. In a case pattern `*` spans `/`, so this accepts any
+        # depth; the `*/` prefix guard keeps the name itself slash-free.
+        /*/build|/*/build-*) ;;
+        *) echo "REFUSING (not an absolute path ending in a build artifact dir): ${dir}" >&2; return 1 ;;
+    esac
+    case "${dir##*/}" in
+        */*) echo "REFUSING (artifact name is not a single component): ${dir}" >&2; return 1 ;;
     esac
     if [ -L "${dir}" ]; then
         echo "REFUSING (symlink, not a directory): ${dir}" >&2; return 1
@@ -115,7 +129,7 @@ assert_reapable_path() {
     if [ ! -d "${dir}" ]; then
         echo "REFUSING (not a directory): ${dir}" >&2; return 1
     fi
-    parent="${dir%/build}"
+    parent="${dir%/*}"
     parent_physical="$(cd "${parent}" 2>/dev/null && pwd -P || true)"
     if [ "${parent_physical}" != "${parent}" ]; then
         echo "REFUSING (worktree root has a symlink/replacement component): ${dir}" >&2
@@ -145,6 +159,14 @@ assert_reapable_path() {
         echo "REFUSING (candidate belongs to a different Git repository): ${dir}" >&2
         return 1
     fi
+    # The name alone does not make a directory regenerable. Require the
+    # repository's own ignore rules to say this content is not source, so every
+    # removal carries per-item evidence rather than a naming convention. A
+    # tracked or untracked-but-unignored `build-*` directory is refused.
+    if ! git -C "${parent}" check-ignore -q -- "${dir}" 2>/dev/null; then
+        echo "REFUSING (git does not report this path as ignored/regenerable): ${dir}" >&2
+        return 1
+    fi
     return 0
 }
 
@@ -168,9 +190,31 @@ path_aliases() {
 a_live_process_is_using() {
     local wt_path="$1" spelling
     [ -f "${PS_SNAPSHOT:-}" ] && [ -f "${LSOF_SNAPSHOT:-}" ] || return 2
+    # Match the path as a PATH, not as a substring. A bare `grep -F` treats
+    # every worktree whose path is a prefix of another as in use — on this
+    # fleet `/Users/.../Code/pulp` is a prefix of ~120 `pulp-*` siblings, so a
+    # single unrelated process pinned all of them. Require the character after
+    # the match to end the path: end-of-argv, a separator, or whitespace.
+    #
+    # This still refuses on any process that merely NAMES the path without
+    # writing to it (an audit `du` listing 65 build dirs is one). That is the
+    # conservative direction — it keeps a directory that could have been
+    # reclaimed — so it is left as a veto; lsof below is what proves real use.
     while IFS= read -r spelling; do
         [ -z "${spelling}" ] && continue
-        if grep -qF "${spelling}" "${PS_SNAPSHOT}"; then
+        if awk -v root="${spelling}" '
+                {
+                    line = $0; n = length(root); idx = index(line, root)
+                    while (idx > 0) {
+                        nxt = substr(line, idx + n, 1)
+                        if (nxt == "" || nxt == "/" || nxt == " " || nxt == "\t") {
+                            found = 1; exit
+                        }
+                        line = substr(line, idx + n); idx = index(line, root)
+                    }
+                }
+                END { exit !found }
+            ' "${PS_SNAPSHOT}"; then
             return 0
         fi
     done < <(path_aliases "${wt_path}")
@@ -311,17 +355,18 @@ pinned_worktree_authority_is_safe() {
 }
 
 pinned_worktree_is_safe() {
-    [ -d build ] && [ ! -L build ] || return 1
+    [ -d "${ARTIFACT_NAME}" ] && [ ! -L "${ARTIFACT_NAME}" ] || return 1
+    ! worktree_has_uncommitted_work "$1" || return 1
     pinned_worktree_authority_is_safe "$@"
 }
 
 restore_quarantine() {
     local quarantine="$1" expected_identity="$2"
-    [ ! -e build ] || return 1
+    [ ! -e "${ARTIFACT_NAME}" ] || return 1
     [ -d "${quarantine}" ] && [ ! -L "${quarantine}" ] || return 1
     [ "$(path_identity "${quarantine}" 2>/dev/null || true)" = \
         "${expected_identity}" ] || return 1
-    mv "${quarantine}" build
+    mv "${quarantine}" "${ARTIFACT_NAME}"
 }
 
 # Recursively remove through an opened, identity-verified directory descriptor.
@@ -387,19 +432,26 @@ reap_pinned_build() (
     local wt="$1" expected_identity="$2" roots_file="$3"
     local expected_head="$4" expected_branch="$5" expected_tip="$6"
     local quarantine="$7" pinned_now build_identity
+    # Subshell-local; the helpers called below read it from this scope.
+    ARTIFACT_NAME="${8:-build}"
+    case "${ARTIFACT_NAME}" in
+        build|build-*) ;;
+        *) return 20 ;;
+    esac
+    case "${ARTIFACT_NAME}" in */*|.|..) return 20 ;; esac
     BUILD_LOCK_PID=""
     trap release_build_lock EXIT
-    acquire_build_lock "${wt}/build" || return 11
+    acquire_build_lock "${wt}/${ARTIFACT_NAME}" || return 11
     cd -P "${wt}" || return 12
     pinned_worktree_is_safe "${wt}" "${expected_identity}" "${roots_file}" \
         "${expected_head}" "${expected_branch}" "${expected_tip}" || return 13
-    build_is_idle build || return 14
+    build_is_idle "${ARTIFACT_NAME}" || return 14
     capture_process_snapshot "${PS_SNAPSHOT}" || return 15
     activity_is_quiet_for "${wt}" || return 16
     [ ! -e "${quarantine}" ] || return 17
-    build_identity="$(path_identity build 2>/dev/null || true)"
+    build_identity="$(path_identity "${ARTIFACT_NAME}" 2>/dev/null || true)"
     [ -n "${build_identity}" ] || return 18
-    mv "build" "${quarantine}" || return 18
+    mv "${ARTIFACT_NAME}" "${quarantine}" || return 18
     [ "$(path_identity "${quarantine}" 2>/dev/null || true)" = \
         "${build_identity}" ] || return 19
 
@@ -495,6 +547,38 @@ lineage_proves_exact_merge() {
     merged_pr_proves_exact_head "${pr}" "${head}" "${expected_tip}"
 }
 
+# Uncommitted tracked work means somebody is mid-change in this worktree right
+# now. HEAD does not move when a file is edited, so the merge gates above see a
+# landed branch and every other gate sees an idle build — the warm build is
+# still regenerable, but taking it out from under live work is a disturbance
+# this reaper has no reason to cause. Untracked files are NOT counted: stray
+# scratch files litter finished worktrees and are not a signal of work.
+worktree_has_uncommitted_work() {
+    local wt="$1" porcelain
+    porcelain="$(git -C "${wt}" status --porcelain=v1 --untracked-files=no \
+        --ignore-submodules=all 2>/dev/null)" || return 0
+    [ -n "${porcelain}" ]
+}
+
+# Git's own answer to "did this exact head land on the default branch".
+#
+# A strict-ancestor relationship means every commit this head carries is
+# already contained in the default tip — that is the definition of merged, and
+# it is a stronger instrument than the bookkeeping registry, not a weaker one:
+# it is derived from the object graph rather than from whether a session
+# remembered to record a closeout. The two cases the registry gate was written
+# to exclude are handled separately and still are: a worktree sitting exactly
+# at the tip carries no work of its own (refused before this is reached), and
+# an abandoned branch's head is by construction NOT an ancestor of the tip.
+git_proves_exact_merge() {
+    local head="$1" expected_tip="$2"
+    [ -n "${head}" ] && [ -n "${expected_tip}" ] || return 1
+    # Equality is not merge evidence: it is a worktree that has done nothing.
+    [ "${head}" != "${expected_tip}" ] || return 1
+    git -C "${REPO_ROOT}" merge-base --is-ancestor "${head}" \
+        "${expected_tip}" 2>/dev/null
+}
+
 current_worktree_identity_proves_merge() {
     local wt="$1" expected_head="$2" expected_branch="$3" expected_tip="$4"
     local current_head current_branch current_tip
@@ -506,7 +590,8 @@ current_worktree_identity_proves_merge() {
         "refs/remotes/origin/${DEFAULT_BRANCH}" 2>/dev/null || true)"
     [ -n "${expected_tip}" ] && [ "${current_tip}" = "${expected_tip}" ] || return 1
     [ "${current_head}" != "${expected_tip}" ] || return 1
-    lineage_proves_exact_merge "${current_branch}" "${current_head}" "${expected_tip}"
+    lineage_proves_exact_merge "${current_branch}" "${current_head}" "${expected_tip}" || \
+        git_proves_exact_merge "${current_head}" "${expected_tip}"
 }
 
 # Let tests exercise the invariant and the path handling without enumerating or
@@ -581,6 +666,25 @@ git -C "${REPO_ROOT}" worktree list --porcelain \
     ' > "${WORKTREE_TABLE}"
 cut -f1 "${WORKTREE_TABLE}" > "${WORKTREE_ROOTS}"
 
+# A worktree can hold several regenerable artifact trees, and on this fleet most
+# of the reclaimable bytes are NOT in a directory called exactly `build`:
+# `build-debug`, `build-trace`, `build-asan`, `build-cov` and friends are the
+# ordinary product of sanitizer, coverage and focused-target runs. Expand the
+# worktree table into one candidate row per artifact directory so the gates below
+# judge each tree on its own evidence. Depth 1 only: a nested `build` inside a
+# source tree is never a candidate.
+WORKTREE_ARTIFACT_TABLE="${SCRATCH}/worktree-artifact-table"
+: > "${WORKTREE_ARTIFACT_TABLE}"
+while IFS=$'\t' read -r wt_row head_row branch_row; do
+    [ -n "${wt_row}" ] && [ -d "${wt_row}" ] || continue
+    while IFS= read -r artifact_dir; do
+        [ -n "${artifact_dir}" ] || continue
+        printf '%s\t%s\t%s\t%s\n' "${wt_row}" "${head_row}" "${branch_row}" \
+            "${artifact_dir##*/}" >> "${WORKTREE_ARTIFACT_TABLE}"
+    done < <(find "${wt_row}" -maxdepth 1 -mindepth 1 -type d \
+                 \( -name build -o -name 'build-*' \) 2>/dev/null | LC_ALL=C sort)
+done < "${WORKTREE_TABLE}"
+
 # The first entry `git worktree list` prints is the main worktree. That is where
 # a human works, so its `build/` is an interactive rebuild cost rather than
 # reclaimable scratch — as is the checkout this script is running from.
@@ -597,6 +701,28 @@ if [ -n "${ROOT_FILTER}" ]; then
     echo "clean_worktree_builds: LIMITED to worktrees under ${ROOT_FILTER} (PULP_WORKTREES_ROOT)"
 fi
 
+# Reclaim-to-a-goal. A disk-pressure responder needs to clear a specific
+# shortfall, not to free every eligible byte: a host at 52 GiB free is healthy,
+# and deleting another 700 GB of caches because the opportunity exists just
+# converts a resolved incident into a week of cold rebuilds. When
+# PULP_REAP_STOP_AT_FREE_BYTES is set, stop removing as soon as the named
+# volume is at or above that many free bytes. Unset (the default) preserves the
+# original "remove everything that passes the gates" behaviour.
+STOP_AT_FREE_BYTES="${PULP_REAP_STOP_AT_FREE_BYTES:-}"
+STOP_AT_PATH="${PULP_REAP_STOP_AT_PATH:-${REPO_ROOT}}"
+case "${STOP_AT_FREE_BYTES}" in
+    '') ;;
+    *[!0-9]*) echo "clean_worktree_builds: PULP_REAP_STOP_AT_FREE_BYTES must be an integer" >&2; exit 2 ;;
+esac
+
+reclaim_goal_met() {
+    [ -n "${STOP_AT_FREE_BYTES}" ] || return 1
+    local kb
+    kb="$(df -Pk "${STOP_AT_PATH}" 2>/dev/null | awk 'NR==2 {print $4}')"
+    case "${kb}" in ''|*[!0-9]*) return 1 ;; esac
+    [ $(( kb * 1024 )) -ge "${STOP_AT_FREE_BYTES}" ]
+}
+
 total_kb=0
 found=0
 reapable=0
@@ -610,9 +736,18 @@ note_skip() {
     fi
 }
 
-while IFS=$'\t' read -r wt head branch; do
+while IFS=$'\t' read -r wt head branch artifact; do
     [ -z "${wt}" ] && continue
-    build="${wt}/build"
+    if [ "${APPLY}" -eq 1 ] && reclaim_goal_met; then
+        if [ -z "${REACHED_GOAL_ANNOUNCED:-}" ]; then
+            echo "clean_worktree_builds: reclaim goal reached; stopping with candidates still eligible."
+            REACHED_GOAL_ANNOUNCED=1
+        fi
+        break
+    fi
+    case "${artifact}" in build|build-*) ;; *) continue ;; esac
+    case "${artifact}" in */*|.|..) continue ;; esac
+    build="${wt}/${artifact}"
     [ -d "${build}" ] || continue
     if [ -n "${ROOT_FILTER}" ]; then
         case "${wt}" in "${ROOT_FILTER}"/*|"${ROOT_FILTER}") ;; *) continue ;; esac
@@ -652,10 +787,25 @@ while IFS=$'\t' read -r wt head branch; do
         continue
     fi
 
-    # 3. LINEAGE. An ancestor relationship alone includes abandoned branches
-    # and freshly-created worktrees. Require explicit exact-head closeout.
-    if ! lineage_proves_exact_merge "${branch}" "${head}" "${DEFAULT_TIP}"; then
-        note_skip "lineage does not prove this exact head merged" "${build}"
+    # 3. MERGE PROOF. Require that this exact head landed — proven EITHER by
+    # the shared lineage registry (which also covers squash merges, whose
+    # source head is deliberately not an ancestor) OR by git directly. The
+    # registry alone used to be mandatory, which made a missing or stale
+    # bookkeeping row veto an ancestry git could prove on demand; on a host
+    # with 68 merged worktrees that refused every one of them while the disk
+    # filled. Absence of a record is not evidence of non-merge.
+    if lineage_proves_exact_merge "${branch}" "${head}" "${DEFAULT_TIP}"; then
+        merge_proof="lineage-proven"
+    elif git_proves_exact_merge "${head}" "${DEFAULT_TIP}"; then
+        merge_proof="git-ancestry-proven"
+    else
+        note_skip "neither the lineage registry nor git proves this exact head merged" "${build}"
+        continue
+    fi
+
+    # 3b. QUIESCENT. No uncommitted tracked work in the worktree.
+    if worktree_has_uncommitted_work "${wt}"; then
+        note_skip "uncommitted work in the worktree" "${build}"
         continue
     fi
 
@@ -694,11 +844,12 @@ while IFS=$'\t' read -r wt head branch; do
     size_kb="$(du -sk "${build}" 2>/dev/null | awk '{print $1}')"; size_kb="${size_kb:-0}"
     human="$(du -sh "${build}" 2>/dev/null | awk '{print $1}')"
     if [ "${APPLY}" -eq 1 ]; then
-        quarantine=".pulp-reap-build-$$"
+        quarantine=".pulp-reap-${artifact}-$$"
         if reap_pinned_build "${wt}" "${wt_identity}" "${WORKTREE_ROOTS}" \
-                "${head}" "${branch}" "${DEFAULT_TIP}" "${quarantine}"; then
+                "${head}" "${branch}" "${DEFAULT_TIP}" "${quarantine}" \
+                "${artifact}"; then
             total_kb=$((total_kb + size_kb))
-            echo "  removed ${human}	${build}	(merged, lineage-proven)"
+            echo "  removed ${human}	${build}	(merged, ${merge_proof})"
             deleted=$((deleted + 1))
         else
             reap_rc=$?
@@ -708,9 +859,9 @@ while IFS=$'\t' read -r wt head branch; do
         fi
     else
         total_kb=$((total_kb + size_kb))
-        echo "  would remove ${human}	${build}	(merged, lineage-proven)"
+        echo "  would remove ${human}	${build}	(merged, ${merge_proof})"
     fi
-done < "${WORKTREE_TABLE}"
+done < "${WORKTREE_ARTIFACT_TABLE}"
 
 total_gb="$(awk -v kb="${total_kb}" 'BEGIN{printf "%.1f", kb/1024/1024}')"
 echo
