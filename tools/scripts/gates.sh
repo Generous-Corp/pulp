@@ -304,6 +304,29 @@ if [ -f "$PGL" ]; then
     fi
 fi
 
+# ── 6c. diff-scoped clang-format (advisory) ─────────────────────────────────
+# Touched lines only; existing formatting debt is grandfathered. Exit 3 (no
+# clang-format 21 here) is infrastructure, not a verdict. Same promotion knob
+# as the pre-push hook: PULP_ENFORCE_PREPUSH_FORMAT=1 makes exit 1 fail.
+FMT="$ROOT/tools/scripts/format_changed.sh"
+if [ -f "$FMT" ]; then
+    echo "" >&2
+    echo "▸ diff-scoped clang-format check (advisory; touched lines only)" >&2
+    bash "$FMT" --check --base "$BASE"
+    case $? in
+        0) ;;
+        1)
+            if [ "${PULP_ENFORCE_PREPUSH_FORMAT:-0}" = "1" ]; then
+                fail=1
+            else
+                echo "format_changed: ADVISORY — touched lines are not clang-format clean; run tools/scripts/format_changed.sh" >&2
+            fi
+            ;;
+        3) echo "format_changed: SKIPPED — no clang-format 21 on this machine (INFRASTRUCTURE, not a formatting verdict)" >&2 ;;
+        *) echo "format_changed: internal error (not a formatting verdict)" >&2 ;;
+    esac
+fi
+
 # ── 6b2. gpu-handoff pin freshness ──────────────────────────────────────────
 # docs/status/gpu-vellum-handoff.yaml pins referenced Pulp paths to an exact
 # revision, so editing one of those files is inherently a two-commit operation:
