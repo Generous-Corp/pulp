@@ -100,9 +100,10 @@ std::int64_t groove_timing_reach(const timeline::GrooveTemplate& groove) noexcep
 
 /// Every way a nesting can change what a sealed artifact sounds.
 ///
-/// A freeze is a rendered artifact anchored in absolute samples, so nothing
-/// about it can be re-derived: it either lands where it was rendered to land or
-/// it is a stale render playing at the wrong time or level. That makes the
+/// A sealed artifact — a track freeze, or the takes a comp selects — is
+/// rendered and anchored in absolute samples, so nothing about it can be
+/// re-derived: it either lands where it was rendered to land, or it is a stale
+/// render playing at the wrong time or level. That makes the
 /// question "does this nesting transform its child at all?" rather than "can we
 /// map the artifact through the transform?", and this enum is the answer's
 /// vocabulary — one enumerator per observation, so the predicate below is a
@@ -134,6 +135,22 @@ enum class NestingTransformation : std::uint8_t {
     SequenceChordScale,
     ArtifactRate,
     kCount,
+};
+
+/// The sealed artifact a nesting is being asked to carry.
+///
+/// A freeze and a selected take lane are one construct with two payloads: a
+/// track-scoped rendered artifact anchored in absolute samples, chosen as the
+/// alternative to flattening. The eighteen nesting observations above are
+/// therefore the same eighteen questions for both, and are asked once.
+///
+/// Only `ArtifactRate` has to know which payload it holds, because a freeze
+/// declares one rate and a comp declares one per take its segments draw from.
+/// Exactly one member is set; neither being set is refused rather than
+/// permitted, in the same direction as the switch's trailing `return true`.
+struct SealedArtifact {
+    const timeline::TrackFreeze* freeze = nullptr;
+    const timeline::TakeLane* active_take = nullptr;
 };
 
 } // namespace
@@ -462,7 +479,7 @@ class SequenceContentLowerer::Impl {
     /// permitting it — and it is what makes adding an enumerator fail closed by
     /// construction rather than by anyone remembering to extend this function.
     bool nesting_imposes(NestingTransformation which, const timeline::Track& track,
-                         const timeline::TrackFreeze& freeze) const {
+                         const SealedArtifact& artifact) const {
         const auto any_frame = [this](auto&& predicate) {
             return std::any_of(frames_.begin(), frames_.end(), predicate);
         };
@@ -555,33 +572,63 @@ class SequenceContentLowerer::Impl {
                 return !frame.sequence->chord_scale_lane().empty();
             });
         case NestingTransformation::ArtifactRate:
-            return artifact_rate_differs(freeze);
+            return artifact_rate_differs(artifact);
         case NestingTransformation::kCount:
             break;
         }
         return true;
     }
 
-    /// Whether the freeze's declared rate differs from either rate the two
+    /// Whether the artifact's declared rate differs from either rate the two
     /// emission paths read.
     ///
     /// This one is not a transformation the owner applies, and it is here
     /// because leaving it out silently breaks the identity this predicate
-    /// exists to guarantee. A top-level freeze compiles through
-    /// compile_track_freeze_program, which sets the renderable length to the
-    /// artifact's projected timeline span; a lowered leaf compiles through the
-    /// generic absolute-clip path, which sets it to the source length scaled
-    /// and rounded up. Those two agree only when no rate conversion happens at
-    /// all — otherwise they can differ by a frame, and the nested render stops
-    /// being the unnested one. Do not delete this as redundant with the
-    /// freeze compiler's own rate check: that check runs on a path this leaf
-    /// never takes.
-    bool artifact_rate_differs(const timeline::TrackFreeze& freeze) const {
-        const auto declared = freeze.sample_rate.normalized();
-        if (declared != tempo_map_.sample_rate().normalized())
-            return true;
-        const auto* asset = project_.find_asset(freeze.media.asset_id);
-        return !asset || asset->sample_rate.normalized() != declared;
+    /// exists to guarantee. A top-level artifact compiles through
+    /// compile_track_freeze_program or compile_take_comp_segment_program, both
+    /// of which set the renderable length to the artifact's projected timeline
+    /// span; a lowered leaf compiles through the generic absolute-clip path,
+    /// which sets it to the source length scaled and rounded up. Those two
+    /// agree only when no rate conversion happens at all — otherwise they can
+    /// differ by a frame, and the nested render stops being the unnested one.
+    /// Do not delete this as redundant with either compiler's own rate check:
+    /// those run on a path this leaf never takes.
+    bool artifact_rate_differs(const SealedArtifact& artifact) const {
+        const auto timeline_rate = tempo_map_.sample_rate().normalized();
+        // Both rates, because the leaf's generic path reads the decoded
+        // asset's rate where the artifact compilers read the declared one. The
+        // document ties the two together, so a disagreement is not reachable
+        // through a valid project; asking anyway costs a lookup and removes an
+        // assumption from a predicate whose whole value is that it assumes
+        // nothing.
+        const auto matches = [&](timebase::RationalRate declared, timeline::ItemId asset_id) {
+            const auto normalized = declared.normalized();
+            if (normalized != timeline_rate)
+                return false;
+            const auto* asset = project_.find_asset(asset_id);
+            return asset != nullptr && asset->sample_rate.normalized() == normalized;
+        };
+        if (artifact.freeze != nullptr)
+            return !matches(artifact.freeze->sample_rate, artifact.freeze->media.asset_id);
+        if (artifact.active_take != nullptr) {
+            // Every take a segment draws from, and only those. A lane may hold
+            // takes the comp never selects, and a rate those carry is not a
+            // rate this nesting would have to convert.
+            //
+            // A comp selecting nothing converts nothing, so an empty one is
+            // not a differing rate. It lowers to no leaves, which is what the
+            // unnested lane renders too.
+            for (const auto& segment : artifact.active_take->comp_segments()) {
+                const auto* take = artifact.active_take->find_take(segment.take_id);
+                if (take == nullptr || !matches(take->sample_rate(), take->media().asset_id))
+                    return true;
+            }
+            return false;
+        }
+        // Neither payload set. Same direction as the switch's trailing
+        // `return true`: an artifact kind nobody has reasoned about refuses the
+        // nesting rather than permitting it.
+        return true;
     }
 
     /// Whether this nesting leaves its child exactly as authored.
@@ -589,10 +636,10 @@ class SequenceContentLowerer::Impl {
     /// The loop is the point: permission is granted only by every enumerator
     /// answering "not imposed", so an unanswered one cannot reach `true`.
     bool nesting_is_transparent(const timeline::Track& track,
-                                const timeline::TrackFreeze& freeze) const {
+                                const SealedArtifact& artifact) const {
         for (auto index = static_cast<std::uint8_t>(0);
              index < static_cast<std::uint8_t>(NestingTransformation::kCount); ++index)
-            if (nesting_imposes(static_cast<NestingTransformation>(index), track, freeze))
+            if (nesting_imposes(static_cast<NestingTransformation>(index), track, artifact))
                 return false;
         return true;
     }
@@ -618,6 +665,71 @@ class SequenceContentLowerer::Impl {
         auto appended = append(std::move(leaf).value(), track.id());
         if (appended.error)
             return appended;
+        ++frame.track_index;
+        frame.clip_index = 0;
+        return {};
+    }
+
+    /// Emits a transparently nested active take comp as the sealed windows it
+    /// already is.
+    ///
+    /// The freeze above lowers to one leaf; a comp lowers to N, because it is a
+    /// sequence of absolute windows each drawn from its own take. Per segment:
+    /// resolve the take the segment names, read the source offset as the
+    /// distance from that take's placement to the segment's start, and emit an
+    /// absolute leaf carrying exactly that window of the take's media.
+    ///
+    /// This is the same arithmetic compile_take_comp_segment_program performs,
+    /// re-derived rather than shared, because the two stand on opposite sides
+    /// of the compiler: that one builds a renderer program, this one builds a
+    /// document clip the renderer has yet to compile. What they owe each other
+    /// is the rendered samples, so a test asserts that identity instead of a
+    /// comment asserting the arithmetic.
+    ///
+    /// Every bound below was already proved by TakeLane::canonical_comp before
+    /// the lane could be constructed, so each names InvalidStructure — the
+    /// document should not exist — rather than a capability refusal, and is a
+    /// backstop against this walk building a leaf the model never sanctioned.
+    StepResult emit_sealed_active_take(ReferenceFrame& frame, const timeline::Track& track,
+                                       const timeline::TakeLane& lane) {
+        for (const auto& segment : lane.comp_segments()) {
+            const auto* take = lane.find_take(segment.take_id);
+            if (take == nullptr || segment.range.start.value < take->placement_start().value)
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::InvalidStructure, lane.id()}};
+            const auto& media = take->media();
+            const auto offset = static_cast<std::uint64_t>(segment.range.start.value -
+                                                           take->placement_start().value);
+            if (offset > media.frame_count ||
+                segment.range.sample_count > media.frame_count - offset)
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::InvalidStructure, take->id()}};
+            if (media.source_start.value < 0 ||
+                offset > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max() -
+                                                    media.source_start.value))
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::InvalidStructure, take->id()}};
+            if (next_generated_id_ == 0 ||
+                next_generated_id_ == std::numeric_limits<std::uint64_t>::max())
+                return {.error = SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded,
+                                                       track.id()}};
+            // The take's rate, not the segment's. They are equal — canonical_comp
+            // rejects a comp whose segment rate is not its take's — so this is a
+            // choice of which authority to read, and the segment compiler reads
+            // the take's when it projects the window onto the timeline.
+            auto leaf = timeline::Clip::create_absolute(
+                timeline::ItemId{next_generated_id_++}, segment.range.start,
+                segment.range.sample_count, take->sample_rate(),
+                timeline::MediaRef{media.asset_id,
+                                   timebase::SamplePosition{media.source_start.value +
+                                                            static_cast<std::int64_t>(offset)},
+                                   segment.range.sample_count});
+            if (!leaf)
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::InvalidStructure, take->id()}};
+            if (auto appended = append(std::move(leaf).value(), track.id()); appended.error)
+                return appended;
+        }
         ++frame.track_index;
         frame.clip_index = 0;
         return {};
@@ -682,14 +794,24 @@ class SequenceContentLowerer::Impl {
             // nesting_is_transparent is the whole of that judgement, and it
             // grants permission only by affirmative match.
             if (track.freeze()) {
-                if (!nesting_is_transparent(track, *track.freeze()))
+                if (!nesting_is_transparent(track, SealedArtifact{.freeze = &*track.freeze()}))
                     return {.error = SequenceLoweringError{
                                 CompileErrorCode::NestedFrozenTrackUnsupported, track.id()}};
                 return emit_sealed_freeze(frame, track);
             }
-            if (track.active_take_lane_id().valid())
-                return {.error = SequenceLoweringError{CompileErrorCode::NestedActiveTakeUnsupported,
-                                                       track.id()}};
+            if (track.active_take_lane_id().valid()) {
+                const auto* lane = track.find_take_lane(track.active_take_lane_id());
+                // A selection naming no lane is a broken document rather than a
+                // nesting this walk declines to carry, and begin_track says the
+                // same about the same document at the top level.
+                if (lane == nullptr)
+                    return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                           track.active_take_lane_id()}};
+                if (!nesting_is_transparent(track, SealedArtifact{.active_take = lane}))
+                    return {.error = SequenceLoweringError{
+                                CompileErrorCode::NestedActiveTakeUnsupported, track.id()}};
+                return emit_sealed_active_take(frame, track, *lane);
+            }
             // Record-arm and unselected take lanes are deliberately absent from
             // the refusals above. Neither reaches lowered output at either
             // level: begin_track consults freeze and the active lane and never
