@@ -1,0 +1,89 @@
+{
+  "id": "offline-stretch-subframe-window-trim",
+  "title": "A stretch window trimmed by less than a frame links instead of being refused",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "e943ad40-282d-4383-892e-af12e84be359",
+  "owned_paths": [
+    "core/playback/src/audio_renderer.cpp",
+    "test/test_timeline_nesting_playback.cpp",
+    ".agents/skills/playback/SKILL.md",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/offline-stretch-subframe-window-trim.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/playback/src/audio_renderer.cpp",
+      "needles": [
+        "The converse is deliberately not asserted, because it is not true.",
+        "Ticks resolve far finer than frames",
+        "clip.source_frame_count != clip.audio->num_frames()"
+      ]
+    },
+    {
+      "path": "test/test_timeline_nesting_playback.cpp",
+      "needles": [
+        "sub-frame left trim",
+        "sub-frame right trim",
+        "link_audio_track_program({3}, {compiled}, {})"
+      ]
+    },
+    {
+      "path": ".agents/skills/playback/SKILL.md",
+      "needles": [
+        "A trim can be real in ticks and absent in frames",
+        "is the only caller of `validate_clip_program()`"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "A tick edit finer than a frame is authorable and real, but renders as nothing"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "gap",
+      "rationale": "link_audio_track_program is an installed entry point and the only caller of the clip validator this narrows, so an SDK consumer that compiles a windowed stretch clip and links it is exactly who the refusal reached. No signature, type or error code changes: the same call now returns a track program where it returned InvalidAsset, so there is nothing new for a consumer to discover and nothing that reports in advance which trims a window tolerates. Owner: NW-D (P0-40-CONTROLS).",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "nested-placement-trim-frame-window-query"
+      ]
+    },
+    "offline_timeline_cli": {
+      "disposition": "gap",
+      "rationale": "No CLI verb trims a nested placement or reports the frame window a trim resolves to, so an author cannot ask whether a trim falls below one frame and cannot reach the widened acceptance except by compiling a document that already carries it. Owner: NW-D (P0-40-CONTROLS).",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "nested-placement-trim-frame-window-query",
+        "product-a-timeline-document-session"
+      ]
+    },
+    "offline_timeline_mcp": {
+      "disposition": "gap",
+      "rationale": "The generated Timeline MCP schema carries no operation that trims a nested placement or exposes a stretch artifact's window, so the widened acceptance is not reachable there. Owner: NW-D (P0-40-CONTROLS).",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "nested-placement-trim-frame-window-query",
+        "product-a-timeline-document-session"
+      ]
+    },
+    "live_product_control": {
+      "disposition": "gap",
+      "rationale": "Product A live timeline authority is absent for the sequencer generally, so neither the trim nor the window it resolves to is reachable as a live control. Owner: NW-D, and only where that source is Pulp-owned.",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "product-a-timeline-document-session"
+      ]
+    },
+    "design_time_agent_manifest": {
+      "disposition": "gap",
+      "rationale": "No agent-capability row states how a stretch window relates to the ticks it covers, so an agent authoring a trim cannot ask whether the trim is representable in frames before making it. Owner: NW-D (P0-40-CONTROLS).",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "nested-placement-trim-frame-window-query"
+      ]
+    }
+  }
+}

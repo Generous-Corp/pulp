@@ -1,0 +1,82 @@
+{
+  "id": "sequencer-control-skill-gate-integrity",
+  "title": "The sequencer control-skill gate measures the registry it claims to measure",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "2eff8852-a0b1-41ce-aac0-542fec8e2851",
+  "owned_paths": [
+    "test/cmake/timeline_tests.cmake",
+    "tools/scripts/inspector_truth_check.py",
+    "tools/scripts/sequencer_control_skill_check.py",
+    "tools/scripts/test_inspector_truth_check.py",
+    "tools/scripts/test_sequencer_control_skill_check.py",
+    "docs/status/sequencer-exposure/rows/sequencer-control-skill-gate-integrity.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/scripts/inspector_truth_check.py",
+      "needles": [
+        "def registry_parse_errors",
+        "def load_capability_definitions",
+        "def load_control_operations",
+        "CAPABILITY_INVOCATION_RE",
+        "the control shipping projection is not being compared"
+      ]
+    },
+    {
+      "path": "tools/scripts/test_inspector_truth_check.py",
+      "needles": [
+        "class RegistryParseCompletenessTests",
+        "class ShippingProjectionVacuityTests",
+        "test_renamed_lists_are_reported_not_silently_satisfied"
+      ]
+    },
+    {
+      "path": "tools/scripts/sequencer_control_skill_check.py",
+      "needles": [
+        "load_capability_definitions",
+        "load_control_operations",
+        "if parse_errors:",
+        "A partial parse is the failure this gate is least able to survive"
+      ]
+    },
+    {
+      "path": "tools/scripts/test_sequencer_control_skill_check.py",
+      "needles": [
+        "reflowed capability invocation",
+        "capability invocation the parser cannot read",
+        "registry holds no sequencer capability",
+        "sequencer capability that no operation binds"
+      ]
+    },
+    {
+      "path": "test/cmake/timeline_tests.cmake",
+      "needles": [
+        "add_test(NAME sequencer-control-skill-coverage COMMAND",
+        "add_test(NAME sequencer-control-skill-coverage-selftest COMMAND"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No installed header, target, or exported symbol changes. The registry include and the control manifest the gate reads are untouched; only the reader that derives assertions from them changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler is added or changed. The checker is a repository gate run by ctest and the pre-push hook, not a shipped command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler is added or changed. Nothing in tools/mcp reads this checker."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, or profile policy changes. Both sequencer capabilities and their operations keep the exact ids, gating, and result kinds the frozen registry already declares; the change is that a capability the reader cannot parse is now reported instead of dropped."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged. Making a repository gate fail closed publishes no design-time capability."
+    }
+  }
+}

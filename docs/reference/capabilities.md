@@ -209,7 +209,7 @@ for existing callers.
 
 | Capability | Status | Module | Docs | Examples |
 |---|---|---|---|---|
-| FAUST offline codegen via external compiler + checked-in generated C++ | experimental | [dsl](modules.md#dsl) | [faust guide](../guides/faust.md), [pulp-dsl contract](../contracts/pulp-dsl-v1.md) | faust-gain, faust-filter, faust-tremolo |
+| FaustProcessor with Pulp reference DSPs + optional external codegen | experimental | [dsl](modules.md#dsl) | [faust guide](../guides/faust.md), [pulp-dsl contract](../contracts/pulp-dsl-v1.md) | faust-gain, faust-filter, faust-tremolo |
 | Cmajor external-toolchain support lane | experimental | [dsl](modules.md#dsl) | [cmajor guide](../guides/cmajor.md), [pulp-dsl contract](../contracts/pulp-dsl-v1.md) | cmajor-gain (source-only) |
 | JSFX bounded subset support lane | experimental | [dsl](modules.md#dsl) | [jsfx guide](../guides/jsfx.md), [pulp-dsl contract](../contracts/pulp-dsl-v1.md) | jsfx-gain, jsfx-tremolo, jsfx-delay (source-only) |
 

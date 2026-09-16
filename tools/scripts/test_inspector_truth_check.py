@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import pathlib
 import tempfile
 import unittest
@@ -253,6 +255,69 @@ class ControlOperationDocumentationTests(unittest.TestCase):
         self.assertTrue(any("parsed zero operations" in error for error in errors), errors)
 
 
+class UndocumentedRealityTests(unittest.TestCase):
+    """The generator's placeholder is not documentation."""
+
+    def setUp(self) -> None:
+        self.definitions = inspector_truth_check.parse_capability_definitions(
+            CAPABILITY_DEFINITIONS
+        )
+
+    def test_accepts_hand_written_reality(self) -> None:
+        self.assertEqual(
+            inspector_truth_check.undocumented_reality_errors(
+                self.definitions, CAPABILITY_DOC
+            ),
+            [],
+        )
+
+    def test_rejects_the_generated_placeholder(self) -> None:
+        doc = CAPABILITY_DOC.replace(
+            "Grant-controlled single event", inspector_truth_check.UNDOCUMENTED_REALITY
+        )
+        errors = inspector_truth_check.undocumented_reality_errors(
+            self.definitions, doc
+        )
+        self.assertTrue(
+            any("current reality of `ui.input` undocumented" in error for error in errors),
+            errors,
+        )
+        self.assertFalse(any("state.read" in error for error in errors), errors)
+
+    def test_rejects_an_emptied_reality_cell(self) -> None:
+        # Deleting the placeholder documents nothing, and every other rule in
+        # the file still accepts the row, so emptiness has to be rejected here
+        # or it becomes the way around this gate.
+        doc = CAPABILITY_DOC.replace("Grant-controlled single event", "")
+        errors = inspector_truth_check.undocumented_reality_errors(
+            self.definitions, doc
+        )
+        self.assertTrue(
+            any("current reality of `ui.input` undocumented" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_a_whitespace_only_reality_cell(self) -> None:
+        doc = CAPABILITY_DOC.replace("Grant-controlled single event", "   ")
+        errors = inspector_truth_check.undocumented_reality_errors(
+            self.definitions, doc
+        )
+        self.assertTrue(
+            any("current reality of `ui.input` undocumented" in error for error in errors),
+            errors,
+        )
+
+    def test_check_root_runs_the_undocumented_reality_gate(self) -> None:
+        root = pathlib.Path(inspector_truth_check.__file__).resolve().parents[2]
+        sentinel = "undocumented reality gate reached"
+        with mock.patch.object(
+            inspector_truth_check, "undocumented_reality_errors", return_value=[sentinel]
+        ) as gate:
+            errors = inspector_truth_check.check_root(root)
+        self.assertTrue(gate.called)
+        self.assertIn(sentinel, errors)
+
+
 class GeneratedMatrixWriteTests(unittest.TestCase):
     """`--write` must emit exactly what `--check` accepts, and preserve prose."""
 
@@ -327,6 +392,23 @@ class GeneratedMatrixWriteTests(unittest.TestCase):
         inspector_truth_check.write_root(self.root)
         self.assertIn(inspector_truth_check.UNDOCUMENTED_REALITY, self._doc())
 
+    def test_written_placeholder_does_not_pass_the_check(self) -> None:
+        definitions = (
+            CAPABILITY_DEFINITIONS
+            + 'PULP_INSPECT_CAPABILITY(LogsRead, "logs.read", "dev.pulp.logs/read@1", '
+            "Sensitive, None, Protocol, Response, 1, 1, 1, 0)\n"
+        )
+        path = self.root / inspector_truth_check.CAPABILITY_DEFINITIONS_PATH
+        path.write_text(definitions, encoding="utf-8")
+        inspector_truth_check.write_root(self.root)
+        errors = inspector_truth_check.undocumented_reality_errors(
+            inspector_truth_check.parse_capability_definitions(definitions), self._doc()
+        )
+        self.assertTrue(
+            any("current reality of `logs.read` undocumented" in error for error in errors),
+            errors,
+        )
+
     def test_write_refuses_a_document_without_generated_regions(self) -> None:
         path = self.root / inspector_truth_check.CAPABILITY_DOC_PATH
         path.write_text("# no generated regions here\n", encoding="utf-8")
@@ -352,6 +434,145 @@ class OperationGateWiringTests(unittest.TestCase):
             errors = inspector_truth_check.check_root(root)
         self.assertTrue(gate.called)
         self.assertIn(sentinel, errors)
+
+
+class RegistryParseCompletenessTests(unittest.TestCase):
+    """A parse that reads fewer entries than the file spells is a failure.
+
+    Comparing against zero only catches a reader aimed at the wrong file. The
+    shipping failure is partial: one entry drops out of the parser's reach, the
+    survivors still agree, and every assertion downstream passes while judging
+    one capability fewer than exist.
+    """
+
+    WRAPPED = (
+        "PULP_INSPECT_CAPABILITY(\n"
+        '    UiInput, "ui.input", "dev.pulp.ui/input@1",\n'
+        "    HighRisk, Input, HostMain, Receipt, 0, 1, 1, 0)\n"
+    )
+
+    def test_reads_a_reflowed_invocation(self) -> None:
+        # `control_manifest.cpp` wraps every operation this way, and a
+        # 150-column registry line reflows to exactly this under the repo's
+        # 100-column clang-format config.
+        text = CAPABILITY_DEFINITIONS.replace(
+            'PULP_INSPECT_CAPABILITY(UiInput, "ui.input", "dev.pulp.ui/input@1", '
+            "HighRisk, Input, HostMain, Receipt, 0, 1, 1, 0)\n",
+            self.WRAPPED,
+        )
+        self.assertNotEqual(text, CAPABILITY_DEFINITIONS)
+        self.assertEqual(
+            [
+                definition.legacy_id
+                for definition in inspector_truth_check.parse_capability_definitions(text)
+            ],
+            ["state.read", "ui.input"],
+        )
+
+    def test_documentation_comment_is_not_counted_as_an_invocation(self) -> None:
+        commented = (
+            "// Define PULP_INSPECT_CAPABILITY(symbol, legacy_id, contract_id,\n"
+            + CAPABILITY_DEFINITIONS
+        )
+        self.assertEqual(
+            len(inspector_truth_check.CAPABILITY_INVOCATION_RE.findall(commented)), 2
+        )
+
+    def test_reports_a_shortfall_between_spelled_and_parsed(self) -> None:
+        errors = inspector_truth_check.registry_parse_errors(
+            label="capability definitions", path="x.inc", parsed=21, spelled=22
+        )
+        self.assertTrue(any("the parser read 21" in error for error in errors))
+
+    def test_reports_an_empty_source(self) -> None:
+        errors = inspector_truth_check.registry_parse_errors(
+            label="capability definitions", path="x.inc", parsed=0, spelled=0
+        )
+        self.assertTrue(any("not measuring" in error for error in errors))
+
+    def test_accepts_a_complete_parse(self) -> None:
+        self.assertEqual(
+            inspector_truth_check.registry_parse_errors(
+                label="capability definitions", path="x.inc", parsed=22, spelled=22
+            ),
+            [],
+        )
+
+    def test_unreadable_invocation_is_reported_not_skipped(self) -> None:
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        root = pathlib.Path(tempdir.name)
+        path = root / inspector_truth_check.CAPABILITY_DEFINITIONS_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            CAPABILITY_DEFINITIONS.replace(
+                "HighRisk, Input, HostMain, Receipt, 0, 1, 1, 0)",
+                "HighRisk, Input, HostMain, Receipt, kObserveDenied, 1, 1, 0)",
+            ),
+            encoding="utf-8",
+        )
+        definitions, errors = inspector_truth_check.load_capability_definitions(root)
+        self.assertEqual(len(definitions), 1)
+        self.assertTrue(any("the parser read 1" in error for error in errors))
+
+
+class ShippingProjectionVacuityTests(unittest.TestCase):
+    """Two empty lists agree; that agreement must not read as a passing gate."""
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        self.source = pathlib.Path(inspector_truth_check.__file__).resolve().parents[2]
+        self.root = pathlib.Path(self.tempdir.name)
+
+    def _root_with_shipping_cmake(self, text: str | None) -> pathlib.Path:
+        path = self.root / inspector_truth_check.SHIPPING_CMAKE_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if text is None:
+            return self.root
+        path.write_text(text, encoding="utf-8")
+        return self.root
+
+    def _errors(self, text: str | None) -> list[str]:
+        """Run the real check against the real repo, swapping only this file."""
+        self._root_with_shipping_cmake(text)
+        real_read = pathlib.Path.read_text
+        swapped = (self.root / inspector_truth_check.SHIPPING_CMAKE_PATH).resolve()
+        target = (self.source / inspector_truth_check.SHIPPING_CMAKE_PATH).resolve()
+
+        def read_text(self_path, *args, **kwargs):
+            if self_path.resolve() == target and text is not None:
+                return real_read(swapped, *args, **kwargs)
+            return real_read(self_path, *args, **kwargs)
+
+        exists = pathlib.Path.exists
+
+        def path_exists(self_path):
+            if self_path.resolve() == target:
+                return text is not None
+            return exists(self_path)
+
+        with mock.patch.object(pathlib.Path, "read_text", read_text), mock.patch.object(
+            pathlib.Path, "exists", path_exists
+        ):
+            return inspector_truth_check.check_root(self.source)
+
+    def test_unmodified_repository_is_clean(self) -> None:
+        self.assertEqual(inspector_truth_check.check_root(self.source), [])
+
+    def test_renamed_lists_are_reported_not_silently_satisfied(self) -> None:
+        text = (
+            self.source / inspector_truth_check.SHIPPING_CMAKE_PATH
+        ).read_text(encoding="utf-8")
+        renamed = text.replace(
+            "_PULP_INSPECTOR_SHIPPING_CAPABILITIES", "_RENAMED_SHIPPING"
+        ).replace("_PULP_CONTROL_CAPABILITIES", "_RENAMED_CONTROL")
+        errors = self._errors(renamed)
+        self.assertTrue(any("not being compared against anything" in e for e in errors))
+
+    def test_missing_file_is_reported_not_skipped(self) -> None:
+        errors = self._errors(None)
+        self.assertTrue(any("is missing" in error for error in errors))
 
 
 if __name__ == "__main__":

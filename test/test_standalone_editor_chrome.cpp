@@ -1446,20 +1446,41 @@ TEST_CASE("Standalone window-open log reports the RESOLVED gpu class",
         CHECK(msg.find("skia-unavailable") == std::string::npos);
     }
 
-    SECTION("gpu requested but CPU-resolved reports the fallback explicitly") {
+    // No reason supplied: the fallback is real, but the cause is unknown, so
+    // the marker stays cause-neutral rather than guessing "skia-unavailable"
+    // — Skia can be fully compiled in and still fail to resolve a GPU host at
+    // runtime (a Dawn adapter or Skia surface failure), so naming Skia here
+    // would assert a cause that was never established.
+    SECTION("gpu requested but CPU-resolved with no known cause reports a "
+            "cause-neutral fallback") {
         const auto msg = format_standalone_window_open_message(
             640, 360, /*gpu_requested=*/true, /*gpu_resolved=*/false, false,
             chrome);
-        CHECK(msg.find("gpu=false (skia-unavailable)") != std::string::npos);
+        CHECK(msg.find("gpu=false (gpu-unavailable)") != std::string::npos);
+        CHECK(msg.find("skia-unavailable") == std::string::npos);
         CHECK(msg.find("gpu=true") == std::string::npos);
     }
 
-    SECTION("gpu not requested reports gpu=false without the fallback marker") {
+    SECTION("gpu requested but CPU-resolved with a known cause names it") {
+        const auto msg = format_standalone_window_open_message(
+            640, 360, /*gpu_requested=*/true, /*gpu_resolved=*/false, false,
+            chrome, /*gpu_unavailable_reason=*/"dawn-adapter-unavailable");
+        CHECK(msg.find("gpu=false (dawn-adapter-unavailable)") != std::string::npos);
+        CHECK(msg.find("gpu-unavailable") == std::string::npos);
+    }
+
+    // A deliberate CPU request is not a fallback at all — nobody asked for
+    // GPU, so there is nothing to explain, even if a reason string is passed.
+    SECTION("gpu not requested reports gpu=false without a fallback marker, "
+            "even with a reason supplied") {
         const auto msg = format_standalone_window_open_message(
             640, 360, /*gpu_requested=*/false, /*gpu_resolved=*/false, false,
-            chrome);
+            chrome, /*gpu_unavailable_reason=*/"dawn-adapter-unavailable");
         CHECK(msg.find("gpu=false") != std::string::npos);
+        CHECK(msg.find("gpu=false (") == std::string::npos);
         CHECK(msg.find("skia-unavailable") == std::string::npos);
+        CHECK(msg.find("gpu-unavailable") == std::string::npos);
+        CHECK(msg.find("dawn-adapter-unavailable") == std::string::npos);
     }
 
     // A GPU host that nobody asked for still reports what it IS. This is the
@@ -1471,6 +1492,7 @@ TEST_CASE("Standalone window-open log reports the RESOLVED gpu class",
             chrome);
         CHECK(msg.find("gpu=true") != std::string::npos);
         CHECK(msg.find("skia-unavailable") == std::string::npos);
+        CHECK(msg.find("gpu-unavailable") == std::string::npos);
     }
 
     // The default config carries a settings tab, so this chrome labels itself
@@ -1519,8 +1541,26 @@ TEST_CASE("Standalone window-open log reads gpu class off the window",
                 640, 360, window, /*gpu_requested=*/true, false, chrome);
             captured = capture.text();
         }
-        CHECK(captured.find("gpu=false (skia-unavailable)") != std::string::npos);
+        // No cause was supplied, so the log does not assert one: it reports
+        // the fallback without claiming it is specifically Skia's fault.
+        CHECK(captured.find("gpu=false (gpu-unavailable)") != std::string::npos);
+        CHECK(captured.find("skia-unavailable") == std::string::npos);
         CHECK(captured.find("gpu=true") == std::string::npos);
+    }
+
+    SECTION("CPU-backed window logs a caller-supplied cause when given one") {
+        StubWindowHost window;
+        window.gpu_backed_ = false;
+        std::string captured;
+        {
+            StderrCapture capture(sink);
+            log_standalone_window_open(
+                640, 360, window, /*gpu_requested=*/true, false, chrome,
+                /*gpu_unavailable_reason=*/"skia-surface-failed");
+            captured = capture.text();
+        }
+        CHECK(captured.find("gpu=false (skia-surface-failed)") != std::string::npos);
+        CHECK(captured.find("gpu-unavailable") == std::string::npos);
     }
 
     SECTION("GPU-backed window logs gpu=true with no marker") {

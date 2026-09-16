@@ -249,3 +249,12 @@ title = "Skill-sync + version-bump gates are enforcing; the only bypass is per-c
 why = "Advisory mode burned 80+ min/PR; a nuclear PULP_SKIP_PREPUSH on a new commit burned a roundtrip anyway."
 do_not = "PULP_SKIP_PREPUSH=1 on new commits to dodge a gate; use the scoped Skill-Update / Version-Bump trailers instead."
 guards = [".github/workflows/**", ".shipyard/config.toml"]
+
+[[decision]]
+id = 21
+layer = "pulp"
+tags = ["could-not-establish", "exit-codes", "skip-return-code", "typed-verdict"]
+title = "No shared 'could not establish' exit code and no static SKIP_RETURN_CODE ledger: a check emits its own verdict, and its CONSUMER names that verdict in a case."
+why = "Exit 2 is already argparse/config error (version_bump_check.py, docs_noise_lint.py) and four checks already spend their own codes on this state, so a shared code collides rather than unifies; every aggregator collapses nonzero to fail while the correct response differs per site (block at pre-push, warn on a required check, retry on a platform 503). The working shape already ships: gates.sh cases format_changed.sh's 3 as 'SKIPPED (INFRASTRUCTURE, not a formatting verdict)'."
+do_not = "Minting a repo-wide 'could not establish' code, or a static SKIP_RETURN_CODE ledger of checks that might be blind: there is no enumerable population to freeze, and such a ledger certifies the defect instead of detecting it, so it would have been green throughout the incident that motivated it."
+guards = [".github/workflows/**", ".shipyard/config.toml", "tools/ci/**"]
