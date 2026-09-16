@@ -154,7 +154,7 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
 
     set(_controller_caps
         ui.input trace.control trace.session.control state.write test.input
-        authoring.tweaks runtime.reload runtime.eval)
+        authoring.tweaks runtime.reload runtime.eval sequencer.transport.loop.write)
     foreach(_control_cap IN LISTS _control_caps)
         list(FIND _PULP_CONTROL_CAPABILITIES "${_control_cap}" _cap_index)
         list(GET _PULP_INSPECTOR_SHIPPING_CAPABILITIES ${_cap_index} _cap)
