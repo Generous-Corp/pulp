@@ -6103,7 +6103,7 @@
           "path": "inspect/include/pulp/inspect/control_registry_digest.inc",
           "needles": [
             "PULP_CONTROL_REGISTRY_DIGEST_V1",
-            "70578eae97288609fe384bd2caa1641e62af016127f3abc6e4a3cd754422d584"
+            "2e4d3896612b275c50b418cf2d32c1c8edd6e900a578d09de480411434c6cb56"
           ]
         }
       ],
@@ -8327,6 +8327,198 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "No design-time capability is registered or removed. The artifact window is computed inside the renderer's program compiler and is reachable only through the trim an author already wrote on the placement."
+        }
+      }
+    },
+    {
+      "id": "sequencer-transport-loop-control",
+      "title": "Live sequencer transport loop read and loop write over Product A",
+      "classification": "live_product_control",
+      "delivery_state": "pending",
+      "claim_id": "product-a-sequencer-transport-operation",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        ".github/vellum-expansion-watch-events/20260912-pa-sequencer-transport-loop-watch.json",
+        "docs/reference/development-inspector-capabilities.md",
+        "docs/status/gpu-vellum-handoff.yaml",
+        "docs/status/sequencer-exposure.json",
+        "docs/validation/gpu-handoff-provenance/receipt.json",
+        "inspect/CMakeLists.txt",
+        "inspect/include/pulp/inspect/capability_definitions.inc",
+        "inspect/include/pulp/inspect/control_registry_digest.inc",
+        "inspect/include/pulp/inspect/control_sequencer_transport_executor.hpp",
+        "inspect/include/pulp/inspect/control_standalone_host.hpp",
+        "inspect/src/control_manifest.cpp",
+        "inspect/src/control_sequencer_transport_executor.cpp",
+        "inspect/src/control_standalone_host.cpp",
+        "test/cmake/view_widget_bridge_tests.cmake",
+        "test/fixtures/control_installed_host_e2e_fixture.cpp",
+        "test/test_control_broker_daemon.cpp",
+        "test/test_control_endpoint_enrollment.cpp",
+        "test/test_control_host_enrollment.cpp",
+        "test/test_control_manifest.cpp",
+        "test/test_control_phase15_aggregate_e2e.cpp",
+        "test/test_control_sequencer_transport_executor.cpp",
+        "test/test_control_trusted_host_e2e.cpp",
+        "test/test_control_trusted_host_inventory.cpp",
+        "test/test_inspector_domain_helpers.cpp",
+        "test/test_mcp_control_adapter.cpp",
+        "tools/cmake/PulpControlShipping.cmake",
+        "tools/cmake/PulpUtils.cmake",
+        "tools/cmake/check_control_shipping_artifact.cmake",
+        "tools/scripts/test_release_artifact_contents.py"
+      ],
+      "evidence": [
+        {
+          "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+          "needles": [
+            "dev.pulp.sequencer/transport.loop.read@1",
+            "dev.pulp.sequencer/transport.loop.write@1"
+          ]
+        },
+        {
+          "path": "inspect/src/control_sequencer_transport_executor.cpp",
+          "needles": [
+            "make_control_sequencer_transport_read_executor",
+            "make_control_sequencer_transport_write_executor"
+          ]
+        },
+        {
+          "path": "test/test_control_sequencer_transport_executor.cpp",
+          "needles": [
+            "set-range receipt carries the transport's acceptance, not the tick helper's",
+            "a negative document tick is carried rather than refused as out of range"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The installed pulp_add_plugin() admits both contract ids in CONTROL_CAPABILITIES, so a find_package(Pulp) consumer such as Forge Sequencer or Forge Modular declares the loop read and loop write capabilities from the shipped CMake package rather than from an in-tree side door.",
+          "evidence": [
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpUtils.cmake",
+              "needles": [
+                "_pulp_standalone_control_capabilities",
+                "dev.pulp.sequencer/transport.loop.read@1",
+                "dev.pulp.sequencer/transport.loop.write@1"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpControlShipping.cmake",
+              "needles": [
+                "sequencer.transport.loop.read",
+                "sequencer.transport.loop.write"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The operations read and write live MasterTransport loop state on a running host; they persist no Timeline document, so the offline Timeline CLI writer boundary has nothing to project."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Same runtime-only scope as the offline CLI surface: there is no Timeline-document mutation for an offline MCP session to carry."
+        },
+        "live_product_control": {
+          "disposition": "exposed",
+          "rationale": "Product A now carries a typed sequencer transport loop capability pair. The Sensitive read reports the transport's own publication and the Control write applies action-discriminated set-range/set-enabled edits under a grant, both fenced onto the host main thread. This closes what the sequencer-loop-range-editor row names as its sole missing dependency without editing that released row.",
+          "evidence": [
+            {
+              "kind": "capability_definition",
+              "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+              "needles": [
+                "SequencerTransportRead",
+                "SequencerTransportWrite",
+                "dev.pulp.sequencer/transport.loop.read@1",
+                "dev.pulp.sequencer/transport.loop.write@1"
+              ]
+            },
+            {
+              "kind": "operation_definition",
+              "path": "inspect/src/control_manifest.cpp",
+              "needles": [
+                "sequencer/transport.loop.read",
+                "sequencer/transport.loop.write"
+              ]
+            },
+            {
+              "kind": "executor_binding",
+              "path": "inspect/src/control_sequencer_transport_executor.cpp",
+              "needles": [
+                "make_control_sequencer_transport_read_executor",
+                "make_control_sequencer_transport_write_executor"
+              ]
+            },
+            {
+              "kind": "executor_binding",
+              "path": "inspect/include/pulp/inspect/control_sequencer_transport_executor.hpp",
+              "needles": [
+                "ControlSequencerTransportTarget",
+                "ControlSequencerTransportTargetResolver"
+              ]
+            },
+            {
+              "kind": "profile_policy",
+              "path": "inspect/src/control_standalone_host.cpp",
+              "needles": [
+                "PULP_INSPECT_CAPABILITY_SEQUENCER_TRANSPORT_READ_V1",
+                "PULP_INSPECT_CAPABILITY_SEQUENCER_TRANSPORT_WRITE_V1"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/cli/cmd_control.cpp",
+              "needles": [
+                "resolve_control_operation",
+                "unknown operation: "
+              ]
+            },
+            {
+              "kind": "mcp_projection",
+              "path": "tools/mcp/mcp_control_tool_catalog.cpp",
+              "needles": [
+                "operation_tool_name",
+                "capability_is_grantable"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_control_sequencer_transport_executor.cpp",
+              "needles": [
+                "set-range receipt carries the transport's acceptance, not the tick helper's",
+                "set-enabled preserves an accepted range the audio thread has not yet published",
+                "a negative document tick is carried rather than refused as out of range"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_control_adapter.cpp",
+              "needles": [
+                "sequencer transport loop operations reach the generic MCP catalog",
+                "pulp_control_sequencer_transport_loop_write"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Loop transport control is a runtime capability on a live host, not an offline SDK-composition capability a design-time agent manifest declares."
         }
       }
     }

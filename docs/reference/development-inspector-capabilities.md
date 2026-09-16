@@ -66,6 +66,8 @@ availability.
 | `dev.pulp.artifact/read@1` (`artifact.read`) | no | no | Publication-bound typed client rechecks exact original lineage and broker ACL for every chunk |
 | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | yes | yes | Main-thread executor copies one `state::SequencerStateChannel` UI-side triple-buffer snapshot and seqlock playhead out of the channel before returning; it never touches the audio-side publication methods and never drains the applied-edit queue the owning UI consumer needs |
 | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | no | yes | Grant-controlled main-thread executor submits one bounded typed step edit into the single-producer command FIFO; a full FIFO refuses with a retryable `ResourceExhausted` rather than blocking or dropping, and no audio-thread method is reachable from the operation |
+| `dev.pulp.sequencer/transport.loop.read@1` (`sequencer.transport.loop.read`) | yes | yes | Fenced main-thread sensitive read of the live `MasterTransport` publication: loop endpoints, enabled flag, transport running state, and the publication sequence. A transport that has never published refuses `HostUnavailable` rather than reporting a loop no transport has accepted |
+| `dev.pulp.sequencer/transport.loop.write@1` (`sequencer.transport.loop.write`) | no | yes | Grant-controlled fenced main-thread receipt operation with action-discriminated `set-range`/`set-enabled` input. Endpoints arrive already snapped and are never snapped for the caller; the receipt carries the transport's own acceptance, and every `TransportError` maps to its own distinct refusal message |
 | `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
 <!-- END GENERATED capability-matrix -->
 
@@ -110,6 +112,8 @@ executor on the target host fails closed.
 | `dev.pulp.artifact/read@1` | `dev.pulp.artifact/read@1` (`artifact.read`) | `artifact-chunk` |
 | `dev.pulp.sequencer/state.read@1` | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | `response` |
 | `dev.pulp.sequencer/state.edit@1` | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | `receipt` |
+| `dev.pulp.sequencer/transport.loop.read@1` | `dev.pulp.sequencer/transport.loop.read@1` (`sequencer.transport.loop.read`) | `response` |
+| `dev.pulp.sequencer/transport.loop.write@1` | `dev.pulp.sequencer/transport.loop.write@1` (`sequencer.transport.loop.write`) | `receipt` |
 <!-- END GENERATED operation-matrix -->
 
 ## Canonical control foundation

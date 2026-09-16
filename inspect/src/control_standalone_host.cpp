@@ -9,6 +9,7 @@
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_manifest.hpp>
 #include <pulp/inspect/control_sequencer_state_executor.hpp>
+#include <pulp/inspect/control_sequencer_transport_executor.hpp>
 #include <pulp/inspect/control_state_read_executor.hpp>
 #include <pulp/inspect/control_state_write_executor.hpp>
 #include <pulp/inspect/control_standalone_ui_adapter.hpp>
@@ -81,7 +82,9 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
         "PULP_INSPECT_CAPABILITY_SEQUENCER_STATE_EDIT_V1\0"
         "PULP_INSPECT_CAPABILITY_TEST_INPUT_V1\0"
         "PULP_INSPECT_CAPABILITY_AUTHORING_TWEAKS_V1\0"
-        "PULP_INSPECT_CAPABILITY_TELEMETRY_STREAM_V1";
+        "PULP_INSPECT_CAPABILITY_TELEMETRY_STREAM_V1\0"
+        "PULP_INSPECT_CAPABILITY_SEQUENCER_TRANSPORT_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_SEQUENCER_TRANSPORT_WRITE_V1";
 
 #undef PULP_CONTROL_COMPONENT_MARKER
 
@@ -400,12 +403,33 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         ControlMainThreadExecutor main_sequencer_edit(
             rpc_, make_control_sequencer_state_edit_executor(sequencer_target));
         auto fenced_sequencer_edit = main_sequencer_edit.executor();
+        ControlSequencerTransportTargetResolver sequencer_transport_target =
+            [this](const ControlAdmissionPlan& plan)
+                -> std::optional<ControlSequencerTransportTarget> {
+            if (!author_hooks_.sequencer_transport)
+                return std::nullopt;
+            auto* transport = author_hooks_.sequencer_transport();
+            if (!transport)
+                return std::nullopt;
+            return ControlSequencerTransportTarget{
+                .registration_id = plan.registration_id,
+                .host_tier = ControlHostTier::Standalone,
+                .transport = transport};
+        };
+        ControlMainThreadExecutor main_transport_read(
+            rpc_, make_control_sequencer_transport_read_executor(sequencer_transport_target));
+        auto fenced_transport_read = main_transport_read.executor();
+        ControlMainThreadExecutor main_transport_write(
+            rpc_, make_control_sequencer_transport_write_executor(sequencer_transport_target));
+        auto fenced_transport_write = main_transport_write.executor();
         ControlOperationExecutor state_executor =
             [state_read = std::move(state_read),
              state_write = std::move(fenced_state_write),
              sequencer_read = std::move(fenced_sequencer_read),
              sequencer_edit = std::move(fenced_sequencer_edit),
-             gpu_health_read = std::move(gpu_health_read)](
+             gpu_health_read = std::move(gpu_health_read),
+             transport_read = std::move(fenced_transport_read),
+             transport_write = std::move(fenced_transport_write)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                 const ControlExecutionContext& context) {
                 if (request.operation_id == "dev.pulp.state/read@1")
@@ -418,6 +442,10 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return sequencer_edit(plan, request, context);
                 if (request.operation_id == "dev.pulp.gpu/health.read@1")
                     return gpu_health_read(plan, request, context);
+                if (request.operation_id == "dev.pulp.sequencer/transport.loop.read@1")
+                    return transport_read(plan, request, context);
+                if (request.operation_id == "dev.pulp.sequencer/transport.loop.write@1")
+                    return transport_write(plan, request, context);
                 return unavailable_operation();
             };
 

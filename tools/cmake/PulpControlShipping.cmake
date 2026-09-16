@@ -29,6 +29,8 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     artifact.read
     sequencer.state.read
     sequencer.state.edit
+    sequencer.transport.loop.read
+    sequencer.transport.loop.write
     unavailable)
 
 set(_PULP_CONTROL_CAPABILITIES
@@ -53,6 +55,8 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.artifact/read@1
     dev.pulp.sequencer/state.read@1
     dev.pulp.sequencer/state.edit@1
+    dev.pulp.sequencer/transport.loop.read@1
+    dev.pulp.sequencer/transport.loop.write@1
     dev.pulp.unavailable/operation@1)
 
 # Registry presence pre-stages schema/client compatibility but is not permission
@@ -64,7 +68,7 @@ set(_PULP_CONTROL_UNWIRED_CAPABILITIES)
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.
 set(_PULP_CONTROL_REGISTRY_DIGEST_V1
-    "70578eae97288609fe384bd2caa1641e62af016127f3abc6e4a3cd754422d584")
+    "2e4d3896612b275c50b418cf2d32c1c8edd6e900a578d09de480411434c6cb56")
 
 function(_pulp_cache_control_declarations target profile capabilities eval_ack)
     # A target's declarations are configure-time truth, not sticky user

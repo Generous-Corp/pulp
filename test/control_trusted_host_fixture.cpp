@@ -5,7 +5,7 @@ const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
 const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_4fe8bdb87ce76fdd8eb613140baf9cc2ded9299593260a4f7017c4a2e0e984cb_"
+    "PULP_CONTROL_MANIFEST_SHA256_861823aac7eadfb0745390db310e12aa238a3e0d6db5e81610ab2d5cfb67be16_"
     "V1";
 const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
 } // namespace

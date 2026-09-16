@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "mcp_control_tool_catalog.hpp"
 #include "mcp_control_tools.hpp"
 #include "mcp_server.hpp"
 #include "support/thread_progress.hpp"
 
+#include <pulp/inspect/capabilities.hpp>
 #include <pulp/inspect/control_inspector_client.hpp>
 #include <pulp/inspect/control_manifest.hpp>
 #include <pulp/inspect/control_protocol.hpp>
@@ -288,6 +290,39 @@ TEST_CASE("control MCP bindings are generated from every canonical operation",
     REQUIRE(tools.find("\"required\":[\"instance_id\",\"input\"]") != std::string::npos);
     REQUIRE(tools.find("\"oneOf\":[{\"required\":[\"profile\"]},{\"required\":[\"operation_id\"]}]") !=
             std::string::npos);
+}
+
+TEST_CASE("sequencer transport loop operations reach the generic MCP catalog",
+          "[mcp][control][protocol][sequencer]") {
+    auto state = std::make_shared<FakeState>();
+    ControlMcpAdapter adapter(factory(state));
+    const auto tools = adapter.tools_json_fragment();
+
+    const auto read = tools.find("\"name\":\"pulp_control_sequencer_transport_loop_read\"");
+    const auto write = tools.find("\"name\":\"pulp_control_sequencer_transport_loop_write\"");
+    REQUIRE(read != std::string::npos);
+    REQUIRE(write != std::string::npos);
+    REQUIRE(adapter.owns_tool("pulp_control_sequencer_transport_loop_read"));
+    REQUIRE(adapter.owns_tool("pulp_control_sequencer_transport_loop_write"));
+
+    REQUIRE(tools.find("dev.pulp.sequencer/transport.loop.read@1", read) != std::string::npos);
+    REQUIRE(tools.find("\"readOnlyHint\":true", read) != std::string::npos);
+    REQUIRE(tools.find("\"idempotentHint\":true", read) != std::string::npos);
+    REQUIRE(tools.find("dev.pulp.sequencer/transport.loop.write@1", write) != std::string::npos);
+    REQUIRE(tools.find("\"readOnlyHint\":false", write) != std::string::npos);
+    REQUIRE(tools.find("\"idempotentHint\":false", write) != std::string::npos);
+    REQUIRE(tools.find("\"destructiveHint\":false", write) != std::string::npos);
+
+    const auto* read_operation =
+        pulp_mcp::detail::control_operation_for_tool("pulp_control_sequencer_transport_loop_read");
+    const auto* write_operation =
+        pulp_mcp::detail::control_operation_for_tool("pulp_control_sequencer_transport_loop_write");
+    REQUIRE(read_operation != nullptr);
+    REQUIRE(write_operation != nullptr);
+    CHECK(read_operation->capability == InspectorCapability::SequencerTransportRead);
+    CHECK(write_operation->capability == InspectorCapability::SequencerTransportWrite);
+    CHECK(capability_is_grantable(InspectorCapability::SequencerTransportRead));
+    CHECK(capability_is_grantable(InspectorCapability::SequencerTransportWrite));
 }
 
 TEST_CASE("control MCP inventory bootstraps the broker-owned installed host",

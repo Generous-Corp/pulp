@@ -549,6 +549,14 @@ target_link_libraries(pulp-test-control-state-write-executor PRIVATE
 catch_discover_tests(pulp-test-control-state-write-executor
     PROPERTIES LABELS "inspect;control;main-thread;mutation;t1;t2a")
 
+add_executable(pulp-test-control-sequencer-transport-executor
+    test_control_sequencer_transport_executor.cpp)
+target_link_libraries(pulp-test-control-sequencer-transport-executor PRIVATE
+    pulp::inspect-runtime pulp::inspect-control pulp::playback pulp::timeline-editor
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-control-sequencer-transport-executor
+    PROPERTIES LABELS "inspect;control;sequencer;transport;main-thread")
+
 add_executable(pulp-test-control-trace-session-executor
     test_control_trace_session_executor.cpp)
 target_link_libraries(pulp-test-control-trace-session-executor PRIVATE
