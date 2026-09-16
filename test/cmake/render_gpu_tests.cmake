@@ -18,6 +18,8 @@ if(PULP_ENABLE_GPU)
 
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_gpu_surface_tests.cmake")
 
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_gpu_diagnostics_tests.cmake")
+
     if(PULP_ENABLE_SCENE3D)
         include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_core_tests.cmake")
         include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/renderer3d_probe_tests.cmake")

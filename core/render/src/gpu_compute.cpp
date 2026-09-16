@@ -7,6 +7,7 @@
 // says what the code actually depends on.
 #ifdef PULP_HAS_DAWN
 
+#include <pulp/render/gpu_diagnostics.hpp>
 #include <pulp/runtime/log.hpp>
 #include "webgpu/webgpu_cpp.h"
 
@@ -1166,8 +1167,11 @@ public:
         dev_desc.requiredFeatures = required_features.data();
         dev_desc.SetUncapturedErrorCallback(
             [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView msg) {
+                const std::string text(msg.data, msg.length);
                 runtime::log_error("GpuCompute: WebGPU error ({}): {}",
-                    static_cast<int>(type), std::string(msg.data, msg.length));
+                    static_cast<int>(type), text);
+                emit_gpu_diagnostic(GpuDiagnosticSeverity::error,
+                                    "dawn.uncaptured_error", text);
             });
         // Device loss is normal behavior, not an init failure: a browser tab can
         // lose its device at any moment, and a native driver reset does the same.
@@ -1182,8 +1186,10 @@ public:
                 // while ~DawnGpuCompute() is unwinding. The token is expired
                 // first in the dtor, which makes that case a no-op.
                 if (alive.expired()) return;
-                handle_device_lost(static_cast<int>(reason),
-                                   std::string(msg.data, msg.length));
+                const std::string text(msg.data, msg.length);
+                emit_gpu_diagnostic(GpuDiagnosticSeverity::fatal,
+                                    "dawn.device_lost", text);
+                handle_device_lost(static_cast<int>(reason), text);
             });
 
         adapter_.RequestDevice(

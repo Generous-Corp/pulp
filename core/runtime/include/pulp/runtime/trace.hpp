@@ -160,6 +160,29 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 
 #define PULP_TRACE_END(category) TRACE_EVENT_END(category)
 
+// A zero-duration instant event: a thing HAPPENED at a point in time, with no
+// span to close. Use it for one-shot facts a duration would misrepresent — a
+// device error, a lost device, a dropped frame. The name is a
+// perfetto::StaticString, so a dynamic std::string does NOT compile.
+#define PULP_TRACE_INSTANT(category, name) \
+    TRACE_EVENT_INSTANT(category, ::perfetto::StaticString(name))
+
+// An instant event carrying typed debug-annotation args as trailing
+// "key", value pairs, matching PULP_TRACE_SCOPE_NAMED_ARGS. Prefer this over
+// PULP_TRACE_INSTANT_DYNAMIC when the runtime text is a payload to read rather
+// than a key to group by: the name stays interned and the variable part rides
+// along as arg `debug.<key>`, readable via
+// EXTRACT_ARG(arg_set_id, 'debug.<key>').
+#define PULP_TRACE_INSTANT_ARGS(category, name, ...) \
+    TRACE_EVENT_INSTANT(category, ::perfetto::StaticString(name), __VA_ARGS__)
+
+// An instant event whose name is computed at runtime. Same dynamic-name caveats
+// as PULP_TRACE_SCOPE_DYNAMIC — the bytes are copied per event and the name
+// multiplies `slice.name` cardinality — so reach for it only when the runtime
+// value is the thing you need to group or filter on.
+#define PULP_TRACE_INSTANT_DYNAMIC(category, name_expr) \
+    TRACE_EVENT_INSTANT(category, ::perfetto::DynamicString{name_expr})
+
 #define PULP_TRACE_COUNTER(category, name, value) \
     TRACE_COUNTER(category, ::perfetto::StaticString(name), (value))
 
@@ -175,6 +198,9 @@ static_assert(eq(prettify_function(PULP_TRACE_WRAP_CT_STRING(
 #define PULP_TRACE_BEGIN_ARGS(category, name, ...) ((void)0)
 #define PULP_TRACE_BEGIN_DYNAMIC(category, name_expr) ((void)0)
 #define PULP_TRACE_END(category) ((void)0)
+#define PULP_TRACE_INSTANT(category, name) ((void)0)
+#define PULP_TRACE_INSTANT_ARGS(category, name, ...) ((void)0)
+#define PULP_TRACE_INSTANT_DYNAMIC(category, name_expr) ((void)0)
 #define PULP_TRACE_COUNTER(category, name, value) ((void)0)
 
 #endif  // PULP_TRACING_ENABLED
