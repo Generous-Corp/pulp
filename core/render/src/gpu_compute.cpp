@@ -7,9 +7,9 @@
 // says what the code actually depends on.
 #ifdef PULP_HAS_DAWN
 
+#include "webgpu/webgpu_cpp.h"
 #include <pulp/render/gpu_diagnostics.hpp>
 #include <pulp/runtime/log.hpp>
-#include "webgpu/webgpu_cpp.h"
 
 // Dawn's *native* implementation headers: the instance factory and the C proc
 // table. emdawnwebgpu implements webgpu.h over the browser's navigator.gpu and
