@@ -182,6 +182,10 @@ class SharedIoExecutionController {
         if (telemetry_)
             telemetry_->record_callback_block(false);
         if (callback_started_ && callback_sequence != next_callback_sequence_) {
+            // A timeline discontinuity is itself a miss. Keep the declared
+            // miss policy (CPU fallback, silence, or dry passthrough) rather
+            // than relying on SharedIoDelivery's default Silence value.
+            result.path = fallback_path();
             result.fallback_reason = SharedIoFallbackReason::SequenceGap;
             result.resynced = true;
             if (telemetry_)

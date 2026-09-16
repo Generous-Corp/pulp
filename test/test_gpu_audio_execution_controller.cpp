@@ -162,6 +162,19 @@ TEST_CASE("execution controller accounts for every callback and sequence-gap sil
     REQUIRE(stats.resync_drops == 1);
 }
 
+TEST_CASE("sequence-gap delivery honors the declared CPU fallback",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(contract(), &telemetry));
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+    const auto gap = controller.deliver(2);
+    REQUIRE(gap.path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(gap.fallback_reason == SharedIoFallbackReason::SequenceGap);
+    REQUIRE(gap.resynced);
+    REQUIRE(telemetry.snapshot().fallback_blocks == 1);
+}
+
 TEST_CASE("controller callback delivery performs no allocation",
           "[gpu_audio][shared_io][controller][allocation]") {
     SharedIoExecutionController controller;
