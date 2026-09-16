@@ -1489,6 +1489,49 @@ The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
 one implementation.
 
+**A reused `build-cov` reports WRONG NUMBERS, not just wasted disk — and every
+ordinary check passes while it does.** Reclaiming it is a correctness
+requirement after the branch changes, not only a space one.
+
+Lead with the tell, because nothing else gives it away. In one observed case
+the objects and every `.profraw` were NEWER than the source, all 270 tests
+passed, the diff-cover report listed every changed file, and the number was a
+plausible 82% — comfortably over the gate. The only signal was a line that is
+easy to read past:
+
+```
+warning: 66495 functions have mismatched data     # corrupted
+warning:  9764 functions have mismatched data     # same branch, clean build-cov
+```
+
+`llvm-cov` drops functions it cannot match to a binary, and a dropped function
+reads as UNCOVERED. On byte-identical source with identical diff hunks,
+`label.cpp` scored **70.5% corrupted vs 90.2% clean** — a 20-point swing, in the
+conservative direction here but not guaranteed to be. Compare the mismatch count
+against a known-clean baseline for the same suite; a raw count means nothing on
+its own, since a healthy run already reports thousands.
+
+The mechanism is sharper than "the directory is stale", and worth knowing
+because a clean `build-cov` alone does not protect you:
+
+> **The tests you run must come from the targets you built.**
+
+`local_diff_cover.sh <targets>` builds ONLY the targets you name, while
+`PULP_DIFF_COVER_CTEST_REGEX` selects whatever it matches. A narrow target list
+with a broad regex therefore runs binaries nobody rebuilt — in the case above,
+270 tests ran against 4 rebuilt targets, and the other ~266 binaries still held
+a previous branch's objects. On a clean `build-cov` the same invocation ran 131
+tests, because the stale binaries did not exist to run. That is also why the
+corruption needs a branch switch to appear: within one branch the leftovers
+still match.
+
+So when passing targets, keep the ctest filter inside them, and remove this
+worktree's `build-cov` after switching branches:
+
+```bash
+rm -rf build-cov            # this worktree only; never sweep while other lanes build
+```
+
 **Reclaiming coverage build dirs.** `local_diff_cover.sh` (and shipyard's
 local validation, which runs it) creates a per-worktree `build-cov/` and never
 cleans it. Across many worktrees these accumulate into hundreds of GB and fill
