@@ -1787,6 +1787,7 @@ jobs:
           echo "ctest-nonruns: registered(ctest -N raw lines)=$raw_lines registered(total)=${registered:-unknown}"
           python3 tools/scripts/ctest_nonruns.py "$junit" \
             --registered "${registered:-unknown}" --raw-lines "$raw_lines" \
+            --json-output "$PULP_BUILD_DIR/ctest.nonruns.json" \
             --leg "$PULP_CTEST_LEG" >> "$GITHUB_STEP_SUMMARY"
 
       # Observation, not a gate. Every GPU case in the suite skips when no
@@ -1902,6 +1903,7 @@ jobs:
           path: |
             ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
             ${{ env.PULP_BUILD_DIR }}/ctest.junit.xml
+            ${{ env.PULP_BUILD_DIR }}/ctest.nonruns.json
           if-no-files-found: ignore
           retention-days: 7
 

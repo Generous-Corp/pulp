@@ -3078,20 +3078,38 @@ outcome (no GPU, no device, no vendor SDK), and the summary also prints the
 registered `ctest -N` population beside the report's declared `tests=` count so
 a gap created by label exclusions or `--exclude-regex` stays visible.
 
-The same observer works locally on an explicit downloaded or local artifact:
+The same observer works locally on an explicit downloaded or local artifact.
+Use a baseline when the question is “what changed?” rather than merely “what
+did not run?”:
 
 ```bash
 python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --json
 python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --registered 20000
+python3 tools/scripts/ctest_nonruns.py /tmp/current/ctest.junit.xml \
+  --baseline /tmp/known-good/ctest.junit.xml --json
 ```
+
+CI also writes `ctest.nonruns.json` beside `ctest.junit.xml` in each non-Windows
+`ctest-logs-<key>` artifact. Download two artifacts when investigating a change;
+the JSON is the ready-to-read single-run projection, while `--baseline` over the
+two retained XML files computes transitions. Unique CTest names are matched by
+the SHA-256 of the full name. Same-name duplicates are compared as status-count
+groups; the tool reports an ambiguous group instead of guessing per-case
+transitions. `current_only` and `baseline_only` mean only “present in one supplied artifact”: selection,
+configuration, and source changes can all cause that shape. They are leads, not
+proof that a test was added or removed.
 
 `--registered` is optional caller-supplied context, not an inferred selection.
 The helper reads only that regular file (64 MiB maximum), requires CTest's
 `testsuite` dialect, and records its SHA-256 without claiming current-head
-provenance. Counts cover all entries; at most 100 non-run rows and 100 issues
-are displayed, with omitted counts. Names/reasons/labels are bounded to 512
+provenance. Counts cover all entries; at most 100 non-run rows, 100 comparison
+rows total, and 100 issues are displayed, with omitted counts.
+Names/reasons/labels are bounded to 512
 characters and the last output line to 160, so keep the original XML for full
-detail. JSON and the workflow's Markdown summary share one interpretation.
+detail. `pulp.ctest-nonruns.v2` JSON and the workflow's Markdown summary share
+one interpretation. `--json-output <path>` writes the same object to a regular,
+non-symlink file while retaining Markdown on stdout, which is how CI publishes
+the job summary and agent-readable artifact from one observation.
 Reports include bounded test output; treat them as potentially sensitive
 artifacts, not as instructions or safe-to-publish logs.
 

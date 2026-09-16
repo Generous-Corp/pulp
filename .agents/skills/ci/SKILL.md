@@ -708,11 +708,15 @@ observation above: `continue-on-error: true`, records the answer, asserts
 nothing.
 
 The renderer is `tools/scripts/ctest_nonruns.py`, shared with local artifact
-inspection. Pass an explicit CTest JUnit path and `--json` for bounded structured
-non-runs, counts, and the input digest. Exit 0 means the observation is readable,
-even when tests failed or skipped; exit 2 means unavailable/incomplete evidence,
-not a CTest verdict. Empty reports never claim that every test ran. No test is
-executed, provisioned, or selected by this helper.
+inspection and registered in `docs/status/tools.yaml`. Pass an explicit CTest
+JUnit path and `--json` for bounded structured non-runs, counts, and the input
+digest. Pass `--baseline <known-good.xml>` to surface duplicate-safe status
+transitions and cases present in only one artifact. Same-name duplicates are
+compared as status-count groups, never guessed per case. CI publishes the v2
+JSON beside the original XML in each non-Windows `ctest-logs-<key>`. Exit 0 means the observation is
+readable, even when tests failed or skipped; exit 2 means unavailable/incomplete
+evidence, not a CTest verdict. Empty reports never claim that every test ran. No
+test is executed, provisioned, or selected by this helper.
 
 Four things bite when touching this:
 
@@ -729,8 +733,8 @@ Four things bite when touching this:
   population; the report's `tests=` is the attempted one. Any gap is created by
   `-LE` label exclusions, `--exclude-regex`, or configure-time absence, which
   remove a test from the report entirely — a strictly larger blind spot that a
-  JUnit report cannot see. No `<testcase>` entries at all means the flag did not
-  take.
+  JUnit report cannot see. No `<testcase>` entries provides no execution
+  evidence; it can also be the honest result of an empty selection.
 - **Never turn exit 77 into a failure to make a skip visible.** That is what
   `tools/scripts/test_ios_gate_skip_contract.py` exists to prevent, after doing
   it in the Build step took the iOS gate out. Visibility and enforcement are

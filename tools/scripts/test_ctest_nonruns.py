@@ -90,13 +90,95 @@ class ObservationTests(unittest.TestCase):
         self.assertIn("continue-on-error: true", step)
         self.assertIn("always() && runner.os != 'Windows'", step)
         self.assertIn('python3 tools/scripts/ctest_nonruns.py "$junit"', step)
+        self.assertIn('--json-output "$PULP_BUILD_DIR/ctest.nonruns.json"', step)
         self.assertIn('>> "$GITHUB_STEP_SUMMARY"', step)
         self.assertNotIn("ET.parse", step)
         self.assertNotIn("pip install", step)
+        upload = text.split("- name: Upload ctest logs and JUnit report", 1)[1].split("- name:", 1)[0]
+        self.assertIn("ctest.nonruns.json", upload)
 
     def test_duplicate_names_are_not_collapsed(self):
         report = self.observe('<testsuite tests="2">' + '<testcase name="a" status="notrun"/>' * 2 + '</testsuite>')
         self.assertEqual([r["index"] for r in report["nonruns"]], [1, 2])
+
+    def test_baseline_comparison_is_duplicate_safe_and_bounded(self):
+        baseline = self.root / "baseline.xml"
+        baseline.write_text('<testsuite tests="7"><testcase name="same" status="run"/><testcase name="same" status="notrun"/><testcase name="ambiguous" status="run"/><testcase name="ambiguous" status="notrun"/><testcase name="new-skip" status="run"/><testcase name="recovered" status="notrun"/><testcase name="failure" status="fail"><failure/></testcase></testsuite>', encoding="utf-8")
+        self.report.write_text('<testsuite tests="7"><testcase name="same" status="notrun"/><testcase name="same" status="run"/><testcase name="ambiguous" status="notrun"/><testcase name="ambiguous" status="notrun"/><testcase name="new-skip" status="notrun"/><testcase name="recovered" status="run"/><testcase name="failure" status="run"/></testsuite>', encoding="utf-8")
+        report, cases = observer.observe_with_cases(self.report)
+        observer.compare(report, cases, baseline)
+        comparison = report["comparison"]
+        self.assertEqual(comparison["status"], "observed")
+        self.assertEqual(comparison["transition_counts"], {"new_nonrun": 1, "recovered": 1, "changed": 1, "ambiguous_duplicate_groups": 1})
+        self.assertFalse(any(row["name"] == "same" for row in comparison["transitions"]))
+        self.assertEqual(comparison["ambiguous_duplicate_groups"][0]["name"], "ambiguous")
+        self.assertIn("Changes from baseline", observer.markdown(report))
+        self.assertIn("ambiguous duplicate groups: 1", observer.markdown(report))
+
+    def test_invalid_baseline_makes_comparison_incomplete(self):
+        baseline = self.root / "baseline.xml"
+        baseline.write_text('<testsuites/>', encoding="utf-8")
+        self.report.write_text('<testsuite tests="1"><testcase name="ok" status="run"/></testsuite>', encoding="utf-8")
+        result = subprocess.run([sys.executable, str(SCRIPT), str(self.report), "--baseline", str(baseline), "--json"], capture_output=True, text=True, timeout=10)
+        report = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(report["comparison"]["status"], "unavailable")
+        self.assertEqual(report["observation"], "incomplete")
+
+    def test_comparison_has_one_global_row_budget(self):
+        baseline = self.root / "baseline.xml"
+        count = observer.MAX_ROWS + 20
+        baseline.write_text(f'<testsuite tests="{count}">' + ''.join(f'<testcase name="base-{i}" status="run"/>' for i in range(count)) + '</testsuite>', encoding="utf-8")
+        self.report.write_text(f'<testsuite tests="{count}">' + ''.join(f'<testcase name="current-{i}" status="run"/>' for i in range(count)) + '</testsuite>', encoding="utf-8")
+        report, cases = observer.observe_with_cases(self.report)
+        observer.compare(report, cases, baseline)
+        comparison = report["comparison"]
+        shown = (len(comparison["transitions"]) + len(comparison["ambiguous_duplicate_groups"])
+                 + len(comparison["current_only"]) + len(comparison["baseline_only"]))
+        self.assertEqual(shown, observer.MAX_ROWS)
+        self.assertEqual(comparison["current_only_count"], count)
+        self.assertEqual(comparison["baseline_only_count"], count)
+        self.assertEqual(comparison["omitted_current_only"] + comparison["omitted_baseline_only"], count * 2 - observer.MAX_ROWS)
+        rendered = observer.markdown(report)
+        self.assertIn("current only", rendered)
+        self.assertIn("Omitted", rendered)
+
+    def test_json_output_matches_stdout_and_rejects_symlink(self):
+        output = self.root / "observation.json"
+        self.report.write_text('<testsuite tests="1"><testcase name="ok" status="run"/></testsuite>', encoding="utf-8")
+        result = subprocess.run([sys.executable, str(SCRIPT), str(self.report), "--json", "--json-output", str(output)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), json.loads(output.read_text()))
+        output.unlink()
+        output.symlink_to(self.report)
+        result = subprocess.run([sys.executable, str(SCRIPT), str(self.report), "--json-output", str(output)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("JSON output unavailable", result.stderr)
+        self.assertTrue(output.is_symlink())
+
+    def test_json_output_cannot_replace_input(self):
+        original = '<testsuite tests="1"><testcase name="ok" status="run"/></testsuite>'
+        self.report.write_text(original, encoding="utf-8")
+        result = subprocess.run([sys.executable, str(SCRIPT), str(self.report), "--json-output", str(self.report)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.report.read_text(), original)
+        self.assertIn("must not replace an input", result.stderr)
+
+    def test_json_output_cannot_replace_baseline_or_hardlink(self):
+        baseline = self.root / "baseline.xml"
+        current = '<testsuite tests="1"><testcase name="ok" status="run"/></testsuite>'
+        baseline.write_text(current, encoding="utf-8")
+        self.report.write_text(current, encoding="utf-8")
+        for output in (baseline, self.root / "baseline-hardlink.xml"):
+            if output != baseline:
+                os.link(baseline, output)
+            with self.subTest(output=output.name):
+                result = subprocess.run([sys.executable, str(SCRIPT), str(self.report), "--baseline", str(baseline), "--json-output", str(output)], capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(baseline.read_text(), current)
+                self.assertIn("must not replace an input", result.stderr)
+            if output != baseline:
+                output.unlink()
 
     def test_output_bound_does_not_truncate_counts(self):
         count = observer.MAX_ROWS + 7
