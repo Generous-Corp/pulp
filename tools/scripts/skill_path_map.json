@@ -969,6 +969,7 @@
         "inspect/src/control_sequencer_state_executor.cpp",
         "test/test_control_sequencer_state_executor.cpp",
         "tools/scripts/sequencer_control_skill_check.py",
+        "tools/scripts/timeline_command_doc_check.py",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
         "tools/cmake/PulpLinkFloor.cmake",
         "tools/scripts/link_floor_selftest.py",

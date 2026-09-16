@@ -823,18 +823,17 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
 
 ## Editing contracts
 
-- `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
-  `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
-  `ReplaceNoteContent`, `SetNoteEvents`, `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
-  `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
-  `SetActiveTakeLane`, `SetTakeComp`, `SetTrackFreeze`, `InsertMarker`,
-  `RemoveMarker`, `InsertRegion`, `RemoveRegion`, `SetChordScaleLane`,
-  `SetGroove`, and `SetTrackMixer` are the bounded mutation
-  vocabulary. Automation commands attach or tombstone complete Track-owned
-  lanes; map commands carry exact expected/replacement document values and
-  participate in the same transaction, journal, undo, and replay machinery.
-  `reduce_transaction()` is pure: it returns a new snapshot, exact canonical
-  dirty set, and reverse-ordered inverse commands.
+- The bounded mutation vocabulary is exactly the `Command`-domain verbs of
+  `core/timeline/schema/timeline_cli_verbs.json` — 64 of them, catalogued in
+  full under **Command catalog** below with the wire `type` each one carries. A
+  hand-kept subset drifts from the model as soon as a command lands, so the
+  catalog is derived from that artifact and the `timeline-command-doc-coverage`
+  ctest fails when a declared command is missing from it. Automation commands
+  attach or tombstone complete Track-owned lanes; map commands carry exact
+  expected/replacement document values and participate in the same transaction,
+  journal, undo, and replay machinery. `reduce_transaction()` is pure: it
+  returns a new snapshot, exact canonical dirty set, and reverse-ordered inverse
+  commands.
 - `NoteTransformRegistry` is the control-thread apply-time extension point for
   pure `(note span, canonical params JSON, seed) -> note array` functions.
   `ApplyNoteTransform` is a typed preparation request, not a durable `Command`:
@@ -923,6 +922,163 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
   checkpoint snapshot/revision mismatch or cross-entry writer-ID reuse.
 - Undo and redo submit fresh ordinary transactions. They append to the journal;
   they do not delete or rewrite history.
+
+### Command catalog
+
+Every durable mutation the document model accepts, with the exact `type` string
+a caller writes. The wire type is the operative half: the C++ spelling is what
+an agent guesses from the model, while the wire type is what
+`pulp seq apply`, the `pulp_timeline_command_apply` MCP tool, and
+`DocumentSession` actually decode, and a type the manifest does not carry is
+refused before it reaches a reducer.
+
+Rows are derived from `core/timeline/schema/timeline_cli_verbs.json` and their
+descriptions from the declarations in
+`core/timeline/include/pulp/timeline/command.hpp`. Regenerate the artifact after
+a manifest change, then add the row here — `timeline-command-doc-coverage`
+fails a command that exists in the artifact and not in this table.
+
+| Command | Wire `type` | What it does |
+|---|---|---|
+| `CloneSequence` | `pulp.timeline.command.clone_sequence` | Clones a sequence using an explicit, complete owned-identity mapping. |
+| `CreateAsset` | `pulp.timeline.command.create_asset` | Adds one sealed recorded or imported media asset. |
+| `InsertAutomationLane` | `pulp.timeline.command.insert_automation_lane` | Inserts an automation lane into a track. |
+| `InsertClip` | `pulp.timeline.command.insert_clip` | Inserts an identity-bearing clip into a track. |
+| `InsertDevice` | `pulp.timeline.command.insert_device` | Inserts a typed device declaration into a track's authored chain. |
+| `InsertMacro` | `pulp.timeline.command.insert_macro` | Inserts a track-owned macro control. |
+| `InsertMarker` | `pulp.timeline.command.insert_marker` | Inserts a sequence-owned marker identity. |
+| `InsertMidiExpressionLane` | `pulp.timeline.command.insert_midi_expression_lane` | Inserts a controller/expression lane into a MIDI clip. |
+| `InsertModulationRoute` | `pulp.timeline.command.insert_modulation_route` | Inserts one authored source-to-parameter connection. |
+| `InsertModulator` | `pulp.timeline.command.insert_modulator` | Inserts a track-owned modulation source. |
+| `InsertNotes` | `pulp.timeline.command.insert_notes` | Inserts a set of identity-bearing notes into one MIDI clip. |
+| `InsertRegion` | `pulp.timeline.command.insert_region` | Inserts a sequence-owned region identity. |
+| `InsertScene` | `pulp.timeline.command.insert_scene` | Inserts a scene at an authored position in a sequence. |
+| `InsertSequence` | `pulp.timeline.command.insert_sequence` | Inserts a complete sequence and its owned identity subtree. |
+| `InsertSlot` | `pulp.timeline.command.insert_slot` | Inserts a slot at an authored position in a scene. |
+| `InsertTake` | `pulp.timeline.command.insert_take` | Inserts one take into an existing take lane. |
+| `InsertTakeLane` | `pulp.timeline.command.insert_take_lane` | Inserts one take lane and its owned take-identity subtree. |
+| `InsertTrack` | `pulp.timeline.command.insert_track` | Inserts a track and its complete owned identity subtree at an authored position. |
+| `MoveClip` | `pulp.timeline.command.move_clip` | Replaces a clip's time range under an exact optimistic-value gate. |
+| `MoveDevice` | `pulp.timeline.command.move_device` | Moves a device under an exact optimistic authored-position gate. |
+| `MoveTrack` | `pulp.timeline.command.move_track` | Moves a track in authored order under an exact optimistic-position gate. |
+| `RemoveAsset` | `pulp.timeline.command.remove_asset` | Removes a project-owned media asset by identity. |
+| `RemoveAutomationLane` | `pulp.timeline.command.remove_automation_lane` | Removes an automation lane by identity. |
+| `RemoveClip` | `pulp.timeline.command.remove_clip` | Removes a clip by its owning coordinates and identity. |
+| `RemoveDevice` | `pulp.timeline.command.remove_device` | Removes a device declaration by identity. |
+| `RemoveMacro` | `pulp.timeline.command.remove_macro` | Removes a track-owned macro control by identity. |
+| `RemoveMarker` | `pulp.timeline.command.remove_marker` | Removes a sequence-owned marker by identity. |
+| `RemoveMidiExpressionLane` | `pulp.timeline.command.remove_midi_expression_lane` | Removes a controller/expression lane from a MIDI clip by identity. |
+| `RemoveModulationRoute` | `pulp.timeline.command.remove_modulation_route` | Removes one authored connection by identity. |
+| `RemoveModulator` | `pulp.timeline.command.remove_modulator` | Removes a track-owned modulation source by identity. |
+| `RemoveNotes` | `pulp.timeline.command.remove_notes` | Removes a named set of notes under an exact optimistic-value gate. |
+| `RemoveRegion` | `pulp.timeline.command.remove_region` | Removes a sequence-owned region by identity. |
+| `RemoveScene` | `pulp.timeline.command.remove_scene` | Removes a scene and its owned slots by identity. |
+| `RemoveSequence` | `pulp.timeline.command.remove_sequence` | Removes a sequence and its owned identity subtree. |
+| `RemoveSlot` | `pulp.timeline.command.remove_slot` | Removes a slot from a scene by identity. |
+| `RemoveTake` | `pulp.timeline.command.remove_take` | Removes one take from an existing take lane. |
+| `RemoveTakeLane` | `pulp.timeline.command.remove_take_lane` | Removes a take lane and its owned take identities. |
+| `RemoveTrack` | `pulp.timeline.command.remove_track` | Removes a track and its complete owned identity subtree by identity. |
+| `ReplaceNoteContent` | `pulp.timeline.command.replace_note_content` | Replaces the complete note event set of one note clip. |
+| `RetargetDevice` | `pulp.timeline.command.retarget_device` | Replaces device kind, binding, slot, stage, bypass, and wet/dry atomically. |
+| `SetActiveTakeLane` | `pulp.timeline.command.set_active_take_lane` | Selects the arrangement or an existing take lane under an exact value gate. |
+| `SetChordScaleLane` | `pulp.timeline.command.set_chord_scale_lane` | Replaces a sequence's complete chord/scale lane under an exact value gate. |
+| `SetClipPlaybackProperties` | `pulp.timeline.command.set_clip_playback_properties` | Replaces clip-level gain and fade controls under an exact value gate. |
+| `SetClipSequenceRef` | `pulp.timeline.command.set_clip_sequence_ref` | Retargets a sequence-reference clip under an exact optimistic-value gate. |
+| `SetDeviceState` | `pulp.timeline.command.set_device_state` | Replaces the optional content-addressed opaque state reference. |
+| `SetDynamicsLane` | `pulp.timeline.command.set_dynamics_lane` | Replaces a sequence's complete dynamics lane under an exact value gate. |
+| `SetGroove` | `pulp.timeline.command.set_groove` | Replaces a sequence's complete groove under an exact value gate. |
+| `SetMacro` | `pulp.timeline.command.set_macro` | Replaces a macro control's declaration under an exact value gate. |
+| `SetMacroValue` | `pulp.timeline.command.set_macro_value` | Replaces only a macro's authored position under an exact value gate. |
+| `SetMeterMap` | `pulp.timeline.command.set_meter_map` | Replaces the complete project meter map under an exact value gate. |
+| `SetMidiExpressionLanePoints` | `pulp.timeline.command.set_midi_expression_lane_points` | Replaces one lane's authored points under an exact optimistic-value gate. |
+| `SetModulationRoute` | `pulp.timeline.command.set_modulation_route` | Replaces a route's source, target, depth, and bypass under an exact gate. |
+| `SetModulator` | `pulp.timeline.command.set_modulator` | Replaces a modulation source's declaration under an exact value gate. |
+| `SetNoteEvents` | `pulp.timeline.command.set_note_events` | Replaces the values of a named subset of one note clip's notes. |
+| `SetNoteVelocity` | `pulp.timeline.command.set_note_velocity` | Replaces one note velocity under an exact optimistic-value gate. |
+| `SetProjectTuning` | `pulp.timeline.command.set_project_tuning` | Replaces the project-wide tuning statement under an exact value gate. |
+| `SetRecordArm` | `pulp.timeline.command.set_record_arm` | Replaces record-arm document intent under an exact optimistic-value gate. |
+| `SetRegion` | `pulp.timeline.command.set_region` | Replaces one sequence-owned region under an exact value gate. |
+| `SetTakeComp` | `pulp.timeline.command.set_take_comp` | Replaces a take lane's canonical comp segments under an exact value gate. |
+| `SetTempoMap` | `pulp.timeline.command.set_tempo_map` | Replaces the complete project tempo map under an exact value gate. |
+| `SetTrackFreeze` | `pulp.timeline.command.set_track_freeze` | Publishes or clears a pre-rendered track artifact under an exact value gate. |
+| `SetTrackMixer` | `pulp.timeline.command.set_track_mixer` | Replaces track gain and pan under an exact optimistic-value gate. |
+| `SetTrackName` | `pulp.timeline.command.set_track_name` | Replaces a track's authored name under an exact optimistic-value gate. |
+| `SetTrackTuning` | `pulp.timeline.command.set_track_tuning` | Replaces one track's tuning override under an exact value gate. |
+
+#### Modulation sources, macros, and routes are track-owned and caller-identified
+
+A track carries three modulation members, and they are inserted rather than
+minted: `InsertModulator`
+(`pulp.timeline.command.insert_modulator`), `InsertMacro`
+(`pulp.timeline.command.insert_macro`), and `InsertModulationRoute`
+(`pulp.timeline.command.insert_modulation_route`) each carry a complete
+declaration bearing its own identity, so a source and the route that reads it
+can be stated in one transaction instead of requiring a round trip to learn
+what identity the model chose.
+
+Removal is refused by the model rather than by the command. A source a route
+still reads cannot leave: `RemoveModulator`
+(`pulp.timeline.command.remove_modulator`) and `RemoveMacro`
+(`pulp.timeline.command.remove_macro`) produce a track whose routes name a
+member it does not hold, and the model refuses that track — so the failure
+arrives as a rejected transaction, not as a document that quietly loses its
+routing. `RemoveModulationRoute`
+(`pulp.timeline.command.remove_modulation_route`) is the one modulation removal
+nothing can refuse, because no other member reads a route.
+
+The three `Set` forms pin identity. `SetModulator`
+(`pulp.timeline.command.set_modulator`), `SetMacro`
+(`pulp.timeline.command.set_macro`), and `SetModulationRoute`
+(`pulp.timeline.command.set_modulation_route`) each require the addressed id,
+`expected.id`, and `replacement.id` to be equal. An unpinned identity would let
+a Modify swap one member for another — a removal and a creation wearing a
+signature that declares neither — which hands a writer holding only Modify the
+operation its capability mask refuses. `SetModulationRoute` gates the whole
+route including `enabled`, because a bypassed route keeps its depth and target
+so re-enabling restores what was there.
+
+`SetMacroValue` (`pulp.timeline.command.set_macro_value`) is the narrow command
+beside the broad one, the same shape `SetNoteVelocity` has beside
+`SetNoteEvents`. It gates the normalized position alone, so a performer moving
+a macro need not also supply its current name and a concurrent rename cannot
+abort an edit that did not conflict with it. The float compares exactly rather
+than within a tolerance, which is safe because the persisted spelling is the
+IEEE-754 bit pattern. The overlap with `SetMacro` is deliberate: an edit that
+rewrites the whole macro should gate on the whole macro.
+
+#### A MIDI expression lane is addressed, not note-keyed
+
+`InsertMidiExpressionLane` (`pulp.timeline.command.insert_midi_expression_lane`)
+delivers a lane whole — identity, `MidiLaneAddress`, and every authored point —
+and `MidiContent::create` is the single authority on whether it may join the
+clip, enforcing identity distinctness across notes, points, and lanes plus one
+lane per address. `RemoveMidiExpressionLane`
+(`pulp.timeline.command.remove_midi_expression_lane`) is separate because
+abandoning a stream is the destructive intent a capability mask denies by
+default: a writer that may edit a lane's values does not thereby gain the right
+to discard it.
+
+`SetMidiExpressionLanePoints`
+(`pulp.timeline.command.set_midi_expression_lane_points`) changes what a stream
+says, never which stream it is — the lane keeps both its identity and its
+address, and the gate compares the full point array in canonical order.
+Re-addressing a lane is a remove and an insert, because the two things a caller
+means by it carry different authority.
+
+#### Whole-sequence and region commands
+
+`InsertSequence` (`pulp.timeline.command.insert_sequence`) and `RemoveSequence`
+(`pulp.timeline.command.remove_sequence`) carry a complete sequence and its
+owned identity subtree, the sequence-level pair beside `InsertTrack` /
+`RemoveTrack`. `CloneSequence` is the third member and the one that needs an
+explicit complete old-to-new id mapping.
+
+`SetRegion` (`pulp.timeline.command.set_region`) completes the region trio
+beside `InsertRegion` and `RemoveRegion`, and pins identity the way the
+modulation `Set` commands do: `expected.id` and `replacement.id` must be equal
+and must name a region the sequence owns. That pinning is what makes correcting
+a region's `SectionRole` reachable for a writer profile that may modify but may
+not remove.
 
 ### Rebuilding a `MidiContent` from its notes alone silently drops everything else
 
