@@ -2,19 +2,16 @@ name: Codex review request
 
 # Codex's automatic code review fires on PR open only for PRs whose author is a
 # GitHub *User*. A PR opened by an App — every PR `shipyard pr` creates, which is
-# the mandated path for agents — is skipped, so it merges with no review unless a
-# human types `@codex review` by hand. Codex reports the distinction itself: the
-# "Review trigger" cell in its summary comment reads `PR opened` on User-authored
-# PRs and `Manual request` on the App-authored ones that were reviewed at all.
+# the mandated path for agents — is skipped, so it merges unreviewed unless
+# somebody asks. Codex reports the distinction itself: the "Review trigger" cell
+# in its summary comment reads `PR opened` on User-authored PRs and
+# `Manual request` on the App-authored ones that were reviewed at all.
 #
 # The skip is Codex-side behavior and is not configurable from this repository.
-# This workflow is the in-repo mitigation: it issues the same `@codex review`
-# request a human would, then PROVES a review actually started. It fails loudly
-# when no review appears, because a review-coverage mitigation that can no-op in
-# silence reproduces the gap it exists to close.
-#
-# Codex signals "reviewed, found nothing" with a THUMBS_UP reaction on the PR
-# rather than a comment, so the verification below accepts either signal.
+# This workflow is the in-repo mitigation: it issues the same `@codex review` a
+# human would, then PROVES a review completed for this PR's head commit. It
+# fails loudly when none did, because a review-coverage mitigation that can
+# no-op in silence reproduces the gap it exists to close.
 
 on:
   pull_request:
@@ -30,52 +27,62 @@ concurrency:
 
 jobs:
   request:
-    # App-authored PRs only, and never from a fork: a fork PR carries a User
-    # author (so Codex already reviews it) and only a read-only token.
+    # Matched by login, not by `user.type == 'Bot'`. That type also covers
+    # Dependabot, whose `pull_request` runs get no secrets and a read-only
+    # token, so this job would reach `gh pr comment` and fail — an unrelated
+    # red check on a PR it was never meant to touch. Fork PRs are excluded
+    # too: they carry a User author, so Codex already reviews them.
     if: >-
-      github.event.pull_request.user.type == 'Bot' &&
+      github.event.pull_request.user.login == 'shipyard-local[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     name: Request Codex review on an App-authored PR
+    timeout-minutes: 20
 
     env:
       PR: ${{ github.event.pull_request.number }}
       REPO: ${{ github.repository }}
-      # A real user PAT, so the request carries the same identity as the manual
-      # `@codex review` comments that are known to work. GITHUB_TOKEN is the
-      # fallback; whether Codex honours a request from it is unproven, which is
-      # why the verification step below reports which identity was used.
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      # A real user PAT is preferred so the request carries the same identity as
+      # the manual `@codex review` comments a human would send. GITHUB_TOKEN is
+      # a workable fallback — a request from an App identity does produce a
+      # review — but it is second choice, and the verification below is what
+      # actually decides whether either worked.
       GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
-      HAS_RELEASE_PAT: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
       CODEX_LOGIN: chatgpt-codex-connector[bot]
-      REVIEW_MARKER: '<!-- codex-pull-request-review-summary -->'
 
     steps:
-      - name: Checkout (shallow)
+      # Deliberately the BASE commit, never the PR's. This job runs with a
+      # privileged PAT in the environment, and the PR under review is authored
+      # by an automated process: checking out the PR would let a change to
+      # `codex_review_signal.sh` execute with that PAT in reach. The base copy
+      # is the reviewed one, and a PR that edits the checker is still checked by
+      # the version already on the branch it targets.
+      - name: Checkout the base commit (never the PR under review)
         uses: actions/checkout@v5
         with:
-          fetch-depth: 1
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
 
-      - name: Request a review if Codex has not already responded
+      - name: Request a review if one has not already completed
         id: request
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ "$HAS_RELEASE_PAT" = "true" ]; then
-              identity="RELEASE_BOT_TOKEN (user PAT)"
-          else
-              identity="GITHUB_TOKEN (App)"
-              echo "::warning::RELEASE_BOT_TOKEN is unset; requesting as GITHUB_TOKEN." \
-                   "Codex is not known to honour a request from an App identity."
+          # Exit 2 means the checker could not see, which is not the same as
+          # "no review" and must not be treated as one.
+          set +e
+          bash tools/scripts/codex_review_signal.sh "$REPO" "$PR" "$HEAD_SHA"
+          signal=$?
+          set -e
+          if [ "$signal" -eq 2 ]; then
+              echo "::error::Cannot read review state for #$PR, so whether it has been" \
+                   "reviewed is unknown. Not requesting; re-run once GitHub is reachable."
+              exit 1
           fi
-          echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          echo "Requesting as: $identity"
-
-          # Idempotent: a re-run, or a PR Codex picked up anyway, must not stack
-          # duplicate requests.
-          if bash tools/scripts/codex_review_signal.sh "$REPO" "$PR"; then
-              echo "Codex already responded on #$PR — not requesting again."
+          if [ "$signal" -eq 0 ]; then
+              echo "A review has already completed for this head — not requesting again."
               echo "already=true" >> "$GITHUB_OUTPUT"
               exit 0
           fi
@@ -84,27 +91,32 @@ jobs:
           gh pr comment "$PR" --repo "$REPO" --body '@codex review'
           echo "Requested a Codex review on #$PR."
 
-      - name: Verify a review actually started
+      - name: Verify a review completed for this head
         if: steps.request.outputs.already != 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          # Codex answers a manual request in well under a minute in practice.
-          # Two spaced checks, not a poll loop: this is a seconds-scale wait, and
-          # a tight loop would trip GitHub's secondary rate limit.
-          for wait in 60 120; do
+          # Observed reviews reach **Completed** in four to five minutes, so the
+          # budget is ten: long enough not to fail one that is simply still
+          # thinking, short enough to report while the PR is open. Four spaced
+          # checks, never a poll loop — a tight loop over the GitHub API trips
+          # its secondary rate limit for the whole machine.
+          for wait in 120 150 180 240; do
               sleep "$wait"
-              if bash tools/scripts/codex_review_signal.sh "$REPO" "$PR"; then
-                  echo "Codex review confirmed on #$PR."
-                  exit 0
+              set +e
+              bash tools/scripts/codex_review_signal.sh "$REPO" "$PR" "$HEAD_SHA"
+              signal=$?
+              set -e
+              [ "$signal" -eq 0 ] && exit 0
+              if [ "$signal" -eq 2 ]; then
+                  echo "::error::Lost visibility of review state for #$PR; whether it" \
+                       "was reviewed is unknown rather than known-bad."
+                  exit 1
               fi
-              echo "No Codex signal yet on #$PR."
           done
 
-          echo "::error::Requested a Codex review on #$PR as" \
-               "${{ steps.request.outputs.identity }} but Codex did not respond" \
-               "within 3 minutes. This PR is unreviewed. If the identity above is" \
-               "GITHUB_TOKEN, set the RELEASE_BOT_TOKEN secret; if it is already a" \
-               "user PAT, the Codex integration itself is not responding."
+          echo "::error::Requested a Codex review on #$PR but none completed for" \
+               "$HEAD_SHA within ten minutes, so this PR is unreviewed. The last line" \
+               "above distinguishes a request that stalled from one never taken."
           exit 1

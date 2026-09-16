@@ -932,21 +932,24 @@ Codex states the trigger in its own summary comment: the "Review trigger" cell
 reads `PR opened` on a User-authored PR and `Manual request` on an App-authored
 one. That cell is the fastest way to tell which kind of review a PR received.
 
-`.github/workflows/codex-review-request.yml` closes this by posting `@codex
-review` on App-authored PRs as `RELEASE_BOT_TOKEN` (a real user PAT, the
-identity known to work), then verifying a review actually started and failing
-when none did. The skip itself is Codex-side and cannot be fixed from this
-repository — only requested around.
+**Asking works, including from a bot.** A `@codex review` comment gets a real
+review on an App-authored PR whatever identity posts it. Codex answers a bot
+commenter with "create a Codex account", which reads like a refusal and is not —
+the review still runs.  `.github/workflows/codex-review-request.yml` automates
+that ask and then verifies a review completed for the PR's head commit. If a PR
+slipped past it, comment `@codex review` yourself.
 
-**Do not read "no Codex comment" as "no findings".** A clean review leaves a
-THUMBS_UP reaction on the PR and no prose at all, so comments alone cannot
-separate *reviewed clean* from *never reviewed* — the same absence-is-ambiguous
-trap as a green ctest that never ran. `tools/scripts/codex_review_signal.sh`
-accepts either signal and exits 2 (not 1) when the API is unreachable, so an
-outage cannot masquerade as an unreviewed PR.
+**Do not read a summary comment as "reviewed", and do not read "no comment" as
+"no findings".** The summary comment and an EYES reaction appear the moment a
+review is requested, so they prove only that something was asked; a clean review
+leaves a THUMBS_UP and no prose at all. `tools/scripts/codex_review_signal.sh`
+requires `**Completed**` bound to the current head, separates completed from
+requested-but-unfinished from never-asked, and exits 2 (not 1) when the API is
+unreachable, so an outage cannot masquerade as an unreviewed PR.
 
-If you want a review on a PR the workflow did not cover, comment `@codex review`
-on it yourself; that manual path works on App-authored PRs and always has.
+**A completed review is per-commit.** A review of an earlier push says nothing
+about the code now on the branch, which is why the check binds to the head SHA
+rather than accepting any historical signal on the PR.
 
 ## Pre-flight: plugin ↔ CLI skew check
 

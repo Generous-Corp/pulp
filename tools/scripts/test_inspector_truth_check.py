@@ -282,6 +282,29 @@ class UndocumentedRealityTests(unittest.TestCase):
         )
         self.assertFalse(any("state.read" in error for error in errors), errors)
 
+    def test_rejects_an_emptied_reality_cell(self) -> None:
+        # Deleting the placeholder documents nothing, and every other rule in
+        # the file still accepts the row, so emptiness has to be rejected here
+        # or it becomes the way around this gate.
+        doc = CAPABILITY_DOC.replace("Grant-controlled single event", "")
+        errors = inspector_truth_check.undocumented_reality_errors(
+            self.definitions, doc
+        )
+        self.assertTrue(
+            any("current reality of `ui.input` undocumented" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_a_whitespace_only_reality_cell(self) -> None:
+        doc = CAPABILITY_DOC.replace("Grant-controlled single event", "   ")
+        errors = inspector_truth_check.undocumented_reality_errors(
+            self.definitions, doc
+        )
+        self.assertTrue(
+            any("current reality of `ui.input` undocumented" in error for error in errors),
+            errors,
+        )
+
     def test_check_root_runs_the_undocumented_reality_gate(self) -> None:
         root = pathlib.Path(inspector_truth_check.__file__).resolve().parents[2]
         sentinel = "undocumented reality gate reached"

@@ -581,7 +581,9 @@ def undocumented_reality_errors(
 
     `--write` fills a capability it has no prose for with a placeholder, so the
     check has to reject that placeholder; otherwise a newly registered
-    capability ships documented only by the generator's own filler.
+    capability ships documented only by the generator's own filler. An empty
+    cell is rejected on the same grounds: deleting the placeholder documents
+    nothing, and every other rule here still passes such a row.
     """
     errors: list[str] = []
     reality = {
@@ -589,7 +591,10 @@ def undocumented_reality_errors(
         for capability_id, _, _, prose in CAPABILITY_ROW_RE.findall(capability_doc)
     }
     for definition in definitions:
-        if reality.get(definition.legacy_id) != UNDOCUMENTED_REALITY:
+        prose = reality.get(definition.legacy_id)
+        if prose is None:
+            continue
+        if prose.strip() and prose != UNDOCUMENTED_REALITY:
             continue
         errors.append(
             "development inspector docs leave the current reality of "
