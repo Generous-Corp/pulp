@@ -10,7 +10,7 @@ using namespace pulp::gpu_audio::detail;
 
 namespace {
 class FakeProvider final : public SharedIoArenaProvider {
-    struct Slot { std::byte* input; std::byte* output; };
+    struct Slot { std::byte* input; std::byte* output; std::uint64_t generation = 1; bool retired = false; };
   public:
     bool create_slot(std::uint32_t, std::size_t in, std::size_t out,
                      SlotResources& resources) noexcept override {
@@ -23,23 +23,52 @@ class FakeProvider final : public SharedIoArenaProvider {
         resources.input = slot->input; resources.input_size = in;
         resources.output = slot->output; resources.output_size = out;
         resources.opaque = slot;
+        slots_.push_back(slot);
         resources.input_lifecycle = {.allocated=true, .import_attempted=true,
                                      .import_succeeded=true};
         resources.output_lifecycle = resources.input_lifecycle;
         return true;
     }
     void retire_slot(SlotResources& resources) noexcept override {
+        auto* slot = static_cast<Slot*>(resources.opaque);
+        if (slot) { slot->retired = true; ++slot->generation; }
         resources.input_lifecycle.dispose_observed = true;
         resources.output_lifecycle.dispose_observed = true;
     }
     void destroy_slot(SlotResources& resources) noexcept override {
         auto* slot = static_cast<Slot*>(resources.opaque);
         if (!slot) return;
-        delete[] slot->input; delete[] slot->output; delete slot;
+        delete[] slot->input; delete[] slot->output;
+        std::erase(slots_, slot);
+        delete slot;
         resources.input_lifecycle.host_freed = true;
         resources.output_lifecycle.host_freed = true;
         resources.opaque = nullptr;
     }
+    bool acquire_slot_buffers(const SlotResources& resources,
+                              SlotBufferHandle& handle) const noexcept override {
+        auto* slot = static_cast<Slot*>(resources.opaque);
+        if (!slot || slot->retired) return false;
+        handle = {};
+        handle.provider = this;
+        handle.device = this;
+        handle.input_buffer = slot->input;
+        handle.output_buffer = slot->output;
+        handle.slot = 0;
+        handle.generation = slot->generation;
+        handle.lifetime = lifetime_;
+        return true;
+    }
+    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override {
+        if (handle.provider != this || handle.device != this || handle.lifetime.expired()) return false;
+        for (const auto* slot : slots_) {
+            if (!slot->retired && handle.input_buffer == slot->input &&
+                handle.output_buffer == slot->output && handle.generation == slot->generation)
+                return true;
+        }
+        return false;
+    }
+
     bool submit(const SlotResources& resources, SlotToken token,
                 std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept override {
         auto* slot = static_cast<Slot*>(resources.opaque);
@@ -53,6 +82,8 @@ class FakeProvider final : public SharedIoArenaProvider {
     }
     void poll() noexcept override {}
     bool drain() noexcept override { return true; }
+    std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
+    std::vector<Slot*> slots_;
 };
 } // namespace
 
@@ -122,4 +153,31 @@ TEST_CASE("shared IO compute plan exposes retired output and cancels refused lea
     REQUIRE(next);
     REQUIRE(plan.cancel({next->token, 0}));
     REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO slot buffer capabilities expire at retirement",
+          "[gpu_audio][shared_io][p2]") {
+    FakeProvider provider;
+    SharedIoArenaProvider::SlotResources resources;
+    REQUIRE(provider.create_slot(0, 16, 16, resources));
+    SharedIoArenaProvider::SlotBufferHandle handle;
+    REQUIRE(provider.acquire_slot_buffers(resources, handle));
+    REQUIRE(provider.validate_slot_buffers(handle));
+    provider.retire_slot(resources);
+    CHECK_FALSE(provider.validate_slot_buffers(handle));
+    provider.destroy_slot(resources);
+    CHECK_FALSE(provider.validate_slot_buffers(handle));
+}
+
+TEST_CASE("shared IO slot buffer capability lifetime expires with provider",
+          "[gpu_audio][shared_io][p2]") {
+    SharedIoArenaProvider::SlotBufferHandle handle;
+    {
+        FakeProvider provider;
+        SharedIoArenaProvider::SlotResources resources;
+        REQUIRE(provider.create_slot(0, 16, 16, resources));
+        REQUIRE(provider.acquire_slot_buffers(resources, handle));
+        CHECK(handle.has_lifetime());
+    }
+    CHECK_FALSE(handle.has_lifetime());
 }

@@ -119,6 +119,21 @@ class SharedIoArenaProvider {
         bool host_freed = false;
     };
 
+    // Non-owning capability for a provider-owned slot buffer pair. The weak
+    // lifetime token expires when the provider is destroyed; generation is
+    // invalidated at slot retirement. Consumers must validate before encoding.
+    struct SlotBufferHandle {
+        const void* provider = nullptr;
+        const void* device = nullptr;
+        const void* input_buffer = nullptr;
+        const void* output_buffer = nullptr;
+        std::uint32_t slot = 0;
+        std::uint64_t generation = 0;
+        std::weak_ptr<const void> lifetime;
+
+        bool has_lifetime() const noexcept { return !lifetime.expired(); }
+    };
+
     struct SlotResources {
         std::byte* input = nullptr;
         std::size_t input_size = 0;
@@ -143,6 +158,14 @@ class SharedIoArenaProvider {
                              SlotResources& resources) noexcept = 0;
     virtual void retire_slot(SlotResources& resources) noexcept = 0;
     virtual void destroy_slot(SlotResources& resources) noexcept = 0;
+
+    // Optional private Dawn interop capability. The default keeps test and
+    // non-Dawn providers source-compatible; only a provider that owns the
+    // device and imported buffers may issue a valid capability.
+    virtual bool acquire_slot_buffers(const SlotResources&, SlotBufferHandle&) const noexcept {
+        return false;
+    }
+    virtual bool validate_slot_buffers(const SlotBufferHandle&) const noexcept { return false; }
 
     // Accepted work completes exactly once through the independently retained
     // inbox. Rejection must not push. A provider must correlate the token with
