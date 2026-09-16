@@ -82,6 +82,9 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
                      SlotResources& resources) noexcept override;
     void retire_slot(SlotResources& resources) noexcept override;
     void destroy_slot(SlotResources& resources) noexcept override;
+    bool acquire_slot_buffers(const SlotResources& resources,
+                              SlotBufferHandle& handle) const noexcept override;
+    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override;
     bool submit(const SlotResources& resources, SlotToken token,
                 std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept override;
     void poll() noexcept override;

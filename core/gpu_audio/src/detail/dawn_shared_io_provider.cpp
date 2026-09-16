@@ -227,6 +227,7 @@ struct DawnSharedIoProvider::Impl {
         wgpu::Buffer output_buffer;
         bool input_disposal_expected = false;
         bool output_disposal_expected = false;
+        std::uint64_t handle_generation = 1;
         wgpu::BindGroup bind_group;
         Submission submission;
         bool retired = false;
@@ -521,6 +522,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     bool refusal_consumed = false;
     Stats stats;
     AdapterIdentity adapter_identity;
+    std::shared_ptr<const void> lifetime = std::make_shared<int>(0);
 };
 
 DawnSharedIoProvider::DawnSharedIoProvider(std::unique_ptr<Impl> impl) noexcept
@@ -725,6 +727,7 @@ void DawnSharedIoProvider::retire_slot(SlotResources& resources) noexcept {
     if (!slot || slot->retired)
         return;
     slot->retired = true;
+    ++slot->handle_generation;
     slot->bind_group = nullptr;
     if (slot->input_buffer) {
         slot->input_buffer.Destroy();
@@ -765,6 +768,37 @@ void DawnSharedIoProvider::destroy_slot(SlotResources& resources) noexcept {
     resources = {};
     if (impl_->slots.empty() && impl_->reusable && !impl_->device_destroyed)
         impl_->accepting = true;
+}
+
+bool DawnSharedIoProvider::acquire_slot_buffers(const SlotResources& resources,
+                                                  SlotBufferHandle& handle) const noexcept {
+    auto* slot = static_cast<Impl::Slot*>(resources.opaque);
+    if (!impl_ || !slot || slot->retired || !slot->input_buffer || !slot->output_buffer ||
+        resources.opaque != slot || resources.input == nullptr || resources.output == nullptr)
+        return false;
+    handle = {};
+    handle.provider = this;
+    handle.device = &impl_->device;
+    handle.input_buffer = &slot->input_buffer;
+    handle.output_buffer = &slot->output_buffer;
+    handle.slot = slot->index;
+    handle.generation = slot->handle_generation;
+    handle.lifetime = impl_->lifetime;
+    return true;
+}
+
+bool DawnSharedIoProvider::validate_slot_buffers(const SlotBufferHandle& handle) const noexcept {
+    if (!impl_ || handle.provider != this || handle.device != &impl_->device ||
+        handle.lifetime.expired() || handle.lifetime.lock() != impl_->lifetime)
+        return false;
+    for (const auto* slot : impl_->slots) {
+        if (slot->index == handle.slot && !slot->retired &&
+            handle.input_buffer == &slot->input_buffer &&
+            handle.output_buffer == &slot->output_buffer &&
+            handle.generation == slot->handle_generation)
+            return true;
+    }
+    return false;
 }
 
 bool DawnSharedIoProvider::submit(const SlotResources& resources, SlotToken token,
