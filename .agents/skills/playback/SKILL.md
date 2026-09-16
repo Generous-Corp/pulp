@@ -69,10 +69,26 @@ agrees only where source frames and timeline frames happen to advance together,
 which is exactly the case a real conform is not. A zero `phase_end` means the
 media reference's own end, so an untrimmed leaf lowers to the program it always
 did.
-`Stretch` still refuses with `NestedConformedTrimUnsupported`, and the range
-does not help it: its audio is a rendered artifact keyed to the clip's own
-authored tick range, so a trimmed window needs a separately windowed artifact
-rather than a different read of the same one.
+`Stretch` is lowered too, and the range is not what does it. Its audio is a
+rendered artifact keyed to an authored tick range, so the artifact stays keyed
+to that range — `LoweredClip::authored_window_start` and `authored_duration`,
+the pair a trim already recorded for generated content, say where the range is —
+and the leaf reads the frame span of the render that belongs to its window, as
+`AudioClipRendererProgram::source_start` plus `source_frame_count` over an
+artifact longer than the clip. `offline_stretch_artifact_window` in
+`audio_renderer_internal.hpp` is the one place that arithmetic lives, and both
+the artifact compiler and the program compiler go through it. Two consequences
+worth knowing: a trimmed leaf and its untrimmed twin produce the same artifact
+key, so they share one cached render and the trimmed leaf is bit-identical to
+the untrimmed one over the same ticks; and the authored range can begin before
+tick zero when a placement sits earlier than the offset it reads, which the
+tempo map extrapolates and no document clip can express.
+A stretched leaf keeps its whole media reference — narrowing it would change
+what gets stretched rather than which part of the result is heard — so the
+lowerer's elapsed-samples rebase is scoped to `TimeConform::None`. Anything
+reading an artifact directly must offset by `source_start`: the realtime
+stretch lane's `artifact_sample` does, and reading from frame zero there is
+silently the wrong audio rather than an error.
 
 Each nested refusal names one cause. A child device chain raises
 `NestedDeviceChainUnsupported`, and an absolute-anchored leaf inside a nested
@@ -1577,22 +1593,56 @@ Three things about the enumeration are worth knowing before you edit it:
   entry here, a modulated fader under a sealed artifact would be silently
   permitted.
 - **The artifact's sample rate is in the list and is not a transformation the
-  owner applies.** An unnested freeze compiles through
-  `compile_track_freeze_program`, which takes the artifact's projected timeline
-  span as its renderable length; a lowered leaf compiles through the generic
-  absolute-clip path, which takes the source length scaled and rounded up.
-  Those agree only when no rate conversion happens. Do not delete the check as
-  redundant with the freeze compiler's own rate validation — that validation
-  runs on a path the lowered leaf never takes.
+  owner applies.** An unnested artifact compiles through
+  `compile_track_freeze_program` or `compile_take_comp_segment_program`, both of
+  which take the projected timeline span as the renderable length; a lowered
+  leaf compiles through the generic absolute-clip path, which takes the source
+  length scaled and rounded up. Those agree only when no rate conversion
+  happens. Do not delete the check as redundant with either compiler's own rate
+  validation — that validation runs on a path the lowered leaf never takes.
 - **Some entries are unreachable backstops.** A `SequenceRef` clip cannot carry
   a conform or an absolute anchor (`Clip::create` and `create_absolute` reject
   both), so no refusal test can exercise those entries and none pretends to.
 
-`NestedActiveTakeUnsupported` is unchanged and still refuses unconditionally.
-A comp is the same root cause — a track-scoped sealed artifact anchored in
-absolute samples — but a different payload: N segments each needing take
-resolution, which today exists only inside
-`compile_take_comp_segment_program`. One construct, two payloads.
+### An active take comp nests by the same predicate, N leaves instead of one
+
+`NestedActiveTakeUnsupported` is narrowed by the *same* `nesting_is_transparent`
+call — one construct, two payloads, and the eighteen nesting observations are
+the same eighteen questions for both. What differs is what gets emitted and
+what `ArtifactRate` has to look at.
+
+`SealedArtifact` is how the predicate carries the difference: exactly one of
+`freeze` / `active_take` is set, and neither being set returns *imposed*, in the
+same fail-closed direction as the switch's trailing `return true`. For a comp,
+`artifact_rate_differs` asks the question once **per take a segment draws from**
+— not per take in the lane, because a lane may hold takes the comp never
+selects and a rate those carry is not a rate anything would convert.
+
+`emit_sealed_active_take` is the payload. Per comp segment: resolve the take the
+segment names, read the source offset as the distance from that take's
+`placement_start` to the segment's `range.start`, and emit an absolute leaf over
+`MediaRef{take.media.asset_id, take.media.source_start + offset,
+segment.range.sample_count}` at `segment.range.start`. That is the arithmetic
+`compile_take_comp_segment_program` performs, re-derived on the document side
+rather than shared, because the two build different things — a document clip
+and a renderer program — and what they owe each other is the rendered samples.
+A test asserts that identity; no comment should be trusted to.
+
+Two consequences worth knowing:
+
+- **An empty comp is transparent and lowers to nothing.** That is correct, not
+  a hole: `begin_track` renders an empty comp as no clips too, so the nested and
+  unnested documents agree on silence.
+- **The `TakeCompSegment` ordinal collision is out of reach from this lane.**
+  `link_audio_track_program` identifies a comp-segment program by a bare ordinal
+  (`segment_index + 1`), so two copies of one comp on one track collide. A
+  *lowered* comp never produces that program kind — it produces `ArrangementClip`
+  leaves carrying generated document identities — and the pair that would have
+  collided cannot be authored anyway: transparency pins a placement to its
+  child's origin, so a second transparent placement on the same track would have
+  to overlap the first, and `Track::create` rejects the overlap. A second
+  placement on a *different* track compiles and sounds its own copy, which is
+  what a placement means for ordinary child content too.
 
 `record_armed()` and the bare `take_lanes()` list are read by **neither** path,
 and refusing them rejected documents that already compiled correctly. Three

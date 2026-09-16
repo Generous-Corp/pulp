@@ -32,7 +32,8 @@ class OfflineStretchProgramCompiler {
          const AudioRendererLimits& limits, double source_frame_offset,
          const std::vector<LoweredPlacementFade>& placement_fades, std::uint64_t document_revision,
          std::uint64_t program_generation, OfflineStretchArtifactCache& artifact_cache,
-         AudioSampleRateConverterCache& converter_cache) noexcept;
+         AudioSampleRateConverterCache& converter_cache, std::int64_t authored_window_start,
+         timebase::TickDuration authored_duration) noexcept;
 
     OfflineStretchProgramCompileError error() const noexcept {
         return error_;
@@ -45,6 +46,11 @@ class OfflineStretchProgramCompiler {
                                             OfflineStretchErrorCode offline) noexcept;
 
     OfflineStretchCompileJob job_;
+    // The clip the artifact is keyed to. Equal to the lowered leaf unless a
+    // nesting trimmed it, in which case the leaf is a window onto this one and
+    // the stretch is still rendered across the whole of it.
+    std::optional<timeline::Clip> authored_;
+    std::optional<OfflineStretchArtifactWindow> window_;
     std::shared_ptr<const OfflineStretchArtifact> artifact_;
     std::optional<AudioClipRendererProgram> program_;
     OfflineStretchProgramCompileError error_;

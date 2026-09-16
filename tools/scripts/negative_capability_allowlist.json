@@ -30,13 +30,6 @@
       "reason": "pulp.timeline.command.insert_automation_lane authors a lane targeting TrackMixerParameter::Gain on a nested child track, and the flattened leaf the curve reaches does consume clip gain: a MediaRef or EmptyContent leaf already reads ClipPlaybackProperties::gain_linear, so the destination exists but is a single scalar, and writing a moving value there would freeze it at one point. This is a real gap: the document is authorable today and will not play, and the refusal is a placeholder for work that has not happened rather than a decision that nesting should decline it. Of the three automation refusals it is the one closest to closable, because the sink is the only part missing. The missing primitive is a per-clip automation envelope: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into. Its arrival is the checkable condition, and it closes this refusal on its own."
     },
     {
-      "code": "NestedConformedTrimUnsupported",
-      "file": "core/playback/src/sequence_content_lowerer.cpp",
-      "owner": "playback",
-      "status": "live-defect",
-      "reason": "A SequenceRef source window trims a nested MediaRef leaf whose time_conform is Stretch. A stretched clip's audio is a rendered artifact keyed to the clip's own authored tick range, and a trimmed window is not that range, so a partial view needs a separately windowed artifact rather than a different read of the same one; that artifact is the checkable condition. Resample no longer refuses: the retained window maps onto the matching sub-span of the source under the same conform function, and the lowerer emits that sub-span as a source range beside the clip. A complete, untrimmed nested stretched clip already lowers correctly, so the refusal is scoped to a cut source window rather than to stretched content."
-    },
-    {
       "code": "NestedAbsoluteChildUnsupported",
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
@@ -76,7 +69,7 @@
       "file": "core/playback/src/sequence_content_lowerer.cpp",
       "owner": "playback",
       "status": "live-defect",
-      "reason": "set_active_take_lane selects a comp lane on a track a SequenceRef then nests. Selection is the same substitution freeze performs: begin_track returns ActiveTake content built from the lane's comp segments and discards the arrangement. The nested walk reads the arrangement, so honouring the nesting would sound exactly the material the author deselected. The refusal is scoped to a SELECTED lane; an unselected lane is inert at both levels and does not refuse. Flip this when a flattened leaf can carry comped take segments, the same missing construct freeze needs."
+      "reason": "set_active_take_lane selects a comp lane on a track a SequenceRef then nests. The comp is a sequence of windows anchored in absolute samples, so it cannot follow a nesting that moves or cuts its child in ticks: the nested walk descends into the child's clips and would sound exactly the material the author deselected. Where the nesting provably transforms nothing - no tick offset, no trimmed window, no gain, fade, fader, pan, modulation, tuning, groove, dynamics or chord lane, and no sample-rate conversion - each segment is already in the right place and lowers as one absolute MediaRef leaf over that take window, rendering bit-identically to the same comp unnested. Everywhere else the refusal stands and names the track. The refusal is scoped to a SELECTED lane; an unselected lane is inert at both levels and does not refuse. Flip this to intended, or retire it, when a sealed comp can be re-anchored into an owner's context and its segment windows revalidated against the nested tempo context; that re-anchoring is the checkable condition."
     },
     {
       "code": "UnsupportedDevicePosition",
