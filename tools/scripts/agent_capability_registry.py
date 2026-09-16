@@ -102,6 +102,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/supersaw.hpp": "Pulp::signal",
     "pulp/signal/true_peak_limiter.hpp": "Pulp::signal",
     "pulp/signal/transient_designer.hpp": "Pulp::signal",
+    "pulp/signal/unit_delay.hpp": "Pulp::signal",
     "pulp/signal/unison.hpp": "Pulp::signal",
     "pulp/signal/velvet_noise.hpp": "Pulp::signal",
     "pulp/signal/wavetable.hpp": "Pulp::signal",
@@ -141,6 +142,18 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/unit_delay.hpp",
+        "fingerprint": "sha256:7e91b280e5a3a83b78ed1f84301990eee1b6dcaa8b7736f07287452896d22726",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Exact one-sample state primitive for ordinary Processor composition and the "
+            "sample-region causal cut. The complete sample-region capability is published "
+            "only after its graph authoring, runtime, persistence, and control surfaces land; "
+            "this helper makes no standalone generator capability claim."
+        ),
+    },
     {
         "include": "pulp/signal/character_delay/reverse.hpp",
         "fingerprint": "sha256:8ffe9c4341a734e18aeae9900554cb042acfc3dd0982b243cde8705067140c91",
