@@ -957,6 +957,7 @@ def main() -> int:
             "owned_paths": [
                 "docs/status/gpu-vellum-handoff.yaml",
                 "docs/validation/gpu-handoff-provenance/receipt.json",
+                "tools/agent-capabilities/contract-history.json",
                 "inspect/src/control_generated_sibling.cpp",
             ],
         })
@@ -964,6 +965,7 @@ def main() -> int:
         for regenerated_path in (
             "docs/status/gpu-vellum-handoff.yaml",
             "docs/validation/gpu-handoff-provenance/receipt.json",
+            "tools/agent-capabilities/contract-history.json",
         ):
             transition_errors = validate_transition(
                 generated_base, generated_base, [regenerated_path]

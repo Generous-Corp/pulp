@@ -102,6 +102,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/supersaw.hpp": "Pulp::signal",
     "pulp/signal/true_peak_limiter.hpp": "Pulp::signal",
     "pulp/signal/transient_designer.hpp": "Pulp::signal",
+    "pulp/signal/unit_delay.hpp": "Pulp::signal",
     "pulp/signal/unison.hpp": "Pulp::signal",
     "pulp/signal/velvet_noise.hpp": "Pulp::signal",
     "pulp/signal/wavetable.hpp": "Pulp::signal",
@@ -141,6 +142,18 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
+    {
+        "include": "pulp/signal/unit_delay.hpp",
+        "fingerprint": "sha256:7e91b280e5a3a83b78ed1f84301990eee1b6dcaa8b7736f07287452896d22726",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Exact one-sample state primitive for ordinary Processor composition and the "
+            "sample-region causal cut. The complete sample-region capability is published "
+            "only after its graph authoring, runtime, persistence, and control surfaces land; "
+            "this helper makes no standalone generator capability claim."
+        ),
+    },
     {
         "include": "pulp/signal/character_delay/reverse.hpp",
         "fingerprint": "sha256:8ffe9c4341a734e18aeae9900554cb042acfc3dd0982b243cde8705067140c91",
@@ -1080,6 +1093,32 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "aliased identity. It is the playback engine's own control object; its "
             "agent-facing exposure is claimed by the capability rows that bind a "
             "transport surface, not by this header."
+        ),
+    },
+    {
+        "include": "pulp/signal/convolver.hpp",
+        "fingerprint": "sha256:7b6f5cc6d4bd8a3c71c07149958db256d08aa0f264544df0abfa07eb3a4b5825",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Uniform partitioned convolution engine with a lock-free live IR swap and an "
+            "opt-in swap crossfade. docs/reference/modules.md documents it as a bounded DSP "
+            "primitive a plugin drives from its own process() at a fixed block size, and its "
+            "generator-facing shape is already published through the signal compatibility "
+            "vocabulary, so it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/convolver_messages.hpp",
+        "fingerprint": "sha256:2d4d3361cfa9099d4cd549fc250de196c1053c9c5448fa15b540089433e74e29",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Audio-thread hand-off plumbing behind PartitionedConvolver: the per-IR state, "
+            "the convolver's shared input history, and the lock-free swapper that shuttles "
+            "them between a worker thread and the audio thread over runtime::Handoff. "
+            "Real-time ownership-transfer infrastructure for that engine rather than an "
+            "advertised generator surface; it carries no capability claim of its own."
         ),
     },
 ]

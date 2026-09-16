@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 73,
+  "inventory_version": 75,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,15 +42,15 @@
     }
   ],
   "counts": {
-    "public_headers": 487,
-    "reviewed_headers": 195,
-    "legacy_unreviewed_headers": 292,
+    "public_headers": 488,
+    "reviewed_headers": 198,
+    "legacy_unreviewed_headers": 290,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 108,
       "capability_support": 44,
-      "infrastructure": 41,
-      "legacy_unreviewed": 292,
+      "infrastructure": 44,
+      "legacy_unreviewed": 290,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -85,9 +85,9 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 265,
-        "reviewed_headers": 110,
-        "legacy_unreviewed_headers": 155,
+        "public_headers": 266,
+        "reviewed_headers": 113,
+        "legacy_unreviewed_headers": 153,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -2438,20 +2438,20 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/convolver.hpp",
-      "fingerprint": "sha256:7426a15cbae4c4ef930bc290d94b60378af9a95786b5be52b030288567bb0aed",
+      "fingerprint": "sha256:7b6f5cc6d4bd8a3c71c07149958db256d08aa0f264544df0abfa07eb3a4b5825",
       "include": "pulp/signal/convolver.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Uniform partitioned convolution engine with a lock-free live IR swap and an opt-in swap crossfade. docs/reference/modules.md documents it as a bounded DSP primitive a plugin drives from its own process() at a fixed block size, and its generator-facing shape is already published through the signal compatibility vocabulary, so it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/convolver_messages.hpp",
-      "fingerprint": "sha256:273c4296f0311011f7ea920d1ceac2b11d4e9964bdfaa8699bd8f8f9a761d91b",
+      "fingerprint": "sha256:2d4d3361cfa9099d4cd549fc250de196c1053c9c5448fa15b540089433e74e29",
       "include": "pulp/signal/convolver_messages.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Audio-thread hand-off plumbing behind PartitionedConvolver: the per-IR state, the convolver's shared input history, and the lock-free swapper that shuttles them between a worker thread and the audio thread over runtime::Handoff. Real-time ownership-transfer infrastructure for that engine rather than an advertised generator surface; it carries no capability claim of its own."
     },
     {
       "domain": "signal",
@@ -4515,6 +4515,15 @@
         "signal.unison-voice-primitives"
       ],
       "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/unit_delay.hpp",
+      "fingerprint": "sha256:7e91b280e5a3a83b78ed1f84301990eee1b6dcaa8b7736f07287452896d22726",
+      "include": "pulp/signal/unit_delay.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Exact one-sample state primitive for ordinary Processor composition and the sample-region causal cut. The complete sample-region capability is published only after its graph authoring, runtime, persistence, and control surfaces land; this helper makes no standalone generator capability claim."
     },
     {
       "domain": "signal",
