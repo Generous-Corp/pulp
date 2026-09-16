@@ -47,6 +47,13 @@ LEDGERS = (
 # describing bytes that no longer exist -- green here, red in CI.
 REPAIR = "python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt"
 VERIFY = "python3 tools/scripts/gpu_handoff_provenance.py check"
+RESOLVE = "python3 tools/scripts/gpu_handoff_provenance.py resolve"
+
+# .gitattributes routes both ledgers here by name. Git resolves that name
+# against local config only, so the attribute is present in every clone while
+# the driver behind it is present in none until a bootstrap registers it.
+DRIVER_ATTRIBUTE = "pulp-gpu-ledger"
+INSTALLER = "tools/scripts/install-githooks.sh"
 
 
 def read_revision(root: Path, rev: str, relative: Path) -> str | None:
@@ -89,6 +96,72 @@ def sentinel_files(root: Path, rev: str | None = None) -> list[Path]:
     return found
 
 
+def declared_driver_paths(root: Path) -> list[str]:
+    """Paths .gitattributes routes to the driver, read from the file itself.
+
+    Read rather than assumed: a check that hardcodes the routed paths keeps
+    passing after somebody removes the attribute, which is the state it exists
+    to notice.
+    """
+
+    try:
+        text = (root / ".gitattributes").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    marker = f"merge={DRIVER_ATTRIBUTE}"
+    return [
+        line.split()[0]
+        for line in text.splitlines()
+        if marker in line and not line.lstrip().startswith("#") and line.split()
+    ]
+
+
+def driver_is_registered(root: Path) -> bool:
+    """Whether Git in this checkout can resolve the name .gitattributes uses."""
+
+    completed = subprocess.run(
+        ["git", "-C", str(root), "config", "--get", f"merge.{DRIVER_ATTRIBUTE}.driver"],
+        capture_output=True, text=True, check=False,
+    )
+    return completed.returncode == 0 and bool(completed.stdout.strip())
+
+
+def report_unregistered_driver(root: Path, routed: list[str]) -> None:
+    """Say that the repo's own merge automation is not installed here."""
+
+    print("", file=sys.stderr)
+    print(
+        "gpu-ledger-sentinel: .gitattributes routes these files to the "
+        f"{DRIVER_ATTRIBUTE!r} merge driver, but this checkout has no driver "
+        "registered under that name:",
+        file=sys.stderr,
+    )
+    for path in routed:
+        print(f"    {path}", file=sys.stderr)
+    print(
+        "  Git does not error on a name it cannot resolve. It falls back to the",
+        file=sys.stderr,
+    )
+    print(
+        "  ordinary text merge, in silence — so the generated-ledger collision",
+        file=sys.stderr,
+    )
+    print(
+        "  comes back conflicted on every sweep, and the automation that was",
+        file=sys.stderr,
+    )
+    print(
+        "  supposed to end it looks installed because the attribute is there.",
+        file=sys.stderr,
+    )
+    print(
+        "  A checkout bootstrapped before the driver landed is the usual cause.",
+        file=sys.stderr,
+    )
+    print(f"  Repair:  {INSTALLER}", file=sys.stderr)
+    print(f"  Then:    {RESOLVE}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -97,11 +170,29 @@ def main(argv: list[str] | None = None) -> int:
         help="read the ledgers from this revision instead of the working tree",
     )
     parser.add_argument("--mode", choices=("report", "hint"), default="report")
+    parser.add_argument(
+        "--skip-registration",
+        action="store_true",
+        help="scan only for the sentinel; do not check the local driver registration",
+    )
     args = parser.parse_args(argv)
 
-    hits = sentinel_files(Path(args.root).resolve(), args.rev)
+    root = Path(args.root).resolve()
+
+    # Two independent claims about the same mechanism, and each is invisible to
+    # the other's evidence. A sentinel says the driver ran and nobody
+    # regenerated; an unregistered driver says it never ran at all, and that one
+    # produces no sentinel to find.
+    failed = False
+    if not args.skip_registration:
+        routed = declared_driver_paths(root)
+        if routed and not driver_is_registered(root):
+            report_unregistered_driver(root, routed)
+            failed = args.mode != "hint"
+
+    hits = sentinel_files(root, args.rev)
     if not hits:
-        return 0
+        return 1 if failed else 0
 
     where = "in the commit being pushed" if args.rev else "in the working tree"
     print("", file=sys.stderr)
