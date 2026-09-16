@@ -477,6 +477,11 @@ pulp_add_test_suite(pulp-test-gpu-shared-io-arena-link
     LIBRARIES pulp::gpu-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+pulp_add_test_suite(pulp-test-gpu-shared-io-compute-plan
+    SOURCES test_gpu_shared_io_compute_plan.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Flow pans: pure per-room constant-power pan math + GpuMultiConvolver::set_flow
 # (an atomic store). GPU-agnostic, so it runs — and keeps the flow math covered —
 # in the no-GPU coverage build too.
