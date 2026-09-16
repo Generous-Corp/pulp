@@ -73,6 +73,35 @@ make_repo() {
     echo "$d"
 }
 
+# A PATH containing exactly the tools format_changed.sh shells out to, and
+# provably NOT clang-format. `PATH=/usr/bin:/bin` is an ASSUMPTION about the
+# host, not a construction: /usr/bin/clang-format is absent on macOS and present
+# (v18) on Ubuntu, so the "no binary" cases below silently stopped testing
+# absence on Linux while staying green on the macOS gate. Build the directory
+# instead, then prove it is clang-format-free before asserting anything about
+# what happens when none is found.
+make_sandbox_path() {
+    local dir="$1" t src
+    mkdir -p "$dir"
+    for t in cat diff git grep head printf sed sort; do
+        src="$(command -v "$t" 2>/dev/null)" || continue
+        [ -n "$src" ] && ln -sf "$src" "$dir/$t"
+    done
+    echo "$dir"
+}
+
+# The control for every "no clang-format" assertion. If this fails, the cases
+# below are measuring a host that HAS a binary, and their verdicts mean nothing.
+expect_sandbox_is_bare() { # <name> <sandbox-bin-dir>
+    local found
+    found="$(PATH="$2" command -v clang-format 2>/dev/null || true)"
+    if [ -z "$found" ]; then
+        ok "$1"
+    else
+        bad "$1" "sandbox PATH still resolves clang-format at $found — the absence was never created"
+    fi
+}
+
 # run <repo> <fake-dir> [args...]  → stdout+stderr in $out, exit in $rc
 run() {
     local repo="$1" fake="$2"; shift 2
@@ -98,7 +127,9 @@ echo "format_changed.sh self-tests"
 
 # ── no binary anywhere → exit 3 with install guidance ───────────────────────
 repo="$(make_repo)"
-out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="" PULP_CLANG_FORMAT_CANDIDATES="" \
+sandbox="$(make_sandbox_path "$repo/sandbox-bin")"
+expect_sandbox_is_bare "no-clang-format control: the sandbox PATH really has none" "$sandbox"
+out="$(cd "$repo" && PATH="$sandbox" PULP_CLANG_FORMAT="" PULP_CLANG_FORMAT_CANDIDATES="" \
     /bin/bash "$SCRIPT" --base main 2>&1)"; rc=$?
 expect_rc "no clang-format → exit 3" 3
 expect_out "no clang-format → names the pinned major" "pinned major 21"
@@ -173,13 +204,33 @@ expect_rc "external/ + .md + .py changes → nothing to format" 0
 expect_out "external/ + .md + .py changes → says so" "nothing to format"
 rm -rf "$repo"
 
-# ── another major warns but still runs ──────────────────────────────────────
+# ── another major: refused under --check, allowed for a local rewrite ───────
+# A binary of the wrong major reflows differently, so under --check its answer
+# would not be about .clang-format as pinned. That is the "measurement that
+# succeeds without measuring" shape, so --check must refuse rather than emit a
+# verdict. A rewrite still runs: the warning is visible and the author owns it.
 repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
 printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
 out="$(cd "$repo" && PATH=/usr/bin:/bin FAKE_MAJOR=19 FAKE_LOG="$repo/fake.log" PULP_CLANG_FORMAT="$fake/clang-format" \
     PULP_CLANG_FORMAT_CANDIDATES="" /bin/bash "$SCRIPT" --base main --check 2>&1)"; rc=$?
-expect_rc "clang-format 19 → still runs (exit 1 on the dirty line)" 1
-expect_out "clang-format 19 → warns about the pinned major" "expected clang-format 21"
+expect_rc "clang-format 19 under --check → exit 3, not a verdict" 3
+expect_out "clang-format 19 under --check → labelled INFRASTRUCTURE" "INFRASTRUCTURE"
+expect_out "clang-format 19 under --check → names the pinned major" "not the pinned major 21"
+expect_no_out "clang-format 19 under --check → emits no formatting diff" "+F:"
+rm -rf "$repo"
+
+# The same binary must NOT block a local rewrite — only the verdict path.
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+out="$(cd "$repo" && PATH=/usr/bin:/bin FAKE_MAJOR=19 FAKE_LOG="$repo/fake.log" PULP_CLANG_FORMAT="$fake/clang-format" \
+    PULP_CLANG_FORMAT_CANDIDATES="" /bin/bash "$SCRIPT" --base main 2>&1)"; rc=$?
+expect_rc "clang-format 19 rewriting → still runs (exit 0)" 0
+expect_out "clang-format 19 rewriting → warns about the pinned major" "not the pinned major 21"
+if grep -Fq "F:CHANGED" "$repo/core/a.cpp"; then
+    ok "clang-format 19 rewriting → the changed line was actually formatted"
+else
+    bad "clang-format 19 rewriting → the changed line was actually formatted" "core/a.cpp was not rewritten"
+fi
 rm -rf "$repo"
 
 # ── path restriction ────────────────────────────────────────────────────────

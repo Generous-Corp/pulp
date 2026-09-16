@@ -23,13 +23,16 @@
 # selected Xcode toolchain, CommandLineTools) and /usr/lib/llvm-21 on Linux.
 # The pinned major is 21: every macOS toolchain in 2026 ships LLVM 21, and the
 # three local 21.x binaries were measured byte-identical over the whole tree
-# (clang-format 19 differed on 2 of 4,415 files). Another major warns; it does
-# not fail, because no gate depends on this and a warning beats hand-formatting.
+# (clang-format 19 differed on 2 of 4,415 files). Another major reflows
+# differently, so its answer is not about .clang-format as pinned: --check
+# refuses it as infrastructure, while a local rewrite warns and proceeds
+# because the author sees the warning and owns the result.
 #
 # Exit: 0 clean / rewritten · 1 --check found changes · 2 usage or repo error ·
-#       3 no clang-format found. Only 1 is a formatting verdict; 2 and 3 are
-#       infrastructure and say so on stderr, so a gate can never report a
-#       missing binary as "your code is misformatted".
+#       3 no usable clang-format (absent, or the wrong major under --check).
+#       Only 1 is a formatting verdict; 2 and 3 are infrastructure and say so on
+#       stderr, so a gate can never report a tooling gap as "your code is
+#       misformatted".
 #
 # Runs under bash 3.2 (macOS default) — no mapfile, no associative arrays.
 
@@ -117,10 +120,30 @@ EOF
 
 version_line="$("$bin" --version 2>/dev/null | head -1)"
 major="$(printf '%s\n' "$version_line" | sed -n 's/.*clang-format version \([0-9][0-9]*\)\..*/\1/p')"
-if [ -z "$major" ]; then
-    echo "format_changed: INFRASTRUCTURE: could not parse a version from: $bin ($version_line)" >&2
-elif [ "$major" != "$PULP_CLANG_FORMAT_MAJOR" ]; then
-    echo "format_changed: WARNING: $bin is clang-format $major; expected clang-format ${PULP_CLANG_FORMAT_MAJOR} (output may differ on a few files)" >&2
+# A binary of the wrong major formats differently from the pinned one, so in
+# --check it would emit a verdict that is not about the pinned config at all.
+# Refuse there (INFRASTRUCTURE, never a formatting verdict); keep rewriting
+# locally, where the warning is visible and the author owns the result.
+if [ -z "$major" ] || [ "$major" != "$PULP_CLANG_FORMAT_MAJOR" ]; then
+    if [ -z "$major" ]; then
+        detail="could not parse a version from: $bin ($version_line)"
+    else
+        detail="$bin is clang-format $major, not the pinned major ${PULP_CLANG_FORMAT_MAJOR}"
+    fi
+    if [ "$check" -eq 1 ]; then
+        cat >&2 <<EOF
+format_changed: INFRASTRUCTURE: $detail — this is NOT a formatting verdict.
+  Nothing about the touched lines was judged: another major reflows differently,
+  so its answer would not be about .clang-format as pinned.
+  Install the pinned major ${PULP_CLANG_FORMAT_MAJOR}:
+    macOS:  brew install llvm@${PULP_CLANG_FORMAT_MAJOR}   (or: xcode-select --install)
+    Linux:  apt install clang-format-${PULP_CLANG_FORMAT_MAJOR}
+    any:    pip install clang-format==${PULP_CLANG_FORMAT_MAJOR}.1.8
+  or point PULP_CLANG_FORMAT / --binary at one.
+EOF
+        exit 3
+    fi
+    echo "format_changed: WARNING: $detail (output may differ on a few files)" >&2
 fi
 echo "format_changed: using $bin ($version_line)" >&2
 
