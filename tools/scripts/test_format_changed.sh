@@ -127,6 +127,15 @@ echo "format_changed.sh self-tests"
 
 # ── no binary anywhere → exit 3 with install guidance ───────────────────────
 repo="$(make_repo)"
+# An explicit --binary/PULP_CLANG_FORMAT that does not exist. resolve_binary
+# short-circuits on it, so this never reaches the PATH lookup — deterministic on
+# every host, and the case the next block cannot cover.
+out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="$repo/missing-clang-format" PULP_CLANG_FORMAT_CANDIDATES="" \
+    /bin/bash "$SCRIPT" --base main 2>&1)"; rc=$?
+expect_rc "explicit missing binary → exit 3" 3
+
+# Nothing named clang-format anywhere on PATH, which is the branch the case above
+# short-circuits past. The control proves the sandbox really is bare first.
 sandbox="$(make_sandbox_path "$repo/sandbox-bin")"
 expect_sandbox_is_bare "no-clang-format control: the sandbox PATH really has none" "$sandbox"
 out="$(cd "$repo" && PATH="$sandbox" PULP_CLANG_FORMAT="" PULP_CLANG_FORMAT_CANDIDATES="" \

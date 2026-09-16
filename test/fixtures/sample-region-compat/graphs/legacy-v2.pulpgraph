@@ -1,0 +1,12 @@
+{
+  "format_version": 2,
+  "nodes": [
+    {"id": 10, "type": "audio_in", "name": "Input", "num_input_ports": 0, "num_output_ports": 1, "gain": 1},
+    {"id": 11, "type": "gain", "name": "Flat gain", "num_input_ports": 2, "num_output_ports": 2, "gain": 0.25},
+    {"id": 12, "type": "audio_out", "name": "Output", "num_input_ports": 1, "num_output_ports": 0, "gain": 1}
+  ],
+  "connections": [
+    {"source_node": 10, "source_port": 0, "dest_node": 11, "dest_port": 0, "feedback": false, "midi": false, "automation": false, "audio_rate_modulation": false, "sidechain": false},
+    {"source_node": 11, "source_port": 0, "dest_node": 12, "dest_port": 0, "feedback": false, "midi": false, "automation": false, "audio_rate_modulation": false, "sidechain": false}
+  ]
+}
