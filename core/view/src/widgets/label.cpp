@@ -1493,8 +1493,8 @@ void Label::paint_selection_line_(canvas::Canvas& canvas, const std::string& lin
             const Rect band = rects.front();
             // Same theme keys the editor's selection uses, so a Label and a
             // TextEditor in one document highlight identically.
-            const auto fill = resolve_color("text.selection",
-                                            resolve_color("accent", canvas::Color::hex(0x3b82f6)));
+            const auto fill = resolve_color(
+                "text.selection", resolve_color("accent.primary", canvas::Color::hex(0x3b82f6)));
             canvas.set_fill_color(fill);
             canvas.fill_rect(band.x, band.y, band.width, band.height);
             canvas.set_fill_color(text_color);
