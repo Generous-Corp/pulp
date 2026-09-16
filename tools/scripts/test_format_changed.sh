@@ -242,6 +242,39 @@ else
 fi
 rm -rf "$repo"
 
+# ── an unwritable report is INFRASTRUCTURE, never a clean verdict ───────────
+# Every tally is a `grep -c` over one report file, so an unreadable report and a
+# clean tree produce identical counts. Without a sentinel the tool reports
+# "clean" for a scan it never ran — a missing TMPDIR and a full disk both land
+# here. This is the exact shape the wrapper exists to prevent elsewhere.
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+out="$(cd "$repo" && TMPDIR=/tmp/pulp-no-such-dir-$$/ PATH=/usr/bin:/bin FAKE_LOG="$repo/fake.log" \
+    PULP_CLANG_FORMAT="$fake/clang-format" PULP_CLANG_FORMAT_CANDIDATES="" \
+    /bin/bash "$SCRIPT" --base main --check 2>&1)"; rc=$?
+expect_rc "unwritable report → exit 2, not a verdict" 2
+expect_out "unwritable report → labelled INFRASTRUCTURE" "INFRASTRUCTURE"
+expect_no_out "unwritable report → never claims the tree is clean" "clean on touched lines"
+rm -rf "$repo"
+
+# ── a formatter that dies under --check is INFRASTRUCTURE, not "misformatted" ─
+# Piping the formatter straight into diff hides its exit status behind diff's,
+# so a dead formatter reads as "every line of your file is wrong".
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+cat > "$fake/clang-format" <<'EOF'
+#!/usr/bin/env bash
+[ "${1:-}" = "--version" ] && { echo "clang-format version 21.0.0 (fake)"; exit 0; }
+echo "boom" >&2; exit 1
+EOF
+chmod +x "$fake/clang-format"
+printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="$fake/clang-format" \
+    PULP_CLANG_FORMAT_CANDIDATES="" /bin/bash "$SCRIPT" --base main --check 2>&1)"; rc=$?
+expect_rc "formatter dies under --check → exit 2, not exit 1" 2
+expect_out "formatter dies under --check → reported as a failure, not a diff" "clang-format failed"
+expect_no_out "formatter dies under --check → emits no formatting verdict" "need formatting"
+rm -rf "$repo"
+
 # ── path restriction ────────────────────────────────────────────────────────
 repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
 printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"

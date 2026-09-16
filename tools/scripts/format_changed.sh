@@ -159,7 +159,13 @@ git rev-parse --verify -q "$base^{commit}" >/dev/null || {
     echo "format_changed: unknown base ref: $base" >&2
     exit 2
 }
-echo "format_changed: base $base" >&2
+# Compare against the merge base, not the base tip. `git diff <base>` on a
+# branch that is merely BEHIND main reports main's own commits as "your
+# changes", so the tool then reformats lines the branch never touched.
+base_mb="$(git merge-base "$base" HEAD 2>/dev/null)" || base_mb=""
+[ -n "$base_mb" ] || base_mb="$base"
+echo "format_changed: base $base (merge-base ${base_mb%%
+*})" >&2
 
 # ── Collect candidate files ─────────────────────────────────────────────────
 is_source() {
@@ -174,7 +180,7 @@ is_source() {
 }
 
 # shellcheck disable=SC2086  # $paths is a deliberate word list
-changed="$( { git diff --name-only --diff-filter=ACMR "$base" -- $paths; git ls-files --others --exclude-standard -- $paths; } | sort -u )"
+changed="$( { git diff --name-only --diff-filter=ACMR "$base_mb" -- $paths; git ls-files --others --exclude-standard -- $paths; } | sort -u )"
 untracked="$(git ls-files --others --exclude-standard -- $paths)"
 
 is_untracked() {
@@ -183,7 +189,7 @@ is_untracked() {
 
 # Lines of `--lines=a:b` for the hunks of $1 that differ from base.
 hunk_ranges() {
-    git diff -U0 "$base" -- "$1" | sed -n 's/^@@ -[0-9][0-9,]* +\([0-9][0-9,]*\) @@.*/\1/p' | while IFS= read -r range; do
+    git diff -U0 --find-renames "$base_mb" -- "$1" | sed -n 's/^@@ -[0-9][0-9,]* +\([0-9][0-9,]*\) @@.*/\1/p' | while IFS= read -r range; do
         start="${range%%,*}"
         if [ "$range" = "$start" ]; then
             count=1
@@ -198,11 +204,18 @@ hunk_ranges() {
 
 dirty=0
 touched=0
-printf '%s\n' "$changed" | while IFS= read -r f; do
+report="${TMPDIR:-/tmp}/format_changed.$$"
+: > "$report" 2>/dev/null || {
+    echo "format_changed: INFRASTRUCTURE: cannot create the scan report at $report — this is NOT a formatting verdict." >&2
+    exit 2
+}
+printf 'SCANNED\n' > "$report"
+
+{ printf '%s\n' "$changed" | while IFS= read -r f; do
     [ -n "$f" ] || continue
     is_source "$f" || continue
     [ -f "$f" ] || continue
-    if is_untracked "$f" || ! git cat-file -e "$base:$f" 2>/dev/null; then
+    if is_untracked "$f" || ! git cat-file -e "$base_mb:$f" 2>/dev/null; then
         ranges=""
     else
         ranges="$(hunk_ranges "$f")"
@@ -210,7 +223,16 @@ printf '%s\n' "$changed" | while IFS= read -r f; do
     fi
     # shellcheck disable=SC2086  # ranges are one --lines= per word
     if [ "$check" -eq 1 ]; then
-        if ! "$bin" --style=file $ranges "$f" | diff -u --label "a/$f" --label "b/$f" "$f" - ; then
+        # Run the formatter on its own first. Piping it straight into diff hides
+        # its exit status behind diff's, so a formatter that died would be
+        # reported as "every line of your file is misformatted" — an
+        # infrastructure failure wearing a formatting verdict's clothes.
+        formatted="$("$bin" --style=file $ranges "$f" 2>/dev/null)" || {
+            echo "FAILED $f"
+            echo "TOUCHED $f"
+            continue
+        }
+        if ! printf '%s\n' "$formatted" | diff -u --label "a/$f" --label "b/$f" "$f" - ; then
             echo "DIRTY $f"
         fi
         echo "TOUCHED $f"
@@ -218,16 +240,26 @@ printf '%s\n' "$changed" | while IFS= read -r f; do
         "$bin" --style=file -i $ranges "$f" || echo "FAILED $f"
         echo "TOUCHED $f"
     fi
-done > "${TMPDIR:-/tmp}/format_changed.$$" 2>&1
-rc=$?
-report="${TMPDIR:-/tmp}/format_changed.$$"
+done; } >> "$report" 2>&1
+
+# An unreadable report and a clean tree produce identical tallies — every
+# `grep -c` returns 0 — so without this the tool reports "clean" for a scan it
+# never performed. A missing TMPDIR or a full disk both land here. The sentinel
+# is written unconditionally before the loop, so its ABSENCE proves the report
+# is untrustworthy rather than empty.
+if [ ! -s "$report" ] || ! grep -q '^SCANNED$' "$report"; then
+    echo "format_changed: INFRASTRUCTURE: the scan report at $report is missing or truncated — this is NOT a formatting verdict." >&2
+    echo "  Nothing about the touched lines was judged. Check that TMPDIR exists and the volume is not full." >&2
+    rm -f "$report"
+    exit 2
+fi
 
 # The loop ran in a subshell (pipe), so tally from its report rather than from
 # variables it could not hand back.
 touched=$(grep -c '^TOUCHED ' "$report")
 dirty=$(grep -c '^DIRTY ' "$report")
 failed=$(grep -c '^FAILED ' "$report")
-grep -v -E '^(TOUCHED|DIRTY|FAILED) ' "$report"
+grep -v -E '^(SCANNED|TOUCHED|DIRTY|FAILED)' "$report"
 rm -f "$report"
 
 if [ "$touched" -eq 0 ]; then
@@ -247,4 +279,6 @@ if [ "$check" -eq 1 ]; then
     exit 0
 fi
 echo "format_changed: formatted changed lines in $touched file(s)." >&2
-exit "$rc"
+# A per-file formatter failure already exited 2 above, so reaching here means
+# every touched file was rewritten.
+exit 0
