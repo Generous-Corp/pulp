@@ -11,6 +11,9 @@
 #include <pulp/state/store.hpp>
 #include <pulp/audio/buffer.hpp>
 
+#include "harness/scoped_rt_process_probe.hpp"
+
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <vector>
@@ -28,23 +31,27 @@ namespace {
 template <int NumInputs, int NumOutputs>
 class MockFaustDsp : public dsp {
 public:
-    // Parameters exposed to buildUserInterface — mirror FAUST codegen
-    FAUSTFLOAT gain_{0.5f};
-    FAUSTFLOAT level_{0.0f};
-    FAUSTFLOAT mute_{0.0f};
+  inline static std::atomic<int> total_compute_calls{0};
 
-    // Observed state so tests can assert against it
-    int init_calls = 0;
-    int compute_calls = 0;
-    int last_sample_rate = 0;
-    int last_compute_count = 0;
-    FAUSTFLOAT last_gain_seen = 0.0f;
-    FAUSTFLOAT last_level_seen = 0.0f;
-    std::string name = "MockSynth";
-    std::string author = "Pulp";
-    std::string version = "1.0.0";
+  // Parameters exposed to buildUserInterface — mirror FAUST codegen
+  FAUSTFLOAT gain_{0.5f};
+  FAUSTFLOAT level_{0.0f};
+  FAUSTFLOAT mute_{0.0f};
 
-    int getNumInputs() override { return NumInputs; }
+  // Observed state so tests can assert against it
+  int init_calls = 0;
+  int compute_calls = 0;
+  int last_sample_rate = 0;
+  int last_compute_count = 0;
+  FAUSTFLOAT last_gain_seen = 0.0f;
+  FAUSTFLOAT last_level_seen = 0.0f;
+  std::string name = "MockSynth";
+  std::string author = "Pulp";
+  std::string version = "1.0.0";
+
+  int getNumInputs() override {
+      return NumInputs;
+  }
     int getNumOutputs() override { return NumOutputs; }
     int getSampleRate() override { return last_sample_rate; }
 
@@ -77,6 +84,7 @@ public:
     }
 
     void compute(int count, FAUSTFLOAT** /*inputs*/, FAUSTFLOAT** outputs) override {
+        total_compute_calls.fetch_add(1, std::memory_order_relaxed);
         ++compute_calls;
         last_compute_count = count;
         last_gain_seen = gain_;
@@ -515,6 +523,113 @@ TEST_CASE("FaustProcessor::process honours zero-length buffer (num_samples == 0)
 
     // Must not crash or UB on zero-length input. If FAUST compute() is
     // called at all, it gets count == 0 and does nothing.
-    proc.process(out_view, in_view, midi_in, midi_out, pctx);
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        proc.process(out_view, in_view, midi_in, midi_out, pctx);
+        REQUIRE(probe.allocation_count() == 0);
+    }
     SUCCEED("FaustProcessor handled zero-length block without crashing");
+}
+
+TEST_CASE("FaustProcessor renders accepted ordinary and maximum prepared shapes without RT work",
+          "[dsl][faust-processor][process][rt-safety]") {
+    constexpr int kMaximumChannels = 8;
+    constexpr int kMaximumFrames = 1024;
+    using MaximumDsp = MockFaustDsp<kMaximumChannels, kMaximumChannels>;
+
+    pulp::dsl::FaustProcessor<MaximumDsp> proc;
+    pulp::state::StateStore store;
+    proc.set_state_store(&store);
+    proc.define_parameters(store);
+    store.set_value(1, 0.625f);
+    proc.prepare({48000.0, kMaximumFrames, kMaximumChannels, kMaximumChannels});
+
+    auto render = [&](int frames) {
+        pulp::audio::Buffer<float> input(kMaximumChannels, static_cast<std::size_t>(frames));
+        pulp::audio::Buffer<float> output(kMaximumChannels, static_cast<std::size_t>(frames));
+        std::vector<const float*> input_ptrs(kMaximumChannels);
+        for (int channel = 0; channel < kMaximumChannels; ++channel) {
+            input_ptrs[static_cast<std::size_t>(channel)] =
+                input.channel(static_cast<std::size_t>(channel)).data();
+        }
+        pulp::audio::BufferView<const float> input_view(input_ptrs.data(), input_ptrs.size(),
+                                                        static_cast<std::size_t>(frames));
+        auto output_view = output.view();
+        pulp::midi::MidiBuffer midi_in, midi_out;
+        pulp::format::ProcessContext context;
+        context.num_samples = frames;
+        {
+            pulp::test::ScopedRtProcessProbe probe;
+            proc.process(output_view, input_view, midi_in, midi_out, context);
+            REQUIRE(probe.allocation_count() == 0);
+        }
+        for (int channel = 0; channel < kMaximumChannels; ++channel) {
+            for (float sample : output.channel(static_cast<std::size_t>(channel))) {
+                REQUIRE_THAT(sample, WithinAbs(0.625f, 1e-6f));
+            }
+        }
+    };
+
+    render(37);
+    render(kMaximumFrames);
+}
+
+TEST_CASE("FaustProcessor fails closed for unprepared and mismatched runtime shapes",
+          "[dsl][faust-processor][process][rt-safety][negative]") {
+    using ShapeDsp = MockFaustDsp<2, 2>;
+
+    auto check_refusal = [](int input_channels, int input_frames, int output_channels,
+                            int output_frames, int process_frames, bool prepare,
+                            int prepared_inputs = 2, int prepared_outputs = 2) {
+        pulp::dsl::FaustProcessor<ShapeDsp> proc;
+        pulp::state::StateStore store;
+        proc.set_state_store(&store);
+        proc.define_parameters(store);
+        if (prepare) {
+            proc.prepare({48000.0, 64, prepared_inputs, prepared_outputs});
+        }
+
+        pulp::audio::Buffer<float> input(static_cast<std::size_t>(input_channels),
+                                         static_cast<std::size_t>(input_frames));
+        pulp::audio::Buffer<float> output(static_cast<std::size_t>(output_channels),
+                                          static_cast<std::size_t>(output_frames));
+        for (int channel = 0; channel < output_channels; ++channel) {
+            std::fill(output.channel(static_cast<std::size_t>(channel)).begin(),
+                      output.channel(static_cast<std::size_t>(channel)).end(), 0.75f);
+        }
+        std::vector<const float*> input_ptrs(static_cast<std::size_t>(input_channels));
+        for (int channel = 0; channel < input_channels; ++channel) {
+            input_ptrs[static_cast<std::size_t>(channel)] =
+                input.channel(static_cast<std::size_t>(channel)).data();
+        }
+        pulp::audio::BufferView<const float> input_view(input_ptrs.data(), input_ptrs.size(),
+                                                        static_cast<std::size_t>(input_frames));
+        auto output_view = output.view();
+        pulp::midi::MidiBuffer midi_in, midi_out;
+        pulp::format::ProcessContext context;
+        context.num_samples = process_frames;
+        const int calls_before = ShapeDsp::total_compute_calls.load(std::memory_order_relaxed);
+        {
+            pulp::test::ScopedRtProcessProbe probe;
+            proc.process(output_view, input_view, midi_in, midi_out, context);
+            REQUIRE(probe.allocation_count() == 0);
+        }
+        REQUIRE(ShapeDsp::total_compute_calls.load(std::memory_order_relaxed) == calls_before);
+        for (int channel = 0; channel < output_channels; ++channel) {
+            for (float sample : output.channel(static_cast<std::size_t>(channel))) {
+                REQUIRE(sample == 0.0f);
+            }
+        }
+    };
+
+    check_refusal(2, 32, 2, 32, 32, false);
+    check_refusal(1, 32, 2, 32, 32, true);
+    check_refusal(3, 32, 2, 32, 32, true);
+    check_refusal(2, 32, 1, 32, 32, true);
+    check_refusal(2, 32, 3, 32, 32, true);
+    check_refusal(2, 31, 2, 32, 32, true);
+    check_refusal(2, 32, 2, 31, 32, true);
+    check_refusal(2, 65, 2, 65, 65, true);
+    check_refusal(2, 32, 2, 32, 32, true, 1, 2);
+    check_refusal(2, 32, 2, 32, 32, true, 2, 1);
 }

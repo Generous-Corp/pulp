@@ -26,6 +26,8 @@ Supported now:
   source equivalence to their adjacent `.dsp` examples is claimed
 - automatic parameter reflection from FAUST `buildUserInterface()` into `StateStore`
 - bus layout detection from `getNumInputs()` / `getNumOutputs()`
+- real-time-safe processing after `prepare()` for the exact prepared channel
+  topology and blocks up to the declared maximum size
 - metadata extraction (`name`, `author`, `version`) into `PluginDescriptor`
 - CMake integration via `PulpFaust.cmake` (`pulp_faust_generate`, `pulp_add_faust_test`)
 - three working examples: gain, filter, tremolo
@@ -59,10 +61,15 @@ by an externally supplied Faust compiler.
 
 1. **Constructor** calls `buildUserInterface()` to discover parameters and `metadata()` for plugin info
 2. **`define_parameters()`** registers each FAUST zone as a `StateStore` parameter with correct range/unit/group
-3. **`prepare()`** calls `dsp::init(sample_rate)`
-4. **`process()`** syncs `StateStore` values into FAUST zone pointers, adapts
-   the block's channels to the compatibility interface, and calls
-   `dsp::compute()`
+3. **`prepare()`** validates the declared input/output channel topology, stores
+   the maximum block size, pre-sizes the raw channel-pointer arrays, and calls
+   `dsp::init(sample_rate)`
+4. **`process()`** accepts only that prepared topology and a block no larger
+   than the declared maximum. It reuses the pre-sized pointer arrays, syncs
+   `StateStore` values into FAUST zone pointers, and calls `dsp::compute()`
+   without constructing or resizing vectors. An unprepared call, a channel
+   mismatch, an undersized buffer, or an oversized block fails closed by
+   clearing the output without calling the FAUST DSP.
 
 ## Creating a FAUST Plugin
 
@@ -172,6 +179,11 @@ When modifying the FAUST lane, verify:
   `dsp` class's `buildUserInterface()` metadata
 - bus layout matches `getNumInputs()` / `getNumOutputs()`
 - audio output is correct at known parameter values
+- `prepare()` declares the largest block a test or host will submit; larger
+  runtime blocks are rejected and cleared rather than processed
+- zero, ordinary, and maximum prepared blocks produce the expected output,
+  while unprepared and mismatched shapes fail closed
+- allocation-abort and real-time lock probes remain green inside `process()`
 - `DslProcessor` reflection (`dsl_name`, `dsl_params`, `bus_layout`) is accurate
 - new examples are added to `examples/CMakeLists.txt`
 
