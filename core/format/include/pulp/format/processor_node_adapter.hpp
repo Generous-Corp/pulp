@@ -84,6 +84,7 @@ class ProcessorNodeInstance final {
     ProcessorNodeInstance& operator=(const ProcessorNodeInstance&) = delete;
 
     bool prepare(const PrepareContext& context) noexcept;
+    bool release() noexcept;
     GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept {
         return adapter_.binding(node_id, required);
     }

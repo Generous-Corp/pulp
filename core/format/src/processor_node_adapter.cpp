@@ -172,6 +172,13 @@ bool ProcessorNodeInstance::prepare(const PrepareContext& context) noexcept {
     return true;
 }
 
+bool ProcessorNodeInstance::release() noexcept {
+    if (!prepared_)
+        return true;
+    prepared_ = false;
+    return adapter_.release();
+}
+
 const state::ParamInfo* ProcessorNodeInstance::parameter(state::ParamID id) const noexcept {
     const auto found = std::find_if(parameter_catalog_.begin(), parameter_catalog_.end(),
                                     [id](const state::ParamInfo& param) { return param.id == id; });
