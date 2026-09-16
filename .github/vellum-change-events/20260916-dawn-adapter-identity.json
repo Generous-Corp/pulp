@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260916-dawn-adapter-identity",
+  "kind": "change",
+  "created_at": "2026-09-16T09:40:00Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "The Dawn branch of adapter_info() hardcoded the adapter identity: name was assembled as \"Native Dawn Adapter (<backend>)\", description mirrored it, and vendor was the literal string \"Dawn\". It never read dawn_info.device, .vendor or .description, so the reported identity described the backend rather than the driver. The wgpu-native branch in the same file already reads those fields with empty-value fallbacks, so this was a fix that reached one of two parallel paths. It matters to Pulp specifically: android_gpu_adapter_identity() feeds exactly these fields to the Android Vulkan driver blocklist, which therefore could never match a real driver. This mirrors the existing sibling implementation rather than introducing a new mechanism, and there is no named immutable Vellum framework commit to backport, so it is dispositioned pulp-only as Pulp host-integration work.",
+  "tests": [
+    "GpuSurface adapter_info reports the driver's own identity",
+    "Vellum freeze",
+    "Vellum trusted freeze"
+  ],
+  "disposition": "pulp-only"
+}
