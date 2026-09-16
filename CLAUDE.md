@@ -295,7 +295,7 @@ pack" and bake-layer parameter injection.
 | Lane | What | Use for |
 |------|------|---------|
 | **C++** — `tools/audio/analysis/` (lib `pulp-audio-analysis`, linked by the shipped CLI) + `test/support/` (scenario/stimulus/contract wiring) | Seeded generators, metrics, assertions (incl. `assert_null_near`), `RenderScenario` over `HeadlessHost` (offline render, SR×block matrix), contracts, Audio Doctor (frequency response, THD/THD+N), FFT + windowing | **Required per-PR ctest gates.** Fast, no venv, already CI-wired. |
-| **Python** — `tools/audio/quality-lab/` (`pulp tool install audio-quality-lab`) | Null residual **with alignment** (`estimate_global_lag`/`local_align`), LTAS log-spectral distance (**phase-blind**), spectral flux/centroid, HNR, Theil-Sen slope, Kaiser-sinc resampling, license-guarded corpus + provenance, `regression_net` ratchet | **Advisory/offline**: deep investigation, A/B packs, model fitting, perceptual artifacts. **Not in CI** — it cannot hold a required gate as-is. |
+| **Python** — `tools/audio/quality-lab/` (`pulp tool install audio-quality-lab`) | Null residual **with alignment** (`estimate_global_lag`/`local_align`), LTAS log-spectral distance (**phase-blind**), spectral flux/centroid, HNR, Theil-Sen slope, Kaiser-sinc resampling, license-guarded corpus + provenance, `regression_net` ratchet, opt-in ViSQOL/PEAQ layer (env-path, never bundled) | **Advisory/offline**: deep investigation, A/B packs, perceptual artifacts. **Cannot hold a required gate**: behind `PULP_AUDIO_QUALITY_LAB_GATE=OFF` + an operator-supplied interpreter, and its `quality-lab` label is excluded from the required lane. |
 
 **The closed A/B loop — use it instead of asking a human to listen.** Pulp can
 host a reference plugin offline, render it, render your candidate under identical
@@ -306,13 +306,13 @@ device, nobody listening. Every piece already exists:
 # Reference and candidate, identical stimulus, offline (no DAW, no audio device)
 pulp audio render --plugin Reference.vst3 --out /tmp/ref.wav  --duration-ms 2000 ...
 pulp audio render --plugin Candidate.clap --out /tmp/cand.wav --duration-ms 2000 ...
-# Per-detector, timestamped verdicts (transient smear, dulling, metallic HF, graininess)
-pulp tool run audio-quality-lab -- compare /tmp/ref.wav /tmp/cand.wav
+# ONE curated axis per invocation (--profile, default tonal-balance), NOT timestamped
+pulp tool run audio-quality-lab -- compare /tmp/ref.wav /tmp/cand.wav --profile added-hf
 ```
 
-`core/host/plugin_slot.hpp` (`PluginSlot`: load → prepare → process, VST3/AU/CLAP/LV2)
-and `offline_signal_graph_host.hpp` are the hosting spine; `regression_net.py`
-already shells to `pulp audio render --plugin` to ratchet it. See the
+`compare` runs ONE axis, **no timestamps** (localized output: `run --out-dir`;
+multi-axis: `regression-net`, which does NOT shell to `pulp audio render`).
+`core/host/plugin_slot.hpp` + `offline_signal_graph_host.hpp` are the spine. See the
 [`hosting`](.agents/skills/hosting/SKILL.md) skill. **Caveat:** `pulp audio render`
 is bundle-only — an in-tree `Processor` must be rendered test-side via
 `RenderScenario` and written to WAV first.
@@ -333,16 +333,16 @@ Non-obvious things that cost real time when you don't know them:
   rejection.** Any anti-aliasing measurement that doesn't explicitly pin
   `Kind::linear_phase_fir` (96 dB standard / 140 dB pristine) or `polyphase_iir`
   is measuring the filter, not your DSP.
-- **Deep-dynamic-range measurement is a window problem, and no ordinary window
-  solves it.** The analysis `Window` enum exposes only `{rectangular, hann}`, and
-  Hann's −31.5 dB first side lobe cannot resolve a −100 dB component beside a 0 dB
-  fundamental. Widening it from `core/signal/windowing.hpp` does **not** fix that
-  by itself: blackman is ~−58 dB and **flat_top is only ~−93 dB** (flat_top buys
-  amplitude accuracy, *not* dynamic range) — neither can gate −100 dBc at any FFT
-  length. Only a high-β Kaiser (β≈14, ~−126 dB) could. **Prefer least-squares tone
-  projection**, which sidesteps leakage entirely: prior art is `tone_residual_db()`
-  in `test/test_oversampling_quality.cpp`, which already asserts `< -100 dB` in a
-  passing test.
+- **Deep-dynamic-range measurement is a window problem most windows cannot solve.**
+  The `Window` enum ships **six** members (rectangular, hann, hamming, blackman,
+  flat_top, kaiser), first side lobes −14/−31/−41/−57/−93/−124 dB. **flat_top buys
+  amplitude accuracy, NOT dynamic range**; it, hann and blackman cannot gate
+  −100 dBc at any FFT length. Only `kaiser` at β = 14 can, and only near the tone
+  (a DC pedestal leaves bins 1-3 at ≈−66/−75/−92 dB through any window).
+  **Prefer least-squares tone projection** — no leakage, off-bin frequencies, and
+  **public API** not test-local: `fit_tone`/`tone_residual_db`/`measure_aliasing`
+  in `audio_spectrum.hpp`, asserted `< -100 dB` in `test_oversampling_quality.cpp`
+  (pinning `linear_phase_fir`+`pristine`+x16).
 - **State every analyzer's detection floor, and keep gate thresholds above it.**
   A gate that passes because the measurement cannot see the failure is worse than
   no gate — it fails silently. And **prove the floor, don't derive it**: the usual
@@ -357,10 +357,10 @@ Non-obvious things that cost real time when you don't know them:
   `RenderScenario` is the only path unless you render to WAV first.
 - **`estimate_frequency()` is a zero-crossing detector** and its own doc disclaims
   harmonically dense material. It is not a pitch tracker; a saw will defeat it.
-- **`test_golden_audio.cpp` is not a golden corpus** — it holds computed-expectation
-  tests. There are no stored reference renders and no audio ratchet in CI.
-- **DSP perf is tracked, not gated** (`tools/scripts/bench_diff.py` + committed
-  `planning/bench/*.json`). Perf assertions flake on shared runners.
+- **`test_golden_audio.cpp` is not a golden corpus** (computed expectations). The one
+  committed reference is a byte-exact **determinism** fixture; no quality ratchet.
+- **DSP perf is neither gated nor tracked by `bench_diff.py`** — it diffs UI/GPU
+  frame-timing JSON, not DSP, and is referenced by zero workflows.
 
 ### Thread Model
 
