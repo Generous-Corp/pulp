@@ -124,6 +124,11 @@ REMOTE_SCRIPT = r"""
 printf '%s\n' '@@BEGIN@@'
 printf 'PATH\t%s\n' "$PATH"
 printf 'SHELL_KIND\t%s\n' "${ZSH_VERSION:+zsh}${BASH_VERSION:+bash}"
+# The user-local bin dir is the one a non-login shell drops, so the
+# path_breadth control needs to know whether it exists on THIS host before it
+# can say anything about whether the probe could have seen a tool in it.
+if [ -d "$HOME/.local/bin" ]; then _hb_exists=1; else _hb_exists=0; fi
+printf 'HOMEBIN\t%s\t%s\n' "$HOME/.local/bin" "$_hb_exists"
 
 # Find an executable regular file for $1 by scanning PATH entries in order.
 # Immune to functions, aliases and builtins in both directions.
@@ -205,6 +210,8 @@ def parse_payload(stdout: str) -> dict:
 
     searched_path = ""
     shell_kind = ""
+    home_bin = ""
+    home_bin_exists = False
     tools: dict[str, dict] = {}
     for line in body.splitlines():
         if not line.strip():
@@ -215,12 +222,21 @@ def parse_payload(stdout: str) -> dict:
             searched_path = parts[1]
         elif tag == "SHELL_KIND" and len(parts) >= 2:
             shell_kind = parts[1]
+        elif tag == "HOMEBIN" and len(parts) >= 3:
+            home_bin = parts[1]
+            home_bin_exists = parts[2] == "1"
         elif tag == "TOOL" and len(parts) >= 4:
             tools[parts[1]] = {"path": parts[2], "shell_kind": parts[3], "version": ""}
         elif tag == "VERSION" and len(parts) >= 3:
             if parts[1] in tools:
                 tools[parts[1]]["version"] = parts[2]
-    return {"searched_path": searched_path, "shell_kind": shell_kind, "tools": tools}
+    return {
+        "searched_path": searched_path,
+        "shell_kind": shell_kind,
+        "home_bin": home_bin,
+        "home_bin_exists": home_bin_exists,
+        "tools": tools,
+    }
 
 
 def classify(entry: dict) -> str:
@@ -259,16 +275,52 @@ def evaluate_controls(parsed: dict) -> list[dict]:
         "not_sensitive_to": "PATH breadth",
     })
 
+    # The check that must be sensitive to the incident, and once was not.
+    #
+    # The first version asked only "does PATH contain ANY user-bin marker?".
+    # The minimal non-login ssh PATH measured on m3 is
+    #   /opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin
+    # which DOES contain /opt/homebrew/bin -- so that control passed on the
+    # exact PATH that produced the wrong answer, while claiming in its own
+    # metadata to be sensitive to it. Decoration, by this tool's own
+    # definition, inside the tool written to prevent it.
+    #
+    # The directory that actually goes missing is the user-local one, so the
+    # control now asks the sharper question: if ~/.local/bin EXISTS on this
+    # host, was it searched?
     entries = [d for d in path.split(":") if d]
-    hit = [m for m in USER_BIN_MARKERS if any(m in d for d in entries)]
+    home_bin = parsed.get("home_bin") or ""
+    home_bin_exists = bool(parsed.get("home_bin_exists"))
+    home_bin_searched = home_bin in entries
+
+    if home_bin_exists and not home_bin_searched:
+        ok = False
+        detail = (
+            f"{home_bin} exists on the host but is NOT on the searched PATH "
+            f"({len(entries)} dirs) — a tool installed there is invisible"
+        )
+    else:
+        hit = [m for m in USER_BIN_MARKERS if any(m in d for d in entries)]
+        ok = bool(hit) or home_bin_searched
+        detail = (
+            f"searched {len(entries)} dirs; "
+            + (f"{home_bin} searched" if home_bin_searched
+               else f"{home_bin} absent on host" if home_bin
+               else "no home-bin reported")
+            + f"; other user-bin markers: {hit or 'NONE'}"
+        )
     controls.append({
         "name": "path_breadth",
-        "ok": bool(hit),
-        "detail": (
-            f"searched {len(entries)} dirs; user-bin markers present: {hit or 'NONE'}"
+        "ok": ok,
+        "detail": detail,
+        "sensitive_to": (
+            "the non-login-shell minimal PATH — an existing ~/.local/bin that was "
+            "never searched, which is exactly the m3 incident"
         ),
-        "sensitive_to": "the non-login-shell minimal PATH — a tool never searched for",
-        "not_sensitive_to": "a tool genuinely absent from a complete PATH",
+        "not_sensitive_to": (
+            "a tool genuinely absent from a complete PATH; a tool installed "
+            "somewhere neither ~/.local/bin nor a known user-bin marker"
+        ),
     })
     return controls
 

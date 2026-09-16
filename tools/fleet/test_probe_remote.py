@@ -28,9 +28,13 @@ LOGIN_PATH = (
 )
 
 
-def payload(path, tools):
+HOME_BIN = "/Users/danielraffel/.local/bin"
+
+
+def payload(path, tools, home_bin=HOME_BIN, home_bin_exists=True):
     """Build a fenced probe payload. `tools` maps name -> (file, kind, version)."""
-    lines = [P.BEGIN, f"PATH\t{path}", "SHELL_KIND\tzsh"]
+    lines = [P.BEGIN, f"PATH\t{path}", "SHELL_KIND\tzsh",
+             f"HOMEBIN\t{home_bin}\t{1 if home_bin_exists else 0}"]
     for name, (file_path, kind, version) in tools.items():
         lines.append(f"TOOL\t{name}\t{file_path}\t{kind}")
         if file_path:
@@ -97,8 +101,6 @@ class Controls(unittest.TestCase):
         self.assertTrue(all(c["ok"] for c in controls), controls)
 
     def test_path_breadth_control_fails_on_the_minimal_ssh_path(self):
-        # /opt/homebrew/bin IS in USER_BIN_MARKERS, so assert the control is
-        # sensitive to a PATH with NO user-bin dir at all.
         bare = "/usr/bin:/bin:/usr/sbin:/sbin"
         parsed = P.parse_payload(payload(bare, {
             P.SCANNER_CONTROL: ("/bin/ls", "command", ""),
@@ -106,6 +108,32 @@ class Controls(unittest.TestCase):
         }))
         breadth = [c for c in P.evaluate_controls(parsed) if c["name"] == "path_breadth"][0]
         self.assertFalse(breadth["ok"])
+
+    def test_path_breadth_fails_on_the_EXACT_incident_path(self):
+        # The regression that matters. MINIMAL_PATH is the real non-login ssh
+        # PATH from m3, and it DOES contain /opt/homebrew/bin. The first
+        # version of this control only asked "any user-bin marker present?",
+        # so it PASSED here -- on the exact PATH that produced the wrong
+        # answer -- while advertising sensitivity to it. ~/.local/bin exists on
+        # the host and was not searched, which is the question that matters.
+        parsed = P.parse_payload(payload(MINIMAL_PATH, {
+            "shipyard": ("", "none", ""),
+            P.SCANNER_CONTROL: ("/bin/ls", "command", ""),
+            P.SENTINEL: ("", "none", ""),
+        }))
+        breadth = [c for c in P.evaluate_controls(parsed) if c["name"] == "path_breadth"][0]
+        self.assertFalse(breadth["ok"], "the control must fail on the incident's own PATH")
+        self.assertIn(HOME_BIN, breadth["detail"])
+
+    def test_path_breadth_passes_when_home_bin_does_not_exist(self):
+        # A host with no ~/.local/bin cannot be blind to it. Do not manufacture
+        # a failure where the directory is simply not a thing on this host.
+        parsed = P.parse_payload(payload(MINIMAL_PATH, {
+            P.SCANNER_CONTROL: ("/bin/ls", "command", ""),
+            P.SENTINEL: ("", "none", ""),
+        }, home_bin_exists=False))
+        breadth = [c for c in P.evaluate_controls(parsed) if c["name"] == "path_breadth"][0]
+        self.assertTrue(breadth["ok"])
 
     def test_scanner_control_fails_when_ls_does_not_resolve(self):
         parsed = P.parse_payload(payload(LOGIN_PATH, {
@@ -256,6 +284,11 @@ class RemoteScript(unittest.TestCase):
         script = P.build_remote_script(["shipyard"])
         self.assertNotIn("for _dir in $PATH", script)
         self.assertIn("${_rest%%:*}", script)
+
+    def test_script_reports_whether_home_bin_exists(self):
+        script = P.build_remote_script(["shipyard"])
+        self.assertIn("HOMEBIN", script)
+        self.assertIn('-d "$HOME/.local/bin"', script)
 
     def test_version_is_read_from_the_absolute_path(self):
         script = P.build_remote_script(["shipyard"])
