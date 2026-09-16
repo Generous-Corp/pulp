@@ -31,7 +31,7 @@ void set_opt_in(const char* value) {
     }
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("GPU diagnostic severities carry distinct stable labels", "[gpu][diagnostics]") {
     std::set<std::string> labels;
@@ -47,10 +47,10 @@ TEST_CASE("GPU diagnostic severities carry distinct stable labels", "[gpu][diagn
 
 TEST_CASE("Skia log-bridge statuses carry distinct stable labels", "[gpu][diagnostics]") {
     std::set<std::string> labels;
-    for (auto status : {SkiaLogBridgeStatus::not_attempted, SkiaLogBridgeStatus::installed,
-                        SkiaLogBridgeStatus::declined_handler_present,
-                        SkiaLogBridgeStatus::declined_not_enabled,
-                        SkiaLogBridgeStatus::unavailable_no_skia}) {
+    for (auto status :
+         {SkiaLogBridgeStatus::not_attempted, SkiaLogBridgeStatus::installed,
+          SkiaLogBridgeStatus::declined_handler_present, SkiaLogBridgeStatus::declined_not_enabled,
+          SkiaLogBridgeStatus::unavailable_no_skia}) {
         const std::string label = to_string(status);
         REQUIRE_FALSE(label.empty());
         REQUIRE(label != "unknown");
@@ -79,8 +79,7 @@ TEST_CASE("emit_gpu_diagnostic counts every record it is handed", "[gpu][diagnos
     }
 }
 
-TEST_CASE("emit_gpu_diagnostic accepts a null source and an empty message",
-          "[gpu][diagnostics]") {
+TEST_CASE("emit_gpu_diagnostic accepts a null source and an empty message", "[gpu][diagnostics]") {
     const auto before = gpu_diagnostics_stats();
     emit_gpu_diagnostic(GpuDiagnosticSeverity::info, nullptr, std::string_view{});
     const auto after = gpu_diagnostics_stats();
@@ -156,8 +155,7 @@ TEST_CASE("an absent opt-in declines without installing", "[gpu][diagnostics]") 
     set_opt_in(nullptr);
 }
 
-TEST_CASE("an explicit install reports a terminal, idempotent outcome",
-          "[gpu][diagnostics]") {
+TEST_CASE("an explicit install reports a terminal, idempotent outcome", "[gpu][diagnostics]") {
     const auto first = install_skia_log_bridge();
 
     // "Not attempted" and "not enabled" are both non-answers; an explicit
@@ -186,10 +184,9 @@ void log_through_skia(SkLogHandler& handler, SkLogPriority priority, const char*
     va_end(args);
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("an installed Skia handler forwards records into the same sink",
-          "[gpu][diagnostics]") {
+TEST_CASE("an installed Skia handler forwards records into the same sink", "[gpu][diagnostics]") {
     if (install_skia_log_bridge() != SkiaLogBridgeStatus::installed) {
         SUCCEED("another SkLogHandler owns this process; the bridge correctly declined");
         return;
@@ -201,12 +198,11 @@ TEST_CASE("an installed Skia handler forwards records into the same sink",
     const auto sink_before = gpu_diagnostics_stats();
     const auto bridge_before = skia_log_bridge_state();
 
-    log_through_skia(*handler, SkLogPriority::kError, "graphite: %s failed (%d)",
-                     "submit", 7);
+    log_through_skia(*handler, SkLogPriority::kError, "graphite: %s failed (%d)", "submit", 7);
 
     const auto bridge_after = skia_log_bridge_state();
     const auto sink_after = gpu_diagnostics_stats();
     REQUIRE(bridge_after.records_forwarded == bridge_before.records_forwarded + 1);
     REQUIRE(sink_after.emitted == sink_before.emitted + 1);
 }
-#endif  // PULP_TEST_HAS_SK_LOG_HANDLER
+#endif // PULP_TEST_HAS_SK_LOG_HANDLER

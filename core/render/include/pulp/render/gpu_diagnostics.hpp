@@ -45,8 +45,7 @@ const char* to_string(GpuDiagnosticSeverity severity) noexcept;
 ///
 /// Counted unconditionally, including in a PULP_TRACING=OFF build, so the
 /// counter proves the call site ran even where no Perfetto event exists.
-void emit_gpu_diagnostic(GpuDiagnosticSeverity severity,
-                         const char* source,
+void emit_gpu_diagnostic(GpuDiagnosticSeverity severity, const char* source,
                          std::string_view message) noexcept;
 
 /// Longest message text carried into a trace annotation. Longer messages are
@@ -119,4 +118,4 @@ SkiaLogBridgeStatus install_skia_log_bridge_if_enabled() noexcept;
 /// outcome.
 SkiaLogBridgeStatus install_skia_log_bridge() noexcept;
 
-}  // namespace pulp::render
+} // namespace pulp::render

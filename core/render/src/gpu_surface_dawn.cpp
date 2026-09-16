@@ -258,8 +258,7 @@ public:
 #endif
                 runtime::log_error("GpuSurface: WebGPU error ({}): {}",
                     static_cast<int>(type), msg);
-                emit_gpu_diagnostic(GpuDiagnosticSeverity::error,
-                                    "dawn.uncaptured_error", msg);
+                emit_gpu_diagnostic(GpuDiagnosticSeverity::error, "dawn.uncaptured_error", msg);
             });
 
         adapter_.RequestDevice(

@@ -1165,14 +1165,12 @@ public:
         }
         dev_desc.requiredFeatureCount = required_features.size();
         dev_desc.requiredFeatures = required_features.data();
-        dev_desc.SetUncapturedErrorCallback(
-            [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView msg) {
-                const std::string text(msg.data, msg.length);
-                runtime::log_error("GpuCompute: WebGPU error ({}): {}",
-                    static_cast<int>(type), text);
-                emit_gpu_diagnostic(GpuDiagnosticSeverity::error,
-                                    "dawn.uncaptured_error", text);
-            });
+        dev_desc.SetUncapturedErrorCallback([](const wgpu::Device&, wgpu::ErrorType type,
+                                               wgpu::StringView msg) {
+            const std::string text(msg.data, msg.length);
+            runtime::log_error("GpuCompute: WebGPU error ({}): {}", static_cast<int>(type), text);
+            emit_gpu_diagnostic(GpuDiagnosticSeverity::error, "dawn.uncaptured_error", text);
+        });
         // Device loss is normal behavior, not an init failure: a browser tab can
         // lose its device at any moment, and a native driver reset does the same.
         // Every in-flight readback is completed as Failed rather than left to
@@ -1187,8 +1185,7 @@ public:
                 // first in the dtor, which makes that case a no-op.
                 if (alive.expired()) return;
                 const std::string text(msg.data, msg.length);
-                emit_gpu_diagnostic(GpuDiagnosticSeverity::fatal,
-                                    "dawn.device_lost", text);
+                emit_gpu_diagnostic(GpuDiagnosticSeverity::fatal, "dawn.device_lost", text);
                 handle_device_lost(static_cast<int>(reason), text);
             });
 

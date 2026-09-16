@@ -38,7 +38,8 @@ std::mutex g_bridge_mutex;
 
 bool env_flag(const char* name, bool& value) noexcept {
     const char* raw = std::getenv(name);
-    if (raw == nullptr || *raw == '\0') return false;
+    if (raw == nullptr || *raw == '\0')
+        return false;
     const std::string_view text(raw);
     if (text == "1" || text == "true" || text == "yes" || text == "on") {
         value = true;
@@ -51,41 +52,51 @@ bool env_flag(const char* name, bool& value) noexcept {
     return false;
 }
 
-}  // namespace
+} // namespace
 
 const char* to_string(GpuDiagnosticSeverity severity) noexcept {
     switch (severity) {
-        case GpuDiagnosticSeverity::info:    return "info";
-        case GpuDiagnosticSeverity::warning: return "warning";
-        case GpuDiagnosticSeverity::error:   return "error";
-        case GpuDiagnosticSeverity::fatal:   return "fatal";
+    case GpuDiagnosticSeverity::info:
+        return "info";
+    case GpuDiagnosticSeverity::warning:
+        return "warning";
+    case GpuDiagnosticSeverity::error:
+        return "error";
+    case GpuDiagnosticSeverity::fatal:
+        return "fatal";
     }
     return "unknown";
 }
 
 const char* to_string(SkiaLogBridgeStatus status) noexcept {
     switch (status) {
-        case SkiaLogBridgeStatus::not_attempted:            return "not_attempted";
-        case SkiaLogBridgeStatus::installed:                return "installed";
-        case SkiaLogBridgeStatus::declined_handler_present: return "declined_handler_present";
-        case SkiaLogBridgeStatus::declined_not_enabled:     return "declined_not_enabled";
-        case SkiaLogBridgeStatus::unavailable_no_skia:      return "unavailable_no_skia";
+    case SkiaLogBridgeStatus::not_attempted:
+        return "not_attempted";
+    case SkiaLogBridgeStatus::installed:
+        return "installed";
+    case SkiaLogBridgeStatus::declined_handler_present:
+        return "declined_handler_present";
+    case SkiaLogBridgeStatus::declined_not_enabled:
+        return "declined_not_enabled";
+    case SkiaLogBridgeStatus::unavailable_no_skia:
+        return "unavailable_no_skia";
     }
     return "unknown";
 }
 
-void emit_gpu_diagnostic(GpuDiagnosticSeverity severity,
-                         const char* source,
+void emit_gpu_diagnostic(GpuDiagnosticSeverity severity, const char* source,
                          std::string_view message) noexcept {
     g_emitted.fetch_add(1, std::memory_order_relaxed);
 
     // Bounded stack copy: the annotation needs a null-terminated buffer and the
     // render thread must not allocate to get one.
     const std::size_t copied = std::min(message.size(), kGpuDiagnosticMessageLimit);
-    if (copied < message.size()) g_truncated.fetch_add(1, std::memory_order_relaxed);
+    if (copied < message.size())
+        g_truncated.fetch_add(1, std::memory_order_relaxed);
 
     std::array<char, kGpuDiagnosticMessageLimit + 1> buffer{};
-    if (copied > 0) std::memcpy(buffer.data(), message.data(), copied);
+    if (copied > 0)
+        std::memcpy(buffer.data(), message.data(), copied);
     buffer[copied] = '\0';
 
     const char* const tag = (source != nullptr) ? source : "unknown";
@@ -94,9 +105,7 @@ void emit_gpu_diagnostic(GpuDiagnosticSeverity severity,
     // One interned event name for every GPU diagnostic; severity and source are
     // low-cardinality annotations, so `GROUP BY` on the slice name still works
     // and the variable text rides along as debug.message.
-    PULP_TRACE_INSTANT_ARGS("gpu", "gpu.diagnostic",
-                            "severity", severity_label,
-                            "source", tag,
+    PULP_TRACE_INSTANT_ARGS("gpu", "gpu.diagnostic", "severity", severity_label, "source", tag,
                             "message", static_cast<const char*>(buffer.data()));
 
     if constexpr (runtime::kTracingEnabled) {
@@ -138,10 +147,14 @@ namespace {
 
 GpuDiagnosticSeverity severity_of(SkLogPriority priority) noexcept {
     switch (priority) {
-        case SkLogPriority::kError:   return GpuDiagnosticSeverity::error;
-        case SkLogPriority::kWarning: return GpuDiagnosticSeverity::warning;
-        case SkLogPriority::kInfo:    return GpuDiagnosticSeverity::info;
-        case SkLogPriority::kDebug:   return GpuDiagnosticSeverity::info;
+    case SkLogPriority::kError:
+        return GpuDiagnosticSeverity::error;
+    case SkLogPriority::kWarning:
+        return GpuDiagnosticSeverity::warning;
+    case SkLogPriority::kInfo:
+        return GpuDiagnosticSeverity::info;
+    case SkLogPriority::kDebug:
+        return GpuDiagnosticSeverity::info;
     }
     return GpuDiagnosticSeverity::info;
 }
@@ -149,14 +162,15 @@ GpuDiagnosticSeverity severity_of(SkLogPriority priority) noexcept {
 // Skia may log from any thread, so this holds no mutable state beyond the two
 // relaxed counters the sink already owns.
 class TraceLogHandler final : public SkLogHandler {
-public:
+  public:
     void onLog(SkLogPriority priority, const char format[], va_list args) override {
         std::array<char, kGpuDiagnosticMessageLimit + 1> buffer{};
         int written = 0;
         if (format != nullptr) {
             written = std::vsnprintf(buffer.data(), buffer.size(), format, args);
         }
-        if (written < 0) written = 0;
+        if (written < 0)
+            written = 0;
         const std::size_t length =
             std::min(static_cast<std::size_t>(written), kGpuDiagnosticMessageLimit);
 
@@ -166,7 +180,7 @@ public:
     }
 };
 
-}  // namespace
+} // namespace
 
 SkiaLogBridgeStatus install_skia_log_bridge() noexcept {
     const std::lock_guard<std::mutex> lock(g_bridge_mutex);
@@ -188,21 +202,20 @@ SkiaLogBridgeStatus install_skia_log_bridge() noexcept {
     const bool ok = SkLogHandler::SetInstance(sk_make_sp<TraceLogHandler>());
     // A false return means somebody won the race between the read above and
     // this write. Their handler stands.
-    const auto result = ok ? SkiaLogBridgeStatus::installed
-                           : SkiaLogBridgeStatus::declined_handler_present;
+    const auto result =
+        ok ? SkiaLogBridgeStatus::installed : SkiaLogBridgeStatus::declined_handler_present;
     g_bridge_status.store(result, std::memory_order_relaxed);
     return result;
 }
 
-#else  // no Skia log handler in this build
+#else // no Skia log handler in this build
 
 SkiaLogBridgeStatus install_skia_log_bridge() noexcept {
-    g_bridge_status.store(SkiaLogBridgeStatus::unavailable_no_skia,
-                          std::memory_order_relaxed);
+    g_bridge_status.store(SkiaLogBridgeStatus::unavailable_no_skia, std::memory_order_relaxed);
     return SkiaLogBridgeStatus::unavailable_no_skia;
 }
 
-#endif  // PULP_RENDER_HAS_SK_LOG_HANDLER
+#endif // PULP_RENDER_HAS_SK_LOG_HANDLER
 
 SkiaLogBridgeStatus install_skia_log_bridge_if_enabled() noexcept {
     if (!skia_log_bridge_enabled()) {
@@ -220,4 +233,4 @@ SkiaLogBridgeStatus install_skia_log_bridge_if_enabled() noexcept {
     return install_skia_log_bridge();
 }
 
-}  // namespace pulp::render
+} // namespace pulp::render
