@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260915-pr8400-selectable-text-capability-watch",
+  "created_at": "2026-09-15T20:55:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Expose painted text geometry that Label and TextEditor already compute so a later document-level selection owner can reach the existing hit-test and line-layout behavior without re-deriving it. The new SelectableText interface reports UTF-8 byte offsets and painted line bands; Label records geometry beside its existing fill_text calls, TextEditor projects its existing LayoutSnapshot, and a declared View content region makes supported labels discoverable while preserving existing control gestures outside that region. The focused tests cover UTF-8 cluster boundaries, shaped offsets, wrapped lines, empty and unmeasured layouts, selection bands, region scoping, reparenting, and the no-recording performance control. This is a Pulp view capability and test surface only: no renderer backend, asset pipeline, visual-proof acceptance boundary, or Vellum source authority moves, so the disposition is watch-only.",
+  "tests": [
+    "ctest --test-dir build -R 'selectable|Selectable|Label|TextEditor|text editor' --output-on-failure",
+    "PULP_DIFF_COVER_CTEST_REGEX='selectable|Selectable|Label|TextEditor|text editor' tools/scripts/local_diff_cover.sh pulp-test-selectable-text pulp-test-widgets-label pulp-test-text-editor pulp-test-text-editor-paint",
+    "python3 tools/scripts/vellum_freeze_check.py --source-head HEAD --output <outbox>",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -4,39 +4,39 @@
 // focused node, connection, or custom-node header when runtime access is not
 // required.
 
-#include <pulp/host/custom_node_type.hpp>
-#include <pulp/host/signal_graph_connection.hpp>
-#include <pulp/host/signal_graph_node.hpp>
-#include <pulp/host/anticipation_lane.hpp>
-#include <pulp/host/graph_types.hpp>
-#include <pulp/host/plugin_slot.hpp>
-#include <pulp/host/signal_graph_executor_routing.hpp>
+#include <atomic>
+#include <cassert>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/live_dsp_telemetry.hpp>
 #include <pulp/audio/load_measurer.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
-#include <pulp/runtime/slot.hpp>
+#include <pulp/host/anticipation_lane.hpp>
+#include <pulp/host/custom_node_type.hpp>
+#include <pulp/host/graph_types.hpp>
+#include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/signal_graph_connection.hpp>
+#include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/host/signal_graph_node.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
+#include <pulp/runtime/slot.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/state/modulation_lane.hpp>
-#include <atomic>
-#include <cassert>
-#include <thread>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <vector>
-#include <unordered_map>
-#include <unordered_set>
 #include <string>
 #include <string_view>
-#include <cmath>
-#include <cstdint>
-#include <cstddef>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace pulp::host {
 
@@ -143,6 +143,7 @@ public:
     // can rebuild with the matching process callback. Shape mismatches keep
     // placeholder passthrough semantics instead of attaching the callback.
     bool register_custom_node_type(CustomNodeType type);
+    bool register_custom_node_type(CustomNodeType type, SampleKernelDescriptor sample_kernel);
     // Returns a callback-free, value-owned snapshot sorted lexicographically by
     // (type_id, version). The snapshot remains valid across later registrations
     // and after this graph is destroyed.
@@ -150,6 +151,7 @@ public:
     const CustomNodeType* custom_node_type(std::string_view type_id) const;
     const CustomNodeType* custom_node_type(std::string_view type_id,
                                            int version) const;
+    const SampleKernelDescriptor* sample_kernel_type(std::string_view type_id, int version) const;
     NodeId add_custom_node(std::string_view type_id,
                            const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id,
@@ -726,12 +728,13 @@ public:
     std::size_t custom_node_type_count() const;
 
 private:
-    friend class ExecutionSnapshot;
-    struct PrepareLifecycleObserver {
-        void* context = nullptr;
-        void (*plugin_will_prepare)(void*, PluginSlot*) noexcept = nullptr;
-        void (*custom_will_prepare)(void*, void*) noexcept = nullptr;
-    };
+  friend bool register_builtin_sample_region_types(SignalGraph& graph);
+  friend class ExecutionSnapshot;
+  struct PrepareLifecycleObserver {
+      void* context = nullptr;
+      void (*plugin_will_prepare)(void*, PluginSlot*) noexcept = nullptr;
+      void (*custom_will_prepare)(void*, void*) noexcept = nullptr;
+  };
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
         MidiBlockSnapshot(const MidiBlockSnapshot& other);
@@ -1112,6 +1115,7 @@ private:
     std::vector<std::uint64_t> connection_identities_;
     std::uint64_t next_connection_identity_{1};
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
+    std::unordered_map<std::string, SampleKernelDescriptor> sample_kernel_types_;
     // Bumped on every register_custom_node_type; captured into each CompiledGraph
     // so the 2.2b reinit-free-swap predicate can reject a candidate compiled after
     // the custom registry changed (M6 — prevents binding new callbacks to
@@ -1555,5 +1559,10 @@ LiveSwapAdmission evaluate_live_swap_admission(
     const audio::AudioProcessLoadSnapshot& graph,
     const std::vector<audio::AudioProcessLoadSnapshot>& staged_nodes,
     float headroom_threshold, std::uint64_t min_callbacks);
+
+// Explicitly registers the closed framework-owned v1 scalar cohort. There are
+// no process-global registries or static-initializer side effects.
+bool register_builtin_sample_region_types(SignalGraph& graph);
+bool register_builtin_sample_region_types(SignalGraph::PreparedTopologyEdit& edit);
 
 } // namespace pulp::host

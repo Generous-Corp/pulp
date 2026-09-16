@@ -46,6 +46,58 @@
     target_link_libraries(pulp-test-gpu-compute PRIVATE pulp::render pulp::signal Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-compute ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # Native Apple-Silicon capability proof for Dawn's HostMappedPointer path.
+    # This is a standalone probe rather than a Catch test because CI and field
+    # machines need distinct pass / failed / unavailable exit states plus one
+    # bounded JSON receipt with the exact provider identity.
+    if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_HAS_SKIA
+            AND EXISTS "${DAWN_LIBRARY}")
+        file(SHA256 "${DAWN_LIBRARY}" _pulp_gpu_audio_dawn_archive_sha256)
+        set(_pulp_gpu_audio_asset_sha256 "unknown")
+        if(EXISTS "${SKIA_DIR}/.skia-asset-sha256")
+            file(READ "${SKIA_DIR}/.skia-asset-sha256"
+                _pulp_gpu_audio_asset_sha256)
+            string(STRIP "${_pulp_gpu_audio_asset_sha256}"
+                _pulp_gpu_audio_asset_sha256)
+        endif()
+
+        add_executable(pulp-gpu-host-mapped-pointer-probe
+            test_gpu_host_mapped_pointer_probe.cpp)
+        target_link_libraries(pulp-gpu-host-mapped-pointer-probe PRIVATE
+            "${DAWN_LIBRARY}"
+            "-framework Metal"
+            "-framework Foundation"
+            "-framework IOKit"
+            "-framework IOSurface"
+            "-framework QuartzCore"
+            objc)
+        target_include_directories(pulp-gpu-host-mapped-pointer-probe PRIVATE
+            ${SKIA_INCLUDE_DIRS})
+        if(EXISTS "${SKIA_INCLUDE_DIRS}/dawn")
+            target_include_directories(pulp-gpu-host-mapped-pointer-probe PRIVATE
+                "${SKIA_INCLUDE_DIRS}/dawn")
+        endif()
+        target_compile_definitions(pulp-gpu-host-mapped-pointer-probe PRIVATE
+            PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256="${_pulp_gpu_audio_asset_sha256}"
+            PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256="${_pulp_gpu_audio_dawn_archive_sha256}"
+            PULP_GPU_AUDIO_BUILD_TYPE="$<CONFIG>")
+        add_test(NAME pulp-gpu-host-mapped-pointer-probe
+            COMMAND pulp-gpu-host-mapped-pointer-probe)
+        add_test(NAME pulp-gpu-host-mapped-pointer-oracle-negative-control
+            COMMAND pulp-gpu-host-mapped-pointer-probe
+                --verify-oracle-negative-control)
+        set_tests_properties(
+            pulp-gpu-host-mapped-pointer-probe
+            pulp-gpu-host-mapped-pointer-oracle-negative-control
+            PROPERTIES
+                RESOURCE_LOCK pulp_gpu
+                SKIP_RETURN_CODE 77
+                TIMEOUT 20)
+
+        unset(_pulp_gpu_audio_asset_sha256)
+        unset(_pulp_gpu_audio_dawn_archive_sha256)
+    endif()
+
     # GPU roofline / occupancy harness (tooling, not a test): drives every
     # MAC-dense compute pass and prints a ranked GMAC/s-vs-roofline + occupancy
     # table. Confirms the WaveNet one-thread-per-sample gap and its siblings.

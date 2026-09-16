@@ -143,7 +143,7 @@ functions:
 
   - name: pulp_faust_generate
     status: experimental
-    summary: Generate C++ from a FAUST .dsp file (requires faust compiler). Pre-generated files are used when faust is not installed.
+    summary: Generate a developer-selected C++ artifact with an optional external Faust compiler; Pulp reference DSPs do not depend on it.
     required:
       - output_hpp
       - input_dsp

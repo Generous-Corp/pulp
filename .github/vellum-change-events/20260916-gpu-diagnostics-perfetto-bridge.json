@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20260916-gpu-diagnostics-perfetto-bridge",
+  "kind": "change",
+  "created_at": "2026-09-16T09:40:00Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "Dawn already reported uncaptured errors and device loss through its own callbacks, but those messages only reached runtime::log_error, so a validation error that dropped a frame never appeared on the timeline beside the frame it killed. A gpu trace category already existed and nothing emitted into it from these paths. The change adds instant-event macros to Pulp's trace API and a shared sink that the Dawn callbacks feed, keeping their existing log_error calls so no current behaviour regresses; the event name stays an interned StaticString with the message as a debug annotation because these callbacks run on the render thread. The touched Dawn file gains only the emit calls, and the iOS-Simulator warning filter is preserved byte-identical and still precedes them. This wires a transferred-slice callback into Pulp's own runtime tracing, which is Pulp host-integration work with no named immutable Vellum framework commit to backport, so it is dispositioned pulp-only.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "an installed Skia handler forwards records into the same sink",
+    "emit_gpu_diagnostic counts every record it is handed",
+    "the Skia log bridge agrees with this build about its own presence"
+  ],
+  "disposition": "pulp-only"
+}

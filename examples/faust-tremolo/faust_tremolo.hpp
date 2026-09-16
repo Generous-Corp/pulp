@@ -1,6 +1,6 @@
 #pragma once
 
-#include "generated_tremolo.hpp"
+#include "reference_tremolo.hpp"
 #include <pulp/dsl/faust_processor.hpp>
 
 namespace pulp::examples {

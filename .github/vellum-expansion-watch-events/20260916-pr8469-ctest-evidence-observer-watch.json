@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260916-pr8469-ctest-evidence-observer-watch",
+  "created_at": "2026-09-16T06:42:48Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Extracts the existing CTest non-run observer from workflow YAML into a bounded source-owned Python helper, adds duplicate-safe baseline artifact comparison, and publishes its JSON projection beside the raw non-Windows CTest XML. The observer remains non-gating and does not change test selection, CTest verdicts, runner routing, packaging, release behavior, or design/render authority. The design-output-and-packaging family is crossed by exactly one path: docs/status/tools.yaml, whose registry row makes the checkout-only evidence helper discoverable to agents and generates the matching CLAUDE.md catalog entry. The other changed paths are the helper and tests, CI observation wiring, local-CI documentation, and the CI skill; they match no Vellum watch selector. No importer, DesignIR schema, generated design output, template, installed SDK, product artifact, renderer, asset pipeline, or Vellum-owned source changes. Registered as watch-only so selector coverage stays exact without claiming an authority move.",
+  "tests": [
+    "python3 tools/scripts/test_ctest_nonruns.py",
+    "python3 tools/scripts/test_workflow_lint.py",
+    "python3 tools/scripts/test_tools_registry.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR merge-base> --head HEAD",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

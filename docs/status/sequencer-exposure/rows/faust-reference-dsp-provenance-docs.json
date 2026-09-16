@@ -1,0 +1,57 @@
+{
+  "id": "faust-reference-dsp-provenance-docs",
+  "title": "Faust documentation distinguishes Pulp reference DSPs from optional external code generation",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "511a16fb-9867-47d2-a92e-5462b0d54c98",
+  "owned_paths": [
+    "docs/guides/examples.md",
+    "docs/reference/cmake.md",
+    "docs/status/cmake-functions.yaml",
+    "docs/status/sequencer-exposure/rows/faust-reference-dsp-provenance-docs.json"
+  ],
+  "evidence": [
+    {
+      "path": "docs/guides/examples.md",
+      "needles": [
+        "Pulp-owned reference DSP implementations",
+        "Pulp provides optional external codegen separately"
+      ]
+    },
+    {
+      "path": "docs/reference/cmake.md",
+      "needles": [
+        "Generate a developer-selected C++ artifact",
+        "Pulp reference DSPs remain buildable"
+      ]
+    },
+    {
+      "path": "docs/status/cmake-functions.yaml",
+      "needles": [
+        "Pulp reference DSPs do not depend on it"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "These edits correct documentation provenance and optional-tool wording. They add no installed header, target, symbol, or sequencer API."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline CLI verb, flag, handler, or document operation changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No Timeline MCP definition, handler, schema, or authority boundary changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No live product capability, operation, executor binding, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The design-time capability manifest is unchanged; the documentation correction publishes no sequencer capability."
+    }
+  }
+}
