@@ -3,7 +3,7 @@
 
 Asserts:
   * the shipped `.agents/contract.toml` parses and is schema-valid;
-  * every layer is represented and the 20 known decisions are present;
+  * every layer is represented and no decision row has gone missing;
   * `--mode surface` returns the expected rows for a guarded fleet/CI path and
     is a clean, empty no-op for a non-fleet path (the external-contributor
     guarantee);
@@ -44,6 +44,20 @@ import decisions_contract as dc  # noqa: E402  (same directory)
 
 _failures: list[str] = []
 
+# The row count is DERIVED from the contract, never written as a literal. Three
+# assertions here cross-check a rendering or a subprocess's own report against
+# the parsed contract, and each of those comparisons is real signal; the literal
+# is not. Pinning it means editing every site on every added row, and that edit
+# has been missed. What the literal actually protected is a row silently
+# DISAPPEARING, which a floor covers just as well while needing an edit only on
+# a deliberate removal.
+MINIMUM_DECISIONS = 20
+
+
+def expected_decisions() -> int:
+    """Rows in the shipped contract, read fresh so no test pins a number."""
+    return len(dc.load_contract(CONTRACT)["decision"])
+
 
 def check(cond: bool, msg: str) -> None:
     if cond:
@@ -64,7 +78,8 @@ def test_shipped_contract_is_valid() -> None:
     print("test_shipped_contract_is_valid")
     data = dc.load_contract(CONTRACT)  # raises SchemaError on any problem
     ids = sorted(d["id"] for d in data["decision"])
-    check(len(ids) == 20, f"20 decisions present (got {len(ids)})")
+    check(len(ids) >= MINIMUM_DECISIONS,
+          f"no decision row went missing (got {len(ids)}, floor {MINIMUM_DECISIONS})")
     check(len(set(ids)) == len(ids), "decision ids are unique")
     layers = {d["layer"] for d in data["decision"]}
     check(layers == {"default", "pulp"}, f"both layers represented (got {layers})")
@@ -72,8 +87,10 @@ def test_shipped_contract_is_valid() -> None:
     proc = run_checker("--mode", "validate", "--json")
     check(proc.returncode == 0, "validate exits 0 on the shipped file")
     payload = json.loads(proc.stdout)
-    check(payload.get("ok") is True and payload.get("decisions") == 20,
-          "validate --json reports ok + 20 decisions")
+    expected = expected_decisions()
+    check(payload.get("ok") is True and payload.get("decisions") == expected,
+          f"validate --json reports ok + every row (expected {expected}, "
+          f"got {payload.get('decisions')})")
 
 
 def test_surface_matches_and_noops() -> None:
@@ -290,8 +307,10 @@ def test_runs_on_an_interpreter_without_tomllib() -> None:
     check(proc.returncode != 9, "control: the no-tomllib shim actually took effect")
     check(proc.returncode == 0,
           f"`--mode list` succeeds without tomllib (exit {proc.returncode})")
-    check(proc.stdout.count("      why:") == 20,
-          f"all 20 rows are listed (got {proc.stdout.count('      why:')})")
+    expected = expected_decisions()
+    check(proc.stdout.count("      why:") == expected,
+          f"every row is listed across the re-exec (expected {expected}, "
+          f"got {proc.stdout.count('      why:')})")
     check("re-executing under" in proc.stderr,
           "the hand-over is announced on stderr, not silent")
 
@@ -299,10 +318,18 @@ def test_runs_on_an_interpreter_without_tomllib() -> None:
     check(proc.returncode == 0, "`--mode validate --json` succeeds without tomllib")
     try:
         payload = json.loads(proc.stdout)
+        clean_json = True
     except ValueError:
         payload = {}
-    check(payload.get("ok") is True and payload.get("decisions") == 20,
-          "stdout stays clean JSON across the re-exec")
+        clean_json = False
+    # Two separate properties, asserted separately: a conjunction here reports
+    # whichever message it carries no matter which half failed, which is the
+    # defect this file exists to catch elsewhere.
+    check(clean_json and payload.get("ok") is True,
+          f"stdout stays clean JSON across the re-exec (got {proc.stdout[:80]!r})")
+    check(payload.get("decisions") == expected,
+          f"the re-exec reports every row (expected {expected}, "
+          f"got {payload.get('decisions')})")
 
     # The external-contributor no-op must survive: no stray note on stderr.
     proc = _run_without_tomllib("--mode", "surface", "--paths", "core/signal/biquad.cpp")

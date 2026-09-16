@@ -449,5 +449,108 @@ class SquashBuriedBypassTrailerTests(unittest.TestCase):
         self.assertNotIn("## notes", got)
 
 
+class QuotedTrailerIsNotABypassTests(unittest.TestCase):
+    """The whole-body line scan that rescues squash-buried trailers must not
+    read a trailer that prose merely QUOTES. A friction report, a guide, or a
+    PR body pasted into a commit message all show trailer syntax as an example;
+    none of them declares a bypass. Every quoting form a writer actually reaches
+    for has to stay inert, or documenting the mechanism grants it."""
+
+    def test_indented_trailer_is_not_a_bypass(self) -> None:
+        body = (
+            "docs: explain the bypass\n\n"
+            "Use the trailer like this:\n\n"
+            "    Version-Bump: skip reason=\"an indented example\"\n"
+        )
+        self.assertNotIn("version-bump", gc._parse_trailer_block(body))
+
+    def test_blockquoted_trailer_is_not_a_bypass(self) -> None:
+        body = (
+            "docs: quote the report\n\n"
+            "> Skill-Update: skip skill=ci reason=\"quoted from the report\"\n"
+        )
+        self.assertNotIn("skill-update", gc._parse_trailer_block(body))
+
+    def test_fenced_trailer_is_not_a_bypass(self) -> None:
+        # A fence is the one quoting form that keeps the trailer at column zero,
+        # so the line-start anchor alone cannot exclude it.
+        body = (
+            "docs: document the trailer syntax\n\n"
+            "```\n"
+            "Version-Bump: skip reason=\"a fenced example\"\n"
+            "```\n\n"
+            "...as shown above.\n"
+        )
+        self.assertNotIn("version-bump", gc._parse_trailer_block(body))
+
+    def test_fenced_trailer_with_info_string_is_not_a_bypass(self) -> None:
+        body = (
+            "docs: document the trailer syntax\n\n"
+            "```text\n"
+            "Hotspot-Grow: CLAUDE.md reason=\"a fenced example\"\n"
+            "~~~\n"
+            "```\n"
+        )
+        self.assertNotIn("hotspot-grow", gc._parse_trailer_block(body))
+
+    def test_tilde_fenced_trailer_is_not_a_bypass(self) -> None:
+        body = (
+            "docs: document the trailer syntax\n\n"
+            "~~~\n"
+            "Config-Doc: skip reason=\"a fenced example\"\n"
+            "~~~\n"
+        )
+        self.assertNotIn("config-doc", gc._parse_trailer_block(body))
+
+    def test_real_trailer_after_a_fenced_example_still_counts(self) -> None:
+        # The discriminating case: one body holding BOTH a documented example
+        # and a genuine declaration. Masking the fence must not cost the real one.
+        body = (
+            "docs: document the trailer, and use it\n\n"
+            "```\n"
+            "Version-Bump: skip reason=\"the documented example\"\n"
+            "```\n\n"
+            "Version-Bump: skip reason=\"the real declaration\"\n\n"
+            "---------\n\n"
+            "Co-authored-by: Someone <s@example.com>\n"
+        )
+        got = gc._parse_trailer_block(body)
+        self.assertEqual(got["version-bump"], ['skip reason="the real declaration"'])
+
+    def test_unclosed_fence_masks_nothing(self) -> None:
+        # Fail toward SEEING a trailer. Letting an unterminated fence swallow the
+        # rest of a body would drop a real bypass and resurrect the silent
+        # merge-queue eviction, which is far more expensive than a prose false
+        # positive that still had to be written at column zero.
+        # Shaped as a squash so the declaration is reachable ONLY through the
+        # rescue scan: interpret-trailers latches the Co-authored-by block, so a
+        # mask that swallowed the rest of the body would drop the trailer for real.
+        body = (
+            "feat: thing (#1)\n\n"
+            "```\n"
+            "an example that was never closed\n\n"
+            "Skill-Update: skip skill=ci reason=\"a real declaration\"\n\n"
+            "---------\n\n"
+            "Co-authored-by: Someone <s@example.com>\n"
+        )
+        got = gc._parse_trailer_block(body)
+        self.assertEqual(got["skill-update"], ['skip skill=ci reason="a real declaration"'])
+
+    def test_trailer_key_does_not_cross_match_a_longer_key(self) -> None:
+        # The key is delimited by its colon, so a longer hyphenated key must not
+        # register as its own prefix: `Release-Note:` is not a `Release:` bypass.
+        body = (
+            "feat: thing\n\n"
+            "Release-Note: user-visible change\n"
+            "Version-Bump-Reason: not a Version-Bump\n\n"
+            "---------\n\n"
+            "Co-authored-by: Someone <s@example.com>\n"
+        )
+        got = gc._parse_trailer_block(body)
+        self.assertNotIn("release", got)
+        self.assertNotIn("version-bump", got)
+        self.assertIn("release-note", got)
+
+
 if __name__ == "__main__":
     unittest.main()
