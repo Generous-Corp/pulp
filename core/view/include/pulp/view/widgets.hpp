@@ -168,27 +168,76 @@ public:
     // Each setter marks the corresponding has_own_* flag so
     // paint() can distinguish "default value" from "explicitly set" and
     // fall through to inheritable_*() for unset properties.
-    void set_font_size(float size) { font_size_ = size; has_own_font_size_ = true; }
+    // Typography that feeds the shaper's cache key — size, family, weight,
+    // style, letter spacing, line height, wrap mode, case transform — decides
+    // this Label's measured box, so changing it is a geometry mutation and has
+    // to advance the layout generation. Both layout gates
+    // (View::layout_children_if_needed and WidgetBridge::ensure_layout) elide
+    // the pass while the applied generation matches the tree's, so a setter
+    // that stays silent here leaves the Label painting at the box its PREVIOUS
+    // typography solved to, and leaves every ancestor sized for it.
+    //
+    // Each setter is guarded on an actual change. A materialized React commit
+    // replays an element's complete style object when only paint state moved;
+    // dirtying the tree for an identical write would make every following
+    // geometry read pay for a full Yoga pass, which is the same contract
+    // flex_styles_equal keeps on the flex path.
+    void set_font_size(float size) {
+        if (has_own_font_size_ && font_size_ == size)
+            return;
+        font_size_ = size;
+        has_own_font_size_ = true;
+        invalidate_layout();
+    }
     float font_size() const { return font_size_; }
     bool has_own_font_size() const { return has_own_font_size_; }
 
     /// CSS font-family string (e.g. "Inter", "JetBrains Mono"). Empty means
     /// the widget falls back to the default theme family ("Inter").
-    void set_font_family(std::string family) { font_family_ = std::move(family); }
+    void set_font_family(std::string family) {
+        if (font_family_ == family)
+            return;
+        font_family_ = std::move(family);
+        invalidate_layout();
+    }
     const std::string& font_family() const { return font_family_; }
 
-    void set_font_weight(int weight) { font_weight_ = weight; has_own_font_weight_ = true; }  // 100-900, 400=normal, 700=bold
+    // 100-900, 400=normal, 700=bold
+    void set_font_weight(int weight) {
+        if (has_own_font_weight_ && font_weight_ == weight)
+            return;
+        font_weight_ = weight;
+        has_own_font_weight_ = true;
+        invalidate_layout();
+    }
     int font_weight() const { return font_weight_; }
     bool has_own_font_weight() const { return has_own_font_weight_; }
 
-    void set_font_style(int style) { font_style_ = style; }  // 0=normal, 1=italic, 2=oblique
+    // 0=normal, 1=italic, 2=oblique
+    void set_font_style(int style) {
+        if (font_style_ == style)
+            return;
+        font_style_ = style;
+        invalidate_layout();
+    }
     int font_style() const { return font_style_; }
 
-    void set_letter_spacing(float sp) { letter_spacing_ = sp; has_own_letter_spacing_ = true; }
+    void set_letter_spacing(float sp) {
+        if (has_own_letter_spacing_ && letter_spacing_ == sp)
+            return;
+        letter_spacing_ = sp;
+        has_own_letter_spacing_ = true;
+        invalidate_layout();
+    }
     float letter_spacing() const { return letter_spacing_; }
     bool has_own_letter_spacing() const { return has_own_letter_spacing_; }
 
-    void set_line_height(float lh) { line_height_ = lh; }
+    void set_line_height(float lh) {
+        if (line_height_ == lh)
+            return;
+        line_height_ = lh;
+        invalidate_layout();
+    }
     float line_height() const { return line_height_; }
 
     void set_text_align(LabelAlign align) { text_align_ = align; has_own_text_align_ = true; }
@@ -201,7 +250,12 @@ public:
     bool has_own_text_color() const { return has_own_text_color_; }
     canvas::Color text_color() const { return text_color_; }
 
-    void set_multi_line(bool ml) { multi_line_ = ml; }
+    void set_multi_line(bool ml) {
+        if (multi_line_ == ml)
+            return;
+        multi_line_ = ml;
+        invalidate_layout();
+    }
     bool multi_line() const { return multi_line_; }
 
     /// CSS `line-clamp` / `-webkit-line-clamp`. Maximum number of visible
@@ -218,7 +272,12 @@ public:
 
     /// CSS text-transform: uppercase, lowercase, capitalize, none
     enum class TextTransform { none, uppercase, lowercase, capitalize };
-    void set_text_transform(TextTransform t) { text_transform_ = t; }
+    void set_text_transform(TextTransform t) {
+        if (text_transform_ == t)
+            return;
+        text_transform_ = t;
+        invalidate_layout();
+    }
     TextTransform text_transform() const { return text_transform_; }
 
     /// CSS text-decoration: none, underline, line-through, overline
