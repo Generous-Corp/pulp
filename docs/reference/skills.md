@@ -35,7 +35,7 @@ for its complete, authoritative guidance.
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
 | `decide` | Ask Daniel a blocking decision as options with a recommendation and honest pros/cons, rather than prose. |
 | `engine` | Query, recommend, and switch the Pulp JS engine backend (QuickJS, JavaScriptCore, V8). |
-| `faust` | Create FAUST DSP plugins in Pulp using offline codegen, pre-generated C++ headers, and the FaustProcessor template wrapper. |
+| `faust` | Create Faust DSP plugins in Pulp using Pulp-owned reference DSPs, optional external code generation, and the FaustProcessor template wrapper. |
 | `forge-app-delivery` | Building and shipping a Forge app (Modular, Instrument, MIDI, FX, and the sequencer work to come) as a signed installer somebody else can actually use. |
 | `forge-modular` | Forge Modular's generator, patch checker, module pack and Forge-worktree seam — the traps that make green results untrue |
 | `friction-report` | Turn a moment of friction — a conflicting PR, a wedged runner, a mysterious red check, a repeated manual chore — into a durable, actionable report. |

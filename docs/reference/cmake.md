@@ -567,15 +567,16 @@ target_link_libraries(MyPlugin_Core PRIVATE MyGain_Core)
 
 ## pulp_faust_generate
 
-Generate a checked-in C++ header from a FAUST `.dsp` source file. This helper is
-optional: when the `faust` compiler is not installed, the build keeps using the
-pre-generated file already in the source tree.
+Generate a developer-selected C++ artifact from a Faust `.dsp` source file with
+an optional external compiler. When `faust` is unavailable, no codegen command is
+registered. Pulp reference DSPs remain buildable and are not claimed to match
+compiler output.
 
 ```cmake
 include(${PULP_ROOT}/tools/cmake/PulpFaust.cmake)
 
 pulp_faust_generate(
-    ${CMAKE_CURRENT_SOURCE_DIR}/generated_gain.hpp
+    ${CMAKE_CURRENT_BINARY_DIR}/my_gain_faust.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gain.dsp
     FaustGainDsp
 )
@@ -585,7 +586,7 @@ pulp_faust_generate(
 
 | Parameter | Required | Description |
 |---|---|---|
-| `output_hpp` | Yes | Header path to generate, normally under the source tree so it can be committed |
+| `output_hpp` | Yes | Artifact path to generate; prefer the build tree unless provenance is pinned and verified |
 | `input_dsp` | Yes | FAUST `.dsp` source file |
 | `class_name` | Yes | C++ class name passed to FAUST via `-cn` |
 
