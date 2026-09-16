@@ -427,6 +427,11 @@ pulp_add_test_suite(pulp-test-gpu-shared-io-slot-ledger
     LIBRARIES Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+pulp_add_test_suite(pulp-test-gpu-dawn-submission-tracker
+    SOURCES test_gpu_dawn_submission_tracker.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_submission_tracker.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Separate full-library link check keeps the private production TU wired into
 # pulp::gpu-audio without burdening every focused lifecycle rebuild.
 pulp_add_test_suite(pulp-test-gpu-shared-io-arena-link

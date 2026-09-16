@@ -176,7 +176,9 @@ class SharedIoArenaProvider {
     // occur. A later explicit retire_slot() may initiate a disposal-only
     // callback wave; a second drain() closes that phase. After every old slot is
     // destroyed, a later create_slot() may open a new preparation generation.
-    virtual void drain() noexcept = 0;
+    // False preserves every backing allocation and makes arena release fail;
+    // a deadline is never evidence that callbacks or GPU access have ended.
+    virtual bool drain() noexcept = 0;
 };
 
 // Prepared, fixed-capacity owner for shared CPU/GPU I/O slots. All methods other

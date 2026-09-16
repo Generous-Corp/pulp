@@ -485,15 +485,17 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
             auto& request = pending[index];
             if (!request.accepted || (request.terminal && !request.completion_pending))
                 continue;
-            const auto status = request.completion_pending ? request.completion_status
-                                                           : completion_on_poll;
+            const auto status =
+                request.completion_pending ? request.completion_status : completion_on_poll;
             if (complete(index, status) == SharedIoTerminalInbox::PushResult::Busy)
                 ++poll_busy_publications;
         }
     }
 
-    void drain() noexcept override {
+    bool drain() noexcept override {
         ++drain_calls;
+        if (force_drain_failure)
+            return false;
         for (auto& request : pending) {
             if (!request.accepted || request.terminal)
                 continue;
@@ -520,6 +522,7 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
             }
             resource = nullptr;
         }
+        return !drain_push_failed;
     }
 
     SharedIoTerminalInbox::PushResult complete(std::size_t index, SharedIoTerminalStatus status) {
@@ -600,6 +603,7 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
     std::uint32_t disposals_observed = 0;
     std::uint32_t host_frees = 0;
     bool drain_push_failed = false;
+    bool force_drain_failure = false;
     bool destroy_before_dispose = false;
     std::vector<Pending> pending;
     std::vector<Pending> previous;
@@ -798,8 +802,7 @@ TEST_CASE("shared IO provider poll retains a busy terminal publication for retry
     CHECK(provider.poll_busy_publications == 1);
     CHECK_FALSE(arena.acquire_output(token.preparation_epoch, token.stream_sequence));
 
-    REQUIRE(provider.finish_held_stale_claim() ==
-            SharedIoTerminalInbox::PushResult::Rejected);
+    REQUIRE(provider.finish_held_stale_claim() == SharedIoTerminalInbox::PushResult::Rejected);
     const auto retried = arena.drain_completions();
     CHECK(provider.poll_calls == 2);
     CHECK(provider.poll_busy_publications == 1);
@@ -927,6 +930,29 @@ TEST_CASE("shared IO arena teardown terminally drains pending work before exact 
     CHECK_FALSE(provider.destroy_before_dispose);
     CHECK(provider.destroy_calls == 2);
     CHECK(provider.live_allocations == 0);
+}
+
+TEST_CASE("shared IO arena preserves imported ownership across a failed drain",
+          "[gpu_audio][shared_io][arena][teardown]") {
+    FakeSharedIoProvider provider;
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(provider, arena_config(1)));
+    publish_and_submit(arena, 450);
+
+    provider.force_drain_failure = true;
+    CHECK_FALSE(arena.release());
+    CHECK(arena.prepared());
+    CHECK(provider.live_allocations == 1);
+    CHECK(provider.host_frees == 0);
+    CHECK(provider.destroy_calls == 0);
+
+    provider.force_drain_failure = false;
+    REQUIRE(arena.release());
+    CHECK_FALSE(arena.prepared());
+    CHECK(provider.live_allocations == 0);
+    CHECK(provider.host_frees == 2);
+    CHECK(provider.destroy_calls == 1);
+    CHECK_FALSE(provider.destroy_before_dispose);
 }
 
 TEST_CASE("shared IO arena submission rejection returns reserved terminal credit",

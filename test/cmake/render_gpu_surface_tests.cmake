@@ -261,6 +261,90 @@
                     pulp-gpu-host-mapped-pointer-provider-negative-control
                     PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
             endif()
+
+            add_executable(pulp-gpu-dawn-shared-io-provider-probe
+                test_gpu_dawn_shared_io_provider_probe.cpp)
+            target_link_libraries(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
+                "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+            target_compile_definitions(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            set(_pulp_gpu_audio_shared_prelink_receipt
+                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/shared-io-pre-link.json")
+            set(_pulp_gpu_audio_shared_bound_receipt
+                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/shared-io-bound.json")
+            set_property(TARGET pulp-gpu-dawn-shared-io-provider-probe APPEND PROPERTY
+                LINK_DEPENDS
+                    "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/fetch_skia_for_release.py"
+                    "${_pulp_gpu_audio_configure_receipt}"
+                    "${_pulp_gpu_audio_dawn_header}"
+                    "${DAWN_LIBRARY}"
+                    "${SKIA_DIR}/.skia-asset-sha256"
+                    "${SKIA_DIR}/.skia-generation-manifest.json"
+                    "${SKIA_DIR}/.skia-source-archive.zip")
+            add_custom_command(TARGET pulp-gpu-dawn-shared-io-provider-probe PRE_LINK
+                COMMAND "${CMAKE_COMMAND}" -E make_directory
+                    "${_pulp_gpu_audio_identity_dir}/$<CONFIG>"
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    prelink
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --result "${_pulp_gpu_audio_shared_prelink_receipt}"
+                VERBATIM)
+            add_custom_command(TARGET pulp-gpu-dawn-shared-io-provider-probe POST_BUILD
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    bind
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --prelink-receipt "${_pulp_gpu_audio_shared_prelink_receipt}"
+                    --executable "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"
+                    --result "${_pulp_gpu_audio_shared_bound_receipt}"
+                VERBATIM)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-identity
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    verify
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --prelink-receipt "${_pulp_gpu_audio_shared_prelink_receipt}"
+                    --executable "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"
+                    --receipt "${_pulp_gpu_audio_shared_bound_receipt}")
+            set_tests_properties(pulp-gpu-dawn-shared-io-provider-identity PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_audio_provider_identity
+                FIXTURES_SETUP pulp_gpu_dawn_shared_io_provider_identity
+                TIMEOUT 60)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-probe
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict)
+            set_tests_properties(pulp-gpu-dawn-shared-io-provider-probe PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                TIMEOUT 20)
+
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-lifecycle
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/test/verify_gpu_dawn_shared_io_provider.py"
+                    --probe "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>")
+            set_tests_properties(pulp-gpu-dawn-shared-io-provider-lifecycle PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                TIMEOUT 60)
         endif()
 
         unset(_pulp_gpu_audio_asset_sha256)

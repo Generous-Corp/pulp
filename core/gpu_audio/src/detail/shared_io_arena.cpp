@@ -1,5 +1,6 @@
 #include "shared_io_arena.hpp"
 
+#include <algorithm>
 #include <new>
 
 namespace pulp::gpu_audio::detail {
@@ -7,8 +8,9 @@ namespace pulp::gpu_audio::detail {
 namespace {
 
 bool owns_host_allocation(const SharedIoArenaProvider::SlotResources& resources) noexcept {
-    return resources.opaque != nullptr || resources.input_lifecycle.allocated ||
-           resources.output_lifecycle.allocated;
+    return resources.opaque != nullptr ||
+           (resources.input_lifecycle.allocated && !resources.input_lifecycle.host_freed) ||
+           (resources.output_lifecycle.allocated && !resources.output_lifecycle.host_freed);
 }
 
 bool valid_import(const SharedIoArenaProvider::AllocationLifecycle& lifecycle) noexcept {
@@ -16,7 +18,7 @@ bool valid_import(const SharedIoArenaProvider::AllocationLifecycle& lifecycle) n
            !lifecycle.dispose_observed && !lifecycle.host_freed;
 }
 
-void retire_drain_destroy(SharedIoArenaProvider& provider,
+bool retire_drain_destroy(SharedIoArenaProvider& provider,
                           std::vector<SharedIoArenaProvider::SlotResources>& resources) noexcept {
     for (auto& resource : resources) {
         if (owns_host_allocation(resource))
@@ -25,11 +27,13 @@ void retire_drain_destroy(SharedIoArenaProvider& provider,
     // retire_slot() releases imported handles. Their dispose callbacks can be
     // deferred even when buffer creation itself failed, so cross the callback
     // drain before freeing any host allocation.
-    provider.drain();
+    if (!provider.drain())
+        return false;
     for (auto& resource : resources) {
         if (owns_host_allocation(resource))
             provider.destroy_slot(resource);
     }
+    return std::none_of(resources.begin(), resources.end(), owns_host_allocation);
 }
 
 } // namespace
@@ -237,7 +241,15 @@ bool SharedIoArena::prepare(SharedIoArenaProvider& provider, const Config& confi
         // A failed or malformed creation can still own successful imports and
         // deferred disposal callbacks. Roll the whole attempted transaction
         // through release, drain, then host free before making prepare retryable.
-        retire_drain_destroy(provider, resources_);
+        if (!retire_drain_destroy(provider, resources_)) {
+            // Keep the entire attempted transaction alive. A later release()
+            // can retry the physical barrier; clearing these records here
+            // would orphan imported pages after a timeout.
+            prepared_ = provider_ != nullptr;
+            if (prepared_)
+                begin_retirement();
+            return false;
+        }
         resources_.clear();
         rejected_submissions_.clear();
         terminal_inbox_.reset();
@@ -381,7 +393,8 @@ bool SharedIoArena::release() noexcept {
     if (!prepared_)
         return true;
     begin_retirement();
-    provider_->drain();
+    if (!provider_->drain())
+        return false;
     drain_completions();
     // release() is the explicit assertion that CPU producers/consumers have
     // quiesced; begin_retirement() alone never invalidates their spans.
@@ -394,9 +407,12 @@ bool SharedIoArena::release() noexcept {
     // before the provider frees the host allocations.
     for (auto& resource : resources_)
         provider_->retire_slot(resource);
-    provider_->drain();
+    if (!provider_->drain())
+        return false;
     for (auto& resource : resources_)
         provider_->destroy_slot(resource);
+    if (std::any_of(resources_.begin(), resources_.end(), owns_host_allocation))
+        return false;
     resources_.clear();
     rejected_submissions_.clear();
     terminal_inbox_.reset();

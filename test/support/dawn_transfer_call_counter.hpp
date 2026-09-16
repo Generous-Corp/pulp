@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <type_traits>
 
 namespace pulp::test {
@@ -26,6 +27,7 @@ namespace pulp::test {
 // closed.
 class DawnTransferCallCounter {
   public:
+    enum class InstallMode : std::uint8_t { InstallAndRestore, DeferredSingleInstall };
     // Byte fields are requested frontend API bytes. They do not observe copies
     // performed internally by a Dawn backend, writes made through a buffer mapped
     // at creation, or CPU memcpy into shared/mapped storage.
@@ -40,16 +42,19 @@ class DawnTransferCallCounter {
         std::uint64_t submitted_command_buffers = 0;
     };
 
-    DawnTransferCallCounter() : original_(dawn::native::GetProcs()), interposed_(original_) {
+    explicit DawnTransferCallCounter(InstallMode mode = InstallMode::InstallAndRestore)
+        : mode_(mode), original_(dawn::native::GetProcs()),
+          interposed_(std::make_unique<DawnProcTable>(original_)) {
         DawnTransferCallCounter* expected = nullptr;
         if (!active_.compare_exchange_strong(expected, this, std::memory_order_acq_rel))
             std::abort();
 
-        interposed_.queueWriteBuffer = &count_queue_write_buffer;
-        interposed_.commandEncoderCopyBufferToBuffer = &count_copy_buffer_to_buffer;
-        interposed_.bufferMapAsync = &count_buffer_map_async;
-        interposed_.queueSubmit = &count_queue_submit;
-        dawnProcSetProcs(&interposed_);
+        interposed_->queueWriteBuffer = &count_queue_write_buffer;
+        interposed_->commandEncoderCopyBufferToBuffer = &count_copy_buffer_to_buffer;
+        interposed_->bufferMapAsync = &count_buffer_map_async;
+        interposed_->queueSubmit = &count_queue_submit;
+        if (mode_ == InstallMode::InstallAndRestore)
+            dawnProcSetProcs(interposed_.get());
     }
 
     ~DawnTransferCallCounter() {
@@ -59,12 +64,23 @@ class DawnTransferCallCounter {
         // The caller must already have torn down every Dawn object. Restore the
         // entry points before clearing active_ so a new public call cannot enter
         // a wrapper without an owning counter.
-        dawnProcSetProcs(&original_);
+        if (mode_ == InstallMode::InstallAndRestore) {
+            dawnProcSetProcs(&original_);
+        } else {
+            // The isolated child exits immediately after this object dies. Keep
+            // the installed table's storage valid until process teardown without
+            // a second process-global setter mutation.
+            interposed_.release();
+        }
         active_.store(nullptr, std::memory_order_release);
     }
 
     DawnTransferCallCounter(const DawnTransferCallCounter&) = delete;
     DawnTransferCallCounter& operator=(const DawnTransferCallCounter&) = delete;
+
+    const DawnProcTable* deferred_proc_table() const noexcept {
+        return mode_ == InstallMode::DeferredSingleInstall ? interposed_.get() : nullptr;
+    }
 
     // Acceptance snapshots must be taken at a quiescent boundary. Each field is
     // individually atomic, but the returned struct is not one atomic aggregate.
@@ -180,8 +196,9 @@ class DawnTransferCallCounter {
     static_assert(std::is_same_v<decltype(&count_buffer_map_async), WGPUProcBufferMapAsync>);
     static_assert(std::is_same_v<decltype(&count_queue_submit), WGPUProcQueueSubmit>);
 
+    InstallMode mode_ = InstallMode::InstallAndRestore;
     DawnProcTable original_{};
-    DawnProcTable interposed_{};
+    std::unique_ptr<DawnProcTable> interposed_;
 
     std::atomic<std::uint64_t> queue_write_buffer_calls_{0};
     std::atomic<std::uint64_t> queue_write_buffer_bytes_{0};
