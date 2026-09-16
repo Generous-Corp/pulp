@@ -645,24 +645,33 @@ it by updating the fingerprint in
 through explicit reviewed classifications`. That is deliberate. The frozen set is
 content-pinned so headers in it cannot be edited silently.
 
-The sanctioned path is to classify the header OUT of the bucket, which means all
-of these in one change:
+The sanctioned path is to classify the header OUT of the bucket. That takes two
+edits, and **the baseline file is not one of them**:
 
 1. add it to `REVIEWED_HEADERS` in `tools/scripts/agent_capability_registry.py`
-   with its NEW fingerprint, a disposition, and a rationale;
-2. delete its entry from the baseline, decrement `frozen_count`, and recompute
-   `entries_digest` with `agent_capability_surface.canonical_digest(entries)`;
-3. update BOTH `FROZEN_LEGACY_COUNT` and `FROZEN_LEGACY_DIGEST` in
-   `tools/scripts/agent_capability_surface.py` to match; and
-4. run `python3 tools/scripts/agent_capability_rederive.py`, not a hand-edit, to
+   with its NEW fingerprint, a disposition, and a rationale; then
+2. run `python3 tools/scripts/agent_capability_rederive.py`, not a hand-edit, to
    move the counters. Editing `manifest_revision` / `inventory_version` directly
    in the generated JSON does nothing: they are projected from
    `MANIFEST_REVISION` / `SURFACE_INVENTORY_VERSION` constants, so `--write`
    regenerates them and still reports `changed without a revision increase`.
 
+**Do NOT delete the entry from the baseline, decrement `frozen_count`, recompute
+`entries_digest`, or touch `FROZEN_LEGACY_COUNT` / `FROZEN_LEGACY_DIGEST`.** The
+declaration alone satisfies the fingerprint check; the surface document derives
+each header's disposition from `REVIEWED_HEADERS` first, so a declared header
+stops being counted as legacy without the snapshot changing at all. Editing those
+pinned constants to make a PR pass removes the deliberate guard — see "A header
+in the frozen legacy baseline does NOT require unfreezing anything" below, which
+is the authoritative statement. Afterwards confirm the baseline file has no diff
+and its entry count is unchanged; `--check` should report `fresh`, and the
+surface's `legacy_unreviewed` count should have dropped by exactly the number of
+headers you declared.
+
 Only classify a header when the classification is already defensible from a
-written decision. Inventing one to unblock an edit converts a safety gate into
-paperwork.
+written decision, and only when the edit that tripped the gate is load-bearing
+for the change (the triage in that later section). Inventing a classification to
+unblock an incidental edit converts a safety gate into paperwork.
 
 ## The rederive self-test dirties the checkout for its whole run
 
