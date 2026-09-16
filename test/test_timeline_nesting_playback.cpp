@@ -889,6 +889,15 @@ TEST_CASE("Trimmed nested stretched media reads a window of the authored artifac
         Geometry{"left and right trim", kTicksPerQuarter / 4, kTicksPerQuarter / 2, 6'000, 12'000},
         Geometry{"right trim only", 0, 3 * kTicksPerQuarter / 4, 0, 18'000},
         Geometry{"left trim only", kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4, 6'000, 18'000},
+        // The three rows above all trim on a frame boundary: a quarter of a
+        // quarter note is exactly 6'000 frames here. Ticks resolve far finer
+        // than that. One tick is about 1/29.4 of a frame at 120 BPM and 48 kHz,
+        // so trimming seven of them moves no frame edge, and the window that
+        // correctly results reads the whole artifact while the clip covers less
+        // than the whole authored range. Both edges are spelled because each is
+        // a separate comparison between the artifact's key and the clip.
+        Geometry{"sub-frame left trim", 7, kTicksPerQuarter - 7, 0, 24'000},
+        Geometry{"sub-frame right trim", 0, kTicksPerQuarter - 7, 0, 24'000},
     };
 
     for (const auto& geometry : geometries) {
@@ -932,6 +941,12 @@ TEST_CASE("Trimmed nested stretched media reads a window of the authored artifac
         REQUIRE(compiled.source_start == geometry.expected_artifact_frame_start);
         REQUIRE(compiled.source_frame_count == geometry.expected_window_frames);
         REQUIRE(compiled.timeline_frame_count == geometry.expected_window_frames);
+        // The clip also has to satisfy the linker, which is where the SDK
+        // states the relationship between the frames a window reads and the
+        // ticks it covers. A window trimmed by less than a frame is the shape
+        // that relationship is easiest to state as an equivalence it does not
+        // have, and stating it that way rejects a clip that is correct.
+        REQUIRE(link_audio_track_program({3}, {compiled}, {}));
         // The untrimmed nesting reaches the same artifact, so the two renders
         // below differ only in which frames of it each leaf reads.
         REQUIRE(only_audio_clip(*whole_program).offline_stretch_artifact->key ==
