@@ -225,8 +225,7 @@ validate_clip_program(const AudioClipRendererProgram& clip,
                 clip.musical_tick_end.value ||
             (clip.offline_stretch_artifact->key.musical_tick_start == clip.musical_tick_start &&
              clip.offline_stretch_artifact->key.musical_tick_end == clip.musical_tick_end &&
-             (clip.source_start != 0 ||
-              clip.source_frame_count != clip.audio->num_frames())) ||
+             (clip.source_start != 0 || clip.source_frame_count != clip.audio->num_frames())) ||
             clip.offline_stretch_artifact->key.timeline_sample_rate.denominator != 1 ||
             clip.offline_stretch_artifact->key.algorithm !=
                 OfflineStretchAlgorithmConfig{limits.offline_stretch_algorithm_version,
