@@ -464,3 +464,57 @@ TEST_CASE("GpuAudioTransport fallback stream matches reference convolution",
     const auto s = transport.stats();
     REQUIRE(s.miss_blocks > 0);  // we really exercised the miss path
 }
+
+TEST_CASE("GpuConvolver full-tail oracle matrix",
+          "[gpu_audio][convolver][p2][gpu]") {
+    for (const auto channels : {1u, 2u}) {
+        for (const auto block : {32u, 64u, 128u}) {
+            constexpr std::uint32_t sample_rate = 48000;
+            constexpr std::size_t ir_size = 257;
+            const std::size_t blocks = 6;
+            std::vector<float> ir(ir_size);
+            for (std::size_t i = 0; i < ir.size(); ++i)
+                ir[i] = static_cast<float>(0.17 * std::sin(0.031 * i) *
+                                            std::exp(-0.004 * i));
+            GpuConvolver node(channels, block, sample_rate, ir);
+            REQUIRE(node.prepare());
+            if (!node.gpu_available())
+                SKIP(kNoGpu);
+            std::vector<std::vector<float>> input(
+                channels, std::vector<float>(blocks * block));
+            std::vector<std::vector<float>> output(
+                channels, std::vector<float>(blocks * block));
+            for (std::uint32_t ch = 0; ch < channels; ++ch)
+                for (std::size_t i = 0; i < blocks * block; ++i)
+                    input[ch][i] = static_cast<float>(
+                        0.4 * std::sin(0.013 * i + ch * 0.7) +
+                        0.2 * std::cos(0.071 * i + ch * 0.2));
+            for (std::size_t b = 0; b < blocks; ++b) {
+                std::vector<const float*> in_ptrs(channels);
+                std::vector<float*> out_ptrs(channels);
+                std::vector<std::vector<float>> in_block(
+                    channels, std::vector<float>(block));
+                std::vector<std::vector<float>> out_block(
+                    channels, std::vector<float>(block));
+                for (std::uint32_t ch = 0; ch < channels; ++ch) {
+                    std::copy_n(input[ch].data() + b * block, block, in_block[ch].data());
+                    in_ptrs[ch] = in_block[ch].data();
+                    out_ptrs[ch] = out_block[ch].data();
+                }
+                BufferView<const float> in_view(in_ptrs.data(), channels, block);
+                BufferView<float> out_view(out_ptrs.data(), channels, block);
+                node.process_block(in_view, out_view, block);
+                for (std::uint32_t ch = 0; ch < channels; ++ch)
+                    std::copy_n(out_block[ch].data(), block,
+                                output[ch].data() + b * block);
+            }
+            for (std::uint32_t ch = 0; ch < channels; ++ch) {
+                std::vector<float> flat_input = input[ch];
+                const auto reference = direct_convolution(flat_input, ir);
+                for (std::size_t i = 0; i < output[ch].size(); ++i)
+                    REQUIRE(std::abs(output[ch][i] - reference[i]) <
+                            2e-2f * (1.0f + std::abs(reference[i])));
+            }
+        }
+    }
+}

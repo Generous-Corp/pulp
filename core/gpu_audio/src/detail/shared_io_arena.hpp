@@ -231,6 +231,13 @@ class SharedIoArena {
         std::size_t rejected_stale_or_duplicate = 0;
     };
 
+    struct CompletionObserver {
+        using Callback = void (*)(void*, const SlotToken&, CompletionStatus) noexcept;
+        void* context = nullptr;
+        Callback callback = nullptr;
+        explicit operator bool() const noexcept { return callback != nullptr; }
+    };
+
     SharedIoArena() = default;
     ~SharedIoArena();
 
@@ -275,7 +282,8 @@ class SharedIoArena {
     bool expire_delivery(const SlotToken& token) noexcept {
         return ledger_.expire_delivery(token);
     }
-    CompletionDrain drain_completions() noexcept;
+    CompletionDrain drain_completions(CompletionObserver observer) noexcept;
+    CompletionDrain drain_completions() noexcept { return drain_completions(CompletionObserver{}); }
     std::optional<OutputLease> acquire_output(std::uint64_t expected_epoch,
                                               std::uint64_t expected_sequence) noexcept;
     bool release_output(const ReleaseRecord& record) noexcept {
