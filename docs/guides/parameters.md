@@ -238,8 +238,12 @@ Dense audio-rate modulation is a separate ProcessBlock-native contract:
 `AudioRateModulationView` lanes with one plain-domain value per frame. Do not
 encode those lanes as one `ParameterEventQueue` entry per sample. The legacy
 `process_processor_block()` adapter leaves dense lanes out of
-`Processor::param_events()` until a processor opts into a ProcessBlock-native
-path.
+`Processor::param_events()`. A native in-process processor opts in by declaring
+`descriptor.node_capabilities.consumes_audio_rate_modulations = true` and
+overriding `Processor::process_block(ProcessBlock&)`; its graph binding then
+publishes the borrowed lanes without changing the parameter's persistent base
+value or `StateStore` generation. Hosted AU, VST3, CLAP, LV2, WAM, and WebCLAP
+adapters retain their existing sparse parameter-event behavior.
 
 ## Binding (UI Integration)
 

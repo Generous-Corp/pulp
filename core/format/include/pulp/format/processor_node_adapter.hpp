@@ -4,6 +4,11 @@
 #include <pulp/format/process_block.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/processor_block_adapter.hpp>
+#include <pulp/state/store.hpp>
+
+#include <memory>
+#include <span>
+#include <vector>
 
 namespace pulp::format {
 
@@ -17,10 +22,10 @@ namespace pulp::format {
 /// is no second routing path — a ProcessorNode is wired into a snapshot exactly
 /// like any other GraphRuntimeNodeBinding.
 ///
-/// Current scope: one Main mono audio input and one Main mono
-/// audio output. Parameters, MIDI, latency, and state are deliberately out of
-/// scope; the binding presents no EventBlock to the processor, so a processor
-/// that emits MIDI on this path sees the bridge's discard sink.
+/// The binding attaches gathered sparse parameter events, MIDI, and borrowed
+/// dense modulation lanes through one EventBlock. Legacy processors still enter
+/// through process_processor_block(); processors that declare dense consumption
+/// enter through Processor::process_block().
 ///
 /// Lifetime: the wrapped Processor is non-owning and must outlive the node and
 /// every routed block that references it. prepare() runs off the realtime thread
@@ -35,8 +40,14 @@ public:
     /// Off-RT preparation: prepares the wrapped processor for the given audio
     /// configuration and sizes the block-adapter scratch so process_binding()
     /// stays allocation-free. Idempotent enough to re-run when the
-    /// configuration changes; call with the audio thread stopped.
+    /// configuration changes; call with the audio thread stopped. Call release()
+    /// before re-preparing this non-owning adapter.
     bool prepare(const PrepareContext& context);
+    bool release() noexcept;
+
+    /// Build the only valid graph binding for this adapter. The cached
+    /// capability selects dense views or the legacy event expansion.
+    GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept;
 
     /// Routed node binding entry point. `user_data` must be the owning
     /// ProcessorNode. Reads the executor's gathered mono input view
@@ -56,6 +67,59 @@ private:
     // Caller-owned MIDI/parameter fallback storage for the block bridge. Sized
     // once in prepare() and reused across blocks; never resized on the RT path.
     ProcessorBlockAdapterScratch scratch_;
+    NodeCapabilities capabilities_{};
+    bool prepared_ = false;
+};
+
+/// Retained, self-contained lifetime for an authored in-process graph node.
+/// Creation freezes the descriptor and parameter catalog off the audio thread;
+/// published graph snapshots retain the shared instance through quiescence.
+class ProcessorNodeInstance final {
+  public:
+    static std::shared_ptr<ProcessorNodeInstance>
+    create(std::unique_ptr<Processor> processor) noexcept;
+
+    ~ProcessorNodeInstance();
+    ProcessorNodeInstance(const ProcessorNodeInstance&) = delete;
+    ProcessorNodeInstance& operator=(const ProcessorNodeInstance&) = delete;
+
+    bool prepare(const PrepareContext& context) noexcept;
+    GraphRuntimeNodeBinding binding(graph::NodeId node_id, bool required = true) noexcept {
+        return adapter_.binding(node_id, required);
+    }
+
+    const PluginDescriptor& descriptor() const noexcept {
+        return descriptor_;
+    }
+    std::span<const state::ParamInfo> parameter_catalog() const noexcept {
+        return parameter_catalog_;
+    }
+    const state::ParamInfo* parameter(state::ParamID id) const noexcept;
+    state::StateStore& state_store() noexcept {
+        return state_store_;
+    }
+    const state::StateStore& state_store() const noexcept {
+        return state_store_;
+    }
+    Processor& processor() noexcept {
+        return *processor_;
+    }
+    const Processor& processor() const noexcept {
+        return *processor_;
+    }
+
+  private:
+    explicit ProcessorNodeInstance(std::unique_ptr<Processor> processor)
+        : processor_(std::move(processor)), adapter_(*processor_) {}
+
+    state::StateStore state_store_;
+    // Declared after the store so Processor destruction runs first while its
+    // StateStore pointer is still valid.
+    std::unique_ptr<Processor> processor_;
+    PluginDescriptor descriptor_;
+    std::vector<state::ParamInfo> parameter_catalog_;
+    ProcessorNode adapter_;
+    bool prepared_ = false;
 };
 
 } // namespace pulp::format

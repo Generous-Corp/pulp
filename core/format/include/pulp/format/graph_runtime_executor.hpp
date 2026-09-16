@@ -25,6 +25,11 @@ class AudioProcessLoadMeasurer;
 
 namespace pulp::format {
 
+enum class AudioRateModulationDelivery : std::uint8_t {
+    LegacyParameterEvents = 0,
+    DenseViews = 1,
+};
+
 enum class GraphRuntimeCommandStatus : std::uint8_t {
     Accepted,
     Rejected,
@@ -77,6 +82,9 @@ struct GraphRuntimeNodeProcessContext {
     // a plugin binding passes it to PluginSlot::process. Null when the graph
     // carries no automation — a binding then uses an empty queue.
     state::ParameterEventQueue* node_param_events = nullptr;
+    // Borrowed, final plain-domain dense lanes for this node. The executor owns
+    // both descriptors and samples; they remain valid only for this callback.
+    std::span<const AudioRateModulationView> node_audio_rate_modulations;
 };
 
 using GraphRuntimeNodeProcessFn = bool (*)(
@@ -109,6 +117,8 @@ struct GraphRuntimeNodeBinding {
     // pointee is owned elsewhere (the host's persistent per-node measurer map)
     // and must outlive the snapshot; the executor only calls begin()/end().
     audio::AudioProcessLoadMeasurer* load = nullptr;
+    AudioRateModulationDelivery audio_rate_modulation_delivery =
+        AudioRateModulationDelivery::LegacyParameterEvents;
 };
 
 /// Control-thread-built graph snapshot for GraphRuntimeExecutor.
@@ -394,11 +404,28 @@ private:
 ///
 /// Per node: one ParameterEventQueue (the automation events handed to the
 /// plugin). Per connection: the persisted per-source slew state (last delivered
-/// value + primed flag) a sparse automation edge ramps from across blocks. Both
+/// value + primed flag) an automation edge ramps from across blocks. Both
 /// are sized off-RT from the snapshot; the executor's automation gather fills a
 /// node's queue from its inbound automation connections before the node runs.
 class GraphRuntimeAutomationScratch {
 public:
+  static constexpr std::uint32_t kMaxDenseLanesPerNode = 64;
+  static constexpr std::uint32_t kMaxDenseLanesPerGraph = 256;
+  static constexpr std::uint32_t kMaxDenseFrames = 16384;
+
+  struct PreparedStats {
+      std::uint32_t dense_lane_count = 0;
+      std::size_t dense_sample_bytes = 0;
+      std::size_t dense_descriptor_bytes = 0;
+      std::size_t dense_accumulator_bytes = 0;
+      std::size_t dense_node_index_bytes = 0;
+
+      std::size_t total_dense_bytes() const noexcept {
+          return dense_sample_bytes + dense_descriptor_bytes + dense_accumulator_bytes +
+                 dense_node_index_bytes;
+      }
+  };
+
     // Per-node SPARSE (control-rate) automation accumulator. The gather dedups a
     // node's inbound sparse-automation edges by parameter id and accumulates two
     // control points (v0 at sample 0, vN at sample N-1) plus the parameter's
@@ -419,18 +446,26 @@ public:
     // node a max_frames accumulation buffer per distinct DENSE (audio-rate)
     // automation parameter plus its transient gather flags/bounds; and a per-node
     // SPARSE accumulator slice — all precomputed from the plan in first-seen
-    // connection order. Returns false on allocation failure.
+    // connection order. The source-compatible two-argument overload applies
+    // legacy event-queue admission to every node; callers publishing a snapshot
+    // pass its bindings so dense consumers use the separate dense caps. Returns
+    // false on invalid limits, queue overflow, or allocation failure.
     bool reset(const graph::GraphRuntimePlan& plan, std::uint32_t max_frames);
+    bool reset(const graph::GraphRuntimePlan& plan,
+               std::span<const GraphRuntimeNodeBinding> bindings, std::uint32_t max_frames);
     void clear() noexcept;
 
     std::uint32_t node_count() const noexcept { return node_count_; }
     std::uint32_t connection_count() const noexcept { return connection_count_; }
     std::uint32_t max_frames() const noexcept { return max_frames_; }
+    const PreparedStats& prepared_stats() const noexcept {
+        return prepared_stats_;
+    }
 
     state::ParameterEventQueue* events(std::uint32_t node_index) noexcept {
         return node_index < node_count_ ? events_[node_index].get() : nullptr;
     }
-    // Persisted per-connection slew state (RT-mutable, sparse). last() is the
+    // Persisted per-connection slew state (RT-mutable). last() is the
     // previous block's post-slew value; primed() guards the first-block snap.
     float& slew_last(std::uint32_t conn_index) noexcept { return slew_last_[conn_index]; }
     bool slew_primed(std::uint32_t conn_index) const noexcept {
@@ -476,6 +511,16 @@ public:
     std::span<std::uint32_t> dense_touched(std::uint32_t node_index) noexcept {
         return dense_span(dense_touched_, node_index);
     }
+    std::span<AudioRateModulationView> dense_views(std::uint32_t node_index) noexcept {
+        return dense_span(dense_views_, node_index);
+    }
+    std::uint32_t dense_view_count(std::uint32_t node_index) const noexcept {
+        return node_index < node_count_ ? node_dense_view_count_[node_index] : 0;
+    }
+    void set_dense_view_count(std::uint32_t node_index, std::uint32_t count) noexcept {
+        if (node_index < node_count_)
+            node_dense_view_count_[node_index] = count;
+    }
 
     // Per-node SPARSE accumulator slice (one SparseAccum per distinct control-rate
     // parameter the node receives). Disjoint per node => parallel-safe.
@@ -520,6 +565,10 @@ private:
     std::vector<std::uint8_t> dense_replace_;
     std::vector<std::uint8_t> dense_add_;
     std::vector<std::uint32_t> dense_touched_;
+    std::vector<AudioRateModulationView> dense_views_;
+    // Number of descriptors published for the current block. Kept separately
+    // from the prepared lane count because a source may be unavailable.
+    std::vector<std::uint32_t> node_dense_view_count_;
     // Per-node SPARSE accumulators, flattened (one slice per node).
     std::vector<SparseAccum> sparse_accum_storage_;
     std::vector<std::uint32_t> node_sparse_first_;    // per node: index into storage
@@ -527,6 +576,7 @@ private:
     std::uint32_t node_count_ = 0;
     std::uint32_t connection_count_ = 0;
     std::uint32_t max_frames_ = 0;
+    PreparedStats prepared_stats_{};
 };
 
 class GraphRuntimeExecutor {
