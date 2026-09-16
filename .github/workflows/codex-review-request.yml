@@ -80,22 +80,38 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Exit 2 means the checker could not see, which is not the same as
-          # "no review" and must not be treated as one.
+          # Every exit the checker can produce is handled by name. Only 0 and 1
+          # are verdicts; 2 means it could not see, and anything else means it
+          # did not run — 127 when the base commit has no copy of it, which is
+          # what the run that introduces this workflow hits. Folding those into
+          # "no review" would post a request and then report a failure that says
+          # the PR was unreviewed when the truth is that nothing checked.
           set +e
           bash tools/scripts/codex_review_signal.sh "$REPO" "$PR" "$HEAD_SHA"
           signal=$?
           set -e
-          if [ "$signal" -eq 2 ]; then
-              echo "::error::Cannot read review state for #$PR, so whether it has been" \
-                   "reviewed is unknown. Not requesting; re-run once GitHub is reachable."
-              exit 1
-          fi
-          if [ "$signal" -eq 0 ]; then
-              echo "A review has already completed for this head — not requesting again."
-              echo "already=true" >> "$GITHUB_OUTPUT"
-              exit 0
-          fi
+          case "$signal" in
+              0)
+                  echo "A review has already completed for this head — not requesting again."
+                  echo "already=true" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+              1) ;;
+              2)
+                  echo "::error::Cannot read review state for #$PR, so whether it has" \
+                       "been reviewed is unknown. Not requesting; re-run once GitHub" \
+                       "is reachable."
+                  exit 1
+                  ;;
+              *)
+                  echo "::error::The review checker did not run (exit $signal)." \
+                       "tools/scripts/codex_review_signal.sh is missing or not" \
+                       "executable at the base commit. Expected only on the pull" \
+                       "request that introduces it; anywhere else the base checkout" \
+                       "is broken. This PR has NOT been shown to be reviewed."
+                  exit 1
+                  ;;
+          esac
           echo "already=false" >> "$GITHUB_OUTPUT"
 
           gh pr comment "$PR" --repo "$REPO" --body '@codex review'
@@ -119,9 +135,9 @@ jobs:
               signal=$?
               set -e
               [ "$signal" -eq 0 ] && exit 0
-              if [ "$signal" -eq 2 ]; then
-                  echo "::error::Lost visibility of review state for #$PR; whether it" \
-                       "was reviewed is unknown rather than known-bad."
+              if [ "$signal" -ne 1 ]; then
+                  echo "::error::Lost sight of review state for #$PR (exit $signal);" \
+                       "whether it was reviewed is unknown rather than known-bad."
                   exit 1
               fi
           done

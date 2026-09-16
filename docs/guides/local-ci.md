@@ -957,11 +957,16 @@ THUMBS_UP is reported rather than required: it separates "reviewed, no findings"
 from "reviewed, left comments", which is worth printing, but it carries no
 commit and so cannot prove anything about a particular head.
 
-**The job checks out the base commit, never the PR.** It runs with a PAT in the
-environment against a PR authored by an automated process, so checking out the
-PR would let a change to the checker execute with that credential in reach. The
-base copy is the reviewed one, and a PR that edits the checker is still checked
-by the version already on the branch it targets.
+**The job checks out the base commit, never the PR.** The checker decides
+whether a PR was reviewed, so running the PR's own copy would let an unreviewed
+change rule that it needs no review. The base copy is the reviewed one, and a PR
+that edits the checker is still judged by the version already on the branch it
+targets.
+
+That has one consequence worth knowing: on the pull request that first adds the
+checker, the base commit has no copy of it, so the checker cannot run. The job
+reports that exit distinctly — "did not run" rather than "not reviewed" — and
+still fails, because a run that verified nothing must not read as a pass.
 
 This workflow requests reviews; it does not audit whether older PRs got one.
 `.github/workflows/post-merge-review-sweep.yml` remains the separate, scheduled
