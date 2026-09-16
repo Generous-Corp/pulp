@@ -701,5 +701,16 @@ if(Python3_EXECUTABLE)
         "${CMAKE_SOURCE_DIR}/tools/scripts/sequencer_control_skill_check.py")
 endif()
 
+# The same surface, for the durable command vocabulary. The schema drift gate
+# proves `timeline_cli_verbs.json` still matches the manifest, but nothing
+# requires anyone to be told a command exists. This derives every
+# `Command`-domain verb from that artifact and fails when the skill omits one or
+# names it without the wire type a caller writes, so a reachable mutation cannot
+# ship agent-invisible.
+if(Python3_EXECUTABLE)
+    add_test(NAME timeline-command-doc-coverage COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/timeline_command_doc_check.py")
+endif()
+
 # Keep focused Timeline submodule registrations beneath this owner hub.
 include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")
