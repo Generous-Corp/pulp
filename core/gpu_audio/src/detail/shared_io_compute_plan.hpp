@@ -34,6 +34,9 @@ class SharedIoComputePlan {
         std::uint64_t misses = 0;
         std::uint64_t late_completions = 0;
         std::uint64_t high_water_in_flight = 0;
+        // The shared Dawn provider has no timestamp-query/occupancy certificate yet.
+        bool gpu_timing_available = false;
+        bool occupancy_available = false;
     };
 
     SharedIoComputePlan() = default;
@@ -47,8 +50,20 @@ class SharedIoComputePlan {
     std::optional<SharedIoArena::WriteLease>
     acquire_input(std::uint64_t sequence, std::uint64_t deadline_ns) noexcept;
     bool submit(const SubmitToken& token) noexcept;
+    // A pre-submit refusal must return the write lease to the fixed ledger.
+    bool cancel(const SubmitToken& token) noexcept;
     std::size_t drain(std::uint64_t now_ns) noexcept;
     std::optional<Completion> pop_completion() noexcept;
+    std::optional<SharedIoArena::OutputLease>
+    acquire_output(const Completion& completion) noexcept {
+        if (completion.status != SharedIoArena::CompletionStatus::RetiredSuccess)
+            return std::nullopt;
+        return arena_.acquire_output(completion.token.slot.preparation_epoch,
+                                     completion.token.slot.stream_sequence);
+    }
+    bool expire_delivery(const Completion& completion) noexcept {
+        return arena_.expire_delivery(completion.token.slot);
+    }
     bool release_output(const SharedIoArena::ReleaseRecord& record) noexcept {
         return arena_.release_output(record);
     }

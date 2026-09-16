@@ -42,8 +42,13 @@ bool SharedIoComputePlan::submit(const SubmitToken& token) noexcept {
         !pending_[token.slot.slot].active ||
         !(pending_[token.slot.slot].token.slot == token.slot))
         return false;
-    if (!arena_.publish_written({token.slot}))
+    if (!arena_.publish_written({token.slot})) {
+        // The lease was granted by this plan but could not be published. Drop
+        // it immediately so a saturated dispatcher cannot strand a slot.
+        pending_[token.slot.slot].active = false;
+        arena_.discard(token.slot);
         return false;
+    }
     const auto started = std::chrono::steady_clock::now();
     if (!arena_.submit(token.slot)) {
         pending_[token.slot.slot].active = false;
@@ -53,6 +58,15 @@ bool SharedIoComputePlan::submit(const SubmitToken& token) noexcept {
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - started).count());
     return true;
+}
+
+bool SharedIoComputePlan::cancel(const SubmitToken& token) noexcept {
+    if (token.slot.slot >= pending_.size() ||
+        !pending_[token.slot.slot].active ||
+        !(pending_[token.slot.slot].token.slot == token.slot))
+        return false;
+    pending_[token.slot.slot].active = false;
+    return arena_.discard(token.slot);
 }
 
 void SharedIoComputePlan::on_terminal(void* context,
