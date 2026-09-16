@@ -6103,7 +6103,7 @@
           "path": "inspect/include/pulp/inspect/control_registry_digest.inc",
           "needles": [
             "PULP_CONTROL_REGISTRY_DIGEST_V1",
-            "70578eae97288609fe384bd2caa1641e62af016127f3abc6e4a3cd754422d584"
+            "1010e23c360febd946335c5c91d0c8d9ad9a67dca7bfcceedce38a0bf5ebe1c8"
           ]
         }
       ],
@@ -8327,6 +8327,255 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "No design-time capability is registered or removed. The artifact window is computed inside the renderer's program compiler and is reachable only through the trim an author already wrote on the placement."
+        }
+      }
+    },
+    {
+      "id": "product-a-timeline-document-session",
+      "title": "Live Product A control over a mutable Timeline document session",
+      "classification": "live_product_control",
+      "delivery_state": "pending",
+      "claim_id": "c7d4869f-de94-4418-85ae-86bb325dbc1f",
+      "owned_paths": [
+        ".agents/skills/agent-capabilities/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "docs/reference/development-inspector-capabilities.md",
+        "docs/status/gpu-vellum-handoff.yaml",
+        "docs/status/sequencer-exposure.json",
+        "docs/validation/gpu-handoff-provenance/receipt.json",
+        "inspect/CMakeLists.txt",
+        "inspect/include/pulp/inspect/capability_definitions.inc",
+        "inspect/include/pulp/inspect/control_registry_digest.inc",
+        "inspect/include/pulp/inspect/control_standalone_host.hpp",
+        "inspect/include/pulp/inspect/control_timeline_document_session_executor.hpp",
+        "inspect/src/control_manifest.cpp",
+        "inspect/src/control_standalone_host.cpp",
+        "inspect/src/control_standalone_host_minimal.cpp",
+        "inspect/src/control_timeline_document_session_executor.cpp",
+        "test/cmake/test_control_shipping_matrix.cmake",
+        "test/cmake/timeline_tests.cmake",
+        "test/fixtures/control_installed_host_e2e_fixture.cpp",
+        "test/test_control_broker_daemon.cpp",
+        "test/test_control_endpoint_enrollment.cpp",
+        "test/test_control_host_enrollment.cpp",
+        "test/test_control_manifest.cpp",
+        "test/test_control_phase15_aggregate_e2e.cpp",
+        "test/test_control_timeline_document_session.cpp",
+        "test/test_control_trusted_host_e2e.cpp",
+        "test/test_control_trusted_host_inventory.cpp",
+        "test/test_inspector_domain_helpers.cpp",
+        "tools/cmake/PulpControlShipping.cmake",
+        "tools/cmake/PulpInstallRules.cmake",
+        "tools/cmake/check_control_shipping_artifact.cmake",
+        "tools/scripts/test_release_artifact_contents.py"
+      ],
+      "evidence": [
+        {
+          "path": "inspect/include/pulp/inspect/control_timeline_document_session_executor.hpp",
+          "needles": [
+            "enum class ControlTimelineDocumentSessionAction",
+            "struct ControlTimelineDocumentSessionRequest",
+            "struct ControlTimelineDocumentSessionOutcome",
+            "struct ControlTimelineDocumentSessionSource",
+            "make_control_timeline_document_session_executor",
+            "control_timeline_admissible_writer_profile"
+          ]
+        },
+        {
+          "path": "inspect/src/control_timeline_document_session_executor.cpp",
+          "needles": [
+            "constexpr std::string_view kOperationId = \"dev.pulp.timeline/document-session@1\";",
+            "control_timeline_conflict_result_code",
+            "control_timeline_conflict_retry",
+            "validate_control_output_json_schema",
+            "exact timeline document session source is unavailable"
+          ]
+        },
+        {
+          "path": "inspect/src/control_standalone_host.cpp",
+          "needles": [
+            "make_control_timeline_document_session_executor(",
+            "create_standalone_timeline_document_session_source(plan)",
+            "install_standalone_timeline_document_session_factory(",
+            "compare_exchange_strong"
+          ]
+        },
+        {
+          "path": "test/test_control_timeline_document_session.cpp",
+          "needles": [
+            "the seven layers compose end to end over a live document session",
+            "a stale expected_revision is refused live under the offline surface's own code",
+            "a replayed idempotency key returns the original result and a changed one collides",
+            "a CommandAuthority refusal reaches the broker as the session's own verdict",
+            "the broker never selects the trusted authority on a caller's behalf",
+            "shape and exact-instance bindings refuse before the session is reached",
+            "a cancelled or revoked checkpoint stops the operation terminally"
+          ]
+        },
+        {
+          "path": ".agents/skills/timeline/SKILL.md",
+          "needles": [
+            "The live broker surface projects `ConflictCode`; it must never re-decide it",
+            "control_timeline_admissible_writer_profile",
+            "never add a `default:` arm to `control_timeline_conflict_result_code`"
+          ]
+        },
+        {
+          "path": ".agents/skills/agent-capabilities/SKILL.md",
+          "needles": [
+            "An installed `inspect/` control header is not a design-time capability row",
+            "design_time_agent_manifest: not_applicable"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "inspect/include/pulp/inspect/control_timeline_document_session_executor.hpp",
+              "needles": [
+                "struct ControlTimelineDocumentSessionSource",
+                "using ControlTimelineDocumentSessionSourceResolver",
+                "make_control_timeline_document_session_executor",
+                "control_timeline_conflict_result_code"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "inspect/include/pulp/inspect/control_timeline_document_session_executor.hpp"
+              ]
+            },
+            {
+              "kind": "executor_binding",
+              "path": "inspect/include/pulp/inspect/control_standalone_host.hpp",
+              "needles": [
+                "using StandaloneTimelineDocumentSessionFactory",
+                "install_standalone_timeline_document_session_factory",
+                "create_standalone_timeline_document_session_source"
+              ]
+            }
+          ],
+          "rationale": "The executor header installs with the SDK, so a Pulp-embedding host links the typed request, outcome and exact-instance source types directly rather than re-declaring them. A host supplies its own live session by installing a factory through the standalone host's install_standalone_timeline_document_session_factory seam, which is a single atomic compare_exchange_strong that admits exactly one installer for the process lifetime; the minimal host keeps an inert stub so a build without a session still links and refuses honestly. Admission is in_process because what a caller links is a header and a factory pointer, not a registered writer, and refusal_codes stays empty because that field names registered-writer conflict codes emitted at the live boundary, which this row records under live_product_control instead.",
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "This slice adds no `pulp seq` verb and changes no offline CLI handler. The offline writer-profile authority for the CLI boundary already exists and is owned by offline-writer-profile-authority; the generic `pulp control` projection this row does rely on is recorded as cli_projection evidence under live_product_control, where it belongs, because it projects a live broker operation rather than an offline timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "This slice adds no offline Timeline MCP tool and changes no offline MCP handler. The generated Timeline MCP schema is untouched. The MCP surface this row does reach is the capability-control tool catalog, which projects the live broker operation and is recorded as mcp_projection evidence under live_product_control."
+        },
+        "live_product_control": {
+          "disposition": "exposed",
+          "evidence": [
+            {
+              "kind": "capability_definition",
+              "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+              "needles": [
+                "PULP_INSPECT_CAPABILITY(TimelineDocumentSession, \"timeline.document.session\", \"dev.pulp.timeline/document-session@1\", Control, Authoring, Background, Receipt, 0, 1, 1, 0)"
+              ]
+            },
+            {
+              "kind": "operation_definition",
+              "path": "inspect/src/control_manifest.cpp",
+              "needles": [
+                "TimelineDocumentSession, \"timeline/document-session\",",
+                "PULP_RECEIPT_OPERATION(",
+                "\"writer_profile\":{\"enum\":[\"proposal\",\"editor\"]}"
+              ]
+            },
+            {
+              "kind": "executor_binding",
+              "path": "inspect/src/control_standalone_host.cpp",
+              "needles": [
+                "make_control_timeline_document_session_executor(",
+                "detail::create_standalone_timeline_document_session_source(plan)",
+                "install_standalone_timeline_document_session_factory("
+              ]
+            },
+            {
+              "kind": "profile_policy",
+              "path": "inspect/src/control_timeline_document_session_executor.cpp",
+              "needles": [
+                "control_timeline_admissible_writer_profile",
+                "return std::string(\"proposal\");",
+                "return std::string(\"editor\");",
+                "the broker does not admit the requested writer profile",
+                "control_timeline_conflict_result_code"
+              ]
+            },
+            {
+              "kind": "cli_projection",
+              "path": "tools/cli/cmd_control.cpp",
+              "needles": [
+                "resolve_control_operation(operation, 1)",
+                "validate_control_json_schema(params, descriptor->input_schema_json"
+              ]
+            },
+            {
+              "kind": "mcp_projection",
+              "path": "tools/mcp/mcp_control_tool_catalog.cpp",
+              "needles": [
+                "for (const auto& operation : control_operation_registry())",
+                "capability_is_grantable(operation.capability)",
+                "operation_tool_name(operation.id)"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_control_timeline_document_session.cpp",
+              "needles": [
+                "the seven layers compose end to end over a live document session",
+                "a stale expected_revision is refused live under the offline surface's own code",
+                "a replayed idempotency key returns the original result and a changed one collides",
+                "a CommandAuthority refusal reaches the broker as the session's own verdict",
+                "the broker never selects the trusted authority on a caller's behalf"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_control_manifest.cpp",
+              "needles": [
+                "CHECK(receipt_binding_count == 10);"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/cmake/test_control_shipping_matrix.cmake",
+              "needles": [
+                "dev.pulp.timeline/document-session@1"
+              ]
+            }
+          ],
+          "rationale": "A live Pulp instance now carries a mutable Timeline document session as a first-class capability-control operation, dev.pulp.timeline/document-session@1, and all seven layers are present: the capability row TimelineDocumentSession is declared grantable in the X-macro inventory, the operation and its input and output schemas are declared once in control_manifest.cpp, the standalone host binds the executor to a host-installed exact-instance source, the broker's writer-profile policy admits proposal and editor, both the `pulp control` CLI and the capability-control MCP tool catalog project it from the same registry with no hand-written per-operation entry, and the operation is tested end to end. Because both projections walk control_operation_registry() and resolve_control_operation() rather than enumerating operations by hand, Forge Sequencer and Forge Modular reach this through unified controls as pulp_control_timeline_document_session and `pulp control call dev.pulp.timeline/document-session@1` without any Forge-side change. The authority model is the Timeline's own and is projected, never duplicated: control_timeline_conflict_result_code maps the session's ConflictCode verdict onto a broker result code one-directionally, so a CommandAuthority refusal arrives as the session's CapabilityDenied under PolicyDenied and is asserted identically from both sides, and a stale expected_revision is refused live under StaleRevision, the same code the offline surface uses. The broker never selects the trusted authority on a caller's behalf and never escalates: an unnamed profile resolves down to proposal, editor is admitted on request, and trusted is refused, so editor is the ceiling this surface grants. This closes the live-control gap recorded at p0-9-midi-content, p1-6-sparse-live-edit-compile and p0-39-writer-capability-masks, whose dispositions are frozen at their merge and are therefore left untouched here; the precedent for recording a closure on a new row rather than editing a released one is program-wire-controller-section.",
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_transaction_retained_bytes": 16777216,
+              "max_session_retained_bytes": 268435456
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "stale_revision",
+              "transaction_id_collision",
+              "writer_quota_exhausted"
+            ]
+          }
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Runtime operation metadata, grants, instances and receipts stay outside the design-time agent-capabilities manifest by construction, even though the executor header installs in the same SDK. This slice registers no design-time capability contract and adds no typed binding to that manifest, so there is nothing for it to advertise there."
         }
       }
     }
