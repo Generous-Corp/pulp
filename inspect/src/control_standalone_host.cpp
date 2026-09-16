@@ -1,31 +1,31 @@
 #include <pulp/inspect/control_standalone_host.hpp>
 
-#include <pulp/inspect/control_host_preflight.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/format/standalone.hpp>
+#include <pulp/format/view_bridge.hpp>
+#include <pulp/inspect/console_capture.hpp>
 #include <pulp/inspect/control_gpu_health_provider.hpp>
 #include <pulp/inspect/control_gpu_health_read_executor.hpp>
 #include <pulp/inspect/control_gpu_health_view_adapter.hpp>
-#include <pulp/inspect/console_capture.hpp>
+#include <pulp/inspect/control_host_preflight.hpp>
 #include <pulp/inspect/control_installed_host.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_manifest.hpp>
 #include <pulp/inspect/control_sequencer_state_executor.hpp>
 #include <pulp/inspect/control_sequencer_transport_executor.hpp>
+#include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/control_state_read_executor.hpp>
 #include <pulp/inspect/control_state_write_executor.hpp>
-#include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/inspect/motion_scrubber.hpp>
 #include <pulp/inspect/runtime_eval_component.hpp>
-#include <pulp/format/processor.hpp>
-#include <pulp/format/standalone.hpp>
-#include <pulp/format/view_bridge.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/motion.hpp>
-#include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
 
@@ -412,16 +412,15 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         auto fenced_sequencer_edit = main_sequencer_edit.executor();
         ControlSequencerTransportTargetResolver sequencer_transport_target =
             [this](const ControlAdmissionPlan& plan)
-                -> std::optional<ControlSequencerTransportTarget> {
+            -> std::optional<ControlSequencerTransportTarget> {
             if (!author_hooks_.sequencer_transport)
                 return std::nullopt;
             auto* transport = author_hooks_.sequencer_transport();
             if (!transport)
                 return std::nullopt;
-            return ControlSequencerTransportTarget{
-                .registration_id = plan.registration_id,
-                .host_tier = ControlHostTier::Standalone,
-                .transport = transport};
+            return ControlSequencerTransportTarget{.registration_id = plan.registration_id,
+                                                   .host_tier = ControlHostTier::Standalone,
+                                                   .transport = transport};
         };
         ControlMainThreadExecutor main_transport_read(
             rpc_, make_control_sequencer_transport_read_executor(sequencer_transport_target));
@@ -435,8 +434,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                 return detail::create_standalone_timeline_document_session_source(plan);
             });
         ControlOperationExecutor state_executor =
-            [state_read = std::move(state_read),
-             state_write = std::move(fenced_state_write),
+            [state_read = std::move(state_read), state_write = std::move(fenced_state_write),
              sequencer_read = std::move(fenced_sequencer_read),
              sequencer_edit = std::move(fenced_sequencer_edit),
              gpu_health_read = std::move(gpu_health_read),

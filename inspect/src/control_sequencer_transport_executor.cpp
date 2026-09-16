@@ -286,8 +286,7 @@ ControlOperationExecutor make_control_sequencer_transport_write_executor(
 
         const auto verdict = target->transport->set_loop(candidate);
         if (verdict != playback::TransportError::None)
-            return fail(ControlResultCode::InvalidRequest,
-                        std::string{transport_refusal(verdict)});
+            return fail(ControlResultCode::InvalidRequest, std::string{transport_refusal(verdict)});
 
         const auto published = target->transport->playhead();
         accepted->loop = candidate;

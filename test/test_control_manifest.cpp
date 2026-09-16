@@ -437,10 +437,9 @@ TEST_CASE("control registry projects capability and operation metadata",
         if (operation.capability == InspectorCapability::SequencerTransportRead) {
             CHECK(operation.id == "dev.pulp.sequencer/transport.loop.read@1");
             CHECK(operation.result_kind == "response");
-            CHECK(operation.input_schema_json.find("\"properties\":{}") !=
-                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"properties\":{}") != std::string_view::npos);
             CHECK(operation.output_schema_json.find("\"sequence\":{\"maximum\":9007199254740991,"
-                                                   "\"minimum\":1,\"type\":\"integer\"}") !=
+                                                    "\"minimum\":1,\"type\":\"integer\"}") !=
                   std::string_view::npos);
             CHECK(operation.output_schema_json.find("\"receipt_id\"") == std::string_view::npos);
         }

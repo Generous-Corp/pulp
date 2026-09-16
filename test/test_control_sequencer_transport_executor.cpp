@@ -91,8 +91,8 @@ TEST_CASE("transport loop read reports the transport's own publication",
     PreparedTransport fixture;
     const auto start = fixture.tick_at_sample(0);
     const auto end = fixture.tick_at_sample(96'000);
-    REQUIRE(fixture.transport.set_loop({true, timebase::TickPosition{start},
-                                        timebase::TickPosition{end}}) ==
+    REQUIRE(fixture.transport.set_loop(
+                {true, timebase::TickPosition{start}, timebase::TickPosition{end}}) ==
             playback::TransportError::None);
     fixture.run_block(256);
 
@@ -196,11 +196,11 @@ TEST_CASE("set-enabled refuses endpoints instead of snapping or re-ranging",
           "[inspect][control][sequencer][transport][write]") {
     PreparedTransport fixture;
     auto executor = make_control_sequencer_transport_write_executor(bound(fixture.transport));
-    const auto outcome = executor(
-        plan(),
-        write_request(R"({"action":"set-enabled","enabled":false,"expected_sequence":1,)"
-                      R"("start_tick":0,"end_tick":480,"idempotency_key":"once"})"),
-        context());
+    const auto outcome =
+        executor(plan(),
+                 write_request(R"({"action":"set-enabled","enabled":false,"expected_sequence":1,)"
+                               R"("start_tick":0,"end_tick":480,"idempotency_key":"once"})"),
+                 context());
     CHECK(outcome.terminal_state == ControlReceiptState::Failed);
     CHECK(outcome.result.result_code == ControlResultCode::InvalidRequest);
     CHECK(outcome.result.explanation.find("carries no endpoints") != std::string::npos);
@@ -222,11 +222,11 @@ TEST_CASE("set-enabled preserves an accepted range the audio thread has not yet 
 
     // No block has run, so the published playhead still carries the previous
     // loop. Toggling must not discard the range the transport already accepted.
-    const auto toggled = executor(
-        plan(),
-        write_request(R"({"action":"set-enabled","enabled":false,"expected_sequence":)" +
-                      std::to_string(sequence) + R"(,"idempotency_key":"twice"})"),
-        context());
+    const auto toggled =
+        executor(plan(),
+                 write_request(R"({"action":"set-enabled","enabled":false,"expected_sequence":)" +
+                               std::to_string(sequence) + R"(,"idempotency_key":"twice"})"),
+                 context());
     REQUIRE(toggled.terminal_state == ControlReceiptState::Completed);
     const auto detail = detail_of(toggled);
     CHECK(detail["action"].getString() == "set-enabled");
@@ -250,12 +250,12 @@ TEST_CASE("set-enabled refuses a stale publication sequence",
     REQUIRE(fixture.transport.playhead().sequence != stale);
 
     auto executor = make_control_sequencer_transport_write_executor(bound(fixture.transport));
-    const auto outcome = executor(
-        plan(),
-        write_request(R"({"action":"set-enabled","enabled":true,"expected_sequence":)" +
-                      std::to_string(static_cast<std::int64_t>(stale)) +
-                      R"(,"idempotency_key":"once"})"),
-        context());
+    const auto outcome =
+        executor(plan(),
+                 write_request(R"({"action":"set-enabled","enabled":true,"expected_sequence":)" +
+                               std::to_string(static_cast<std::int64_t>(stale)) +
+                               R"(,"idempotency_key":"once"})"),
+                 context());
     CHECK(outcome.terminal_state == ControlReceiptState::Failed);
     CHECK(outcome.result.result_code == ControlResultCode::StateConflict);
 }
@@ -275,12 +275,11 @@ TEST_CASE("a mismatched registration is refused before the transport is touched"
           "[inspect][control][sequencer][transport][write]") {
     PreparedTransport fixture;
     auto executor = make_control_sequencer_transport_write_executor(
-        [&fixture](const ControlAdmissionPlan&)
-            -> std::optional<ControlSequencerTransportTarget> {
-            return ControlSequencerTransportTarget{
-                .registration_id = ControlRegistrationId{"registration-other"},
-                .host_tier = ControlHostTier::Standalone,
-                .transport = &fixture.transport};
+        [&fixture](const ControlAdmissionPlan&) -> std::optional<ControlSequencerTransportTarget> {
+            return ControlSequencerTransportTarget{.registration_id =
+                                                       ControlRegistrationId{"registration-other"},
+                                                   .host_tier = ControlHostTier::Standalone,
+                                                   .transport = &fixture.transport};
         });
     const auto start = fixture.tick_at_sample(0);
     const auto end = fixture.tick_at_sample(96'000);
@@ -300,9 +299,8 @@ TEST_CASE("a set-range endpoint beyond the wire range is refused before the tran
     auto executor = make_control_sequencer_transport_write_executor(bound(fixture.transport));
     const auto outcome = executor(
         plan(),
-        write_request(
-            R"({"action":"set-range","start_tick":0,"end_tick":9007199254740992,)"
-            R"("idempotency_key":"once"})"),
+        write_request(R"({"action":"set-range","start_tick":0,"end_tick":9007199254740992,)"
+                      R"("idempotency_key":"once"})"),
         context());
     CHECK(outcome.terminal_state == ControlReceiptState::Failed);
     CHECK(outcome.result.result_code == ControlResultCode::InvalidRequest);
