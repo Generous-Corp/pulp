@@ -405,9 +405,15 @@ private:
             st->fft = std::make_unique<signal::Fft>(st->fft_size);
             st->num_partitions = (ir_.size() + block_ - 1) / block_;
             st->ir_spectra.resize(st->num_partitions);
-            st->input_spectra.resize(st->num_partitions);
-            st->input_buffer.assign(static_cast<std::size_t>(st->fft_size), {0.0f, 0.0f});
             st->accum.assign(static_cast<std::size_t>(st->fft_size), {0.0f, 0.0f});
+            // The input-history spare the convolver adopts if it needs a longer
+            // ring than it holds. Its per-slot buffers are filled one partition
+            // at a time below, like the IR spectra, so a long IR stays sliced.
+            st->history = std::make_unique<signal::ConvolverInputHistory>();
+            st->history->block_size = st->block_size;
+            st->history->fft_size = st->fft_size;
+            st->history->overlap.assign(static_cast<std::size_t>(st->fft_size), {0.0f, 0.0f});
+            st->history->spectra.resize(st->num_partitions);
             stage_part_ = 0;
         }
 
@@ -424,7 +430,7 @@ private:
                 spec[i] = {ir_[offset + i], 0.0f};
             st->fft->forward(spec.data());
 
-            st->input_spectra[p].assign(fft_n, {0.0f, 0.0f});
+            st->history->spectra[p].assign(fft_n, {0.0f, 0.0f});
 
             ++stage_part_;
             spent += fft_n;

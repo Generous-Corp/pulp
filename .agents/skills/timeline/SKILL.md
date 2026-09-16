@@ -3705,10 +3705,13 @@ child without them lowers to, while a nested comped child refuses
 (`NestedActiveTakeUnsupported`) and a nested frozen child refuses
 (`NestedFrozenTrackUnsupported`) unless the nesting transforms nothing at all —
 no tick offset, no trimmed window, no gain, fade, fader, pan, modulation,
-tuning, groove, dynamics or chord lane, and no sample-rate conversion. A freeze
-is anchored in absolute samples and cannot follow a nesting that moves or cuts
-its child, so a transformation-free embedding is the only case where the sealed
-artifact is provably still in the right place. If you add a fifth state, the
+tuning, groove, dynamics or chord lane, and no sample-rate conversion. Both are
+anchored in absolute samples and cannot follow a nesting that moves or cuts the
+child, so a transformation-free embedding is the only case where the sealed
+artifact is provably still in the right place. The two refusals are narrowed by
+one shared predicate and differ only in payload: a freeze lowers to a single
+absolute leaf, a comp to one leaf per segment, each resolved against the take
+that segment names. If you add a fifth state, the
 question to answer is "does anything substitute on this?"
 
 The fixture trap is in the other direction. `TakeLane::create` imposes **no**

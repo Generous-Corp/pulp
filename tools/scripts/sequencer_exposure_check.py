@@ -117,6 +117,7 @@ E0_INFRASTRUCTURE_PATHS = {
 GENERATED_ARTIFACT_PATHS = {
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/validation/gpu-handoff-provenance/receipt.json",
+    "tools/agent-capabilities/contract-history.json",
 }
 
 
