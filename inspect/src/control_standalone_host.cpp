@@ -117,8 +117,7 @@ std::atomic<detail::StandaloneControlAuthorHooksFactory>& author_hooks_factory()
     return factory;
 }
 
-std::atomic<detail::StandaloneTimelineDocumentSessionFactory>&
-timeline_document_session_factory() {
+std::atomic<detail::StandaloneTimelineDocumentSessionFactory>& timeline_document_session_factory() {
     static std::atomic<detail::StandaloneTimelineDocumentSessionFactory> factory{nullptr};
     return factory;
 }

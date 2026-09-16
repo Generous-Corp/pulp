@@ -101,9 +101,9 @@ struct LiveTimelineHost {
         // the document under test is not empty.
         auto seeder = std::move(session->register_writer()).value();
         asset_id = tl::ItemId{session->snapshot()->next_item_id()};
-        REQUIRE(session->submit(seeder, timeline_test::session_transaction(
-                                            seeder, session->revision(),
-                                            {tl::CreateAsset{make_asset(asset_id)}})));
+        REQUIRE(session->submit(
+            seeder, timeline_test::session_transaction(seeder, session->revision(),
+                                                       {tl::CreateAsset{make_asset(asset_id)}})));
         writer = std::move(session->register_writer(profile->mask)).value();
         writer_profile = request.writer_profile;
         session_id = "timeline-document-session-1";
@@ -273,18 +273,18 @@ TEST_CASE("the seven layers compose end to end over a live document session",
     CHECK(host.session->revision().value == opened + 1);
     CHECK(host.session->snapshot()->assets().size() == assets_before + 1);
 
-    const auto diffed = execute(
-        plan(), request(R"({"action":"diff","session_id":"timeline-document-session-1"})"),
-        context());
+    const auto diffed =
+        execute(plan(), request(R"({"action":"diff","session_id":"timeline-document-session-1"})"),
+                context());
     REQUIRE(diffed.terminal_state == ControlReceiptState::Completed);
     const auto diff_detail = choc::json::parse(diffed.result.detail_json);
     CHECK(diff_detail.hasObjectMember("diff"));
     CHECK(diff_detail["diff"].getString() ==
           "{\"assets\":" + std::to_string(assets_before + 1) + "}");
 
-    const auto undone = execute(
-        plan(), request(R"({"action":"undo","session_id":"timeline-document-session-1"})"),
-        context());
+    const auto undone =
+        execute(plan(), request(R"({"action":"undo","session_id":"timeline-document-session-1"})"),
+                context());
     REQUIRE(undone.terminal_state == ControlReceiptState::Completed);
     CHECK(host.session->snapshot()->assets().size() == assets_before);
 }
@@ -295,8 +295,8 @@ TEST_CASE("a stale expected_revision is refused live under the offline surface's
     const auto execute = executor(host);
     const auto opened = open_session(execute, "editor");
 
-    const auto stale = execute(
-        plan(), request(apply_params("create-asset", "editor", {}, opened + 7)), context());
+    const auto stale =
+        execute(plan(), request(apply_params("create-asset", "editor", {}, opened + 7)), context());
 
     // Broker side.
     CHECK(stale.terminal_state == ControlReceiptState::Failed);
@@ -307,8 +307,7 @@ TEST_CASE("a stale expected_revision is refused live under the offline surface's
     REQUIRE(host.last_error);
     CHECK(host.last_error->code == tl::ConflictCode::StaleRevision);
     CHECK(tools_tl::conflict_code_name(host.last_error->code) == "stale_revision");
-    CHECK(stale.result.result_code ==
-          control_timeline_conflict_result_code(host.last_error->code));
+    CHECK(stale.result.result_code == control_timeline_conflict_result_code(host.last_error->code));
     CHECK(stale.result.retry == control_timeline_conflict_retry(host.last_error->code));
     // The typed refusal envelope crosses the broker verbatim.
     CHECK(stale.result.detail_json ==
@@ -478,8 +477,8 @@ TEST_CASE("shape and exact-instance bindings refuse before the session is reache
     CHECK(host.invocations == 0);
 
     // A source that is not the exact admitted instance is unusable.
-    auto drifted = make_control_timeline_document_session_executor(
-        [&host](const ControlAdmissionPlan&) {
+    auto drifted =
+        make_control_timeline_document_session_executor([&host](const ControlAdmissionPlan&) {
             auto value = source(host);
             value.instance_id = "instance-2";
             return std::optional{value};
@@ -488,10 +487,9 @@ TEST_CASE("shape and exact-instance bindings refuse before the session is reache
     CHECK(unavailable.result.result_code == ControlResultCode::HostUnavailable);
     CHECK(unavailable.result.retry == ControlRetryClassification::AfterRefresh);
 
-    auto absent = make_control_timeline_document_session_executor(
-        [](const ControlAdmissionPlan&) {
-            return std::optional<ControlTimelineDocumentSessionSource>{};
-        });
+    auto absent = make_control_timeline_document_session_executor([](const ControlAdmissionPlan&) {
+        return std::optional<ControlTimelineDocumentSessionSource>{};
+    });
     CHECK(absent(plan(), request(open_params("editor")), context()).result.result_code ==
           ControlResultCode::HostUnavailable);
     CHECK(host.invocations == 0);

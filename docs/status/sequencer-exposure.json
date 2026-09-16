@@ -8687,6 +8687,7 @@
             "constexpr std::string_view kOperationId = \"dev.pulp.timeline/document-session@1\";",
             "control_timeline_conflict_result_code",
             "control_timeline_conflict_retry",
+            "std::string_view control_timeline_document_session_action_name(Action action) noexcept {",
             "validate_control_output_json_schema",
             "exact timeline document session source is unavailable"
           ]
@@ -8697,6 +8698,7 @@
             "make_control_timeline_document_session_executor(",
             "create_standalone_timeline_document_session_source(plan)",
             "install_standalone_timeline_document_session_factory(",
+            "std::atomic<detail::StandaloneTimelineDocumentSessionFactory>& timeline_document_session_factory() {",
             "compare_exchange_strong"
           ]
         },
