@@ -110,6 +110,33 @@ outlive the Graphite context. Generic installation and executor policy are
 Vellum-owned; a Pulp build should consume those contracts rather than install a
 second global handler or duplicate context policy.
 
+### Pulp does install a handler — into an empty slot only
+
+Pulp's GPU diagnostics sink (`core/render/src/gpu_diagnostics.cpp`) installs its
+own `SkLogHandler`, which reads as a violation of the consume-don't-install rule
+above. It is a deliberate, bounded deviation, and these are the properties that
+make it safe:
+
+- **Never displaces.** The installer calls `SkLogHandler::GetInstance()` first
+  and returns `declined_handler_present` when the slot is taken. A `SetInstance`
+  that returns false (somebody won the race between the read and the write) is
+  recorded as the same declined status, not retried. A host DAW or a Vellum
+  build that owns the handler keeps it.
+- **Off unless asked.** Installation is gated on `skia_log_bridge_enabled()`
+  (tracing built in, or `PULP_GPU_LOG_BRIDGE`), so an ordinary product build
+  installs nothing.
+- **Degrades, never breaks.** `PULP_RENDER_HAS_SK_LOG_HANDLER` requires both
+  `PULP_HAS_SKIA` and `__has_include("include/utils/SkLogHandler.h")`, so a
+  headers-only or pre-m153 tree compiles to `unavailable_no_skia`.
+- **Additive to logging.** Dawn's callbacks still make their `runtime::log_error`
+  calls; the sink adds Perfetto instant events beside them.
+
+`tools/scripts/verify_skia_m153_capabilities.py` already does the same
+GetInstance-then-conditionally-SetInstance dance, so the pattern is in-repo
+precedent rather than a new local convention. The generic installation and
+executor policy remain Vellum-owned; what Pulp claims is the empty slot when
+nobody else wants it.
+
 For a universal macOS generation, use `--platform darwin-universal --result
 <receipt.json>` on an Apple-Silicon host. That is deliberately a dual-slice
 gate: arm64 runs natively and x86_64 runs through explicit Rosetta, and the

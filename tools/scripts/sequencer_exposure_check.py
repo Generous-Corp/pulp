@@ -119,6 +119,20 @@ GENERATED_ARTIFACT_PATHS = {
     "docs/validation/gpu-handoff-provenance/receipt.json",
     "tools/agent-capabilities/contract-history.json",
 }
+# Files the version bot rewrites wholesale on every bump, mapped to the keys it
+# may rewrite. Excluding one WHOLE would drop real coverage, because the
+# semantic scan below only reaches core/state, core/view, core/midi and
+# inspect -- a docs/ artifact has no semantic backstop. So the exemption is
+# scoped to the transition instead of the path: a diff confined to these keys
+# with version-shaped values is mechanical and needs no ledger row, while any
+# other edit to the same file stays watched and still demands one.
+MECHANICAL_VERSION_ARTIFACTS: dict[str, frozenset[str]] = {
+    "docs/status/pulp-tooling-disposition.json": frozenset(
+        {"version", "catalog_version", "catalog_metadata_version", "min_cli_version"}
+    ),
+}
+_VERSION_VALUE_RE = re.compile(r"^\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.\-]+)?$")
+_VERSION_LINE_RE = re.compile(r'^"([A-Za-z0-9_]+)"\s*:\s*"([^"]*)"$')
 
 
 def _is_nonempty_string(value: Any) -> bool:
@@ -1147,6 +1161,7 @@ def validate_transition(
     changed_paths: list[str],
     trailer_ids: list[str] | None = None,
     semantic_added_paths: set[str] | None = None,
+    mechanical_version_paths: set[str] | None = None,
 ) -> list[str]:
     """Validate omission prevention and append-only removal history."""
     errors: list[str] = []
@@ -1169,8 +1184,11 @@ def validate_transition(
         if not is_ledger_path(path) and path not in E0_INFRASTRUCTURE_PATHS and
         (
             is_sequencer_owned_path(path) or
-            path in watched or
-            path in (semantic_added_paths or set())
+            path in (semantic_added_paths or set()) or
+            (
+                path in watched
+                and path not in (mechanical_version_paths or set())
+            )
         )
     )
     changed_rows = {
@@ -1352,6 +1370,61 @@ def _load_sequencer_trailers(
         else:
             trailer_ids.append(value)
     return trailer_ids, errors
+
+
+def _mechanical_version_paths(
+    repo_root: Path, base: str, changed_paths: list[str], head: str = "HEAD"
+) -> tuple[set[str], list[str]]:
+    """Find declared artifacts whose diff is confined to a version-string rewrite.
+
+    The version bot regenerates these files on every bump, so their whole-file
+    watch would make the bump PR unsatisfiable: a mechanical version rewrite has
+    no exposure decision to record, and no ledger row can honestly cover it. The
+    scan is deliberately per-transition rather than per-path, so the exemption
+    lasts exactly as long as the diff stays mechanical.
+    """
+    matched: set[str] = set()
+    errors: list[str] = []
+    for path in changed_paths:
+        keys = MECHANICAL_VERSION_ARTIFACTS.get(path)
+        if not keys:
+            continue
+        diff = _git(
+            repo_root,
+            "diff",
+            "--no-renames",
+            "--no-ext-diff",
+            "--unified=0",
+            f"{base}...{head}",
+            "--",
+            path,
+        )
+        if diff.returncode != 0:
+            errors.append(
+                f"transition: cannot scan version-only change in {path}: "
+                f"{diff.stderr.strip()}"
+            )
+            continue
+        body = [
+            line
+            for line in diff.stdout.splitlines()
+            if line[:1] in {"+", "-"} and not line.startswith(("+++", "---"))
+        ]
+        if not body:
+            continue
+        mechanical = True
+        for line in body:
+            field = _VERSION_LINE_RE.match(line[1:].strip().rstrip(","))
+            if (
+                field is None
+                or field.group(1) not in keys
+                or _VERSION_VALUE_RE.match(field.group(2)) is None
+            ):
+                mechanical = False
+                break
+        if mechanical:
+            matched.add(path)
+    return matched, errors
 
 
 def _semantic_added_paths(
@@ -1727,12 +1800,18 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root, comparison_base, changed_paths,
                 comparison.resolved_head or "HEAD",
             )
+            mechanical_paths, mechanical_errors = _mechanical_version_paths(
+                repo_root, comparison_base, changed_paths,
+                comparison.resolved_head or "HEAD",
+            )
         else:
             trailer_ids, trailer_errors = [], []
             semantic_paths, semantic_errors = set(), []
+            mechanical_paths, mechanical_errors = set(), []
         errors.extend(transition_errors)
         errors.extend(trailer_errors)
         errors.extend(semantic_errors)
+        errors.extend(mechanical_errors)
         errors.extend(
             validate_transition(
                 base_document,
@@ -1740,6 +1819,7 @@ def main(argv: list[str] | None = None) -> int:
                 changed_paths,
                 trailer_ids,
                 semantic_paths,
+                mechanical_paths,
             )
         )
         print("sequencer exposure check: comparison receipt=" +

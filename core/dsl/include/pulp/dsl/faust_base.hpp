@@ -1,8 +1,8 @@
 #pragma once
 
-// Minimal FAUST base classes required by generated C++ code.
-// These mirror the FAUST architecture headers (faust/dsp/dsp.h, faust/gui/UI.h,
-// faust/gui/meta.h) but are self-contained so builds don't require a FAUST install.
+// Pulp-owned minimal compatibility interfaces for Faust-generated C++ classes.
+// They express the narrow ABI consumed by FaustProcessor and keep the installed
+// Pulp headers independent of an external Faust installation.
 //
 // Declaration order matters: UI and Meta must be defined before dsp,
 // because dsp::buildUserInterface(UI*) and dsp::metadata(Meta*) reference them.

@@ -1,0 +1,61 @@
+{
+  "id": "timeline-command-doc-coverage",
+  "title": "Every durable timeline command is named in the skill with its wire type",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "69a65a72-eeb1-4503-9dea-a64629565d0f",
+  "owned_paths": [
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/timeline-command-doc-coverage.json",
+    "test/cmake/timeline_tests.cmake",
+    "tools/scripts/timeline_command_doc_check.py"
+  ],
+  "evidence": [
+    {
+      "path": "tools/scripts/timeline_command_doc_check.py",
+      "needles": [
+        "def command_verbs",
+        "def declared_structs",
+        "COMMAND_DOMAIN = \"Command\"",
+        "never beside its wire type"
+      ]
+    },
+    {
+      "path": "test/cmake/timeline_tests.cmake",
+      "needles": [
+        "add_test(NAME timeline-command-doc-coverage"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "### Command catalog",
+        "pulp.timeline.command.insert_modulator",
+        "pulp.timeline.command.set_midi_expression_lane_points",
+        "pulp.timeline.command.set_region"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No installed header, target, or exported symbol changes. The commands the catalog documents were already declared in core/timeline/include/pulp/timeline/command.hpp and are unmodified; this slice only writes them down and adds a repository gate."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler is added or changed. pulp seq apply already decoded every wire type in the catalog; documenting them changes what a caller can discover, not what the CLI accepts."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler is added or changed. pulp_timeline_command_apply already accepted every wire type in the catalog."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, or profile policy changes. The gate reads a manifest-derived artifact and a skill document; neither is reachable from a live product control."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged. The catalog is skill prose an agent reads, not a published design-time capability."
+    }
+  }
+}

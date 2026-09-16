@@ -1,6 +1,6 @@
 #pragma once
 
-#include "generated_filter.hpp"
+#include "reference_filter.hpp"
 #include <pulp/dsl/faust_processor.hpp>
 
 namespace pulp::examples {

@@ -11,11 +11,12 @@
 // When Skia is available, we use Dawn's C++ API (which Skia requires).
 // This ensures a single Dawn device can be shared with SkiaSurface.
 
+#include "dawn/dawn_proc.h"
+#include "dawn/native/DawnNative.h"
+#include "webgpu/webgpu_cpp.h"
+#include <pulp/render/gpu_diagnostics.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
-#include "webgpu/webgpu_cpp.h"
-#include "dawn/native/DawnNative.h"
-#include "dawn/dawn_proc.h"
 
 namespace pulp::render {
 
@@ -65,6 +66,13 @@ std::string dawn_texture_format_name(wgpu::TextureFormat format) {
         case wgpu::TextureFormat::RGBA8UnormSrgb: return "rgba8unorm-srgb";
         default: return "bgra8unorm";
     }
+}
+
+std::string dawn_string_view_to_string(wgpu::StringView view) {
+    if (view.data == nullptr || view.length == 0) {
+        return {};
+    }
+    return std::string(view.data, view.length);
 }
 
 wgpu::BackendType dawn_backend_preference(
@@ -257,6 +265,7 @@ public:
 #endif
                 runtime::log_error("GpuSurface: WebGPU error ({}): {}",
                     static_cast<int>(type), msg);
+                emit_gpu_diagnostic(GpuDiagnosticSeverity::error, "dawn.uncaptured_error", msg);
             });
 
         adapter_.RequestDevice(
@@ -397,9 +406,16 @@ public:
         info.null_backend = dawn_info.backendType == wgpu::BackendType::Null;
         info.backend_type = dawn_backend_type_name(dawn_info.backendType);
         info.architecture = info.backend_type;
-        info.name = "Native Dawn Adapter (" + info.backend_type + ")";
-        info.description = info.name;
-        info.vendor = "Dawn";
+        // Report the driver's own identity. Android's Vulkan driver blocklist
+        // matches on these strings, so a synthesized placeholder would make
+        // every entry in it unmatchable. Each field falls back to a generic
+        // label when the adapter leaves it empty.
+        const auto device = dawn_string_view_to_string(dawn_info.device);
+        const auto description = dawn_string_view_to_string(dawn_info.description);
+        const auto vendor = dawn_string_view_to_string(dawn_info.vendor);
+        info.name = device.empty() ? "Native Dawn Adapter (" + info.backend_type + ")" : device;
+        info.description = description.empty() ? info.name : description;
+        info.vendor = vendor.empty() ? "Dawn" : vendor;
         return info;
     }
 

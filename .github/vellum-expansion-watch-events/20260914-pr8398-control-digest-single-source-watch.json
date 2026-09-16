@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260914-pr8398-control-digest-single-source-watch",
+  "created_at": "2026-09-15T05:11:51Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Ends the churn where a derived control-registry digest had to be retyped by hand into every fixture that embeds it. kControlRegistryDigest is sha256_hex(serialize_control_registry()), so every registry change moved it, and it was spelled as a literal in eight fixture manifests plus a release-watchdog test -- values no person can compute without building and running the control-manifest suite, so each registry change invalidated every branch in flight. The three distinct fixture manifests now live once in test/support/control_manifest_fixtures.hpp, splicing the canonical value in through the same include the product header reads, and the shipping markers those fixtures embed are the compile-time SHA-256 of the same bytes rather than literals. The literal now exists only in the canonical include and the installed shipping helper's documented mirror.\n\nThe family is crossed by exactly one path: test/cmake/view_widget_bridge_tests.cmake, which is a visual-proof-harness selector by exact name. The edit there adds target_include_directories entries so the control test and fixture targets can reach ${CMAKE_SOURCE_DIR}/test for that shared header, and adds nothing else -- no target, source, label or dependency changes. The other seventeen changed paths in this branch match no selector in any family: they are control-suite tests and fixtures, the shared header, two status ledgers and one release-watchdog Python test. No screenshot, capture, golden, import-validation, harness or visual-fixture code is touched, and no visual-harness target changes what it builds or runs. Registered as watch-only so the family's coverage stays honest about an include-path edit that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-control-manifest (421 assertions, 10 cases; compile-time SHA-256 pinned against pulp::runtime::sha256_hex)",
+    "pulp-test-control-host-enrollment (49 assertions, 4 cases) and pulp-test-control-endpoint-enrollment (355 assertions, 6 cases)",
+    "pulp-test-control-trusted-host-inventory (125 assertions, 12 cases) and pulp-test-inspector-shipping-report (159 assertions, 29 cases)",
+    "tools/scripts/confirm_failure.sh over the compile-time SHA-256 (CONFIRMED: the marker test fails without it)",
+    "registry-move probe: moved the registry, regenerated only the canonical include and its cmake mirror, and all five suites passed with no fixture edit",
+    "python3 tools/scripts/test_release_artifact_contents.py (97 cases)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
