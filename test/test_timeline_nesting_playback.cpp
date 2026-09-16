@@ -2850,3 +2850,553 @@ TEST_CASE("A transformation on an intermediate track refuses the freeze beneath 
     REQUIRE(error.code == CompileErrorCode::NestedFrozenTrackUnsupported);
     REQUIRE(error.item == ItemId{11});
 }
+
+namespace {
+
+// Where the comp's sealed windows sit in absolute samples. It matches the
+// window every render below reads, so a segment that fails to reach the output
+// shows up as silence rather than as a buffer nobody looked at.
+constexpr std::int64_t kTakeCompPlacementSamples = 24'000;
+// A third of that window, so the three-segment comp tiles it exactly and every
+// rendered frame belongs to a segment somebody named.
+constexpr std::size_t kTakeCompSegmentFrames = 8'000;
+
+// A source no ramp can be mistaken for: every frame is negative. A render that
+// resolves a segment to the wrong take says so by its sign, rather than by a
+// magnitude somebody has to compare against a reference nobody wrote down.
+std::vector<float> falling_ramp() {
+    std::vector<float> ramp(24'000);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame)
+        ramp[frame] = -static_cast<float>(frame + 1) / static_cast<float>(ramp.size());
+    return ramp;
+}
+
+// One knob per transformation the lowerer's transparency predicate answers for,
+// authored exactly as the freeze cases above are. Each case below is the
+// permitting base plus one knob, so a refusal is evidence about that
+// transformation rather than about a fixture that cannot compile at all.
+struct TakeCompNesting {
+    // Off only for the control that proves the child's arrangement is real: an
+    // uncomped twin must produce the note events the comp suppresses.
+    bool comped = true;
+    std::int64_t placement_start = 0;
+    std::int64_t placement_duration = kTicksPerQuarter;
+    std::int64_t source_start = 0;
+    ClipPlaybackProperties placement{};
+    TimeConform placement_conform = TimeConform::None;
+    TrackMixer mixer{};
+    bool device_chain = false;
+    // Authors a gain lane. The gain codes are chosen by the leaf's kind, so
+    // naming one means reaching a leaf, and a sealed comp refuses before any
+    // leaf is reached -- see pan_automation for the one that does name itself.
+    bool automation_lane = false;
+    // Authors a pan lane. Pan needs no leaf to decide it, so it is refused on
+    // entry and does name its construct.
+    bool pan_automation = false;
+    bool modulator = false;
+    bool macro = false;
+    bool modulation_route = false;
+    bool tuning = false;
+    bool groove = false;
+    bool dynamics = false;
+    bool chord_scale = false;
+    // The takes' own rate. canonical_comp refuses a comp whose segment rate is
+    // not its take's, so segment and take move together and the only reachable
+    // mismatch is against the timeline — which is the one that breaks bit
+    // identity.
+    timebase::RationalRate take_rate{48'000, 1};
+};
+
+// The comp both documents carry: three adjacent windows tiling the render,
+// drawn from two takes, with take 41 appearing twice at two different offsets
+// into itself. A single-segment comp would be indistinguishable from a freeze;
+// this one cannot lower correctly unless every segment resolves its own take
+// and its own offset into that take's media.
+std::vector<TakeCompSegment> take_comp_segments(timebase::RationalRate rate) {
+    const auto window = [&](std::size_t index) {
+        return AbsoluteTimeRange{{kTakeCompPlacementSamples +
+                                  static_cast<std::int64_t>(index * kTakeCompSegmentFrames)},
+                                 kTakeCompSegmentFrames, rate};
+    };
+    return {TakeCompSegment{{41}, window(0)}, TakeCompSegment{{42}, window(1)},
+            TakeCompSegment{{41}, window(2)}};
+}
+
+std::vector<Take> take_comp_takes(timebase::RationalRate rate, std::uint64_t frame_count) {
+    return {take(Take::create({41}, MediaRef{{50}, {0}, frame_count},
+                              {kTakeCompPlacementSamples}, rate)),
+            take(Take::create({42}, MediaRef{{51}, {0}, frame_count},
+                              {kTakeCompPlacementSamples}, rate))};
+}
+
+TakeLane take_comp_lane(timebase::RationalRate rate, std::uint64_t frame_count) {
+    return take(TakeLane::create({40}, "comp", take_comp_takes(rate, frame_count),
+                                 take_comp_segments(rate)));
+}
+
+std::vector<MediaAsset> take_comp_assets(timebase::RationalRate rate, std::uint64_t frame_count) {
+    const auto rising_hash = *ContentHash::from_hex(std::string(64, 'a'));
+    const auto falling_hash = *ContentHash::from_hex(std::string(64, 'c'));
+    return {MediaAsset{.id = {50},
+                       .name = "rising",
+                       .frame_count = frame_count,
+                       .sample_rate = rate,
+                       .content_hash = rising_hash},
+            MediaAsset{.id = {51},
+                       .name = "falling",
+                       .frame_count = frame_count,
+                       .sample_rate = rate,
+                       .content_hash = falling_hash}};
+}
+
+// A child track carrying a selected comp AND still holding the arrangement the
+// comp replaced, nested under one placement. The arrangement is deliberately
+// real: if the walk ever descends into it instead of honouring the selection,
+// the note clip is the material that would wrongly sound.
+Project nested_take_comp_project(TakeCompNesting nesting, std::uint64_t frame_count) {
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "comped";
+    child_input.clips.push_back(take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    if (nesting.comped) {
+        child_input.take_lanes.push_back(take_comp_lane(nesting.take_rate, frame_count));
+        child_input.active_take_lane_id = {40};
+    }
+    child_input.mixer = nesting.mixer;
+    if (nesting.device_chain)
+        child_input.device_chain.push_back(DevicePlacement{{14}});
+    if (nesting.automation_lane) {
+        auto curve = take(AutomationCurve::create(
+            {AutomationPoint{{16}, {0}, 1.0f, AutomationInterpolation::Continuous, 0.0f},
+             AutomationPoint{{17}, {kTicksPerQuarter}, 0.5f, AutomationInterpolation::Continuous,
+                             0.0f}}));
+        child_input.automation_lanes.push_back(take(AutomationLane::create(
+            {15}, TrackMixerTarget{TrackMixerParameter::Gain}, std::move(curve))));
+    }
+    if (nesting.pan_automation) {
+        auto curve = take(AutomationCurve::create(
+            {AutomationPoint{{18}, {0}, 1.0f, AutomationInterpolation::Continuous, 0.0f},
+             AutomationPoint{{19}, {kTicksPerQuarter}, 0.5f, AutomationInterpolation::Continuous,
+                             0.0f}}));
+        child_input.automation_lanes.push_back(take(AutomationLane::create(
+            {20}, TrackMixerTarget{TrackMixerParameter::Pan}, std::move(curve))));
+    }
+    if (nesting.modulator || nesting.modulation_route)
+        child_input.modulators.push_back(Modulator{{30}, ModulatorKind::Lfo, "lfo"});
+    if (nesting.macro)
+        child_input.macros.push_back(MacroControl{{31}, "macro", 0.5f});
+    if (nesting.modulation_route)
+        child_input.modulation_routes.push_back(
+            ModulationRoute{{32},
+                            ModulationSourceRef{{30}, ModulationSourceKind::Modulator},
+                            TrackMixerTarget{TrackMixerParameter::Gain},
+                            0.5f,
+                            true});
+    if (nesting.tuning)
+        child_input.tuning = TuningReference{};
+
+    SequenceInput child_sequence;
+    child_sequence.id = {10};
+    child_sequence.name = "child";
+    child_sequence.musical_duration = TickDuration{kTicksPerQuarter};
+    child_sequence.tracks = {take(Track::create(std::move(child_input)))};
+    if (nesting.groove)
+        child_sequence.groove = one_step_groove(20, kGrooveUnitScale);
+    if (nesting.dynamics)
+        child_sequence.dynamics_lane = take(DynamicsLane::create({DynamicsEvent{{0}, 0.5f}}));
+    if (nesting.chord_scale)
+        child_sequence.chord_scale_lane = take(ChordScaleLane::create(
+            {ChordScaleEvent{{0}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9}}));
+    auto child = take(Sequence::create(std::move(child_sequence)));
+
+    auto placement = take(Clip::create({4}, {nesting.placement_start},
+                                       {nesting.placement_duration},
+                                       SequenceRef{{10}, {nesting.source_start}},
+                                       nesting.placement, nesting.placement_conform));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested take comp";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = take_comp_assets(nesting.take_rate, frame_count);
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+// The same comped track sitting directly on the root, at the same root ticks
+// and the same absolute samples. This is what a transparent nesting has to
+// sound exactly like — and it reaches the renderer by the entirely different
+// begin_track/step_take_comp path, one renderer program per segment, which is
+// why bit identity is a claim worth making rather than a tautology.
+Project unnested_take_comp_project(std::uint64_t frame_count) {
+    const timebase::RationalRate rate{48'000, 1};
+    TrackInput root_track;
+    root_track.id = {3};
+    root_track.name = "comped";
+    root_track.clips.push_back(take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    root_track.take_lanes.push_back(take_comp_lane(rate, frame_count));
+    root_track.active_take_lane_id = {40};
+    auto root = take(Sequence::create({2}, "root", std::nullopt,
+                                      {take(Track::create(std::move(root_track)))}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "unnested take comp";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = take_comp_assets(rate, frame_count);
+    input.sequences = {root};
+    return take(Project::create(std::move(input)));
+}
+
+std::vector<float> render_take_comp(const Project& project,
+                                    const std::shared_ptr<const DecodedAudioAssetPool>& assets) {
+    CompiledFixture compiled(shared(project), map_120(), assets);
+    auto program = compiled.store.read();
+    REQUIRE(program);
+    Output output(1, kPlacementFrames);
+    REQUIRE(ArrangementAudioRenderer::process(
+                *program, snapshot(*program, kPlacementFrames, kTakeCompPlacementSamples),
+                output.view()) == AudioRenderStatus::Rendered);
+    return output.storage[0];
+}
+
+std::shared_ptr<const DecodedAudioAssetPool>
+take_comp_pool(const std::vector<float>& rising, const std::vector<float>& falling,
+               std::uint32_t rate = 48'000) {
+    return pool({{{50}, audio_data({rising}, rate)}, {{51}, audio_data({falling}, rate)}});
+}
+
+} // namespace
+
+TEST_CASE("A transparently nested active take renders exactly like the same comp unnested") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+
+    const auto nested = render_take_comp(nested_take_comp_project({}, rising.size()), assets);
+    const auto unnested = render_take_comp(unnested_take_comp_project(rising.size()), assets);
+
+    // Bit identity, not tolerance: a sealed artifact that survives nesting has
+    // no room for a "close enough", and there is no detection floor to state
+    // because the comparison is of exact float bit patterns.
+    REQUIRE(nested == unnested);
+
+    // Without the next two the equality would pass on two silent buffers,
+    // which is exactly what a comp that never reached the output produces.
+    REQUIRE(nested.front() != 0.0f);
+    REQUIRE(nested.back() != 0.0f);
+    // And without these two it would pass on two buffers that are neither
+    // silent nor plural: a lowering that resolved every segment to the first
+    // take renders a perfectly respectable non-silent ramp, and only the
+    // second take can put a negative sample in this buffer.
+    REQUIRE(*std::min_element(nested.begin(), nested.end()) < 0.0f);
+    REQUIRE(*std::max_element(nested.begin(), nested.end()) > 0.0f);
+
+    // Each segment landed in its own window, from its own take, at its own
+    // offset into that take. Sign pins the take — 41 rises through positive
+    // values, 42 falls through negative ones. Magnitude pins the offset:
+    // segment 2 reads take 41 two thirds of the way in, where segment 0 reads
+    // the same take from its very start, so an offset this walk computed as
+    // zero for both would read near zero twice.
+    REQUIRE(nested[0] > 0.0f);
+    REQUIRE(nested[0] < 0.05f);
+    REQUIRE(nested[kTakeCompSegmentFrames] < -0.3f);
+    REQUIRE(nested[2 * kTakeCompSegmentFrames] > 0.5f);
+}
+
+TEST_CASE("A transparently nested active take substitutes the arrangement it replaced") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+    CompiledFixture compiled(shared(nested_take_comp_project({}, rising.size())), map_120(),
+                             assets);
+    auto program = compiled.store.read();
+    REQUIRE(program);
+
+    // One audio clip per comp segment, and no note events. The child's note
+    // clip is the material the author replaced, so a walk that descended into
+    // the arrangement would show up here as note events rather than as none —
+    // and a payload that emitted the comp as a single leaf, the way the freeze
+    // does, would show up as a count of one.
+    const auto* audio = program->find_track({3})->audio_program();
+    REQUIRE(audio != nullptr);
+    REQUIRE(audio->clips().size() == 3);
+    REQUIRE(program->find_track({3})->arrangement_note_events().empty());
+
+    // The control. Emptiness above means the comp substituted the arrangement
+    // only if the arrangement would otherwise have sounded, so the same
+    // document without the comp has to produce the note events this one does
+    // not. Without it, a child whose clip compiled to nothing at all would read
+    // as a successful substitution.
+    CompiledFixture uncomped(shared(nested_take_comp_project({.comped = false}, rising.size())),
+                             map_120(), assets);
+    auto uncomped_program = uncomped.store.read();
+    REQUIRE(uncomped_program);
+    REQUIRE_FALSE(uncomped_program->find_track({3})->arrangement_note_events().empty());
+    REQUIRE(uncomped_program->find_track({3})->audio_program() == nullptr);
+}
+
+TEST_CASE("Each transformation a nesting can impose refuses the active take it would re-time") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+
+    // The base permits. Every case below is this document plus exactly one
+    // transformation, so a refusal is attributable to that transformation and
+    // not to the fixture being unable to compile at all.
+    {
+        CompiledFixture permitted(shared(nested_take_comp_project({}, rising.size())), map_120(),
+                                  assets);
+        REQUIRE(permitted.store.read());
+    }
+
+    const auto refuses = [&](const char* named, TakeCompNesting nesting) {
+        INFO(named);
+        const auto error = compile_error_with_assets(nested_take_comp_project(nesting,
+                                                                              rising.size()),
+                                                     assets);
+        REQUIRE(error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+        REQUIRE(error.item == ItemId{11});
+    };
+
+    // Placement geometry. Each moves or cuts child ticks; the comp's windows
+    // carry no tick position and cannot follow either.
+    refuses(".placement_start = 480", {.placement_start = 480});
+    refuses(".placement_start = 240, .source_start = 240", {.placement_start = 240, .source_start = 240});
+    refuses(".placement_duration = kTicksPerQuarter / 2", {.placement_duration = kTicksPerQuarter / 2});
+    refuses(".placement = {.gain_linear = 0.5f}", {.placement = {.gain_linear = 0.5f}});
+    refuses(".placement = fade_properties(240, 0)", {.placement = fade_properties(240, 0)});
+
+    // Child-track state. The fader and pan change level; the three modulation
+    // entries are read by neither this walk nor begin_track, so without the
+    // predicate a modulated fader over a sealed comp would be permitted with
+    // nothing reporting the loss.
+    refuses(".mixer = TrackMixer{0.5f, 0.0f}", {.mixer = TrackMixer{0.5f, 0.0f}});
+    refuses(".mixer = TrackMixer{1.0f, 0.5f}", {.mixer = TrackMixer{1.0f, 0.5f}});
+    refuses(".modulator = true", {.modulator = true});
+    refuses(".macro = true", {.macro = true});
+    refuses(".tuning = true", {.tuning = true});
+    // A route needs a source object to be a valid document, so this case
+    // carries the modulator above as well and is evidence about the pair rather
+    // than about the route alone. It is asserted anyway: a document that routes
+    // modulation into the child's fader must not compile as a transparent
+    // nesting, whichever of the two entries catches it.
+    refuses(".modulator = true, .modulation_route = true", {.modulator = true, .modulation_route = true});
+
+    // Owning-sequence lanes.
+    refuses(".groove = true", {.groove = true});
+    refuses(".dynamics = true", {.dynamics = true});
+    refuses(".chord_scale = true", {.chord_scale = true});
+
+    // The reason bit identity holds at all: compile_take_comp_segment_program
+    // takes each window's projected timeline span as its renderable length, the
+    // lowered leaf's generic path takes the source length scaled and rounded
+    // up, and those agree only when no rate conversion happens. It needs its
+    // own decoded pool because the document ties every take's rate to its
+    // asset's.
+    const timebase::RationalRate off_rate{44'100, 1};
+    const auto off_rate_assets = take_comp_pool(rising, falling, 44'100);
+    const auto rate_error = compile_error_with_assets(
+        nested_take_comp_project({.take_rate = off_rate}, rising.size()), off_rate_assets);
+    REQUIRE(rate_error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+    REQUIRE(rate_error.item == ItemId{11});
+}
+
+TEST_CASE("A nested active take under a device chain or automation lane keeps naming that construct") {
+    // The predicate answers for each of these, and where a construct has a code
+    // that is decidable on entry that code is raised first. Asserting the codes
+    // here is what keeps a later reordering from silently degrading a specific
+    // diagnostic into the generic active-take refusal -- and, for the one
+    // refusal that is decided at the leaf instead, from claiming a specificity
+    // the walk cannot actually deliver under a comp.
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+    REQUIRE(compile_error_with_assets(nested_take_comp_project({.device_chain = true},
+                                                               rising.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedDeviceChainUnsupported);
+    // Pan is decided on entry to the child track, so it still names its own
+    // construct ahead of the comp.
+    REQUIRE(compile_error_with_assets(nested_take_comp_project({.pan_automation = true},
+                                                               rising.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedAutomationPanUnsupported);
+    // An automated *gain* is the one automation that cannot name itself here.
+    // The two gain codes are chosen by the leaf's kind, so naming one means
+    // reaching a leaf, and a sealed comp refuses before any leaf is reached.
+    // The active-take code is therefore the honest answer, and pinning it keeps
+    // a later change from quietly reordering the two.
+    REQUIRE(compile_error_with_assets(nested_take_comp_project({.automation_lane = true},
+                                                               rising.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedActiveTakeUnsupported);
+}
+
+namespace {
+
+// The same comped track two levels down, so the walk passes through an
+// intermediate track on the way to it. `intermediate_macro` is authored on that
+// middle track and on nothing else.
+Project doubly_nested_take_comp_project(bool intermediate_macro, std::uint64_t frame_count) {
+    const timebase::RationalRate rate{48'000, 1};
+    TrackInput leaf_input;
+    leaf_input.id = {11};
+    leaf_input.name = "comped";
+    leaf_input.clips.push_back(take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    leaf_input.take_lanes.push_back(take_comp_lane(rate, frame_count));
+    leaf_input.active_take_lane_id = {40};
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {take(Track::create(std::move(leaf_input)))}));
+
+    TrackInput middle_input;
+    middle_input.id = {21};
+    middle_input.name = "middle";
+    middle_input.clips.push_back(
+        take(Clip::create({22}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}})));
+    if (intermediate_macro)
+        middle_input.macros.push_back(MacroControl{{31}, "macro", 0.5f});
+    auto middle = take(Sequence::create({20}, "middle", TickDuration{kTicksPerQuarter},
+                                        {take(Track::create(std::move(middle_input)))}));
+
+    auto placement = take(Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{20}, {0}}));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "doubly nested take comp";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = take_comp_assets(rate, frame_count);
+    input.sequences = {root, middle, child};
+    return take(Project::create(std::move(input)));
+}
+
+} // namespace
+
+TEST_CASE("A transparently nested active take survives a second level of nesting") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+
+    // Two levels of transparent nesting still render as the unnested comp, so
+    // depth by itself is not a transformation. The same non-silence and
+    // two-take controls as at depth 1, because an equality between two silent
+    // or two single-take buffers would be just as vacuous here.
+    const auto nested = render_take_comp(doubly_nested_take_comp_project(false, rising.size()),
+                                         assets);
+    REQUIRE(nested == render_take_comp(unnested_take_comp_project(rising.size()), assets));
+    REQUIRE(nested.front() != 0.0f);
+    REQUIRE(nested.back() != 0.0f);
+    REQUIRE(*std::min_element(nested.begin(), nested.end()) < 0.0f);
+    REQUIRE(*std::max_element(nested.begin(), nested.end()) > 0.0f);
+
+    // The macro sits on the middle track, which the walk passes through rather
+    // than lands on. A predicate that only asked about the track holding the
+    // comp would permit this — and a macro two levels up reaches the artifact
+    // exactly as much as one directly above it.
+    const auto error = compile_error_with_assets(
+        doubly_nested_take_comp_project(true, rising.size()), assets);
+    REQUIRE(error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+    REQUIRE(error.item == ItemId{11});
+}
+
+namespace {
+
+// The same comped child placed twice. `second_track` decides whether the second
+// placement sits on its own root track or beside the first, and `second_start`
+// where it begins. The two knobs are what separate the three reachable shapes
+// of "one comped child, two placements" from each other.
+Project twice_placed_take_comp_project(bool second_track, std::int64_t second_start,
+                                       std::uint64_t frame_count) {
+    const timebase::RationalRate rate{48'000, 1};
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "comped";
+    child_input.clips.push_back(take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    child_input.take_lanes.push_back(take_comp_lane(rate, frame_count));
+    child_input.active_take_lane_id = {40};
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {take(Track::create(std::move(child_input)))}));
+
+    auto first = take(Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}));
+    auto second =
+        take(Clip::create({6}, {second_start}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}));
+    std::vector<Track> root_tracks;
+    if (second_track) {
+        root_tracks.push_back(track(3, {first}));
+        root_tracks.push_back(track(5, {second}));
+    } else {
+        root_tracks.push_back(track(3, {first, second}));
+    }
+    auto root = take(Sequence::create({2}, "root", std::nullopt, std::move(root_tracks)));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "twice placed take comp";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = take_comp_assets(rate, frame_count);
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+} // namespace
+
+TEST_CASE("One comped child placed twice never reaches the collision its ordinals would cause") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+
+    // link_audio_track_program identifies a TakeCompSegment program by a bare
+    // ordinal — segment index plus one — so two copies of one comp on one track
+    // would collide and be rejected as a duplicate identity. That tripwire
+    // belongs to the unnested path and is untouched. What the three cases below
+    // establish is that this lane cannot deliver it a colliding pair, by
+    // reaching none of the shapes that would.
+
+    // Two placements on one track cannot BOTH be transparent. Transparency
+    // pins a placement to its child's own origin, so a second transparent
+    // placement would have to start where the first does — and the model
+    // rejects the overlap rather than producing the pair.
+    auto overlapping = Clip::create({6}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}});
+    REQUIRE(overlapping);
+    auto first = take(Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}));
+    REQUIRE_FALSE(Track::create({3}, "root", {first, std::move(overlapping).value()}));
+    // The control: the same two clips are a track the model accepts as soon as
+    // they do not overlap, so the rejection above is about the overlap and not
+    // about the clips or the track.
+    REQUIRE(Track::create(
+        {3}, "root",
+        {first, take(Clip::create({6}, {kTicksPerQuarter}, {kTicksPerQuarter},
+                                  SequenceRef{{10}, {0}}))}));
+
+    // So a second placement on the same track has to be displaced, and a
+    // displaced placement is a transformation the predicate already refuses —
+    // one level before any ordinal is ever assigned.
+    const auto error = compile_error_with_assets(
+        twice_placed_take_comp_project(false, kTicksPerQuarter, rising.size()), assets);
+    REQUIRE(error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+    REQUIRE(error.item == ItemId{11});
+
+    // Two transparent placements on two different tracks do compile, and must:
+    // a placement is how a document asks for a copy, and the flattener answers
+    // the same way here as it does for ordinary child content. No ordinal is
+    // involved — a lowered comp becomes absolute leaves carrying generated
+    // document identities, so the two tracks' leaves are distinct by
+    // construction and each track sounds its own copy of the comp.
+    CompiledFixture twice(shared(twice_placed_take_comp_project(true, 0, rising.size())),
+                          map_120(), assets);
+    auto program = twice.store.read();
+    REQUIRE(program);
+    const auto* left = program->find_track({3})->audio_program();
+    const auto* right = program->find_track({5})->audio_program();
+    REQUIRE(left != nullptr);
+    REQUIRE(right != nullptr);
+    REQUIRE(left->clips().size() == 3);
+    REQUIRE(right->clips().size() == 3);
+    // Distinct identities, which is the whole reason the ordinal collision is
+    // out of reach: had the walk reused one identity per segment the way the
+    // unnested path reuses an ordinal, these would match.
+    for (std::size_t index = 0; index < left->clips().size(); ++index)
+        REQUIRE(left->clips()[index].id != right->clips()[index].id);
+}

@@ -133,6 +133,26 @@ struct PulpClapPlugin {
     const clap_host_t* host = nullptr;
     const clap_host_params_t* host_params = nullptr;
 
+    // True between a successful clap_activate() and the matching
+    // clap_deactivate(). `clap.latency` only permits the reported latency to
+    // move during plugin->activate, so an ACTIVE plugin whose latency changed
+    // must ask the host for a deactivate / reactivate cycle
+    // (`clap_host->request_restart()`) instead of publishing the new value
+    // where the host is not allowed to act on it. An inactive plugin has no
+    // such window to protect and simply reports the new value.
+    bool is_active = false;
+
+    // Latched when an active plugin has asked the host to restart because its
+    // latency moved, and cleared once the new value is published inside the
+    // reactivating clap_activate(). Two jobs:
+    //   * Coalescing. A host may take arbitrarily long to honour a restart (or
+    //     decline it); latency can move many times meanwhile. One outstanding
+    //     request is the whole contract, so further edges must not re-ask.
+    //   * Deferral. `clap_host_latency->changed()` is `[main-thread &
+    //     being-activated]`, so the push waits for the activate this latch
+    //     survives a deactivate to reach.
+    bool latency_restart_pending = false;
+
     // Audio working state
     double sample_rate = 48000.0;
     int max_buffer_size = 512;

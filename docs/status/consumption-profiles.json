@@ -278,12 +278,12 @@
           {
             "exported_as": "Pulp::signal-fft-backend",
             "closure_node_count": 6,
-            "public_header_count": 265
+            "public_header_count": 266
           },
           {
             "exported_as": "Pulp::signal-modal-spec",
             "closure_node_count": 6,
-            "public_header_count": 265
+            "public_header_count": 266
           },
           {
             "exported_as": "Pulp::mbedtls",
@@ -293,7 +293,7 @@
           {
             "exported_as": "Pulp::signal",
             "closure_node_count": 5,
-            "public_header_count": 265
+            "public_header_count": 266
           },
           {
             "exported_as": "Pulp::ausdk",
@@ -4154,7 +4154,7 @@
             "system_libraries": []
           },
           "public_headers": {
-            "count": 265,
+            "count": 266,
             "roots": [
               "core/signal/include"
             ],
@@ -4194,7 +4194,7 @@
             "system_libraries": []
           },
           "public_headers": {
-            "count": 265,
+            "count": 266,
             "roots": [
               "core/signal/include"
             ],
@@ -4232,7 +4232,7 @@
             "system_libraries": []
           },
           "public_headers": {
-            "count": 265,
+            "count": 266,
             "roots": [
               "core/signal/include"
             ],
