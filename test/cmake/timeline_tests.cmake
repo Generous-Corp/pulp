@@ -696,10 +696,18 @@ endif()
 # derives every `dev.pulp.sequencer/` operation from the frozen control registry
 # and fails when the skill omits one or records the wrong result kind, so a
 # live sequencer capability cannot ship agent-invisible.
-if(Python3_EXECUTABLE)
-    add_test(NAME sequencer-control-skill-coverage COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/tools/scripts/sequencer_control_skill_check.py")
-endif()
+# Registered unconditionally, as the other Python-driven tests in this tree
+# are. Wrapping the registration in `if(Python3_EXECUTABLE)` deletes the gate
+# on a host without an interpreter instead of failing it, and `ctest -R` on a
+# name nothing registered exits 0 -- so the lane that can least afford to skip
+# this check is the one that silently would.
+add_test(NAME sequencer-control-skill-coverage COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_SOURCE_DIR}/tools/scripts/sequencer_control_skill_check.py")
+
+# Calibrated controls for the gate above: each proves the checker returns
+# non-zero on a registry/skill pair it must reject.
+add_test(NAME sequencer-control-skill-coverage-selftest COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_SOURCE_DIR}/tools/scripts/test_sequencer_control_skill_check.py")
 
 # Keep focused Timeline submodule registrations beneath this owner hub.
 include("${CMAKE_CURRENT_LIST_DIR}/timeline_agent_view_tests.cmake")
