@@ -95,3 +95,31 @@ TEST_CASE("shared IO bridge never leapfrogs a delayed head",
     CHECK(result->sequence == 11);
     CHECK(result->disposition == SharedIoTransportBridge::Disposition::Deliver);
 }
+
+TEST_CASE("shared IO compute plan exposes retired output and cancels refused leases",
+          "[gpu_audio][shared_io][p2]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider, {.slots=1, .input_bytes_per_slot=16,
+                                    .output_bytes_per_slot=16}));
+    auto input = plan.acquire_input(3, 0);
+    REQUIRE(input);
+    auto* samples = reinterpret_cast<float*>(input->bytes.data());
+    samples[0] = 1.5f;
+    REQUIRE(plan.submit({input->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    auto output = plan.acquire_output(*completion);
+    REQUIRE(output);
+    CHECK(reinterpret_cast<const float*>(output->bytes.data())[0] == 3.0f);
+    REQUIRE(plan.release_output({output->token}));
+
+    auto refused = plan.acquire_input(4, 0);
+    REQUIRE(refused);
+    REQUIRE(plan.cancel({refused->token, 0}));
+    auto next = plan.acquire_input(5, 0);
+    REQUIRE(next);
+    REQUIRE(plan.cancel({next->token, 0}));
+    REQUIRE(plan.release());
+}
