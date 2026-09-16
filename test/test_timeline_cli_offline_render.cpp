@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <set>
 #include <string>
 #include <system_error>
@@ -217,4 +218,129 @@ TEST_CASE("offline render failure messages keep the rejecting subsystem's own co
     REQUIRE(tools::timeline::detail::offline_render_message(transport).find(std::to_string(
                 static_cast<unsigned>(playback::TransportError::NotPrepared))) !=
             std::string::npos);
+}
+
+TEST_CASE("an unflagged render keeps the length it produced before the tail existed",
+          "[timeline][render][tail]") {
+    TempDirectory temp;
+    const auto source_path = write_source_wav(temp.path());
+    const auto json = project_json(source_path);
+    const auto implicit_path = temp.path() / "implicit.wav";
+    const auto explicit_zero_path = temp.path() / "explicit-zero.wav";
+
+    REQUIRE(tools::timeline::render(json, implicit_path.string()));
+    REQUIRE(tools::timeline::render(json, explicit_zero_path.string(), kSampleRate, 0));
+
+    const auto implicit_audio = audio::read_audio_file(implicit_path.string());
+    const auto explicit_audio = audio::read_audio_file(explicit_zero_path.string());
+    REQUIRE(implicit_audio);
+    REQUIRE(explicit_audio);
+    REQUIRE(implicit_audio->channels.size() == explicit_audio->channels.size());
+    for (std::size_t channel = 0; channel < implicit_audio->channels.size(); ++channel) {
+        REQUIRE(implicit_audio->channels[channel] == explicit_audio->channels[channel]);
+        REQUIRE(implicit_audio->channels[channel].size() == kFrameCount);
+    }
+}
+
+TEST_CASE("the render verb's tail lengthens the bounce by exactly the frames it asks for",
+          "[timeline][render][tail]") {
+    TempDirectory temp;
+    const auto source_path = write_source_wav(temp.path());
+    const auto json = project_json(source_path);
+    const auto untailed_path = temp.path() / "untailed.wav";
+    const auto tailed_path = temp.path() / "tailed.wav";
+    constexpr std::uint32_t kTailFrames = 1'024;
+
+    REQUIRE(tools::timeline::render(json, untailed_path.string(), kSampleRate, 0));
+    const auto tailed_result =
+        tools::timeline::render(json, tailed_path.string(), kSampleRate, kTailFrames);
+    REQUIRE(tailed_result);
+
+    const auto untailed = audio::read_audio_file(untailed_path.string());
+    const auto tailed = audio::read_audio_file(tailed_path.string());
+    REQUIRE(untailed);
+    REQUIRE(tailed);
+    REQUIRE(untailed->channels.size() == tailed->channels.size());
+    for (std::size_t channel = 0; channel < tailed->channels.size(); ++channel) {
+        const auto& without = untailed->channels[channel];
+        const auto& with = tailed->channels[channel];
+        REQUIRE(with.size() == without.size() + kTailFrames);
+        // The tail is appended to the region, not a re-render of it: every frame
+        // the untailed bounce produced survives unchanged at the same index.
+        for (std::size_t frame = 0; frame < without.size(); ++frame)
+            REQUIRE(with[frame] == without[frame]);
+    }
+
+    // The requested tail is reported, so a caller can tell how much of the file
+    // is pad without recomputing the region length itself.
+    REQUIRE(tailed_result.json.find(R"("tail_frames":1024)") != std::string::npos);
+}
+
+TEST_CASE("the render verb's tail is the offline renderer's own tail, bit for bit",
+          "[timeline][render][tail]") {
+    TempDirectory temp;
+    const auto source_path = write_source_wav(temp.path());
+    const auto json = project_json(source_path);
+    const auto output_path = temp.path() / "rendered.wav";
+    constexpr std::uint32_t kTailFrames = 777;
+
+    REQUIRE(tools::timeline::render(json, output_path.string(), kSampleRate, kTailFrames));
+    const auto through_cli = audio::read_audio_file(output_path.string());
+    REQUIRE(through_cli);
+
+    auto registry = take(make_builtin_timeline_registry());
+    auto loaded = take(tools::timeline::detail::load_project(
+        tools::timeline::ProjectSource::inline_json(json), registry));
+    auto compiled = take(tools::timeline::detail::compile_project(loaded, kSampleRate));
+    auto program = compiled->store.read();
+    REQUIRE(program);
+
+    host::SignalGraph graph;
+    host::TimelineGraphPlaybackBinding binding(graph, compiled->store);
+    const auto topology = host::build_device_free_timeline_graph(graph, *program, 2);
+    REQUIRE(topology);
+    REQUIRE_FALSE(topology.routes.empty());
+
+    host::TimelineOfflineRenderConfig config;
+    config.sample_rate = static_cast<double>(kSampleRate);
+    config.block_frames = 512;
+    config.output_channels = 2;
+    config.max_output_frames = tools::timeline::detail::kMaxRenderPcmBytes / (2 * sizeof(float));
+    config.maximum_note_events_per_track_per_block =
+        host::TimelineGraphBindingConfig{}.maximum_note_events_per_track_per_block;
+
+    host::TimelineOfflineRenderOptions options;
+    options.end_tick = covering_tick(*compiled->tempo_map, kFrameCount);
+    options.tail_frames = kTailFrames;
+
+    const auto through_library =
+        host::render_timeline_offline(graph, binding, *program, topology.routes, config, options);
+    REQUIRE(through_library);
+    REQUIRE(through_library.tail_frames == kTailFrames);
+
+    REQUIRE(through_cli->channels.size() == through_library.audio.channels.size());
+    for (std::size_t channel = 0; channel < through_library.audio.channels.size(); ++channel) {
+        const auto& expected = through_library.audio.channels[channel];
+        const auto& actual = through_cli->channels[channel];
+        REQUIRE(actual.size() == expected.size());
+        for (std::size_t frame = 0; frame < expected.size(); ++frame)
+            REQUIRE(actual[frame] == expected[frame]);
+    }
+}
+
+TEST_CASE("a tail that overruns the in-memory render budget is refused, not truncated",
+          "[timeline][render][tail]") {
+    TempDirectory temp;
+    const auto source_path = write_source_wav(temp.path());
+    const auto json = project_json(source_path);
+    const auto output_path = temp.path() / "oversized-tail.wav";
+
+    const auto result = tools::timeline::render(json, output_path.string(), kSampleRate,
+                                                std::numeric_limits<std::uint32_t>::max());
+    REQUIRE_FALSE(result);
+    // Its own message: a tail that does not fit is a different failure from a
+    // sequence that does not fit, and collapsing them hides which one to shorten.
+    REQUIRE(result.json.find("sequence plus tail exceeds the in-memory render budget") !=
+            std::string::npos);
+    REQUIRE_FALSE(std::filesystem::exists(output_path));
 }
