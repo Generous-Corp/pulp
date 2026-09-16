@@ -3182,10 +3182,31 @@ A capability reachable only by granting the destructive axis is not reachable.
 
 Clip expression lanes take the third shape for this reason: `Insert`/`Create`,
 `Remove`/`Remove`, and a separate point-edit command at `Modify` whose payload
-names the lane by identity and carries no address. The test that earns it is the
-profile test — a proposal writer inserts a lane, edits its points, and is
-refused the removal — and it is worth writing before the reducers, because it is
-the only assertion that fails under either of the wrong shapes.
+names the lane by identity and carries no address.
+
+**Splitting the command is half the job — the split protects the lane's
+identity, not its contents.** The point-edit command is itself an
+`{expected, replacement}` pair that admits an empty replacement, so it carries
+the very defect the first paragraph names one level down: the lane survives, and
+every point in it is retired. A declared intent describes the *command*; the
+authority a *payload* needs has to be read off the payload. So any command whose
+reducer calls `plan_identity_deactivate` while declaring `Modify` must widen its
+requirement in `required_authorities`, by set-differencing the identities in
+`expected` against those in `replacement` — `ReplaceNoteContent` and
+`SetMidiExpressionLanePoints` both do. The general rule: **a reducer that retires
+an identity belongs to a `Remove`-declared command, or its arm in
+`required_authorities` earns the `Remove` bit from its payload. There is no third
+option**, and a `Modify` command that replaces a collection of identified items
+is exactly where the miss hides.
+
+The test that earns this cannot be a mask comparison. `allows(proposal, edit)`
+is *true* by construction — that is the whole point of the third shape — so
+asserting it proves the split and says nothing about what a payload may do.
+Submit the command through a real `DocumentSession` under
+`non_destructive_capabilities()` and assert `ConflictCode::CapabilityDenied`,
+with an in-place value edit on the same lane as the control that the writer is
+still admitted. Write it before the reducers: it is the only assertion that
+fails under any of the wrong shapes.
 
 ## `chased` is a derivation receipt, and only the command layer can refuse one
 
