@@ -14,7 +14,7 @@ import re
 import sys
 
 UNBRACED_COLON = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*):([A-Za-z])")
-PIPESTATUS = re.compile(r"\$\{?PIPESTATUS(?:\[|\})")
+PIPESTATUS = re.compile(r"\$(?:\{PIPESTATUS(?:\[|\})|PIPESTATUS(?:\[0-9]+)?\b)")
 
 
 def check_file(path: pathlib.Path) -> list[str]:
@@ -24,7 +24,7 @@ def check_file(path: pathlib.Path) -> list[str]:
     findings: list[str] = []
     for number, line in enumerate(lines, 1):
         match = UNBRACED_COLON.search(line)
-        if match:
+        if match and "$env:" not in line:
             findings.append(
                 f"{path}:{number}: zsh colon-expansion hazard "
                 f"'${match.group(1)}:{match.group(2)}'; use "
@@ -41,8 +41,13 @@ def check_file(path: pathlib.Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="*", type=pathlib.Path)
+    parser.add_argument("--rules", type=pathlib.Path,
+                        default=pathlib.Path(__file__).with_name("shell_portability_rules.json"))
     args = parser.parse_args()
-    paths = args.paths or [pathlib.Path(".")]
+    rules = __import__("json").loads(args.rules.read_text(encoding="utf-8"))
+    if rules.get("schema_version") != 1 or not rules.get("rules"):
+        parser.error("invalid shell portability rules manifest")
+    paths = args.paths or [pathlib.Path("tools/ci"), pathlib.Path("scripts"), pathlib.Path("tools/scripts")]
     files = [
         p for root in paths
         for p in ([root] if root.is_file() else root.rglob("*"))

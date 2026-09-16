@@ -25,6 +25,15 @@ class ShellPortabilityTests(unittest.TestCase):
     def test_bash_pipestatus_is_allowed(self) -> None:
         self.assert_findings('#!/usr/bin/env bash\nprint -- "${PIPESTATUS[0]}"\n', False)
 
+    def test_bare_pipestatus_is_rejected_in_zsh(self) -> None:
+        self.assert_findings('#!/bin/zsh\nprint -- "$PIPESTATUS"\n', True)
+
+    def test_manifest_is_valid(self) -> None:
+        import json
+        manifest = json.loads((Path(__file__).with_name("shell_portability_rules.json")).read_text())
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertTrue(all(rule["owner"] and rule["review_after"] for rule in manifest["rules"]))
+
 
 if __name__ == "__main__":
     unittest.main()
