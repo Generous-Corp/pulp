@@ -537,6 +537,15 @@ like a healthy instrument — but the same control returns 72 on `main`. **A con
 non-zero only proves the tool ran. Compare its COUNT against the expected target** when the two
 could differ.
 
+**And a control must be sensitive to the SPECIFIC failure you fear, not merely non-zero.**
+`ssh m3 'command -v shipyard …'` reported MISSING (it was installed); its control
+`command -v ghapp` printed `present` — but `ghapp` is a shell *function*, which resolves
+regardless of PATH, so the control could not fail the way the probe did. **A control that
+would still pass when the instrument is broken in the way you fear is decoration.** State
+each control's blind spot. For fleet probes don't hand-roll it:
+`tools/fleet/probe_remote.py --hosts m1,m3 <tool>` (login shell, PATH scan for a real file,
+exits 3 rather than claiming a false absence).
+
 Practical forms:
 
 ```sh
