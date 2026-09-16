@@ -893,8 +893,24 @@ that outlives a main move. The repair is one command, and it is in the failure
 text:
 
 ```sh
-python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt
+python3 tools/scripts/gpu_handoff_provenance.py resolve   # regenerate + decide + prove the binding
 ```
+
+`resolve` is the preferred form: it regenerates pinned to `HEAD` (a commit that
+already exists — the receipt names its own source commit, so pinning to the one
+the write is about to create cannot converge), then decides whether regeneration
+actually changed what HEAD committed (`MOVED`), left it alone with the receipt
+already binding (`CHURN`, writes nothing), or left it alone with the receipt
+bound to other bytes (`REBIND`, receipt only) — and refuses rather than guessing
+on anything else. It reports `BINDS:` with a mutated-ledger control. The
+lower-level `write --source-commit HEAD --receipt` is what it performs.
+
+**This gate also reports an unregistered driver.** `.gitattributes` names
+`pulp-gpu-ledger`; Git resolves that name against *local* config and does not
+error on one it cannot resolve — it text-merges in silence. A checkout
+bootstrapped before the driver landed therefore has working automation that is
+inert, with the attribute still in place to make it look installed. The repair
+is `tools/scripts/install-githooks.sh`, which is idempotent.
 
 **Why an invalid value rather than a merged one.** A stale-but-ancestral pin
 passes the always-on provenance tier, so any driver that computes a plausible
