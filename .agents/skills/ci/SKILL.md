@@ -935,9 +935,11 @@ one. That cell is the fastest way to tell which kind of review a PR received.
 **Asking works, including from a bot.** A `@codex review` comment gets a real
 review on an App-authored PR whatever identity posts it. Codex answers a bot
 commenter with "create a Codex account", which reads like a refusal and is not —
-the review still runs.  `.github/workflows/codex-review-request.yml` automates
-that ask and then verifies a review completed for the PR's head commit. If a PR
-slipped past it, comment `@codex review` yourself.
+the review still runs. `.github/workflows/codex-review-request.yml` automates
+that ask with `GITHUB_TOKEN` (never a user PAT: a same-repo `pull_request`
+evaluates the workflow from the PR's own revision, so a secret there is readable
+by the unreviewed PR it runs on) and verifies a review completed for the head
+commit. If a PR slipped past it, comment `@codex review` yourself.
 
 **Do not read a summary comment as "reviewed", and do not read "no comment" as
 "no findings".** The summary comment and an EYES reaction appear the moment a

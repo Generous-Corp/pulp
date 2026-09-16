@@ -36,11 +36,11 @@ concurrency:
 
 jobs:
   request:
-    # Matched by login, not by `user.type == 'Bot'`. That type also covers
-    # Dependabot, whose `pull_request` runs get no secrets and a read-only
-    # token, so this job would reach `gh pr comment` and fail — an unrelated
-    # red check on a PR it was never meant to touch. Fork PRs are excluded
-    # too: they carry a User author, so Codex already reviews them.
+    # One exact App login. Matching the broader bot category would also catch
+    # Dependabot, whose runs get a read-only token, so this job would reach
+    # `gh pr comment` and fail — an unrelated red check on a PR it was never
+    # meant to touch. Fork PRs are excluded too: they carry a User author, so
+    # Codex already reviews them.
     if: >-
       github.event.pull_request.user.login == 'shipyard-local[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -52,21 +52,22 @@ jobs:
       PR: ${{ github.event.pull_request.number }}
       REPO: ${{ github.repository }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      # A real user PAT is preferred so the request carries the same identity as
-      # the manual `@codex review` comments a human would send. GITHUB_TOKEN is
-      # a workable fallback — a request from an App identity does produce a
-      # review — but it is second choice, and the verification below is what
-      # actually decides whether either worked.
-      GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+      # GITHUB_TOKEN, deliberately, and no privileged secret anywhere in this
+      # job. A same-repository `pull_request` evaluates the workflow file from
+      # the PR's own revision, so a secret here is readable by any PR that edits
+      # this file — and the PRs this runs on are precisely the unreviewed ones a
+      # user PAT must not be exposed to. An App identity is enough: a request
+      # from one does produce a completed review, and the verification step is
+      # what decides whether it worked rather than an assumption about identity.
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CODEX_LOGIN: chatgpt-codex-connector[bot]
 
     steps:
-      # Deliberately the BASE commit, never the PR's. This job runs with a
-      # privileged PAT in the environment, and the PR under review is authored
-      # by an automated process: checking out the PR would let a change to
-      # `codex_review_signal.sh` execute with that PAT in reach. The base copy
-      # is the reviewed one, and a PR that edits the checker is still checked by
-      # the version already on the branch it targets.
+      # Deliberately the BASE commit, never the PR's. The checker decides
+      # whether this PR was reviewed, so running the PR's own copy would let an
+      # unreviewed change decide that it needs no review. The base copy is the
+      # reviewed one, and a PR that edits the checker is still judged by the
+      # version already on the branch it targets.
       - name: Checkout the base commit (never the PR under review)
         uses: actions/checkout@v5
         with:

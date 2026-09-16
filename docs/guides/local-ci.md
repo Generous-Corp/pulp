@@ -920,9 +920,14 @@ and cannot be configured from this repository; there is no workflow trigger or
 
 `.github/workflows/codex-review-request.yml` is that ask. On a PR opened by
 `shipyard-local[bot]` it posts the same `@codex review` comment a human would,
-preferring `RELEASE_BOT_TOKEN` (a real user PAT, the identity a human request
-carries) and falling back to `GITHUB_TOKEN`. It then verifies a review actually
-completed, and fails if none did.
+using `GITHUB_TOKEN` and no privileged secret at all, then verifies a review
+actually completed and fails if none did.
+
+The absence of a user PAT there is deliberate. A same-repository
+`pull_request` evaluates the workflow file from the PR's own revision, so any
+secret exposed to this job is readable by a PR that edits this file — and the
+PRs it runs on are exactly the unreviewed ones. An App identity is sufficient:
+a `@codex review` from one does produce a completed review.
 
 It runs on `synchronize` as well as `opened` and `ready_for_review`. That is
 load-bearing rather than thorough: under this repo's up-to-date branch
