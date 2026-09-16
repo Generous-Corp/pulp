@@ -949,7 +949,10 @@ unreachable, so an outage cannot masquerade as an unreviewed PR.
 
 **A completed review is per-commit.** A review of an earlier push says nothing
 about the code now on the branch, which is why the check binds to the head SHA
-rather than accepting any historical signal on the PR.
+rather than accepting any historical signal on the PR — and why the workflow
+runs on `synchronize` too. On `opened` alone, the commit reviewed and the commit
+merged are different ones on any PR that gets rebased, which under up-to-date
+branch protection is most of them.
 
 ## Pre-flight: plugin ↔ CLI skew check
 

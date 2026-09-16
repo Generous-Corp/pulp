@@ -8,22 +8,31 @@ name: Codex review request
 # `Manual request` on the App-authored ones that were reviewed at all.
 #
 # The skip is Codex-side behavior and is not configurable from this repository.
-# This workflow is the in-repo mitigation: it issues the same `@codex review` a
-# human would, then PROVES a review completed for this PR's head commit. It
-# fails loudly when none did, because a review-coverage mitigation that can
-# no-op in silence reproduces the gap it exists to close.
+# This workflow is the in-repo mitigation: on every head an App-authored PR can
+# merge, it issues the same `@codex review` a human would, then PROVES a review
+# completed for that exact commit. It fails loudly when none did, because a
+# review-coverage mitigation that can no-op in silence reproduces the gap it
+# exists to close.
 
 on:
   pull_request:
-    types: [opened, ready_for_review]
+    # `synchronize` is load-bearing, not thoroughness. Under this repo's
+    # up-to-date branch protection a PR is pushed to repeatedly — rebases,
+    # fixes, base updates — and on `opened` alone the reviewed commit and the
+    # merged commit are simply different ones. Every head that could merge has
+    # to be a head that was reviewed.
+    types: [opened, ready_for_review, synchronize]
 
 permissions:
   contents: read
   pull-requests: write
 
 concurrency:
+  # Cancel superseded runs: during a burst of pushes only the final head can
+  # merge, so reviewing the intermediate ones spends Codex and ten minutes of
+  # job time on commits nothing will ever land.
   group: codex-review-request-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   request:

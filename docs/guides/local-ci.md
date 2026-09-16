@@ -924,6 +924,12 @@ preferring `RELEASE_BOT_TOKEN` (a real user PAT, the identity a human request
 carries) and falling back to `GITHUB_TOKEN`. It then verifies a review actually
 completed, and fails if none did.
 
+It runs on `synchronize` as well as `opened` and `ready_for_review`. That is
+load-bearing rather than thorough: under this repo's up-to-date branch
+protection a PR is pushed to repeatedly, and on `opened` alone the commit that
+was reviewed and the commit that merges are different ones. Superseded runs are
+cancelled, because during a burst of pushes only the final head can merge.
+
 The verification is the point. A mitigation that posts a comment and never
 checks whether anything came back can no-op in silence, which is the same
 failure it exists to correct. Three distinctions keep that check honest, and all
