@@ -268,6 +268,12 @@
                 pulp::gpu-audio)
             target_include_directories(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
                 "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                # The probe's test-only proc-table counter includes Dawn
+                # declarations, but the definitions remain in vellum-gpu.
+                target_link_libraries(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
+                    Vellum::Gpu Vellum::DawnHeaders)
+            endif()
             target_compile_definitions(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
                 PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
             set(_pulp_gpu_audio_shared_prelink_receipt
@@ -345,6 +351,39 @@
                 FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                 RESOURCE_LOCK pulp_gpu
                 TIMEOUT 60)
+
+            # D15 is intentionally consumed through Vellum's installed CMake
+            # package.  This exercises the coordinator's failure, re-entry,
+            # and idempotence contract in the same linkage shape Pulp uses,
+            # then proves the final executable did not acquire a second Dawn
+            # definition owner from Pulp's static dependency graph.
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                add_executable(pulp-test-gpu-dawn-vellum-bootstrap-contract
+                    test_gpu_dawn_vellum_bootstrap_contract.cpp)
+                target_link_libraries(pulp-test-gpu-dawn-vellum-bootstrap-contract PRIVATE
+                    Vellum::Gpu)
+                target_compile_definitions(pulp-test-gpu-dawn-vellum-bootstrap-contract PRIVATE
+                    "PULP_GPU_AUDIO_VELLUM_D15_PREFIX=\"${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}\"")
+                add_test(NAME pulp-gpu-dawn-vellum-bootstrap-contract
+                    COMMAND pulp-test-gpu-dawn-vellum-bootstrap-contract)
+                set_tests_properties(pulp-gpu-dawn-vellum-bootstrap-contract PROPERTIES
+                    TIMEOUT 20)
+
+                add_test(NAME pulp-gpu-dawn-vellum-provider-topology
+                    COMMAND "${Python3_EXECUTABLE}"
+                        "${PROJECT_SOURCE_DIR}/test/verify_gpu_dawn_vellum_provider_topology.py"
+                        "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"
+                        "$<TARGET_FILE:Vellum::Gpu>")
+                set_tests_properties(pulp-gpu-dawn-vellum-provider-topology PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    TIMEOUT 20)
+            endif()
+
+            add_test(NAME pulp-gpu-dawn-vellum-d15-source
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/test/test_gpu_dawn_vellum_d15_source.py")
+            set_tests_properties(pulp-gpu-dawn-vellum-d15-source PROPERTIES
+                TIMEOUT 20)
         endif()
 
         unset(_pulp_gpu_audio_asset_sha256)

@@ -26,10 +26,53 @@ target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
 
 if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
    AND EXISTS "${DAWN_LIBRARY}")
+    # D15 is deliberately an opt-in installed-prefix integration.  The Vellum
+    # GPU dylib owns the linked Dawn definitions and its coordinator owns the
+    # one process bootstrap; this Pulp target only consumes that provider.  An
+    # absent or incomplete prefix leaves the established P1 provider (and the
+    # CPU fallback available to callers) unchanged.
+    set(PULP_GPU_AUDIO_VELLUM_D15_PREFIX "" CACHE PATH
+        "Installed Vellum D15 prefix for the coordinated GPU-audio provider")
+    set(PULP_GPU_AUDIO_HAS_VELLUM_D15 FALSE CACHE INTERNAL
+        "Pulp GPU-audio is linked through an installed Vellum D15 provider" FORCE)
+    if(PULP_GPU_AUDIO_VELLUM_D15_PREFIX)
+        find_package(Vellum 0.1 CONFIG QUIET
+            PATHS "${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}"
+            PATH_SUFFIXES lib/cmake/Vellum
+            NO_DEFAULT_PATH)
+        if(TARGET Vellum::Gpu AND TARGET Vellum::DawnHeaders)
+            # Imported targets normally stay visible only below this directory.
+            # Pulp's exact-provider probes are configured from a sibling
+            # directory, so make the two installed-provider entry points
+            # visible to that consumer too; their transitive Vellum graph
+            # remains owned by the imported package.
+            set_property(TARGET Vellum::Gpu PROPERTY IMPORTED_GLOBAL TRUE)
+            set_property(TARGET Vellum::DawnHeaders PROPERTY IMPORTED_GLOBAL TRUE)
+            set(PULP_GPU_AUDIO_HAS_VELLUM_D15 TRUE CACHE INTERNAL
+                "Pulp GPU-audio is linked through an installed Vellum D15 provider" FORCE)
+        else()
+            message(WARNING
+                "Pulp GPU-audio: ${PULP_GPU_AUDIO_VELLUM_D15_PREFIX} does not provide "
+                "both Vellum::Gpu and Vellum::DawnHeaders; retaining the staged legacy provider")
+        endif()
+    endif()
+
     target_sources(pulp-gpu-audio PRIVATE
         src/detail/dawn_shared_io_provider.cpp)
-    target_link_libraries(pulp-gpu-audio PRIVATE skia::skia)
-    target_include_directories(pulp-gpu-audio PRIVATE ${SKIA_INCLUDE_DIRS})
+    if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+        # Do not link Pulp's static Dawn archive on this edge.  The executable
+        # keeps undefined Dawn references which resolve through vellum-gpu,
+        # avoiding a second process-global proc-table definition.
+        target_link_libraries(pulp-gpu-audio PRIVATE
+            Vellum::Gpu
+            Vellum::DawnHeaders)
+        target_compile_definitions(pulp-gpu-audio PRIVATE
+            PULP_GPU_AUDIO_HAS_VELLUM_D15=1
+            "PULP_GPU_AUDIO_VELLUM_D15_PREFIX=\"${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}\"")
+    else()
+        target_link_libraries(pulp-gpu-audio PRIVATE skia::skia)
+        target_include_directories(pulp-gpu-audio PRIVATE ${SKIA_INCLUDE_DIRS})
+    endif()
 endif()
 
 # GPU-agnostic real-time transport: depends only on the audio buffer/ring

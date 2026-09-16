@@ -7,6 +7,11 @@
 #include "dawn/native/DawnNative.h"
 #include "webgpu/webgpu_cpp.h"
 
+#if defined(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+#include <vellum/graphics/dawn_bootstrap.hpp>
+#include <vellum/graphics/dawn_native_bootstrap.hpp>
+#endif
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -49,8 +54,81 @@ ProcBootstrap& proc_bootstrap() {
     return state;
 }
 
+#if defined(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+// The installed Vellum coordinator owns the process state machine.  Pulp only
+// supplies this callback for the test-only proc-table interposer; production
+// creation uses vellum::app_host::register_native_dawn_bootstrap below.  Both
+// routes therefore pass through Vellum's revision/re-entry/exception boundary.
+struct VellumOverrideBootstrap {
+    std::string expected;
+    const DawnProcTable* override = nullptr;
+};
+
+vellum::graphics::DawnBootstrapResult install_vellum_override(
+    const vellum::graphics::DawnBootstrapRequest& request, void* opaque, std::string* error) {
+    const auto* context = static_cast<const VellumOverrideBootstrap*>(opaque);
+    const auto header = revision(dawn::kDawnVersion.data());
+    const auto proc = revision(dawnProcGetVersion());
+    const DawnProcTable& native = dawn::native::GetProcs();
+    const auto native_revision = revision(native.version);
+    const auto* selected = context == nullptr || context->override == nullptr
+                               ? &native
+                               : context->override;
+    if (context == nullptr || request.abi_version != vellum::graphics::kDawnBootstrapAbiVersion ||
+        request.expected_dawn_revision != context->expected || header.empty() || header != proc ||
+        header != native_revision || header != context->expected ||
+        revision(selected->version) != header) {
+        if (error != nullptr)
+            *error = "provider_identity_mismatch";
+        return vellum::graphics::DawnBootstrapResult::identity_mismatch;
+    }
+    dawnProcSetProcs(selected);
+    return vellum::graphics::DawnBootstrapResult::ready;
+}
+#endif
+
 bool install_exact_proc_table(const std::string& expected, const void* override_for_testing,
                               std::string& reason) {
+#if defined(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+    const auto header = vellum::app_host::native_dawn_revision();
+    if (header.empty() || (!expected.empty() && expected != header)) {
+        reason = "provider_identity_mismatch";
+        return false;
+    }
+
+    std::string coordinator_error;
+    bool registered = false;
+    if (override_for_testing != nullptr) {
+        VellumOverrideBootstrap context{
+            .expected = header,
+            .override = static_cast<const DawnProcTable*>(override_for_testing),
+        };
+        registered = vellum::graphics::register_dawn_bootstrap(
+            {.abi_version = vellum::graphics::kDawnBootstrapAbiVersion,
+             .callback = &install_vellum_override,
+             .context = &context},
+            header, &coordinator_error);
+    } else {
+        registered = vellum::app_host::register_native_dawn_bootstrap(&coordinator_error);
+    }
+    if (!registered || !vellum::graphics::dawn_bootstrap_is_registered(&coordinator_error)) {
+        reason = coordinator_error.empty() ? "vellum_dawn_bootstrap_failed" : coordinator_error;
+        return false;
+    }
+
+    auto& bootstrap = proc_bootstrap();
+    std::lock_guard lock(bootstrap.mutex);
+    if (bootstrap.installs != 0) {
+        if (bootstrap.revision != header) {
+            reason = "second_provider_identity_mismatch";
+            return false;
+        }
+        return true;
+    }
+    bootstrap.revision = header;
+    bootstrap.installs = 1;
+    return true;
+#else
     const auto header = revision(dawn::kDawnVersion.data());
     const auto proc = revision(dawnProcGetVersion());
     const DawnProcTable& native = dawn::native::GetProcs();
@@ -81,6 +159,7 @@ bool install_exact_proc_table(const std::string& expected, const void* override_
     bootstrap.revision = header;
     bootstrap.installs = 1;
     return true;
+#endif
 }
 
 std::optional<std::size_t> round_up(std::size_t size, std::size_t alignment) {
