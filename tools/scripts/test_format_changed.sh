@@ -98,7 +98,7 @@ echo "format_changed.sh self-tests"
 
 # ── no binary anywhere → exit 3 with install guidance ───────────────────────
 repo="$(make_repo)"
-out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="" PULP_CLANG_FORMAT_CANDIDATES="" \
+out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="$repo/missing-clang-format" PULP_CLANG_FORMAT_CANDIDATES="" \
     /bin/bash "$SCRIPT" --base main 2>&1)"; rc=$?
 expect_rc "no clang-format → exit 3" 3
 expect_out "no clang-format → names the pinned major" "pinned major 21"
