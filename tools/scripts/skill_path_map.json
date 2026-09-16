@@ -155,6 +155,8 @@
         ".shipyard/config.toml",
         "tools/install-shipyard.sh",
         "tools/scripts/install-githooks.sh",
+        "tools/scripts/codex_review_signal.sh",
+        "tools/scripts/test_codex_review_signal.sh",
         "tools/scripts/validation_profile_select.py",
         "tools/scripts/test_validation_profile_select.py",
         "tools/scripts/macos_reroute_watcher.py",

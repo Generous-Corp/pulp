@@ -937,6 +937,41 @@ therefore holds only for whoever remembered to run it — which is why
 `gpu_handoff_pin_freshness.py` (gate 6b2), wired that way, does not actually gate
 a push today.
 
+## A PR you opened with `shipyard pr` is not automatically code-reviewed
+
+Codex's automatic review fires on PR open only for PRs whose author is a GitHub
+*User*. `shipyard pr` opens PRs as `shipyard-local[bot]`, an App — so the path
+this skill tells you to use is exactly the path Codex skips. Human-opened PRs
+get reviewed; yours do not, unless something asks.
+
+Codex states the trigger in its own summary comment: the "Review trigger" cell
+reads `PR opened` on a User-authored PR and `Manual request` on an App-authored
+one. That cell is the fastest way to tell which kind of review a PR received.
+
+**Asking works, including from a bot.** A `@codex review` comment gets a real
+review on an App-authored PR whatever identity posts it. Codex answers a bot
+commenter with "create a Codex account", which reads like a refusal and is not —
+the review still runs. `.github/workflows/codex-review-request.yml` automates
+that ask with `GITHUB_TOKEN` (never a user PAT: a same-repo `pull_request`
+evaluates the workflow from the PR's own revision, so a secret there is readable
+by the unreviewed PR it runs on) and verifies a review completed for the head
+commit. If a PR slipped past it, comment `@codex review` yourself.
+
+**Do not read a summary comment as "reviewed", and do not read "no comment" as
+"no findings".** The summary comment and an EYES reaction appear the moment a
+review is requested, so they prove only that something was asked; a clean review
+leaves a THUMBS_UP and no prose at all. `tools/scripts/codex_review_signal.sh`
+requires `**Completed**` bound to the current head, separates completed from
+requested-but-unfinished from never-asked, and exits 2 (not 1) when the API is
+unreachable, so an outage cannot masquerade as an unreviewed PR.
+
+**A completed review is per-commit.** A review of an earlier push says nothing
+about the code now on the branch, which is why the check binds to the head SHA
+rather than accepting any historical signal on the PR — and why the workflow
+runs on `synchronize` too. On `opened` alone, the commit reviewed and the commit
+merged are different ones on any PR that gets rebased, which under up-to-date
+branch protection is most of them.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before shelling out to `pulp` (or `shipyard pr`, which ultimately

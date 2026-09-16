@@ -125,6 +125,16 @@
     "docs/guides/local-ci.md"
    ],
    "why": "The landing watchdog is the redundant, GitHub-hosted half of the wedge detector; its thresholds and its independence from the fleet are what an operator needs to read before trusting or ignoring the issue it opens. A change here without a doc edit silently drifts the description of what the alarm means."
+  },
+  {
+   "paths": [
+    ".github/workflows/codex-review-request.yml",
+    "tools/scripts/codex_review_signal.sh"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "Codex skips automatic review on App-authored PRs, so the request workflow and its signal check are the only thing standing between an agent-opened PR and merging unreviewed; local-ci.md documents which identity is used and what counts as proof a review happened. Changing either without the guide drifts the documented review coverage."
   }
  ]
 }

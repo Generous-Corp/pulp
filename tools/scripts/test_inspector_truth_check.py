@@ -253,6 +253,69 @@ class ControlOperationDocumentationTests(unittest.TestCase):
         self.assertTrue(any("parsed zero operations" in error for error in errors), errors)
 
 
+class UndocumentedRealityTests(unittest.TestCase):
+    """The generator's placeholder is not documentation."""
+
+    def setUp(self) -> None:
+        self.definitions = inspector_truth_check.parse_capability_definitions(
+            CAPABILITY_DEFINITIONS
+        )
+
+    def test_accepts_hand_written_reality(self) -> None:
+        self.assertEqual(
+            inspector_truth_check.undocumented_reality_errors(
+                self.definitions, CAPABILITY_DOC
+            ),
+            [],
+        )
+
+    def test_rejects_the_generated_placeholder(self) -> None:
+        doc = CAPABILITY_DOC.replace(
+            "Grant-controlled single event", inspector_truth_check.UNDOCUMENTED_REALITY
+        )
+        errors = inspector_truth_check.undocumented_reality_errors(
+            self.definitions, doc
+        )
+        self.assertTrue(
+            any("current reality of `ui.input` undocumented" in error for error in errors),
+            errors,
+        )
+        self.assertFalse(any("state.read" in error for error in errors), errors)
+
+    def test_rejects_an_emptied_reality_cell(self) -> None:
+        # Deleting the placeholder documents nothing, and every other rule in
+        # the file still accepts the row, so emptiness has to be rejected here
+        # or it becomes the way around this gate.
+        doc = CAPABILITY_DOC.replace("Grant-controlled single event", "")
+        errors = inspector_truth_check.undocumented_reality_errors(
+            self.definitions, doc
+        )
+        self.assertTrue(
+            any("current reality of `ui.input` undocumented" in error for error in errors),
+            errors,
+        )
+
+    def test_rejects_a_whitespace_only_reality_cell(self) -> None:
+        doc = CAPABILITY_DOC.replace("Grant-controlled single event", "   ")
+        errors = inspector_truth_check.undocumented_reality_errors(
+            self.definitions, doc
+        )
+        self.assertTrue(
+            any("current reality of `ui.input` undocumented" in error for error in errors),
+            errors,
+        )
+
+    def test_check_root_runs_the_undocumented_reality_gate(self) -> None:
+        root = pathlib.Path(inspector_truth_check.__file__).resolve().parents[2]
+        sentinel = "undocumented reality gate reached"
+        with mock.patch.object(
+            inspector_truth_check, "undocumented_reality_errors", return_value=[sentinel]
+        ) as gate:
+            errors = inspector_truth_check.check_root(root)
+        self.assertTrue(gate.called)
+        self.assertIn(sentinel, errors)
+
+
 class GeneratedMatrixWriteTests(unittest.TestCase):
     """`--write` must emit exactly what `--check` accepts, and preserve prose."""
 
@@ -326,6 +389,23 @@ class GeneratedMatrixWriteTests(unittest.TestCase):
         )
         inspector_truth_check.write_root(self.root)
         self.assertIn(inspector_truth_check.UNDOCUMENTED_REALITY, self._doc())
+
+    def test_written_placeholder_does_not_pass_the_check(self) -> None:
+        definitions = (
+            CAPABILITY_DEFINITIONS
+            + 'PULP_INSPECT_CAPABILITY(LogsRead, "logs.read", "dev.pulp.logs/read@1", '
+            "Sensitive, None, Protocol, Response, 1, 1, 1, 0)\n"
+        )
+        path = self.root / inspector_truth_check.CAPABILITY_DEFINITIONS_PATH
+        path.write_text(definitions, encoding="utf-8")
+        inspector_truth_check.write_root(self.root)
+        errors = inspector_truth_check.undocumented_reality_errors(
+            inspector_truth_check.parse_capability_definitions(definitions), self._doc()
+        )
+        self.assertTrue(
+            any("current reality of `logs.read` undocumented" in error for error in errors),
+            errors,
+        )
 
     def test_write_refuses_a_document_without_generated_regions(self) -> None:
         path = self.root / inspector_truth_check.CAPABILITY_DOC_PATH

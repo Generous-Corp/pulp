@@ -1,0 +1,148 @@
+name: Codex review request
+
+# Codex's automatic code review fires on PR open only for PRs whose author is a
+# GitHub *User*. A PR opened by an App — every PR `shipyard pr` creates, which is
+# the mandated path for agents — is skipped, so it merges unreviewed unless
+# somebody asks. Codex reports the distinction itself: the "Review trigger" cell
+# in its summary comment reads `PR opened` on User-authored PRs and
+# `Manual request` on the App-authored ones that were reviewed at all.
+#
+# The skip is Codex-side behavior and is not configurable from this repository.
+# This workflow is the in-repo mitigation: on every head an App-authored PR can
+# merge, it issues the same `@codex review` a human would, then PROVES a review
+# completed for that exact commit. It fails loudly when none did, because a
+# review-coverage mitigation that can no-op in silence reproduces the gap it
+# exists to close.
+
+on:
+  pull_request:
+    # `synchronize` is load-bearing, not thoroughness. Under this repo's
+    # up-to-date branch protection a PR is pushed to repeatedly — rebases,
+    # fixes, base updates — and on `opened` alone the reviewed commit and the
+    # merged commit are simply different ones. Every head that could merge has
+    # to be a head that was reviewed.
+    types: [opened, ready_for_review, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  # Cancel superseded runs: during a burst of pushes only the final head can
+  # merge, so reviewing the intermediate ones spends Codex and ten minutes of
+  # job time on commits nothing will ever land.
+  group: codex-review-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  request:
+    # One exact App login. Matching the broader bot category would also catch
+    # Dependabot, whose runs get a read-only token, so this job would reach
+    # `gh pr comment` and fail — an unrelated red check on a PR it was never
+    # meant to touch. Fork PRs are excluded too: they carry a User author, so
+    # Codex already reviews them.
+    if: >-
+      github.event.pull_request.user.login == 'shipyard-local[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    name: Request Codex review on an App-authored PR
+    timeout-minutes: 20
+
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      # GITHUB_TOKEN, deliberately, and no privileged secret anywhere in this
+      # job. A same-repository `pull_request` evaluates the workflow file from
+      # the PR's own revision, so a secret here is readable by any PR that edits
+      # this file — and the PRs this runs on are precisely the unreviewed ones a
+      # user PAT must not be exposed to. An App identity is enough: a request
+      # from one does produce a completed review, and the verification step is
+      # what decides whether it worked rather than an assumption about identity.
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CODEX_LOGIN: chatgpt-codex-connector[bot]
+
+    steps:
+      # Deliberately the BASE commit, never the PR's. The checker decides
+      # whether this PR was reviewed, so running the PR's own copy would let an
+      # unreviewed change decide that it needs no review. The base copy is the
+      # reviewed one, and a PR that edits the checker is still judged by the
+      # version already on the branch it targets.
+      - name: Checkout the base commit (never the PR under review)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Request a review if one has not already completed
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Every exit the checker can produce is handled by name. Only 0 and 1
+          # are verdicts; 2 means it could not see, and anything else means it
+          # did not run — 127 when the base commit has no copy of it, which is
+          # what the run that introduces this workflow hits. Folding those into
+          # "no review" would post a request and then report a failure that says
+          # the PR was unreviewed when the truth is that nothing checked.
+          set +e
+          bash tools/scripts/codex_review_signal.sh "$REPO" "$PR" "$HEAD_SHA"
+          signal=$?
+          set -e
+          case "$signal" in
+              0)
+                  echo "A review has already completed for this head — not requesting again."
+                  echo "already=true" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+              1) ;;
+              2)
+                  echo "::error::Cannot read review state for #$PR, so whether it has" \
+                       "been reviewed is unknown. Not requesting; re-run once GitHub" \
+                       "is reachable."
+                  exit 1
+                  ;;
+              *)
+                  echo "::error::The review checker did not run (exit $signal)." \
+                       "tools/scripts/codex_review_signal.sh is missing or not" \
+                       "executable at the base commit. Expected only on the pull" \
+                       "request that introduces it; anywhere else the base checkout" \
+                       "is broken. This PR has NOT been shown to be reviewed."
+                  exit 1
+                  ;;
+          esac
+          echo "already=false" >> "$GITHUB_OUTPUT"
+
+          gh pr comment "$PR" --repo "$REPO" --body '@codex review'
+          echo "Requested a Codex review on #$PR."
+
+      - name: Verify a review completed for this head
+        if: steps.request.outputs.already != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Observed reviews reach **Completed** in four to five minutes, so the
+          # budget is ten: long enough not to fail one that is simply still
+          # thinking, short enough to report while the PR is open. Four spaced
+          # checks, never a poll loop — a tight loop over the GitHub API trips
+          # its secondary rate limit for the whole machine.
+          for wait in 120 150 180 240; do
+              sleep "$wait"
+              set +e
+              bash tools/scripts/codex_review_signal.sh "$REPO" "$PR" "$HEAD_SHA"
+              signal=$?
+              set -e
+              [ "$signal" -eq 0 ] && exit 0
+              if [ "$signal" -ne 1 ]; then
+                  echo "::error::Lost sight of review state for #$PR (exit $signal);" \
+                       "whether it was reviewed is unknown rather than known-bad."
+                  exit 1
+              fi
+          done
+
+          echo "::error::Requested a Codex review on #$PR but none completed for" \
+               "$HEAD_SHA within ten minutes, so this PR is unreviewed. The last line" \
+               "above distinguishes a request that stalled from one never taken."
+          exit 1

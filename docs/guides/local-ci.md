@@ -899,6 +899,81 @@ between the remote HEAD and the target SHA. Typical cycles drop from
 full bundle automatically when the delta would be larger than the full
 pack.
 
+## Codex does not auto-review App-authored PRs
+
+Codex's automatic code review fires on PR open only when the pull request's
+author is a GitHub *User*. A PR opened by a GitHub App is skipped. Because
+`shipyard pr` opens PRs as `shipyard-local[bot]`, and that is the mandated path
+for agents, the default outcome is that agent-opened PRs merge with no review
+while human-opened ones are reviewed.
+
+Codex reports the distinction itself. Its review-summary comment carries a
+"Review trigger" cell that reads `PR opened` on a User-authored PR and
+`Manual request` on an App-authored one — the App-authored PRs that were
+reviewed at all had been reviewed because somebody asked.
+
+**Only the automatic trigger is restricted; asking still works.** A `@codex
+review` comment gets a real review on an App-authored PR, and it does so even
+when the comment itself comes from an App. (Codex replies to a bot commenter
+with "To use Codex here, create a Codex account and connect to github", which
+looks like a refusal and is not — the review runs anyway.) The skip is Codex-side
+and cannot be configured from this repository; there is no workflow trigger or
+`github.actor` guard here involved. What this repository can do is ask.
+
+`.github/workflows/codex-review-request.yml` is that ask. On a PR opened by
+`shipyard-local[bot]` it posts the same `@codex review` comment a human would,
+using `GITHUB_TOKEN` and no privileged secret at all, then verifies a review
+actually completed and fails if none did.
+
+The absence of a user PAT there is deliberate. A same-repository
+`pull_request` evaluates the workflow file from the PR's own revision, so any
+secret exposed to this job is readable by a PR that edits this file — and the
+PRs it runs on are exactly the unreviewed ones. An App identity is sufficient:
+a `@codex review` from one does produce a completed review.
+
+It runs on `synchronize` as well as `opened` and `ready_for_review`. That is
+load-bearing rather than thorough: under this repo's up-to-date branch
+protection a PR is pushed to repeatedly, and on `opened` alone the commit that
+was reviewed and the commit that merges are different ones. Superseded runs are
+cancelled, because during a burst of pushes only the final head can merge.
+
+The verification is the point. A mitigation that posts a comment and never
+checks whether anything came back can no-op in silence, which is the same
+failure it exists to correct. Three distinctions keep that check honest, and all
+three live in `tools/scripts/codex_review_signal.sh` (self-tested by
+`test_codex_review_signal.sh`, ctest `codex-review-signal-selftest`):
+
+- **Acknowledgement is not completion.** Codex posts the summary comment and
+  reacts with EYES the instant a review is requested, before it knows what it
+  can do. Only `**Completed**` in the summary's status cell counts.
+- **Completion is per-commit.** The summary names the commit it reviewed, and
+  the check requires the PR's current head to be that commit. Without the
+  binding, a review of an earlier push would answer for code nobody has seen —
+  a real path, since the workflow can fire on `opened` and again on
+  `ready_for_review` with commits in between.
+- **An unreachable API is not a finding.** Any `gh` failure exits 2, distinct
+  from the exit 1 that means "no review", and the workflow treats it as unknown
+  rather than as a verdict.
+
+THUMBS_UP is reported rather than required: it separates "reviewed, no findings"
+from "reviewed, left comments", which is worth printing, but it carries no
+commit and so cannot prove anything about a particular head.
+
+**The job checks out the base commit, never the PR.** The checker decides
+whether a PR was reviewed, so running the PR's own copy would let an unreviewed
+change rule that it needs no review. The base copy is the reviewed one, and a PR
+that edits the checker is still judged by the version already on the branch it
+targets.
+
+That has one consequence worth knowing: on the pull request that first adds the
+checker, the base commit has no copy of it, so the checker cannot run. The job
+reports that exit distinctly — "did not run" rather than "not reviewed" — and
+still fails, because a run that verified nothing must not read as a pass.
+
+This workflow requests reviews; it does not audit whether older PRs got one.
+`.github/workflows/post-merge-review-sweep.yml` remains the separate, scheduled
+sweep that collects bot review comments on already-merged PRs.
+
 ## Keeping fleet Macs on the Shipyard pin (optional)
 
 `tools/shipyard.toml` pins the Shipyard version every checkout uses, and

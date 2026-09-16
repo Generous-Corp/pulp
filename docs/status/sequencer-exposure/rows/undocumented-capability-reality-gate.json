@@ -1,0 +1,50 @@
+{
+  "id": "undocumented-capability-reality-gate",
+  "title": "The capability doc gate rejects its own undocumented-reality placeholder",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "9573bc91-4cf7-4903-b995-37a15c9c1625",
+  "owned_paths": [
+    "tools/scripts/inspector_truth_check.py",
+    "docs/status/sequencer-exposure/rows/undocumented-capability-reality-gate.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/scripts/inspector_truth_check.py",
+      "needles": [
+        "def undocumented_reality_errors",
+        "undocumented_reality_errors(capability_definitions, capability_doc)",
+        "replace the placeholder with "
+      ]
+    },
+    {
+      "path": "tools/scripts/test_inspector_truth_check.py",
+      "needles": [
+        "UndocumentedRealityTests",
+        "test_written_placeholder_does_not_pass_the_check"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No installed header, target, or exported symbol changes. The checker is a repository gate and ships in no SDK artifact."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler is added or changed. The gate is invoked by the pre-push hook and CI, never as a shipped command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler is added or changed. Nothing in tools/mcp reads the capability matrix."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, or profile policy changes. The gate constrains how a capability is documented, not what it can do."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged. Rejecting placeholder prose publishes no design-time capability."
+    }
+  }
+}
