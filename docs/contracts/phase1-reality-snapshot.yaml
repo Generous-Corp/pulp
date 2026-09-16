@@ -200,8 +200,8 @@ subsystems:
   dsp_dsls:
     status: planned
     notes: >
-      No FAUST, Cmajor, or JSFX code in core/, tools/, templates, or CLI.
-      Future phases 3, 4, 5.
+      No first-class Faust, Cmajor, or JSFX authoring flow exists in templates
+      or the CLI; broader productization remains future work.
       FAUST offline codegen support is real but still narrow: `core/dsl`
       contains the FAUST wrapper substrate, `tools/cmake/PulpFaust.cmake`
       supports optional external generation, and checked-in FAUST examples/tests
