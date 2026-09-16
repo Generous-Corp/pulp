@@ -8,28 +8,72 @@
 // lock-taking atomic shared_ptr path in process().
 // See signal_graph.hpp for the mutation protocol details.
 
-#include <pulp/host/signal_graph.hpp>
-#include <pulp/host/signal_graph_execution_snapshot.hpp>
-#include <pulp/host/anticipation_eligibility.hpp>
-#include <pulp/host/anticipation_partition.hpp>
-#include <pulp/host/anticipation_subgraph.hpp>
-#include <pulp/host/signal_graph_executor_routing.hpp>
-#include <pulp/format/processor.hpp>
-#include <pulp/runtime/log.hpp>
 #include "signal_graph_internal.hpp"
 #include <algorithm>
 #include <array>
-#include <queue>
-#include <cmath>
-#include <limits>
-#include <unordered_set>
-#include <unordered_map>
-#include <cstring>
 #include <cassert>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <pulp/format/processor.hpp>
+#include <pulp/host/anticipation_eligibility.hpp>
+#include <pulp/host/anticipation_partition.hpp>
+#include <pulp/host/anticipation_subgraph.hpp>
+#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_execution_snapshot.hpp>
+#include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/runtime/log.hpp>
+#include <queue>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace pulp::host {
+
+bool SampleKernelDescriptor::is_valid_registration() const noexcept {
+    const bool alignment_valid =
+        state_alignment != 0 && (state_alignment & (state_alignment - 1)) == 0;
+    if (abi_version != kAbiVersion || type_id.empty() || version <= 0 ||
+        scope != SampleKernelScope::RegionOnly || !alignment_valid || latency_samples != 0 ||
+        metadata.category.empty()) {
+        return false;
+    }
+    switch (authored_config_kind) {
+    case SampleKernelConfigKind::None:
+    case SampleKernelConfigKind::BoundaryIndex:
+    case SampleKernelConfigKind::FiniteConstant:
+    case SampleKernelConfigKind::PromotedParameterId:
+        break;
+    case SampleKernelConfigKind::Invalid:
+        return false;
+    default:
+        return false;
+    }
+    if (metadata.has_value_range &&
+        (!std::isfinite(metadata.minimum_value) || !std::isfinite(metadata.maximum_value) ||
+         metadata.minimum_value > metadata.maximum_value)) {
+        return false;
+    }
+
+    const bool has_lifecycle = construct || reset || destroy;
+    if (state_size == 0) {
+        if (state_alignment != 1 || has_lifecycle)
+            return false;
+    } else if (!construct || !reset || !destroy) {
+        return false;
+    }
+
+    switch (causality) {
+    case SampleKernelCausality::Combinational:
+        return process != nullptr && delay_publish == nullptr && delay_commit == nullptr;
+    case SampleKernelCausality::OneSampleDelay:
+        return state_size != 0 && process == nullptr && delay_publish != nullptr &&
+               delay_commit != nullptr;
+    }
+    return false;
+}
 
 // Identity token for exact-parameter ingress ownership. Empty by design: claims
 // are keyed on the shared_ptr's control-block identity and scoped by its
@@ -136,6 +180,217 @@ std::string custom_node_key(std::string_view type_id, int version) {
     return key;
 }
 
+bool metadata_equal(const SampleKernelMetadata& lhs, const SampleKernelMetadata& rhs) noexcept {
+    return lhs.category == rhs.category && lhs.parameter == rhs.parameter &&
+           lhs.units == rhs.units && lhs.minimum_value == rhs.minimum_value &&
+           lhs.maximum_value == rhs.maximum_value && lhs.has_value_range == rhs.has_value_range &&
+           lhs.capability_flags == rhs.capability_flags;
+}
+
+bool sample_descriptors_equal(const SampleKernelDescriptor& lhs,
+                              const SampleKernelDescriptor& rhs) noexcept {
+    return lhs.abi_version == rhs.abi_version && lhs.type_id == rhs.type_id &&
+           lhs.version == rhs.version && lhs.num_input_ports == rhs.num_input_ports &&
+           lhs.num_output_ports == rhs.num_output_ports && lhs.causality == rhs.causality &&
+           lhs.scope == rhs.scope && lhs.authored_config_kind == rhs.authored_config_kind &&
+           lhs.state_size == rhs.state_size && lhs.state_alignment == rhs.state_alignment &&
+           lhs.construct == rhs.construct && lhs.reset == rhs.reset && lhs.destroy == rhs.destroy &&
+           lhs.process == rhs.process && lhs.delay_publish == rhs.delay_publish &&
+           lhs.delay_commit == rhs.delay_commit && lhs.latency_samples == rhs.latency_samples &&
+           metadata_equal(lhs.metadata, rhs.metadata);
+}
+
+template <class R, class... Args>
+bool same_function(const std::function<R(Args...)>& lhs,
+                   const std::function<R(Args...)>& rhs) noexcept {
+    if (static_cast<bool>(lhs) != static_cast<bool>(rhs))
+        return false;
+    if (!lhs)
+        return true;
+    using FunctionPointer = R (*)(Args...);
+    const auto* lhs_target = lhs.template target<FunctionPointer>();
+    const auto* rhs_target = rhs.template target<FunctionPointer>();
+    return lhs_target != nullptr && rhs_target != nullptr && *lhs_target == *rhs_target;
+}
+
+bool custom_types_equal_for_idempotency(const CustomNodeType& lhs,
+                                        const CustomNodeType& rhs) noexcept {
+    if (lhs.type_id != rhs.type_id || lhs.version != rhs.version ||
+        lhs.num_input_ports != rhs.num_input_ports ||
+        lhs.num_output_ports != rhs.num_output_ports || lhs.default_name != rhs.default_name ||
+        lhs.lowerable != rhs.lowerable || lhs.baked_params.size() != rhs.baked_params.size()) {
+        return false;
+    }
+    // std::function erases arbitrary functor state, so only empty callbacks and
+    // identical raw function-pointer targets can be proven equal. Conservatively
+    // refuse to call captured or otherwise opaque functors idempotent.
+    if (!same_function(lhs.process, rhs.process) || !same_function(lhs.create, rhs.create) ||
+        !same_function(lhs.destroy, rhs.destroy) || !same_function(lhs.prepare, rhs.prepare) ||
+        !same_function(lhs.release, rhs.release) || !same_function(lhs.reset, rhs.reset) ||
+        !same_function(lhs.process_instance, rhs.process_instance) ||
+        !same_function(lhs.save_state, rhs.save_state) ||
+        !same_function(lhs.load_state, rhs.load_state) ||
+        !same_function(lhs.process_transport, rhs.process_transport) ||
+        !same_function(lhs.process_instance_transport, rhs.process_instance_transport) ||
+        !same_function(lhs.process_instance_baked_param, rhs.process_instance_baked_param) ||
+        !same_function(lhs.latency_samples, rhs.latency_samples)) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.baked_params.size(); ++i) {
+        const auto& a = lhs.baked_params[i];
+        const auto& b = rhs.baked_params[i];
+        if (a.id != b.id || a.min_value != b.min_value || a.max_value != b.max_value ||
+            a.default_value != b.default_value) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool scalar_identity_matches(const CustomNodeType& type,
+                             const SampleKernelDescriptor& descriptor) noexcept {
+    return type.type_id == descriptor.type_id && type.version == descriptor.version &&
+           type.num_input_ports >= 0 && type.num_output_ports >= 0 &&
+           static_cast<std::uint32_t>(type.num_input_ports) == descriptor.num_input_ports &&
+           static_cast<std::uint32_t>(type.num_output_ports) == descriptor.num_output_ports;
+}
+
+void passthrough_scalar(void*, const PreparedSampleKernelConfig&, const SampleFrameContext&,
+                        const float* inputs, float* outputs) noexcept {
+    outputs[0] = inputs[0];
+}
+
+void constant_scalar(void*, const PreparedSampleKernelConfig& config, const SampleFrameContext&,
+                     const float*, float* outputs) noexcept {
+    outputs[0] = config.constant;
+}
+
+void parameter_scalar(void*, const PreparedSampleKernelConfig& config,
+                      const SampleFrameContext& frame, const float*, float* outputs) noexcept {
+    const auto index = config.boundary_or_parameter_index;
+    outputs[0] = frame.promoted_values != nullptr && index < frame.promoted_value_count
+                     ? frame.promoted_values[index]
+                     : 0.0f;
+}
+
+void add_scalar(void*, const PreparedSampleKernelConfig&, const SampleFrameContext&,
+                const float* inputs, float* outputs) noexcept {
+    outputs[0] = inputs[0] + inputs[1];
+}
+
+void multiply_scalar(void*, const PreparedSampleKernelConfig&, const SampleFrameContext&,
+                     const float* inputs, float* outputs) noexcept {
+    outputs[0] = inputs[0] * inputs[1];
+}
+
+bool delay_construct(void* state, const SampleKernelPrepareContext& context) noexcept {
+    if (state == nullptr || !std::isfinite(context.sample_rate) || context.sample_rate <= 0.0 ||
+        context.max_block_size == 0 ||
+        context.config.kind != PreparedSampleKernelConfigKind::None) {
+        return false;
+    }
+    std::construct_at(static_cast<float*>(state), 0.0f);
+    return true;
+}
+
+void delay_reset(void* state) noexcept {
+    *static_cast<float*>(state) = 0.0f;
+}
+void delay_destroy(void* state) noexcept {
+    std::destroy_at(static_cast<float*>(state));
+}
+void delay_publish(const void* state, const PreparedSampleKernelConfig&, float* outputs) noexcept {
+    outputs[0] = *static_cast<const float*>(state);
+}
+void delay_commit(void* state, const PreparedSampleKernelConfig&, const float* inputs) noexcept {
+    *static_cast<float*>(state) = inputs[0];
+}
+
+struct BuiltinSampleKernelRegistration {
+    CustomNodeType custom;
+    SampleKernelDescriptor scalar;
+};
+
+BuiltinSampleKernelRegistration make_builtin_sample_kernel(const char* id, const char* name,
+                                                           int inputs, int outputs,
+                                                           SampleKernelConfigKind config_kind,
+                                                           SampleKernelProcessFn process,
+                                                           const char* category) {
+    BuiltinSampleKernelRegistration result;
+    result.custom.type_id = id;
+    result.custom.version = 1;
+    result.custom.num_input_ports = inputs;
+    result.custom.num_output_ports = outputs;
+    result.custom.default_name = name;
+    result.scalar.type_id = id;
+    result.scalar.version = 1;
+    result.scalar.num_input_ports = static_cast<std::uint32_t>(inputs);
+    result.scalar.num_output_ports = static_cast<std::uint32_t>(outputs);
+    result.scalar.authored_config_kind = config_kind;
+    result.scalar.process = process;
+    result.scalar.metadata.category = category;
+    return result;
+}
+
+std::array<BuiltinSampleKernelRegistration, 7> builtin_sample_kernels() {
+    auto input = make_builtin_sample_kernel("pulp.core.sample-region.input", "Sample Region Input",
+                                            1, 1, SampleKernelConfigKind::BoundaryIndex,
+                                            passthrough_scalar, "boundary");
+    auto output = make_builtin_sample_kernel(
+        "pulp.core.sample-region.output", "Sample Region Output", 1, 1,
+        SampleKernelConfigKind::BoundaryIndex, passthrough_scalar, "boundary");
+    auto constant = make_builtin_sample_kernel("pulp.core.sample-region.constant", "Constant", 0, 1,
+                                               SampleKernelConfigKind::FiniteConstant,
+                                               constant_scalar, "source");
+    constant.scalar.metadata.parameter = "value";
+    constant.scalar.metadata.has_value_range = true;
+    constant.scalar.metadata.minimum_value = -std::numeric_limits<float>::max();
+    constant.scalar.metadata.maximum_value = std::numeric_limits<float>::max();
+    auto parameter = make_builtin_sample_kernel("pulp.core.sample-region.parameter", "Parameter", 0,
+                                                1, SampleKernelConfigKind::PromotedParameterId,
+                                                parameter_scalar, "source");
+    parameter.scalar.metadata.parameter = "promoted_parameter";
+    auto add = make_builtin_sample_kernel("pulp.core.sample-region.add", "Add", 2, 1,
+                                          SampleKernelConfigKind::None, add_scalar, "math");
+    auto multiply =
+        make_builtin_sample_kernel("pulp.core.sample-region.multiply", "Multiply", 2, 1,
+                                   SampleKernelConfigKind::None, multiply_scalar, "math");
+    auto delay = make_builtin_sample_kernel("pulp.core.unit-delay", "Unit Delay", 1, 1,
+                                            SampleKernelConfigKind::None, nullptr, "delay");
+    delay.scalar.causality = SampleKernelCausality::OneSampleDelay;
+    delay.scalar.state_size = sizeof(float);
+    delay.scalar.state_alignment = alignof(float);
+    delay.scalar.construct = delay_construct;
+    delay.scalar.reset = delay_reset;
+    delay.scalar.destroy = delay_destroy;
+    delay.scalar.delay_publish = delay_publish;
+    delay.scalar.delay_commit = delay_commit;
+    return {std::move(input), std::move(output),   std::move(constant), std::move(parameter),
+            std::move(add),   std::move(multiply), std::move(delay)};
+}
+
+struct AddressRange {
+    std::uintptr_t begin = 0;
+    std::uintptr_t end = 0;
+    bool valid = true;
+};
+
+AddressRange address_range(const void* data, std::size_t bytes) noexcept {
+    if (bytes == 0)
+        return {};
+    if (data == nullptr)
+        return {0, 0, false};
+    const auto begin = reinterpret_cast<std::uintptr_t>(data);
+    if (bytes > std::numeric_limits<std::uintptr_t>::max() - begin)
+        return {0, 0, false};
+    return {begin, begin + bytes, true};
+}
+
+bool overlaps(AddressRange lhs, AddressRange rhs) noexcept {
+    return lhs.begin != lhs.end && rhs.begin != rhs.end && lhs.begin < rhs.end &&
+           rhs.begin < lhs.end;
+}
+
 // Make a per-node opaque instance owned via shared_ptr, with the type's destroy
 // callback as the deleter (RAII). Returns nullptr for stateless types (no
 // `create`).
@@ -150,6 +405,31 @@ std::shared_ptr<void> make_custom_instance(const CustomNodeType& type) {
 }
 
 } // namespace
+
+bool sample_kernel_storage_is_disjoint(const SampleKernelDescriptor& descriptor, const void* state,
+                                       const PreparedSampleKernelConfig& config,
+                                       const SampleFrameContext& frame, const float* inputs,
+                                       float* outputs) noexcept {
+    const auto state_range = address_range(state, descriptor.state_size);
+    const auto config_range = address_range(&config, sizeof(config));
+    const auto input_range =
+        address_range(inputs, static_cast<std::size_t>(descriptor.num_input_ports) * sizeof(float));
+    const auto output_range = address_range(
+        outputs, static_cast<std::size_t>(descriptor.num_output_ports) * sizeof(float));
+    const auto promoted_range =
+        address_range(frame.promoted_values,
+                      static_cast<std::size_t>(frame.promoted_value_count) * sizeof(float));
+    if (!state_range.valid || !config_range.valid || !input_range.valid || !output_range.valid ||
+        !promoted_range.valid) {
+        return false;
+    }
+    if ((descriptor.state_size == 0) != (state == nullptr))
+        return false;
+    return !overlaps(output_range, state_range) && !overlaps(output_range, config_range) &&
+           !overlaps(output_range, input_range) && !overlaps(output_range, promoted_range) &&
+           !overlaps(config_range, state_range) && !overlaps(config_range, input_range) &&
+           !overlaps(config_range, promoted_range);
+}
 
 SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot() {
     prepare_midi_block_storage(events, ump);
@@ -384,6 +664,10 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
         });
     if (type.default_name.empty()) type.default_name = type.type_id;
     const auto key = custom_node_key(type.type_id, type.version);
+    // A block-only replacement deliberately withdraws any scalar companion.
+    // This preserves the historical one-argument replacement behavior without
+    // leaving a stale descriptor paired with different callbacks.
+    sample_kernel_types_.erase(key);
     custom_node_types_[key] = std::move(type);
     // M6 (2.2b): any registry change bumps the generation so a reinit-free swap
     // compiled against an older generation is rejected (a re-register rebinds
@@ -395,6 +679,77 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
         ++authoring_generation_;
     }
     return true;
+}
+
+bool SignalGraph::register_custom_node_type(CustomNodeType type,
+                                            SampleKernelDescriptor sample_kernel) {
+    if (!type.is_valid_registration() || !sample_kernel.is_valid_registration() ||
+        !scalar_identity_matches(type, sample_kernel)) {
+        return false;
+    }
+    if (type.default_name.empty())
+        type.default_name = type.type_id;
+
+    GraphMutationLock mutation_lock(*this);
+    const auto key = custom_node_key(type.type_id, type.version);
+    const auto existing_scalar = sample_kernel_types_.find(key);
+    const auto existing_custom = custom_node_types_.find(key);
+    if (existing_scalar != sample_kernel_types_.end()) {
+        return existing_custom != custom_node_types_.end() &&
+               sample_descriptors_equal(existing_scalar->second, sample_kernel) &&
+               custom_types_equal_for_idempotency(existing_custom->second, type);
+    }
+    if (existing_custom != custom_node_types_.end() &&
+        !custom_types_equal_for_idempotency(existing_custom->second, type)) {
+        return false;
+    }
+
+    const bool affects_existing_nodes =
+        std::any_of(nodes_.begin(), nodes_.end(), [&](const GraphNode& node) {
+            return node.type == NodeType::Custom && node.custom_type_id == type.type_id &&
+                   node.custom_type_version == type.version;
+        });
+    // Build the full replacement off-side so allocation failure cannot publish
+    // only one half of the pair.
+    auto next_custom = custom_node_types_;
+    auto next_scalar = sample_kernel_types_;
+    if (existing_custom == custom_node_types_.end()) {
+        next_custom[key] = std::move(type);
+    }
+    next_scalar[key] = std::move(sample_kernel);
+    cancel_swap_edit_locked_();
+    custom_node_types_.swap(next_custom);
+    sample_kernel_types_.swap(next_scalar);
+    ++custom_registry_generation_;
+    if (affects_existing_nodes)
+        invalidate_live_locked_();
+    else
+        ++authoring_generation_;
+    return true;
+}
+
+std::vector<CustomNodeTypeMetadata> SignalGraph::custom_node_types() const {
+    GraphMutationLock mutation_lock(*this);
+    std::vector<CustomNodeTypeMetadata> snapshot;
+    snapshot.reserve(custom_node_types_.size());
+    for (const auto& [_, type] : custom_node_types_) {
+        snapshot.push_back(CustomNodeTypeMetadata{
+            type.type_id,
+            type.version,
+            type.num_input_ports,
+            type.num_output_ports,
+            type.default_name,
+            type.lowerable,
+            type.baked_params,
+        });
+    }
+    std::sort(snapshot.begin(), snapshot.end(),
+              [](const CustomNodeTypeMetadata& lhs, const CustomNodeTypeMetadata& rhs) {
+                  if (lhs.type_id != rhs.type_id)
+                      return lhs.type_id < rhs.type_id;
+                  return lhs.version < rhs.version;
+              });
+    return snapshot;
 }
 
 std::size_t SignalGraph::custom_node_type_count() const {
@@ -417,6 +772,67 @@ const CustomNodeType* SignalGraph::custom_node_type(std::string_view type_id,
     auto it = custom_node_types_.find(custom_node_key(type_id, version));
     if (it == custom_node_types_.end()) return nullptr;
     return &it->second;
+}
+
+const SampleKernelDescriptor* SignalGraph::sample_kernel_type(std::string_view type_id,
+                                                              int version) const {
+    const auto found = sample_kernel_types_.find(custom_node_key(type_id, version));
+    return found == sample_kernel_types_.end() ? nullptr : &found->second;
+}
+
+bool register_builtin_sample_region_types(SignalGraph& graph) {
+    auto cohort = builtin_sample_kernels();
+    for (const auto& registration : cohort) {
+        if (!registration.custom.is_valid_registration() ||
+            !registration.scalar.is_valid_registration() ||
+            !scalar_identity_matches(registration.custom, registration.scalar)) {
+            return false;
+        }
+    }
+
+    SignalGraph::GraphMutationLock mutation_lock(graph);
+    auto next_custom = graph.custom_node_types_;
+    auto next_scalar = graph.sample_kernel_types_;
+    bool changed = false;
+    bool affects_existing_nodes = false;
+    for (auto& registration : cohort) {
+        const auto key = custom_node_key(registration.custom.type_id, registration.custom.version);
+        const auto existing_custom = next_custom.find(key);
+        const auto existing_scalar = next_scalar.find(key);
+        if (existing_scalar != next_scalar.end()) {
+            if (existing_custom == next_custom.end() ||
+                !custom_types_equal_for_idempotency(existing_custom->second, registration.custom) ||
+                !sample_descriptors_equal(existing_scalar->second, registration.scalar)) {
+                return false;
+            }
+            continue;
+        }
+        if (existing_custom != next_custom.end() &&
+            !custom_types_equal_for_idempotency(existing_custom->second, registration.custom)) {
+            return false;
+        }
+        affects_existing_nodes =
+            affects_existing_nodes ||
+            std::any_of(graph.nodes_.begin(), graph.nodes_.end(), [&](const GraphNode& node) {
+                return node.type == NodeType::Custom &&
+                       node.custom_type_id == registration.custom.type_id &&
+                       node.custom_type_version == registration.custom.version;
+            });
+        next_custom[key] = std::move(registration.custom);
+        next_scalar[key] = std::move(registration.scalar);
+        changed = true;
+    }
+    if (!changed)
+        return true;
+    graph.cancel_swap_edit_locked_();
+    graph.custom_node_types_.swap(next_custom);
+    graph.sample_kernel_types_.swap(next_scalar);
+    ++graph.custom_registry_generation_;
+    if (affects_existing_nodes)
+        graph.invalidate_live_locked_();
+    else
+        ++graph.authoring_generation_;
+    return true;
 }
 
 // add_custom_node overloads only RESOLVE a registered type (read

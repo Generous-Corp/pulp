@@ -629,6 +629,32 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                               {{"expected", SchemaValueKind::Array},
                                {"replacement", SchemaValueKind::Array},
                                {"sequence_id", SchemaValueKind::U64String}}));
+    // The lane arrives as one object rather than as loose address members so a
+    // caller cannot name half a stream, and the points array carries no chased
+    // member: that flag is a derivation receipt the decoder refuses.
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_midi_expression_lane", SchemaDomain::Command,
+                {{"clip_id", SchemaValueKind::U64String},
+                 {"lane", SchemaValueKind::Object},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.remove_midi_expression_lane", SchemaDomain::Command,
+                {{"clip_id", SchemaValueKind::U64String},
+                 {"lane_id", SchemaValueKind::U64String},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    // No address member: this command names a lane by identity and keeps the
+    // address that lane already has, so re-addressing a stream is a remove and
+    // an insert rather than a point edit.
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_midi_expression_lane_points", SchemaDomain::Command,
+                {{"clip_id", SchemaValueKind::U64String},
+                 {"expected", SchemaValueKind::Array},
+                 {"lane_id", SchemaValueKind::U64String},
+                 {"replacement", SchemaValueKind::Array},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(
         builtin("pulp.timeline.command.set_groove", SchemaDomain::Command,
                 {{"expected", SchemaValueKind::Object, true, "pulp.timeline.groove_template"},
@@ -646,6 +672,97 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     schemas.push_back(builtin(
         "pulp.timeline.command.remove_region", SchemaDomain::Command,
         {{"region_id", SchemaValueKind::U64String}, {"sequence_id", SchemaValueKind::U64String}}));
+    // Both sides carry the whole region, role included, because the gate this
+    // command declares is on the value and not on one member of it.
+    schemas.push_back(builtin("pulp.timeline.command.set_region", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Object, true, "pulp.timeline.region"},
+                               {"replacement", SchemaValueKind::Object, true,
+                                "pulp.timeline.region"},
+                               {"sequence_id", SchemaValueKind::U64String}}));
+    // A tuning member is optional on both sides, spelled exactly as the project
+    // and track document schemas spell the same field: absent means the document
+    // states no tuning, which is a different claim from stating equal
+    // temperament, so a required member with a default would lose it.
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_project_tuning", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
+                 {"replacement", SchemaValueKind::Object, false, "pulp.timeline.tuning"}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_track_tuning", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
+                 {"replacement", SchemaValueKind::Object, false, "pulp.timeline.tuning"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    // Both the modulator and the macro commands carry the whole item on the
+    // wire, referencing the document schema that already spells it, so a
+    // command and a document never disagree about what a modulator is.
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_modulator", SchemaDomain::Command,
+                {{"modulator", SchemaValueKind::Object, true, "pulp.timeline.modulator"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_modulator", SchemaDomain::Command,
+                              {{"modulator_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    // The identity rides its own member as well as both sides of the gate. A
+    // decoder that finds the three disagreeing refuses, because a Modify that
+    // relocates identity is a removal and a creation wearing a signature that
+    // declares neither.
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_modulator", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, true, "pulp.timeline.modulator"},
+                 {"modulator_id", SchemaValueKind::U64String},
+                 {"replacement", SchemaValueKind::Object, true, "pulp.timeline.modulator"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_macro", SchemaDomain::Command,
+                {{"macro", SchemaValueKind::Object, true, "pulp.timeline.macro_control"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_macro", SchemaDomain::Command,
+                              {{"macro_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_macro", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, true, "pulp.timeline.macro_control"},
+                 {"macro_id", SchemaValueKind::U64String},
+                 {"replacement", SchemaValueKind::Object, true, "pulp.timeline.macro_control"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    // The two floats are spelled as their IEEE-754 bit patterns, exactly as
+    // macro_control.value_bits spells the field they gate. A decimal spelling
+    // here would reintroduce a round-trip hazard in the one command whose whole
+    // purpose is an exact float gate.
+    schemas.push_back(builtin("pulp.timeline.command.set_macro_value", SchemaDomain::Command,
+                              {{"expected_bits", SchemaValueKind::U32},
+                               {"macro_id", SchemaValueKind::U64String},
+                               {"replacement_bits", SchemaValueKind::U32},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    // A route carries the whole connection on the wire, referencing the
+    // document schema that already spells one, so a command and a document
+    // never disagree about what a route is -- including its bypass, which is a
+    // value an edit states rather than a state an edit discards.
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_modulation_route", SchemaDomain::Command,
+                {{"route", SchemaValueKind::Object, true, "pulp.timeline.modulation_route"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_modulation_route",
+                              SchemaDomain::Command,
+                              {{"route_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_modulation_route", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Object, true, "pulp.timeline.modulation_route"},
+                 {"replacement", SchemaValueKind::Object, true, "pulp.timeline.modulation_route"},
+                 {"route_id", SchemaValueKind::U64String},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.insert_scene", SchemaDomain::Command,
                               {{"before_scene_id", SchemaValueKind::U64String, false},
                                {"scene", SchemaValueKind::Object, true, "pulp.timeline.scene"},

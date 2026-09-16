@@ -605,7 +605,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
                         request_->audio_limits, lowered_clip.source_frame_offset,
                         lowered_clip.placement_fades, request_->document_revision, generation_,
-                        core_->offline_stretch_cache);
+                        core_->offline_stretch_cache, lowered_clip.source_frame_phase_end,
+                        lowered_clip.authored_window_start, lowered_clip.authored_duration);
                     ++work;
                     if (status == detail::TrackAudioClipCompileStatus::Failed) {
                         const auto detail = audio_compiler_.error();
@@ -646,11 +647,19 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                                                            request_->maximum_note_events_per_track);
                     const auto note_bound =
                         std::min(registration->maximum_fragment_notes, remaining_events / 2);
+                    // The hook generates over the authored clip, from the
+                    // authored origin, so a nesting that trims the leaf changes
+                    // which notes survive and never which notes the renderer
+                    // produces. The context tick steps back by the same offset,
+                    // so a lookup at local tick t still reads the position that
+                    // tick occupies in the sequence that authored it.
+                    const auto authored_window =
+                        timebase::TickDuration{lowered_clip.authored_window_start};
                     RegisteredContentCompileInput input{
                         *registered,
                         clip.id(),
-                        clip.duration(),
-                        lowered_clip.context_start,
+                        lowered_clip.authored_duration,
+                        lowered_clip.context_start - authored_window,
                         timeline::CompileContextView(*request_->project, context_sequence->id(),
                                                      registration->subscriptions),
                         note_bound,
@@ -704,8 +713,22 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 }
                 const auto generated_index = registered_note_index_;
                 const auto& note = fragment_notes[registered_note_index_++];
-                const auto start_tick = clip.start() + timebase::TickDuration{note.start.value};
-                const auto end_tick = start_tick + note.duration;
+                // Only the part of the fragment inside the retained window
+                // sounds. A note straddling an edge is cut to that edge and one
+                // wholly outside is dropped, which is the rule a trim already
+                // applies to authored note content. A fragment nothing trimmed
+                // windows onto itself, so every existing render is untouched.
+                const auto window_start = lowered_clip.authored_window_start;
+                const auto local_start = std::max(note.start.value, window_start);
+                const auto local_end = std::min(note.start.value + note.duration.value,
+                                                window_start + clip.duration().value);
+                if (local_end <= local_start) {
+                    ++work;
+                    continue;
+                }
+                const auto start_tick =
+                    clip.start() + timebase::TickDuration{local_start - window_start};
+                const auto end_tick = start_tick + timebase::TickDuration{local_end - local_start};
                 const auto start_sample = request_->tempo_map->ticks_to_samples(start_tick);
                 const auto end_sample = request_->tempo_map->ticks_to_samples(end_tick);
                 if (end_sample <= start_sample)

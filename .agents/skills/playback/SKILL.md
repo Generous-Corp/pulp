@@ -58,18 +58,49 @@ Gain and anchor-native fade durations live on the immutable Clip. Missing,
 mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.
 When sequence lowering flattens a complete nested media clip, preserve its
-authored `TimeConform` value. Reject a nested source window that trims a
-`Resample` or `Stretch` clip with `NestedConformedTrimUnsupported`; advancing a
-raw source-frame offset is valid only for unconformed media and would corrupt
-the authored phase until playback owns a conform-aware source-range mapping.
-`Stretch` needs a second thing the mapping alone does not give it: its rendered
-artifact is keyed to the clip's own authored tick range, so a trimmed window
-also needs a windowed artifact.
+authored `TimeConform` value. A window that trims a `Resample` clip is lowered,
+not refused: the leaf carries a source RANGE rather than a lone offset, as
+`LoweredClip::source_frame_offset` plus `source_frame_phase_end`, which
+`AudioClipRendererProgram` carries under the same names and
+`musical_phase_source_position` reads as the two ends of its phase map. Both
+ends come from the retained window's own fractions of the clip's authored tick
+span, because that is what the conform function says; an elapsed-samples offset
+agrees only where source frames and timeline frames happen to advance together,
+which is exactly the case a real conform is not. A zero `phase_end` means the
+media reference's own end, so an untrimmed leaf lowers to the program it always
+did.
+`Stretch` is lowered too, and the range is not what does it. Its audio is a
+rendered artifact keyed to an authored tick range, so the artifact stays keyed
+to that range — `LoweredClip::authored_window_start` and `authored_duration`,
+the pair a trim already recorded for generated content, say where the range is —
+and the leaf reads the frame span of the render that belongs to its window, as
+`AudioClipRendererProgram::source_start` plus `source_frame_count` over an
+artifact longer than the clip. `offline_stretch_artifact_window` in
+`audio_renderer_internal.hpp` is the one place that arithmetic lives, and both
+the artifact compiler and the program compiler go through it. Two consequences
+worth knowing: a trimmed leaf and its untrimmed twin produce the same artifact
+key, so they share one cached render and the trimmed leaf is bit-identical to
+the untrimmed one over the same ticks; and the authored range can begin before
+tick zero when a placement sits earlier than the offset it reads, which the
+tempo map extrapolates and no document clip can express.
+A stretched leaf keeps its whole media reference — narrowing it would change
+what gets stretched rather than which part of the result is heard — so the
+lowerer's elapsed-samples rebase is scoped to `TimeConform::None`. Anything
+reading an artifact directly must offset by `source_start`: the realtime
+stretch lane's `artifact_sample` does, and reading from frame zero there is
+silently the wrong audio rather than an error.
 
 Each nested refusal names one cause. A child device chain raises
-`NestedDeviceChainUnsupported`, a child automation lane raises
-`NestedAutomationLaneUnsupported`, and an absolute-anchored leaf inside a
-nested sequence raises `NestedAbsoluteChildUnsupported`. Do not reach for one
+`NestedDeviceChainUnsupported`, and an absolute-anchored leaf inside a nested
+sequence raises `NestedAbsoluteChildUnsupported`. A child automation lane
+raises one of three, because the constructs that would lift them differ: an
+automated pan raises `NestedAutomationPanUnsupported` on entry to the child
+track, since no leaf carries a stereo placement at any level. An automated gain
+travels to the leaf and is answered by the leaf's own kind — a leaf that reads
+no clip gain raises `NestedAutomationGainEventLeafUnsupported` and needs a
+renderer that scales it before any envelope would matter, while one that does
+read clip gain raises `NestedAutomationGainMediaUnsupported` and needs only
+that `ClipPlaybackProperties::gain_linear` stop being a lone scalar. Do not reach for one
 code to cover several constructs: the code is what tells an author which
 construct is missing, and a generic one hides that. Two guards in
 `validate_reference` are deliberately not capability codes — a nesting depth
@@ -791,9 +822,12 @@ process-local; they are not persisted in the Timeline document.
 Nondefault renderer production declarations are also process-local:
 `ProgramWire` refuses to serialize a program that carries one. This prevents a
 remote process from inheriting a reproducibility claim without the hook that
-justified it. A nested reference that trims registered content fails as
-`TrimmedRegisteredContentUnsupported`; the compile input does not yet carry the
-source-window offset needed to preserve stateful pattern phase.
+justified it. A nested reference that trims registered content compiles by
+window-after-generate: the hook sees the authored clip duration and an origin
+tick rebased to the authored start, so a stateful pattern keeps its phase, and
+the compiler windows the returned fragment to the retained span with the same
+clamp-and-drop rule a trimmed note leaf uses. The fragment quota is charged
+against what the hook generates, which is the authored extent.
 
 Built-in note compilation applies the owning sequence groove at the original
 owner-sequence onset. Move note-on/off by one shared displacement, intersect the
@@ -1327,6 +1361,30 @@ The retained window is half-open in child-local ticks: points before it set
 what sounds on entry, points at or after `left_trim + target_duration` are
 never reached and must not be emitted.
 
+### A trim can be real in ticks and absent in frames
+
+`kTicksPerQuarter` is 705'600, so one tick is about 0.034 frames at 120 BPM and
+48 kHz: roughly 29.4 ticks to a frame. `ticks_to_samples()` rounds to nearest,
+so a trim of up to fourteen ticks moves no frame edge at all. The window a
+sub-frame trim produces correctly spans the whole artifact while the clip
+covers less than the whole authored tick range.
+
+So a sample-domain trim predicate and a tick-domain one are **not** equivalent,
+and a validator must never assert that they are. `validate_clip_program()` did,
+and refused a correct clip: `link_audio_track_program()` answered `InvalidAsset`
+for a nested stretched clip nudged by a single tick. Assert the implication that
+survives the resolution gap instead -- covering the whole authored range means
+reading the whole artifact -- and leave the converse alone, because it is false.
+
+Two consequences for fixtures. A trim written as `kTicksPerQuarter / 4` is
+exactly 6'000 frames at that tempo and rate, so a table built only from quarter
+fractions is frame-aligned throughout and cannot see any of this; spell an
+awkward tick count when the frame grid is what is under test. And
+`link_audio_track_program()` is the only caller of `validate_clip_program()` --
+`ProgramCompilerTask` constructs an `AudioTrackRendererProgram` directly as a
+friend -- so a test that only compiles a program never reaches that validator
+and cannot fail on anything it holds.
+
 ## A feel-free groove pads nothing observable, so do not test the reach short-circuit
 
 `groove_timing_reach()` returns a supremum, not an estimate: swing's
@@ -1531,6 +1589,84 @@ name: `NestedFrozenTrackUnsupported` and `NestedActiveTakeUnsupported`. They
 do not share a code, because the construct that would lift them is the same
 one but the reason a reader hits them is not — and a shared code sends you to
 the wrong half of the document.
+
+### Freeze nests only where the nesting transforms nothing
+
+A freeze is a rendered artifact anchored in **absolute samples**, and nothing
+about it can be re-derived: it either lands where it was rendered to land or it
+is a stale render playing at the wrong time or level. So the question the
+lowerer asks is not "can the artifact be mapped through this nesting?" but
+"does this nesting transform its child at all?". Where the answer is no, the
+artifact is already in the right place and lowers as an absolute `MediaRef`
+leaf carrying the same media over the same samples; everywhere else the
+refusal stands, exactly as before.
+
+`nesting_is_transparent` is the whole of that judgement, and it is built to
+fail closed: a `NestingTransformation` enumerator with no case in
+`nesting_imposes` reaches a trailing `return true` and is reported as
+*imposed*, so a transformation nobody has reasoned about refuses rather than
+permits. Adding an enumerator without answering for it cannot widen the
+permit.
+
+Three things about the enumeration are worth knowing before you edit it:
+
+- **It is wider than what the walk applies today.** A placement's
+  `time_conform` and a child track's `modulators` / `macros` /
+  `modulation_routes` are read by neither this walk nor `begin_track`, so a
+  child carrying one is neither honoured nor refused anywhere else. Without an
+  entry here, a modulated fader under a sealed artifact would be silently
+  permitted.
+- **The artifact's sample rate is in the list and is not a transformation the
+  owner applies.** An unnested artifact compiles through
+  `compile_track_freeze_program` or `compile_take_comp_segment_program`, both of
+  which take the projected timeline span as the renderable length; a lowered
+  leaf compiles through the generic absolute-clip path, which takes the source
+  length scaled and rounded up. Those agree only when no rate conversion
+  happens. Do not delete the check as redundant with either compiler's own rate
+  validation — that validation runs on a path the lowered leaf never takes.
+- **Some entries are unreachable backstops.** A `SequenceRef` clip cannot carry
+  a conform or an absolute anchor (`Clip::create` and `create_absolute` reject
+  both), so no refusal test can exercise those entries and none pretends to.
+
+### An active take comp nests by the same predicate, N leaves instead of one
+
+`NestedActiveTakeUnsupported` is narrowed by the *same* `nesting_is_transparent`
+call — one construct, two payloads, and the eighteen nesting observations are
+the same eighteen questions for both. What differs is what gets emitted and
+what `ArtifactRate` has to look at.
+
+`SealedArtifact` is how the predicate carries the difference: exactly one of
+`freeze` / `active_take` is set, and neither being set returns *imposed*, in the
+same fail-closed direction as the switch's trailing `return true`. For a comp,
+`artifact_rate_differs` asks the question once **per take a segment draws from**
+— not per take in the lane, because a lane may hold takes the comp never
+selects and a rate those carry is not a rate anything would convert.
+
+`emit_sealed_active_take` is the payload. Per comp segment: resolve the take the
+segment names, read the source offset as the distance from that take's
+`placement_start` to the segment's `range.start`, and emit an absolute leaf over
+`MediaRef{take.media.asset_id, take.media.source_start + offset,
+segment.range.sample_count}` at `segment.range.start`. That is the arithmetic
+`compile_take_comp_segment_program` performs, re-derived on the document side
+rather than shared, because the two build different things — a document clip
+and a renderer program — and what they owe each other is the rendered samples.
+A test asserts that identity; no comment should be trusted to.
+
+Two consequences worth knowing:
+
+- **An empty comp is transparent and lowers to nothing.** That is correct, not
+  a hole: `begin_track` renders an empty comp as no clips too, so the nested and
+  unnested documents agree on silence.
+- **The `TakeCompSegment` ordinal collision is out of reach from this lane.**
+  `link_audio_track_program` identifies a comp-segment program by a bare ordinal
+  (`segment_index + 1`), so two copies of one comp on one track collide. A
+  *lowered* comp never produces that program kind — it produces `ArrangementClip`
+  leaves carrying generated document identities — and the pair that would have
+  collided cannot be authored anyway: transparency pins a placement to its
+  child's origin, so a second transparent placement on the same track would have
+  to overlap the first, and `Track::create` rejects the overlap. A second
+  placement on a *different* track compiles and sounds its own copy, which is
+  what a placement means for ordinary child content too.
 
 `record_armed()` and the bare `take_lanes()` list are read by **neither** path,
 and refusing them rejected documents that already compiled correctly. Three

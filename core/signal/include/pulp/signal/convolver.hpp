@@ -54,7 +54,10 @@ public:
     /// Allocates and FFTs inline — call off the audio thread.
     void load_ir(const SampleType* ir, std::size_t ir_length, std::size_t block_size) {
         state_ = detail::build_convolver_ir_state(ir, ir_length, block_size);
-        partition_index_ = 0;
+        // Adopt the freshly-built state's spare as THE input history. Loading an
+        // IR outright (as opposed to swapping one in) deliberately starts the
+        // stream cold — this is a prepare()-time call, not a live change.
+        history_ = state_ ? std::move(state_->history) : nullptr;
     }
 
     /// Try to consume the most recently staged IR from a swapper. If
@@ -79,7 +82,7 @@ public:
             return false;
         }
 
-        // A crossfade still running (item 2.1b): don't start another swap and
+        // A crossfade still running: don't start another swap and
         // don't touch the in-flight fade-out — the pending IR waits for the next
         // call. Human-paced IR swaps rarely overlap the ~ms fade window.
         if (fading_ && !fade_mixer_.done())
@@ -102,54 +105,93 @@ public:
         if (!next)
             return false;
 
-        const std::size_t prev_partition = partition_index_;
         auto previous = std::move(state_);
         state_ = std::move(next);
-        partition_index_ = 0;
+
+        // The input delay line does NOT move with the swap. It belongs to the
+        // input stream, whose identity is unchanged by an IR change, so the
+        // convolver keeps the one it has and renders the incoming IR — and, under
+        // a crossfade, the outgoing one too — against that same history. Only the
+        // ring's SHAPE can force a change: a first load, a different block/FFT
+        // size, or an IR with more partitions than the ring has slots.
+        auto spare = std::move(state_->history);
+        const bool ring_serves_new =
+            history_ != nullptr &&
+            history_->block_size == state_->block_size &&
+            history_->fft_size == state_->fft_size &&
+            history_->spectra.size() >= state_->num_partitions;
+        if (!ring_serves_new) {
+            // Adopt the incoming state's spare ring — allocated off the audio
+            // thread precisely so this step never has to — carrying across
+            // whatever the old ring held. If the incoming state has no spare (a
+            // hand-built state that skipped it) the old ring is kept; process()
+            // detects the too-short ring and fails safe rather than aliasing it.
+            if (spare) {
+                if (history_) detail::migrate_input_history(*history_, *spare);
+                history_.swap(spare);
+            }
+        }
 
         if (previous) {
-            // Crossfade path: keep the displaced IR rendering in parallel from
-            // its own continuing history and blend old->new (item 2.1b). Only
-            // when a fade is configured AND the scratch fits both IRs' block
-            // size; otherwise fall back to the instant retire below.
-            // Require MATCHING block sizes: the fade-out render reads a full
-            // `previous->block_size` of `input`, but process() only guarantees
-            // num_samples == state_->block_size — a larger old block would read
-            // past the caller's input buffer. A mismatch falls back to instant.
+            // Crossfade path: keep the displaced IR rendering in parallel from the
+            // shared history and blend old->new. Only when a fade is configured AND
+            // the scratch fits both IRs' block size; otherwise fall back to the
+            // instant retire below. Require MATCHING block sizes: the fade-out
+            // render reads a full `previous->block_size` of `input`, but process()
+            // only guarantees num_samples == state_->block_size — a larger old
+            // block would read past the caller's input buffer. A mismatch falls
+            // back to instant.
             const bool can_fade =
                 fade_samples_ > 0 &&
                 previous->block_size == state_->block_size &&
                 fade_scratch_.size() >= static_cast<std::size_t>(state_->block_size);
+            // Whichever ring lost the swap above is now rendered by nobody. Park
+            // it on the displaced state so it is reclaimed off the audio thread
+            // along with it — the audio thread must never free. The live state
+            // never holds a spare (it is taken above on every path that installs
+            // one), so this overwrites nothing and frees nothing.
+            assert(!previous->history);
+            previous->history = std::move(spare);
             if (can_fade) {
                 fading_ = std::move(previous);
-                fading_partition_index_ = prev_partition;
                 fade_mixer_.configure(fade_samples_, fade_curve_);
             } else {
-                // Instantaneous swap (default): carry the input delay line from
-                // the displaced IR into the incoming one so the swap doesn't
-                // truncate the convolver's history (the tail dip) — buffer swaps,
-                // no per-sample copy — then park the displaced IR. The faded path
-                // above needs no carry: the parallel fade-out render IS the
-                // continuity, and carrying would swap away the history it renders.
                 // Pre-checked capacity above; the false branch is defense-in-
                 // depth — leaks rather than freeing on RT.
-                partition_index_ =
-                    detail::carry_input_history(*previous, *state_, prev_partition);
                 const bool ok = swapper.retire(previous);
                 (void)ok;
                 (void)previous.release();
             }
+        } else {
+            // `previous` is null only on a first load into an unloaded convolver,
+            // where `history_` was null too — so the adopt branch above left
+            // `spare` empty and nothing is freed on the audio thread here.
+            assert(!spare);
         }
         return true;
     }
 
-    /// Enable a click-free crossfade on IR swaps (item 2.1b, opt-in — default 0
-    /// = instantaneous swap, exactly the prior behavior). When set, a swap keeps
-    /// the OLD IR rendering in parallel with the new for `samples` and blends
-    /// old→new via the shared TransitionMixer, so an IR change is audibly
-    /// continuous (the old IR's tail fades out from its real history while the
-    /// new fades in) rather than a hard cut. Call off the audio thread AFTER an
-    /// IR is loaded (it sizes the parallel-render scratch from the block size).
+    /// Enable a click-free crossfade on IR swaps (opt-in — default 0 =
+    /// instantaneous swap). When set, a swap keeps the OLD IR rendering in
+    /// parallel with the new for `samples` and blends old→new via the shared
+    /// TransitionMixer, so an IR change is audibly continuous rather than a hard
+    /// cut. Call off the audio thread AFTER an IR is loaded (it sizes the
+    /// parallel-render scratch from the block size).
+    ///
+    /// Both sides of the fade render from the convolver's single shared input
+    /// history, so both are convolving against the same real past: the outgoing
+    /// IR fades out from its tail and the incoming one fades in already warm. A
+    /// fade is therefore continuous at any fade length — under the default
+    /// Smoothstep curve, whose gain law is equal-gain, swapping in a copy of the
+    /// IR already loaded is inaudible — and the choice of `samples` is purely a
+    /// taste question about how fast the timbre should change. (`EqualPower`
+    /// holds POWER rather than amplitude constant, so it bulges on a correlated
+    /// pair by design; pick it when the two IRs are decorrelated.)
+    ///
+    /// A fade shorter than the IR is fine and costs nothing in continuity. Note
+    /// only that a fade blends the outputs of two DIFFERENT impulse responses,
+    /// which for a pair with opposing phase can dip in level mid-fade — that is
+    /// inherent to blending, not a history artifact.
     void set_crossfade(std::size_t samples, TransitionCurve curve = TransitionCurve::Smoothstep) {
         fade_samples_ = samples;
         fade_curve_ = curve;
@@ -189,8 +231,14 @@ public:
     void process(const SampleType* input,
                  SampleType* output,
                  std::size_t num_samples) {
-        // No IR to convolve with: pass through.
-        if (!state_ || state_->ir_spectra.empty()) {
+        // No IR to convolve with — or no input history long enough to serve it,
+        // which only a hand-built state that skipped its `history` spare can
+        // produce. Either way the convolver is a wire rather than something that
+        // would read ring slots that do not exist.
+        if (!state_ || state_->ir_spectra.empty() || !history_ ||
+            history_->block_size != state_->block_size ||
+            history_->fft_size != state_->fft_size ||
+            history_->spectra.size() < state_->num_partitions) {
             std::copy_n(input, num_samples, output);
             return;
         }
@@ -204,41 +252,56 @@ public:
         // Recover from a previous violation before folding a valid block in.
         if (history_torn_) reset();
 
-        render_state(*state_, partition_index_, input, output, num_samples);
+        // Fold this block into the shared input history ONCE — one forward FFT
+        // per block however many IRs render from it.
+        capture_input(*history_, *state_->fft, input);
 
-        // Crossfade the retiring IR (item 2.1b): render it in parallel from its
-        // OWN continuing history into scratch and blend old→new. RT-safe: scratch
-        // is pre-sized, no alloc; the fade-out IR is retired on the ring after
-        // the fade (or opportunistically once done), never freed on the audio
-        // thread. Only engages when a fade is configured + running.
-        if (fading_ && fade_scratch_.size() >= num_samples &&
-            static_cast<std::size_t>(fading_->block_size) == num_samples) {
-            if (!fade_mixer_.done()) {
-                render_state(*fading_, fading_partition_index_, input,
-                             fade_scratch_.data(), num_samples);
+        render_ir(*state_, *history_, output);
+
+        // Crossfade the retiring IR: render it in parallel from the SAME history
+        // into scratch and blend old→new. RT-safe: scratch is pre-sized, no
+        // alloc; the fade-out IR is retired on the ring after the fade (or
+        // opportunistically once done), never freed on the audio thread.
+        if (fading_ && !fade_mixer_.done()) {
+            // Everything the parallel render needs. All three hold for any fade
+            // try_swap_ir() actually starts — it only begins one when the scratch
+            // fits and the block sizes match, and the shared ring is always at
+            // least as long as the outgoing IR needs.
+            const bool can_render =
+                fade_scratch_.size() >= num_samples &&
+                static_cast<std::size_t>(fading_->block_size) == num_samples &&
+                history_->spectra.size() >= fading_->num_partitions;
+            if (can_render) {
+                render_ir(*fading_, *history_, fade_scratch_.data());
                 const std::size_t base = fade_mixer_.position();
                 for (std::size_t i = 0; i < num_samples; ++i) {
                     SampleType old_gain, new_gain;
                     fade_mixer_.gains_at(base + i, old_gain, new_gain);
                     output[i] = output[i] * new_gain + fade_scratch_[i] * old_gain;
                 }
-                fade_mixer_.advance(num_samples);
             }
-            // When the fade completes the fade-out IR is simply held (not
-            // rendered anymore); it is parked on the swapper's retire ring by the
-            // next try_swap_ir() — never freed on the audio thread here.
+            // Advance even when the render was skipped. A fade that cannot render
+            // must still COMPLETE: `fading_` is only retired once the mixer is
+            // done, and try_swap_ir() refuses every swap while a fade is running,
+            // so a fade that never finishes would wedge the convolver on the IR
+            // it happens to be holding.
+            fade_mixer_.advance(num_samples);
         }
+        // When the fade completes the fade-out IR is simply held (not rendered
+        // anymore); it is parked on the swapper's retire ring by the next
+        // try_swap_ir() — never freed on the audio thread here.
+
+        // Step the shared ring once, after every IR has read this block.
+        advance_input(*history_);
     }
 
-    /// Drop all overlap-save history — live and (if a crossfade is in flight)
-    /// fading — so the next block starts from silence rather than continuing a
-    /// previous stream. Also clears the torn-history flag and the block-size
-    /// violation count.
+    /// Drop the convolver's overlap-save input history so the next block starts
+    /// from silence rather than continuing a previous stream. There is one
+    /// history for every IR the convolver renders, so this clears a crossfade's
+    /// fade-out side along with the live one. Also clears the torn-history flag
+    /// and the block-size violation count.
     void reset() {
-        clear_history(state_.get());
-        partition_index_ = 0;
-        clear_history(fading_.get());
-        fading_partition_index_ = 0;
+        clear_history(history_.get());
         history_torn_ = false;
         block_size_violations_ = 0;
     }
@@ -278,24 +341,40 @@ public:
     }
 
 private:
-    // Overlap-save partitioned convolution for one IR state, advancing its own
-    // partition index. Shared by the live path (state_) and the parallel
-    // fade-out render (fading_). Caller guarantees num_samples == s.block_size
-    // and s has a loaded IR.
-    void render_state(ConvolverIrStateT<SampleType>& s,
-                      std::size_t& partition_index,
-                      const SampleType* input,
-                      SampleType* output,
-                      std::size_t num_samples) {
-        (void)num_samples;
-        for (int i = 0; i < s.block_size; ++i)
-            s.input_buffer[s.block_size + i] = {input[i], SampleType{0.0f}};
+    // Fold one input block into the shared history: copy it into the overlap
+    // buffer's upper half and take the forward FFT into the current ring slot.
+    // Called ONCE per processed block, before any IR renders.
+    static void capture_input(ConvolverInputHistoryT<SampleType>& h,
+                              FftT<SampleType>& fft,
+                              const SampleType* input) {
+        for (int i = 0; i < h.block_size; ++i)
+            h.overlap[h.block_size + i] = {input[i], SampleType{0.0f}};
+        auto& current_spectrum = h.spectra[h.write_pos];
+        std::copy(h.overlap.begin(), h.overlap.end(), current_spectrum.begin());
+        // The transform is a property of the FFT size, which every IR rendering
+        // against this history shares, so any loaded state's `fft` will do.
+        fft.forward(current_spectrum.data());
+    }
 
-        auto& current_spectrum = s.input_spectra[partition_index];
-        std::copy(s.input_buffer.begin(), s.input_buffer.end(),
-                  current_spectrum.begin());
-        s.fft->forward(current_spectrum.data());
+    // Slide the overlap buffer down and step the ring cursor. Called ONCE per
+    // processed block, after every IR has read this block — a crossfade renders
+    // twice from one history, so stepping per render would double-advance it.
+    static void advance_input(ConvolverInputHistoryT<SampleType>& h) {
+        std::copy_n(h.overlap.begin() + h.block_size, h.block_size,
+                    h.overlap.begin());
+        std::fill(h.overlap.begin() + h.block_size, h.overlap.end(),
+                  std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
+        h.write_pos = (h.write_pos + 1) % h.spectra.size();
+    }
 
+    // Multiply-accumulate one IR's partitions against the shared input history
+    // and write the block's time-domain result. Shared by the live path (state_)
+    // and the parallel fade-out render (fading_). Reads the history; never writes
+    // or advances it. Caller guarantees `s` has a loaded IR and that the ring is
+    // at least `s.num_partitions` long.
+    static void render_ir(ConvolverIrStateT<SampleType>& s,
+                          const ConvolverInputHistoryT<SampleType>& h,
+                          SampleType* output) {
         std::fill(s.accum.begin(), s.accum.end(),
                   std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
         // Input and IR are FFTs of real data, so every spectrum is Hermitian
@@ -304,10 +383,12 @@ private:
         // is independent — the upper half is reconstructed by conjugate symmetry
         // below instead of being multiply-accumulated, halving the dominant MAC.
         const int half = s.fft_size / 2;   // Nyquist bin; MAC bins [0, half]
+        const std::size_t capacity = h.spectra.size();
         for (std::size_t p = 0; p < s.num_partitions; ++p) {
-            const std::size_t idx =
-                (partition_index + s.num_partitions - p) % s.num_partitions;
-            const std::complex<SampleType>* in = s.input_spectra[idx].data();
+            // Partition p convolves with the input block of age p. `write_pos`
+            // holds the block being processed, so age p is p slots back.
+            const std::size_t idx = (h.write_pos + capacity - p) % capacity;
+            const std::complex<SampleType>* in = h.spectra[idx].data();
             const std::complex<SampleType>* ir = s.ir_spectra[p].data();
             for (int i = 0; i <= half; ++i) {
                 // Complex MAC as explicit float ops: the finite-value result of
@@ -330,36 +411,34 @@ private:
 
         for (int i = 0; i < s.block_size; ++i)
             output[i] = s.accum[s.block_size + i].real();
-
-        std::copy_n(s.input_buffer.begin() + s.block_size, s.block_size,
-                    s.input_buffer.begin());
-        std::fill(s.input_buffer.begin() + s.block_size, s.input_buffer.end(),
-                  std::complex<SampleType>{SampleType{0.0f}, SampleType{0.0f}});
-
-        partition_index = (partition_index + 1) % s.num_partitions;
     }
 
-    // Zero one state's overlap-save history. Null-tolerant so reset() can call
-    // it for both the live and the fading IR without branching per member.
-    static void clear_history(ConvolverIrStateT<SampleType>* s) {
-        if (!s) return;
+    // Zero the shared input history so the next block starts a new stream.
+    // Null-tolerant so reset() can call it on an unloaded convolver.
+    static void clear_history(ConvolverInputHistoryT<SampleType>* h) {
+        if (!h) return;
         constexpr std::complex<SampleType> kZero{SampleType{0.0f}, SampleType{0.0f}};
-        for (auto& spec : s->input_spectra)
+        for (auto& spec : h->spectra)
             std::fill(spec.begin(), spec.end(), kZero);
-        std::fill(s->input_buffer.begin(), s->input_buffer.end(), kZero);
+        std::fill(h->overlap.begin(), h->overlap.end(), kZero);
+        h->write_pos = 0;
     }
 
     std::unique_ptr<ConvolverIrStateT<SampleType>> state_;
-    std::size_t partition_index_ = 0;
+    // The input delay line, shared by every IR this convolver renders. Outlives
+    // any one IR: a swap replaces `state_`, never this. Its ring capacity is the
+    // high-water mark of partition counts seen since the last `load_ir()`, since
+    // growing it on the audio thread means adopting an incoming state's spare and
+    // shrinking it would mean throwing history away for nothing.
+    std::unique_ptr<ConvolverInputHistoryT<SampleType>> history_;
     // Set when process() is handed a block whose size does not match the loaded
     // IR partitioning. The next valid block resets before folding itself in.
     bool history_torn_ = false;
     std::uint64_t block_size_violations_ = 0;
 
-    // ── Crossfade state (item 2.1b; opt-in via set_crossfade) ─────────────────
+    // ── Crossfade state (opt-in via set_crossfade) ────────────────────────────
     std::unique_ptr<ConvolverIrStateT<SampleType>> fading_; // IR fading out (parallel render)
-    std::size_t fading_partition_index_ = 0;      // its own overlap-save cursor
-    signal::TransitionMixerT<SampleType> fade_mixer_; // shared click-free blend (item 2.1)
+    signal::TransitionMixerT<SampleType> fade_mixer_; // shared click-free blend
     std::size_t fade_samples_ = 0;                // configured fade length (0 = instant)
     TransitionCurve fade_curve_ = TransitionCurve::Smoothstep;
     std::vector<SampleType> fade_scratch_;        // parallel-render output, pre-sized off-RT

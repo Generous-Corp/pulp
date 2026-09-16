@@ -4,6 +4,7 @@ description: Local and cloud CI for Pulp — validate branches, create PRs, merg
 requires:
   scripts:
     - tools/local-ci/local_ci.py
+    - tools/scripts/ctest_nonruns.py
   tools:
     - gh
 ---
@@ -689,6 +690,90 @@ runner.environment == 'self-hosted'`. The second clause matters: when
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` is unset the leg falls back to hosted
 `macos-15`, which has no representative GPU and must not opt in.
 
+## A ctest SKIP is green, so a test that never ran reads as a passing one
+
+`SKIP_RETURN_CODE` is the right tool — a test needing a GPU, a device, an absent
+platform or a vendor SDK should skip rather than fail — but the required `macos`
+check reports the skip and the pass identically. A suite that has never executed
+once therefore looks exactly like a suite that executes and passes on every PR,
+and a real failure inside it is invisible for as long as the precondition is
+missing.
+
+`build.yml`'s non-Windows test step makes the non-runs readable without making
+them fail: `--output-junit` writes a report, and an `always()` observation step
+renders the `notrun` tests — name, skip reason, labels, and the skipping
+command's output — into the job summary, with the XML kept in the
+`ctest-logs-<key>` artifact on green runs too. Same shape as the GPU-adapter
+observation above: `continue-on-error: true`, records the answer, asserts
+nothing.
+
+The renderer is `tools/scripts/ctest_nonruns.py`, shared with local artifact
+inspection and registered in `docs/status/tools.yaml`. Pass an explicit CTest
+JUnit path and `--json` for bounded structured non-runs, counts, and the input
+digest. Pass `--baseline <known-good.xml>` to surface duplicate-safe status
+transitions and cases present in only one artifact. Same-name duplicates are
+compared as status-count groups, never guessed per case. CI publishes the v2
+JSON beside the original XML in each non-Windows `ctest-logs-<key>`. Exit 0 means the observation is
+readable, even when tests failed or skipped; exit 2 means unavailable/incomplete
+evidence, not a CTest verdict. Empty reports never claim that every test ran. No
+test is executed, provisioned, or selected by this helper.
+
+Four things bite when touching this:
+
+- **The `--output-junit` path must be ABSOLUTE.** With `--test-dir`, ctest
+  resolves a relative report path against the *build dir*, so
+  `--output-junit "$PULP_BUILD_DIR/ctest.junit.xml"` lands at
+  `$PULP_BUILD_DIR/$PULP_BUILD_DIR/ctest.junit.xml`. Nothing errors, and the
+  upload step's `if-no-files-found: ignore` swallows the miss — the observation
+  silently observes nothing.
+- **The report's status vocabulary is `run` / `fail` / `notrun` / `disabled`.**
+  A failing test ran; only `notrun` and `disabled` are non-runs. Filtering on
+  `status != "run"` files every failure under "did not run".
+- **`ctest -N` is the control for the flag itself.** It is the registered
+  population; the report's `tests=` is the attempted one. Any gap is created by
+  `-LE` label exclusions, `--exclude-regex`, or configure-time absence, which
+  remove a test from the report entirely — a strictly larger blind spot that a
+  JUnit report cannot see. No `<testcase>` entries provides no execution
+  evidence; it can also be the honest result of an empty selection.
+- **Never turn exit 77 into a failure to make a skip visible.** That is what
+  `tools/scripts/test_ios_gate_skip_contract.py` exists to prevent, after doing
+  it in the Build step took the iOS gate out. Visibility and enforcement are
+  separate changes; make the skip readable first, and promote only against a
+  measured population.
+
+### Provisioning a skipped dependency is a SEPARATE decision from reporting it
+
+Making a skip visible is safe. Removing the skip is not, and the two must not
+ride in one change — the second can redden the required gate for the whole
+fleet while the first reddens nothing.
+
+`pulp-rust-gpu-trace-analysis-integration` is the worked example. It is the only
+registration that runs the GPU trace-analysis acceptance tests, and it skips
+whenever the pinned `trace_processor_shell` is absent, which is always: nothing
+in `.github/**` or `.shipyard/**` installs it (0 files mention
+`PULP_TRACE_PROCESSOR`, `trace fetch`, or `trace_processor_shell`, against a
+control of 79 workflow files matching `runs-on`).
+
+One measured run with a `pulp trace fetch` step added established the facts,
+and they are worth keeping even though the step was withdrawn:
+
+- **The Studios can reach the download.** `pulp trace fetch` returned success on
+  `studio-pulp-gate-01`. Network access was never the blocker.
+- **29 acceptance tests execute once provisioned; 28 pass.**
+- **One fails**: `untagged_tooling_failure_cannot_hide_behind_a_tagged_healthy_probe`,
+  and it fails on `main` independently of any branch. So provisioning the
+  dependency turns the required `macos` gate red for every PR until that test's
+  probe semantics are settled.
+
+Hence: land the reporting, hold the provisioning until the failure it exposes
+has an owner. A skip that is *reported* costs nothing; a skip that is *removed*
+spends the fleet's merge capacity on somebody else's open question.
+
+Note when reasoning about persistence: the required macOS gate is an
+**ephemeral** lane (`tools/scripts/runner_topology.json` lanes[0]), a Tart clone
+destroyed after one job, so nothing a job writes to `$HOME` — a fetched
+`~/.pulp/tools/...` included — survives into the next run.
+
 ## An opt-in CMake flag hides tests more completely than any label
 
 A `LABELS "slow"` exclusion at least leaves the test visible in a ctest listing.
@@ -809,6 +894,95 @@ ship a `[[deprecated]]` alias so downstream keeps compiling — lines containing
 
 `--selftest` proves the gate can fail (8 cases). A gate that cannot fail is not
 a gate.
+
+## Gate: gpu-ledger-sentinel (`tools/scripts/gpu_ledger_sentinel_check.py`)
+
+Rejects a push whose `docs/status/gpu-vellum-handoff.yaml` or
+`docs/validation/gpu-handoff-provenance/receipt.json` still contains the literal
+`regenerate-me`. That value is written by the `pulp-gpu-ledger` merge driver,
+which resolves the collision those two generated files produce on every branch
+that outlives a main move. The repair is one command, and it is in the failure
+text:
+
+```sh
+python3 tools/scripts/gpu_handoff_provenance.py resolve   # regenerate + decide + prove the binding
+```
+
+`resolve` is the preferred form: it regenerates pinned to `HEAD` (a commit that
+already exists — the receipt names its own source commit, so pinning to the one
+the write is about to create cannot converge), then decides whether regeneration
+actually changed what HEAD committed (`MOVED`), left it alone with the receipt
+already binding (`CHURN`, writes nothing), or left it alone with the receipt
+bound to other bytes (`REBIND`, receipt only) — and refuses rather than guessing
+on anything else. It reports `BINDS:` with a mutated-ledger control. The
+lower-level `write --source-commit HEAD --receipt` is what it performs.
+
+**This gate also reports an unregistered driver.** `.gitattributes` names
+`pulp-gpu-ledger`; Git resolves that name against *local* config and does not
+error on one it cannot resolve — it text-merges in silence. A checkout
+bootstrapped before the driver landed therefore has working automation that is
+inert, with the attribute still in place to make it look installed. The repair
+is `tools/scripts/install-githooks.sh`, which is idempotent.
+
+**Why an invalid value rather than a merged one.** A stale-but-ancestral pin
+passes the always-on provenance tier, so any driver that computes a plausible
+merge — `merge=ours` included — produces something Git commits in silence. The
+sentinel is chosen so that nothing accepts it.
+
+**Why it needed its own gate.** The two guards that look closest both miss it,
+and each misses it for a structural reason rather than an oversight:
+
+* `gpu_handoff_pin_freshness.py` fires when a pinned path changes and the ledger
+  does **not**. A sentinel merge changes the ledger, so it reads the sentinel as
+  the refresh it was waiting for.
+* `conflict_marker_check.py` looks for `<<<<<<<`. The driver's entire purpose is
+  that there are none.
+
+Which left CI twenty minutes downstream — the roundtrip the driver exists to
+remove.
+
+**It runs from the pre-push hook as well as `gates.sh`, and that distinction is
+load-bearing.** `gates.sh` is run by convention; it is not invoked by
+`.githooks/pre-push`, and `.shipyard/config.toml [validation.gates]` runs its own
+explicit script list rather than the file. A rule wired only into `gates.sh`
+therefore holds only for whoever remembered to run it — which is why
+`gpu_handoff_pin_freshness.py` (gate 6b2), wired that way, does not actually gate
+a push today.
+
+## A PR you opened with `shipyard pr` is not automatically code-reviewed
+
+Codex's automatic review fires on PR open only for PRs whose author is a GitHub
+*User*. `shipyard pr` opens PRs as `shipyard-local[bot]`, an App — so the path
+this skill tells you to use is exactly the path Codex skips. Human-opened PRs
+get reviewed; yours do not, unless something asks.
+
+Codex states the trigger in its own summary comment: the "Review trigger" cell
+reads `PR opened` on a User-authored PR and `Manual request` on an App-authored
+one. That cell is the fastest way to tell which kind of review a PR received.
+
+**Asking works, including from a bot.** A `@codex review` comment gets a real
+review on an App-authored PR whatever identity posts it. Codex answers a bot
+commenter with "create a Codex account", which reads like a refusal and is not —
+the review still runs. `.github/workflows/codex-review-request.yml` automates
+that ask with `GITHUB_TOKEN` (never a user PAT: a same-repo `pull_request`
+evaluates the workflow from the PR's own revision, so a secret there is readable
+by the unreviewed PR it runs on) and verifies a review completed for the head
+commit. If a PR slipped past it, comment `@codex review` yourself.
+
+**Do not read a summary comment as "reviewed", and do not read "no comment" as
+"no findings".** The summary comment and an EYES reaction appear the moment a
+review is requested, so they prove only that something was asked; a clean review
+leaves a THUMBS_UP and no prose at all. `tools/scripts/codex_review_signal.sh`
+requires `**Completed**` bound to the current head, separates completed from
+requested-but-unfinished from never-asked, and exits 2 (not 1) when the API is
+unreachable, so an outage cannot masquerade as an unreviewed PR.
+
+**A completed review is per-commit.** A review of an earlier push says nothing
+about the code now on the branch, which is why the check binds to the head SHA
+rather than accepting any historical signal on the PR — and why the workflow
+runs on `synchronize` too. On `opened` alone, the commit reviewed and the commit
+merged are different ones on any PR that gets rebased, which under up-to-date
+branch protection is most of them.
 
 ## Pre-flight: plugin ↔ CLI skew check
 
@@ -943,7 +1117,10 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    not your change) vs REGRESSED (green on main, red here). Advisory +
    pre-existing red (e.g. a known-broken sanitizer lane on main) does NOT block
    the merge and is not yours to fix; only a REQUIRED + REGRESSED row needs
-   action. This alone avoids chasing main-side breakage. Its check-run query
+   action. This alone avoids chasing main-side breakage. A cancelled or
+   timed-out lane gets its own **NO-EVIDENCE** verdict, not red: it produced no
+   verdict at all, so rerun it rather than reading it, and a required
+   NO-EVIDENCE row withholds the all-clear instead of counting as a pass. Its check-run query
    must keep `gh api --paginate --slurp`, `filter=latest`, and `per_page=100`:
    bare `--paginate` concatenates page documents and breaks its single-document
    JSON decoding past 100 check runs.
@@ -1048,6 +1225,54 @@ measured baseline as a must-stay-quiet case and will fail a tuning that
 re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
+
+### The same sweep also answers "is every host still in it" — a different question
+
+Queue age is about the **lane**. It goes quiet, correctly, while a lane is
+being served — by anyone. On 2026-09-15 one macOS host stopped serving at
+10:02Z and did not serve again for 7h06m; its two peers absorbed the load, so
+every queue-age sweep in that window was right to say nothing, and six monitors
+read green. Three of them had died of the same cause as the host they watched.
+
+So the sweep also groups the required `macos` job's `runner_name` by host prefix
+(`m1-`, `m5-`, `studio-` — each host's `TARTCI_RUNNER_NAME_PREFIX`) and reports
+`host_stopped_contributing`, `unknown_fleet_host`, `sole_host_for_class`,
+`contribution_guard_unconfigured`, `sweep_cadence`. It opens its **own**
+tracking issue. A silent host is not a stalled queue; filing it as one sends
+the next reader to audit a queue that was working the whole time.
+
+This is *not* the label census the section above forbids, and the difference is
+the demand floor: a host is only called silent while the fleet demonstrably
+served at least 3 `macos` jobs in the same window. Below that there was no work
+to distinguish an idle host from a dead one. Remove that floor and you have
+rebuilt the census in a new costume — the test suite fails 3 cases if you do.
+
+**Three measured numbers worth knowing before you touch this.**
+
+- **Observable history is ~2.3 h, not 3 h.** `MAX_RUNS_PER_STATUS` caps each
+  status listing at 60 runs, and on this repo the `completed` listing is
+  *always* truncated: measured 2026-09-15, those 60 runs spanned 2.35 h. Any
+  fixed window wider than that is a window the collector can never fill. The
+  first draft treated the truncation as an evidence gap, which made the check
+  permanently degraded, permanently unable to alarm, and permanently green.
+  The cutoff is now `max(requested, oldest observed)` and every finding reports
+  the span it was actually computed over.
+- **One sweep costs ~245 API calls and ~4 minutes.** 4 run listings plus one
+  jobs call per observed run. `GITHUB_TOKEN` allows 1000 req/hr/repo, so ~4
+  sweeps an hour is the ceiling. **Do not add a `workflow_run` trigger** to
+  raise the cadence: the sweep would start failing its own API calls, which it
+  correctly reads as incomplete evidence and suppresses alarms on — a trigger
+  that silently converts a detection guard into a quiet one. Raising the cadence
+  needs the per-run jobs fan-out reduced first.
+- **`*/30` is delivered as roughly `*/200`.** Measured twice on 2026-09-15: 193
+  and 201 minutes between sweeps. Every detection latency here is bounded by
+  that number, not by the cron expression. Each sweep now reports the gap since
+  its predecessor as `sweep_cadence`, so the degradation is visible in the run
+  summary instead of being invisible for a week.
+
+Honest limit: a sweep that never runs cannot report its own absence. What is
+visible then is that both tracking issues stop being updated and the workflow's
+run list goes quiet in public.
 
 ### Gotcha: a `*_RUNS_ON_JSON` variable read WITHOUT `fromJSON` becomes one literal label
 
@@ -2064,6 +2289,22 @@ bisectable.
   `Skill-Update: skip skill=ci reason="ceiling bump only"` trailer on the **tip**
   commit (note: a later `chore: bump versions` commit from `shipyard pr` displaces
   the tip, so updating this SKILL is the more robust path).
+- **`CLAUDE.md` is a tracked hotspot, and it is the one nobody expects.** Every
+  other entry is source; this one is prose an agent edits casually. It is
+  always-resident context, so a line added there is re-read by every session on
+  every turn, and the file already sits far past the client's context budget —
+  which is why the ceiling exists. Adding prose to it now fails the required
+  `Enforce version & skill sync` check with `grows a frozen hotspot <n> -> <m>`.
+  That is the gate working: either make the edit net-neutral by removing as much
+  as you add, or declare the growth with a
+  `Hotspot-Grow: CLAUDE.md reason="..."` trailer on any commit in the range. The
+  skills table and the tools digest inside it are GENERATED blocks — regenerate
+  them with their `--write` commands rather than hand-editing, or the next
+  `--check` reverts your edit anyway. Note the consequence: **adding a skill or a
+  registered tool grows the generated block by a row**, so that change needs the
+  `Hotspot-Grow: CLAUDE.md` trailer too. That is the intended price — a new row
+  is read by every session forever — not a gate misfiring.
+
 - **Inspector hotspots are frozen too.** `hotspot_size_guard.json` watches newly
   added `inspect/**` files and freezes the current inspector overlay, window,
   domain handler, and tweak-store hotspots. When an inspector extraction shrinks
@@ -4737,10 +4978,15 @@ runs on the local M1s or overflows to github-hosted `macos-15`. The rule:
 **The probe must count only macOS Build-and-Test jobs that are RIGHT NOW
 `status == "in_progress"` on a local M1** — a job whose `status` is
 `in_progress` *and* whose `labels` array contains the local self-hosted
-label (`PULP_LOCAL_MAC_RUNNER_LABEL`, default `pulp-gate-fast`). The probe
-label must match the required selector's fast runner class; otherwise an idle
-rollback-only M1 can suppress overflow for work it cannot serve. Everything
-else counts 0:
+label (`PULP_LOCAL_MAC_RUNNER_LABEL`, default `pulp-gate-fast`). That probe
+label must name a label the gate actually dispatches, and today it does not:
+`build.yml` strips `pulp-gate-fast` and appends one event-class label, so a
+dispatched `macos` job never carries it and the probe counts zero (measured
+2026-09-15: 0 of 4 consecutive `macos` jobs carried `pulp-gate-fast`, 4 of 4
+carried `pulp-build-pr-head`). It is inert while overflow is the `local-only`
+sentinel; re-tune it as part of re-enabling overflow. Do not recover the older
+rationale that an idle *rollback-only* M1 would otherwise suppress overflow —
+M1 serves the required gate on equal terms. Everything else counts 0:
 
 - A `queued` Build-and-Test run has dispatched nothing — never enumerate
   queued runs at all; the probe lists only `status=in_progress` runs.
@@ -5209,6 +5455,27 @@ build's canonical inventory, then run
 `python3 tools/scripts/test_changed_surface_policy.py --build-dir build`.
 Otherwise the full suite can finish almost entirely green and fail only at the
 inventory self-test, forcing a needless second admission cycle.
+
+`--build-dir` is the whole verification. Run bare, that script skips inventory
+validation entirely and still reports `Ran 28 tests ... OK` in well under a
+second against a contract that is provably stale — a green run proving only
+that the policy tables parse. Treat a sub-second pass as "not yet verified",
+and confirm the validating mode can fail: before re-pinning, the same command
+against the same build directory must report `inventory contract drift` naming
+the stale fields. A refresh whose validating run was never seen red has not
+been checked.
+
+Deriving the inventory needs a complete build, not a configure: discovery
+registers per test case by executing the built binaries, so an incomplete tree
+yields a nonzero `placeholder_count` and junk counts. Verify
+`placeholder_count == 0` before trusting any number. `CMAKE_BUILD_TYPE` also
+feeds the toolchain digest, so the refresh must use the `build_flags` pinned in
+`.shipyard/config.toml` (Debug) — a Release tree cannot reproduce the contract.
+In a fresh worktree note that `setup.sh` configures the shared `build/`
+directory as Release with examples OFF and then runs the entire suite, so
+running it first both costs a full test cycle and leaves the cache wrong for
+this purpose; reconfigure explicitly with the pinned flags afterward and
+confirm the cache reads `Debug` before measuring.
 
 Merge the current target branch before deriving that inventory. A configured
 tree from a stale PR head can be internally consistent and still omit tests
@@ -5867,6 +6134,27 @@ trails the C++ surface because the Python bindings ship one milestone behind
 on PyPI; the C++ raster harness is the source of truth for goldens. The
 workflow runs that Linux container and also runs the same pytest smoke on
 macOS arm64 so the future canonical raster lane has a platform signal.
+
+**Neither smoke job builds C++.** `linux-docker` and `macos-local` are pytest
+lanes; only `layout-snapshots` builds `pulp-test-visual`, and it is macOS-only.
+So a golden that must be verified on BOTH hosts cannot be produced by
+`pulp::view::render_to_png`: that call resolves to CoreGraphics on Apple and to
+Skia elsewhere, and the Linux lane has no Pulp build to call it with. The one
+rasterizer that executes on both is the pinned `skia-python` wheel, which is
+what `tools/harness/visual/raster.py` uses for fixtures declaring
+`"driver": "declarative_raster"`. Adding a C++ raster to the Linux lane means
+building Pulp plus Skia inside the container; budget for that before proposing
+it.
+
+**The cross-host byte-identity claim is measured, not assumed.** Both smoke jobs
+run `tools/harness/visual/tests/test_raster_golden.py` as a named step (not just
+as part of the directory sweep) and both publish the digest they computed via
+`python -m tools.harness.visual.raster --fixture ...` with `if: always()`. The
+committed golden was recorded on `darwin-arm64` and confirmed on
+`darwin-x86_64`; the operating-system axis was unproven when it landed. A Linux
+mismatch there is a real result, not a flake: record the Linux digest as a
+per-platform expectation rather than regenerating the shared golden from
+whichever host is currently red.
 
 **Pin-drift guards (manifest is source of truth).** The Skia/V8 pin data is
 hand-mirrored into several files; two mirrors are *tooling-consumed*, so a
@@ -7463,6 +7751,15 @@ drift; humans run `shipyard update` to apply.
   lacks `/opt/homebrew/bin` and reports Homebrew tools as missing — this
   produces a FALSE "tart is not installed" census result. Use
   `ssh host 'zsh -lc "…"'` for any host census.
+  **Better: do not hand-roll the census.** `python3 tools/fleet/probe_remote.py
+  --hosts m1,m3 shipyard tart` runs under a login shell, resolves an executable
+  FILE by scanning PATH (never `command -v`, which answers with the shell's
+  opinion — `ghapp`/`shipyard` are *functions* from `~/.config/whence/hook.sh`
+  and resolve regardless of PATH), prints *where* each binary is plus its
+  version, and exits **3** rather than claiming absence when the connection,
+  the shell, or one of its own controls fails. This rule was written here and
+  still produced a false `shipyard: MISSING` on m3 twice in two days, which is
+  why it is now a tool and not only a sentence.
 - **`TART_HOME` is per-host BY DESIGN — never default it.** Every Pulp VM tool
   now resolves it through `tools/ci/lib/tart-home.sh`: explicit environment,
   then the host profile's `vm_home`, otherwise a loud error. Do not restore a
@@ -8861,3 +9158,33 @@ ubuntu-24.04 ships without the compiler-rt realtime runtime, so
 `-fsanitize=realtime` is rejected at configure time. The lane is advisory and
 dispatch-only for that reason; fixing the variable moves the failure from the
 install step to the configure step and nothing else.
+
+## Diff-scoped clang-format gate (advisory) — touched lines only
+
+`tools/scripts/format_changed.sh --check --base <ref>` judges only the hunks a
+branch changes; the tree itself does not round-trip under `.clang-format`
+(measured 2026-09-14: clang-format 21 reflows 3,743 of 4,415 committed C++
+files, byte-identical across Xcode / CommandLineTools / Homebrew `llvm@21`;
+v19 differs on two), so a whole-file check would fail every PR and a
+whole-tree reformat is a separate decision. Existing debt is grandfathered.
+
+Three surfaces run the same script, all **advisory** today:
+
+| Surface | Invocation | Exit 1 (verdict) | Exit 3 (no clang-format) |
+|---|---|---|---|
+| `.githooks/pre-push` | `run_gate_captured bash "$FMT" --check --base "$BASE"` | `ADVISORY` line, push allowed; `PULP_ENFORCE_PREPUSH_FORMAT=1` makes it `fail=1` | `SKIPPED … INFRASTRUCTURE`, push allowed |
+| `tools/scripts/gates.sh` | same, unsupervised | same knob | same skip |
+| `.github/workflows/format-changed-check.yml` (`Format (changed lines)`, hosted `ubuntu-latest`, path-filtered to C++ sources) | pip `clang-format==21.1.8`, `--base origin/<base_ref>` | job fails with `::error title=Formatting` | job fails with `::error title=INFRASTRUCTURE` — never worded as a formatting verdict |
+
+The workflow is **not** in `required_status_checks`; it reports. Promote it
+by adding the check to branch protection and flipping the hook default only
+after open branches are clean on touched lines — at wiring time 4 of 6
+sampled in-flight PRs would have failed (26–355 diff lines each), which is
+why both surfaces start advisory. Measured cost: 1.8–3.9 s per branch in
+the hook (the diff-cover build is the slow gate, not this).
+
+Exit 3 is deliberately an *infrastructure* failure with its own wording on
+every surface: a gate that reports "no binary" as "misformatted" is the
+false-verdict class this repo keeps paying for. The wiring — exit codes kept
+apart, the PyPI pin, hosted runner — is asserted by
+`tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).

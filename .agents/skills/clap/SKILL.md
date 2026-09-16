@@ -480,14 +480,71 @@ CLAP wiring (the most involved of the four adapters):
    and, if either is set, calls `host->request_callback()` to ask
    the host for a main-thread callback.
 3. `clap_on_main_thread()` then drains via
-   `consume_latency_changed_flag()` / `consume_tail_changed_flag()`
-   and calls `clap_host_latency->changed()` /
-   `clap_host_tail->changed()`.
+   `consume_latency_changed_flag()` / `consume_tail_changed_flag()`.
+   Tail publishes straight away as `clap_host_tail->changed()`.
+   **Latency does not** — see below.
 
 The peek-vs-consume split exists specifically for CLAP — VST3 / AU
 v3 / AU v2 drain in-line because their host APIs are safe from the
 audio callback path. Don't collapse the two helpers into one if you
 add another adapter that needs the same edge.
+
+#### Latency needs a RESTART, not just `changed()`
+
+`clap/ext/latency.h` carries two requirements, and only reading the
+first line of the comment gets you one of them:
+
+```c
+// Tell the host that the latency changed.
+// The latency is only allowed to change during plugin->activate.
+// If the plugin is activated, call host->request_restart()
+// [main-thread & being-activated]
+void(CLAP_ABI *changed)(const clap_host_t *host);
+```
+
+So `changed()` is **not** a general-purpose "my latency moved" push.
+It is annotated `[main-thread & being-activated]` — legal only from
+inside `clap_activate()` — and the reported latency may only move in
+that same window. An **active** plugin that merely calls `changed()`
+is telling the host a number the host is not sanctioned to act on: a
+strict host ignores it and stays on the stale value forever, a lenient
+one re-compensates mid-session against a latency the plugin is not yet
+allowed to have. Both misalign plugin-delay compensation silently.
+
+The adapter therefore branches on activation state:
+
+| State | What happens |
+|---|---|
+| **Active** | `clap_host->request_restart()`, then publish `changed()` from inside the `clap_activate()` that results |
+| **Inactive** | Publish `changed()` immediately — nothing is rendering, no compensation is in force, and the next activate re-reads `get()` regardless |
+
+Three invariants that are easy to break:
+
+- **`is_active` is adapter state, not processor state.** `PulpClapPlugin::is_active`
+  is set at the end of `clap_activate()` and cleared first thing in
+  `clap_deactivate()`. There is no processor-side equivalent.
+- **`latency_restart_pending` coalesces AND defers, and must survive
+  `clap_deactivate()`** — the deactivate it lives across is the one it
+  asked for. A host may take arbitrarily long to honour a restart or
+  decline it entirely, so one outstanding request has to cover any
+  number of further edges; re-asking per edge is a request storm.
+- **Publish after `prepare()`, at the END of `clap_activate()`.** The
+  host answers `changed()` by calling `clap_plugin_latency->get()`;
+  publish before the processor is prepared and it reads the stale value
+  back, which is the original bug wearing a restart.
+
+`clap_host->request_restart` is `[thread-safe]` per `clap/host.h`, so a
+direct audio-thread call would be legal — but the edge is routed through
+the existing `request_callback` → `clap_on_main_thread()` hand-off anyway,
+because `changed()` is *not* thread-safe and keeping both halves on one
+path keeps the ordering obvious.
+
+**The other three formats have no equivalent gap.** VST3 already calls
+`restartComponent(kLatencyChanged)`, which is that API's deactivate/
+reactivate request. AU v2 (`PropertyChanged(kAudioUnitProperty_Latency)`)
+and AU v3 (KVO on `latency`) expose latency as an observable property
+with no restart precondition, so an in-line notification is complete
+there. CLAP is the only one of the four whose spec names a restart.
 
 ### Preset loading
 

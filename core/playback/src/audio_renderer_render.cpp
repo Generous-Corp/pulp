@@ -122,9 +122,11 @@ long double musical_phase_source_position(const AudioClipRendererProgram& clip,
     const auto tick_start = static_cast<long double>(clip.musical_tick_start.value);
     const auto tick_span = static_cast<long double>(clip.musical_tick_end.value) - tick_start;
     const auto phase = std::clamp((document_tick - tick_start) / tick_span, 0.0L, 1.0L);
+    const auto source_end = clip.source_frame_phase_end > 0.0
+                                ? static_cast<long double>(clip.source_frame_phase_end)
+                                : static_cast<long double>(clip.source_frame_count);
     return static_cast<long double>(clip.source_frame_offset) +
-           phase * (static_cast<long double>(clip.source_frame_count) -
-                    static_cast<long double>(clip.source_frame_offset));
+           phase * (source_end - static_cast<long double>(clip.source_frame_offset));
 }
 
 struct SourceReadPoint {

@@ -46,6 +46,7 @@ class SignalGraph::PreparedTopologyEdit {
     PreparedTopologyEdit& operator=(const PreparedTopologyEdit&) = delete;
 
     bool register_custom_node_type(CustomNodeType type);
+    bool register_custom_node_type(CustomNodeType type, SampleKernelDescriptor sample_kernel);
     bool unregister_custom_node_type(std::string_view type_id, int version);
     std::size_t prune_unused_custom_node_types();
     std::size_t custom_node_type_count() const;
@@ -98,6 +99,7 @@ class SignalGraph::PreparedTopologyEdit {
 
   private:
     friend class SignalGraph;
+    friend bool register_builtin_sample_region_types(PreparedTopologyEdit& edit);
     explicit PreparedTopologyEdit(SignalGraph& owner);
     bool base_is_current_locked_() const;
     bool is_new_node_(NodeId id) const;

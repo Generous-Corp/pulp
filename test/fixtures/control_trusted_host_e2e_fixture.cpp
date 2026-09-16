@@ -1,3 +1,5 @@
+#include "support/control_manifest_fixtures.hpp"
+
 #include <pulp/inspect/control_executor_slot.hpp>
 #include <pulp/inspect/control_host_connection.hpp>
 #include <pulp/inspect/control_host_preflight.hpp>
@@ -23,9 +25,8 @@ namespace {
 const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
-const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_977f4291b49aa5ae9098edae5b310bb827a654a4a28c0ddc8a05251abcf9d904_"
-    "V1";
+const volatile pulp::test::ControlManifestMarker kManifest =
+    pulp::test::kTrustedHostE2eFixtureMarker;
 const volatile char kSessionDescribe[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
 const volatile char kSessionControl[] = "PULP_INSPECT_CAPABILITY_SESSION_CONTROL_V1";
 const volatile char kTraceControl[] = "PULP_INSPECT_CAPABILITY_TRACE_SESSION_CONTROL_V1";
@@ -43,7 +44,7 @@ std::shared_ptr<InspectorMainThreadRpc> inline_rpc() {
 
 int main(int argc, char** argv) {
     if ((argc != 3 && argc != 4) || kStandalone[0] != 'P' || kShipping[0] != 'P' ||
-        kProfile[0] != 'P' || kManifest[0] != 'P' || kSessionDescribe[0] != 'P' ||
+        kProfile[0] != 'P' || kManifest.bytes[0] != 'P' || kSessionDescribe[0] != 'P' ||
         kSessionControl[0] != 'P' || kTraceControl[0] != 'P')
         return 64;
 

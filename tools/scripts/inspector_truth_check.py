@@ -9,14 +9,54 @@ import pathlib
 import re
 
 
+# Tolerate a newline anywhere the macro allows whitespace. `control_manifest.cpp`
+# already wraps every operation invocation after the open paren, and a 150-column
+# registry line reflows into exactly that shape under this repo's 100-column
+# clang-format config, so a regex anchored on `(` + symbol reads a reflowed
+# capability as absent rather than as itself.
 CAPABILITY_RE = re.compile(
-    r'PULP_INSPECT_CAPABILITY\(\w+,\s*"([^"]+)",\s*"([^"]+)",'
-    r'\s*\w+,\s*\w+,\s*\w+,\s*\w+,\s*([01]),\s*([01]),'
+    r'PULP_INSPECT_CAPABILITY\(\s*(\w+)\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,'
+    r'\s*\w+\s*,\s*\w+\s*,\s*\w+\s*,\s*\w+\s*,\s*([01])\s*,\s*([01])\s*,'
+)
+# The count control for the regex above: every invocation the registry spells,
+# counted by a rule simple enough that it cannot share the parser's blind spot.
+# The macro's own documentation comment names it mid-line, so anchoring to the
+# start of a line excludes the prose without excluding a wrapped invocation.
+CAPABILITY_INVOCATION_RE = re.compile(
+    r"^[ \t]*PULP_INSPECT_CAPABILITY\s*\(", re.MULTILINE
+)
+OPERATION_INVOCATION_RE = re.compile(
+    r"^[ \t]*PULP_(?:RECEIPT_|PRODUCED_ARTIFACT_)?OPERATION\s*\(", re.MULTILINE
 )
 CAPABILITY_ROW_RE = re.compile(
     r"^\|\s*(?:`[^`]+`\s+\()?`([^`]+)`\)?\s*\|\s*"
-    r"(yes|no)\s*\|\s*(yes|no)\s*\|",
+    r"(yes|no)\s*\|\s*(yes|no)\s*\|\s*(.*?)\s*\|\s*$",
     re.MULTILINE,
+)
+OPERATION_RE = re.compile(
+    r'PULP_(RECEIPT_|PRODUCED_ARTIFACT_)?OPERATION\(\s*'
+    r'([A-Za-z][A-Za-z0-9_]*)\s*,\s*"([^"]+)"'
+)
+RESULT_KIND_RE = re.compile(r'"([a-z][a-z0-9-]*)"\s*\)')
+OPERATION_REGISTRY_RE = re.compile(
+    r"constexpr auto kControlOperations\s*=.*?^    \}\);$", re.DOTALL | re.MULTILINE
+)
+OPERATION_ROW_RE = re.compile(
+    r"^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s+\(`([^`]+)`\)\s*\|\s*`([^`]+)`\s*\|\s*$",
+    re.MULTILINE,
+)
+CAPABILITY_DEFINITIONS_PATH = "inspect/include/pulp/inspect/capability_definitions.inc"
+SHIPPING_CMAKE_PATH = "tools/cmake/PulpControlShipping.cmake"
+CONTROL_MANIFEST_PATH = "inspect/src/control_manifest.cpp"
+CAPABILITY_DOC_PATH = "docs/reference/development-inspector-capabilities.md"
+GENERATOR_INVOCATION = "python3 tools/scripts/inspector_truth_check.py --write"
+UNDOCUMENTED_REALITY = "_Undocumented: describe the current reality for this capability._"
+
+CapabilityDefinition = collections.namedtuple(
+    "CapabilityDefinition", "symbol legacy_id contract_id observe develop"
+)
+ControlOperation = collections.namedtuple(
+    "ControlOperation", "operation_id capability_symbol result_kind"
 )
 MCP_TOOL_RE = re.compile(
     r'"name":"(pulp_(?:inspect|motion|trace)_[^"]+)",'
@@ -351,6 +391,302 @@ def public_surface_errors(root: pathlib.Path) -> list[str]:
             errors.append(f"trace dispatch restores retired authority path: {retired}")
     return errors
 
+
+def control_operation_registry_text(text: str) -> str:
+    """Narrow ``control_manifest.cpp`` to the frozen registry array.
+
+    The macro definitions above the array spell a parameter list rather than a
+    quoted slug, and code below it can carry a bare result-kind string, so both
+    the parser and its count control read the same bounded span.
+    """
+    registry = OPERATION_REGISTRY_RE.search(text)
+    return registry.group(0) if registry is not None else text
+
+
+def registry_parse_errors(
+    *, label: str, path: str, parsed: int, spelled: int
+) -> list[str]:
+    """Reject a parse that saw fewer entries than the source spells.
+
+    Comparing against zero only catches a reader pointed at the wrong file. The
+    failure that actually ships is partial: one entry reflowed out of the
+    parser's reach while the rest still match, which every downstream assertion
+    then passes because the entry it would have judged is simply absent. The
+    spelled count is the control, so the assertion is a comparison against an
+    expected number rather than against emptiness.
+    """
+    if spelled == 0:
+        return [
+            f"{path} spells no {label}; this check is not measuring that file"
+        ]
+    if parsed != spelled:
+        return [
+            f"{path} spells {spelled} {label} but the parser read {parsed}; "
+            f"{spelled - parsed} entry/entries are shaped in a way this check "
+            "cannot see and would be judged by nothing"
+        ]
+    return []
+
+
+def load_capability_definitions(
+    root: pathlib.Path,
+) -> tuple[list[CapabilityDefinition], list[str]]:
+    """Parse the capability registry and prove the parse saw every invocation."""
+    text = (root / CAPABILITY_DEFINITIONS_PATH).read_text(encoding="utf-8")
+    definitions = parse_capability_definitions(text)
+    errors = registry_parse_errors(
+        label="capability definitions",
+        path=CAPABILITY_DEFINITIONS_PATH,
+        parsed=len(definitions),
+        spelled=len(CAPABILITY_INVOCATION_RE.findall(text)),
+    )
+    return definitions, errors
+
+
+def load_control_operations(
+    root: pathlib.Path,
+) -> tuple[list[ControlOperation], list[str]]:
+    """Parse the control registry and prove the parse saw every invocation."""
+    text = (root / CONTROL_MANIFEST_PATH).read_text(encoding="utf-8")
+    operations = parse_control_operations(text)
+    errors = registry_parse_errors(
+        label="control operations",
+        path=CONTROL_MANIFEST_PATH,
+        parsed=len(operations),
+        spelled=len(
+            OPERATION_INVOCATION_RE.findall(control_operation_registry_text(text))
+        ),
+    )
+    return operations, errors
+
+
+def parse_capability_definitions(text: str) -> list[CapabilityDefinition]:
+    """Read the canonical capability inventory out of the registry include."""
+    return [
+        CapabilityDefinition(
+            symbol=symbol,
+            legacy_id=legacy_id,
+            contract_id=contract_id,
+            observe=observe == "1",
+            develop=develop == "1",
+        )
+        for symbol, legacy_id, contract_id, observe, develop in CAPABILITY_RE.findall(text)
+    ]
+
+
+def parse_control_operations(text: str) -> list[ControlOperation]:
+    """Read every typed operation the frozen control registry declares.
+
+    Scanning is bounded to the registry array. The macro definitions above it
+    are not invocations -- they spell the parameter list rather than a quoted
+    slug -- and bounding the tail keeps a plain operation's result kind from
+    being read out of unrelated code below the array.
+    """
+    text = control_operation_registry_text(text)
+    matches = list(OPERATION_RE.finditer(text))
+    operations: list[ControlOperation] = []
+    for index, match in enumerate(matches):
+        macro_kind, symbol, slug = match.groups()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        if macro_kind == "RECEIPT_":
+            result_kind = "receipt"
+        elif macro_kind == "PRODUCED_ARTIFACT_":
+            result_kind = "artifact"
+        else:
+            trailing = RESULT_KIND_RE.findall(text[match.end():end])
+            result_kind = trailing[-1] if trailing else "unknown"
+        operations.append(
+            ControlOperation(
+                operation_id=f"dev.pulp.{slug}@1",
+                capability_symbol=symbol,
+                result_kind=result_kind,
+            )
+        )
+    return operations
+
+
+def _capability_cell(definition: CapabilityDefinition) -> str:
+    return f"`{definition.contract_id}` (`{definition.legacy_id}`)"
+
+
+def render_capability_matrix(
+    definitions: list[CapabilityDefinition], reality: dict[str, str]
+) -> str:
+    """Emit the profile-membership matrix; hand-written reality is preserved."""
+    lines = [
+        "| Canonical capability (legacy spelling) | `observe` | `develop` | Current reality |",
+        "|---|---:|---:|---|",
+    ]
+    for definition in definitions:
+        observe = "yes" if definition.observe else "no"
+        develop = "yes" if definition.develop else "no"
+        prose = reality.get(definition.legacy_id, "").strip() or UNDOCUMENTED_REALITY
+        lines.append(
+            f"| {_capability_cell(definition)} | {observe} | {develop} | {prose} |"
+        )
+    return "\n".join(lines)
+
+
+def render_operation_matrix(
+    operations: list[ControlOperation], definitions: list[CapabilityDefinition]
+) -> str:
+    """Emit the typed operation matrix straight from the frozen registry."""
+    by_symbol = {definition.symbol: definition for definition in definitions}
+    lines = [
+        "| Typed operation | Gating capability (legacy spelling) | Result |",
+        "|---|---|---|",
+    ]
+    for operation in operations:
+        definition = by_symbol.get(operation.capability_symbol)
+        capability = (
+            _capability_cell(definition)
+            if definition
+            else f"`{operation.capability_symbol}` (`unknown`)"
+        )
+        lines.append(
+            f"| `{operation.operation_id}` | {capability} | `{operation.result_kind}` |"
+        )
+    return "\n".join(lines)
+
+
+def _generated_block_re(name: str) -> re.Pattern[str]:
+    return re.compile(
+        rf"(<!-- BEGIN GENERATED {re.escape(name)}[^>]*-->\n)"
+        rf"(.*?)"
+        rf"(<!-- END GENERATED {re.escape(name)} -->)",
+        re.DOTALL,
+    )
+
+
+def capability_doc_text(
+    definitions: list[CapabilityDefinition],
+    operations: list[ControlOperation],
+    current: str,
+) -> str:
+    """Return the capability doc with both generated matrices refreshed."""
+    reality = {
+        capability_id: prose
+        for capability_id, _, _, prose in CAPABILITY_ROW_RE.findall(current)
+    }
+    rendered = current
+    for name, body in (
+        ("capability-matrix", render_capability_matrix(definitions, reality)),
+        ("operation-matrix", render_operation_matrix(operations, definitions)),
+    ):
+        pattern = _generated_block_re(name)
+        if not pattern.search(rendered):
+            raise ValueError(
+                f"{CAPABILITY_DOC_PATH} has no generated `{name}` region to write"
+            )
+        rendered = pattern.sub(
+            lambda match, body=body: match.group(1) + body + "\n" + match.group(3),
+            rendered,
+            count=1,
+        )
+    return rendered
+
+
+def operation_doc_errors(
+    definitions: list[CapabilityDefinition],
+    operations: list[ControlOperation],
+    capability_doc: str,
+) -> list[str]:
+    """Every typed operation must name the capability contract that gates it.
+
+    Documenting the capability alone leaves a hole: a second operation added to
+    an already-documented capability would otherwise ship undescribed.
+    """
+    errors: list[str] = []
+    if not operations:
+        errors.append(
+            "control operation registry parsed zero operations; the check is not measuring "
+            f"{CONTROL_MANIFEST_PATH}"
+        )
+        return errors
+    by_symbol = {definition.symbol: definition for definition in definitions}
+    parsed_rows = OPERATION_ROW_RE.findall(capability_doc)
+    documented = collections.Counter(operation_id for operation_id, _, _, _ in parsed_rows)
+    rows = {
+        operation_id: (contract_id, legacy_id, result_kind)
+        for operation_id, contract_id, legacy_id, result_kind in parsed_rows
+    }
+    for operation_id, count in sorted(documented.items()):
+        if count != 1:
+            errors.append(
+                f"development inspector docs contain {count} rows for operation "
+                f"`{operation_id}`"
+            )
+    registry_ids = {operation.operation_id for operation in operations}
+    for operation_id in sorted(set(rows) - registry_ids):
+        errors.append(
+            f"development inspector docs contain unknown operation `{operation_id}`"
+        )
+    for operation in operations:
+        definition = by_symbol.get(operation.capability_symbol)
+        if definition is None:
+            errors.append(
+                f"control operation `{operation.operation_id}` names unknown capability "
+                f"`{operation.capability_symbol}`"
+            )
+            continue
+        if operation.result_kind == "unknown":
+            errors.append(
+                f"control operation `{operation.operation_id}` has no readable result kind; "
+                "the manifest parser is not measuring its declaration"
+            )
+        row = rows.get(operation.operation_id)
+        if row is None:
+            errors.append(
+                f"development inspector docs omit operation `{operation.operation_id}` "
+                f"(capability `{definition.contract_id}`)"
+            )
+            continue
+        contract_id, legacy_id, result_kind = row
+        if (contract_id, legacy_id) != (definition.contract_id, definition.legacy_id):
+            errors.append(
+                f"development inspector docs bind operation `{operation.operation_id}` to "
+                f"capability `{contract_id}`; the registry gates it on "
+                f"`{definition.contract_id}`"
+            )
+        if result_kind != operation.result_kind:
+            errors.append(
+                f"development inspector docs record result `{result_kind}` for operation "
+                f"`{operation.operation_id}`; the registry declares "
+                f"`{operation.result_kind}`"
+            )
+    return errors
+
+
+def undocumented_reality_errors(
+    definitions: list[CapabilityDefinition], capability_doc: str
+) -> list[str]:
+    """Every capability must describe what it actually does today.
+
+    `--write` fills a capability it has no prose for with a placeholder, so the
+    check has to reject that placeholder; otherwise a newly registered
+    capability ships documented only by the generator's own filler. An empty
+    cell is rejected on the same grounds: deleting the placeholder documents
+    nothing, and every other rule here still passes such a row.
+    """
+    errors: list[str] = []
+    reality = {
+        capability_id: prose
+        for capability_id, _, _, prose in CAPABILITY_ROW_RE.findall(capability_doc)
+    }
+    for definition in definitions:
+        prose = reality.get(definition.legacy_id)
+        if prose is None:
+            continue
+        if prose.strip() and prose != UNDOCUMENTED_REALITY:
+            continue
+        errors.append(
+            "development inspector docs leave the current reality of "
+            f"`{definition.legacy_id}` undocumented; replace the placeholder with "
+            "prose describing what the capability does today"
+        )
+    return errors
+
+
 def check_root(
     root: pathlib.Path,
     *,
@@ -358,16 +694,14 @@ def check_root(
     required_build_contracts=REQUIRED_BUILD_CONTRACTS,
 ) -> list[str]:
     errors: list[str] = []
-    definitions = (
-        root / "inspect/include/pulp/inspect/capability_definitions.inc"
-    ).read_text(encoding="utf-8")
-    capability_definitions = CAPABILITY_RE.findall(definitions)
-    capability_doc = (
-        root / "docs/reference/development-inspector-capabilities.md"
-    ).read_text(encoding="utf-8")
+    capability_definitions, capability_errors = load_capability_definitions(root)
+    errors.extend(capability_errors)
+    capability_doc = (root / CAPABILITY_DOC_PATH).read_text(encoding="utf-8")
+    control_operations, operation_errors = load_control_operations(root)
+    errors.extend(operation_errors)
 
     parsed_rows = CAPABILITY_ROW_RE.findall(capability_doc)
-    row_counts = collections.Counter(capability_id for capability_id, _, _ in parsed_rows)
+    row_counts = collections.Counter(capability_id for capability_id, _, _, _ in parsed_rows)
     for capability_id, count in row_counts.items():
         if count != 1:
             errors.append(
@@ -376,61 +710,102 @@ def check_root(
             )
     capability_rows = {
         capability_id: (observe == "yes", develop == "yes")
-        for capability_id, observe, develop in parsed_rows
+        for capability_id, observe, develop, _ in parsed_rows
     }
     definition_ids = {
-        capability_id for capability_id, _, _, _ in capability_definitions
+        definition.legacy_id for definition in capability_definitions
     }
     extra_rows = sorted(set(capability_rows) - definition_ids)
     for capability_id in extra_rows:
         errors.append(
             f"development inspector docs contain unknown capability `{capability_id}`"
         )
-    for capability_id, _, observe, develop in capability_definitions:
-        if f"`{capability_id}`" not in capability_doc:
+    for definition in capability_definitions:
+        if f"`{definition.legacy_id}`" not in capability_doc:
             errors.append(
-                f"development inspector docs omit capability `{capability_id}`"
+                f"development inspector docs omit capability `{definition.legacy_id}`"
             )
             continue
-        expected = (observe == "1", develop == "1")
-        if capability_rows.get(capability_id) != expected:
+        expected = (definition.observe, definition.develop)
+        if capability_rows.get(definition.legacy_id) != expected:
             expected_text = (
                 f"observe={'yes' if expected[0] else 'no'}, "
                 f"develop={'yes' if expected[1] else 'no'}"
             )
             errors.append(
                 "development inspector docs have stale profile membership for "
-                f"`{capability_id}`; expected {expected_text}"
+                f"`{definition.legacy_id}`; expected {expected_text}"
             )
 
-    shipping_cmake_path = root / "tools/cmake/PulpControlShipping.cmake"
-    if shipping_cmake_path.exists():
+    errors.extend(undocumented_reality_errors(capability_definitions, capability_doc))
+    errors.extend(
+        operation_doc_errors(capability_definitions, control_operations, capability_doc)
+    )
+
+    shipping_cmake_path = root / SHIPPING_CMAKE_PATH
+    if not shipping_cmake_path.exists():
+        # The projection below is the only thing binding the installed shipping
+        # helper to the registry. Skipping it when the file is absent means a
+        # deleted or relocated helper reads as agreement.
+        errors.append(
+            f"{SHIPPING_CMAKE_PATH} is missing; the control shipping projection "
+            "is unchecked rather than in agreement"
+        )
+    else:
         shipping_cmake = shipping_cmake_path.read_text(encoding="utf-8")
 
-        def cmake_list(name: str) -> list[str]:
+        def cmake_list(name: str) -> list[str] | None:
+            """Return the list's entries, or None when the list is not there.
+
+            An empty list would make the comparison below true by vacuity: two
+            empty sequences agree, so renaming or deleting either `set()` turns
+            a projection gate into an unconditional pass. None makes the
+            absence itself the finding.
+            """
             match = re.search(
                 rf"set\({re.escape(name)}\s+(.*?)\)",
                 shipping_cmake,
                 re.DOTALL,
             )
-            return match.group(1).split() if match else []
+            if match is None:
+                return None
+            return match.group(1).split() or None
 
         legacy = cmake_list("_PULP_INSPECTOR_SHIPPING_CAPABILITIES")
         contracts = cmake_list("_PULP_CONTROL_CAPABILITIES")
         registry_pairs = {
-            capability_id: contract_id
-            for capability_id, contract_id, _, _ in capability_definitions
+            definition.legacy_id: definition.contract_id
+            for definition in capability_definitions
         }
-        projected_pairs = list(zip(legacy, contracts))
-        if (
-            len(legacy) != len(contracts)
-            or len(set(legacy)) != len(legacy)
-            or len(set(contracts)) != len(contracts)
-            or any(registry_pairs.get(old) != contract for old, contract in projected_pairs)
+        for name, values in (
+            ("_PULP_INSPECTOR_SHIPPING_CAPABILITIES", legacy),
+            ("_PULP_CONTROL_CAPABILITIES", contracts),
         ):
-            errors.append(
-                "control shipping capability projection differs from the canonical registry"
-            )
+            if values is None:
+                errors.append(
+                    f"{SHIPPING_CMAKE_PATH} declares no non-empty `{name}` list; "
+                    "the control shipping projection is not being compared "
+                    "against anything"
+                )
+        if legacy is not None and contracts is not None:
+            projected_pairs = list(zip(legacy, contracts))
+            if (
+                len(legacy) != len(contracts)
+                # The projection must cover the whole registry. Without this,
+                # a projection holding a correct subset agrees pairwise while
+                # shipping policy for fewer capabilities than exist.
+                or len(projected_pairs) != len(registry_pairs)
+                or len(set(legacy)) != len(legacy)
+                or len(set(contracts)) != len(contracts)
+                or any(
+                    registry_pairs.get(old) != contract
+                    for old, contract in projected_pairs
+                )
+            ):
+                errors.append(
+                    "control shipping capability projection differs from the "
+                    "canonical registry"
+                )
         digest_include = (
             root / "inspect/include/pulp/inspect/control_registry_digest.inc"
         ).read_text(encoding="utf-8")
@@ -520,6 +895,25 @@ def check_root(
     return errors
 
 
+def write_root(root: pathlib.Path) -> bool:
+    """Regenerate the capability and operation matrices. Returns True if changed."""
+    definitions, capability_errors = load_capability_definitions(root)
+    operations, operation_errors = load_control_operations(root)
+    # Regeneration is the more dangerous of the two paths: it does not merely
+    # skip an unreadable entry, it rewrites the catalog without it, so the
+    # catalog and the check agree afterwards and the capability ships
+    # undocumented with both gates green.
+    if capability_errors or operation_errors:
+        raise ValueError("; ".join(capability_errors + operation_errors))
+    path = root / CAPABILITY_DOC_PATH
+    current = path.read_text(encoding="utf-8")
+    rendered = capability_doc_text(definitions, operations, current)
+    if rendered == current:
+        return False
+    path.write_text(rendered, encoding="utf-8")
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -527,7 +921,27 @@ def main() -> int:
         type=pathlib.Path,
         default=pathlib.Path(__file__).resolve().parents[2],
     )
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="regenerate the generated capability and operation matrices in place",
+    )
     args = parser.parse_args()
+
+    if args.write:
+        try:
+            changed = write_root(args.root.resolve())
+        except ValueError as error:
+            print(f"inspector-truth: {error}")
+            return 1
+        print(
+            "inspector-truth: "
+            + (
+                f"regenerated {CAPABILITY_DOC_PATH}"
+                if changed
+                else f"{CAPABILITY_DOC_PATH} already matches the registry"
+            )
+        )
 
     errors = check_root(args.root.resolve())
     if errors:

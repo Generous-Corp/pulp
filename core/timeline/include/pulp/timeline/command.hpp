@@ -1,6 +1,9 @@
 #pragma once
 
+#include <pulp/timeline/midi_lane.hpp>
 #include <pulp/timeline/model.hpp>
+#include <pulp/timeline/modulation.hpp>
+#include <pulp/timeline/tuning.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -528,6 +531,271 @@ struct SetDeviceState {
     std::optional<ContentHash> replacement;
 };
 
+/// Inserts a controller/expression lane into a MIDI clip.
+///
+/// The lane arrives whole — identity, address, and every authored point — and
+/// the content model is the single authority on whether it may join the clip:
+/// identity distinctness across notes, points, and lanes, and one lane per
+/// address, are enforced by `MidiContent::create` and propagated from there.
+struct InsertMidiExpressionLane {
+    /// Sequence owning the track that owns the clip.
+    ItemId sequence_id;
+    /// Track owning the clip.
+    ItemId track_id;
+    /// MIDI clip the lane joins.
+    ItemId clip_id;
+    /// Lane to insert, with its identity, address, and authored points.
+    MidiExpressionLane lane;
+};
+
+/// Removes a controller/expression lane from a MIDI clip by identity.
+///
+/// Removal is the destructive intent a capability mask denies by default, so a
+/// writer that may edit a lane's values does not thereby gain the right to
+/// abandon the stream.
+struct RemoveMidiExpressionLane {
+    /// Sequence owning the track that owns the clip.
+    ItemId sequence_id;
+    /// Track owning the clip.
+    ItemId track_id;
+    /// MIDI clip the lane leaves.
+    ItemId clip_id;
+    /// Identity of the lane to remove.
+    ItemId lane_id;
+};
+
+/// Replaces one lane's authored points under an exact optimistic-value gate.
+///
+/// The lane keeps its identity and its address: this command changes what a
+/// stream says, never which stream it is. Re-addressing a lane is a remove and
+/// an insert, because the two operations a caller means by it — abandoning one
+/// stream and authoring another — carry different authority.
+struct SetMidiExpressionLanePoints {
+    /// Sequence owning the track that owns the clip.
+    ItemId sequence_id;
+    /// Track owning the clip.
+    ItemId track_id;
+    /// MIDI clip owning the lane.
+    ItemId clip_id;
+    /// Identity of the lane whose points change.
+    ItemId lane_id;
+    /// Required current points of that lane, compared in full and in canonical order.
+    std::vector<MidiLanePoint> expected;
+    /// Points written when the gate matches.
+    std::vector<MidiLanePoint> replacement;
+};
+
+/// Replaces the project-wide tuning statement under an exact value gate.
+///
+/// An absent `replacement` states no tuning at all, which is not the same claim
+/// as stating equal temperament: a document that never chose plays in whatever
+/// the host defaults to, while one that chose equal temperament has named it.
+/// Clearing is therefore an authored act on a value the project keeps, not the
+/// removal of anything the document owns, which is why the intent is Modify.
+struct SetProjectTuning {
+    /// Required current project tuning, compared exactly, absence included.
+    std::optional<TuningReference> expected;
+    /// Tuning written when the gate matches.
+    std::optional<TuningReference> replacement;
+};
+
+/// Replaces one track's tuning override under an exact value gate.
+///
+/// Absence means the track plays in whatever the project states, so clearing an
+/// override hands the track back to the project rather than silencing it.
+struct SetTrackTuning {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track whose tuning override changes.
+    ItemId track_id;
+    /// Required current override, compared exactly, absence included.
+    std::optional<TuningReference> expected;
+    /// Override written when the gate matches.
+    std::optional<TuningReference> replacement;
+};
+
+/// Replaces one sequence-owned region under an exact value gate.
+///
+/// Identity is pinned: `expected.id` and `replacement.id` must be equal and must
+/// name a region the sequence owns. A Modify command that could also swap
+/// identity would be a removal and a creation laundered through a signature
+/// that declares neither, and the removal is the axis an untrusted writer is
+/// denied by default. Pinning it is what makes correcting a region's
+/// SectionRole reachable for the writer profile that authored it.
+struct SetRegion {
+    /// Sequence owning the region.
+    ItemId sequence_id;
+    /// Required current region, compared in full including its role.
+    SequenceRegion expected;
+    /// Region written when the gate matches, carrying the same identity.
+    SequenceRegion replacement;
+};
+
+/// Inserts a track-owned modulation source.
+///
+/// Identity is authored by the caller rather than minted here, so the route
+/// that will read this source can be written in the same transaction.
+struct InsertModulator {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track that will own the modulator.
+    ItemId track_id;
+    /// Complete modulator declaration, carrying its own identity.
+    Modulator modulator;
+};
+
+/// Removes a track-owned modulation source by identity.
+///
+/// A source a route still reads cannot be removed: the model refuses a track
+/// whose routes name a source it does not hold, so the refusal arrives as a
+/// model failure rather than as a document that silently loses its routing.
+struct RemoveModulator {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the modulator.
+    ItemId track_id;
+    /// Identity of the modulator to remove.
+    ItemId modulator_id;
+};
+
+/// Replaces a modulation source's declaration under an exact value gate.
+///
+/// Identity is pinned: `expected.id`, `replacement.id`, and `modulator_id` must
+/// all be equal. A Modify that could also swap identity is a removal and a
+/// creation wearing a signature that declares neither, and removal is the axis
+/// an untrusted writer is denied by default — so an unpinned identity would
+/// hand a writer holding only Modify the operation its mask refuses.
+struct SetModulator {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the modulator.
+    ItemId track_id;
+    /// Identity of the modulator whose declaration changes.
+    ItemId modulator_id;
+    /// Required current declaration, compared in full.
+    Modulator expected;
+    /// Declaration written when the gate matches, carrying the same identity.
+    Modulator replacement;
+};
+
+/// Inserts a track-owned macro control.
+struct InsertMacro {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track that will own the macro.
+    ItemId track_id;
+    /// Complete macro declaration, carrying its own identity.
+    MacroControl macro;
+};
+
+/// Removes a track-owned macro control by identity.
+///
+/// As with a modulation source, a macro a route still reads cannot be removed;
+/// the model refuses the resulting track rather than dropping the routes.
+struct RemoveMacro {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the macro.
+    ItemId track_id;
+    /// Identity of the macro to remove.
+    ItemId macro_id;
+};
+
+/// Replaces a macro control's declaration under an exact value gate.
+///
+/// Identity is pinned the same way SetModulator pins it, and for the same
+/// reason. The gate covers the whole macro, name and position together, which
+/// is what an authoring edit that rewrites both should gate on.
+struct SetMacro {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the macro.
+    ItemId track_id;
+    /// Identity of the macro whose declaration changes.
+    ItemId macro_id;
+    /// Required current declaration, compared in full.
+    MacroControl expected;
+    /// Declaration written when the gate matches, carrying the same identity.
+    MacroControl replacement;
+};
+
+/// Replaces only a macro's authored position under an exact value gate.
+///
+/// A whole-value gate would make a performer moving a macro also supply its
+/// current name, so a concurrent rename would abort an edit that did not
+/// conflict with it — the gate manufacturing a conflict out of two disjoint
+/// edits. This is the narrow command beside the broad one, the same shape
+/// SetNoteVelocity has beside SetNoteEvents. The overlap is deliberate:
+/// SetMacro may also change the value, and an edit that rewrites the whole
+/// macro should gate on the whole macro.
+///
+/// The float compares exactly rather than within a tolerance, and that is safe
+/// rather than fragile: the persisted spelling is the IEEE-754 bit pattern, so
+/// a value that round-trips through the wire compares equal to itself.
+struct SetMacroValue {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the macro.
+    ItemId track_id;
+    /// Identity of the macro whose position changes.
+    ItemId macro_id;
+    /// Required current normalized position, compared exactly.
+    float expected = 0.0f;
+    /// Normalized position written when the gate matches.
+    float replacement = 0.0f;
+};
+
+/// Inserts one authored source-to-parameter connection.
+///
+/// Identity is authored by the caller, as it is for the source this reads, so a
+/// source and the route that reads it can be stated in one transaction.
+struct InsertModulationRoute {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track that will own the route.
+    ItemId track_id;
+    /// Complete route declaration, carrying its own identity.
+    ModulationRoute route;
+};
+
+/// Removes one authored connection by identity.
+///
+/// Removing a route is the one modulation removal nothing else can refuse: a
+/// route is read by no other document member, so the source it named stays and
+/// only the connection goes.
+struct RemoveModulationRoute {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the route.
+    ItemId track_id;
+    /// Identity of the route to remove.
+    ItemId route_id;
+};
+
+/// Replaces a route's source, target, depth, and bypass under an exact gate.
+///
+/// Identity is pinned the way SetModulator pins it, and for the same reason.
+/// The gate covers the whole route rather than the depth alone: a route has no
+/// performed field, so there is no high-frequency edit for a narrow gate to
+/// protect, and inventing one would be vocabulary bought with nothing.
+///
+/// `enabled` is gated like every other member. A disabled route keeps its
+/// identity, depth, and target so that re-enabling restores what was there,
+/// which is only true if a bypass is a value an edit states rather than a
+/// state an edit discards.
+struct SetModulationRoute {
+    /// Sequence owning the track.
+    ItemId sequence_id;
+    /// Track owning the route.
+    ItemId track_id;
+    /// Identity of the route whose connection changes.
+    ItemId route_id;
+    /// Required current route, compared in full including its bypass.
+    ModulationRoute expected;
+    /// Route written when the gate matches, carrying the same identity.
+    ModulationRoute replacement;
+};
+
 /// Exhaustive set of durable Timeline document mutations.
 using Command = std::variant<
     InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip, SetNoteVelocity,
@@ -537,7 +805,11 @@ using Command = std::variant<
     RemoveRegion, SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
     InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer, InsertTrack,
     RemoveTrack, SetTrackName, MoveTrack, SetNoteEvents, InsertNotes, RemoveNotes, InsertDevice,
-    RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState, SetDynamicsLane>;
+    RemoveDevice, MoveDevice, RetargetDevice, SetDeviceState, SetDynamicsLane,
+    InsertMidiExpressionLane, RemoveMidiExpressionLane, SetMidiExpressionLanePoints,
+    SetProjectTuning, SetTrackTuning, SetRegion, InsertModulator, RemoveModulator, SetModulator,
+    InsertMacro, RemoveMacro, SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,
+    SetModulationRoute>;
 
 /// One command paired with its writer-scoped idempotency identity.
 struct CommandEnvelope {

@@ -101,10 +101,39 @@ export interface PulpTimelineCommandInsertDevice {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.insert_macro` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertMacro {
+  macro: PulpTimelineMacroControl;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.command.insert_marker` — domain Command, schema version 1. */
 export interface PulpTimelineCommandInsertMarker {
   marker: PulpTimelineMarker;
   sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.insert_midi_expression_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertMidiExpressionLane {
+  clip_id: number | string;
+  lane: Record<string, unknown>;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.insert_modulation_route` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertModulationRoute {
+  route: PulpTimelineModulationRoute;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.insert_modulator` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertModulator {
+  modulator: PulpTimelineModulator;
+  sequence_id: number | string;
+  track_id: number | string;
 }
 
 /** `pulp.timeline.command.insert_notes` — domain Command, schema version 1. */
@@ -216,10 +245,39 @@ export interface PulpTimelineCommandRemoveDevice {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.remove_macro` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveMacro {
+  macro_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.command.remove_marker` — domain Command, schema version 1. */
 export interface PulpTimelineCommandRemoveMarker {
   marker_id: number | string;
   sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_midi_expression_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveMidiExpressionLane {
+  clip_id: number | string;
+  lane_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_modulation_route` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveModulationRoute {
+  route_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_modulator` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveModulator {
+  modulator_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
 }
 
 /** `pulp.timeline.command.remove_notes` — domain Command, schema version 1. */
@@ -351,10 +409,56 @@ export interface PulpTimelineCommandSetGroove {
   sequence_id: number | string;
 }
 
+/** `pulp.timeline.command.set_macro` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetMacro {
+  expected: PulpTimelineMacroControl;
+  macro_id: number | string;
+  replacement: PulpTimelineMacroControl;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_macro_value` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetMacroValue {
+  expected_bits: number | string;
+  macro_id: number | string;
+  replacement_bits: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.command.set_meter_map` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetMeterMap {
   expected: readonly unknown[];
   replacement: readonly unknown[];
+}
+
+/** `pulp.timeline.command.set_midi_expression_lane_points` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetMidiExpressionLanePoints {
+  clip_id: number | string;
+  expected: readonly unknown[];
+  lane_id: number | string;
+  replacement: readonly unknown[];
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_modulation_route` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetModulationRoute {
+  expected: PulpTimelineModulationRoute;
+  replacement: PulpTimelineModulationRoute;
+  route_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_modulator` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetModulator {
+  expected: PulpTimelineModulator;
+  modulator_id: number | string;
+  replacement: PulpTimelineModulator;
+  sequence_id: number | string;
+  track_id: number | string;
 }
 
 /** `pulp.timeline.command.set_note_events` — domain Command, schema version 1. */
@@ -376,12 +480,25 @@ export interface PulpTimelineCommandSetNoteVelocity {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.set_project_tuning` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetProjectTuning {
+  expected?: PulpTimelineTuning;
+  replacement?: PulpTimelineTuning;
+}
+
 /** `pulp.timeline.command.set_record_arm` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetRecordArm {
   expected: boolean;
   replacement: boolean;
   sequence_id: number | string;
   track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_region` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetRegion {
+  expected: PulpTimelineRegion;
+  replacement: PulpTimelineRegion;
+  sequence_id: number | string;
 }
 
 /** `pulp.timeline.command.set_take_comp` — domain Command, schema version 1. */
@@ -419,6 +536,14 @@ export interface PulpTimelineCommandSetTrackMixer {
 export interface PulpTimelineCommandSetTrackName {
   expected: string;
   replacement: string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_track_tuning` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetTrackTuning {
+  expected?: PulpTimelineTuning;
+  replacement?: PulpTimelineTuning;
   sequence_id: number | string;
   track_id: number | string;
 }
@@ -623,7 +748,11 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.insert_automation_lane"
   | "pulp.timeline.command.insert_clip"
   | "pulp.timeline.command.insert_device"
+  | "pulp.timeline.command.insert_macro"
   | "pulp.timeline.command.insert_marker"
+  | "pulp.timeline.command.insert_midi_expression_lane"
+  | "pulp.timeline.command.insert_modulation_route"
+  | "pulp.timeline.command.insert_modulator"
   | "pulp.timeline.command.insert_notes"
   | "pulp.timeline.command.insert_region"
   | "pulp.timeline.command.insert_scene"
@@ -639,7 +768,11 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.remove_automation_lane"
   | "pulp.timeline.command.remove_clip"
   | "pulp.timeline.command.remove_device"
+  | "pulp.timeline.command.remove_macro"
   | "pulp.timeline.command.remove_marker"
+  | "pulp.timeline.command.remove_midi_expression_lane"
+  | "pulp.timeline.command.remove_modulation_route"
+  | "pulp.timeline.command.remove_modulator"
   | "pulp.timeline.command.remove_notes"
   | "pulp.timeline.command.remove_region"
   | "pulp.timeline.command.remove_scene"
@@ -657,15 +790,23 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_device_state"
   | "pulp.timeline.command.set_dynamics_lane"
   | "pulp.timeline.command.set_groove"
+  | "pulp.timeline.command.set_macro"
+  | "pulp.timeline.command.set_macro_value"
   | "pulp.timeline.command.set_meter_map"
+  | "pulp.timeline.command.set_midi_expression_lane_points"
+  | "pulp.timeline.command.set_modulation_route"
+  | "pulp.timeline.command.set_modulator"
   | "pulp.timeline.command.set_note_events"
   | "pulp.timeline.command.set_note_velocity"
+  | "pulp.timeline.command.set_project_tuning"
   | "pulp.timeline.command.set_record_arm"
+  | "pulp.timeline.command.set_region"
   | "pulp.timeline.command.set_take_comp"
   | "pulp.timeline.command.set_tempo_map"
   | "pulp.timeline.command.set_track_freeze"
   | "pulp.timeline.command.set_track_mixer"
   | "pulp.timeline.command.set_track_name"
+  | "pulp.timeline.command.set_track_tuning"
   | "pulp.timeline.content.empty"
   | "pulp.timeline.content.media"
   | "pulp.timeline.content.notes"
@@ -701,7 +842,11 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.insert_automation_lane": PulpTimelineCommandInsertAutomationLane;
   "pulp.timeline.command.insert_clip": PulpTimelineCommandInsertClip;
   "pulp.timeline.command.insert_device": PulpTimelineCommandInsertDevice;
+  "pulp.timeline.command.insert_macro": PulpTimelineCommandInsertMacro;
   "pulp.timeline.command.insert_marker": PulpTimelineCommandInsertMarker;
+  "pulp.timeline.command.insert_midi_expression_lane": PulpTimelineCommandInsertMidiExpressionLane;
+  "pulp.timeline.command.insert_modulation_route": PulpTimelineCommandInsertModulationRoute;
+  "pulp.timeline.command.insert_modulator": PulpTimelineCommandInsertModulator;
   "pulp.timeline.command.insert_notes": PulpTimelineCommandInsertNotes;
   "pulp.timeline.command.insert_region": PulpTimelineCommandInsertRegion;
   "pulp.timeline.command.insert_scene": PulpTimelineCommandInsertScene;
@@ -717,7 +862,11 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.remove_automation_lane": PulpTimelineCommandRemoveAutomationLane;
   "pulp.timeline.command.remove_clip": PulpTimelineCommandRemoveClip;
   "pulp.timeline.command.remove_device": PulpTimelineCommandRemoveDevice;
+  "pulp.timeline.command.remove_macro": PulpTimelineCommandRemoveMacro;
   "pulp.timeline.command.remove_marker": PulpTimelineCommandRemoveMarker;
+  "pulp.timeline.command.remove_midi_expression_lane": PulpTimelineCommandRemoveMidiExpressionLane;
+  "pulp.timeline.command.remove_modulation_route": PulpTimelineCommandRemoveModulationRoute;
+  "pulp.timeline.command.remove_modulator": PulpTimelineCommandRemoveModulator;
   "pulp.timeline.command.remove_notes": PulpTimelineCommandRemoveNotes;
   "pulp.timeline.command.remove_region": PulpTimelineCommandRemoveRegion;
   "pulp.timeline.command.remove_scene": PulpTimelineCommandRemoveScene;
@@ -735,15 +884,23 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_device_state": PulpTimelineCommandSetDeviceState;
   "pulp.timeline.command.set_dynamics_lane": PulpTimelineCommandSetDynamicsLane;
   "pulp.timeline.command.set_groove": PulpTimelineCommandSetGroove;
+  "pulp.timeline.command.set_macro": PulpTimelineCommandSetMacro;
+  "pulp.timeline.command.set_macro_value": PulpTimelineCommandSetMacroValue;
   "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
+  "pulp.timeline.command.set_midi_expression_lane_points": PulpTimelineCommandSetMidiExpressionLanePoints;
+  "pulp.timeline.command.set_modulation_route": PulpTimelineCommandSetModulationRoute;
+  "pulp.timeline.command.set_modulator": PulpTimelineCommandSetModulator;
   "pulp.timeline.command.set_note_events": PulpTimelineCommandSetNoteEvents;
   "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;
+  "pulp.timeline.command.set_project_tuning": PulpTimelineCommandSetProjectTuning;
   "pulp.timeline.command.set_record_arm": PulpTimelineCommandSetRecordArm;
+  "pulp.timeline.command.set_region": PulpTimelineCommandSetRegion;
   "pulp.timeline.command.set_take_comp": PulpTimelineCommandSetTakeComp;
   "pulp.timeline.command.set_tempo_map": PulpTimelineCommandSetTempoMap;
   "pulp.timeline.command.set_track_freeze": PulpTimelineCommandSetTrackFreeze;
   "pulp.timeline.command.set_track_mixer": PulpTimelineCommandSetTrackMixer;
   "pulp.timeline.command.set_track_name": PulpTimelineCommandSetTrackName;
+  "pulp.timeline.command.set_track_tuning": PulpTimelineCommandSetTrackTuning;
   "pulp.timeline.content.empty": PulpTimelineContentEmpty;
   "pulp.timeline.content.media": PulpTimelineContentMedia;
   "pulp.timeline.content.notes": PulpTimelineContentNotes;

@@ -147,6 +147,13 @@ retain those fields in the PR/landing evidence.
 7. Run the manifest mirror/audit tests and both fetch-script suites. Fetch a real native
    Skia asset and matched V8 asset, configure with GPU + Lottie + V8, and run the
    provider-identity/ODR validation. A pixel-only test is insufficient.
+   Configure that validation lane with `PULP_VALIDATE_CAPTURE_STRICT=ON`
+   alongside `PULP_VALIDATE_V8_PROVIDER_STRICT=ON`. The default Three.js native
+   demo capture tests tolerate a build without V8, or a host without a native
+   Dawn adapter, as a skipped PNG assertion, so a toolchain pin that quietly
+   broke the V8 link or the Dawn adapter still shows them green. The strict
+   variants turn both skips into failures, which is what you want from the one
+   lane whose job is to prove the new pins actually render.
    For m153+, run `python3 tools/scripts/verify_skia_m153_capabilities.py
    --platform <matching-native-desktop-platform> --skia-dir
    <materialized-generation>`. Run each architecture on its matching host; the
@@ -288,3 +295,19 @@ retain those fields in the PR/landing evidence.
   timestamp granularity and falls back to comparing content; settle the fixture
   with `touch -t 202001010000` plus `git update-index --refresh` or the test
   grades its own homework.
+- The visual harness has two raster pins on two different version lines, and
+  "re-bake CI goldens" only means one of them. The C++ Skia archive rasterizes
+  nothing in `tools/harness/visual/`: its committed PNG golden is produced by the
+  `skia-python` wheel, pinned separately as `determinism.skia_python_smoke_version`
+  in `tools/deps/manifest.json` (mirrored into `pins.SKIA_PYTHON_SMOKE_VERSION`
+  and the Dockerfile `ARG`, cross-checked by `check_skia_pin.py`). That wheel
+  deliberately trails the C++ milestone, so a Skia/Dawn milestone bump leaves the
+  PNG golden and `pins.RASTER_GOLDEN_SHA256` correct and untouched, while bumping
+  only the wheel invalidates both without moving a single release-asset digest.
+  When changing the wheel, regenerate through
+  `python3 -m tools.harness.visual.runner --generate --all --surface canvas2d`
+  and update the recorded sha256 in the same commit: a golden regenerated without
+  its digest fails `tests/test_raster_golden.py` before any raster runs.
+  `pins.RASTER_GOLDEN_VERIFIED_PLATFORMS` records which hosts that identity was
+  actually measured on, so add a platform key only after a run on that platform
+  reported the matching digest.

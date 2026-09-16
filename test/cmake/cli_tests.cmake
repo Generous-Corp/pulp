@@ -45,11 +45,6 @@ add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)
 target_link_libraries(pulp-test-cli-create-shellout PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-create-shellout pulp-cli)
-    target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
-        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
-endif()
 target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -68,11 +63,6 @@ target_include_directories(pulp-test-cli-import PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-test-cli-import PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-import pulp-cli)
-    target_compile_definitions(pulp-test-cli-import PRIVATE
-        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
-endif()
 target_compile_definitions(pulp-test-cli-import PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-cli-import
@@ -91,11 +81,6 @@ target_include_directories(pulp-test-cli-import-emit PRIVATE ${CMAKE_SOURCE_DIR}
 target_link_libraries(pulp-test-cli-import-emit PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-import-emit pulp-cli)
-    target_compile_definitions(pulp-test-cli-import-emit PRIVATE
-        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
-endif()
 target_compile_definitions(pulp-test-cli-import-emit PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-cli-import-emit
@@ -112,11 +97,6 @@ target_include_directories(pulp-test-cli-import-terms PRIVATE ${CMAKE_SOURCE_DIR
 target_link_libraries(pulp-test-cli-import-terms PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-import-terms pulp-cli)
-    target_compile_definitions(pulp-test-cli-import-terms PRIVATE
-        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
-endif()
 target_compile_definitions(pulp-test-cli-import-terms PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-cli-import-terms
@@ -143,8 +123,25 @@ set_target_properties(pulp-test-cli-run-fixture PROPERTIES
     OUTPUT_NAME "pulp-cli-run-fixture")
 
 # CLI shell-out behavior tests — launches the built `pulp` binary.
+#
+# The build dependency on `pulp-cli` (and the PULP_CLI_BINARY definition that
+# names its real output) is attached from tools/cli/CMakeLists.txt: test/ is
+# configured before tools/cli, so `if(TARGET pulp-cli)` is false here and a
+# guard written in this file silently never fires. Add a new shell-out suite
+# to the list there, not to a guard here.
 function(pulp_bind_cli_shellout_target target)
-    if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
+    # The condition below mirrors the one the root CMakeLists uses to decide
+    # whether tools/cli is added at all. It is NOT interchangeable with
+    # `if(TARGET pulp-cli)`: the root adds test/ before tools/cli, so that
+    # target does not exist yet while this runs and such a guard silently
+    # binds nothing. The path is composed rather than taken from
+    # $<TARGET_FILE:pulp-cli> for the same reason, and add_dependencies
+    # resolves the name at generate time, so naming it here is fine.
+    if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
+        # These tests launch the CLI, so it has to be built before they run.
+        # Without this a shellout test can execute against a stale binary, or
+        # in a clean tree against one that was never built.
+        add_dependencies(${target} pulp-cli)
         set(_pulp_cli_path "${CMAKE_BINARY_DIR}/tools/cli/pulp-cpp${CMAKE_EXECUTABLE_SUFFIX}")
         if(CMAKE_CONFIGURATION_TYPES)
             set(_pulp_cli_path "${CMAKE_BINARY_DIR}/tools/cli/$<CONFIG>/pulp-cpp${CMAKE_EXECUTABLE_SUFFIX}")
@@ -155,7 +152,7 @@ function(pulp_bind_cli_shellout_target target)
 endfunction()
 
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp
-    test_cli_audio_heritage.cpp)
+    test_cli_audio_heritage.cpp test_cli_timeline_render_shellout.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-shellout PRIVATE
     PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)
@@ -396,9 +393,6 @@ endif()
 # for the non-destructive ship subcommand branches.
 add_executable(pulp-test-cli-ship-shellout test_cli_ship_shellout.cpp)
 target_link_libraries(pulp-test-cli-ship-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
-if(TARGET pulp-cli)
-    add_dependencies(pulp-test-cli-ship-shellout pulp-cli)
-endif()
 # hdiutil attaches temporary disk images through a machine-wide service. Keep
 # the one real-image case parallel with ordinary CLI tests, but not with another
 # real-image creator: under ctest -j8 that collision has stretched a 17-second

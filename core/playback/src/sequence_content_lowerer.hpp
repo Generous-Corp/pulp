@@ -61,6 +61,36 @@ struct LoweredClip {
     // reduce to a third. Hence a list travelling beside the clip rather than
     // extra fields inside it.
     std::vector<LoweredPlacementFade> placement_fades;
+    // The authored clip this one is a window onto. A nesting can trim a leaf,
+    // and content whose renderer generates from the authored origin has to be
+    // generated over that origin or its pattern phase moves with the trim, so
+    // the window travels beside the clip and the compiler applies it to what
+    // the renderer returned rather than asking the renderer to apply it.
+    //
+    // `authored_window_start` is the tick inside the authored clip at which the
+    // retained window begins, and `authored_duration` is the authored clip's
+    // own duration. An untrimmed leaf reads zero and its own duration, which
+    // windows to exactly the clip it lowered to before.
+    std::int64_t authored_window_start = 0;
+    timebase::TickDuration authored_duration{0};
+    // Exclusive end of the source span this leaf reads, in its own source-frame
+    // domain, paired with `source_frame_offset` as the inclusive start. Zero
+    // means the leaf reads to the end of its media reference, which is every
+    // leaf a nesting did not cut and every leaf that does not conform.
+    //
+    // A conforming clip maps its whole authored source onto its whole
+    // placement, so a nesting that retains part of that placement retains the
+    // matching part of the source under the same map. No document clip can say
+    // that — narrowing the reference would re-conform the narrowed source over
+    // the whole window — so the range travels beside the clip instead.
+    //
+    // This states in source frames what `authored_window_start` /
+    // `authored_duration` state in ticks, because the two serve different
+    // consumers: the tick pair windows generated content after a renderer
+    // returned it, while the phase map needs the source-frame ends themselves.
+    // The value is derivable from that pair, and collapsing the two is a
+    // deliberate follow-up rather than something to do inside a merge.
+    double source_frame_phase_end = 0.0;
 };
 
 class SequenceContentLowerer {

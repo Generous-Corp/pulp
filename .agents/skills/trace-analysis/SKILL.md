@@ -552,6 +552,22 @@ If you need per-recording GPU time in a capture, enable it explicitly on the
 host's Options. If a trace shows no `gpu_render_time`, check that flag before
 suspecting the adapter.
 
+## GPU errors arrive as `gpu.diagnostic` instant events
+
+A Dawn uncaptured-error / device-lost callback and a Skia log record no longer
+live only in `runtime::log_error` output. `core/render/src/gpu_diagnostics.cpp`
+forwards them into the timeline as zero-duration instant events named
+`gpu.diagnostic` on category `gpu`, with the severity and the message text
+riding along as debug annotations. They keep their `log_error` calls, so a log
+and a trace should agree — a diagnostic in one and not the other means the
+bridge was off, not that the event did not happen.
+
+The Skia half is gated: it installs an `SkLogHandler` only when tracing is
+compiled in or `PULP_GPU_LOG_BRIDGE` is set, and only when nothing else already
+owns Skia's process-global handler. A capture with Dawn diagnostics but no Skia
+ones is therefore an ordinary outcome (a host already held the slot), not a
+dropped event. `skia_log_bridge_state()` reports which it was.
+
 ## DPR experiment traces reuse A2T
 
 A4 DPR trials do not introduce a second profiler or a new ad-hoc SQL report.
@@ -665,6 +681,37 @@ the measured binary, ambient build output, or network; rebuilt bytes and the
 compile-in sentinel must match the requested state. Preserve the source
 archive, closed build request/receipt, product, logs, and digest/version-bound
 toolchain snapshots. A direct binary or build-driver assertion cannot pass.
+
+### The evidence requirement is question-scoped
+
+`gpu-startup` answers for a capture taken with no instrumentation at all: when no
+span anywhere in the trace carries an evidence id, it admits a single untagged
+cohort and reports the setup work the capture plainly contains, with a NULL
+evidence id. The gate is the whole trace, never the startup candidates alone; a
+capture whose `gpu_probe*` spans are tagged is instrumented, and is not admitted.
+`gpu-health` and `gpu-probe` do **not** relax — an untagged capture stays
+`unavailable` there, because each of those answers is a correlation claim, and a
+correlation with nothing to correlate is not a weaker answer but a different one.
+
+Two things follow. A `gpu-startup` breakdown is **not** evidence that the capture
+is tagged, so it does not predict that `gpu-health` or `gpu-probe` will answer at
+all. And the relaxation is all-or-nothing about instrumentation: `gpu-startup`
+admits the untagged cohort only when **no span anywhere in the trace** carries a
+`debug.gpu_evidence_id`. One evidence id — on a startup span, or only on a
+`gpu_probe*` / `gpu_readback*` / `gpu_health_transition` span that is not a
+startup candidate at all — drops the untagged cohort and puts `gpu-startup` back
+on the exact shared-evidence-id requirement.
+
+Absence of evidence is not on its own enough to answer, because an untagged
+cohort has no id to separate one lifecycle from the next. `gpu-startup` also
+fails closed on an untagged capture holding more than one frame-zero anchor, or
+spanning more than one process, and reports `unavailable` /
+`missing-question-category` with no contributors — the same observable answer the
+tagged path gives a capture with two first-visible lifecycles. So an untagged
+`gpu-startup` answer is bounded by at most one frame-zero anchor in one process.
+That bound is weaker than the tagged path's, which separates lifecycles by id: a
+second lifecycle carrying no frame-zero anchor of its own cannot be told apart
+from concurrent setup work, so it is reported with the rest rather than refused.
 
 ## Correlate a catalog recipe with Perfetto
 

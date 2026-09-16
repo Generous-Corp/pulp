@@ -9,6 +9,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -20,6 +21,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import gpu_handoff_provenance as provenance  # noqa: E402
+import gpu_ledger_sentinel_check as sentinel_check  # noqa: E402
 
 
 def git(root: pathlib.Path, *arguments: str) -> str:
@@ -413,6 +415,58 @@ class FixtureRepository(unittest.TestCase):
         self.assertEqual(receipt["source_commit"], self.second_commit)
         self.assertEqual(receipt["canonical_paths"], ["leaf.txt"])
 
+    def test_check_binds_the_receipt_to_the_ledger_bytes(self) -> None:
+        """`check` must not exit 0 while the receipt names other bytes.
+
+        The fixture ledger always fails the closed contract, so the exit code
+        alone cannot carry this claim; the receipt field in the report is the
+        discriminating assertion, and the RECEIPT line is what a reader sees.
+        """
+
+        handoff = self.write_fixture_handoff([build_row("leaf.txt")])
+        receipt = self.root / "receipts" / "receipt.json"
+        self.assertEqual(
+            provenance.main(
+                ["--root", str(self.root), "--handoff", str(handoff),
+                 "receipt", "--output", str(receipt)]
+            ),
+            0,
+        )
+        _, text = self.run_cli(handoff, "check", "--json", "--receipt", str(receipt))
+        self.assertEqual(json.loads(text)["receipt"]["state"], "bound")
+        _, text = self.run_cli(handoff, "check", "--receipt", str(receipt))
+        self.assertNotIn("RECEIPT", text)
+
+        # Regenerate the ledger without its receipt: the receipt now describes
+        # bytes that no longer exist, the exact state a `--theirs` merge or a
+        # bare `write` leaves behind.
+        handoff.write_text(
+            provenance.serialize_handoff(self.document([build_row("nested")])),
+            encoding="utf-8",
+        )
+        exit_code, text = self.run_cli(
+            handoff, "check", "--json", "--receipt", str(receipt)
+        )
+        self.assertEqual(exit_code, 1)
+        report = json.loads(text)["receipt"]
+        self.assertEqual(report["state"], "stale")
+        self.assertTrue(any("sha256" in problem for problem in report["problems"]))
+        self.assertTrue(
+            any("canonical_paths" in problem for problem in report["problems"])
+        )
+        exit_code, text = self.run_cli(handoff, "check", "--receipt", str(receipt))
+        self.assertEqual(exit_code, 1)
+        self.assertIn("RECEIPT", text)
+        self.assertIn("repair with:", text)
+
+    def test_check_says_out_loud_when_there_is_no_receipt_to_bind(self) -> None:
+        handoff = self.write_fixture_handoff([build_row("leaf.txt")])
+        missing = self.root / "no-such-receipt.json"
+        _, text = self.run_cli(handoff, "check", "--json", "--receipt", str(missing))
+        self.assertEqual(json.loads(text)["receipt"]["state"], "absent")
+        _, text = self.run_cli(handoff, "check", "--receipt", str(missing))
+        self.assertIn("binding not checked", text)
+
     def test_an_unresolvable_source_commit_is_an_environment_error(self) -> None:
         handoff = self.write_fixture_handoff([build_row("leaf.txt")])
         self.assertEqual(
@@ -785,6 +839,757 @@ class TruncatedCheckoutRefusal(unittest.TestCase):
         exit_code, text, errors = self.run_cli("paths")
         self.assertEqual(exit_code, 0, errors)
         self.assertGreater(len(text.split()), 0)
+
+
+class MergeSentinel(unittest.TestCase):
+    """Prove the merge-driver sentinel cannot be committed quietly.
+
+    The driver resolves a ledger collision to an identity that is invalid on
+    purpose, because the alternatives that produce a *plausible* value -- a
+    driver that recomputes the pin, or ``merge=ours`` -- both emit something
+    the always-on provenance tier accepts, so Git commits a stale pin and
+    nothing says a word. That property is the whole design, and it is only true
+    if the validator really does reject the sentinel. These cases are what
+    answer that against the shipped generator rather than by assertion.
+    """
+
+    SENTINEL = "regenerate-me"
+    ROW = "handoff entries[0].pulp_paths[0]"
+
+    def setUp(self) -> None:
+        self.root = provenance.ROOT
+        self.handoff = provenance.DEFAULT_HANDOFF
+        self.driver = self.root / "tools/scripts/gpu_ledger_merge_driver.py"
+
+    def rows_for(self, problems: list[str]) -> list[str]:
+        return [problem for problem in problems if problem.startswith(self.ROW)]
+
+    def poison_with_driver(self, source: pathlib.Path, into: pathlib.Path) -> None:
+        """Run the real driver over one file, with no disagreement to resolve.
+
+        The driver takes three sides. Handing it the same content as base, ours
+        and theirs isolates the normalization -- what it poisons and what it
+        leaves alone -- from the merge, which the collision cases cover.
+        """
+
+        shutil.copyfile(source, into)
+        subprocess.run(
+            [str(self.driver), str(source), str(into), str(source)],
+            check=True, stdin=subprocess.DEVNULL, timeout=30,
+        )
+
+    def test_the_routing_validator_rejects_a_sentinel_identity(self) -> None:
+        """The named tier, in isolation, on the real shipped ledger."""
+
+        document = provenance.load_handoff(self.handoff)
+        # Control: this row is clean in this checkout, so any rejection below
+        # is the sentinel rather than local drift that would fake the result.
+        self.assertEqual(
+            self.rows_for(catalog_module().validate_handoff_routing(document, self.root)),
+            [],
+        )
+        document["entries"][0]["pulp_paths"][0]["object_id"] = self.SENTINEL
+        self.assertEqual(
+            self.rows_for(catalog_module().validate_handoff_routing(document, self.root)),
+            [f"{self.ROW} has stale revision/blob/tree identity"],
+        )
+
+    def test_a_sentinel_ledger_is_rejected_by_both_validator_tiers(self) -> None:
+        """What the required gate actually sees, and why no parse error hides it.
+
+        ``validate_with_catalog`` is what the always-on provenance case calls.
+        The sentinel is a legal JSON string, so the document still parses and
+        both tiers get to speak: the schema tier because the value is not a
+        40-character hex object id, and the routing tier because it does not
+        match the blob the pinned revision carries. Two independent rejections
+        for one sentinel is the belt-and-braces the design wants, and it is a
+        fact about the shipped validator, not an intention.
+        """
+
+        document = provenance.load_handoff(self.handoff)
+        self.assertEqual(
+            self.rows_for(provenance.validate_with_catalog(document, self.root)), []
+        )
+        document["entries"][0]["pulp_paths"][0]["object_id"] = self.SENTINEL
+        self.assertEqual(
+            self.rows_for(provenance.validate_with_catalog(document, self.root)),
+            [
+                f"{self.ROW} lacks exact Pulp object identity",
+                f"{self.ROW} has stale revision/blob/tree identity",
+            ],
+        )
+
+    def test_the_driver_poisons_only_what_the_generator_can_regenerate(self) -> None:
+        """Structural, per-array, against the parsed documents.
+
+        ``write`` derives ``pulp_paths`` identities from this repository's own
+        history, and rewrites nothing else. ``vellum_paths`` rows are constants
+        pinned to a fixed foreign revision and checked against a hardcoded
+        table, so a sentinel there is damage no repair command can undo: the
+        generator refuses the document and names a row it will never rewrite.
+        That is not hypothetical -- a driver that poisoned every ``object_id``
+        in the file left a ledger ``write`` would not repair.
+
+        Counted from the parsed JSON rather than from the driver's own notion
+        of which rows are which, so an expectation cannot shrink along with a
+        bug.
+        """
+
+        self.assertTrue(os.access(self.driver, os.X_OK), f"{self.driver} is not executable")
+        original = provenance.load_handoff(self.handoff)
+        with tempfile.TemporaryDirectory() as directory:
+            merged = pathlib.Path(directory) / "ours"
+            self.poison_with_driver(self.handoff, merged)
+            # Still a document the validator can read, or the rejection the
+            # design relies on would be a parse error wearing its name.
+            poisoned = json.loads(merged.read_text(encoding="utf-8"))
+
+        pulp_rows = vellum_rows = 0
+        for before, after in zip(original["entries"], poisoned["entries"]):
+            for row_before, row_after in zip(before["pulp_paths"], after["pulp_paths"]):
+                pulp_rows += 1
+                # Both fields `write` rewrites per re-pin. Poisoning only one of
+                # them would leave the other differing between the two sides, so
+                # every row would come back as a conflict and the driver would
+                # buy nothing.
+                for field in ("revision", "object_id"):
+                    self.assertEqual(row_after[field], self.SENTINEL)
+                regenerable = {"revision", "object_id"}
+                self.assertEqual(
+                    {k: v for k, v in row_before.items() if k not in regenerable},
+                    {k: v for k, v in row_after.items() if k not in regenerable},
+                    "the driver changed a field other than the identity",
+                )
+            for row_before, row_after in zip(before["vellum_paths"], after["vellum_paths"]):
+                vellum_rows += 1
+                self.assertEqual(row_before, row_after, "a Vellum constant was poisoned")
+
+        self.assertEqual(pulp_rows, len(provenance.canonical_inventory(original)))
+        self.assertGreater(vellum_rows, 0, "no Vellum rows present to protect")
+        for key in ("entries",):
+            self.assertEqual(len(original[key]), len(poisoned[key]))
+        self.assertEqual(
+            {k: v for k, v in original.items() if k != "entries"},
+            {k: v for k, v in poisoned.items() if k != "entries"},
+        )
+
+    def test_the_driver_poisons_the_receipt_digest(self) -> None:
+        """The receipt carries no object id, so its binding digest is the lie.
+
+        ``handoff_sha256`` is what ties the receipt to the exact ledger bytes.
+        Left to merge cleanly it would resolve to the other side's digest --
+        stale, plausible, and silent -- so the driver invalidates it for the
+        same reason it invalidates a pin.
+        """
+
+        with tempfile.TemporaryDirectory() as directory:
+            merged = pathlib.Path(directory) / "ours"
+            self.poison_with_driver(provenance.DEFAULT_RECEIPT, merged)
+            receipt = json.loads(merged.read_text(encoding="utf-8"))
+        self.assertEqual(receipt["handoff_sha256"], self.SENTINEL)
+        # The commit the receipt names is regenerated with the digest, and
+        # differs on both sides of every re-pin, so it is normalized too.
+        self.assertEqual(receipt["source_commit"], self.SENTINEL)
+        # The path list is NOT poisoned: it moves only when a row set moves, so
+        # it is one-sided exactly when a row addition is one-sided.
+        self.assertEqual(
+            receipt["canonical_paths"],
+            json.loads(
+                provenance.DEFAULT_RECEIPT.read_text(encoding="utf-8")
+            )["canonical_paths"],
+        )
+        self.assertNotEqual(
+            receipt["handoff_sha256"],
+            hashlib.sha256(self.handoff.read_bytes()).hexdigest(),
+        )
+
+    def three_way(self, directory, base, ours, theirs):
+        """Run the real driver over three encoded documents, as Git would."""
+
+        scratch = pathlib.Path(directory)
+        written = {}
+        for name, document in (("base", base), ("ours", ours), ("theirs", theirs)):
+            written[name] = scratch / name
+            written[name].write_text(
+                provenance.serialize_handoff(document), encoding="utf-8"
+            )
+        completed = subprocess.run(
+            [str(self.driver), str(written["base"]), str(written["ours"]),
+             str(written["theirs"])],
+            check=False, stdin=subprocess.DEVNULL, timeout=30,
+            capture_output=True, text=True,
+        )
+        return completed, written["ours"].read_text(encoding="utf-8")
+
+    @staticmethod
+    def repinned(document, revision):
+        """The ledger as a later commit re-pins it: identities move, rows do not."""
+
+        moved = json.loads(json.dumps(document))
+        for entry in moved["entries"]:
+            for row in entry["pulp_paths"]:
+                row["revision"] = revision
+                row["object_id"] = revision
+        return moved
+
+    def test_a_row_one_side_added_survives_a_re_pin_on_the_other(self) -> None:
+        """The collision the driver exists for, and the one it must not eat.
+
+        A branch adds a pinned path and re-pins; main only re-pins. Resolving
+        the file to either side would be silent data loss: the regeneration that
+        follows only rewrites the identity fields of rows that already exist, so
+        a dropped row never comes back, and the always-on provenance tier only
+        checks that the rows still present route correctly -- a ledger missing a
+        row validates clean. Row additions are not hypothetical; main carries
+        them regularly.
+        """
+
+        base = provenance.load_handoff(self.handoff)
+        ours = self.repinned(base, "a" * 40)
+        added = json.loads(json.dumps(ours["entries"][0]["pulp_paths"][0]))
+        added["path"] = "core/gpu/added_by_the_branch.hpp"
+        ours["entries"][0]["pulp_paths"].append(added)
+        theirs = self.repinned(base, "b" * 40)
+
+        with tempfile.TemporaryDirectory() as directory:
+            completed, merged = self.three_way(directory, base, ours, theirs)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn("<<<<<<<", merged, "churn was reported as a disagreement")
+        document = json.loads(merged)
+        paths = [
+            row["path"] for entry in document["entries"] for row in entry["pulp_paths"]
+        ]
+        self.assertIn("core/gpu/added_by_the_branch.hpp", paths)
+        self.assertEqual(
+            len(paths), len(provenance.canonical_inventory(base)) + 1,
+            "the merge changed the row set by something other than the addition",
+        )
+        # Still sentinelled, or the row survived at the cost of the guarantee.
+        self.assertEqual(
+            {
+                row["object_id"]
+                for entry in document["entries"] for row in entry["pulp_paths"]
+            },
+            {self.SENTINEL},
+        )
+        self.assertEqual(
+            [entry["vellum_paths"] for entry in document["entries"]],
+            [entry["vellum_paths"] for entry in base["entries"]],
+            "a Vellum constant moved",
+        )
+
+    def test_two_authors_editing_one_row_still_conflicts_loudly(self) -> None:
+        """Normalizing the churn must not normalize away a real disagreement.
+
+        The driver silences the identity fields precisely because nobody edits
+        them by hand. Everything else is content, and two sides changing the
+        same content differently is the case that has to come back as markers
+        and a nonzero exit -- today's behaviour, which the fix has to keep.
+        """
+
+        base = provenance.load_handoff(self.handoff)
+        ours = json.loads(json.dumps(base))
+        theirs = json.loads(json.dumps(base))
+        ours["entries"][0]["pulp_paths"][0]["path"] = "core/gpu/ours.hpp"
+        theirs["entries"][0]["pulp_paths"][0]["path"] = "core/gpu/theirs.hpp"
+
+        with tempfile.TemporaryDirectory() as directory:
+            completed, merged = self.three_way(directory, base, ours, theirs)
+
+        self.assertNotEqual(completed.returncode, 0, "a real collision merged silently")
+        for marker in ("<<<<<<<", ">>>>>>>"):
+            self.assertIn(marker, merged)
+        for side in ("core/gpu/ours.hpp", "core/gpu/theirs.hpp"):
+            self.assertIn(side, merged, "a side was dropped from the conflict")
+
+    def test_both_generated_paths_are_routed_to_the_driver(self) -> None:
+        """A driver nothing routes to is a driver that never runs."""
+
+        attributes = (self.root / ".gitattributes").read_text(encoding="utf-8")
+        for path in (
+            self.handoff.relative_to(self.root),
+            provenance.DEFAULT_RECEIPT.relative_to(self.root),
+        ):
+            self.assertIn(f"{path} merge=pulp-gpu-ledger", attributes)
+
+    def test_the_bootstrap_registers_the_driver_git_resolves(self) -> None:
+        """``merge=<name>`` with no local driver behind it silently text-merges.
+
+        That failure is invisible: the attribute is still there, the conflict
+        just comes back anyway. So this runs the real installer against a
+        scratch repository and reads the configured value back out of Git,
+        rather than grepping the script -- the installer assembles the value
+        from a shell variable, so the string it ends up writing appears nowhere
+        in its own source.
+        """
+
+        installer = self.root / "tools/scripts/install-githooks.sh"
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = pathlib.Path(directory)
+            git(scratch, "init", "--quiet", "--initial-branch=main")
+            (scratch / ".githooks").mkdir()
+            (scratch / ".githooks/pre-push").write_text("#!/bin/sh\n")
+            target = scratch / "tools/scripts"
+            target.mkdir(parents=True)
+            for source in (installer, self.driver):
+                copied = target / source.name
+                shutil.copyfile(source, copied)
+                copied.chmod(0o755)
+            subprocess.run(
+                [str(target / installer.name)],
+                cwd=scratch, check=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, timeout=60,
+            )
+            configured = git(
+                scratch, "config", "--get", "merge.pulp-gpu-ledger.driver"
+            )
+            self.assertTrue(
+                git(scratch, "config", "--get", "merge.pulp-gpu-ledger.name")
+            )
+            self.assertEqual(git(scratch, "config", "--get", "core.hooksPath"), ".githooks")
+            # Re-running must not double-register or start failing: setup.sh
+            # calls this on every bootstrap of an already-configured checkout.
+            subprocess.run(
+                [str(target / installer.name)],
+                cwd=scratch, check=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, timeout=60,
+            )
+            self.assertEqual(
+                git(scratch, "config", "--get", "merge.pulp-gpu-ledger.driver"),
+                configured,
+            )
+
+        command = shlex.split(configured)
+        self.assertEqual(
+            command[0], str(self.driver.relative_to(self.root))
+        )
+        # %O is base, %A is ours and the output file, %B is theirs. Dropping
+        # %O leaves the driver unable to tell a re-pin from a row somebody
+        # added, which is how a two-sided driver loses content in silence.
+        self.assertEqual(command[1:], ["%O", "%A", "%B"])
+
+    def test_the_sentinel_check_reads_a_merged_ledger_and_refuses_it(self) -> None:
+        """The local half of the design, end to end on real driver output.
+
+        The pin-freshness guard cannot cover this: it fires when a pinned path
+        changes and the ledger does not, and a sentinel merge changes the
+        ledger, so it reads the sentinel as the refresh it was waiting for. The
+        conflict-marker guard cannot either -- the driver's whole purpose is
+        that there are no markers.
+        """
+
+        # Spelled out rather than taken from sentinel_check.LEDGERS: naming the
+        # files the guard is supposed to cover is the entire assertion, and
+        # deriving them from the guard's own list would shrink the expectation
+        # in lockstep with the bug. Dropping the receipt from that list left
+        # this case green until it was written this way.
+        expected = [
+            pathlib.Path("docs/status/gpu-vellum-handoff.yaml"),
+            pathlib.Path("docs/validation/gpu-handoff-provenance/receipt.json"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            fake = pathlib.Path(directory)
+            for relative in expected:
+                target = fake / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                self.poison_with_driver(self.root / relative, target)
+            # Control: the pristine tree this was copied from must be silent,
+            # or a guard that fires on everything would look like one that
+            # detected something.
+            self.assertEqual(sentinel_check.sentinel_files(self.root), [])
+            self.assertEqual(sentinel_check.sentinel_files(fake), expected)
+            with contextlib.redirect_stderr(io.StringIO()) as reported:
+                self.assertEqual(sentinel_check.main(["--root", str(fake)]), 1)
+            for relative in expected:
+                self.assertIn(str(relative), reported.getvalue())
+            self.assertIn(sentinel_check.REPAIR, reported.getvalue())
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(
+                    sentinel_check.main(["--root", str(fake), "--mode", "hint"]), 0
+                )
+
+    def test_the_guard_reads_the_commit_being_pushed_not_the_working_tree(self) -> None:
+        """A clean tree can sit over a sentinel tip, and the tip is what ships.
+
+        Regenerate-but-forget-to-commit leaves exactly that state: `write` has
+        repaired the files on disk, so a working-tree scan is silent, while the
+        commit the push carries still reads `regenerate-me` and CI rejects it
+        twenty minutes later. The push gate has to read the object, not the file.
+        """
+
+        expected = [
+            pathlib.Path("docs/status/gpu-vellum-handoff.yaml"),
+            pathlib.Path("docs/validation/gpu-handoff-provenance/receipt.json"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = pathlib.Path(directory)
+            git(scratch, "init", "--quiet", "--initial-branch=main")
+            git(scratch, "config", "user.email", "test@example.com")
+            git(scratch, "config", "user.name", "test")
+            for relative in expected:
+                target = scratch / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(
+                    json.dumps({"object_id": self.SENTINEL}, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            git(scratch, "add", "--all")
+            git(scratch, "commit", "--quiet", "-m", "merged, not regenerated")
+            # `write` ran but nothing was committed: disk repaired, tip is not.
+            for relative in expected:
+                (scratch / relative).write_text(
+                    json.dumps({"object_id": "a" * 40}, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+
+            self.assertEqual(
+                sentinel_check.sentinel_files(scratch), [],
+                "the working tree is clean here -- that is the whole trap",
+            )
+            self.assertEqual(sentinel_check.sentinel_files(scratch, "HEAD"), expected)
+            with contextlib.redirect_stderr(io.StringIO()) as reported:
+                self.assertEqual(
+                    sentinel_check.main(
+                        ["--root", str(scratch), "--rev", "HEAD", "--mode", "report"]
+                    ),
+                    1,
+                )
+            self.assertIn("being pushed", reported.getvalue())
+            # Control: once the repair is committed the same scan goes quiet, so
+            # the reading above is the sentinel and not the scan firing always.
+            git(scratch, "add", "--all")
+            git(scratch, "commit", "--quiet", "-m", "regenerated")
+            self.assertEqual(sentinel_check.sentinel_files(scratch, "HEAD"), [])
+
+    def test_the_push_gate_reads_the_tip(self) -> None:
+        """The hook must pass --rev, or the case above is untested in production."""
+
+        hook = (self.root / ".githooks/pre-push").read_text(encoding="utf-8")
+        invocation = [
+            line for line in hook.splitlines()
+            if not line.lstrip().startswith("#")
+            and '"$GPU_LEDGER_SENTINEL"' in line
+            and "--mode" in line
+        ]
+        self.assertEqual(len(invocation), 1, "expected exactly one live invocation")
+        self.assertIn("--rev HEAD", invocation[0])
+
+    def test_the_driver_and_the_check_agree_on_the_sentinel(self) -> None:
+        """Git runs the driver as a bare shell command, so it cannot import the
+        checker; the two literals are only in step because this says so. A
+        silent disagreement would leave the driver writing something no guard
+        looks for, which is the failure this whole design exists to prevent.
+        """
+
+        self.assertEqual(sentinel_check.SENTINEL, self.SENTINEL)
+        self.assertIn(
+            f'"{self.SENTINEL}"', self.driver.read_text(encoding="utf-8")
+        )
+
+    def test_both_push_paths_run_the_sentinel_check(self) -> None:
+        """gates.sh is run by convention; the hook is run by git.
+
+        Wiring only gates.sh would leave the sentinel reaching CI for anyone
+        who did not think to run it -- the twenty-minute roundtrip the driver
+        exists to remove.
+
+        Asserting the script *name* appears in each file cannot prove that:
+        both surfaces hold the path in a shell variable, so the name stays
+        present when the line that runs it is deleted or commented out. This
+        finds the assignment, then requires a live command that actually
+        executes that variable.
+        """
+
+        script = "gpu_ledger_sentinel_check.py"
+        for surface in ("tools/scripts/gates.sh", ".githooks/pre-push"):
+            text = (self.root / surface).read_text(encoding="utf-8")
+            assigned = re.findall(
+                rf'^\s*(\w+)="[^"]*{re.escape(script)}"', text, re.MULTILINE
+            )
+            self.assertEqual(
+                len(assigned), 1,
+                f"{surface} does not name {script} exactly once",
+            )
+            variable = assigned[0]
+            invocations = [
+                line for line in text.splitlines()
+                if not line.lstrip().startswith("#")
+                and f'"${variable}"' in line
+                and "--mode" in line
+            ]
+            self.assertTrue(
+                invocations,
+                f"{surface} never runs ${variable}: the gate is registered but dead",
+            )
+
+
+def catalog_module():
+    """The handoff validator, loaded the way the generator loads it."""
+
+    provenance.validate_with_catalog(
+        provenance.load_handoff(provenance.DEFAULT_HANDOFF), provenance.ROOT
+    )
+    return provenance._CATALOG_MODULE
+
+
+class MergeResolution(unittest.TestCase):
+    """Prove `resolve` finishes the mechanical repair and declines the rest.
+
+    The sequence it replaces was run by hand on five consecutive sweeps, and the
+    branch in it is the part that cannot be defaulted: regeneration always
+    rewrites the receipt's self-referential source_commit, so a diff is never by
+    itself evidence that an identity moved.
+    """
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+
+    def scratch_repository(self) -> pathlib.Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        scratch = pathlib.Path(directory.name)
+        git(scratch, "init", "--quiet", "--initial-branch=main")
+        git(scratch, "config", "user.email", "resolve@example.invalid")
+        git(scratch, "config", "user.name", "Resolve Fixture")
+        return scratch
+
+    def test_binding_proof_discriminates(self) -> None:
+        """A True that cannot be False is not evidence.
+
+        The binding is the claim the identity tiers structurally cannot make:
+        every pinned identity can match while the receipt names another ledger
+        entirely. So the proof is asserted together with the control that must
+        return False on the same inputs.
+        """
+
+        ledger = '{"entries": []}\n'
+        digest = hashlib.sha256(ledger.encode("utf-8")).hexdigest()
+        receipt = json.dumps({"handoff_sha256": digest})
+
+        binds, named, actual = provenance.binding_proof(ledger, receipt)
+        self.assertTrue(binds)
+        self.assertEqual(named, actual)
+
+        # Negative control: one byte of ledger movement must flip it.
+        mutated, _, _ = provenance.binding_proof(ledger + "\n", receipt)
+        self.assertFalse(mutated, "the binding check cannot see a changed ledger")
+        unreadable, _, _ = provenance.binding_proof(ledger, "not json")
+        self.assertFalse(unreadable)
+
+    def test_the_discriminator_separates_churn_from_a_real_move(self) -> None:
+        """source_commit alone is churn; anything else is not this tool's call."""
+
+        base = {"schema": "s", "source_commit": "a" * 40, "handoff_sha256": "b" * 64}
+        churn = dict(base, source_commit="c" * 40)
+        self.assertEqual(
+            provenance.changed_receipt_fields(json.dumps(base), json.dumps(churn)),
+            {"source_commit"},
+        )
+        self.assertLessEqual(
+            provenance.changed_receipt_fields(json.dumps(base), json.dumps(churn)),
+            provenance.RECEIPT_CHURN_FIELDS,
+        )
+
+        moved = dict(base, source_commit="c" * 40, handoff_sha256="d" * 64)
+        self.assertFalse(
+            provenance.changed_receipt_fields(json.dumps(base), json.dumps(moved))
+            <= provenance.RECEIPT_CHURN_FIELDS
+        )
+        self.assertIsNone(provenance.changed_receipt_fields(None, json.dumps(base)))
+
+    def test_the_sentinel_literal_matches_every_copy_of_it(self) -> None:
+        """Three modules carry the literal because Git runs the driver bare."""
+
+        driver = (
+            self.root / "tools/scripts/gpu_ledger_merge_driver.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(f'SENTINEL = "{provenance.LEDGER_SENTINEL}"', driver)
+        self.assertEqual(sentinel_check.SENTINEL, provenance.LEDGER_SENTINEL)
+
+    def test_resolve_refuses_while_the_merge_is_uncommitted(self) -> None:
+        """Pinning to the commit the write is about to create cannot converge."""
+
+        scratch = self.scratch_repository()
+        (scratch / "leaf.txt").write_text("base\n", encoding="utf-8")
+        git(scratch, "add", "leaf.txt")
+        git(scratch, "commit", "--quiet", "-m", "base")
+        self.assertIsNone(provenance.unresolved_merge(scratch))
+
+        git(scratch, "checkout", "--quiet", "-b", "side")
+        (scratch / "leaf.txt").write_text("side\n", encoding="utf-8")
+        git(scratch, "commit", "--quiet", "-a", "-m", "side")
+        git(scratch, "checkout", "--quiet", "main")
+        (scratch / "leaf.txt").write_text("main\n", encoding="utf-8")
+        git(scratch, "commit", "--quiet", "-a", "-m", "main")
+        subprocess.run(
+            ["git", "merge", "--no-edit", "side"],
+            cwd=scratch, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=False, timeout=60,
+        )
+        blocked = provenance.unresolved_merge(scratch)
+        self.assertIsNotNone(blocked, "an in-flight merge was reported as resolved")
+
+    def test_the_discriminator_is_head_not_main(self) -> None:
+        """A branch that already re-pinned is not moving; main is the wrong baseline.
+
+        Measured on the real branch: against `origin/main` the ledger differs
+        because this branch re-pinned it, so a merge that moved nothing read as
+        MOVED and rewrote source_commit for nothing -- a commit claiming a re-pin
+        that did not happen, which re-collides on the next sweep. The question
+        is "did regeneration change what HEAD committed", and only HEAD answers
+        it.
+        """
+
+        source = (
+            self.root / "tools/scripts/gpu_handoff_provenance.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("--baseline", source, "resolve still takes a baseline ref")
+        self.assertIn('read_revision_text(args.root, "HEAD", ledger_name)', source)
+        self.assertNotIn("args.baseline", source)
+
+    def test_resolve_leaves_the_checked_in_pair_bound(self) -> None:
+        """End to end on the real ledger: whatever it decides, the pair binds.
+
+        `resolve` writes, so the files are restored unconditionally. The claim
+        asserted here is the one a green identity check cannot make.
+        """
+
+        handoff = provenance.DEFAULT_HANDOFF
+        receipt = provenance.DEFAULT_RECEIPT
+        if not handoff.is_file() or not receipt.is_file():
+            self.skipTest("the checked-in ledger pair is not present")
+        names = [str(path.relative_to(self.root)) for path in (handoff, receipt)]
+        # Restore from Git, not from bytes read at test start: a run that
+        # inherits an already-dirty pair would otherwise "restore" the dirt and
+        # leave a modified checkout behind. Skipping on dirt keeps the restore
+        # from discarding somebody's real edit.
+        if git(self.root, "status", "--porcelain", "--", *names):
+            self.skipTest("the checked-in ledger pair is modified locally")
+        self.addCleanup(lambda: git(self.root, "checkout", "--", *names))
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+            status = provenance.main(["--root", str(self.root), "resolve", "--json"])
+        if status != 0:
+            self.skipTest(f"resolve declined on this checkout: {buffer.getvalue()}")
+
+        summary = json.loads(buffer.getvalue())
+
+        # Pin the verdict, do not merely accept one. `check` already answers,
+        # independently, whether every identity is current AND the receipt binds
+        # -- which is exactly the state in which regeneration can change nothing.
+        # So when it exits 0 the only admissible verdict is churn, and resolve
+        # owes no commit. Accepting a set here lets the discriminator invert
+        # without a test noticing.
+        probe = io.StringIO()
+        with contextlib.redirect_stdout(probe), contextlib.redirect_stderr(probe):
+            current = provenance.main(["--root", str(self.root), "check", "--json"])
+        if current == 0:
+            self.assertEqual(
+                summary["verdict"],
+                "churn",
+                "a ledger check reports current and bound, so nothing moved",
+            )
+            self.assertFalse(summary["pending"], "churn left a commit pending")
+        else:
+            self.assertIn(summary["verdict"], {"moved", "rebind"})
+        self.assertTrue(summary["binds"], "resolve reported success on an unbound pair")
+        self.assertFalse(
+            summary["binding_control_binds"],
+            "the binding control passed, so the proof does not discriminate",
+        )
+        binds, _, _ = provenance.binding_proof(
+            handoff.read_text(encoding="utf-8"), receipt.read_text(encoding="utf-8")
+        )
+        self.assertTrue(binds, "the files resolve left on disk do not bind")
+        if summary["verdict"] == "churn":
+            # The whole point of the churn verdict: no commit is owed, because
+            # rewriting source_commit alone claims a re-pin that did not happen.
+            self.assertEqual(
+                git(self.root, "status", "--porcelain", "--", *names),
+                "",
+                "a churn resolution dirtied the checkout",
+            )
+
+
+class DriverRegistration(unittest.TestCase):
+    """`.gitattributes` names a driver; only local config can answer for it.
+
+    Git does not error on a `merge=<name>` it cannot resolve -- it falls back to
+    the ordinary text merge, in silence. So the repo can ship working merge
+    automation that is inert in a checkout bootstrapped before it landed, and
+    nothing says so. Measured on this machine: the attribute present, the driver
+    absent, the collision back on every sweep.
+    """
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+
+    def scratch_repository(self) -> pathlib.Path:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        scratch = pathlib.Path(directory.name)
+        git(scratch, "init", "--quiet", "--initial-branch=main")
+        shutil.copyfile(self.root / ".gitattributes", scratch / ".gitattributes")
+        return scratch
+
+    def test_the_routed_paths_are_read_from_gitattributes(self) -> None:
+        """Hardcoding them would keep passing after the routing was removed."""
+
+        routed = sentinel_check.declared_driver_paths(self.root)
+        self.assertEqual(
+            sorted(routed),
+            sorted(
+                [
+                    str(provenance.DEFAULT_HANDOFF.relative_to(self.root)),
+                    str(provenance.DEFAULT_RECEIPT.relative_to(self.root)),
+                ]
+            ),
+        )
+        empty = self.scratch_repository()
+        (empty / ".gitattributes").write_text("*.txt text\n", encoding="utf-8")
+        self.assertEqual(sentinel_check.declared_driver_paths(empty), [])
+
+    def test_an_unregistered_driver_fails_the_gate_and_says_how_to_fix_it(self) -> None:
+        """The condition, and the control that must not fire on the repaired state."""
+
+        scratch = self.scratch_repository()
+        self.assertFalse(sentinel_check.driver_is_registered(scratch))
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stderr(buffer):
+            status = sentinel_check.main(["--root", str(scratch), "--mode=report"])
+        self.assertEqual(status, 1)
+        message = buffer.getvalue()
+        self.assertIn("no driver registered", message)
+        self.assertIn(sentinel_check.INSTALLER, message)
+
+        # Positive control: register it and the same call must go quiet.
+        git(
+            scratch, "config", "merge.pulp-gpu-ledger.driver",
+            "tools/scripts/gpu_ledger_merge_driver.py %O %A %B",
+        )
+        self.assertTrue(sentinel_check.driver_is_registered(scratch))
+        quiet = io.StringIO()
+        with contextlib.redirect_stderr(quiet):
+            self.assertEqual(
+                sentinel_check.main(["--root", str(scratch), "--mode=report"]), 0
+            )
+        self.assertEqual(quiet.getvalue(), "")
+
+    def test_hint_mode_and_the_opt_out_never_block(self) -> None:
+        """Advisory callers must stay advisory, and the scan stay reachable alone."""
+
+        scratch = self.scratch_repository()
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(
+                sentinel_check.main(["--root", str(scratch), "--mode=hint"]), 0
+            )
+            self.assertEqual(
+                sentinel_check.main(
+                    ["--root", str(scratch), "--mode=report", "--skip-registration"]
+                ),
+                0,
+            )
 
 
 if __name__ == "__main__":

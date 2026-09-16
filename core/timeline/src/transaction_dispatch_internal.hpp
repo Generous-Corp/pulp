@@ -27,6 +27,19 @@ template <typename T>
 inline constexpr bool is_automation_command_type =
     claimed_by<T, InsertAutomationLane, RemoveAutomationLane>;
 
+// Modulation sources, macros, and the routes that connect them are track-owned,
+// but they are not track state: a rename or a mixer move replaces a value the
+// track always has, while these are collections whose membership changes, so
+// they carry identity transitions that the track-state family has no shell for.
+// The routes share this family rather than starting one because a route is
+// refused or admitted by the same whole-track revalidation its sources are, and
+// two families would mean two statements of one ownership rule.
+template <typename T>
+inline constexpr bool is_modulation_command_type =
+    claimed_by<T, InsertModulator, RemoveModulator, SetModulator, InsertMacro, RemoveMacro,
+               SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,
+               SetModulationRoute>;
+
 template <typename T>
 inline constexpr bool is_take_command_type =
     claimed_by<T, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
@@ -34,7 +47,7 @@ inline constexpr bool is_take_command_type =
 
 template <typename T>
 inline constexpr bool is_marker_command_type =
-    claimed_by<T, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion>;
+    claimed_by<T, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion, SetRegion>;
 
 template <typename T>
 inline constexpr bool is_scene_command_type =
@@ -49,7 +62,7 @@ inline constexpr bool is_device_command_type =
 
 template <typename T>
 inline constexpr bool is_track_state_command_type =
-    claimed_by<T, SetTrackFreeze, SetTrackMixer, SetTrackName>;
+    claimed_by<T, SetTrackFreeze, SetTrackMixer, SetTrackName, SetTrackTuning>;
 
 template <typename T>
 inline constexpr bool is_sequence_command_type =
@@ -57,15 +70,16 @@ inline constexpr bool is_sequence_command_type =
 
 template <typename T>
 inline constexpr bool is_note_command_type =
-    claimed_by<T, SetNoteVelocity, ReplaceNoteContent, SetNoteEvents, InsertNotes, RemoveNotes>;
+    claimed_by<T, SetNoteVelocity, ReplaceNoteContent, SetNoteEvents, InsertNotes, RemoveNotes,
+               InsertMidiExpressionLane, RemoveMidiExpressionLane, SetMidiExpressionLanePoints>;
 
 // Alternatives reduced by an inline branch in transaction.cpp rather than by a
 // family reducer. They have no predicate of their own, so the list is their
 // only statement of the claim.
 template <typename T>
 inline constexpr bool is_inline_command_type =
-    claimed_by<T, InsertClip, RemoveClip, MoveClip, SetTempoMap, SetMeterMap, CreateAsset,
-               RemoveAsset, SetChordScaleLane, SetGroove, SetClipPlaybackProperties,
-               SetDynamicsLane>;
+    claimed_by<T, InsertClip, RemoveClip, MoveClip, SetTempoMap, SetMeterMap, SetProjectTuning,
+               CreateAsset, RemoveAsset, SetChordScaleLane, SetGroove,
+               SetClipPlaybackProperties, SetDynamicsLane>;
 
 } // namespace pulp::timeline::detail

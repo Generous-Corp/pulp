@@ -1093,6 +1093,11 @@
             "subcommands": []
           },
           {
+            "name": "capabilities",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
             "name": "instances",
             "arguments": [],
             "subcommands": []
@@ -2976,6 +2981,10 @@
           {
             "name": "--sample-rate",
             "kind": "option"
+          },
+          {
+            "name": "--tail-frames",
+            "kind": "option"
           }
         ],
         "subcommands": []
@@ -4751,7 +4760,7 @@
       {
         "name": "claude-marketplace:pulp",
         "disposition": "pulp-owned",
-        "version": "0.455.7",
+        "version": "0.457.3",
         "source": "./",
         "min_cli_version": "0.31.0",
         "registration_keys": [
@@ -4766,13 +4775,13 @@
           "version"
         ],
         "catalog_name": "pulp",
-        "catalog_version": "0.455.7",
+        "catalog_version": "0.457.3",
         "catalog_metadata_version": "1.0.0"
       },
       {
         "name": "claude-plugin:pulp",
         "disposition": "pulp-owned",
-        "version": "0.455.7",
+        "version": "0.457.3",
         "commands": "./.claude/commands",
         "skills": "./.agents/skills",
         "registration_keys": [

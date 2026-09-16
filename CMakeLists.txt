@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.854.0
+    VERSION 0.856.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -661,7 +661,8 @@ if(PULP_BUILD_TESTS AND APPLE AND NOT IOS AND NOT PULP_IOS
         test/test_control_phase15_aggregate_e2e.cpp
         ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
     target_include_directories(pulp-test-control-phase15-aggregate-e2e PRIVATE
-        ${CMAKE_SOURCE_DIR}/inspect/src)
+        ${CMAKE_SOURCE_DIR}/inspect/src
+        ${CMAKE_SOURCE_DIR}/test)
     target_link_libraries(pulp-test-control-phase15-aggregate-e2e PRIVATE
         pulp::inspect-client Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-phase15-aggregate-e2e PRIVATE

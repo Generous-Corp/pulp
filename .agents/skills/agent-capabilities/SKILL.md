@@ -139,7 +139,18 @@ For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
   even when the consumer contract is unchanged. Increase the surface inventory
-  version.
+  version. `--write` cannot do the first of those for you: it reports the
+  measured digest and exits nonzero, because a generator free to restamp a
+  fingerprint would silently launder every unreviewed header edit. Paste the
+  measured digest over the declared one in `agent_capability_registry.py`, bump
+  `SURFACE_INVENTORY_VERSION` in `agent_capability_manifest.py`, then `--write`.
+- `--write` also appends a full snapshot to
+  `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
+  that dwarf the change that caused them. `--check` does not require it, so for
+  a byte-level fingerprint refresh, revert that file and keep the three-file
+  change; `--check` still reports `fresh`. Reverting it is not free of meaning,
+  so keep the snapshot when the change is a real contract movement whose history
+  someone will read back.
 - Increase the capability minor version for compatible additive contract
   changes.
 - Increase the capability major version when a binding is removed, renamed, or
@@ -359,6 +370,30 @@ counter whose material is identical fails the opposite rule,
 `... changed without a manifest change`, so "bump both to be safe" trades one
 red gate for another.
 
+**A taken counter does not always announce itself as a conflict.** Re-read both
+counters after *every* merge of the protected base, not only after git reports
+one. When two lanes reserve the same next integer, the two sides hold
+character-identical constant lines, so the merge is clean and silent — and the
+*increase* is what gets annihilated: the surface has changed (your fingerprint)
+while the counter equals the base again. That surfaces much later as
+`STALE: public surface changed without an inventory_version increase`, on every
+platform at once, naming generated files the diff appears not to touch.
+
+Recovery needs the surface document reset **first**. `--write` derives from the
+on-disk artifact, which already carries your fingerprint at the taken counter,
+so raising the counter alone fails the opposite rule instead:
+
+```bash
+git checkout origin/main -- docs/status/agent-capability-surface.json
+python3 tools/scripts/agent_capability_rederive.py
+```
+
+Reset that one document and nothing else. The same digest also lives in
+`REVIEWED_HEADERS` in `tools/scripts/agent_capability_registry.py`, and that copy
+must keep the NEW value — resetting it too restores the stale digest and
+reproduces the original failure. No integer is picked by hand: `rederive.py`
+resolves the protected tip, so it lands on whatever is free.
+
 It refuses rather than guesses when the surface has unresolved problems — a
 changed header with a stale fingerprint has no stable material to derive from,
 and its fingerprints must be refreshed first. Counters are decided LAST.
@@ -538,6 +573,24 @@ capability header:
    (surface axis — see the next section: this costs no contract bump),
 4. re-run `--check` and confirm it reports `fresh`.
 
+### The fingerprint lives in THREE places, and `--write` adds a fourth file
+
+The recipe above names two. A third holds the value the checker actually
+compares against: the `fingerprint` field of the header's row in
+`REVIEWED_HEADERS` in `tools/scripts/agent_capability_registry.py`. Updating
+only the surface document leaves `--write` and `--check` both reporting the
+same mismatch with the old digest, which reads as "regeneration is broken"
+rather than "one more literal to edit". Grep the old digest across
+`tools/` and `docs/` and replace every hit.
+
+`--write` then also appends a full manifest snapshot to
+`tools/agent-capabilities/contract-history.json` — tens of thousands of lines
+recording the (`manifest_revision`, `inventory_version`) pair. That append is
+not required for freshness: `--check` reports `fresh` on the three-file edit
+alone, so discard the history hunk unless the change is one whose lineage the
+history is meant to carry. Confirm with `--check` rather than assuming either
+way.
+
 ### Adding a function to an existing capability header costs NO contract bump
 
 A binding's identity is `(role, kind, include, qualified_name, target,
@@ -592,24 +645,33 @@ it by updating the fingerprint in
 through explicit reviewed classifications`. That is deliberate. The frozen set is
 content-pinned so headers in it cannot be edited silently.
 
-The sanctioned path is to classify the header OUT of the bucket, which means all
-of these in one change:
+The sanctioned path is to classify the header OUT of the bucket. That takes two
+edits, and **the baseline file is not one of them**:
 
 1. add it to `REVIEWED_HEADERS` in `tools/scripts/agent_capability_registry.py`
-   with its NEW fingerprint, a disposition, and a rationale;
-2. delete its entry from the baseline, decrement `frozen_count`, and recompute
-   `entries_digest` with `agent_capability_surface.canonical_digest(entries)`;
-3. update BOTH `FROZEN_LEGACY_COUNT` and `FROZEN_LEGACY_DIGEST` in
-   `tools/scripts/agent_capability_surface.py` to match; and
-4. run `python3 tools/scripts/agent_capability_rederive.py`, not a hand-edit, to
+   with its NEW fingerprint, a disposition, and a rationale; then
+2. run `python3 tools/scripts/agent_capability_rederive.py`, not a hand-edit, to
    move the counters. Editing `manifest_revision` / `inventory_version` directly
    in the generated JSON does nothing: they are projected from
    `MANIFEST_REVISION` / `SURFACE_INVENTORY_VERSION` constants, so `--write`
    regenerates them and still reports `changed without a revision increase`.
 
+**Do NOT delete the entry from the baseline, decrement `frozen_count`, recompute
+`entries_digest`, or touch `FROZEN_LEGACY_COUNT` / `FROZEN_LEGACY_DIGEST`.** The
+declaration alone satisfies the fingerprint check; the surface document derives
+each header's disposition from `REVIEWED_HEADERS` first, so a declared header
+stops being counted as legacy without the snapshot changing at all. Editing those
+pinned constants to make a PR pass removes the deliberate guard — see "A header
+in the frozen legacy baseline does NOT require unfreezing anything" below, which
+is the authoritative statement. Afterwards confirm the baseline file has no diff
+and its entry count is unchanged; `--check` should report `fresh`, and the
+surface's `legacy_unreviewed` count should have dropped by exactly the number of
+headers you declared.
+
 Only classify a header when the classification is already defensible from a
-written decision. Inventing one to unblock an edit converts a safety gate into
-paperwork.
+written decision, and only when the edit that tripped the gate is load-bearing
+for the change (the triage in that later section). Inventing a classification to
+unblock an incidental edit converts a safety gate into paperwork.
 
 ## The rederive self-test dirties the checkout for its whole run
 
@@ -863,9 +925,10 @@ a second Pulp plug-in is loaded beside it, in somebody else's host. The
 
 ## A green `--check` says nothing about a module outside `PUBLIC_ROOTS`
 
-`PUBLIC_ROOTS` in `tools/scripts/agent_capability_surface.py` lists exactly six
-domains: `audio`, `midi`, `music`, `sequence`, `signal`, `timebase`. Headers
-anywhere else are not scanned, not classified, and not fingerprinted.
+`PUBLIC_ROOTS` in `tools/scripts/agent_capability_surface.py` lists exactly
+seven domains: `audio`, `midi`, `music`, `playback`, `sequence`, `signal`,
+`timebase`. Headers anywhere else are not scanned, not classified, and not
+fingerprinted.
 
 That matters most at the moment it is least visible. Adding a new optional
 module under `core/` and exporting it — appending the target to
@@ -894,6 +957,44 @@ consumer contract with typed bindings and operational probes that do not exist �
 does not, and adding it would mean manufacturing rows to describe headers no
 generator claims. Record which way you went; silence here looks identical to
 having never asked.
+
+## Widening `PUBLIC_ROOTS` is four more edits, and each hides the next
+
+The four coordinated edits above cover a new header inside a domain that is
+already scanned. Admitting a whole new *domain* is a second, disjoint set, and
+the tooling reveals them strictly one at a time — satisfying one produces an
+error that looks unrelated to the one before it:
+
+1. **`PUBLIC_ROOTS`** in `agent_capability_surface.py`. Until the root is
+   declared, `discover_headers()` returns nothing for it, so the domain reads as
+   fully reviewed because it is entirely invisible.
+2. **The schema enum** in `docs/status/agent-capability-surface.schema.json` —
+   in **three** separate places (the review-root `domain`, the inventory's
+   `propertyNames`, and the frozen-entry `domain`). Miss one and a row that the
+   surface script just legitimately produced is rejected as schema-invalid.
+3. **`REVIEWED_MINIMAL_TARGETS`** in `agent_capability_registry.py`. The failure
+   is `include has no covered public target owner`, which names the binding, not
+   the missing map row. The value is the CMake **export** name
+   (`Pulp::playback`), which `PulpInstallRules.cmake` derives from the target
+   (`pulp-playback`) — not the target name itself.
+4. **The compile probe's link list** in `test/cmake/quality_tests.cmake`. The
+   generated link probe for `pulp-test-agent-capability-compile` cannot resolve a
+   symbol from a subsystem the target does not link, so the probe fails at link
+   time with no mention of capabilities at all.
+
+Two preconditions are worth measuring before starting, because assuming either
+one wastes the whole pass. The domain's headers must already install — the check
+is the per-subsystem `install(DIRECTORY …)` loop over
+`_pulp_sdk_header_subsystems` in `PulpInstallRules.cmake`, not the presence of
+an `install(TARGETS …)` line. And the target must already be in
+`PULP_SDK_TARGETS`; if it is not, adding it is itself public surface (see below)
+and belongs in its own slice.
+
+Partial coverage is the expected end state, and it must be spelled. Classify the
+headers that are not part of the advertised closure as `infrastructure` with
+empty `capability_keys`, never as `unsupported_capability`: an absent key means
+*unknown*, and `unsupported_capability` asserts a fact about the header that
+nobody measured.
 
 ## Splitting an exported target means exporting BOTH halves
 

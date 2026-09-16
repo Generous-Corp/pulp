@@ -87,8 +87,6 @@ std::string_view compile_error_code_name(playback::CompileErrorCode code) noexce
         return "MidiExpressionLaneBudgetExceeded";
     case playback::CompileErrorCode::TrimmedGrooveUnsupported:
         return "TrimmedGrooveUnsupported";
-    case playback::CompileErrorCode::TrimmedRegisteredContentUnsupported:
-        return "TrimmedRegisteredContentUnsupported";
     case playback::CompileErrorCode::UnresolvedRegisteredContent:
         return "UnresolvedRegisteredContent";
     case playback::CompileErrorCode::RegisteredContentCompileFailed:
@@ -107,8 +105,12 @@ std::string_view compile_error_code_name(playback::CompileErrorCode code) noexce
         return "NestedActiveTakeUnsupported";
     case playback::CompileErrorCode::NestedDeviceChainUnsupported:
         return "NestedDeviceChainUnsupported";
-    case playback::CompileErrorCode::NestedAutomationLaneUnsupported:
-        return "NestedAutomationLaneUnsupported";
+    case playback::CompileErrorCode::NestedAutomationPanUnsupported:
+        return "NestedAutomationPanUnsupported";
+    case playback::CompileErrorCode::NestedAutomationGainEventLeafUnsupported:
+        return "NestedAutomationGainEventLeafUnsupported";
+    case playback::CompileErrorCode::NestedAutomationGainMediaUnsupported:
+        return "NestedAutomationGainMediaUnsupported";
     case playback::CompileErrorCode::NestedConformedTrimUnsupported:
         return "NestedConformedTrimUnsupported";
     case playback::CompileErrorCode::NestedAbsoluteChildUnsupported:
@@ -322,8 +324,8 @@ OperationResult explain(std::string_view project, std::uint32_t sample_rate) {
 }
 
 OperationResult render(std::string_view project, const std::filesystem::path& output,
-                       std::uint32_t sample_rate) {
-    return render(ProjectSource::auto_detect(project), output, sample_rate);
+                       std::uint32_t sample_rate, std::uint32_t tail_frames) {
+    return render(ProjectSource::auto_detect(project), output, sample_rate, tail_frames);
 }
 
 OperationResult schema() {

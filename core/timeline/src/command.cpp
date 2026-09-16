@@ -136,8 +136,7 @@ bool equal_marker(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept
 }
 
 bool equal_region(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
-    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
-           lhs.duration == rhs.duration && lhs.color == rhs.color;
+    return lhs == rhs;
 }
 
 bool equal_locators(std::span<const AssetLocator> lhs, std::span<const AssetLocator> rhs) noexcept {
@@ -491,6 +490,16 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                                  std::is_same_v<T, SetDynamicsLane>) {
                 return left.sequence_id == right.sequence_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, InsertMidiExpressionLane>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id && left.lane == right.lane;
+            } else if constexpr (std::is_same_v<T, RemoveMidiExpressionLane>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id && left.lane_id == right.lane_id;
+            } else if constexpr (std::is_same_v<T, SetMidiExpressionLanePoints>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id && left.lane_id == right.lane_id &&
+                       left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, InsertMarker>) {
                 return left.sequence_id == right.sequence_id &&
                        equal_marker(left.marker, right.marker);
@@ -499,6 +508,57 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, InsertRegion>) {
                 return left.sequence_id == right.sequence_id &&
                        equal_region(left.region, right.region);
+            } else if constexpr (std::is_same_v<T, SetRegion>) {
+                return left.sequence_id == right.sequence_id &&
+                       equal_region(left.expected, right.expected) &&
+                       equal_region(left.replacement, right.replacement);
+            } else if constexpr (std::is_same_v<T, InsertModulator>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.modulator == right.modulator;
+            } else if constexpr (std::is_same_v<T, RemoveModulator>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.modulator_id == right.modulator_id;
+            } else if constexpr (std::is_same_v<T, SetModulator>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.modulator_id == right.modulator_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, InsertMacro>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.macro == right.macro;
+            } else if constexpr (std::is_same_v<T, RemoveMacro>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.macro_id == right.macro_id;
+            } else if constexpr (std::is_same_v<T, SetMacro>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.macro_id == right.macro_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, SetMacroValue>) {
+                // Bit comparison, not value comparison: two commands that both
+                // carry a NaN expectation are the same authored command, and
+                // `==` would call them different. Idempotency asks whether the
+                // same command arrived twice, which is a question about the
+                // bytes.
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.macro_id == right.macro_id &&
+                       std::bit_cast<std::uint32_t>(left.expected) ==
+                           std::bit_cast<std::uint32_t>(right.expected) &&
+                       std::bit_cast<std::uint32_t>(left.replacement) ==
+                           std::bit_cast<std::uint32_t>(right.replacement);
+            } else if constexpr (std::is_same_v<T, InsertModulationRoute>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.route == right.route;
+            } else if constexpr (std::is_same_v<T, RemoveModulationRoute>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.route_id == right.route_id;
+            } else if constexpr (std::is_same_v<T, SetModulationRoute>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.route_id == right.route_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, SetProjectTuning>) {
+                return left.expected == right.expected && left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, SetTrackTuning>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, RemoveRegion>) {
                 return left.sequence_id == right.sequence_id && left.region_id == right.region_id;
             } else if constexpr (std::is_same_v<T, InsertScene>) {
@@ -582,6 +642,31 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(sizeof(T), value.marker.name.size());
             if constexpr (std::is_same_v<T, InsertRegion>)
                 return saturated_add(sizeof(T), value.region.name.size());
+            // A region carries one heap allocation, its name, on each side of the
+            // gate. A tuning carries none: every member is a fixed-width value,
+            // so the struct's own size is the whole charge.
+            if constexpr (std::is_same_v<T, SetRegion>)
+                return saturated_add(
+                    sizeof(T),
+                    saturated_add(value.expected.name.size(), value.replacement.name.size()));
+            // A modulator and a macro each carry one heap allocation, their
+            // name, and a value gate carries one on each side. Every other
+            // member is a fixed-width value the struct's own size covers.
+            if constexpr (std::is_same_v<T, InsertModulator>)
+                return saturated_add(sizeof(T), value.modulator.name.size());
+            if constexpr (std::is_same_v<T, SetModulator>)
+                return saturated_add(sizeof(T), saturated_add(value.expected.name.size(),
+                                                              value.replacement.name.size()));
+            if constexpr (std::is_same_v<T, InsertMacro>)
+                return saturated_add(sizeof(T), value.macro.name.size());
+            if constexpr (std::is_same_v<T, SetMacro>)
+                return saturated_add(sizeof(T), saturated_add(value.expected.name.size(),
+                                                              value.replacement.name.size()));
+            // A route owns no heap storage at all: its source is two fixed-width
+            // fields, its target is a variant of two trivially copyable structs,
+            // and its depth and bypass are scalars. So the struct's own size is
+            // the whole answer and no arm is written for the three route
+            // commands -- the default below is correct rather than missing.
             if constexpr (std::is_same_v<T, InsertScene>)
                 return saturated_add(saturated_add(sizeof(T), value.scene.name.size()),
                                      detail::launcher_slot_list_owned_storage(value.scene.slots));
@@ -651,6 +736,18 @@ std::size_t retained_size(const Command& command) noexcept {
                     sizeof(T), saturated_multiply(saturated_add(value.expected.events().size(),
                                                                 value.replacement.events().size()),
                                                   sizeof(DynamicsEvent)));
+            // Charges the payload this command carries, which is a copy the
+            // caller supplied. The live clip's own lane storage is accounted
+            // separately by clip_retained_size, so neither total absorbs the
+            // other's bytes.
+            if constexpr (std::is_same_v<T, InsertMidiExpressionLane>)
+                return saturated_add(sizeof(T), saturated_multiply(value.lane.points.size(),
+                                                                   sizeof(MidiLanePoint)));
+            if constexpr (std::is_same_v<T, SetMidiExpressionLanePoints>)
+                return saturated_add(
+                    sizeof(T), saturated_multiply(saturated_add(value.expected.size(),
+                                                                value.replacement.size()),
+                                                  sizeof(MidiLanePoint)));
             if constexpr (std::is_same_v<T, SetGroove>)
                 return saturated_add(
                     sizeof(T), saturated_add(saturated_multiply(

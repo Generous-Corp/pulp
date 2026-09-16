@@ -1,0 +1,118 @@
+name: Format (changed lines)
+
+# Diff-scoped clang-format check: judges ONLY the lines a PR changes against
+# its base. The tree does not round-trip under .clang-format (clang-format 21
+# reflows 3,743 of 4,415 committed C++ files), existing debt is grandfathered,
+# and a whole-tree reformat is a separate decision — so this is the only shape
+# of format check that can be honest here.
+#
+# ADVISORY: this check is not in required_status_checks. It reports; it does
+# not block. Promote it in branch protection once open branches are clean on
+# touched lines.
+#
+# Two distinct failure classes, kept apart on purpose:
+#   * exit 1  — a touched line is not clang-format clean (a formatting verdict)
+#   * exit 3  — no clang-format 21 on the runner (INFRASTRUCTURE; nothing was
+#               judged, and the message says so — never "your code is
+#               misformatted")
+# The binary is pinned: PyPI `clang-format==21.1.8`, measured byte-identical to
+# the Xcode, CommandLineTools and Homebrew llvm@21 binaries developers run.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - '**.cpp'
+      - '**.hpp'
+      - '**.h'
+      - '**.mm'
+      - '**.cc'
+      - '**.cxx'
+      - '.clang-format'
+      - 'tools/scripts/format_changed.sh'
+      - '.github/workflows/format-changed-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: format-changed-check-${{ github.ref }}
+  # Advisory check: a superseded run may be cancelled; nothing waits on it.
+  cancel-in-progress: true
+
+jobs:
+  format-changed:
+    name: Format (changed lines)
+    # GitHub-hosted on purpose: a few seconds of python + clang-format, and it
+    # must never take a slot from the self-hosted pool that serves the required
+    # `macos` gate.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # format_changed.sh diffs the checkout (the PR merge ref) against the
+          # base branch tip, so the base must be reachable.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned clang-format 21
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet "clang-format==21.1.8"
+          clang-format --version
+
+      - name: Resolve diff base
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=origin/main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check touched lines
+        env:
+          BASE_REF: ${{ steps.base.outputs.ref }}
+        run: |
+          set -uo pipefail
+          PULP_CLANG_FORMAT="$(command -v clang-format || true)"
+          export PULP_CLANG_FORMAT
+          report="$RUNNER_TEMP/format-changed.txt"
+          bash tools/scripts/format_changed.sh --check --base "$BASE_REF" > "$report" 2>&1
+          rc=$?
+          cat "$report"
+          {
+            echo "## Format (changed lines)"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          case "$rc" in
+            0)
+              echo "Touched lines are clang-format clean (advisory check)." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            1)
+              {
+                echo "Some touched lines are not clang-format clean. Only the lines this PR changes are judged; run \`tools/scripts/format_changed.sh\` locally to fix them."
+                echo
+                echo '```diff'
+                grep -E '^(---|\+\+\+|@@|[-+ ])' "$report" || true
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error title=Formatting (touched lines)::Some lines this PR changes are not clang-format clean. Run tools/scripts/format_changed.sh (advisory check; only touched lines are judged)."
+              exit 1
+              ;;
+            3)
+              echo "INFRASTRUCTURE: clang-format 21 was not available on the runner. Nothing was judged; this is not a formatting verdict." >> "$GITHUB_STEP_SUMMARY"
+              echo "::error title=INFRASTRUCTURE::clang-format 21 is not available on this runner, so no line was judged. This is NOT a formatting verdict — fix the pip pin or the runner, not the PR."
+              exit 1
+              ;;
+            *)
+              echo "INFRASTRUCTURE: format_changed.sh exited $rc (usage/repo error). Nothing was judged; this is not a formatting verdict." >> "$GITHUB_STEP_SUMMARY"
+              echo "::error title=INFRASTRUCTURE::format_changed.sh exited $rc (usage or repository error) — nothing was judged; this is NOT a formatting verdict."
+              exit 1
+              ;;
+          esac

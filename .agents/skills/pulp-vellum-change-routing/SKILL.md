@@ -160,10 +160,18 @@ so regenerating without it leaves a second gate red for the next reader.
 
 `gpu_recipe_catalog.py` will not catch that omission. It validates the ledger's
 own identities and reports `OK` while the receipt still names the previous
-ledger bytes, so the check recommended above is green in exactly the state this
-paragraph warns about. Prove the receipt separately — re-run `write --receipt`
-and confirm it rewrites nothing, or compare the receipt's `handoff_sha256`
-against `shasum -a 256 docs/status/gpu-vellum-handoff.yaml`.
+ledger bytes. `gpu_handoff_provenance.py check` **does** catch it now: it binds
+the published receipt to the ledger's bytes (sha256 + canonical paths, no git,
+no currency claim), prints a `RECEIPT …` line and exits 1 when they disagree,
+and says `receipt: none at …; binding not checked` out loud when there is no
+receipt to bind. It used to exit 0 on exactly the state this paragraph warns
+about, while the selftest that would have caught it
+(`test_published_receipt_binds_the_checked_in_ledger`) is opt-in behind
+`PULP_GPU_HANDOFF_REQUIRE_CURRENT=1` — deliberately, because currency at HEAD
+would go red on every unrelated PR — so a "36 tests, OK" run proved nothing
+about the receipt. Read the RECEIPT line, or `--json` and the `receipt.state`
+field (`bound` / `stale` / `absent`); do not infer binding from a green
+selftest.
 
 `check` names each stale row, its path, and the field-level correction, so a
 drifted pin no longer has to be located by hand. `write` derives `revision`,
@@ -189,13 +197,52 @@ fixing one pin creates the next. The sequence terminates, because a pin-refresh
 commit touches only the YAML, and the YAML excludes itself from the inventory.
 Land the file edits first, then regenerate in a single following commit. Re-run
 `gpu_recipe_catalog.py` after the refresh rather than before, or the second
-stale row goes out unseen. Note that `gates.sh` and the pre-push hook do **not**
-run this check, so a clean `gates: ✓ all gates pass` says nothing about your
-pins.
+stale row goes out unseen.
+
+`gates.sh` and the pre-push hook DO catch a stale pin, but only the cheap half
+of it. A diff-scoped `gpu-handoff pin freshness` guard fails when a changed file
+is pinned and the ledger was not touched, and it names the repair command. It
+deliberately does not re-verify the identity fields, because that costs a `git
+log` per pinned path. So `gates: ✓ all gates pass` proves the ledger was
+*refreshed*, never that its 100+ identities are *correct* — only
+`gpu_handoff_provenance.py check` proves that, and it is not run by any gate.
+Run it yourself after every refresh.
+
+**The cascade can start from a gate you were not thinking about.** A fix in
+`core/` that touches a skill-mapped source path makes `skill_sync_check.py`
+demand a SKILL.md edit; a SKILL.md is frequently a pinned path, so satisfying
+skill-sync stales a handoff row; and the refresh commit touches the YAML, which
+is itself mapped to *this* skill and so re-arms skill-sync. Landing a one-line
+source fix can therefore require touching two skills and the ledger. The way
+out is not to keep chasing it: satisfy skill-sync with a real gotcha where you
+genuinely learned one and the `Skill-Update: skip skill=<name> reason="..."`
+trailer where you did not, then refresh the ledger LAST, in its own commit.
 
 The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
 unregenerated ledger fails locally and in CI with the repair command in the
 failure message rather than only as a stale-identity report.
+
+**Write the receipt in the same run as the ledger, before you commit either.**
+`write --receipt` stamps `source_commit` with whatever HEAD is when it runs, and
+`test_published_receipt_binds_the_checked_in_ledger` re-derives the ledger from
+that commit and compares bytes. A bare `write` that is then committed leaves no
+way to fold the receipt into that commit afterwards: regenerating stamps the
+commit you just made, and `--amend`ing the receipt into it orphans that SHA, so
+the receipt names a commit that is no longer an ancestor of HEAD, and every
+further amend repeats it. Regenerate from a clean tree with `--receipt` first,
+then commit the ledger and the receipt together. To recover from a bare `write`
+that already landed, `git reset --soft` back to the commit that owns the edited
+files, restore the ledger, and regenerate with `--receipt`.
+
+Nothing in the fast path catches that omission. `gates.sh`'s `gpu-handoff pin
+freshness` gate only asserts the ledger was **touched**, so a bare `write` turns
+it green, and `gpu_recipe_catalog.py` validates the ledger's own identities and
+also reports `OK`. The stale receipt surfaces only in
+`gpu-handoff-provenance-selftest`. Run it directly before pushing:
+
+```bash
+python3 -B tools/scripts/test_gpu_handoff_provenance.py -k published_receipt
+```
 
 **A capability-registry change stales a handoff pin without touching any GPU or
 Vellum file.** `tools/scripts/test_release_artifact_contents.py` is a pinned
@@ -334,15 +381,119 @@ Two mechanics that cost time on the way to that error:
   that prints `exit=0` under a pipe may have exited 1. Read `${PIPESTATUS[0]}`,
   or drop the pipe.
 - **`write --source-commit` refuses on an unclean canonical path** (rc=2). So a
-  repair cannot precede the merge commit that resolves the conflict: take
-  `--theirs` on the generated ledgers, commit the merge, and regenerate from the
-  merge sha.
+  repair cannot precede the merge commit that resolves the conflict: let the
+  merge land, then regenerate from the merge sha. On a checkout without the
+  merge driver below, "let the merge land" means taking `--theirs` on the
+  generated ledgers by hand first.
 
 A receipt conflict is also not always pointer churn. One case reported
 `102 rows unchanged` while `handoff_sha256` moved to a value matching **neither**
 parent — the ledger bytes were equal and the receipt hash was not, which means
 the hash was computed over a tree that no longer existed. Regenerate from the
 merge sha rather than picking a side.
+
+## `regenerate-me` in a ledger is a resolved merge, not corruption
+
+`.gitattributes` routes `docs/status/gpu-vellum-handoff.yaml` and
+`docs/validation/gpu-handoff-provenance/receipt.json` to the
+`pulp-gpu-ledger` merge driver, which `setup.sh` registers via
+`tools/scripts/install-githooks.sh`. The driver reads all three sides — base,
+ours and theirs — and overwrites, in each of them, every Pulp row's `revision`
+and `object_id`, plus the receipt's `source_commit` and `handoff_sha256`, with
+the literal `regenerate-me`. Those are exactly the fields `write` regenerates,
+so poisoning them makes the re-pin churn byte-identical on every side, and an
+ordinary three-way merge then runs over the result.
+
+That split is the point. Identity churn cancels out; everything else — a row
+one side added, a comment somebody re-bound — is content, and merges the way
+content does. `vellum_paths` rows are constants pinned to a fixed foreign
+revision and are never touched. When a re-pin was the only difference the merge
+completes with no conflict markers and commits itself; when two authors edited
+the same row it still comes back as conflict markers and a nonzero exit, which
+is what you want.
+
+**The value is invalid on purpose, and that is the entire mechanism.** Every
+resolution that produces something *shaped* like an identity is accepted
+somewhere: a stale-but-ancestral pin satisfies the always-on provenance tier, so
+a driver that computed the merged value — or `merge=ours` — would hand Git a
+wrong answer and Git would commit it without a word. `regenerate-me` cannot
+survive. It fails the 40-hex check in `validate_handoff` *and* the blob
+comparison in `validate_handoff_routing`, and
+`tools/scripts/gpu_ledger_sentinel_check.py` rejects it from both the pre-push
+hook and `gates.sh` before it can reach CI.
+
+So when a ledger reads `regenerate-me`, nothing is corrupt: the merge is done
+and the regeneration is owed. Regenerating is not optional politeness — the
+identities are invalid until you do, and every tier says so:
+
+```sh
+python3 tools/scripts/gpu_handoff_provenance.py resolve   # preferred: decides the branch below
+```
+
+`resolve` runs the whole sequence from a committed merge: it regenerates pinned
+to `HEAD` — a commit that already exists, because the receipt names its own
+source commit and pinning to the commit the write is about to create cannot
+converge — then decides whether anything actually moved, and proves the receipt
+binds the ledger it was written beside with a control on a mutated ledger that
+must come back False.
+
+**The baseline is HEAD, not `origin/main`.** Regeneration always rewrites the
+receipt's `source_commit`, so a diff is never by itself evidence of movement;
+and a branch that already re-pinned its ledger differs from main *for a reason
+that is not movement*, so taking main as the baseline calls an inert merge a
+re-pin and commits the churn it was supposed to prevent. The question is only
+whether regeneration changed what HEAD committed.
+
+| Signal | Verdict | What `resolve` does |
+|---|---|---|
+| regeneration changes the ledger HEAD committed | `MOVED` | keeps it; reports `repaired N identity fields` |
+| ledger unchanged, HEAD's receipt already binds it | `CHURN` | keeps HEAD's bytes; writes and commits nothing |
+| ledger unchanged, HEAD's receipt does not bind it | `REBIND` | rewrites the receipt only — a text merge that took one side of the pair |
+| ledger unchanged, receipt would change in a field that cannot move on an unmoved ledger | refuses (exit 3) | that is a human edit |
+
+It also refuses (exit 2) while `MERGE_HEAD` is present or the index holds
+unmerged entries, on an unclean canonical path, and (exit 3) when
+`regenerate-me` survives regeneration — which means the driver poisoned a field
+`write` does not rewrite, and no repair command clears it. Add `--commit` to
+land the result, and `--json` for the verdict as data.
+
+The manual form remains available and is what `resolve` performs:
+
+```sh
+python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt
+git commit docs/status/gpu-vellum-handoff.yaml \
+           docs/validation/gpu-handoff-provenance/receipt.json
+```
+
+Land that as **its own commit**: amending a commit that touches a pinned path
+changes that path's owning revision and re-stales the row just repaired. Drop
+`--receipt` and the ledger is repaired while the receipt stays bound to bytes
+that no longer exist — green locally, red in CI.
+
+**`check` answers the binding question, and it is the only thing that does.**
+The identity tiers compare pins against Git; none of them reads the receipt, so
+every pinned identity can match while the receipt names a ledger that no longer
+exists. `check` therefore compares `sha256(ledger)` against the receipt's
+`handoff_sha256` unconditionally — not behind a flag — and prints
+`RECEIPT …` plus a nonzero exit when they disagree, or `the receipt binds this
+ledger` when they agree. When no receipt is present it says so loudly rather
+than exiting 0 on a claim it never examined.
+
+Two limits worth knowing before trusting the driver:
+
+- **A checkout that never ran `setup.sh` has no driver**, because Git resolves
+  `merge=<name>` against *local* config that no clone carries — and it does not
+  error on a name it cannot resolve, it falls back to the ordinary text merge in
+  silence. A checkout bootstrapped *before* the driver landed is the same state
+  and the likelier one: the attribute is there, so the automation looks
+  installed while every sweep re-conflicts. `gpu_ledger_sentinel_check.py` now
+  reports that directly — it reads the routed paths out of `.gitattributes` and
+  asks Git whether the name resolves — so the pre-push hook and `gates.sh` both
+  fail with `install-githooks.sh` as the repair. Re-running the installer is
+  idempotent and takes a second.
+- **GitHub's server-side merge does not run merge drivers.** A pull request can
+  still show `CONFLICTING` on github.com while the same merge is clean locally.
+  Merge `origin/main` into the branch, regenerate, and push.
 
 ## The watch-family selectors match PATHS, so a one-line include can demand an event
 

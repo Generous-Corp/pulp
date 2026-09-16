@@ -48,11 +48,25 @@ sweep:
     - tools/harness
     - tools/audio
   include_paths:
+    - tools/scripts/ctest_nonruns.py
     - tools/scripts/figma_import_diff.py
     - tools/scripts/gpu_trace_overhead_acceptance.py
     - tools/scripts/render-figma-import.sh
 
 tools:
+  # ── CI and test evidence ────────────────────────────────────────────────
+  - name: ctest-nonruns
+    path: tools/scripts/ctest_nonruns.py
+    category: test-evidence
+    use_when: Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift.
+    invocation: python3 tools/scripts/ctest_nonruns.py <current-ctest.junit.xml> [--baseline <known-good-ctest.junit.xml>] [--json]
+    inputs: One explicit CTest JUnit artifact and, optionally, a baseline artifact produced with a comparable selection.
+    outputs: Bounded Markdown or `pulp.ctest-nonruns.v2` JSON with input digests, status counts, non-run reasons, duplicate-safe status transitions, and tests present in only one artifact.
+    caveat: Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
+    availability: always
+    skill: ci
+    docs: guides/local-ci.md
+
   # ── Visual comparison — the tools the hand-roll incident was about ────────
   - name: fidelity-diff
     path: tools/import-design/fidelity_diff.py
@@ -545,6 +559,18 @@ tools:
     invocation: python3 tools/harness/visual/check_skia_pin.py
     inputs: ci/visual-harness.Dockerfile + tools/deps/manifest.json.
     outputs: Non-zero with a clear diff when the baked Skia tag/URL/SHA drifts from the canonical pin.
+    availability: always
+    skill: screenshot
+    docs: guides/testing-advanced.md
+
+  - name: visual-harness-raster-digest
+    path: tools/harness/visual/raster.py
+    category: harness
+    use_when: "A `kind: render` golden mismatches and you need to know WHICH host's bytes moved."
+    invocation: python3 tools/harness/visual/raster.py --fixture <fixture.json>
+    inputs: "A visual-harness `kind: render` fixture, plus the pinned skia-python wheel."
+    outputs: This host's platform key, byte count and SHA-256, printed whether the comparison passes or fails, so a mismatch is attributable to a host and a value.
+    caveat: Reports a digest and adjudicates nothing — it holds no expectation, so it can never fail. It rasterizes through the pinned skia-python wheel, NOT through `pulp::view::render_to_png`, so its bytes say nothing about what the C++ renderer draws. Without the pinned wheel it exits non-zero rather than degrading to another rasterizer.
     availability: always
     skill: screenshot
     docs: guides/testing-advanced.md

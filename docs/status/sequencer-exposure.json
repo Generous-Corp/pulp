@@ -100,9 +100,9 @@
         },
         "live_product_control": {
           "disposition": "gap",
-          "rationale": "Product A has no typed operation and executor for sequencer grid snapshots or edits.",
+          "rationale": "A typed Product A operation and executor for sequencer grid snapshots and edits now exist, but this row cannot carry that closure. The row is released, so its evidence resolves against the merge it shipped in rather than against the current tree; an exposed claim here would assert a live control that did not exist in that snapshot. The closure is recorded instead on the pending row product-a-sequencer-state-control, whose live_product_control surface is exposed and whose evidence resolves against the tree that contains the executor. This surface stays a gap only as the pointer to that row.",
           "dependencies": [
-            "product-a-sequencer-state-operation"
+            "product-a-sequencer-state-control"
           ],
           "owner": "sequencer-control-closure"
         },
@@ -2037,7 +2037,7 @@
       "id": "windows-mcp-string-chunks",
       "title": "Portable generated Timeline MCP document string chunks",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "a4565ce5-05df-467e-b284-1edf94c63a11",
       "owned_paths": [
         "test/cmake/timeline_tests.cmake",
@@ -2048,6 +2048,12 @@
         "tools/cmake/PulpCppStringChunks.cmake",
         "docs/status/sequencer-exposure.json"
       ],
+      "release": {
+        "pr": 8034,
+        "accepted_head": "efe88295894770991fa3060cee0766eead3407da",
+        "merge_sha": "d018d5bd1b35af12959d476a6a3506e2253767d3",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/mcp/timeline_mcp_tools.h.in",
@@ -2095,11 +2101,17 @@
       "id": "sequencer-api-docs-diagnostic-privacy",
       "title": "Private-path-safe Sequencer API documentation diagnostics",
       "classification": "ci_test_only",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "codeql-alert-124-20260827",
       "owned_paths": [
         "tools/scripts/timeline_api_docs_check.py"
       ],
+      "release": {
+        "pr": 7853,
+        "accepted_head": "b3e79c926aefd5d9bacc0de006f722ed6156a020",
+        "merge_sha": "a4a45d8536f9207cf61c3921eeab33a8a736aa76",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/scripts/timeline_api_docs_check.py",
@@ -2299,7 +2311,7 @@
       "id": "timebase-foundation-link-boundary",
       "title": "Timebase links the header-only foundation target instead of the full runtime",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "dsp-foundation-link-boundary-20260829",
       "owned_paths": [
         ".agents/skills/playback/SKILL.md",
@@ -2311,6 +2323,12 @@
         "tools/cmake/PulpInstallRules.cmake",
         "tools/scripts/timeline_engine_dependency_floor_check.py"
       ],
+      "release": {
+        "pr": 7904,
+        "accepted_head": "b4ca49dcf2652ad99f0da67a68d60823008bdb0c",
+        "merge_sha": "aaa78ac62efd9425b409ca67051af2b18306bbfe",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "examples/timeline-sdk-consumer/CMakeLists.txt",
@@ -2400,7 +2418,7 @@
       "id": "signal-fir-equiripple-design",
       "title": "Equiripple FIR design by the Remez exchange",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "signal-fir-equiripple-design-20260830",
       "owned_paths": [
         "core/signal/include/pulp/signal/fir_design.hpp",
@@ -2409,6 +2427,12 @@
         "docs/reference/fir-design.md",
         "docs/status/agent-capabilities.json"
       ],
+      "release": {
+        "pr": 7916,
+        "accepted_head": "02ef91d441163fc9ac3d04bf530fd81324f19cc8",
+        "merge_sha": "e96d9bce6a2e0c20bda0844181182f5d3b055176",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/signal/include/pulp/signal/fir_design.hpp",
@@ -2736,13 +2760,19 @@
       "id": "signal-spectral-mask-realtime-layout",
       "title": "Realtime spectral-mask layout adoption",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "signal-spectral-mask-realtime-layout-20260901",
       "owned_paths": [
         "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
         "test/test_spectral_primitives.cpp",
         "docs/status/agent-capabilities.json"
       ],
+      "release": {
+        "pr": 7996,
+        "accepted_head": "e7e72f0c6c720a8b7333dfdaa397c334f979b120",
+        "merge_sha": "bb0559e33c57d10f6d12864c1394ca29fdf7bff4",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
@@ -2912,7 +2942,7 @@
       "id": "standalone-open-documents-installed-sdk",
       "title": "Standalone document-open seam ships with the selected SDK",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "standalone-open-documents-20260903",
       "owned_paths": [
         "tools/cmake/PulpInstallRules.cmake",
@@ -2920,6 +2950,12 @@
         "core/format/include/pulp/format/standalone.hpp",
         "core/view/include/pulp/view/window_host.hpp"
       ],
+      "release": {
+        "pr": 8032,
+        "accepted_head": "24ee29550bc2ca12b401bc97717f2a0af60e1baa",
+        "merge_sha": "bc7d6999229f189f18a82a8f03aa4a576bca21d7",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/cmake/PulpInstallRules.cmake",
@@ -3090,10 +3126,10 @@
         },
         "offline_timeline_cli": {
           "disposition": "gap",
-          "rationale": "No `pulp seq` operation reads or writes controller lanes yet. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to restricted proposal-safe writers. Dependency: this row's runtime must land first so the CLI does not publish an operation whose backend refuses valid input.",
+          "rationale": "No `pulp seq` operation reads or writes controller lanes yet. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to restricted proposal-safe writers. Dependency: offline-timeline-expression-lane-commands, the typed clip expression-lane command set that would carry this runtime onto the CLI.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "midi-expression-playback"
+            "offline-timeline-expression-lane-commands"
           ]
         },
         "offline_timeline_mcp": {
@@ -3101,7 +3137,7 @@
           "rationale": "The generated Timeline MCP schema exposes no controller-lane operation. Owner: NW-D (P0-40-CONTROLS).",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "midi-expression-playback"
+            "offline-timeline-expression-lane-commands"
           ]
         },
         "live_product_control": {
@@ -3109,8 +3145,7 @@
           "rationale": "Product A live timeline authority is absent for the sequencer generally, not merely for controllers. Owner: NW-D, and only where that source is Pulp-owned; otherwise it stays a recorded cross-repository dependency rather than a Pulp change.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
-            "midi-expression-playback"
+            "product-a-timeline-document-session"
           ]
         },
         "design_time_agent_manifest": {
@@ -3118,7 +3153,7 @@
           "rationale": "No agent-capability row yet advertises controller playback. Owner: NW-D, which closes the capability surface once the runtime operations it would advertise are executable.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "midi-expression-playback"
+            "sequence-controller-playback-program"
           ]
         }
       }
@@ -3212,7 +3247,7 @@
           "rationale": "Product A live timeline authority is absent for the sequencer generally. The wire section is the transport such a control lane would publish over, so this row is a dependency of that closure rather than a step of it. Owner: NW-D, and only where that source is Pulp-owned.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
+            "product-a-timeline-document-session",
             "midi-expression-playback"
           ]
         },
@@ -3299,7 +3334,7 @@
           "rationale": "`pulp seq` can author a track mixer and a clip's playback properties, but nothing reports whether a given nesting will compose or refuse, so an author still discovers a refusal at compile time. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to proposal-safe writers and can then surface the refusal codes.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-sequence-gain-composition"
+            "offline-timeline-nesting-refusal-preview"
           ]
         },
         "offline_timeline_mcp": {
@@ -3307,7 +3342,7 @@
           "rationale": "The generated Timeline MCP schema carries no operation that reports nested-mixer composability or its refusal codes. Owner: NW-D (P0-40-CONTROLS).",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-sequence-gain-composition"
+            "offline-timeline-nesting-refusal-preview"
           ]
         },
         "live_product_control": {
@@ -3315,8 +3350,7 @@
           "rationale": "Product A live timeline authority is absent for the sequencer generally, not merely for nested mixer state. Owner: NW-D, and only where that source is Pulp-owned; otherwise it stays a recorded cross-repository dependency.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
-            "nested-sequence-gain-composition"
+            "product-a-timeline-document-session"
           ]
         },
         "design_time_agent_manifest": {
@@ -3324,7 +3358,7 @@
           "rationale": "No agent-capability row advertises what a nested sequence preserves. An agent building reusable patterns still cannot discover that a child fader composes over media and refuses over notes. Owner: NW-D, once the runtime it would advertise is complete across the remaining NW-C slices.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-sequence-gain-composition"
+            "nested-sequence-composition-capability-row"
           ]
         }
       }
@@ -3474,7 +3508,7 @@
           "rationale": "No `pulp seq` operation reports or sets a device chain's event latency, and none should until an event-to-event device executes: a CLI reading a shift that is structurally zero would publish a number with no content. Owner: the sequencer control closure lane, gated on event-to-event execution landing first.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "event-stream-pdc-contract"
+            "event-to-event-device-and-catalog"
           ]
         },
         "offline_timeline_mcp": {
@@ -3482,24 +3516,19 @@
           "rationale": "The generated Timeline MCP schema exposes no event-latency or compensation operation, for the same reason as the CLI surface. Owner: the sequencer control closure lane.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "event-stream-pdc-contract"
+            "event-to-event-device-and-catalog"
           ]
         },
         "live_product_control": {
-          "disposition": "gap",
-          "rationale": "This slice refuses live input into a compensated event chain rather than exposing a monitoring control for it, so there is no behaviour here for a live surface to project. A per-track monitor policy is the prerequisite for any live control, not a projection of what shipped here.",
-          "owner": "sequencer-control-closure",
-          "dependencies": [
-            "product-a-sequencer-state-operation",
-            "event-stream-pdc-contract"
-          ]
+          "disposition": "not_applicable",
+          "rationale": "This slice refuses live input into a compensated event chain rather than exposing a monitoring control for it, so there is no behaviour here for a live surface to project. A per-track monitor policy is the prerequisite for any live control, not a projection of what shipped here."
         },
         "design_time_agent_manifest": {
           "disposition": "gap",
           "rationale": "No agent-capability row advertises event-chain compensation. Advertising it now would claim an executable event-device chain that does not exist; the capability becomes advertisable when event-to-event execution lands.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "event-stream-pdc-contract"
+            "event-to-event-device-and-catalog"
           ]
         }
       }
@@ -3654,7 +3683,7 @@
       "id": "offline-apply-retry-and-staleness",
       "title": "Retry token and expected revision on offline session applies",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
       "owned_paths": [
         "tools/mcp/mcp_timeline_tools.cpp",
@@ -3666,6 +3695,12 @@
         "test/test_mcp_timeline_sessions.cpp",
         "core/timeline/tools/test_schema_mcp_emit.py"
       ],
+      "release": {
+        "pr": 8128,
+        "accepted_head": "6fb82c925c2bede2a0ccc05306422b56e700dd1d",
+        "merge_sha": "603acc906ea307459c0aef3e558bfc6a92b915b5",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/timeline/schema/timeline_mcp_tools.json",
@@ -3866,7 +3901,7 @@
       "id": "offline-validate-compile-diagnostics",
       "title": "Compile refusals reported as validate diagnostics on the offline CLI and MCP",
       "classification": "offline_cli_mcp",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
       "owned_paths": [
         "tools/timeline/include/pulp/tools/timeline/agent.hpp",
@@ -3880,6 +3915,12 @@
         ".agents/skills/playback/SKILL.md",
         "tools/scripts/negative_capability_check.py"
       ],
+      "release": {
+        "pr": 8134,
+        "accepted_head": "4841cb30a779960ab1d8e09d74594471f356c0bc",
+        "merge_sha": "059e0a1c0d09ecbba266d6aa1ae295ef0064b678",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/timeline/src/timeline_agent.cpp",
@@ -4002,13 +4043,19 @@
       "id": "negative-capability-case-label-precision",
       "title": "Negative-capability gate reads a switch label as a destination, not a refusal",
       "classification": "ci_test_only",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "negative-capability-case-label-20260909",
       "owned_paths": [
         "test/cmake/timeline_tests.cmake",
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8136,
+        "accepted_head": "fd261454c63cf3b6534095c75aaaa3f63d3f074e",
+        "merge_sha": "8ef26afb49016c08a005c71d5335477a36dd06dd",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "test/cmake/timeline_tests.cmake",
@@ -4056,12 +4103,18 @@
       "id": "trace-cli-reachability",
       "title": "Perfetto tracing reachable from the CLI without hand-editing a CMake cache",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "trace-cli-reachability-20260909",
       "owned_paths": [
         "docs/status/cli-commands.yaml",
         "docs/reference/cli.md"
       ],
+      "release": {
+        "pr": 8113,
+        "accepted_head": "00a154200de055ab1077e5df4157f8451462289d",
+        "merge_sha": "45f02c7f573acc27abe83136920f4c2a1ab60799",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "docs/status/cli-commands.yaml",
@@ -4304,11 +4357,17 @@
       "id": "installed-mcp-server-rpath",
       "title": "Installed MCP server resolves its GPU dependency from the SDK prefix",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "installed-mcp-server-rpath-20260910",
       "owned_paths": [
         "tools/mcp/CMakeLists.txt"
       ],
+      "release": {
+        "pr": 8145,
+        "accepted_head": "61bcce2c6e401cd36fe738b749745674e1bf86f8",
+        "merge_sha": "68694f4a89bd28a02085545db159421a9af9159f",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/mcp/CMakeLists.txt",
@@ -4416,7 +4475,7 @@
       "id": "nested-trimmed-groove-chase",
       "title": "Groove-chased notes survive a trimmed nested placement",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "588515e2-d977-4581-9a0b-138057a6f6ef",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -4430,6 +4489,12 @@
         ".agents/skills/timeline/SKILL.md",
         "docs/guides/timeline-sdk.md"
       ],
+      "release": {
+        "pr": 8166,
+        "accepted_head": "b5cc0235330b0aa86acb7724cb53a6838b22ef07",
+        "merge_sha": "396660ac190789d28e1628df961ac6c74c3278e1",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
@@ -4483,7 +4548,7 @@
       "id": "nested-trimmed-audio-leaf-fade",
       "title": "A trim that cuts an audio leaf's own fade shortens the fade instead of refusing",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "8b6831cf-d83c-4567-9123-41d57f900d41",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -4493,6 +4558,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8187,
+        "accepted_head": "915d108ae88008760e079d861112ccc68cb0d01b",
+        "merge_sha": "24f80c506f8b82c434b5b5f58a1cb10efc7b19cd",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
@@ -4504,12 +4575,6 @@
           "path": "test/test_timeline_nesting_playback.cpp",
           "needles": [
             "Nested trimming shortens an audio leaf's own fade to the new edge"
-          ]
-        },
-        {
-          "path": "tools/scripts/negative_capability_allowlist.json",
-          "needles": [
-            "NestedConformedTrimUnsupported"
           ]
         }
       ],
@@ -4631,7 +4696,7 @@
       "id": "nested-substitution-state-refusal-split",
       "title": "Nested child track states split by whether they substitute content",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "ce3e007c-374a-4704-8e8c-cd35a795d583",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -4644,6 +4709,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8177,
+        "accepted_head": "246f2917cfc96a3e47145e321b0333fd31de1123",
+        "merge_sha": "9962805cca2c839015c01721d24e63145ce277e1",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
@@ -4708,7 +4779,7 @@
           "rationale": "The CLI now names both refusals distinctly instead of reporting a shared code, but it can neither author a child track's freeze, take lanes or record-arm state nor report in advance that a nesting will refuse: those states reach a project through loading, not through any `pulp seq` verb. An author still discovers a frozen or comped nesting only at compile time. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to proposal-safe writers and can then surface these codes.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-substitution-state-refusal-split"
+            "offline-timeline-nesting-refusal-preview"
           ]
         },
         "offline_timeline_mcp": {
@@ -4716,7 +4787,7 @@
           "rationale": "The generated Timeline MCP schema carries no operation that reports whether a nested child will substitute its arrangement, and none that authors the states which decide it. Owner: NW-D (P0-40-CONTROLS).",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-substitution-state-refusal-split"
+            "offline-timeline-nesting-refusal-preview"
           ]
         },
         "live_product_control": {
@@ -4724,8 +4795,7 @@
           "rationale": "Product A live timeline authority is absent for the sequencer generally, so neither the two documents that now compile nor the two named refusals are reachable as a live control. Owner: NW-D, and only where that source is Pulp-owned; otherwise it stays a recorded cross-repository dependency.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
-            "nested-substitution-state-refusal-split"
+            "product-a-timeline-document-session"
           ]
         },
         "design_time_agent_manifest": {
@@ -4733,7 +4803,7 @@
           "rationale": "No agent-capability row advertises which child-track states survive nesting. An agent building reusable patterns still cannot discover that record-arm and an unselected take lane nest freely while freeze and a selected lane refuse. Owner: NW-D, once the runtime it would advertise is complete across the remaining NW-C slices.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-substitution-state-refusal-split"
+            "nested-sequence-composition-capability-row"
           ]
         }
       }
@@ -4742,12 +4812,18 @@
       "id": "negative-capability-selftest-derivation",
       "title": "Negative-capability selftest derives its subjects from the allowlist it guards",
       "classification": "ci_test_only",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "negative-capability-selftest-derivation-20260911",
       "owned_paths": [
         "tools/scripts/negative_capability_check.py",
         ".agents/skills/playback/SKILL.md"
       ],
+      "release": {
+        "pr": 8197,
+        "accepted_head": "a1406a376dbee72a2a8da5d523997f28327e40c8",
+        "merge_sha": "dea7b2c93518008796913bb7ed23fa176dbb2546",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/scripts/negative_capability_check.py",
@@ -5008,13 +5084,8 @@
           ]
         },
         "live_product_control": {
-          "disposition": "gap",
-          "rationale": "The fold removes a per-block refusal that a live surface could previously have surfaced as a loop-end failure; it adds no control a musician sets. A live surface still cannot read or set event-domain latency, and live input into a compensated chain remains refused, so there is no live control to project here. Owner: the sequencer control closure lane.",
-          "owner": "sequencer-control-closure",
-          "dependencies": [
-            "product-a-sequencer-state-operation",
-            "event-stream-pdc-contract"
-          ]
+          "disposition": "not_applicable",
+          "rationale": "The fold removes a per-block refusal that a live surface could previously have surfaced as a loop-end failure; it adds no control a musician sets. A live surface still cannot read or set event-domain latency, and live input into a compensated chain remains refused, so there is no live control to project here."
         },
         "design_time_agent_manifest": {
           "disposition": "gap",
@@ -5176,7 +5247,7 @@
           "path": "core/playback/include/pulp/playback/program_compiler.hpp",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
@@ -5185,8 +5256,7 @@
           "path": "core/playback/src/sequence_content_lowerer.cpp",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
-            "NestedConformedTrimUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
         },
@@ -5194,8 +5264,7 @@
           "path": "tools/scripts/negative_capability_allowlist.json",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
-            "NestedConformedTrimUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
         },
@@ -5203,7 +5272,7 @@
           "path": "tools/timeline/src/timeline_agent.cpp",
           "needles": [
             "NestedDeviceChainUnsupported",
-            "NestedAutomationLaneUnsupported",
+            "NestedAutomationPanUnsupported",
             "NestedConformedTrimUnsupported",
             "NestedAbsoluteChildUnsupported"
           ]
@@ -5219,7 +5288,7 @@
               "path": "core/playback/include/pulp/playback/program_compiler.hpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5235,7 +5304,7 @@
               "path": "tools/timeline/src/timeline_agent.cpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5251,7 +5320,7 @@
               "path": "tools/timeline/src/timeline_agent.cpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedConformedTrimUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
@@ -5267,8 +5336,7 @@
               "path": "core/playback/src/sequence_content_lowerer.cpp",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
-                "NestedConformedTrimUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
             }
@@ -5283,8 +5351,7 @@
               "path": "tools/scripts/negative_capability_allowlist.json",
               "needles": [
                 "NestedDeviceChainUnsupported",
-                "NestedAutomationLaneUnsupported",
-                "NestedConformedTrimUnsupported",
+                "NestedAutomationPanUnsupported",
                 "NestedAbsoluteChildUnsupported"
               ]
             }
@@ -5328,7 +5395,7 @@
             "struct SetDynamicsLane",
             "DynamicsLane expected;",
             "DynamicsLane replacement;",
-            "SetDynamicsLane>;",
+            "SetDynamicsLane,",
             "/// Sequence whose dynamics lane changes.",
             "/// Required current lane content, compared in full.",
             "/// Lane content written when the gate matches."
@@ -5373,7 +5440,7 @@
         {
           "path": "test/test_timeline_writer_capabilities.cpp",
           "needles": [
-            "alternatives == 48"
+            "alternatives == 64"
           ]
         },
         {
@@ -5416,7 +5483,7 @@
                 "struct SetDynamicsLane",
                 "DynamicsLane expected;",
                 "DynamicsLane replacement;",
-                "SetDynamicsLane>;",
+                "SetDynamicsLane,",
                 "/// Sequence whose dynamics lane changes.",
                 "/// Required current lane content, compared in full.",
                 "/// Lane content written when the gate matches."
@@ -5866,7 +5933,7 @@
           "rationale": "Nothing here is a live control. The device chain is authored in the document and resolved at admission on the control thread; there is no Product A capability ID, operation, executor or policy projection that names a device chain, and inventing one from this slice would advertise a live authority no executor implements. The live surface becomes projectable when the sequencer control tranche lands a timeline document capability, not as a side effect of a device becoming executable.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
+            "product-a-timeline-document-session",
             "event-stream-pdc-contract"
           ]
         },
@@ -5965,7 +6032,7 @@
       "id": "clap-bundle-package-declaration",
       "title": "Contents/PkgInfo written into the CLAP bundle pulp_add_plugin() produces, declaring it a package",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "7ec955f8-c18d-4526-b728-d7e6061ed48c",
       "owned_paths": [
         "tools/cmake/PulpPluginFormats.cmake",
@@ -5974,6 +6041,12 @@
         "tools/scripts/versioning.json",
         "docs/status/sequencer-exposure.json"
       ],
+      "release": {
+        "pr": 8297,
+        "accepted_head": "b62fcd8d7c9bfb70c670c9110c345e46f5d5f98c",
+        "merge_sha": "59a9bcbd22f97e821c0ed41b281c130c19c5e8a0",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/cmake/PulpPluginFormats.cmake",
@@ -6108,6 +6181,13 @@
             "`dev.pulp.sequencer/state.read@1`",
             "`dev.pulp.sequencer/state.edit@1`"
           ]
+        },
+        {
+          "path": "inspect/include/pulp/inspect/control_registry_digest.inc",
+          "needles": [
+            "PULP_CONTROL_REGISTRY_DIGEST_V1",
+            "70578eae97288609fe384bd2caa1641e62af016127f3abc6e4a3cd754422d584"
+          ]
         }
       ],
       "surfaces": {
@@ -6209,7 +6289,7 @@
     },
     {
       "id": "view-contextmenu-arming-and-bubbling",
-      "title": "Right-click context menus reach their handler, with keyboard navigation",
+      "title": "Right-click context menus reach their handler, with keyboard navigation, within MSVC's string-literal cap",
       "classification": "public_sdk",
       "delivery_state": "pending",
       "claim_id": "pulp-pr-8307-contextmenu",
@@ -6221,8 +6301,10 @@
         "docs/reference/compat/react.md",
         "docs/status/gpu-vellum-handoff.yaml",
         "docs/validation/gpu-handoff-provenance/receipt.json",
+        "test/cmake/quality_tests.cmake",
         "test/test_context_menu.cpp",
-        "test/test_widget_bridge_animation.cpp"
+        "test/test_widget_bridge_animation.cpp",
+        "tools/scripts/msvc_string_literal_guard.py"
       ],
       "evidence": [
         {
@@ -6236,6 +6318,13 @@
           "path": "core/view/src/context_menu.cpp",
           "needles": [
             "void ContextMenu::move_hover_to_edge(bool last)"
+          ]
+        },
+        {
+          "path": "tools/scripts/msvc_string_literal_guard.py",
+          "needles": [
+            "MSVC_LITERAL_CAP_BYTES = 16380",
+            "raw string literal is"
           ]
         }
       ],
@@ -6259,6 +6348,2285 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "This slice describes no installed design-time authoring capability."
+        }
+      }
+    },
+    {
+      "id": "sequence-controller-playback-program",
+      "title": "Controller playback program events advertised as a reviewed public SDK capability",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "634a6a40-04e1-4cd0-ad42-90ce9ae30b27",
+      "owned_paths": [
+        ".agents/skills/agent-capabilities/SKILL.md",
+        "docs/status/agent-capabilities.json",
+        "docs/status/agent-capability-surface.json",
+        "docs/status/agent-capability-surface.schema.json",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/quality_tests.cmake",
+        "test/test_agent_capability_compile.cpp",
+        "tools/agent-capabilities/contract-history.json",
+        "tools/scripts/agent_capability_catalog_timing.py",
+        "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_registry.py",
+        "tools/scripts/agent_capability_surface.py"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program.hpp",
+          "needles": [
+            "struct ControllerProgramEvent {",
+            "constexpr bool controller_program_event_less(const ControllerProgramEvent& lhs,"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The controller playback program ships as the public header pulp/playback/program.hpp on Pulp::playback, and this slice makes that header a reviewed capability root rather than an unreviewed legacy path. ControllerProgramEvent is the value a host reads or writes to place a controller move on the playback timeline, and controller_program_event_less is the exported ordering predicate that decides how two moves at the same coordinate resolve — so a consumer can sort, merge or diff a controller program without re-deriving the engine's own tie-break.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/program.hpp",
+              "needles": [
+                "struct ControllerProgramEvent {",
+                "constexpr bool controller_program_event_less(const ControllerProgramEvent& lhs,"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "The playback program is an in-process value type consumed by hosts; this slice adds no offline Timeline command."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The playback program is an in-process value type consumed by hosts; this slice adds no MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "The header carries no Product A live control capability, grant, or policy projection."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "exposed",
+          "rationale": "The capability manifest publishes sequence.controller-playback with typed bindings for pulp::playback::ControllerProgramEvent and pulp::playback::controller_program_event_less at target Pulp::playback, so a design-time agent can discover the playback program root and its ordering predicate from the manifest alone.",
+          "evidence": [
+            {
+              "kind": "capability_definition",
+              "path": "docs/status/agent-capabilities.json",
+              "needles": [
+                "sequence.controller-playback"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "descriptor",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        }
+      }
+    },
+    {
+      "id": "control-capability-operation-discoverability",
+      "title": "Offline discoverability and documentation enforcement for the control capability registry",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "23612851-d383-485a-a565-2c132c7e909b",
+      "owned_paths": [
+        ".agents/skills/cli-maintenance/SKILL.md",
+        "docs/reference/cli.md",
+        "docs/reference/development-inspector-capabilities.md",
+        "docs/status/cli-commands.yaml",
+        "docs/status/sequencer-exposure.json",
+        "tools/cli/cmd_control.cpp",
+        "tools/scripts/inspector_truth_check.py"
+      ],
+      "evidence": [
+        {
+          "path": "tools/scripts/inspector_truth_check.py",
+          "needles": [
+            "def operation_doc_errors(",
+            "def parse_control_operations(",
+            "def write_root(",
+            "development inspector docs omit operation"
+          ]
+        },
+        {
+          "path": "docs/reference/development-inspector-capabilities.md",
+          "needles": [
+            "<!-- BEGIN GENERATED operation-matrix",
+            "| `dev.pulp.sequencer/state.read@1` | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | `response` |",
+            "| `dev.pulp.sequencer/state.edit@1` | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | `receipt` |"
+          ]
+        },
+        {
+          "path": "tools/cli/cmd_control.cpp",
+          "needles": [
+            "void print_capabilities(bool json)",
+            "serialize_control_registry()",
+            "capabilities accepts only --json"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "No public SDK header, symbol, or install rule changes. The offline catalog prints serialize_control_registry(), which control_manifest.hpp already declares and PulpInstallRules.cmake already installs; the CLI is a consumer of that existing projection, not a new SDK surface."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Adds no `pulp seq` verb, flag, or document reader. `pulp control capabilities` reads the frozen in-binary capability registry and opens no timeline document; the sequencer operations it happens to list are runtime control operations, not persisted timeline state."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Adds no MCP tool and changes no generated Timeline MCP schema. The catalog is a CLI verb only; whether to mirror it as an MCP tool is a separate decision that would need its own row."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Registers no capability, operation, executor, grant, or profile membership, and calls nothing. dev.pulp.sequencer/state.read@1 and dev.pulp.sequencer/state.edit@1 were registered by product-a-sequencer-state-control and are unchanged here; that released row is not edited. This slice only makes the existing registry readable without a live instance and makes an operation added without documentation fail the inspector-truth gate, so it narrows what can ship silently rather than widening live authority."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Registers no design-time agent capability row and edits no agent-capability manifest. The generated matrix describes runtime control operations, which the agent-capabilities ledger deliberately does not advertise."
+        }
+      }
+    },
+    {
+      "id": "offline-timeline-expression-lane-commands",
+      "title": "Typed clip expression-lane commands split across create, remove, and a gated point edit",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "2f0f1f3c-5cf2-4f1e-9a8a-6ad6f1d29d7b",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/include/pulp/timeline/document_session.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/command.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/serialize_command_decode.cpp",
+        "core/timeline/src/transaction_dispatch_internal.hpp",
+        "core/timeline/src/transaction_note_internal.cpp",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_mcp_timeline_tools.cpp",
+        "test/test_timeline_agent.cpp",
+        "test/test_timeline_command_persistence.cpp",
+        "test/test_timeline_midi_expression_commands.cpp",
+        "test/test_timeline_schema_registry.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": [
+            "struct InsertMidiExpressionLane",
+            "struct RemoveMidiExpressionLane",
+            "struct SetMidiExpressionLanePoints",
+            "SetMidiExpressionLanePoints,"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+          "needles": [
+            "std::is_same_v<T, InsertMidiExpressionLane>",
+            "std::is_same_v<T, RemoveMidiExpressionLane>",
+            "std::is_same_v<T, SetMidiExpressionLanePoints>"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_note_internal.cpp",
+          "needles": [
+            "reduce_insert_midi_expression_lane",
+            "reduce_remove_midi_expression_lane",
+            "reduce_set_midi_expression_lane_points",
+            "forged_chase_receipt"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_dispatch_internal.hpp",
+          "needles": [
+            "SetMidiExpressionLanePoints>;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_midi_expression_lane",
+            "pulp.timeline.command.remove_midi_expression_lane",
+            "pulp.timeline.command.set_midi_expression_lane_points"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_command_decode.cpp",
+          "needles": [
+            "decode_command_lane_points",
+            "pulp.timeline.command.insert_midi_expression_lane",
+            "pulp.timeline.command.set_midi_expression_lane_points"
+          ]
+        },
+        {
+          "path": "core/timeline/src/command.cpp",
+          "needles": [
+            "std::is_same_v<T, SetMidiExpressionLanePoints>",
+            "std::is_same_v<T, InsertMidiExpressionLane>"
+          ]
+        },
+        {
+          "path": "test/test_timeline_midi_expression_commands.cpp",
+          "needles": [
+            "inserting an expression lane adds it and its inverse removes it exactly",
+            "removing an expression lane drops it and undo restores it whole",
+            "setting lane points replaces them under an exact gate and keeps the address",
+            "expression lane commands refuse a forged chase receipt",
+            "decode refuses a forged chase receipt and a malformed address",
+            "a writer holding note modify may author and edit a lane but not abandon one"
+          ]
+        },
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "pulp-test-timeline-midi-expression-commands"
+          ]
+        },
+        {
+          "path": "test/test_timeline_writer_capabilities.cpp",
+          "needles": [
+            "alternatives == 64"
+          ]
+        },
+        {
+          "path": "test/test_timeline_schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_midi_expression_lane",
+            "pulp.timeline.command.set_midi_expression_lane_points"
+          ]
+        },
+        {
+          "path": "test/test_timeline_command_persistence.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_midi_expression_lane",
+            "std::holds_alternative<SetMidiExpressionLanePoints>(commands[50])"
+          ]
+        },
+        {
+          "path": "test/test_timeline_agent.cpp",
+          "needles": [
+            "timeline agent authors an expression lane and hands back a document that carries it",
+            "pulp.timeline.command.insert_midi_expression_lane"
+          ]
+        },
+        {
+          "path": "test/test_mcp_timeline_tools.cpp",
+          "needles": [
+            "timeline MCP authors and edits an expression lane but refuses to abandon one",
+            "pulp.timeline.command.set_midi_expression_lane_points"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The three commands are public alternatives of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp authors, edits, and removes a clip's controller streams through the same transaction path every other command uses. The family is three types rather than one because command_authority_of<T>() returns exactly one class-and-intent pair per type: a single expected/replacement command that could also delete a lane would have to declare Modify for all three operations, which hands lane deletion to every writer holding Note/Modify, and an Insert/Remove pair with no Modify would force every point edit to be spelled remove-then-insert, which a writer denied the destructive axis cannot do at all. Each reducer rebuilds the clip through MidiContent::create(notes, modifiers, seed, lanes) and propagates its ModelError, so identity distinctness, one lane per address, and canonical ordering keep a single authority; the commands add only the rules the model cannot state, namely the exact point gate and the refusal of a forged chased receipt. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. This row does not touch the released midi-expression-playback row, whose dispositions are frozen at its merge; it records the authoring half that row's CLI and MCP rationale named as its open owner.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/command.hpp",
+              "needles": [
+                "struct InsertMidiExpressionLane",
+                "struct RemoveMidiExpressionLane",
+                "struct SetMidiExpressionLanePoints",
+                "SetMidiExpressionLanePoints,"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+              "needles": [
+                "std::is_same_v<T, InsertMidiExpressionLane>",
+                "std::is_same_v<T, SetMidiExpressionLanePoints>"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "platform runtime music timebase timeline"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_midi_expression_commands.cpp",
+              "needles": [
+                "inserting an expression lane adds it and its inverse removes it exactly",
+                "setting lane points replaces them under an exact gate and keeps the address",
+                "a writer holding note modify may author and edit a lane but not abandon one"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The CLI reaches the three commands through the canonical command-apply handler in tools/cli/cmd_seq.cpp, and the generated verb table carries their type names because the schema registry does. The reason a command alone does not earn this surface is that command_apply applies the decoded commands and then returns serialize_project() of the result, so a mutation the sequence encoder does not carry is destroyed by the same call that performed it. That floor is measured rather than assumed here: serialize_encode.cpp already writes a clip's lanes from note_content.lanes(), and test_timeline_agent.cpp drives command_apply end to end, asserts the returned document carries the authored lane identity and address, reopens and validates that document, applies a point edit whose expectation is what the insert wrote, and asserts a replay of the insert is refused. The authority recorded here is the CLI's declared editor profile and the refusal codes that profile's admission can emit, not the commands' own conflict codes.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": [
+                "pulp.timeline.command.insert_midi_expression_lane",
+                "pulp.timeline.command.remove_midi_expression_lane",
+                "pulp.timeline.command.set_midi_expression_lane_points"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_agent.cpp",
+              "needles": [
+                "timeline agent authors an expression lane and hands back a document that carries it",
+                "pulp.timeline.command.insert_midi_expression_lane"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The MCP tool definitions are projected from the same manifest as the CLI verbs, so pulp_timeline_command_apply advertises all three type names in its type_name enum and its x-pulp-command-types list, and handle_timeline_command_apply binds that tool to the same command_apply the CLI calls. The default MCP authority is the non-destructive proposal profile, which holds every class and no destructive intent, and this is the surface the three-command split exists for: test_mcp_timeline_tools.cpp inserts a lane and edits its points under that default profile, asserts the returned document carries each change, reopens it through pulp_timeline_project_open, and asserts the removal is refused -- then applies the identical removal payload under the editor profile as a control, so the refusal is the authority rather than a malformed command. A single Modify-declared command able to delete a lane would have passed that refusal, which is why the family is not one type.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_command_apply",
+                "pulp.timeline.command.insert_midi_expression_lane",
+                "pulp.timeline.command.set_midi_expression_lane_points"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline MCP authors and edits an expression lane but refuses to abandon one",
+                "pulp.timeline.command.remove_midi_expression_lane"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live controller-lane operation and no executor binding for one. These commands are the mutation such a control would execute, so this row is a dependency of that closure rather than a step of it; the live surface additionally needs the timeline document session Product A does not yet hold.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises controller playback. This family is deliberately not the owner of that closure: the runtime operations such a capability would advertise are already executable without it, because clip expression lanes are lowered to playback::ControllerProgramEvent by program_compiler.cpp and consumed by program_wire.cpp, and an agent can already author lanes through the four-argument MidiContent::create. The manifest closure edits docs/status/agent-capabilities.json and the capability compile test, which share no path with this row, and it is a correction to a rationale that has stopped being true rather than a feature -- so it is reviewed on its own evidence in its own slice.",
+          "dependencies": [
+            "midi-expression-playback"
+          ],
+          "owner": "sequencer-controller-playback-capability"
+        }
+      }
+    },
+    {
+      "id": "sequencer-control-skill-reachability",
+      "title": "The timeline skill is compelled to carry the live sequencer control surface",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "92f55d88-47ad-4abf-898b-0ad91288b0e4",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/timeline_tests.cmake",
+        "tools/scripts/sequencer_control_skill_check.py"
+      ],
+      "evidence": [
+        {
+          "path": "tools/scripts/sequencer_control_skill_check.py",
+          "needles": [
+            "SEQUENCER_CONTRACT_PREFIX = \"dev.pulp.sequencer/\"",
+            "def sequencer_operations(root: Path):",
+            "does not document control operation",
+            "but never beside"
+          ]
+        },
+        {
+          "path": ".agents/skills/timeline/SKILL.md",
+          "needles": [
+            "## Live sequencer control operations",
+            "`dev.pulp.sequencer/state.read@1`",
+            "`dev.pulp.sequencer/state.edit@1`",
+            "pulp control capabilities"
+          ]
+        },
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "sequencer-control-skill-coverage"
+          ]
+        },
+        {
+          "path": "tools/scripts/skill_path_map.json",
+          "needles": [
+            "inspect/src/control_sequencer_state_executor.cpp",
+            "tools/scripts/sequencer_control_skill_check.py"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "No public SDK header, exported symbol, target, or install rule changes. The slice adds one repository check script, one ctest registration, one skill section, and four path-map entries; none of them is compiled into or installed with the SDK, and the sequencer transport itself remains the already-installed core/state/include/pulp/state/sequencer_state_channel.hpp owned by step-sequencer-state-channel."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "Adds no `pulp seq` verb, flag, or document reader, and opens no timeline document. The operations the new check is about are live in-process control operations, whose CLI reachability is the generic `pulp control call` verb recorded under live_product_control by product-a-sequencer-state-control; this slice documents that reachability rather than creating any."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "Adds no MCP tool and changes no generated Timeline MCP schema. pulp_control_sequencer_state_read and pulp_control_sequencer_state_edit are derived by the live control tool catalog from registry rows that already exist and are unchanged here."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Registers no capability, operation, executor, grant, or profile membership, and calls nothing. dev.pulp.sequencer/state.read@1 and dev.pulp.sequencer/state.edit@1 were registered by product-a-sequencer-state-control and are byte-identical here. What changes is that the fourth reader of that surface is now gated: the registry has a digest, the reference catalog has inspector_truth_check.py, and `pulp control capabilities` prints it offline, but .agents/skills/timeline/SKILL.md -- the surface an agent actually consults before touching sequencer work -- had no generator and no gate, and carried no reference to either operation. sequencer_control_skill_check.py derives every dev.pulp.sequencer/ operation from the frozen registry and fails when the skill omits one or records a result kind the registry does not declare, so it narrows what can ship agent-invisible rather than widening live authority. It refuses to pass on an empty registry read, because a check that finds no sequencer capability is reading the wrong inventory rather than reporting an absent surface."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "Registers no design-time agent capability row and edits no agent-capability manifest. The agent-capabilities ledger describes offline SDK composition contracts; runtime control operations are advertised by the live control registry, which it deliberately does not mirror."
+        }
+      }
+    },
+    {
+      "id": "trimmed-registered-content-window",
+      "title": "A nested placement that trims registered content compiles by window-after-generate",
+      "classification": "engine_internal",
+      "delivery_state": "pending",
+      "claim_id": "88c93ee4-b0e2-4e74-bf30-3b1ec4e51b1e",
+      "owned_paths": [
+        ".agents/skills/agent-capabilities/SKILL.md",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "docs/guides/timeline-sdk.md",
+        "docs/status/agent-capability-surface.json",
+        "docs/status/sequencer-exposure.json",
+        "test/test_playback_chord_pattern_renderer.cpp",
+        "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_registry.py",
+        "tools/scripts/negative_capability_allowlist.json",
+        "tools/timeline/src/timeline_agent.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.hpp",
+          "needles": [
+            "authored_window_start",
+            "authored_duration"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "authored_window_start",
+            "authored_duration"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_compiler.cpp",
+          "needles": [
+            "authored_window_start",
+            "authored_duration"
+          ]
+        },
+        {
+          "path": "test/test_playback_chord_pattern_renderer.cpp",
+          "needles": [
+            "nested_pattern_project"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "No installed type, entry point or capability is added. The compile hook's input struct is unchanged: the compiler presents the authored clip duration and an origin tick rebased to the authored start, which are values it already computed, so a renderer built against the previous header compiles and links unchanged and now also renders correctly under a trim. One CompileErrorCode member is removed rather than added, because the condition it named no longer occurs anywhere in the compiler; claiming an installed-SDK surface would advertise a capability this change does not add.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/playback/include/pulp/playback/compile_context_registry.hpp",
+              "needles": [
+                "RegisteredContentCompileInput",
+                "maximum_fragment_notes"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "`pulp seq` gains and loses no command, flag or output field. A document that previously reported a compile refusal now compiles, which changes the result of an existing invocation rather than adding an offline capability.",
+          "evidence": [
+            {
+              "kind": "cli_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "compile_error_code_name",
+                "TrimmedGrooveUnsupported"
+              ]
+            }
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "The MCP timeline tools read the same compile status through the same name mapping, so no tool, argument or result field changes shape.",
+          "evidence": [
+            {
+              "kind": "mcp_handler",
+              "path": "tools/timeline/src/timeline_agent.cpp",
+              "needles": [
+                "compile_error_code_name"
+              ]
+            }
+          ]
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "Nothing becomes controllable at runtime. The windowing is computed and consumed entirely inside the compile worker, beneath controls that already exist, and it removes a refusal rather than adding a control surface.",
+          "evidence": [
+            {
+              "kind": "other",
+              "path": "core/playback/src/program_compiler.cpp",
+              "needles": [
+                "authored_window_start"
+              ]
+            }
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or withdrawn. The allowlist loses the row that recorded why the trim refused, because the refusal is gone; the authored window is an internal lowering fact with no agent-visible surface."
+        }
+      }
+    },
+    {
+      "id": "offline-timeline-tuning-region-commands",
+      "title": "Typed document-tuning commands and a gated region edit that makes a section role correctable",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "1f02f669-3023-46ab-9e2f-2538b7f404fc",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/include/pulp/timeline/document_session.hpp",
+        "core/timeline/include/pulp/timeline/model.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/command.cpp",
+        "core/timeline/src/model.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/sequence.cpp",
+        "core/timeline/src/serialize_command_decode.cpp",
+        "core/timeline/src/track.cpp",
+        "core/timeline/src/transaction.cpp",
+        "core/timeline/src/transaction_dispatch_internal.hpp",
+        "core/timeline/src/transaction_marker_internal.cpp",
+        "core/timeline/src/transaction_reduction_support.hpp",
+        "core/timeline/src/transaction_track_state_internal.cpp",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_mcp_timeline_tools.cpp",
+        "test/test_timeline_agent.cpp",
+        "test/test_timeline_command_persistence.cpp",
+        "test/test_timeline_schema_registry.cpp",
+        "test/test_timeline_tuning_region_commands.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": [
+            "struct SetProjectTuning",
+            "struct SetTrackTuning",
+            "struct SetRegion",
+            "SetProjectTuning, SetTrackTuning, SetRegion,"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+          "needles": [
+            "std::is_same_v<T, SetProjectTuning>",
+            "std::is_same_v<T, SetTrackTuning>",
+            "std::is_same_v<T, SetRegion>",
+            "the tuning a project or one of its tracks plays in"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/model.hpp",
+          "needles": [
+            "with_tuning(std::optional<TuningReference> tuning) const;",
+            "replace_region(SequenceRegion replacement) const;",
+            "replace_tuning(std::optional<TuningReference> tuning) const;",
+            "auto operator<=>(const SequenceRegion&) const = default;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction.cpp",
+          "needles": [
+            "std::get_if<SetProjectTuning>(&envelope.command)"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_track_state_internal.cpp",
+          "needles": [
+            "reduce_set_track_tuning"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_marker_internal.cpp",
+          "needles": [
+            "reduce_set_region",
+            "set.expected.id != set.replacement.id"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_dispatch_internal.hpp",
+          "needles": [
+            "SetTrackName, SetTrackTuning>;",
+            "RemoveRegion, SetRegion>;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/track.cpp",
+          "needles": [
+            "Track::with_tuning",
+            "ModelErrorCode::InvalidTuningReference"
+          ]
+        },
+        {
+          "path": "core/timeline/src/model.cpp",
+          "needles": [
+            "Project::replace_tuning"
+          ]
+        },
+        {
+          "path": "core/timeline/src/sequence.cpp",
+          "needles": [
+            "Sequence::replace_region"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.set_project_tuning",
+            "pulp.timeline.command.set_track_tuning",
+            "pulp.timeline.command.set_region"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_command_decode.cpp",
+          "needles": [
+            "pulp.timeline.command.set_region",
+            "pulp.timeline.command.set_project_tuning",
+            "pulp.timeline.command.set_track_tuning"
+          ]
+        },
+        {
+          "path": "core/timeline/src/command.cpp",
+          "needles": [
+            "std::is_same_v<T, SetRegion>",
+            "std::is_same_v<T, SetProjectTuning>",
+            "std::is_same_v<T, SetTrackTuning>"
+          ]
+        },
+        {
+          "path": "test/test_timeline_tuning_region_commands.cpp",
+          "needles": [
+            "project tuning is authored, replaced, and cleared under an exact gate",
+            "a track override applies to its own track and leaves the project's alone",
+            "a stale tuning expectation is refused and the document is unchanged",
+            "an inconsistent tuning is refused by the model's own helper",
+            "a region's section role is corrected in place and the edit inverts exactly",
+            "a region edit gates on every authored member, role included",
+            "a region edit may not swap identity and may not name a region the sequence lacks",
+            "decode refuses a region edit that swaps identity",
+            "a writer denied removal may still correct a region's role and retune"
+          ]
+        },
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "pulp-test-timeline-tuning-region-commands"
+          ]
+        },
+        {
+          "path": "test/test_timeline_writer_capabilities.cpp",
+          "needles": [
+            "alternatives == 64"
+          ]
+        },
+        {
+          "path": "test/test_timeline_schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.set_project_tuning",
+            "pulp.timeline.command.set_region",
+            "pulp.timeline.command.set_track_tuning"
+          ]
+        },
+        {
+          "path": "test/test_timeline_command_persistence.cpp",
+          "needles": [
+            "pulp.timeline.command.set_region",
+            "std::holds_alternative<SetTrackTuning>(commands[53])"
+          ]
+        },
+        {
+          "path": "test/test_timeline_agent.cpp",
+          "needles": [
+            "timeline agent retunes a document and corrects a section role in place",
+            "pulp.timeline.command.set_project_tuning"
+          ]
+        },
+        {
+          "path": "test/test_mcp_timeline_tools.cpp",
+          "needles": [
+            "timeline MCP retunes a project and corrects a section role under the default profile",
+            "pulp.timeline.command.set_region"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The three commands are public alternatives of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp can state a project's or a track's tuning and correct a region's SectionRole through the same transaction path every other command uses. Both tuning commands are {Timing, Modify} rather than a new CommandClass, because adding a class renumbers capability_bit and silently repurposes every persisted and transmitted writer mask; kCommandClassCount is still 11 and three bit literals are asserted rather than assumed. Timing rather than Track for the track command keeps the retuning grant on one bit, so a mask can forbid retuning without also forbidding renames, and a grant issued to rename and reorder tracks does not silently become authority to retune them. Every intent is Modify, clearing included: a TuningReference is a value field, absence is the distinct claim that the document names no tuning rather than the removal of anything it owns, and routing the clear through Remove would let a writer set a tuning it could never retract. Validity is not restated: each reducer replaces through Project::replace_tuning or Track::with_tuning, which call the same valid_tuning_reference the constructors apply, so a stray payload hash or an out-of-range reference pitch surfaces as the model's own refusal. SetRegion pins identity in both the reducer and the decoder, because a Modify that could swap identity is a removal and a creation wearing a signature that declares neither. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. The released p0-17-section-role-tuning row is untouched; this row records the mutation vocabulary that row's own rationale named as its open owner.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/command.hpp",
+              "needles": [
+                "struct SetProjectTuning",
+                "struct SetTrackTuning",
+                "struct SetRegion",
+                "SetProjectTuning, SetTrackTuning, SetRegion,"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+              "needles": [
+                "std::is_same_v<T, SetProjectTuning>",
+                "std::is_same_v<T, SetRegion>"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/model.hpp",
+              "needles": [
+                "with_tuning(std::optional<TuningReference> tuning) const;",
+                "replace_region(SequenceRegion replacement) const;"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "platform runtime music timebase timeline"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_tuning_region_commands.cpp",
+              "needles": [
+                "project tuning is authored, replaced, and cleared under an exact gate",
+                "a region's section role is corrected in place and the edit inverts exactly",
+                "a writer denied removal may still correct a region's role and retune"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The CLI reaches all three commands through the canonical command-apply handler in tools/cli/cmd_seq.cpp, and the generated verb table carries their type names because the schema registry does. A registered command alone does not earn this surface, because command_apply applies the decoded commands and then returns serialize_project() of the result, so a mutation the project encoder does not carry is destroyed by the same call that performed it. That floor is measured rather than assumed: test_timeline_agent.cpp drives command_apply end to end, asserts the returned document carries the 432000 millihertz reference pitch and then the corrected chorus role, reopens and validates that document, and asserts a replay of the region correction is refused by its own gate. The tuning members are optional on both sides of the wire, spelled exactly as the project and track document schemas spell the same field, so an omitted side is the claim that the document names no tuning rather than a missing member -- which is what makes clearing expressible at all. The authority recorded here is the CLI's declared editor profile and the refusal codes that profile's admission can emit, not the commands' own conflict codes.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": [
+                "pulp.timeline.command.set_project_tuning",
+                "pulp.timeline.command.set_track_tuning",
+                "pulp.timeline.command.set_region"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_agent.cpp",
+              "needles": [
+                "timeline agent retunes a document and corrects a section role in place",
+                "pulp.timeline.command.set_region"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The MCP tool definitions are projected from the same manifest as the CLI verbs, so pulp_timeline_command_apply advertises all three type names in its type_name enum and its x-pulp-command-types list, and handle_timeline_command_apply binds that tool to the same command_apply the CLI calls. The default MCP authority is the non-destructive proposal profile, which holds every class and no destructive intent, and that profile is the reason SetRegion exists: before it, such a writer could author a region carrying a SectionRole and never correct it, because the only correction was remove-then-insert and the remove is the axis the profile is denied. test_mcp_timeline_tools.cpp retunes the project and corrects the role under that default profile, reopens the returned document through pulp_timeline_project_open, asserts the region removal is still refused to the same profile -- so the reachability did not come from widening the mask -- and then applies the identical removal payload under the editor profile as a control, so the refusal is the authority rather than a malformed command.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_command_apply",
+                "pulp.timeline.command.set_project_tuning",
+                "pulp.timeline.command.set_region"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline MCP retunes a project and corrects a section role under the default profile",
+                "pulp.timeline.command.set_project_tuning"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live operation for document tuning or for a section role, and no executor binding for one. These commands are the mutation such a control would execute, so this row is a dependency of that closure rather than a step of it: the live surface additionally needs the timeline document session Product A does not yet hold, which is why closing it here would make the ledger stop describing the product.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This slice installs no design-time authoring capability. Tuning and section role are document mutations reached through the command vocabulary the CLI and MCP surfaces above already advertise, not a capability an agent manifest declares."
+        }
+      }
+    },
+    {
+      "id": "offline-timeline-modulation-source-macro-commands",
+      "title": "Typed modulation-source and macro mutation commands under exact value gates",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "a4c652ca-81f1-4260-9c2e-329b754a510d",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/PulpTimelineSources.cmake",
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/include/pulp/timeline/document_session.hpp",
+        "core/timeline/include/pulp/timeline/model.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/command.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/serialize_command_decode.cpp",
+        "core/timeline/src/serialize_modulation_decode.cpp",
+        "core/timeline/src/serialize_modulation_decode.hpp",
+        "core/timeline/src/track.cpp",
+        "core/timeline/src/transaction.cpp",
+        "core/timeline/src/transaction_dispatch_internal.hpp",
+        "core/timeline/src/transaction_modulation_internal.cpp",
+        "core/timeline/src/transaction_modulation_internal.hpp",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_mcp_timeline_tools.cpp",
+        "test/test_timeline_agent.cpp",
+        "test/test_timeline_command_persistence.cpp",
+        "test/test_timeline_modulation_commands.cpp",
+        "test/test_timeline_schema_registry.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": [
+            "struct InsertModulator",
+            "struct RemoveModulator",
+            "struct SetModulator",
+            "struct InsertMacro",
+            "struct RemoveMacro",
+            "struct SetMacro",
+            "struct SetMacroValue",
+            "InsertMacro, RemoveMacro, SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+          "needles": [
+            "std::is_same_v<T, InsertModulator>",
+            "std::is_same_v<T, SetModulator>",
+            "std::is_same_v<T, InsertMacro>",
+            "std::is_same_v<T, SetMacroValue>",
+            "modulation sources, macros, and routes"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/model.hpp",
+          "needles": [
+            "insert_modulator(Modulator modulator) const;",
+            "replace_modulator(Modulator replacement) const;",
+            "insert_macro(MacroControl macro) const;",
+            "replace_macro(MacroControl replacement) const;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/track.cpp",
+          "needles": [
+            "Track::with_modulators",
+            "Track::with_macros",
+            "Track::erase_modulator",
+            "Track::replace_macro"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_dispatch_internal.hpp",
+          "needles": [
+            "is_modulation_command_type",
+            "SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_modulation_internal.cpp",
+          "needles": [
+            "reduce_insert_modulator",
+            "reduce_remove_macro",
+            "reduce_set_macro_value",
+            "set.expected.id != set.replacement.id || set.expected.id != set.modulator_id",
+            "ConflictCode::ExpectedValueMismatch"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction.cpp",
+          "needles": [
+            "detail::is_modulation_command(envelope.command)",
+            "detail::is_modulation_command_type<T>"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulator",
+            "pulp.timeline.command.set_modulator",
+            "pulp.timeline.command.insert_macro",
+            "pulp.timeline.command.set_macro_value",
+            "expected_bits"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_command_decode.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulator",
+            "pulp.timeline.command.set_macro_value",
+            "decode_command_modulator",
+            "decode_command_macro_control",
+            "decode_command_float_bits"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_modulation_decode.hpp",
+          "needles": [
+            "decode_modulator(const JsonValue& value",
+            "decode_macro_control(const JsonValue& value"
+          ]
+        },
+        {
+          "path": "core/timeline/src/command.cpp",
+          "needles": [
+            "std::is_same_v<T, InsertModulator>",
+            "std::is_same_v<T, SetMacroValue>",
+            "std::is_same_v<T, SetMacro>"
+          ]
+        },
+        {
+          "path": "test/test_timeline_modulation_commands.cpp",
+          "needles": [
+            "a modulation source is authored and corrected in place and removed whole",
+            "a macro is authored and its position moves under a gate that covers only the position",
+            "a stale modulation expectation is refused and the document is unchanged",
+            "a modulation edit may not move identity in either of the two ways it could",
+            "a command addressed at the wrong kind of item is refused",
+            "a source a route still reads cannot be removed",
+            "an out-of-range macro position and an undeclared modulator kind are refused",
+            "modulation commands round trip through their schema envelopes",
+            "a decoded macro position satisfies the gate the encoder wrote it for",
+            "decode refuses a modulation edit that moves identity",
+            "undo through a session restores a removed modulation source whole",
+            "a writer denied removal may author and correct a modulator and a macro",
+            "modulation command identity and retained size answer for their own payloads"
+          ]
+        },
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "pulp-test-timeline-modulation-commands"
+          ]
+        },
+        {
+          "path": "test/test_timeline_writer_capabilities.cpp",
+          "needles": [
+            "alternatives == 64"
+          ]
+        },
+        {
+          "path": "test/test_timeline_schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulator",
+            "pulp.timeline.command.set_macro_value",
+            "pulp.timeline.command.remove_macro"
+          ]
+        },
+        {
+          "path": "test/test_timeline_command_persistence.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulator",
+            "std::holds_alternative<SetMacroValue>(commands[60])"
+          ]
+        },
+        {
+          "path": "test/test_timeline_agent.cpp",
+          "needles": [
+            "timeline agent authors a modulation source and moves a macro it already holds",
+            "pulp.timeline.command.insert_modulator"
+          ]
+        },
+        {
+          "path": "test/test_mcp_timeline_tools.cpp",
+          "needles": [
+            "timeline MCP authors a modulator and moves a macro but refuses to remove either",
+            "pulp.timeline.command.set_macro_value"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The seven commands are public alternatives of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp can author, correct, and retire a track's modulation sources and macros through the same transaction path every other command uses. Before them the three TrackInput collections were storable, encodable, decodable, and validated, and reachable by no mutation at all: the only way to state a modulator was to rebuild the document. All seven are {Automation, *} rather than a new CommandClass, because adding an enumerator renumbers capability_bit and silently repurposes every persisted and transmitted writer mask; kCommandClassCount is still 11 and the three Automation bit literals are asserted rather than assumed. Automation rather than Device, because routes reach a track mixer as well as a device parameter and the sources are owned by the track rather than by any placement; and rather than Track, because folding modulation into \"existence, order, naming, mix, arm, and freeze\" would turn a grant issued to rename and reorder tracks into authority to rewire every parameter on them. The honest cost is stated rather than hidden: Automation becomes the broadest track-scoped class, and a writer granted Automation/Create to add lanes can also create modulators. SetModulator and SetMacro pin identity in the reducer and again in the decoder, because the model is handed one item and cannot see that the caller named another, and a Modify that could relocate identity would let a writer holding only Modify perform the removal its mask denies. SetMacroValue exists beside SetMacro for the reason SetNoteVelocity exists beside SetNoteEvents: a whole-value gate would make a performer moving a macro also supply its current name, so a concurrent rename would abort an edit that did not conflict with it. Its exact float comparison is safe rather than fragile because the persisted spelling is the IEEE-754 bit pattern, which a test proves by gating on a decoded 0.1f and refusing its neighbouring bit pattern. Validity is reached rather than restated: every reducer edits through a Track accessor that revalidates the whole track with the same validate_attached_modulation Track::create applies, so an out-of-range macro position, an undeclared modulator kind, and the removal of a source a route still reads all surface as the model's own refusal. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. The released p0-21-modulation-macros row is untouched and its CLI/MCP gaps stay open: this row delivers sources and macros, not routes, and a row closed on a vocabulary that can create a source and never route it would advertise a modulation surface that does not exist.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/command.hpp",
+              "needles": [
+                "struct InsertModulator",
+                "struct SetModulator",
+                "struct SetMacroValue",
+                "InsertMacro, RemoveMacro, SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+              "needles": [
+                "std::is_same_v<T, InsertModulator>",
+                "std::is_same_v<T, SetMacroValue>"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/model.hpp",
+              "needles": [
+                "insert_modulator(Modulator modulator) const;",
+                "replace_macro(MacroControl replacement) const;"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "platform runtime music timebase timeline"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_modulation_commands.cpp",
+              "needles": [
+                "a modulation source is authored and corrected in place and removed whole",
+                "a modulation edit may not move identity in either of the two ways it could",
+                "a writer denied removal may author and correct a modulator and a macro"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The CLI reaches all seven commands through the canonical command-apply handler in tools/cli/cmd_seq.cpp, and the generated verb table carries their type names because the schema registry does. A registered command alone does not earn this surface, because command_apply applies the decoded commands and then returns serialize_project() of the result, so a mutation the project encoder does not carry is destroyed by the same call that performed it. That floor is measured rather than assumed: test_timeline_agent.cpp drives command_apply end to end, asserts the returned document carries the authored envelope kind and then the moved macro's bit pattern, reopens and validates that document, and asserts a replay of the move is refused by its own gate. The two floats travel as *_bits members spelled exactly as macro_control.value_bits spells the field they gate, so a value that round-trips compares equal to itself rather than to something near it. The authority recorded here is the CLI's declared editor profile and the refusal codes that profile's admission can emit, not the commands' own conflict codes.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": [
+                "pulp.timeline.command.insert_modulator",
+                "pulp.timeline.command.set_modulator",
+                "pulp.timeline.command.set_macro_value"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_agent.cpp",
+              "needles": [
+                "timeline agent authors a modulation source and moves a macro it already holds",
+                "pulp.timeline.command.set_macro_value"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The MCP tool definitions are projected from the same manifest as the CLI verbs, so pulp_timeline_command_apply advertises all seven type names in its type_name enum and its x-pulp-command-types list, and handle_timeline_command_apply binds that tool to the same command_apply the CLI calls. The default MCP authority is the non-destructive proposal profile, which holds every class and no destructive intent, and that profile is why the three Modify commands exist at all: a vocabulary of Insert and Remove alone is write-once for it, because correction would mean remove-then-insert and the remove is the axis it is denied. test_mcp_timeline_tools.cpp authors a modulator and moves a macro under that default profile, reopens the returned document through pulp_timeline_project_open, asserts the macro removal is still refused to the same profile -- so the reachability did not come from widening the mask -- and then applies the identical removal payload under the editor profile as a control, so the refusal is the authority rather than a malformed command.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_command_apply",
+                "pulp.timeline.command.insert_modulator",
+                "pulp.timeline.command.set_macro_value"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline MCP authors a modulator and moves a macro but refuses to remove either",
+                "pulp.timeline.command.insert_modulator"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live operation for a modulation source or a macro and no executor binding for one. These commands are the mutation such a control would execute, so this row is a dependency of that closure rather than a step of it: the live surface additionally needs the timeline document session Product A does not yet hold, and closing it here would make the ledger stop describing the product.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This slice installs no design-time authoring capability. A modulator, a macro, and their declarations are document mutations reached through the command vocabulary the CLI and MCP surfaces above already advertise, not a capability an agent manifest declares."
+        }
+      }
+    },
+    {
+      "id": "offline-timeline-modulation-route-commands",
+      "title": "Typed modulation-route mutation commands under whole-route value gates",
+      "classification": "public_sdk",
+      "delivery_state": "pending",
+      "claim_id": "fc9863de-7a51-45e5-a745-0c42481b5eef",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        "core/timeline/include/pulp/timeline/command.hpp",
+        "core/timeline/include/pulp/timeline/document_session.hpp",
+        "core/timeline/include/pulp/timeline/model.hpp",
+        "core/timeline/schema/timeline_cli_verbs.json",
+        "core/timeline/schema/timeline_facade.js",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/schema/timeline_schema.json",
+        "core/timeline/schema/timeline_types.d.ts",
+        "core/timeline/src/command.cpp",
+        "core/timeline/src/schema_registry.cpp",
+        "core/timeline/src/serialize_command_decode.cpp",
+        "core/timeline/src/serialize_modulation_decode.cpp",
+        "core/timeline/src/serialize_modulation_decode.hpp",
+        "core/timeline/src/track.cpp",
+        "core/timeline/src/transaction_dispatch_internal.hpp",
+        "core/timeline/src/transaction_modulation_internal.cpp",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/timeline_tests.cmake",
+        "test/test_mcp_timeline_tools.cpp",
+        "test/test_timeline_agent.cpp",
+        "test/test_timeline_command_persistence.cpp",
+        "test/test_timeline_modulation_route_commands.cpp",
+        "test/test_timeline_schema_registry.cpp",
+        "test/test_timeline_writer_capabilities.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "core/timeline/include/pulp/timeline/command.hpp",
+          "needles": [
+            "struct InsertModulationRoute",
+            "struct RemoveModulationRoute",
+            "struct SetModulationRoute",
+            "SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+          "needles": [
+            "std::is_same_v<T, InsertModulationRoute>",
+            "std::is_same_v<T, RemoveModulationRoute>",
+            "std::is_same_v<T, SetModulationRoute>"
+          ]
+        },
+        {
+          "path": "core/timeline/include/pulp/timeline/model.hpp",
+          "needles": [
+            "insert_modulation_route(ModulationRoute route) const;",
+            "erase_modulation_route(ItemId id) const;",
+            "replace_modulation_route(ModulationRoute replacement) const;",
+            "with_modulation_routes(std::vector<ModulationRoute> routes) const;"
+          ]
+        },
+        {
+          "path": "core/timeline/src/track.cpp",
+          "needles": [
+            "Track::with_modulation_routes",
+            "Track::insert_modulation_route",
+            "Track::erase_modulation_route",
+            "Track::replace_modulation_route"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_dispatch_internal.hpp",
+          "needles": [
+            "is_modulation_command_type",
+            "SetMacro, SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
+          ]
+        },
+        {
+          "path": "core/timeline/src/transaction_modulation_internal.cpp",
+          "needles": [
+            "reduce_insert_modulation_route",
+            "reduce_remove_modulation_route",
+            "reduce_set_modulation_route",
+            "set.expected.id != set.replacement.id || set.expected.id != set.route_id",
+            "ConflictCode::ExpectedValueMismatch"
+          ]
+        },
+        {
+          "path": "core/timeline/src/schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulation_route",
+            "pulp.timeline.command.remove_modulation_route",
+            "pulp.timeline.command.set_modulation_route",
+            "pulp.timeline.modulation_route"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_command_decode.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulation_route",
+            "pulp.timeline.command.set_modulation_route",
+            "decode_command_modulation_route"
+          ]
+        },
+        {
+          "path": "core/timeline/src/serialize_modulation_decode.hpp",
+          "needles": [
+            "decode_modulation_route(const JsonValue& value"
+          ]
+        },
+        {
+          "path": "core/timeline/src/command.cpp",
+          "needles": [
+            "std::is_same_v<T, InsertModulationRoute>",
+            "std::is_same_v<T, SetModulationRoute>",
+            "A route owns no heap storage at all"
+          ]
+        },
+        {
+          "path": "test/test_timeline_modulation_route_commands.cpp",
+          "needles": [
+            "a modulation route is authored and rewired in place and removed whole",
+            "a route command round trips a document back to the bytes it started from",
+            "a stale route expectation is refused and the document is unchanged",
+            "a route edit may not move identity in either of the two ways it could",
+            "a route command addressed at the wrong kind of item or the wrong track is refused",
+            "a route naming an absent source or the wrong source kind is refused both ways in",
+            "a route depth outside the declared maximum is refused on both paths",
+            "route commands round trip through their schema envelopes",
+            "a decoded route depth satisfies the gate the encoder wrote it for",
+            "decode refuses a route edit that moves identity",
+            "undo through a session restores a removed route with its bypass intact",
+            "a writer denied removal may author and rewire a route",
+            "route command identity and retained size answer for their own payloads"
+          ]
+        },
+        {
+          "path": "test/cmake/timeline_tests.cmake",
+          "needles": [
+            "pulp-test-timeline-modulation-route-commands"
+          ]
+        },
+        {
+          "path": "test/test_timeline_writer_capabilities.cpp",
+          "needles": [
+            "alternatives == 64"
+          ]
+        },
+        {
+          "path": "test/test_timeline_schema_registry.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulation_route",
+            "pulp.timeline.command.set_modulation_route"
+          ]
+        },
+        {
+          "path": "test/test_timeline_command_persistence.cpp",
+          "needles": [
+            "pulp.timeline.command.insert_modulation_route",
+            "std::holds_alternative<SetModulationRoute>(commands[63])"
+          ]
+        },
+        {
+          "path": "test/test_timeline_agent.cpp",
+          "needles": [
+            "timeline agent authors a route and rewires one it already holds",
+            "pulp.timeline.command.set_modulation_route"
+          ]
+        },
+        {
+          "path": "test/test_mcp_timeline_tools.cpp",
+          "needles": [
+            "timeline MCP authors a route and rewires it but refuses to remove it",
+            "pulp.timeline.command.insert_modulation_route"
+          ]
+        },
+        {
+          "path": ".agents/skills/timeline/SKILL.md",
+          "needles": [
+            "A referencing collection is the one whose removal nothing can refuse",
+            "A bypass is a gated value, not a state an edit may drop"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "exposed",
+          "rationale": "The three route commands are public alternatives of the installed Command variant, so an in-process caller that links pulp/timeline/command.hpp can author a source-to-parameter connection, rewire it, and retire it through the same transaction path every other command uses. They complete the modulation vocabulary the source and macro commands opened: a writer could state a modulator and a macro and could not connect either to anything, so the collection that gives the other two their effect was the one with no mutation. All three are {Automation, *} rather than a new CommandClass, because adding an enumerator renumbers capability_bit and silently repurposes every persisted and transmitted writer mask; kCommandClassCount is still 11 and the three Automation bit literals are asserted rather than assumed. SetModulationRoute pins identity in the reducer and again in the decoder, because the model is handed one route and cannot see that the caller named another, and a Modify that could relocate identity would let a writer holding only Modify perform the removal its mask denies. Its gate covers the whole route rather than the depth alone, bypass included: modulation.hpp states that a disabled route keeps its identity, depth, and target precisely so re-enabling restores what was there, which is only true if a bypass is a value an edit states rather than a state an edit discards -- so a Remove's inverse carries the route whole and a stale-gate test varies all four members in turn. No narrow companion sits beside it the way SetMacroValue sits beside SetMacro, because a route has no performed field and inventing one would be vocabulary bought with nothing. Validity is reached rather than restated: the reducer edits through Track accessors that revalidate the whole track with the same validate_attached_modulation Track::create applies, so a depth outside [-kMaximumModulationDepth, +kMaximumModulationDepth], a source identity the track does not hold, a source kind that disagrees with the entity holding that identity, and a second route stating one connection twice all surface as the model's own refusal -- on Insert and on Set, which reach the model through different accessors. Removing a route is the one modulation removal nothing can refuse, because no document member reads a route; the asymmetry is tested as its own claim rather than assumed from the source-side shape. Admission is in_process because the installed header is what a caller links; refusal_codes stays empty because that field names the conflict codes a registered writer emits, and no writer is registered by the command type itself. The released p0-21-modulation-macros row is untouched: its evidence resolves against its own merge commit, where these verbs by construction do not exist.",
+          "evidence": [
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/command.hpp",
+              "needles": [
+                "struct InsertModulationRoute",
+                "struct SetModulationRoute",
+                "SetMacroValue, InsertModulationRoute, RemoveModulationRoute,"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/document_session.hpp",
+              "needles": [
+                "std::is_same_v<T, InsertModulationRoute>",
+                "std::is_same_v<T, SetModulationRoute>"
+              ]
+            },
+            {
+              "kind": "sdk_header",
+              "path": "core/timeline/include/pulp/timeline/model.hpp",
+              "needles": [
+                "insert_modulation_route(ModulationRoute route) const;",
+                "replace_modulation_route(ModulationRoute replacement) const;"
+              ]
+            },
+            {
+              "kind": "sdk_target",
+              "path": "tools/cmake/PulpInstallRules.cmake",
+              "needles": [
+                "platform runtime music timebase timeline"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_modulation_route_commands.cpp",
+              "needles": [
+                "a modulation route is authored and rewired in place and removed whole",
+                "a route edit may not move identity in either of the two ways it could",
+                "a writer denied removal may author and rewire a route"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "in_process",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "The CLI reaches all three commands through the canonical command-apply handler in tools/cli/cmd_seq.cpp, and the generated verb table carries their type names because the schema registry does. A registered command alone does not earn this surface, because command_apply applies the decoded commands and then returns serialize_project() of the result, so a mutation the project encoder does not carry is destroyed by the same call that performed it. That floor is measured rather than assumed: test_timeline_agent.cpp drives command_apply end to end, asserts the returned document carries the authored route's depth bit pattern and its enabled:false bypass, reopens and validates that document, rewires the route the document already held, and asserts a replay of the rewire is refused by its own gate. The depth travels as a depth_bits member spelled exactly as modulation_route.depth_bits spells the field it gates, so a value that round-trips compares equal to itself rather than to something near it. The authority recorded here is the CLI's declared editor profile and the refusal codes that profile's admission can emit, not the commands' own conflict codes. The CLI and MCP claim is made on this row rather than on the sources-and-macros row because a vocabulary that can create a source and never route it does not close \"no typed modulation mutation\" -- a gap is honest and a premature close is not. The released p0-21-modulation-macros row that names this work as its owner is left untouched, per the in-repo precedent set by program-wire-controller-section: its evidence resolves against its own merge commit, where verbs introduced here cannot exist.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "core/timeline/schema/timeline_cli_verbs.json",
+              "needles": [
+                "pulp.timeline.command.insert_modulation_route",
+                "pulp.timeline.command.remove_modulation_route",
+                "pulp.timeline.command.set_modulation_route"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "command_apply",
+                "ProjectSource::file"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_timeline_agent.cpp",
+              "needles": [
+                "timeline agent authors a route and rewires one it already holds",
+                "pulp.timeline.command.set_modulation_route"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "editor",
+            "bounds": {
+              "max_session_retained_bytes": 268435456,
+              "max_transaction_retained_bytes": 16777216
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "The MCP tool definitions are projected from the same manifest as the CLI verbs, so pulp_timeline_command_apply advertises all three type names in its type_name enum and its x-pulp-command-types list, and handle_timeline_command_apply binds that tool to the same command_apply the CLI calls. The default MCP authority is the non-destructive proposal profile, which holds every class and no destructive intent, and that profile is why SetModulationRoute ships with its Insert and Remove rather than after them: an Insert/Remove pair alone is write-once for it, because correcting a connection would mean remove-then-insert and the remove is the axis it is denied. test_mcp_timeline_tools.cpp authors a route under that default profile, reopens the returned document through pulp_timeline_project_open, rewires the route to a different source, target, and an inverted depth, asserts the route removal is still refused to the same profile -- so the reachability did not come from widening the mask -- and then applies the identical removal payload under the editor profile as a control, so the refusal is the authority rather than a malformed command.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "pulp_timeline_command_apply",
+                "pulp.timeline.command.insert_modulation_route",
+                "pulp.timeline.command.set_modulation_route"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "handle_timeline_command_apply",
+                "kTimelineCommandApplyToolName"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline MCP authors a route and rewires it but refuses to remove it",
+                "pulp.timeline.command.insert_modulation_route"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "registered_writer",
+            "writer_profile": "proposal",
+            "bounds": {
+              "max_session_retained_bytes": 33554432,
+              "max_transaction_retained_bytes": 1048576
+            },
+            "refusal_codes": [
+              "capability_denied",
+              "writer_quota_exhausted",
+              "stale_revision"
+            ]
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A has no typed live operation for a modulation route and no executor binding for one. These commands are the mutation such a control would execute, so this row is a dependency of that closure rather than a step of it: the live surface additionally needs the timeline document session Product A does not yet hold, and closing it here would make the ledger stop describing the product.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "This slice installs no design-time authoring capability. A route between a track-owned source and a parameter is a document mutation reached through the command vocabulary the CLI and MCP surfaces above already advertise, not a capability an agent manifest declares."
+        }
+      }
+    },
+    {
+      "id": "nested-child-automation-refusal-split",
+      "title": "Nested child-track automation refused by three cause-specific codes, each a named gap",
+      "classification": "engine_internal",
+      "delivery_state": "released",
+      "claim_id": "4ba74e56-8b5d-4fcf-8cbc-3f3336293ac4",
+      "owned_paths": [
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/program_compiler.hpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "docs/status/agent-capability-surface.json",
+        "docs/status/sequencer-exposure.json",
+        "test/test_timeline_nesting_playback.cpp",
+        "test/timeline_nesting_test_support.hpp",
+        "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_registry.py",
+        "tools/scripts/negative_capability_allowlist.json",
+        "tools/timeline/src/timeline_agent.cpp"
+      ],
+      "release": {
+        "pr": 8412,
+        "accepted_head": "930ceb2646013605df42f48e9482a5eea45cb3d8",
+        "merge_sha": "6691ecdfc8f3a0b4cc5cafa3969e33f46afc2dca",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/playback/include/pulp/playback/program_compiler.hpp",
+          "needles": [
+            "NestedAutomationPanUnsupported",
+            "NestedAutomationGainEventLeafUnsupported",
+            "NestedAutomationGainMediaUnsupported"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "NestedAutomationPanUnsupported",
+            "NestedAutomationGainEventLeafUnsupported",
+            "NestedAutomationGainMediaUnsupported"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "NestedAutomationPanUnsupported",
+            "NestedAutomationGainEventLeafUnsupported",
+            "NestedAutomationGainMediaUnsupported"
+          ]
+        },
+        {
+          "path": "tools/timeline/src/timeline_agent.cpp",
+          "needles": [
+            "NestedAutomationPanUnsupported",
+            "NestedAutomationGainEventLeafUnsupported",
+            "NestedAutomationGainMediaUnsupported"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "gap",
+          "rationale": "A developer using the installed SDK cannot compile a nested sequence whose child track automates its gain or pan; the compile refuses. The three new CompileErrorCode members make the refusal say which construct is missing, but naming a gap precisely is not filling it, so the capability remains absent from the installed surface. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "sequencer-controller-playback-capability"
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "`pulp seq` can author such a document through insert_automation_lane and can report the specific refusal, but it cannot compile or render one. The command vocabulary is ahead of playback here, which is what makes this authorable and unplayable rather than simply unsupported. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The MCP timeline tools read the same wire names from compile_error_code_name and so report the narrower cause automatically, but no tool compiles or renders a nested child track whose gain or pan is automated. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "timeline-cli-mcp"
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "No live typed operation plays a nested child track's automation, because nothing downstream can evaluate a per-leaf curve. Splitting the refusal changes which code a caller sees, not what a caller can control at runtime. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No design-time capability is declared for nested child-track automation, and the negative-capability allowlist now carries one row per cause, each recording the gap as real and naming what would close it rather than arguing the refusal is intended. Closing it needs a per-clip automation envelope, which is three things and none of them exist: an envelope field on ClipPlaybackProperties in core/timeline/include/pulp/timeline/clip.hpp beside the scalar gain_linear it carries today, a renderer that evaluates that envelope per flattened leaf rather than per whole track as resolve_track_mixer in core/playback/src/program_compiler_helpers.cpp does now, and the lowerer wire that carries a nested child track's curve onto the leaf it was flattened into.",
+          "dependencies": [
+            "clip-playback-automation-envelope-field",
+            "per-leaf-automation-evaluating-renderer",
+            "nested-child-lane-to-leaf-envelope-wire"
+          ],
+          "owner": "agent-capability-maintainers"
+        }
+      }
+    },
+    {
+      "id": "nested-conform-aware-resample-trim",
+      "title": "A trimmed nested Resample leaf reads the sub-span its window maps onto",
+      "delivery_state": "pending",
+      "claim_id": "0f6c1a83-9b42-4d57-8a10-2c4b7e5d9f31",
+      "owned_paths": [
+        ".agents/skills/agent-capabilities/SKILL.md",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/include/pulp/playback/audio_renderer.hpp",
+        "core/playback/src/audio_renderer.cpp",
+        "core/playback/src/audio_renderer_internal.hpp",
+        "core/playback/src/audio_renderer_render.cpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/sequence_content_lowerer.hpp",
+        "core/playback/src/track_audio_program_compiler.cpp",
+        "core/playback/src/track_audio_program_compiler.hpp",
+        "docs/status/agent-capability-surface.json",
+        "docs/status/sequencer-exposure.json",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/agent_capability_manifest.py",
+        "tools/scripts/agent_capability_registry.py",
+        "tools/scripts/negative_capability_allowlist.json"
+      ],
+      "classification": "engine_internal",
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "source_frame_phase_end",
+            "timeline::TimeConform::Resample",
+            "authored_span"
+          ]
+        },
+        {
+          "path": "core/playback/src/sequence_content_lowerer.hpp",
+          "needles": [
+            "source_frame_phase_end"
+          ]
+        },
+        {
+          "path": "core/playback/include/pulp/playback/audio_renderer.hpp",
+          "needles": [
+            "source_frame_phase_end"
+          ]
+        },
+        {
+          "path": "core/playback/src/audio_renderer_render.cpp",
+          "needles": [
+            "source_frame_phase_end",
+            "musical_phase_source_position"
+          ]
+        },
+        {
+          "path": "core/playback/src/audio_renderer.cpp",
+          "needles": [
+            "source_frame_phase_end"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "Trimmed nested resampling media reads the conformed sub-span",
+            "Trimmed nested resampling media rejects elapsed-sample source offsets"
+          ]
+        },
+        {
+          "path": "tools/scripts/agent_capability_registry.py",
+          "needles": [
+            "sha256:6050c1569f5e90b404fc4dc8a95498964a796a418a1fe62a9ec4929bb8e57e2f"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The source range is produced by flattening and can never be authored. It rides on AudioClipRendererProgram, a compiled-output type an SDK consumer reads rather than writes, as one field beside the source_frame_offset that type already carried; MediaRef and TimeConform are deliberately untouched, because narrowing the reference would re-conform the narrowed source over the whole window and so would mean something different from what the placement says. No schema version moves and no serialized form changes."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. A nested placement that trims a Resample clip previously refused to compile and now compiles, through the same SequenceRef source window pulp seq already writes."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal beneath the nesting and time-conform controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The source range is computed inside the lowerer and is reachable only through the trim an author already wrote on the placement."
+        }
+      }
+    },
+    {
+      "id": "nested-freeze-retime-predicate",
+      "title": "A nested freeze refuses only where the nesting actually re-times it",
+      "classification": "engine_internal",
+      "delivery_state": "released",
+      "claim_id": "7e26afef-066a-4c42-b9da-78d244c479f2",
+      "owned_paths": [
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json",
+        "docs/status/sequencer-exposure.json",
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md"
+      ],
+      "release": {
+        "pr": 8410,
+        "accepted_head": "d0319c2c24d87b0ddd3aa9cd190addc0a98585c8",
+        "merge_sha": "bcb8a6c4153e0743c61b8598048feaa5bc1f42d7",
+        "integration_mode": "merge"
+      },
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "nesting_is_transparent",
+            "NestingTransformation",
+            "artifact_rate_differs"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "A transparently nested freeze renders exactly like the same freeze unnested",
+            "Each transformation a nesting can impose refuses the freeze it would re-time"
+          ]
+        },
+        {
+          "path": "tools/scripts/negative_capability_allowlist.json",
+          "needles": [
+            "renders bit-identically to the same freeze unnested"
+          ]
+        },
+        {
+          "path": ".agents/skills/playback/SKILL.md",
+          "needles": [
+            "Freeze nests only where the nesting transforms nothing"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "NestedFrozenTrackUnsupported survives with a tighter guard; no CompileErrorCode member is added or removed and no installed header, entry point or SDK type changes. The narrowing is a judgement inside the lowerer about which documents compile, so claiming an installed-SDK surface would advertise a type that did not change."
+        },
+        "offline_timeline_cli": {
+          "disposition": "gap",
+          "rationale": "A transformation-free nested freeze now compiles where it previously refused, but no CLI verb authors a track's freeze and none reports in advance whether a nesting will re-time. An author still discovers the verdict at compile time. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to proposal-safe writers.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-substitution-state-refusal-split"
+          ]
+        },
+        "offline_timeline_mcp": {
+          "disposition": "gap",
+          "rationale": "The generated Timeline MCP schema carries no operation that authors a freeze or reports whether a nesting transforms its child, so the narrowed refusal is not reachable there. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-substitution-state-refusal-split"
+          ]
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Product A live timeline authority is absent for the sequencer generally, so neither the documents that now compile nor the surviving refusal is reachable as a live control. Owner: NW-D, and only where that source is Pulp-owned.",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "product-a-timeline-document-session",
+            "nested-substitution-state-refusal-split"
+          ]
+        },
+        "design_time_agent_manifest": {
+          "disposition": "gap",
+          "rationale": "No agent-capability row advertises which nestings a sealed artifact survives, so an agent cannot ask before authoring one. Owner: NW-D (P0-40-CONTROLS).",
+          "owner": "sequencer-control-closure",
+          "dependencies": [
+            "nested-substitution-state-refusal-split"
+          ]
+        }
+      }
+    },
+    {
+      "id": "nested-stretch-authored-artifact-window",
+      "title": "A trimmed nested Stretch leaf reads a window of the artifact rendered for its authored range",
+      "delivery_state": "pending",
+      "claim_id": "3e7d9b41-5c26-4af8-9d03-71b8e4a26c5f",
+      "owned_paths": [
+        ".agents/skills/playback/SKILL.md",
+        ".agents/skills/timeline/SKILL.md",
+        "core/playback/src/audio_renderer.cpp",
+        "core/playback/src/audio_renderer_internal.hpp",
+        "core/playback/src/offline_stretch_program_compiler.cpp",
+        "core/playback/src/offline_stretch_program_compiler.hpp",
+        "core/playback/src/program_compiler.cpp",
+        "core/playback/src/realtime_stretch_renderer.cpp",
+        "core/playback/src/sequence_content_lowerer.cpp",
+        "core/playback/src/track_audio_program_compiler.cpp",
+        "core/playback/src/track_audio_program_compiler.hpp",
+        "docs/guides/timeline-sdk.md",
+        "docs/status/sequencer-exposure.json",
+        "test/test_timeline_nesting_playback.cpp",
+        "tools/scripts/negative_capability_allowlist.json"
+      ],
+      "classification": "engine_internal",
+      "evidence": [
+        {
+          "path": "core/playback/src/sequence_content_lowerer.cpp",
+          "needles": [
+            "Stretch reaches the same window from the other end",
+            "timeline::TimeConform::None) {"
+          ]
+        },
+        {
+          "path": "core/playback/src/audio_renderer_internal.hpp",
+          "needles": [
+            "OfflineStretchArtifactWindow",
+            "offline_stretch_artifact_window"
+          ]
+        },
+        {
+          "path": "core/playback/src/audio_renderer.cpp",
+          "needles": [
+            "offline_stretch_artifact_window",
+            "window->frame_start",
+            "window->authored_start"
+          ]
+        },
+        {
+          "path": "core/playback/src/offline_stretch_program_compiler.cpp",
+          "needles": [
+            "authored_window_start",
+            "window_->frame_start"
+          ]
+        },
+        {
+          "path": "core/playback/src/offline_stretch_program_compiler.hpp",
+          "needles": [
+            "authored_duration",
+            "OfflineStretchArtifactWindow"
+          ]
+        },
+        {
+          "path": "core/playback/src/realtime_stretch_renderer.cpp",
+          "needles": [
+            "clip.source_start",
+            "subspan"
+          ]
+        },
+        {
+          "path": "core/playback/src/track_audio_program_compiler.hpp",
+          "needles": [
+            "authored_window_start"
+          ]
+        },
+        {
+          "path": "core/playback/src/track_audio_program_compiler.cpp",
+          "needles": [
+            "authored_duration"
+          ]
+        },
+        {
+          "path": "core/playback/src/program_compiler.cpp",
+          "needles": [
+            "lowered_clip.authored_window_start"
+          ]
+        },
+        {
+          "path": "test/test_timeline_nesting_playback.cpp",
+          "needles": [
+            "Trimmed nested stretched media reads a window of the authored artifact",
+            "Nested stretched media placed before its authored origin still windows the artifact",
+            "Host-mapped nested stretched media reads the artifact window live"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "No installed header changes. The authored range a trimmed leaf is a window onto already travels beside the lowered clip, and the frame span it selects is carried by AudioClipRendererProgram's existing source_start/source_frame_count fields, which a compiled-output consumer reads rather than writes. No schema version moves and no serialized form changes."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No CLI verb, flag or output field changes. A nested placement that trims a Stretch clip previously refused to compile and now compiles, through the same SequenceRef source window pulp seq already writes."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP operation or schema changes; the generated operation set is untouched."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "This adds no Product-A control. It removes a compile refusal beneath the nesting and time-conform controls that already exist."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No design-time capability is registered or removed. The artifact window is computed inside the renderer's program compiler and is reachable only through the trim an author already wrote on the placement."
+        }
+      }
+    },
+    {
+      "id": "offline-timeline-render-tail",
+      "title": "Explicit render tail on the offline timeline render verb",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "e4a6dc69-a3ab-4d77-8e2c-fcd266bc3fb8",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        ".github/vellum-expansion-watch-events/20260914-pr8385-timeline-render-tail-watch.json",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/tools/schema_mcp_emit.py",
+        "core/timeline/tools/test_schema_mcp_emit.py",
+        "docs/reference/cli.md",
+        "docs/status/cli-commands.yaml",
+        "docs/status/pulp-tooling-disposition.json",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/cli_tests.cmake",
+        "test/test_cli_timeline_render_shellout.cpp",
+        "test/test_timeline_cli_offline_render.cpp",
+        "tools/cli/cmd_seq.cpp",
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/timeline/include/pulp/tools/timeline/agent.hpp",
+        "tools/timeline/src/timeline_agent.cpp",
+        "tools/timeline/src/timeline_render.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "tools/timeline/src/timeline_render.cpp",
+          "needles": [
+            "options.tail_frames = tail_frames;",
+            "sequence plus tail exceeds the in-memory render budget"
+          ]
+        },
+        {
+          "path": "tools/cli/cmd_seq.cpp",
+          "needles": [
+            "parse_tail_frames",
+            "--tail-frames"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The tail control itself is host::TimelineOfflineRenderOptions::tail_frames, an already-installed host field this slice does not change. The entry point the slice widens lives in tools/timeline, which PulpInstallRules.cmake does not export as a header subsystem, so no installed SDK surface moves."
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "pulp render --tail-frames <n> renders n frames after the sequence ends, so a ringing delay, reverb, or release is captured instead of cut. Zero stays the default, so an unflagged render keeps the length it has always produced.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "docs/status/cli-commands.yaml",
+              "needles": [
+                "--tail-frames"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "parse_tail_frames",
+                "--tail-frames requires a value"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_cli_timeline_render_shellout.cpp",
+              "needles": [
+                "pulp render rejects a tail option with no value"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "pulp_timeline_render accepts an optional bounded tail_frames integer. Absent means zero; a present but unparsable value is refused rather than silently read as absent.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "tail_frames"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline_tail_frames",
+                "handle_timeline_render"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "core/timeline/tools/test_schema_mcp_emit.py",
+              "needles": [
+                "render exposes the tail as an explicit bounded integer option"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Bounce length is not a live Product A control: no live typed operation renders a timeline offline or selects a tail for one.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The tail is an argument to an offline render, not a design-time authoring capability; it grants no authority over a document."
+        }
+      }
+    },
+    {
+      "id": "control-fixture-manifest-digest-derivation",
+      "title": "Control fixture manifests and shipping markers derive from the canonical registry digest",
+      "classification": "ci_test_only",
+      "delivery_state": "pending",
+      "claim_id": "control-fixture-manifest-digest-derivation-20260914",
+      "owned_paths": [
+        "test/support/control_manifest_fixtures.hpp",
+        "test/control_enrollment_host_fixture.cpp",
+        "test/control_trusted_host_fixture.cpp",
+        "test/fixtures/control_host_preflight_fixture.cpp",
+        "test/fixtures/control_installed_host_e2e_fixture.cpp",
+        "test/fixtures/control_trusted_host_e2e_fixture.cpp",
+        "test/test_control_broker_daemon.cpp",
+        "test/test_control_endpoint_enrollment.cpp",
+        "test/test_control_host_enrollment.cpp",
+        "test/test_control_manifest.cpp",
+        "test/test_control_phase15_aggregate_e2e.cpp",
+        "test/test_control_trusted_host_e2e.cpp",
+        "test/test_control_trusted_host_inventory.cpp",
+        "tools/scripts/test_release_artifact_contents.py"
+      ],
+      "evidence": [
+        {
+          "path": "test/support/control_manifest_fixtures.hpp",
+          "needles": [
+            "#include <pulp/inspect/control_registry_digest.inc>",
+            "\"registry_digest\": \")\" PULP_CONTROL_REGISTRY_DIGEST_V1 R\"(\"",
+            "constexpr ControlManifestMarker control_manifest_marker(std::string_view manifest)"
+          ]
+        },
+        {
+          "path": "test/test_control_manifest.cpp",
+          "needles": [
+            "fixture shipping markers hash the manifest bytes the fixtures ship",
+            "expected_marker(pulp::test::kInstalledHostE2eFixtureManifest)",
+            "std::string(kControlRegistryDigest)"
+          ]
+        },
+        {
+          "path": "test/fixtures/control_installed_host_e2e_fixture.cpp",
+          "needles": [
+            "const volatile pulp::test::ControlManifestMarker kManifest =",
+            "pulp::test::kInstalledHostE2eFixtureManifest"
+          ]
+        },
+        {
+          "path": "tools/scripts/test_release_artifact_contents.py",
+          "needles": [
+            "def canonical_control_registry_digest() -> str:",
+            "CONTROL_REGISTRY_DIGEST_INCLUDE"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The manifests and shipping markers moved here are test fixtures. No SDK header, target or symbol changes: the canonical digest still lives in inspect/include/pulp/inspect/control_registry_digest.inc and the installed shipping helper keeps its own deliberate mirror, so an installed plugin sees byte-identical registry bytes and the same digest it saw before."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No offline Timeline command gains, loses or changes behaviour. The fixtures are compiled and launched by ctest only; `pulp seq` neither reads them nor is reached by them."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP tool is added or altered. The generated Timeline MCP schema is untouched, and nothing here is reachable as an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "No capability, operation, executor binding, grant or policy projection changes. The capability registry is not edited at all, so serialize_control_registry() emits the same bytes and kControlRegistryDigest keeps its value; the fixtures simply read that value instead of restating it, and their shipping markers are hashed from the same bytes they already carried."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No authoring capability an agent manifest could carry is added or removed. This changes only where a CI fixture gets a value it was previously retyping by hand."
         }
       }
     }

@@ -203,9 +203,12 @@ AUv3 demos. Some are gated by platform, optional dependencies, or feature flags.
 
 ## FAUST Examples
 
-These examples validate the current supported FAUST lane: offline codegen,
-checked-in generated headers, `FaustProcessor<T>` wrapping, and headless
-regression tests.
+These examples validate the checked-in part of the current Faust lane:
+Pulp-owned reference DSP implementations, `FaustProcessor<T>` wrapping, and
+headless regression tests. Pulp provides optional external codegen separately.
+The adjacent `.dsp` files are authoring examples; Pulp does not claim that the
+checked-in reference implementations were generated from or are
+source-equivalent to them.
 
 ### FaustGain
 
@@ -225,8 +228,8 @@ expected filter behavior.
 
 **Path**: `examples/faust-tremolo/`
 **Type**: Effect
-**Purpose**: Modulation effect example. Validates another non-trivial generated
-DSP shape and the current offline-codegen workflow.
+**Purpose**: Modulation effect example. Validates another non-trivial reference
+DSP shape through `FaustProcessor<T>`.
 
 ## Cmajor Example
 

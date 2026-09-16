@@ -3,6 +3,7 @@
 #include "serialize_automation_decode.hpp"
 #include "serialize_decode_context.hpp"
 #include "serialize_decode_support.hpp"
+#include "serialize_modulation_decode.hpp"
 
 #include <algorithm>
 #include <array>
@@ -145,6 +146,56 @@ decode_optional_content_hash(const JsonValue& data, std::string_view name,
     return runtime::Ok(std::optional<ContentHash>{*decoded});
 }
 
+// Charged against the same project counters a document decode charges, so a
+// command carrying a modulator cannot buy decode budget a document could not.
+runtime::Result<Modulator, PersistenceError>
+decode_command_modulator(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment =
+        bounded_increment(context.counts.modulators, context.limits.max_modulators);
+    if (!increment)
+        return fail<Modulator>(PersistenceErrorCode::LimitExceeded, std::move(path), value.begin,
+                               increment.actual, context.limits.max_modulators);
+    return decode_modulator(value, std::move(path));
+}
+
+runtime::Result<MacroControl, PersistenceError>
+decode_command_macro_control(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment =
+        bounded_increment(context.counts.macro_controls, context.limits.max_macro_controls);
+    if (!increment)
+        return fail<MacroControl>(PersistenceErrorCode::LimitExceeded, std::move(path), value.begin,
+                                  increment.actual, context.limits.max_macro_controls);
+    return decode_macro_control(value, std::move(path));
+}
+
+runtime::Result<ModulationRoute, PersistenceError>
+decode_command_modulation_route(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment =
+        bounded_increment(context.counts.modulation_routes, context.limits.max_modulation_routes);
+    if (!increment)
+        return fail<ModulationRoute>(PersistenceErrorCode::LimitExceeded, std::move(path),
+                                     value.begin, increment.actual,
+                                     context.limits.max_modulation_routes);
+    return decode_modulation_route(value, std::move(path));
+}
+
+// A float member spelled as its IEEE-754 bit pattern, which is how the macro
+// document schema spells the field this command gates. A decimal spelling would
+// let a value fail to compare equal to the one that was written.
+runtime::Result<float, PersistenceError>
+decode_command_float_bits(const JsonValue& data, std::string_view name, const std::string& path) {
+    auto value = required(data, name, path);
+    if (!value)
+        return fail<float>(value.error().code, value.error().path, value.error().byte_offset);
+    const auto member_path = path + "/" + std::string(name);
+    auto bits = parse_canonical_u64_string(*value.value(), member_path);
+    if (!bits)
+        return fail<float>(bits.error().code, bits.error().path, bits.error().byte_offset);
+    if (bits.value() > std::numeric_limits<std::uint32_t>::max())
+        return fail<float>(PersistenceErrorCode::InvalidSchema, member_path, value.value()->begin);
+    return runtime::Ok(std::bit_cast<float>(static_cast<std::uint32_t>(bits.value())));
+}
+
 runtime::Result<ClipPlaybackProperties, PersistenceError>
 decode_command_playback_properties(const JsonValue& value, std::string path) {
     auto gain = required(value, "gain_linear_bits", path);
@@ -227,6 +278,95 @@ decode_command_notes(const JsonValue& value, DecodeContext& context, std::string
         return model_fail<std::vector<NoteEvent>>(validated.error(), std::move(path));
     return runtime::Ok(
         std::vector<NoteEvent>(validated->notes().begin(), validated->notes().end()));
+}
+
+// Decodes a command payload's controller points.
+//
+// `chased` is a derivation receipt the flattening path writes, never something
+// an author states, so a payload carrying it set is refused rather than
+// silently dropped: a caller who believes they authored provenance and did not
+// is worse off than one who is told the field is not theirs to write. The
+// project encoder does not write the member at all, so no stored document is
+// rejected by this rule.
+runtime::Result<std::vector<MidiLanePoint>, PersistenceError>
+decode_command_lane_points(const JsonValue& value, DecodeContext& context, std::string path) {
+    if (value.kind != JsonValue::Kind::Array)
+        return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::UnexpectedType,
+                                                std::move(path), value.begin);
+    auto& count = context.counts.midi_lane_points;
+    if (count > context.limits.max_midi_lane_points ||
+        value.array.size() > context.limits.max_midi_lane_points - count)
+        return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::LimitExceeded,
+                                                std::move(path), value.begin,
+                                                count + value.array.size(),
+                                                context.limits.max_midi_lane_points);
+    std::vector<MidiLanePoint> points;
+    points.reserve(value.array.size());
+    for (std::size_t index = 0; index < value.array.size(); ++index) {
+        const auto item_path = path + "/" + std::to_string(index);
+        const auto& item = value.array[index];
+        if (const auto* chased = item.find("chased");
+            chased && (chased->kind != JsonValue::Kind::Boolean || chased->boolean))
+            return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::UnexpectedType,
+                                                    item_path + "/chased", chased->begin);
+        auto id = required(item, "id", item_path);
+        auto position = required(item, "position_ticks", item_path);
+        auto point_value = required(item, "value", item_path);
+        if (!id || !position || !point_value)
+            return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::MissingField, item_path);
+        auto decoded_id = parse_canonical_u64_string(*id.value(), item_path + "/id");
+        auto decoded_position =
+            parse_canonical_i64_string(*position.value(), item_path + "/position_ticks");
+        auto decoded_value = parse_u32_number(*point_value.value(), item_path + "/value");
+        if (!decoded_id || !decoded_position || !decoded_value)
+            return fail<std::vector<MidiLanePoint>>(PersistenceErrorCode::InvalidNumber, item_path);
+        points.push_back(
+            {ItemId{decoded_id.value()}, {decoded_position.value()}, decoded_value.value(), false});
+    }
+    count += points.size();
+    return runtime::Ok(std::move(points));
+}
+
+// Decodes a whole lane: identity, the five raw wire address components, and the
+// points. An address outside the width the wire gives it is refused here rather
+// than reaching a reducer, because a malformed address names no stream.
+runtime::Result<MidiExpressionLane, PersistenceError>
+decode_command_lane(const JsonValue& value, DecodeContext& context, std::string path) {
+    if (value.kind != JsonValue::Kind::Object)
+        return fail<MidiExpressionLane>(PersistenceErrorCode::UnexpectedType, std::move(path),
+                                        value.begin);
+    auto& count = context.counts.midi_lanes;
+    if (count >= context.limits.max_midi_lanes)
+        return fail<MidiExpressionLane>(PersistenceErrorCode::LimitExceeded, path, value.begin,
+                                        count + 1, context.limits.max_midi_lanes);
+    ++count;
+    auto id = decode_command_item_id(value, "id", path);
+    auto points = required(value, "points", path);
+    if (!id || !points)
+        return fail<MidiExpressionLane>(PersistenceErrorCode::MissingField, std::move(path));
+    std::array<std::string_view, 5> names{"group", "channel", "status", "bank", "index"};
+    std::array<std::uint8_t, 5> address{};
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        auto member = required(value, names[index], path);
+        if (!member)
+            return fail<MidiExpressionLane>(PersistenceErrorCode::MissingField, std::move(path));
+        auto decoded =
+            parse_u32_number(*member.value(), path + "/" + std::string(names[index]));
+        if (!decoded || decoded.value() > std::numeric_limits<std::uint8_t>::max())
+            return fail<MidiExpressionLane>(PersistenceErrorCode::InvalidNumber,
+                                            path + "/" + std::string(names[index]));
+        address[index] = static_cast<std::uint8_t>(decoded.value());
+    }
+    const MidiLaneAddress decoded_address{address[0], address[1], address[2], address[3],
+                                          address[4]};
+    if (!midi_lane_address_well_formed(decoded_address))
+        return fail<MidiExpressionLane>(PersistenceErrorCode::InvalidNumber, std::move(path),
+                                        value.begin);
+    auto decoded_points = decode_command_lane_points(*points.value(), context, path + "/points");
+    if (!decoded_points)
+        return runtime::Err(decoded_points.error());
+    return runtime::Ok(MidiExpressionLane{id.value(), decoded_address,
+                                          std::move(decoded_points).value()});
 }
 
 runtime::Result<ClipTimeRange, PersistenceError> decode_command_clip_range(const JsonValue& value,
@@ -711,6 +851,50 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             Command(SetDynamicsLane{sequence.value(), std::move(decoded_expected).value(),
                                     std::move(decoded_replacement).value()}));
     }
+    if (type.value() == "pulp.timeline.command.insert_midi_expression_lane") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto clip = decode_command_item_id(command, "clip_id", data_path);
+        auto lane = required(command, "lane", data_path);
+        if (!sequence || !track || !clip || !lane)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_lane = decode_command_lane(*lane.value(), context, data_path + "/lane");
+        if (!decoded_lane)
+            return runtime::Err(decoded_lane.error());
+        return runtime::Ok(Command(InsertMidiExpressionLane{
+            sequence.value(), track.value(), clip.value(), std::move(decoded_lane).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_midi_expression_lane") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto clip = decode_command_item_id(command, "clip_id", data_path);
+        auto lane = decode_command_item_id(command, "lane_id", data_path);
+        if (!sequence || !track || !clip || !lane)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveMidiExpressionLane{sequence.value(), track.value(),
+                                                            clip.value(), lane.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_midi_expression_lane_points") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto clip = decode_command_item_id(command, "clip_id", data_path);
+        auto lane = decode_command_item_id(command, "lane_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !track || !clip || !lane || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_command_lane_points(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement =
+            decode_command_lane_points(*replacement.value(), context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        return runtime::Ok(Command(SetMidiExpressionLanePoints{
+            sequence.value(), track.value(), clip.value(), lane.value(),
+            std::move(decoded_expected).value(), std::move(decoded_replacement).value()}));
+    }
     if (type.value() == "pulp.timeline.command.insert_marker") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);
         auto marker = required(command, "marker", data_path);
@@ -745,6 +929,224 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         if (!sequence || !region)
             return fail<Command>(PersistenceErrorCode::MissingField, data_path);
         return runtime::Ok(Command(RemoveRegion{sequence.value(), region.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_region") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected = decode_region(*expected.value(), MemberPolicy::Optional, context,
+                                              data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement = decode_region(*replacement.value(), MemberPolicy::Optional,
+                                                 context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        // Refused at the wire as well as in the reducer, because there is no
+        // model rule to lean on: Sequence::replace_region is handed one region
+        // and cannot see that the caller meant a different one. A swap here is a
+        // removal and a creation spelled as a modification.
+        if (decoded_expected.value().id != decoded_replacement.value().id)
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path + "/replacement",
+                                 replacement.value()->begin);
+        return runtime::Ok(Command(SetRegion{sequence.value(),
+                                             std::move(decoded_expected).value(),
+                                             std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_project_tuning" ||
+        type.value() == "pulp.timeline.command.set_track_tuning") {
+        // Absent and null both mean "states no tuning", which is a value this
+        // gate compares rather than a missing member: a command that omits both
+        // asserts the project currently names no tuning and must keep naming
+        // none, and that is a legitimate no-op to replay.
+        const auto decode_side =
+            [&](std::string_view name) -> runtime::Result<std::optional<TuningReference>,
+                                                          PersistenceError> {
+            const auto* value = command.find(name);
+            if (!value || value->kind == JsonValue::Kind::Null)
+                return runtime::Ok(std::optional<TuningReference>{});
+            auto decoded = decode_tuning(*value, data_path + "/" + std::string(name));
+            if (!decoded)
+                return runtime::Err(decoded.error());
+            return runtime::Ok(std::optional<TuningReference>(std::move(decoded).value()));
+        };
+        auto expected = decode_side("expected");
+        if (!expected)
+            return runtime::Err(expected.error());
+        auto replacement = decode_side("replacement");
+        if (!replacement)
+            return runtime::Err(replacement.error());
+        if (type.value() == "pulp.timeline.command.set_project_tuning")
+            return runtime::Ok(Command(SetProjectTuning{std::move(expected).value(),
+                                                        std::move(replacement).value()}));
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        if (!sequence || !track)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(SetTrackTuning{sequence.value(), track.value(),
+                                                  std::move(expected).value(),
+                                                  std::move(replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_modulator") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto modulator = required(command, "modulator", data_path);
+        if (!sequence || !track || !modulator)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded =
+            decode_command_modulator(*modulator.value(), context, data_path + "/modulator");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(
+            Command(InsertModulator{sequence.value(), track.value(), std::move(decoded).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_modulator") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto modulator = decode_command_item_id(command, "modulator_id", data_path);
+        if (!sequence || !track || !modulator)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(
+            Command(RemoveModulator{sequence.value(), track.value(), modulator.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_modulator") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto modulator_id = decode_command_item_id(command, "modulator_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !track || !modulator_id || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_command_modulator(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement =
+            decode_command_modulator(*replacement.value(), context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        // Refused at the wire as well as in the reducer, because there is no
+        // model rule to lean on: Track::replace_modulator is handed one
+        // modulator and cannot see that the caller named another. A swap here is
+        // a removal and a creation spelled as a modification, and removal is the
+        // intent an untrusted writer's mask denies.
+        if (decoded_expected.value().id != decoded_replacement.value().id ||
+            decoded_expected.value().id != modulator_id.value())
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path + "/replacement",
+                                 replacement.value()->begin);
+        return runtime::Ok(Command(SetModulator{
+            sequence.value(), track.value(), modulator_id.value(),
+            std::move(decoded_expected).value(), std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_macro") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto macro = required(command, "macro", data_path);
+        if (!sequence || !track || !macro)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded = decode_command_macro_control(*macro.value(), context, data_path + "/macro");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(
+            Command(InsertMacro{sequence.value(), track.value(), std::move(decoded).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_macro") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto macro = decode_command_item_id(command, "macro_id", data_path);
+        if (!sequence || !track || !macro)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveMacro{sequence.value(), track.value(), macro.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_macro") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto macro_id = decode_command_item_id(command, "macro_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !track || !macro_id || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_command_macro_control(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement =
+            decode_command_macro_control(*replacement.value(), context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        if (decoded_expected.value().id != decoded_replacement.value().id ||
+            decoded_expected.value().id != macro_id.value())
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path + "/replacement",
+                                 replacement.value()->begin);
+        return runtime::Ok(Command(SetMacro{sequence.value(), track.value(), macro_id.value(),
+                                            std::move(decoded_expected).value(),
+                                            std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_macro_value") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto macro_id = decode_command_item_id(command, "macro_id", data_path);
+        auto expected = decode_command_float_bits(command, "expected_bits", data_path);
+        auto replacement = decode_command_float_bits(command, "replacement_bits", data_path);
+        if (!sequence || !track || !macro_id)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        if (!expected)
+            return runtime::Err(expected.error());
+        if (!replacement)
+            return runtime::Err(replacement.error());
+        return runtime::Ok(Command(SetMacroValue{sequence.value(), track.value(), macro_id.value(),
+                                                 expected.value(), replacement.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_modulation_route") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto route = required(command, "route", data_path);
+        if (!sequence || !track || !route)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded =
+            decode_command_modulation_route(*route.value(), context, data_path + "/route");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(Command(
+            InsertModulationRoute{sequence.value(), track.value(), std::move(decoded).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_modulation_route") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto route = decode_command_item_id(command, "route_id", data_path);
+        if (!sequence || !track || !route)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(
+            Command(RemoveModulationRoute{sequence.value(), track.value(), route.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.set_modulation_route") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        auto route_id = decode_command_item_id(command, "route_id", data_path);
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!sequence || !track || !route_id || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_command_modulation_route(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement = decode_command_modulation_route(*replacement.value(), context,
+                                                                   data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        // Refused at the wire as well as in the reducer, for the reason
+        // set_modulator states: the model is handed one route and cannot see
+        // that the caller named another.
+        if (decoded_expected.value().id != decoded_replacement.value().id ||
+            decoded_expected.value().id != route_id.value())
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path + "/replacement",
+                                 replacement.value()->begin);
+        return runtime::Ok(Command(SetModulationRoute{
+            sequence.value(), track.value(), route_id.value(), std::move(decoded_expected).value(),
+            std::move(decoded_replacement).value()}));
     }
     if (type.value() == "pulp.timeline.command.set_groove") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);

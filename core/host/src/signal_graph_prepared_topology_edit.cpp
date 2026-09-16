@@ -114,6 +114,7 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     candidate_->connection_identities_ = owner.connection_identities_;
     candidate_->next_connection_identity_ = owner.next_connection_identity_;
     candidate_->custom_node_types_ = owner.custom_node_types_;
+    candidate_->sample_kernel_types_ = owner.sample_kernel_types_;
     candidate_->custom_registry_generation_ = owner.custom_registry_generation_;
     candidate_->next_id_ = owner.next_id_;
     candidate_->limits_ = owner.limits_;
@@ -292,12 +293,29 @@ bool SignalGraph::PreparedTopologyEdit::register_custom_node_type(CustomNodeType
         return false;
     }
     const auto key = prepared_custom_key(type.type_id, type.version);
-    if (baseline_registry_keys_.count(key) != 0) {
+    const auto generation_before = candidate_->custom_registry_generation_;
+    const bool ok = candidate_->register_custom_node_type(std::move(type));
+    if (!ok) {
+        mutation_failed_ = true;
+    } else if (candidate_->custom_registry_generation_ != generation_before &&
+               baseline_registry_keys_.count(key) != 0) {
         replaced_registry_keys_.insert(key);
     }
-    const bool ok = candidate_->register_custom_node_type(std::move(type));
-    if (!ok)
+    return ok;
+}
+
+bool SignalGraph::PreparedTopologyEdit::register_custom_node_type(
+    CustomNodeType type, SampleKernelDescriptor sample_kernel) {
+    if (mutation_failed_ || committed_ || prepare_attempted_ || !type.is_valid_registration() ||
+        !sample_kernel.is_valid_registration()) {
         mutation_failed_ = true;
+        return false;
+    }
+    const bool ok =
+        candidate_->register_custom_node_type(std::move(type), std::move(sample_kernel));
+    if (!ok) {
+        mutation_failed_ = true;
+    }
     return ok;
 }
 
@@ -317,6 +335,7 @@ bool SignalGraph::PreparedTopologyEdit::unregister_custom_node_type(std::string_
         if (in_use)
             return false;
         candidate_->custom_node_types_.erase(found);
+        candidate_->sample_kernel_types_.erase(key);
         ++candidate_->custom_registry_generation_;
         candidate_->invalidate_live_locked_();
         return true;
@@ -340,6 +359,7 @@ std::size_t SignalGraph::PreparedTopologyEdit::prune_unused_custom_node_types() 
     for (auto it = candidate_->custom_node_types_.begin();
          it != candidate_->custom_node_types_.end();) {
         if (used.count(it->first) == 0) {
+            candidate_->sample_kernel_types_.erase(it->first);
             it = candidate_->custom_node_types_.erase(it);
             ++removed;
         } else {
@@ -356,6 +376,18 @@ std::size_t SignalGraph::PreparedTopologyEdit::prune_unused_custom_node_types() 
 std::size_t SignalGraph::PreparedTopologyEdit::custom_node_type_count() const {
     GraphMutationLock candidate_lock(*candidate_);
     return candidate_->custom_node_types_.size();
+}
+
+bool register_builtin_sample_region_types(SignalGraph::PreparedTopologyEdit& edit) {
+    if (edit.mutation_failed_ || edit.committed_ || edit.prepare_attempted_) {
+        edit.mutation_failed_ = true;
+        return false;
+    }
+    if (!register_builtin_sample_region_types(*edit.candidate_)) {
+        edit.mutation_failed_ = true;
+        return false;
+    }
+    return true;
 }
 
 NodeId SignalGraph::PreparedTopologyEdit::add_input_node(int channels, const std::string& name) {
@@ -997,6 +1029,7 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     owner_->connection_identities_ = std::move(candidate_->connection_identities_);
     owner_->next_connection_identity_ = candidate_->next_connection_identity_;
     owner_->custom_node_types_ = std::move(candidate_->custom_node_types_);
+    owner_->sample_kernel_types_ = std::move(candidate_->sample_kernel_types_);
     owner_->custom_registry_generation_ = candidate_->custom_registry_generation_;
     owner_->next_id_ = candidate_->next_id_;
     owner_->limits_ = candidate_->limits_;

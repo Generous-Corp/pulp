@@ -187,6 +187,9 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
 
     def test_release_regression_tests_remain_in_lint_gate(self) -> None:
         step = _find_step(self.text, "Release-pipeline regression tests (#720, #1962, #2467)")
+        self.assertIn("python3 tools/scripts/test_ctest_nonruns.py", step)
+        for path in ("tools/scripts/ctest_nonruns.py", "tools/scripts/test_ctest_nonruns.py"):
+            self.assertEqual(self.text.count(f"- '{path}'"), 2)
         self.assertIn("set -euo pipefail", step)
         self.assertIn(
             "python3 tools/scripts/test_release_workflow_test_step.py",

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <utility>
 #include <variant>
@@ -97,6 +98,61 @@ std::int64_t groove_timing_reach(const timeline::GrooveTemplate& groove) noexcep
     return reach + widest_step;
 }
 
+/// Every way a nesting can change what a sealed artifact sounds.
+///
+/// A sealed artifact — a track freeze, or the takes a comp selects — is
+/// rendered and anchored in absolute samples, so nothing about it can be
+/// re-derived: it either lands where it was rendered to land, or it is a stale
+/// render playing at the wrong time or level. That makes the
+/// question "does this nesting transform its child at all?" rather than "can we
+/// map the artifact through the transform?", and this enum is the answer's
+/// vocabulary — one enumerator per observation, so the predicate below is a
+/// list nobody can shorten by accident.
+///
+/// Membership is deliberately wider than the transformations the walk applies
+/// today. `PlacementConform` and the three modulation entries are read by
+/// neither this walk nor `begin_track`, so a child carrying one is neither
+/// honoured nor refused anywhere else; without an entry here a modulated fader
+/// under a sealed artifact would be silently permitted.
+enum class NestingTransformation : std::uint8_t {
+    PlacementTranslation,
+    PlacementWindowStart,
+    PlacementWindowEnd,
+    PlacementGain,
+    PlacementFade,
+    PlacementConform,
+    PlacementAnchor,
+    TrackFader,
+    TrackPan,
+    TrackDeviceChain,
+    TrackAutomationLane,
+    TrackModulator,
+    TrackMacro,
+    TrackModulationRoute,
+    TrackTuning,
+    SequenceGroove,
+    SequenceDynamics,
+    SequenceChordScale,
+    ArtifactRate,
+    kCount,
+};
+
+/// The sealed artifact a nesting is being asked to carry.
+///
+/// A freeze and a selected take lane are one construct with two payloads: a
+/// track-scoped rendered artifact anchored in absolute samples, chosen as the
+/// alternative to flattening. The eighteen nesting observations above are
+/// therefore the same eighteen questions for both, and are asked once.
+///
+/// Only `ArtifactRate` has to know which payload it holds, because a freeze
+/// declares one rate and a comp declares one per take its segments draw from.
+/// Exactly one member is set; neither being set is refused rather than
+/// permitted, in the same direction as the switch's trailing `return true`.
+struct SealedArtifact {
+    const timeline::TrackFreeze* freeze = nullptr;
+    const timeline::TakeLane* active_take = nullptr;
+};
+
 } // namespace
 
 /// Flattens `SequenceRef` placements into leaf clips on the referring track.
@@ -144,6 +200,14 @@ std::int64_t groove_timing_reach(const timeline::GrooveTemplate& groove) noexcep
 ///
 /// And a composed gain that has nowhere to land is refused rather than dropped
 /// (`NestedGainSinkUnsupported`): see `consumes_clip_gain`.
+///
+/// A child track's *automated* gain does not compose at all, because a curve
+/// has no scalar to fold into. It travels to the leaf as the bare fact that one
+/// exists, and is refused there by the leaf's own kind: a leaf that reads no
+/// clip gain raises `NestedAutomationGainEventLeafUnsupported`, and one that
+/// does raises `NestedAutomationGainMediaUnsupported` because the field it
+/// reads is a single scalar. An automated pan needs no leaf to decide it and is
+/// refused on entry to the child track (`NestedAutomationPanUnsupported`).
 class SequenceContentLowerer::Impl {
   public:
     Impl(const timeline::Project& project, const timebase::CompiledTempoMap& tempo_map,
@@ -251,7 +315,7 @@ class SequenceContentLowerer::Impl {
         auto appended = append(std::move(sentinel).value(), clip.id());
         if (appended.error)
             return appended;
-        push_reference(clip, *reference, 1, 1.0f, {}, clip, 0);
+        push_reference(clip, *reference, 1, 1.0f, false, {}, clip, 0);
         return {};
     }
 
@@ -270,11 +334,26 @@ class SequenceContentLowerer::Impl {
         // The fader of the child track currently being walked, set once when
         // the walk enters it.
         float track_gain = 1.0f;
+        // Whether any enclosing child track automates its gain, down to but
+        // excluding the track being walked. A curve cannot fold into the
+        // scalar the gain product folds into, so this travels as the bare fact
+        // that one exists and is answered at the leaf, where the leaf's own
+        // kind decides which refusal applies.
+        bool inherited_gain_automation = false;
+        // Whether the child track currently being walked automates its gain,
+        // set once when the walk enters it.
+        bool track_gain_automation = false;
         // Every enclosing placement's fade ramps, this frame's own included,
         // already carried into the owner timeline's ticks. Each level appends;
         // nothing folds, because ramps of different shapes have no common
         // shape to fold into.
         std::vector<LoweredPlacementFade> placement_fades;
+        // The child track this placement was authored on, or null when the
+        // placement sits on the compile root. Only the intermediate tracks are
+        // recorded, because the root track's own state applies to a nested and
+        // an unnested document alike and so is never a difference the nesting
+        // introduced.
+        const timeline::Track* owning_track = nullptr;
     };
 
     struct PendingLeaf {
@@ -305,15 +384,22 @@ class SequenceContentLowerer::Impl {
                       double source_frame_offset = 0.0, timeline::ItemId context_sequence_id = {},
                       std::optional<timebase::TickPosition> context_start = std::nullopt,
                       std::int64_t groove_pad_left = 0, std::int64_t groove_pad_right = 0,
-                      std::vector<LoweredPlacementFade> placement_fades = {}) {
+                      std::vector<LoweredPlacementFade> placement_fades = {},
+                      std::int64_t authored_window_start = 0,
+                      timebase::TickDuration authored_duration = {},
+                      double source_frame_phase_end = 0.0) {
         if (expanded_clips_ >= max_expanded_clips_)
             return {.error =
                         SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded, source}};
         ++expanded_clips_;
         const auto authored_start = context_start.value_or(clip.start());
+        // A clip no nesting trimmed is its own authored extent, so the window
+        // is the identity rather than a case the compiler has to special-case.
+        const auto authored = authored_duration.value > 0 ? authored_duration : clip.duration();
         output_->push_back({std::move(clip), source_frame_offset, context_sequence_id,
                             authored_start, groove_pad_left, groove_pad_right,
-                            std::move(placement_fades)});
+                            std::move(placement_fades), authored_window_start, authored,
+                            source_frame_phase_end});
         return {};
     }
 
@@ -367,15 +453,286 @@ class SequenceContentLowerer::Impl {
     /// onto the stack is the trimmed, re-placed one whose fades have already
     /// been lifted out of it and into the ramp list.
     void push_reference(const timeline::Clip& placement, const timeline::SequenceRef& reference,
-                        std::size_t depth, float inherited_gain,
+                        std::size_t depth, float inherited_gain, bool inherited_gain_automation,
                         std::vector<LoweredPlacementFade> placement_fades,
-                        const timeline::Clip& authored_placement, std::int64_t translation) {
+                        const timeline::Clip& authored_placement, std::int64_t translation,
+                        const timeline::Track* owning_track = nullptr) {
         append_placement_fades(placement_fades, authored_placement, translation);
         auto& frame = frames_.emplace_back(ReferenceFrame{
             placement, reference, project_.find_sequence(reference.sequence_id),
             reference.source_start + timebase::TickDuration{placement.duration().value}, depth});
         frame.inherited_gain = inherited_gain * placement.playback_properties().gain_linear;
+        frame.inherited_gain_automation = inherited_gain_automation;
         frame.placement_fades = std::move(placement_fades);
+        frame.owning_track = owning_track;
+    }
+
+    /// Whether the nesting currently on the frame stack imposes `which`.
+    ///
+    /// Every enumerator answers for the whole stack, not just the innermost
+    /// frame: a transparent placement inside a trimmed one is still a trimmed
+    /// nesting, and the artifact underneath cannot tell the two apart.
+    ///
+    /// An enumerator with no case below reaches the trailing `return true` and
+    /// is therefore reported as imposed. That direction is the safe one — a
+    /// transformation nobody has reasoned about refuses the nesting instead of
+    /// permitting it — and it is what makes adding an enumerator fail closed by
+    /// construction rather than by anyone remembering to extend this function.
+    bool nesting_imposes(NestingTransformation which, const timeline::Track& track,
+                         const SealedArtifact& artifact) const {
+        const auto any_frame = [this](auto&& predicate) {
+            return std::any_of(frames_.begin(), frames_.end(), predicate);
+        };
+        // The track being walked plus every intermediate track the walk passed
+        // through to reach it. A fader or a modulator two levels up transforms
+        // the artifact exactly as much as one directly above it, and only the
+        // compile root's own track state is excluded — that applies to a nested
+        // and an unnested document alike, so it is never a difference the
+        // nesting introduced.
+        const auto any_track = [this, &track](auto&& predicate) {
+            return predicate(track) ||
+                   std::any_of(frames_.begin(), frames_.end(), [&](const ReferenceFrame& frame) {
+                       return frame.owning_track != nullptr && predicate(*frame.owning_track);
+                   });
+        };
+        switch (which) {
+        case NestingTransformation::PlacementTranslation:
+            // Child tick T reaches owner tick placement.start() + (T -
+            // source_start). Anything but the identity moves musical content
+            // that the artifact, having no tick position at all, cannot follow.
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.placement.start().value != frame.reference.source_start.value;
+            });
+        case NestingTransformation::PlacementWindowStart:
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.reference.source_start.value != 0;
+            });
+        case NestingTransformation::PlacementWindowEnd:
+            // A window that ends before the child does cuts content. The cut is
+            // expressed in ticks and the artifact in samples, so there is no
+            // honest way to apply it; a child that declares no duration cannot
+            // prove the window covers it and is refused for that reason.
+            return any_frame([](const ReferenceFrame& frame) {
+                const auto duration = frame.sequence->duration();
+                return !duration || frame.source_end.value < duration->value;
+            });
+        case NestingTransformation::PlacementGain:
+            // Each placement is asked separately rather than reading the
+            // accumulated product, so a 2.0 above a 0.5 is refused instead of
+            // cancelling to a unity nobody authored.
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.placement.playback_properties().gain_linear != 1.0f;
+            });
+        case NestingTransformation::PlacementFade:
+            // append_placement_fades pushes nothing for a fadeless placement, so
+            // an empty accumulated list is exactly "no enclosing placement fades".
+            return !frames_.empty() && !frames_.back().placement_fades.empty();
+        case NestingTransformation::PlacementConform:
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.placement.time_conform() != timeline::TimeConform::None;
+            });
+        case NestingTransformation::PlacementAnchor:
+            return any_frame([](const ReferenceFrame& frame) {
+                return frame.placement.time_anchor() != timeline::ClipTimeAnchor::Musical;
+            });
+        case NestingTransformation::TrackFader:
+            return any_track([](const timeline::Track& walked) {
+                return walked.mixer().gain_linear != 1.0f;
+            });
+        case NestingTransformation::TrackPan:
+            return any_track(
+                [](const timeline::Track& walked) { return walked.mixer().pan != 0.0f; });
+        case NestingTransformation::TrackDeviceChain:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.device_chain().empty(); });
+        case NestingTransformation::TrackAutomationLane:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.automation_lanes().empty(); });
+        case NestingTransformation::TrackModulator:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.modulators().empty(); });
+        case NestingTransformation::TrackMacro:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.macros().empty(); });
+        case NestingTransformation::TrackModulationRoute:
+            return any_track(
+                [](const timeline::Track& walked) { return !walked.modulation_routes().empty(); });
+        case NestingTransformation::TrackTuning:
+            return any_track(
+                [](const timeline::Track& walked) { return walked.tuning().has_value(); });
+        case NestingTransformation::SequenceGroove:
+            return any_frame([](const ReferenceFrame& frame) {
+                return !frame.sequence->groove().states_no_feel();
+            });
+        case NestingTransformation::SequenceDynamics:
+            return any_frame(
+                [](const ReferenceFrame& frame) { return !frame.sequence->dynamics_lane().empty(); });
+        case NestingTransformation::SequenceChordScale:
+            return any_frame([](const ReferenceFrame& frame) {
+                return !frame.sequence->chord_scale_lane().empty();
+            });
+        case NestingTransformation::ArtifactRate:
+            return artifact_rate_differs(artifact);
+        case NestingTransformation::kCount:
+            break;
+        }
+        return true;
+    }
+
+    /// Whether the artifact's declared rate differs from either rate the two
+    /// emission paths read.
+    ///
+    /// This one is not a transformation the owner applies, and it is here
+    /// because leaving it out silently breaks the identity this predicate
+    /// exists to guarantee. A top-level artifact compiles through
+    /// compile_track_freeze_program or compile_take_comp_segment_program, both
+    /// of which set the renderable length to the artifact's projected timeline
+    /// span; a lowered leaf compiles through the generic absolute-clip path,
+    /// which sets it to the source length scaled and rounded up. Those two
+    /// agree only when no rate conversion happens at all — otherwise they can
+    /// differ by a frame, and the nested render stops being the unnested one.
+    /// Do not delete this as redundant with either compiler's own rate check:
+    /// those run on a path this leaf never takes.
+    bool artifact_rate_differs(const SealedArtifact& artifact) const {
+        const auto timeline_rate = tempo_map_.sample_rate().normalized();
+        // Both rates, because the leaf's generic path reads the decoded
+        // asset's rate where the artifact compilers read the declared one. The
+        // document ties the two together, so a disagreement is not reachable
+        // through a valid project; asking anyway costs a lookup and removes an
+        // assumption from a predicate whose whole value is that it assumes
+        // nothing.
+        const auto matches = [&](timebase::RationalRate declared, timeline::ItemId asset_id) {
+            const auto normalized = declared.normalized();
+            if (normalized != timeline_rate)
+                return false;
+            const auto* asset = project_.find_asset(asset_id);
+            return asset != nullptr && asset->sample_rate.normalized() == normalized;
+        };
+        if (artifact.freeze != nullptr)
+            return !matches(artifact.freeze->sample_rate, artifact.freeze->media.asset_id);
+        if (artifact.active_take != nullptr) {
+            // Every take a segment draws from, and only those. A lane may hold
+            // takes the comp never selects, and a rate those carry is not a
+            // rate this nesting would have to convert.
+            //
+            // A comp selecting nothing converts nothing, so an empty one is
+            // not a differing rate. It lowers to no leaves, which is what the
+            // unnested lane renders too.
+            for (const auto& segment : artifact.active_take->comp_segments()) {
+                const auto* take = artifact.active_take->find_take(segment.take_id);
+                if (take == nullptr || !matches(take->sample_rate(), take->media().asset_id))
+                    return true;
+            }
+            return false;
+        }
+        // Neither payload set. Same direction as the switch's trailing
+        // `return true`: an artifact kind nobody has reasoned about refuses the
+        // nesting rather than permitting it.
+        return true;
+    }
+
+    /// Whether this nesting leaves its child exactly as authored.
+    ///
+    /// The loop is the point: permission is granted only by every enumerator
+    /// answering "not imposed", so an unanswered one cannot reach `true`.
+    bool nesting_is_transparent(const timeline::Track& track,
+                                const SealedArtifact& artifact) const {
+        for (auto index = static_cast<std::uint8_t>(0);
+             index < static_cast<std::uint8_t>(NestingTransformation::kCount); ++index)
+            if (nesting_imposes(static_cast<NestingTransformation>(index), track, artifact))
+                return false;
+        return true;
+    }
+
+    /// Emits a transparently nested freeze as the sealed artifact it already is.
+    ///
+    /// The artifact is absolute, so it lowers to an absolute leaf carrying the
+    /// same media over the same samples rather than to anything derived from
+    /// the child's arrangement. Skipping to the next track is what makes this a
+    /// substitution rather than an addition — the nested analogue of
+    /// begin_track discarding the clips it replaced.
+    StepResult emit_sealed_freeze(ReferenceFrame& frame, const timeline::Track& track) {
+        const auto& freeze = *track.freeze();
+        if (next_generated_id_ == 0 ||
+            next_generated_id_ == std::numeric_limits<std::uint64_t>::max())
+            return {.error =
+                        SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded, track.id()}};
+        auto leaf = timeline::Clip::create_absolute(timeline::ItemId{next_generated_id_++},
+                                                    freeze.placement_start, freeze.media.frame_count,
+                                                    freeze.sample_rate, freeze.media);
+        if (!leaf)
+            return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, track.id()}};
+        auto appended = append(std::move(leaf).value(), track.id());
+        if (appended.error)
+            return appended;
+        ++frame.track_index;
+        frame.clip_index = 0;
+        return {};
+    }
+
+    /// Emits a transparently nested active take comp as the sealed windows it
+    /// already is.
+    ///
+    /// The freeze above lowers to one leaf; a comp lowers to N, because it is a
+    /// sequence of absolute windows each drawn from its own take. Per segment:
+    /// resolve the take the segment names, read the source offset as the
+    /// distance from that take's placement to the segment's start, and emit an
+    /// absolute leaf carrying exactly that window of the take's media.
+    ///
+    /// This is the same arithmetic compile_take_comp_segment_program performs,
+    /// re-derived rather than shared, because the two stand on opposite sides
+    /// of the compiler: that one builds a renderer program, this one builds a
+    /// document clip the renderer has yet to compile. What they owe each other
+    /// is the rendered samples, so a test asserts that identity instead of a
+    /// comment asserting the arithmetic.
+    ///
+    /// Every bound below was already proved by TakeLane::canonical_comp before
+    /// the lane could be constructed, so each names InvalidStructure — the
+    /// document should not exist — rather than a capability refusal, and is a
+    /// backstop against this walk building a leaf the model never sanctioned.
+    StepResult emit_sealed_active_take(ReferenceFrame& frame, const timeline::Track& track,
+                                       const timeline::TakeLane& lane) {
+        for (const auto& segment : lane.comp_segments()) {
+            const auto* take = lane.find_take(segment.take_id);
+            if (take == nullptr || segment.range.start.value < take->placement_start().value)
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::InvalidStructure, lane.id()}};
+            const auto& media = take->media();
+            const auto offset = static_cast<std::uint64_t>(segment.range.start.value -
+                                                           take->placement_start().value);
+            if (offset > media.frame_count ||
+                segment.range.sample_count > media.frame_count - offset)
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::InvalidStructure, take->id()}};
+            if (media.source_start.value < 0 ||
+                offset > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max() -
+                                                    media.source_start.value))
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::InvalidStructure, take->id()}};
+            if (next_generated_id_ == 0 ||
+                next_generated_id_ == std::numeric_limits<std::uint64_t>::max())
+                return {.error = SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded,
+                                                       track.id()}};
+            // The take's rate, not the segment's. They are equal — canonical_comp
+            // rejects a comp whose segment rate is not its take's — so this is a
+            // choice of which authority to read, and the segment compiler reads
+            // the take's when it projects the window onto the timeline.
+            auto leaf = timeline::Clip::create_absolute(
+                timeline::ItemId{next_generated_id_++}, segment.range.start,
+                segment.range.sample_count, take->sample_rate(),
+                timeline::MediaRef{media.asset_id,
+                                   timebase::SamplePosition{media.source_start.value +
+                                                            static_cast<std::int64_t>(offset)},
+                                   segment.range.sample_count});
+            if (!leaf)
+                return {.error =
+                            SequenceLoweringError{CompileErrorCode::InvalidStructure, take->id()}};
+            if (auto appended = append(std::move(leaf).value(), track.id()); appended.error)
+                return appended;
+        }
+        ++frame.track_index;
+        frame.clip_index = 0;
+        return {};
     }
 
     StepResult step_reference() {
@@ -393,22 +750,68 @@ class SequenceContentLowerer::Impl {
             if (!track.device_chain().empty())
                 return {.error = SequenceLoweringError{
                             CompileErrorCode::NestedDeviceChainUnsupported, track.id()}};
-            if (!track.automation_lanes().empty())
-                return {.error = SequenceLoweringError{
-                            CompileErrorCode::NestedAutomationLaneUnsupported, track.id()}};
+            // The chain is empty by the guard above, and Track::create rejects
+            // a lane whose device placement is absent from that chain, so every
+            // lane reaching this walk targets the track's own mixer. Pan is
+            // refused outright: no leaf carries a stereo placement at any
+            // level, so no leaf kind can change the answer. Gain travels to the
+            // leaf instead, because there the leaf's own kind decides whether
+            // the sink is merely a scalar or absent altogether, and those are
+            // separately closable.
+            bool gain_automation = false;
+            for (const auto& lane : track.automation_lanes()) {
+                const auto* mixer_target = std::get_if<timeline::TrackMixerTarget>(&lane.target());
+                if (!mixer_target)
+                    return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                           lane.id()}};
+                switch (mixer_target->parameter) {
+                case timeline::TrackMixerParameter::Pan:
+                    return {.error = SequenceLoweringError{
+                                CompileErrorCode::NestedAutomationPanUnsupported, track.id()}};
+                case timeline::TrackMixerParameter::Gain:
+                    gain_automation = true;
+                    break;
+                }
+            }
             // Freeze and an active take lane are the two states that replace a
             // track's arrangement with something else. begin_track honours that
             // replacement by returning Freeze or ActiveTake content and
             // discarding the clips; this walk descends into the clips instead,
-            // so it would play precisely the material the author replaced. Each
-            // names its own code rather than sharing a generic one, because the
-            // construct that would lift it differs.
-            if (track.freeze())
-                return {.error = SequenceLoweringError{
-                            CompileErrorCode::NestedFrozenTrackUnsupported, track.id()}};
-            if (track.active_take_lane_id().valid())
-                return {.error = SequenceLoweringError{CompileErrorCode::NestedActiveTakeUnsupported,
-                                                       track.id()}};
+            // so it would play precisely the material the author replaced.
+            //
+            // They keep separate codes because the reason a reader hits each is
+            // different — a freeze is one media placement, an active take is N
+            // comp segments each needing take resolution — not because the
+            // construct that lifts them differs. It does not: both are a
+            // track-scoped sealed artifact anchored in absolute samples,
+            // selected as the alternative to flattening. One construct, two
+            // payloads.
+            //
+            // A sealed artifact carries no tick position, so it cannot follow a
+            // nesting that moves or cuts its child. Where the nesting provably
+            // moves and cuts nothing, the artifact is already in the right
+            // place and lowers as itself; everywhere else the refusal stands.
+            // nesting_is_transparent is the whole of that judgement, and it
+            // grants permission only by affirmative match.
+            if (track.freeze()) {
+                if (!nesting_is_transparent(track, SealedArtifact{.freeze = &*track.freeze()}))
+                    return {.error = SequenceLoweringError{
+                                CompileErrorCode::NestedFrozenTrackUnsupported, track.id()}};
+                return emit_sealed_freeze(frame, track);
+            }
+            if (track.active_take_lane_id().valid()) {
+                const auto* lane = track.find_take_lane(track.active_take_lane_id());
+                // A selection naming no lane is a broken document rather than a
+                // nesting this walk declines to carry, and begin_track says the
+                // same about the same document at the top level.
+                if (lane == nullptr)
+                    return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                           track.active_take_lane_id()}};
+                if (!nesting_is_transparent(track, SealedArtifact{.active_take = lane}))
+                    return {.error = SequenceLoweringError{
+                                CompileErrorCode::NestedActiveTakeUnsupported, track.id()}};
+                return emit_sealed_active_take(frame, track, *lane);
+            }
             // Record-arm and unselected take lanes are deliberately absent from
             // the refusals above. Neither reaches lowered output at either
             // level: begin_track consults freeze and the active lane and never
@@ -428,8 +831,11 @@ class SequenceContentLowerer::Impl {
                             SequenceLoweringError{CompileErrorCode::InvalidStructure, track.id()}};
             // The fader enters the product instead of being refused; it leaves
             // the product again when the walk moves to the next track, because
-            // this assignment runs once per track entry.
+            // this assignment runs once per track entry. The gain curve travels
+            // beside it as a bare fact rather than a value, for want of a scalar
+            // it could fold into.
             frame.track_gain = mixer.gain_linear;
+            frame.track_gain_automation = gain_automation;
         }
         if (frame.clip_index == track.clips().size()) {
             ++frame.track_index;
@@ -463,24 +869,23 @@ class SequenceContentLowerer::Impl {
         const auto right_trim = child.end().value - clipped_end.value;
         // Everything the nesting adds on top of this leaf's own authored gain.
         const auto composed_gain = frame.inherited_gain * frame.track_gain;
-        if (std::holds_alternative<timeline::RegisteredContent>(child.content()) &&
-            (left_trim != 0 || right_trim != 0))
-            return {.error = SequenceLoweringError{
-                        CompileErrorCode::TrimmedRegisteredContentUnsupported, child.id()}};
+        // Whether any level of the nesting reaching this leaf automates gain.
+        // Scalars compose by multiplying; curves cannot, so this composes by
+        // disjunction and is answered once, here, where the leaf kind is known.
+        const auto composed_gain_automation =
+            frame.inherited_gain_automation || frame.track_gain_automation;
         // A conforming clip maps its complete authored source span onto its
-        // musical placement. The legacy nested-trim path below advances a raw
-        // source-frame offset from elapsed timeline samples, which is only
-        // valid for TimeConform::None. Refuse a partial view until the renderer
-        // owns a conform-aware source-range mapping; otherwise a nested
-        // tempo-ramped clip can silently start at the wrong audio. Stretch
-        // fails a second way: its rendered artifact is keyed to the clip's own
-        // authored tick range, and a trimmed window is not that range, so it
-        // additionally needs a windowed artifact.
-        if (std::holds_alternative<timeline::MediaRef>(child.content()) &&
-            child.time_conform() != timeline::TimeConform::None &&
-            (left_trim != 0 || right_trim != 0))
-            return {.error = SequenceLoweringError{
-                        CompileErrorCode::NestedConformedTrimUnsupported, child.id()}};
+        // musical placement, so a retained window maps onto the matching
+        // sub-span of the source under the same function. Resample names that
+        // sub-span below, as a source range travelling beside the clip.
+        //
+        // Stretch reaches the same window from the other end. Its audio is a
+        // rendered artifact keyed to the clip's own authored tick range, so the
+        // renderer keeps rendering that range — the authored window already
+        // travelling beside the leaf says where it is — and the leaf reads the
+        // matching frames of the result. Re-keying the artifact to the trimmed
+        // range would re-stretch the whole source into it and play the wrong
+        // audio at every frame.
 
         if (const auto* nested = std::get_if<timeline::SequenceRef>(&child.content())) {
             if (nested->source_start.value > std::numeric_limits<std::int64_t>::max() - left_trim)
@@ -510,13 +915,25 @@ class SequenceContentLowerer::Impl {
             if (auto charged = charge_reference(child.id()); charged.error)
                 return charged;
             push_reference(nested_clip.value(), reference, depth, composed_gain,
-                           frame.placement_fades, child, target_start.value - clipped_start.value);
+                           composed_gain_automation, frame.placement_fades, child,
+                           target_start.value - clipped_start.value, &track);
             return {};
         }
 
         if (composed_gain != 1.0f && !consumes_clip_gain(child.content()))
             return {.error = SequenceLoweringError{CompileErrorCode::NestedGainSinkUnsupported,
                                                    child.id()}};
+        // A gain curve somewhere above this leaf. The two ways it fails are
+        // different constructs and close separately, so each names its own
+        // code: a leaf that reads no clip gain needs a renderer that scales it
+        // before any envelope would matter, while a leaf that does read clip
+        // gain needs only that the field it reads stop being a single scalar.
+        if (composed_gain_automation)
+            return {.error = SequenceLoweringError{
+                        consumes_clip_gain(child.content())
+                            ? CompileErrorCode::NestedAutomationGainMediaUnsupported
+                            : CompileErrorCode::NestedAutomationGainEventLeafUnsupported,
+                        child.id()}};
         // Only the ramps this leaf lies within travel with it. One the leaf
         // sits wholly past reads unity for its whole extent, and a leaf that
         // never meets a ramp is a leaf that need not know one exists.
@@ -621,6 +1038,7 @@ class SequenceContentLowerer::Impl {
         pending_leaf_.reset();
         timeline::ClipContent content = pending.child.content();
         double source_frame_offset = 0.0;
+        double source_frame_phase_end = 0.0;
         if (const auto* notes = std::get_if<timeline::MidiContent>(&content)) {
             const auto* owner = project_.find_sequence(pending.context_sequence_id);
             if (!owner)
@@ -707,7 +1125,43 @@ class SequenceContentLowerer::Impl {
                                                        pending.child.id()}};
             content = std::move(rebuilt).value();
         } else if (auto* media = std::get_if<timeline::MediaRef>(&content);
-                   media && pending.left_trim > 0) {
+                   media && pending.child.time_conform() == timeline::TimeConform::Resample &&
+                   (pending.left_trim > 0 || pending.right_trim > 0)) {
+            // Resample places source frame `f` at the fraction `f / frames` of
+            // the clip's authored tick span, whatever the tempo does in
+            // between. So the retained window's own fractions of that span name
+            // its end points in the source directly, and the flattened leaf
+            // reads exactly what the untrimmed leaf reads over the same ticks.
+            // Elapsed samples answer a different question and would put a
+            // tempo-ramped leaf at the wrong audio.
+            const auto authored_span = pending.child.duration().value;
+            if (authored_span <= 0 || media->frame_count == 0)
+                return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                       pending.child.id()}};
+            const auto span = static_cast<long double>(authored_span);
+            const auto frames = static_cast<long double>(media->frame_count);
+            const auto begin = static_cast<long double>(pending.left_trim) / span * frames;
+            const auto end =
+                static_cast<long double>(authored_span - pending.right_trim) / span * frames;
+            // A window this narrow retains no source frame to read, and a
+            // source range that does not advance is not one the renderer's
+            // phase map can divide by.
+            if (!(begin >= 0.0L) || !(end > begin) || !(end <= frames))
+                return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                       pending.child.id()}};
+            source_frame_offset = static_cast<double>(begin);
+            source_frame_phase_end = static_cast<double>(end);
+            if (!(source_frame_phase_end > source_frame_offset))
+                return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
+                                                       pending.child.id()}};
+        } else if (auto* media = std::get_if<timeline::MediaRef>(&content);
+                   media && pending.left_trim > 0 &&
+                   pending.child.time_conform() == timeline::TimeConform::None) {
+            // Only a leaf that plays its source at native rate can answer a
+            // trim by moving into the reference. A stretched leaf's artifact is
+            // keyed to the whole reference, so narrowing it here would change
+            // what gets stretched rather than which part of the result is
+            // heard; the artifact window does that instead.
             if (pending.target_start.value <
                 std::numeric_limits<std::int64_t>::min() + pending.left_trim)
                 return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
@@ -776,7 +1230,8 @@ class SequenceContentLowerer::Impl {
                                                    pending.child.id()}};
         return append(std::move(flattened).value(), pending.child.id(), source_frame_offset,
                       pending.context_sequence_id, pending.clipped_start, pending.pad_left,
-                      pending.pad_right, std::move(pending.placement_fades));
+                      pending.pad_right, std::move(pending.placement_fades), pending.left_trim,
+                      pending.child.duration(), source_frame_phase_end);
     }
 
     const timeline::Project& project_;

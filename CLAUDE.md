@@ -295,7 +295,7 @@ pack" and bake-layer parameter injection.
 | Lane | What | Use for |
 |------|------|---------|
 | **C++** — `tools/audio/analysis/` (lib `pulp-audio-analysis`, linked by the shipped CLI) + `test/support/` (scenario/stimulus/contract wiring) | Seeded generators, metrics, assertions (incl. `assert_null_near`), `RenderScenario` over `HeadlessHost` (offline render, SR×block matrix), contracts, Audio Doctor (frequency response, THD/THD+N), FFT + windowing | **Required per-PR ctest gates.** Fast, no venv, already CI-wired. |
-| **Python** — `tools/audio/quality-lab/` (`pulp tool install audio-quality-lab`) | Null residual **with alignment** (`estimate_global_lag`/`local_align`), LTAS log-spectral distance (**phase-blind**), spectral flux/centroid, HNR, Theil-Sen slope, Kaiser-sinc resampling, license-guarded corpus + provenance, `regression_net` ratchet | **Advisory/offline**: deep investigation, A/B packs, model fitting, perceptual artifacts. **Not in CI** — it cannot hold a required gate as-is. |
+| **Python** — `tools/audio/quality-lab/` (`pulp tool install audio-quality-lab`) | Null residual **with alignment** (`estimate_global_lag`/`local_align`), LTAS log-spectral distance (**phase-blind**), spectral flux/centroid, HNR, Theil-Sen slope, Kaiser-sinc resampling, license-guarded corpus + provenance, `regression_net` ratchet, opt-in ViSQOL/PEAQ layer (env-path, never bundled) | **Advisory/offline**: deep investigation, A/B packs, perceptual artifacts. **Cannot hold a required gate**: behind `PULP_AUDIO_QUALITY_LAB_GATE=OFF` + an operator-supplied interpreter, and its `quality-lab` label is excluded from the required lane. |
 
 **The closed A/B loop — use it instead of asking a human to listen.** Pulp can
 host a reference plugin offline, render it, render your candidate under identical
@@ -306,13 +306,13 @@ device, nobody listening. Every piece already exists:
 # Reference and candidate, identical stimulus, offline (no DAW, no audio device)
 pulp audio render --plugin Reference.vst3 --out /tmp/ref.wav  --duration-ms 2000 ...
 pulp audio render --plugin Candidate.clap --out /tmp/cand.wav --duration-ms 2000 ...
-# Per-detector, timestamped verdicts (transient smear, dulling, metallic HF, graininess)
-pulp tool run audio-quality-lab -- compare /tmp/ref.wav /tmp/cand.wav
+# ONE curated axis per invocation (--profile, default tonal-balance), NOT timestamped
+pulp tool run audio-quality-lab -- compare /tmp/ref.wav /tmp/cand.wav --profile added-hf
 ```
 
-`core/host/plugin_slot.hpp` (`PluginSlot`: load → prepare → process, VST3/AU/CLAP/LV2)
-and `offline_signal_graph_host.hpp` are the hosting spine; `regression_net.py`
-already shells to `pulp audio render --plugin` to ratchet it. See the
+`compare` runs ONE axis, **no timestamps** (localized output: `run --out-dir`;
+multi-axis: `regression-net`, which does NOT shell to `pulp audio render`).
+`core/host/plugin_slot.hpp` + `offline_signal_graph_host.hpp` are the spine. See the
 [`hosting`](.agents/skills/hosting/SKILL.md) skill. **Caveat:** `pulp audio render`
 is bundle-only — an in-tree `Processor` must be rendered test-side via
 `RenderScenario` and written to WAV first.
@@ -333,16 +333,16 @@ Non-obvious things that cost real time when you don't know them:
   rejection.** Any anti-aliasing measurement that doesn't explicitly pin
   `Kind::linear_phase_fir` (96 dB standard / 140 dB pristine) or `polyphase_iir`
   is measuring the filter, not your DSP.
-- **Deep-dynamic-range measurement is a window problem, and no ordinary window
-  solves it.** The analysis `Window` enum exposes only `{rectangular, hann}`, and
-  Hann's −31.5 dB first side lobe cannot resolve a −100 dB component beside a 0 dB
-  fundamental. Widening it from `core/signal/windowing.hpp` does **not** fix that
-  by itself: blackman is ~−58 dB and **flat_top is only ~−93 dB** (flat_top buys
-  amplitude accuracy, *not* dynamic range) — neither can gate −100 dBc at any FFT
-  length. Only a high-β Kaiser (β≈14, ~−126 dB) could. **Prefer least-squares tone
-  projection**, which sidesteps leakage entirely: prior art is `tone_residual_db()`
-  in `test/test_oversampling_quality.cpp`, which already asserts `< -100 dB` in a
-  passing test.
+- **Deep-dynamic-range measurement is a window problem most windows cannot solve.**
+  The `Window` enum ships **six** members (rectangular, hann, hamming, blackman,
+  flat_top, kaiser), first side lobes −14/−31/−41/−57/−93/−124 dB. **flat_top buys
+  amplitude accuracy, NOT dynamic range**; it, hann and blackman cannot gate
+  −100 dBc at any FFT length. Only `kaiser` at β = 14 can, and only near the tone
+  (a DC pedestal leaves bins 1-3 at ≈−66/−75/−92 dB through any window).
+  **Prefer least-squares tone projection** — no leakage, off-bin frequencies, and
+  **public API** not test-local: `fit_tone`/`tone_residual_db`/`measure_aliasing`
+  in `audio_spectrum.hpp`, asserted `< -100 dB` in `test_oversampling_quality.cpp`
+  (pinning `linear_phase_fir`+`pristine`+x16).
 - **State every analyzer's detection floor, and keep gate thresholds above it.**
   A gate that passes because the measurement cannot see the failure is worse than
   no gate — it fails silently. And **prove the floor, don't derive it**: the usual
@@ -357,10 +357,10 @@ Non-obvious things that cost real time when you don't know them:
   `RenderScenario` is the only path unless you render to WAV first.
 - **`estimate_frequency()` is a zero-crossing detector** and its own doc disclaims
   harmonically dense material. It is not a pitch tracker; a saw will defeat it.
-- **`test_golden_audio.cpp` is not a golden corpus** — it holds computed-expectation
-  tests. There are no stored reference renders and no audio ratchet in CI.
-- **DSP perf is tracked, not gated** (`tools/scripts/bench_diff.py` + committed
-  `planning/bench/*.json`). Perf assertions flake on shared runners.
+- **`test_golden_audio.cpp` is not a golden corpus** (computed expectations). The one
+  committed reference is a byte-exact **determinism** fixture; no quality ratchet.
+- **DSP perf is neither gated nor tracked by `bench_diff.py`** — it diffs UI/GPU
+  frame-timing JSON, not DSP, and is referenced by zero workflows.
 
 ### Thread Model
 
@@ -536,6 +536,15 @@ In the first case the control was *present but misread*: `runs-on` matched 56 fi
 like a healthy instrument — but the same control returns 72 on `main`. **A control that returns
 non-zero only proves the tool ran. Compare its COUNT against the expected target** when the two
 could differ.
+
+**And a control must be sensitive to the SPECIFIC failure you fear, not merely non-zero.**
+`ssh m3 'command -v shipyard …'` reported MISSING (it was installed); its control
+`command -v ghapp` printed `present` — but `ghapp` is a shell *function*, which resolves
+regardless of PATH, so the control could not fail the way the probe did. **A control that
+would still pass when the instrument is broken in the way you fear is decoration.** State
+each control's blind spot. For fleet probes don't hand-roll it:
+`tools/fleet/probe_remote.py --hosts m1,m3 <tool>` (login shell, PATH scan for a real file,
+exits 3 rather than claiming a false absence).
 
 Practical forms:
 
@@ -713,7 +722,13 @@ The record is branch-local but stored in the repository's common Git config,
 so sibling worktrees can discover it and it survives worktree removal as long
 as the local branch is retained. `superseded` requires a successor; `merged`
 requires a PR unless exact-head ancestry into `origin/main` is provable; and
-`archived` records the archive SHA-256. Never remove a dirty or active worktree.
+`archived` records the archive SHA-256. A `merged` record without a PR URL is
+valid but proves less than one with it: a squash-landed head is not an
+ancestor of `origin/main`, so only the PR can prove it landed, and the build
+reaper below reads that proof from the record. Close records out with the PR
+URL, or run `tools/scripts/worktree_lineage.sh reconcile`, which derives it
+from `origin/main`'s own merge commit (zero API calls) for every registered
+worktree nobody marked. Never remove a dirty or active worktree.
 For old clean unmerged work, retain the local branch and either prove an exact
 remote ref or create and verify a complete `git bundle` before removal.
 Lineage metadata is a discovery aid, not deletion authorization: always recheck
@@ -981,6 +996,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Measure installed CLI/MCP GPU trace-analysis latency and prove both surfaces consume one sibling artifact pair. → `tools/scripts/gpu_trace_overhead_acceptance.py`
   - ⚠ **Cannot see:** Measures offline analyzer overhead only. It cannot grade trace-producer capture cost; new producer call sites require separate compile-out, idle-session, and active-capture product trials.
 - Build the visual-harness Docker image — use this, not a raw docker build. → `tools/harness/visual/docker-build.sh`
+- A `kind: render` golden mismatches and you need to know WHICH host's bytes moved. → `tools/harness/visual/raster.py`
+  - ⚠ **Cannot see:** Reports a digest and adjudicates nothing — it holds no expectation, so it can never fail. It rasterizes through the pinned skia-python wheel, NOT through `pulp::view::render_to_png`, so its bytes say nothing about what the C++ renderer draws. Without the pinned wheel it exits non-zero rather than degrading to another rasterizer.
 - Run the deterministic visual layout snapshots. → `python3 -m tools.harness.visual.runner`
 
 **audio** — prove what the audio actually did
@@ -989,6 +1006,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
 - Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
+
+**test-evidence**
+- Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
+  - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
 
 This digest is GENERATED from `docs/status/tools.yaml` by
 `tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.
@@ -1201,13 +1222,13 @@ Skills in `.agents/skills/` are living documents. When you discover a gotcha, fi
    - `core/view/src/webview*`, `core/view/include/*/webview*` → `webview-ui`
    - Design import paths → `import-design`
 5. **No skill exists**: If you've accumulated 3+ gotchas for a domain with no skill, create one.
-6. **Adding, renaming, or removing a skill** — every skill needs a real `name` + `description` in its SKILL.md frontmatter (the `description` is what makes it activate and what the public catalog shows), and the public catalog must be regenerated:
+6. **Adding, renaming, or removing a skill** — every skill needs a real `name` + `description` in its SKILL.md frontmatter (the `description` is what makes it activate and what the public catalog shows), and both generated catalogs must be regenerated:
 
    ```bash
-   python3 tools/scripts/skills_doc_check.py --write   # regenerate docs/reference/skills.md
+   python3 tools/scripts/skills_doc_check.py --write   # regenerate skills.md + the CLAUDE.md table
    ```
 
-   This is **enforced**: the `skills-doc-sync` ctest (in the required macOS gate) and `tools/check-docs.sh` both fail if `docs/reference/skills.md` is stale or a skill has a missing/too-short description. `docs/reference/skills.md` is generated — never hand-edit it. (Also append the skill's row to the in-context table below and register its paths in `tools/scripts/skill_path_map.json`.)
+   This is **enforced**: the `skills-doc-sync` ctest (in the required macOS gate) and `tools/check-docs.sh` both fail if `docs/reference/skills.md` is stale or a skill has a missing/too-short description. `docs/reference/skills.md` and the in-context skills table below are both generated — never hand-edit either; `--write` regenerates both. (Also register the skill's paths in `tools/scripts/skill_path_map.json`.)
 
 This rule applies to all agents (Claude Code, Codex) and humans. Skills are checked into the repo alongside the code they document.
 
@@ -1481,6 +1502,49 @@ The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
 one implementation.
 
+**A reused `build-cov` reports WRONG NUMBERS, not just wasted disk — and every
+ordinary check passes while it does.** Reclaiming it is a correctness
+requirement after the branch changes, not only a space one.
+
+Lead with the tell, because nothing else gives it away. In one observed case
+the objects and every `.profraw` were NEWER than the source, all 270 tests
+passed, the diff-cover report listed every changed file, and the number was a
+plausible 82% — comfortably over the gate. The only signal was a line that is
+easy to read past:
+
+```
+warning: 66495 functions have mismatched data     # corrupted
+warning:  9764 functions have mismatched data     # same branch, clean build-cov
+```
+
+`llvm-cov` drops functions it cannot match to a binary, and a dropped function
+reads as UNCOVERED. On byte-identical source with identical diff hunks,
+`label.cpp` scored **70.5% corrupted vs 90.2% clean** — a 20-point swing, in the
+conservative direction here but not guaranteed to be. Compare the mismatch count
+against a known-clean baseline for the same suite; a raw count means nothing on
+its own, since a healthy run already reports thousands.
+
+The mechanism is sharper than "the directory is stale", and worth knowing
+because a clean `build-cov` alone does not protect you:
+
+> **The tests you run must come from the targets you built.**
+
+`local_diff_cover.sh <targets>` builds ONLY the targets you name, while
+`PULP_DIFF_COVER_CTEST_REGEX` selects whatever it matches. A narrow target list
+with a broad regex therefore runs binaries nobody rebuilt — in the case above,
+270 tests ran against 4 rebuilt targets, and the other ~266 binaries still held
+a previous branch's objects. On a clean `build-cov` the same invocation ran 131
+tests, because the stale binaries did not exist to run. That is also why the
+corruption needs a branch switch to appear: within one branch the leftovers
+still match.
+
+So when passing targets, keep the ctest filter inside them, and remove this
+worktree's `build-cov` after switching branches:
+
+```bash
+rm -rf build-cov            # this worktree only; never sweep while other lanes build
+```
+
 **Reclaiming coverage build dirs.** `local_diff_cover.sh` (and shipyard's
 local validation, which runs it) creates a per-worktree `build-cov/` and never
 cleans it. Across many worktrees these accumulate into hundreds of GB and fill
@@ -1534,8 +1598,12 @@ tools/scripts/clean_worktree_builds.sh --yes      # delete
 
 It only considers directories `git worktree list` reports for this repository,
 and deletes only when **all five** hold: the exact head is a strict ancestor of
-current `origin/main`; the shared lineage registry records that exact head as
-merged with a PR URL; the build has been idle beyond
+current `origin/main`; the exact head is proven landed - by the shared
+lineage registry recording it `merged` with a PR URL, which is the only proof
+a squash-landed head can have (on 2026-09-13, 54 provably merged worktrees
+held 947 GB because their records were still `active`; run
+`worktree_lineage.sh reconcile` to back-fill them from `origin/main`'s merge
+commits, zero API calls); the build has been idle beyond
 `PULP_WORKTREE_BUILD_IDLE_HOURS` (default 2) across its entire tree; no live
 process names, has its cwd in, or holds an open file under the worktree; and the
 physical path/common Git directory re-pass a fresh registry check at deletion
@@ -1774,68 +1842,82 @@ When updating existing skills, preserve backward compatibility — don't remove 
 
 Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<name>/SKILL.md` carries the authoritative, full description. `tools/scripts/skill_path_map.json` owns the source-path → skill mapping used by `skill_sync_check.py` to enforce SKILL.md updates on mapped edits.
 
+<!-- generated:start id=skills-digest -->
 | Skill | Purpose |
 |-------|---------|
-| `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
-| `ableton-link` | Optional desktop Link tempo sync: developer-supplied SDK, licensing boundary, realtime host-time mapping, loud-SKIP validation |
-| `agent-capabilities` | Installed design-time capability contracts: explicit registration, typed bindings, versions/digests, partial coverage, public-header ledger, and removal tombstones |
-| `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
-| `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
-| `audio-harness` | Prove/debug what a Processor emits: signal generators, metrics, assertions, RenderScenario, contracts + offline Audio Doctor (response, THD, group delay) |
-| `audio-headless-debug` | Headless Processor scenes and standalone AU probes for DAW-only audio bugs |
-| `auv2` | AU v2 adapter: aufx/aumf/aumi/aumu component types, MIDI input wiring, DAW cache gotchas |
-| `auv3` | AU v3 adapter: AUAudioUnit render block, parameter tree, UMP / sysex, sidechain, iOS extension |
-| `ci` | Local + cloud CI: validate branches, `shipyard pr` ship flow, merge on green, PR triage |
-| `clap` | CLAP adapter: param / mod / sidechain routing, MIDI 1.0 + UMP + sysex + note-expression, ARA hook |
-| `cli-maintenance` | CLI command add/modify/remove checklist — keeps source, slash commands, docs, skills in sync |
-| `cmajor-external` | MIT-safe Cmajor lane: source-owned patches, external `cmaj` toolchain, generated-artifact flow |
-| `code-comments` | How to write durable source comments + test names/tags (and what to never write); grounds the no-phase/PR/provenance-breadcrumb rule with concrete rewrite examples |
-| `content` | Validate, preview, install, update, list, rescan, remove, and reveal data-only content packs |
-| `contrib-intake` | Maintainer side of an outside contribution — find it, adopt it into an in-repo branch with authorship intact, review, ship |
-| `contribute` | Contribute to Pulp/Forge without Shipyard/Tart/VMs or write access — routing, local build+test, `contributor_check.sh`, patch/bundle handoff format |
+| `aax` | Optional AAX support for Pulp, including developer-supplied Avid SDK setup, CMake enablement, DigiShell/AAX Validator workflows, and local AAX builds on macOS or Windows. |
+| `ableton-link` | Configure, implement, and test Pulp's optional desktop Ableton Link tempo-sync adapter while preserving the developer-supplied SDK, licensing, realtime, latency-compensation, and no-install boundaries. |
+| `agent-capabilities` | Maintain Pulp's installed design-time agent capability manifest and public-surface ledger. |
+| `android` | Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows, and end-to-end smoke validation. |
+| `ara` | Optional ARA support for Pulp, including developer-supplied ARA SDK setup, CMake enablement, adapter companion APIs, validation, and ARA-aware plugin implementation guidance. |
+| `audio-harness` | The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. |
+| `audio-headless-debug` | Reproduce and debug "only happens in a DAW" audio plugin bugs (cutouts, glitches, parameter-change failures) entirely offline — headless Processor scenes for DSP bugs and a standalone AudioUnit host probe for adapter/host-interaction bugs. |
+| `auv2` | Audio Unit v2 adapter work for Pulp — picking the right AU component type (aufx/aumf/aumi/aumu) and its matching entry macro, wiring MIDI input and output (including the aumi MIDI-processor adapter), sharing the base-class-free adapter surface, and avoiding the DAW-side component cache that silently masks repackaging. |
+| `auv3` | Audio Unit v3 (AUAudioUnit) format adapter for Pulp — render-block wiring, parameter tree bridging, MIDI / sysex via AURenderEvent, sidechain pulls, state persistence, iOS extension surface, and the pitfalls discovered while wiring the adapter. |
+| `ci` | Local and cloud CI for Pulp — validate branches, create PRs, merge on green. |
+| `clap` | CLAP format adapter for Pulp — how Processor bridges to clap_plugin_t, how parameters / modulation / sidechain / MPE / UMP / sysex flow, and the pitfalls discovered while wiring the adapter. |
+| `cli-maintenance` | Checklist and decision tree for adding, modifying, or removing CLI commands. |
+| `cmajor-external` | Use Pulp's MIT-safe Cmajor support lane via source-owned patches, an external `cmaj` toolchain, and explicit generated-artifact workflows. |
+| `code-comments` | How to write source comments, doc comments, and test names/tags that have lasting value — and what to never write. |
+| `content` | Validate, install, update, list, rescan, remove, and reveal data-only Pulp content packs for installed plugins. |
+| `contrib-intake` | Maintainer side of an outside contribution — find what has arrived (fork PR, issue, or patches sent out-of-band), adopt it into an in-repo branch with authorship intact, review it against the repo's bar, and ship it through the normal merge path. |
+| `contribute` | Prepare an outside contribution to Pulp or Forge that a maintainer can land with minimal rework — routing (Core vs Forge), local build and test on a plain Mac, the checks that are worth running without Shipyard/Tart/VMs, and the handoff format. |
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
-| `decide` | Put a blocked decision in front of the user as selectable options with a recommendation and honest pros/cons, instead of burying it in prose |
-| `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
-| `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
-| `forge-app-delivery` | Building and shipping a Forge app as an installer somebody else can use: the Forge/Pulp seam, what a green signal does not prove, shipping the runtime not just the binary, wiring gaps |
-| `forge-modular` | Forge Modular generation, Rack SDK/toolchain staging, catalogue-guided patches, physical parameter mapping, packaging boundaries, and validation loops |
-| `handoff` | Coordinate a cross-session / cross-machine handoff: snapshot open work, write a status doc to pulp-planning main, emit a goal prompt linking it, verify monitored work is terminal before retiring |
-| `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |
-| `import-design` | Import designs from Figma / Stitch / v0 / Pencil into Pulp web-compat JS with visual validation |
-| `installable-tools` | Acceptance bar for anything Pulp can install (`pulp tool` / `pulp add`): validate install AND uninstall from OUTSIDE a checkout before the README ships; uninstall-safety contract |
-| `intel-canary` | macOS Intel (x86_64) portability: PULP_INTEL_CANARY lint + allowlist, Tier 0-3 CI (build.yml canary, intel-portability, nightly-intel, release universal gate) |
-| `ios` | iOS platform: AUv3 app extensions, Simulator builds, UIKit host, CoreAudio, touch + Pencil input |
-| `jsfx-subset` | Bounded JSFX subset — source-only examples, explicit exclusions (no `@gfx`), subset validation |
-| `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp kit manifests |
-| `motion` | Trace and validate animations, transitions, scroll geometry, reduced motion, and motion fixtures |
-| `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
-| `packages` | Third-party audio package search, suggest, add, browse |
-| `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially material/large PRs; pre-/post-merge, cross-repo (Pulp + Shipyard) |
-| `pr-batching` | Ship 2+ finished branches as ONE PR when they're related — cuts CI runs; heuristics for when NOT to |
-| `prove-before-showing` | Prove a UI or generation feature works before a human sees it: A/B against the source design, drive every control headlessly, prove the generator spawns, launch the real host, negative-control every gate |
-| `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): focus marker + normal watch/rebuild, AOT analyzer guidance, deferred ar-swap / PR monitor |
-| `pulp-vellum-change-routing` | Route repository-qualified design-import, visual-harness, Chromium, DesignIR, and rendering changes through Pulp's exact Vellum ownership projection |
-| `render-toolchain-update` | Update Skia/built-Dawn/V8 provenance, including an explicit temporary Skia-first lane when matched V8 assets are incomplete |
-| `screenshot` | Faithful headless PNG capture: render_to_png Skia-vs-CoreGraphics backends, image-compositing trap, `--screenshot-backend`, capture_png |
-| `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
-| `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
-| `skia-gpu-build` | Enable Skia+Dawn GPU builds: prebuilt skia-builder libs, headers-only worktree trap, `SKIA_DIR` reuse, `MacGpuWindowHost` verify, raster-fallback + GPU-wedge gotchas |
-| `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
-| `stretch` | Offline time-stretch / pitch / varispeed: character modes, fine-tune presets, A/B eval toolkit, honest quality state |
-| `tart-ci` | Tart golden-VM macOS CI: layered goldens, ephemeral per-job runners, vm-image manifest, caching/rebake, host-keychain safety |
-| `text-metrics` | Label + captured-text metrics: half-leading against real ink, negative leading, measure/paint font-face parity, verifying a baseline change moved a number |
-| `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |
-| `trace-analysis` | "Why is this slow?" investigation harness over a Perfetto `.pftrace`: chain-of-evidence loop, wall-vs-CPU-time, follow-the-blocker, exhaustive verification, Pulp domain hints (dsp/frame/js/gpu/cross-platform) |
-| `trace-sql` | SQL discipline for Pulp traces via `trace_processor`: idempotent `CREATE OR REPLACE PERFETTO` views, `GLOB`/`dur=-1`/`EXTRACT_ARG`, stable-key joins, plus the Pulp trace-stdlib views |
-| `update-demos` | Rebuild / re-pin / republish the downstream demo + example repos against a new or latest SDK via `pulp minos {sweep,update,publish-runbook}` |
-| `upgrade` | `pulp upgrade` guidance: release discovery, migration notes, breaking-change fixes |
-| `video-proof` | Desktop validation videos: record raw proof, render Remotion context, publish/serve report, prepare review issue body |
-| `view-bridge` | Editor lifecycle and multi-view attach — `Processor::create_view()`, open/notify/resize/close protocol |
-| `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
-| `web-plugins` | Pulp in the browser: WAM v2 / WebCLAP adapters, wasm runtime, Skia-Ganesh/WebGL2 browser host, worklet constraints |
-| `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
+| `decide` | Ask Daniel a blocking decision as options with a recommendation and honest pros/cons, rather than prose. |
+| `engine` | Query, recommend, and switch the Pulp JS engine backend (QuickJS, JavaScriptCore, V8). |
+| `faust` | Create Faust DSP plugins in Pulp using Pulp-owned reference DSPs, optional external code generation, and the FaustProcessor template wrapper. |
+| `forge-app-delivery` | Building and shipping a Forge app (Modular, Instrument, MIDI, FX, and the sequencer work to come) as a signed installer somebody else can actually use. |
+| `forge-modular` | Forge Modular's generator, patch checker, module pack and Forge-worktree seam — the traps that make green results untrue |
+| `friction-report` | Turn a moment of friction — a conflicting PR, a wedged runner, a mysterious red check, a repeated manual chore — into a durable, actionable report. |
+| `handoff` | Coordinate a cross-session or cross-machine handoff — snapshot the open work, write a status doc to the pulp-planning repo on main, and emit a ready-to-paste goal prompt that links it, so a fresh session (often on another machine) can pick up and finish. |
+| `heritage-profile` | Research, author, validate, render, and archive data-only Pulp Sample Heritage profiles. |
+| `hosting` | Load, run, and test VST3 / AU / CLAP / LV2 plugins from Pulp code. |
+| `import-design` | Import designs from Figma, Stitch, v0, Pencil, React Native, or Claude Design into Pulp web-compat JS with automated visual validation. |
+| `installable-tools` | The acceptance bar for anything Pulp can install (a `pulp tool` registry entry, `pulp add` package, or any downloadable). |
+| `intel-canary` | Maintain Pulp's macOS Intel (x86_64) portability lint and CI tiering — the PULP_INTEL_CANARY configure gate, intel_canary_lint.py + its allowlist, and the Tier 0-3 workflows (build.yml canary step, intel-portability.yml, nightly-intel.yml, release-cli.yml universal gate). |
+| `ios` | iOS platform development for Pulp — iPhone/iPad AUv3 app extensions, iOS Simulator builds, UIKit window host, CoreAudio IO audio, touch & Apple Pencil input, XcodeBuildMCP automation. |
+| `jsfx-subset` | Work in Pulp's bounded JSFX lane using source-only examples, subset validation, and explicit exclusions like no `@gfx`. |
+| `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp package manifests. |
+| `moonbase` | Optional Moonbase license-activation integration for Pulp — load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, audio-thread gating + click-free fade, async start/pump, the interactive native (no-WebView) activation editor (frame-tick polling + the don't-rebuild-mid-event trap), loadable plugin/standalone formats, and headless screenshots. |
+| `motion` | Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. |
+| `mpe` | Build an MPE-aware Pulp synth — opt into MPE via PluginDescriptor, consume per-note pitch bend / pressure / timbre from MpeBuffer, and route voices through MpeVoiceAllocator without reinventing channel tracking. |
+| `packages` | Search, suggest, add, and browse third-party audio packages. |
+| `playback` | Pulp timeline transport, immutable compiled playback programs, bounded arrangement audio rendering, block-level publication latches, stable shells, and ProcessContext projection. |
+| `pr-batching` | Decide whether several finished branches ship as ONE PR or stay separate. |
+| `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially for material (large / logic-bearing) PRs. |
+| `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. |
+| `prove-before-showing` | Prove a UI or generation feature actually works before asking a human to look at it. |
+| `pulp-vellum-change-routing` | Route repository-qualified changes across Pulp and Vellum using Pulp's exact ownership projection. |
+| `pulp-web-demo` | Generate and maintain browser demos of Pulp audio plugins (both web ABIs — WAM and WCLAP) from one declarative config, so every demo mounts the SAME shared player and the two ABIs stay in lockstep. |
+| `render-toolchain-update` | Update Pulp's pinned Skia, Dawn, and optional V8 prebuilts as one milestone-matched render-toolchain release. |
+| `screenshot` | Capture faithful PNGs of Pulp view trees / imported UIs headlessly. |
+| `screenshot-sync` | Keep a plugin/demo repo's screenshots in sync with its UX. |
+| `sdf-text` | Work with Pulp's SDF / MSDF / PSDF glyph atlases — building, sampling via SkSL, and the shared text-layout helpers. |
+| `ship` | Sign, notarize, package, and distribute Pulp plugins and apps across macOS, Windows, and Android |
+| `skia-gpu-build` | Enable a Skia + Dawn GPU build of Pulp (MacGpuWindowHost, Skia Graphite). |
+| `streams` | Pick the right Pulp Stream for a given I/O task, wire async callbacks correctly without deadlocking the worker, and avoid the backpressure / cancellation footguns in `pulp::runtime::AsyncStream`. |
+| `stretch` | Offline time-stretch / pitch / varispeed — character modes, fine-tune presets, A/B toolkit, and the honest quality state, so an agent can pick a mode, dial it in, and ship a plugin with it. |
+| `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
+| `text-metrics` | Baseline, half-leading, and font-face resolution for Label and captured (browser-imported) text — the arithmetic that decides where a glyph lands and how wide the box must be, plus the measure-vs-paint divergences that make text clip or sit low without any test going red. |
+| `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
+| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, order-preserving groove kernels, coordinate randomness, streaming cursors, and quantization arithmetic. |
+| `timeline` | Build, edit, validate, explain, render, import, or integrate Pulp timeline projects through the CLI, MCP tools, or C++ SDK. |
+| `trace-analysis` | The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). |
+| `trace-sql` | SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. |
+| `update-demos` | Rebuild, re-pin, and republish Pulp's downstream demo/example repos against a new or the latest SDK. |
+| `upgrade` | Guide users through `pulp upgrade` — discover new CLI releases, interpret migration notes for the hop they're performing, and apply breaking-change fixes (CMake macro renames, API surface changes, config file moves). |
+| `video-proof` | Record, compose, publish, serve, and review short desktop validation video proofs for Pulp UX/test-harness work. |
+| `view-bridge` | Editor lifecycle and multi-view attach for Pulp plugins — when to override Processor::create_view(), the open → notify_attached → resize → close protocol, release_view() ownership rules, and secondary-view roles. |
+| `vst3` | VST3 format adapter for Pulp — SingleComponentEffect wiring, bus arrangement negotiation, parameter / MIDI event routing, state round-trip, and the pitfalls discovered while wiring the adapter against Steinberg's SDK. |
+| `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
+| `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
+This table of 66 skills is GENERATED from each
+`.agents/skills/<name>/SKILL.md` frontmatter by
+`tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
+<!-- generated:end id=skills-digest -->
+
+When adding a new skill, register its subsystem in `tools/scripts/skill_path_map.json` and run `python3 tools/scripts/skills_doc_check.py --write` to regenerate this table and `docs/reference/skills.md`.
 
 ### Claude Code Plugin
 

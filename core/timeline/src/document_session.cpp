@@ -170,11 +170,15 @@ void add_possible_sequence_child_authorities(std::uint64_t& required, CommandInt
         required |= capability_bit({command_class, intent});
 }
 
-std::vector<std::uint64_t> note_ids(const std::vector<NoteEvent>& notes) {
+// A whole-collection replacement declares the identities it keeps by listing
+// them. Sorting both halves lets the set difference below name which identities
+// the edit introduces and which it retires, so the authority it needs is read
+// from the payload rather than assumed from the command's declared intent.
+template <class Item> std::vector<std::uint64_t> sorted_ids(const std::vector<Item>& items) {
     std::vector<std::uint64_t> result;
-    result.reserve(notes.size());
-    for (const auto& note : notes)
-        result.push_back(note.id.value);
+    result.reserve(items.size());
+    for (const auto& item : items)
+        result.push_back(item.id.value);
     std::sort(result.begin(), result.end());
     return result;
 }
@@ -201,8 +205,23 @@ std::uint64_t required_authorities(const Command& command, const Project& projec
                 if (!found || has_prior_commands)
                     required |= capability_bit({CommandClass::Note, CommandIntent::Remove});
             } else if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
-                const auto expected = note_ids(value.expected);
-                const auto replacement = note_ids(value.replacement);
+                const auto expected = sorted_ids(value.expected);
+                const auto replacement = sorted_ids(value.replacement);
+                if (!std::includes(expected.begin(), expected.end(), replacement.begin(),
+                                   replacement.end()))
+                    required |= capability_bit({CommandClass::Note, CommandIntent::Create});
+                if (!std::includes(replacement.begin(), replacement.end(), expected.begin(),
+                                   expected.end()))
+                    required |= capability_bit({CommandClass::Note, CommandIntent::Remove});
+            } else if constexpr (std::is_same_v<T, SetMidiExpressionLanePoints>) {
+                // The lane keeps its identity here, but each point carries one
+                // of its own, and the replacement is free-form: a shorter list
+                // retires every point it omits. That retirement is destructive
+                // whatever the command's declared Modify intent says, so the
+                // authority is derived from the two payload halves exactly as
+                // it is for a note-content replacement above.
+                const auto expected = sorted_ids(value.expected);
+                const auto replacement = sorted_ids(value.replacement);
                 if (!std::includes(expected.begin(), expected.end(), replacement.begin(),
                                    replacement.end()))
                     required |= capability_bit({CommandClass::Note, CommandIntent::Create});

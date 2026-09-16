@@ -141,6 +141,16 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.insert_macro": Object.freeze({
+    schemaType: "pulp.timeline.command.insert_macro",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "macro", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.macro_control" }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.insert_marker": Object.freeze({
     schemaType: "pulp.timeline.command.insert_marker",
     domain: "Command",
@@ -148,6 +158,37 @@ export const timelineSchema = Object.freeze({
     fields: Object.freeze([
       Object.freeze({ name: "marker", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.marker" }),
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.insert_midi_expression_lane": Object.freeze({
+    schemaType: "pulp.timeline.command.insert_midi_expression_lane",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "lane", kind: "Object", jsType: "object", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.insert_modulation_route": Object.freeze({
+    schemaType: "pulp.timeline.command.insert_modulation_route",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "route", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.modulation_route" }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.insert_modulator": Object.freeze({
+    schemaType: "pulp.timeline.command.insert_modulator",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "modulator", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.modulator" }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
   "pulp.timeline.command.insert_notes": Object.freeze({
@@ -304,6 +345,16 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.remove_macro": Object.freeze({
+    schemaType: "pulp.timeline.command.remove_macro",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "macro_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.remove_marker": Object.freeze({
     schemaType: "pulp.timeline.command.remove_marker",
     domain: "Command",
@@ -311,6 +362,37 @@ export const timelineSchema = Object.freeze({
     fields: Object.freeze([
       Object.freeze({ name: "marker_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.remove_midi_expression_lane": Object.freeze({
+    schemaType: "pulp.timeline.command.remove_midi_expression_lane",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "lane_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.remove_modulation_route": Object.freeze({
+    schemaType: "pulp.timeline.command.remove_modulation_route",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "route_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.remove_modulator": Object.freeze({
+    schemaType: "pulp.timeline.command.remove_modulator",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "modulator_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
   "pulp.timeline.command.remove_notes": Object.freeze({
@@ -493,6 +575,30 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.set_macro": Object.freeze({
+    schemaType: "pulp.timeline.command.set_macro",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.macro_control" }),
+      Object.freeze({ name: "macro_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "replacement", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.macro_control" }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.set_macro_value": Object.freeze({
+    schemaType: "pulp.timeline.command.set_macro_value",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected_bits", kind: "U32", jsType: "number", required: true }),
+      Object.freeze({ name: "macro_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "replacement_bits", kind: "U32", jsType: "number", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.set_meter_map": Object.freeze({
     schemaType: "pulp.timeline.command.set_meter_map",
     domain: "Command",
@@ -500,6 +606,43 @@ export const timelineSchema = Object.freeze({
     fields: Object.freeze([
       Object.freeze({ name: "expected", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "replacement", kind: "Array", jsType: "array", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.set_midi_expression_lane_points": Object.freeze({
+    schemaType: "pulp.timeline.command.set_midi_expression_lane_points",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "expected", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "lane_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "replacement", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.set_modulation_route": Object.freeze({
+    schemaType: "pulp.timeline.command.set_modulation_route",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.modulation_route" }),
+      Object.freeze({ name: "replacement", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.modulation_route" }),
+      Object.freeze({ name: "route_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.set_modulator": Object.freeze({
+    schemaType: "pulp.timeline.command.set_modulator",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.modulator" }),
+      Object.freeze({ name: "modulator_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "replacement", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.modulator" }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
   "pulp.timeline.command.set_note_events": Object.freeze({
@@ -527,6 +670,15 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.set_project_tuning": Object.freeze({
+    schemaType: "pulp.timeline.command.set_project_tuning",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected", kind: "Object", jsType: "object", required: false, ref: "pulp.timeline.tuning" }),
+      Object.freeze({ name: "replacement", kind: "Object", jsType: "object", required: false, ref: "pulp.timeline.tuning" }),
+    ]),
+  }),
   "pulp.timeline.command.set_record_arm": Object.freeze({
     schemaType: "pulp.timeline.command.set_record_arm",
     domain: "Command",
@@ -536,6 +688,16 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "replacement", kind: "Boolean", jsType: "boolean", required: true }),
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.set_region": Object.freeze({
+    schemaType: "pulp.timeline.command.set_region",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.region" }),
+      Object.freeze({ name: "replacement", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.region" }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
   "pulp.timeline.command.set_take_comp": Object.freeze({
@@ -588,6 +750,17 @@ export const timelineSchema = Object.freeze({
     fields: Object.freeze([
       Object.freeze({ name: "expected", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "replacement", kind: "String", jsType: "string", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.set_track_tuning": Object.freeze({
+    schemaType: "pulp.timeline.command.set_track_tuning",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected", kind: "Object", jsType: "object", required: false, ref: "pulp.timeline.tuning" }),
+      Object.freeze({ name: "replacement", kind: "Object", jsType: "object", required: false, ref: "pulp.timeline.tuning" }),
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
@@ -854,7 +1027,11 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.insert_automation_lane",
   "pulp.timeline.command.insert_clip",
   "pulp.timeline.command.insert_device",
+  "pulp.timeline.command.insert_macro",
   "pulp.timeline.command.insert_marker",
+  "pulp.timeline.command.insert_midi_expression_lane",
+  "pulp.timeline.command.insert_modulation_route",
+  "pulp.timeline.command.insert_modulator",
   "pulp.timeline.command.insert_notes",
   "pulp.timeline.command.insert_region",
   "pulp.timeline.command.insert_scene",
@@ -870,7 +1047,11 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.remove_automation_lane",
   "pulp.timeline.command.remove_clip",
   "pulp.timeline.command.remove_device",
+  "pulp.timeline.command.remove_macro",
   "pulp.timeline.command.remove_marker",
+  "pulp.timeline.command.remove_midi_expression_lane",
+  "pulp.timeline.command.remove_modulation_route",
+  "pulp.timeline.command.remove_modulator",
   "pulp.timeline.command.remove_notes",
   "pulp.timeline.command.remove_region",
   "pulp.timeline.command.remove_scene",
@@ -888,15 +1069,23 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.set_device_state",
   "pulp.timeline.command.set_dynamics_lane",
   "pulp.timeline.command.set_groove",
+  "pulp.timeline.command.set_macro",
+  "pulp.timeline.command.set_macro_value",
   "pulp.timeline.command.set_meter_map",
+  "pulp.timeline.command.set_midi_expression_lane_points",
+  "pulp.timeline.command.set_modulation_route",
+  "pulp.timeline.command.set_modulator",
   "pulp.timeline.command.set_note_events",
   "pulp.timeline.command.set_note_velocity",
+  "pulp.timeline.command.set_project_tuning",
   "pulp.timeline.command.set_record_arm",
+  "pulp.timeline.command.set_region",
   "pulp.timeline.command.set_take_comp",
   "pulp.timeline.command.set_tempo_map",
   "pulp.timeline.command.set_track_freeze",
   "pulp.timeline.command.set_track_mixer",
   "pulp.timeline.command.set_track_name",
+  "pulp.timeline.command.set_track_tuning",
   "pulp.timeline.content.empty",
   "pulp.timeline.content.media",
   "pulp.timeline.content.notes",
