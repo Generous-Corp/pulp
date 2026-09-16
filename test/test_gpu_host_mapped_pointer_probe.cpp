@@ -34,6 +34,10 @@
 #define PULP_GPU_AUDIO_BUILD_TYPE "unknown"
 #endif
 
+#ifndef PULP_GPU_AUDIO_EXPECTED_DAWN_SHA
+#define PULP_GPU_AUDIO_EXPECTED_DAWN_SHA "unknown"
+#endif
+
 namespace {
 
 constexpr int kPassed = 0;
@@ -85,12 +89,18 @@ void dispose_allocation(void* userdata) {
     allocation->dispose_count.fetch_add(1, std::memory_order_release);
 }
 
-std::string dawn_sha() {
+std::string dawn_sha(const uint8_t* bytes) {
+    if (bytes == nullptr)
+        return "unknown";
     std::ostringstream out;
     out << std::hex << std::setfill('0');
-    for (const auto byte : dawn::kDawnVersion)
-        out << std::setw(2) << unsigned(byte);
+    for (size_t index = 0; index < dawn::kDawnVersion.size(); ++index)
+        out << std::setw(2) << unsigned(bytes[index]);
     return out.str();
+}
+
+std::string header_dawn_sha() {
+    return dawn_sha(dawn::kDawnVersion.data());
 }
 
 std::string json_escape(wgpu::StringView value) {
@@ -176,13 +186,28 @@ struct Receipt {
     unsigned dispatches = 0;
     unsigned input_disposals = 0;
     unsigned output_disposals = 0;
+    std::string expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA;
+    std::string header_dawn_revision = header_dawn_sha();
+    std::string proc_dawn_revision = "unknown";
+    std::string native_dawn_revision = "unknown";
+    std::string runtime_version_status = "unverified";
+    std::string provider_identity_status = "unverified";
+    bool proc_table_install_attempted = false;
 };
 
 void print_receipt(const Receipt& r) {
     std::cout << "{\"schema\":\"pulp.gpu-host-mapped-pointer-probe.v1\""
               << ",\"status\":\"" << r.status << "\""
               << ",\"reason\":\"" << r.reason << "\""
-              << ",\"dawn_sha\":\"" << dawn_sha() << "\""
+              << ",\"dawn_sha\":\"" << r.header_dawn_revision << "\""
+              << ",\"expected_dawn_revision\":\"" << r.expected_dawn_revision << "\""
+              << ",\"header_dawn_revision\":\"" << r.header_dawn_revision << "\""
+              << ",\"proc_dawn_revision\":\"" << r.proc_dawn_revision << "\""
+              << ",\"native_dawn_revision\":\"" << r.native_dawn_revision << "\""
+              << ",\"runtime_version_status\":\"" << r.runtime_version_status << "\""
+              << ",\"provider_identity_status\":\"" << r.provider_identity_status << "\""
+              << ",\"proc_table_install_attempted\":"
+              << (r.proc_table_install_attempted ? "true" : "false")
               << ",\"provider_asset_sha256\":\"" << PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256 << "\""
               << ",\"dawn_archive_sha256\":\"" << PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256 << "\""
               << ",\"build_type\":\"" << PULP_GPU_AUDIO_BUILD_TYPE << "\""
@@ -241,8 +266,22 @@ int main(int argc, char** argv) {
         return code;
     };
     bool verify_oracle_negative_control = false;
+    bool verify_setter_order_negative_control = false;
+    const char* provider_identity_negative_control = nullptr;
     if (argc == 2 && std::strcmp(argv[1], "--verify-oracle-negative-control") == 0) {
         verify_oracle_negative_control = true;
+    } else if (argc >= 2 && argc <= 3 &&
+               std::strcmp(argv[1], "--verify-provider-identity-negative-control") == 0) {
+        provider_identity_negative_control = argc == 3 ? argv[2] : "proc";
+        if (std::strcmp(provider_identity_negative_control, "expected") != 0 &&
+            std::strcmp(provider_identity_negative_control, "header") != 0 &&
+            std::strcmp(provider_identity_negative_control, "proc") != 0 &&
+            std::strcmp(provider_identity_negative_control, "native") != 0)
+            return finish(kFailed, "failed", "invalid_arguments");
+    } else if (argc == 2 &&
+               std::strcmp(argv[1], "--verify-provider-setter-order-negative-control") == 0) {
+        provider_identity_negative_control = "proc";
+        verify_setter_order_negative_control = true;
     } else if (argc != 1) {
         return finish(kFailed, "failed", "invalid_arguments");
     }
@@ -255,8 +294,46 @@ int main(int argc, char** argv) {
     receipt.machine = machine_model();
     receipt.os = os_identity();
 
+    // Validate the compile-time header, libdawn_proc entry point, and native
+    // proc table before installing that table process-wide. Calling the setter
+    // first would let a mixed provider execute through an ABI it has not proved.
+    receipt.proc_dawn_revision = dawn_sha(dawnProcGetVersion());
     const DawnProcTable& procs = dawn::native::GetProcs();
-    dawnProcSetProcs(&procs);
+    receipt.native_dawn_revision = dawn_sha(procs.version);
+    auto install_proc_table = [&] {
+        receipt.proc_table_install_attempted = true;
+        dawnProcSetProcs(&procs);
+    };
+    if (verify_setter_order_negative_control)
+        install_proc_table();
+    auto corrupt_revision = [](std::string& revision) {
+        if (revision.size() != dawn::kDawnVersion.size() * 2)
+            revision.assign(dawn::kDawnVersion.size() * 2, '0');
+        revision.front() = revision.front() == '0' ? '1' : '0';
+    };
+    if (provider_identity_negative_control != nullptr) {
+        if (std::strcmp(provider_identity_negative_control, "expected") == 0)
+            corrupt_revision(receipt.expected_dawn_revision);
+        else if (std::strcmp(provider_identity_negative_control, "header") == 0)
+            corrupt_revision(receipt.header_dawn_revision);
+        else if (std::strcmp(provider_identity_negative_control, "proc") == 0)
+            corrupt_revision(receipt.proc_dawn_revision);
+        else
+            corrupt_revision(receipt.native_dawn_revision);
+    }
+    const bool has_exact_expectation = receipt.expected_dawn_revision != "unknown";
+    const bool expected_matches =
+        !has_exact_expectation || receipt.header_dawn_revision == receipt.expected_dawn_revision;
+    const bool runtime_versions_match =
+        receipt.header_dawn_revision == receipt.proc_dawn_revision &&
+        receipt.header_dawn_revision == receipt.native_dawn_revision;
+    receipt.runtime_version_status = runtime_versions_match ? "passed" : "failed";
+    if (!expected_matches || !runtime_versions_match) {
+        receipt.provider_identity_status = "failed";
+        return finish(kFailed, "failed", "provider_identity_mismatch");
+    }
+    receipt.provider_identity_status = has_exact_expectation ? "passed" : "unverified";
+    install_proc_table();
 
     wgpu::InstanceDescriptor instance_desc{};
     auto native_instance = std::make_unique<dawn::native::Instance>(
