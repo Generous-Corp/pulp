@@ -1,3 +1,5 @@
+#include "support/control_manifest_fixtures.hpp"
+
 #include <pulp/inspect/control_manifest.hpp>
 #include <pulp/runtime/crypto.hpp>
 
@@ -470,4 +472,39 @@ TEST_CASE("control registry projects capability and operation metadata",
     REQUIRE(registry.find("dev.pulp.ui/input@1") != std::string::npos);
     REQUIRE(registry.find("dev.pulp.runtime/reload@1") != std::string::npos);
     REQUIRE(registry.find("dev.pulp.artifact/read@1") != std::string::npos);
+}
+
+TEST_CASE("fixture shipping markers hash the manifest bytes the fixtures ship",
+          "[inspect][control-manifest][fixtures]") {
+    const auto expected_marker = [](std::string_view manifest) {
+        return "PULP_CONTROL_MANIFEST_SHA256_" + pulp::runtime::sha256_hex(manifest) + "_V1";
+    };
+    // The markers are hashed while compiling so a registry change does not have
+    // to be retyped into each fixture. Pin that compile-time hash against the
+    // runtime one: were they ever to disagree, every fixture would carry a
+    // marker no scanner could match, and only the slow launch suites would say
+    // so.
+    REQUIRE(std::string(pulp::test::kTrustedHostFixtureMarker.bytes) ==
+            expected_marker(pulp::test::kTrustedHostFixtureManifest));
+    REQUIRE(std::string(pulp::test::kTrustedHostE2eFixtureMarker.bytes) ==
+            expected_marker(pulp::test::kTrustedHostE2eFixtureManifest));
+    REQUIRE(std::string(pulp::test::kInstalledHostE2eFixtureMarker.bytes) ==
+            expected_marker(pulp::test::kInstalledHostE2eFixtureManifest));
+
+    // The bare digest a validator expectation carries is the same hash, so a
+    // test that spells an expectation cannot drift from the marker it checks.
+    REQUIRE(std::string(pulp::test::kTrustedHostFixtureDigest.bytes) ==
+            pulp::runtime::sha256_hex(pulp::test::kTrustedHostFixtureManifest));
+    REQUIRE(std::string(pulp::test::kTrustedHostE2eFixtureDigest.bytes) ==
+            pulp::runtime::sha256_hex(pulp::test::kTrustedHostE2eFixtureManifest));
+    REQUIRE(std::string(pulp::test::kInstalledHostE2eFixtureDigest.bytes) ==
+            pulp::runtime::sha256_hex(pulp::test::kInstalledHostE2eFixtureManifest));
+
+    // And that every fixture manifest carries the live registry digest rather
+    // than a copy that has drifted.
+    const std::string field =
+        "\"registry_digest\": \"" + std::string(kControlRegistryDigest) + "\"";
+    REQUIRE(pulp::test::kTrustedHostFixtureManifest.find(field) != std::string_view::npos);
+    REQUIRE(pulp::test::kTrustedHostE2eFixtureManifest.find(field) != std::string_view::npos);
+    REQUIRE(pulp::test::kInstalledHostE2eFixtureManifest.find(field) != std::string_view::npos);
 }

@@ -54,6 +54,7 @@ target_sources(pulp-view-core PRIVATE
     src/text_edit_model.cpp
     src/text_editor.cpp
     src/text_editor_clipboard.cpp
+    src/selectable_text.cpp
     src/text_editor_ime.cpp
     src/text_editor_paint.cpp
     src/ui_components.cpp

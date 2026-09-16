@@ -560,6 +560,13 @@ if(UNIX)
     add_test(NAME format-changed-selftest
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_format_changed.sh)
     set_tests_properties(format-changed-selftest PROPERTIES TIMEOUT 120)
+    # codex_review_signal.sh decides whether a pull request was reviewed at all,
+    # and the two states it separates look identical from outside: a clean
+    # review leaves only a reaction, and an unreachable API returns nothing.
+    # Drives a stubbed `gh` in throwaway dirs; no network, no build.
+    add_test(NAME codex-review-signal-selftest
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_codex_review_signal.sh)
+    set_tests_properties(codex-review-signal-selftest PROPERTIES TIMEOUT 120)
     # worktree_lineage.sh is how every agent discovers whether a checkout is
     # safe to remove, so a wrong row is a deletion hazard. Builds a throwaway
     # repo and asserts each emitted column against the config it renders.

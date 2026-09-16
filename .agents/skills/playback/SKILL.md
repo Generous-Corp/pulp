@@ -1361,6 +1361,30 @@ The retained window is half-open in child-local ticks: points before it set
 what sounds on entry, points at or after `left_trim + target_duration` are
 never reached and must not be emitted.
 
+### A trim can be real in ticks and absent in frames
+
+`kTicksPerQuarter` is 705'600, so one tick is about 0.034 frames at 120 BPM and
+48 kHz: roughly 29.4 ticks to a frame. `ticks_to_samples()` rounds to nearest,
+so a trim of up to fourteen ticks moves no frame edge at all. The window a
+sub-frame trim produces correctly spans the whole artifact while the clip
+covers less than the whole authored tick range.
+
+So a sample-domain trim predicate and a tick-domain one are **not** equivalent,
+and a validator must never assert that they are. `validate_clip_program()` did,
+and refused a correct clip: `link_audio_track_program()` answered `InvalidAsset`
+for a nested stretched clip nudged by a single tick. Assert the implication that
+survives the resolution gap instead -- covering the whole authored range means
+reading the whole artifact -- and leave the converse alone, because it is false.
+
+Two consequences for fixtures. A trim written as `kTicksPerQuarter / 4` is
+exactly 6'000 frames at that tempo and rate, so a table built only from quarter
+fractions is frame-aligned throughout and cannot see any of this; spell an
+awkward tick count when the frame grid is what is under test. And
+`link_audio_track_program()` is the only caller of `validate_clip_program()` --
+`ProgramCompilerTask` constructs an `AudioTrackRendererProgram` directly as a
+friend -- so a test that only compiles a program never reaches that validator
+and cannot fail on anything it holds.
+
 ## A feel-free groove pads nothing observable, so do not test the reach short-circuit
 
 `groove_timing_reach()` returns a supremum, not an estimate: swing's

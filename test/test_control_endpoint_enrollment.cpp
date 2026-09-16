@@ -1,3 +1,5 @@
+#include "support/control_manifest_fixtures.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/events/interprocess_connection.hpp>
@@ -28,21 +30,7 @@ using namespace pulp::inspect;
 
 namespace {
 
-constexpr std::string_view kManifest = R"({
-  "schema": "dev.pulp.control/artifact-manifest@1",
-  "schema_version": 1,
-  "profile": "developer-local",
-  "target": "pulp-control-trusted-host-fixture",
-  "product_name": "Pulp Trusted Host Fixture",
-  "bundle_id": "dev.pulp.test.trusted-host-fixture",
-  "build_id": "build:0123456789abcdef0123456789abcdef",
-  "registry_digest": "2e4d3896612b275c50b418cf2d32c1c8edd6e900a578d09de480411434c6cb56",
-  "endpoint_included": true,
-  "unsafe_runtime_eval_acknowledged": false,
-  "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
-  "capabilities": ["dev.pulp.instance/read@1"]
-}
-)";
+constexpr std::string_view kManifest = pulp::test::kTrustedHostFixtureManifest;
 
 struct Directory {
     Directory() {
@@ -92,7 +80,7 @@ std::optional<ControlTrustedHostSnapshot> make_snapshot(Directory& directory) {
     const auto validation = validate_control_artifact_bytes(
         binary,
         {.profile_id = "developer-local",
-         .manifest_digest = "861823aac7eadfb0745390db310e12aa238a3e0d6db5e81610ab2d5cfb67be16",
+         .manifest_digest = pulp::test::kTrustedHostFixtureDigest.bytes,
          .endpoint_included = true,
          .capability_ids = {"session.describe"}});
     CAPTURE(validation.error);

@@ -1,3 +1,5 @@
+#include "support/control_manifest_fixtures.hpp"
+
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/control_host_connection.hpp>
 
@@ -18,9 +20,8 @@ namespace {
 const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
-const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_861823aac7eadfb0745390db310e12aa238a3e0d6db5e81610ab2d5cfb67be16_"
-    "V1";
+const volatile pulp::test::ControlManifestMarker kManifest =
+    pulp::test::kTrustedHostFixtureMarker;
 const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
 
 bool send_and_drop(std::string_view endpoint, std::string_view enrollment_id) {
@@ -58,8 +59,8 @@ bool publish_result(const std::filesystem::path& path, unsigned accepted, unsign
 } // namespace
 
 int main() {
-    if (kStandalone[0] != 'P' || kShipping[0] != 'P' || kProfile[0] != 'P' || kManifest[0] != 'P' ||
-        kCapability[0] != 'P')
+    if (kStandalone[0] != 'P' || kShipping[0] != 'P' || kProfile[0] != 'P' ||
+        kManifest.bytes[0] != 'P' || kCapability[0] != 'P')
         return 9;
     std::string preflight_endpoint;
     if (!std::getline(std::cin, preflight_endpoint))

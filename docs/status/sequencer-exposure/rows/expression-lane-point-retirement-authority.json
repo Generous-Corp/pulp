@@ -1,0 +1,71 @@
+{
+  "id": "expression-lane-point-retirement-authority",
+  "title": "A shrinking expression-lane point edit needs the destructive authority it actually exercises",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "9de4b202-5d4a-45b0-a292-57573f25ddb2",
+  "owned_paths": [
+    "core/timeline/src/document_session.cpp",
+    "test/test_timeline_midi_expression_commands.cpp",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/expression-lane-point-retirement-authority.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/timeline/src/document_session.cpp",
+      "needles": [
+        "SetMidiExpressionLanePoints",
+        "sorted_ids",
+        "a shorter list\n                // retires every point it omits"
+      ]
+    },
+    {
+      "path": "test/test_timeline_midi_expression_commands.cpp",
+      "needles": [
+        "a non-destructive writer is refused a lane edit that drops points",
+        "CapabilityDenied"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "Splitting the command is half the job",
+        "a reducer that retires\nan identity belongs to a `Remove`-declared command"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No installed header, entry point, or SDK type changes. SetMidiExpressionLanePoints keeps its declared Note/Modify authority and its payload shape; what changes is the authority required_authorities derives from that payload inside the session translation unit. Claiming an installed-SDK surface would advertise a type that did not move."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The CLI registers the editor profile, which holds every destructive intent, so no CLI verb's verdict changes. No verb is added, removed, or re-gated."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "gap",
+      "rationale": "pulp_timeline_command_apply defaults to the proposal profile and will now refuse a set_midi_expression_lane_points whose replacement omits a point, but the tool schema states only that the default is non-destructive; it does not say which payloads a given profile may carry, and there is no operation that reports in advance whether an edit retires an identity. A caller still discovers the verdict by submitting. Owner: NW-D (P0-40-CONTROLS).",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "nested-substitution-state-refusal-split"
+      ]
+    },
+    "live_product_control": {
+      "disposition": "gap",
+      "rationale": "Product A live timeline authority is absent for the sequencer generally, so neither the tightened refusal nor the edits that remain admitted is reachable as a live control. Owner: NW-D, and only where that source is Pulp-owned.",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "product-a-sequencer-state-operation"
+      ]
+    },
+    "design_time_agent_manifest": {
+      "disposition": "gap",
+      "rationale": "No agent-capability row states which payloads a proposal writer may carry, so an agent cannot ask whether a point edit it is about to author will be admitted before submitting it. Owner: NW-D (P0-40-CONTROLS).",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "nested-substitution-state-refusal-split"
+      ]
+    }
+  }
+}

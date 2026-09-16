@@ -1,3 +1,5 @@
+#include "support/control_manifest_fixtures.hpp"
+
 #include <pulp/inspect/control_host_preflight.hpp>
 #include <pulp/inspect/control_installed_host.hpp>
 #include <pulp/inspect/control_manifest.hpp>
@@ -26,28 +28,13 @@ namespace {
 const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
-const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_a3a4910c78c4510f7d9c43df51b0506928eb74e22774fd334aa9cc8e4629e866_"
-    "V1";
+const volatile pulp::test::ControlManifestMarker kManifest =
+    pulp::test::kInstalledHostE2eFixtureMarker;
 const volatile char kTraceControl[] = "PULP_INSPECT_CAPABILITY_TRACE_CONTROL_V1";
 const volatile char kTraceSession[] = "PULP_INSPECT_CAPABILITY_TRACE_SESSION_CONTROL_V1";
 const volatile char kUiInput[] = "PULP_INSPECT_CAPABILITY_UI_INPUT_V1";
 
-constexpr std::string_view kInstalledManifest = R"({
-  "schema": "dev.pulp.control/artifact-manifest@1",
-  "schema_version": 1,
-  "profile": "developer-local",
-  "target": "pulp-control-installed-host-e2e-fixture",
-  "product_name": "Pulp Installed Host E2E Fixture",
-  "bundle_id": "dev.pulp.test.installed-host-e2e-fixture",
-  "build_id": "build:1123456789abcdef0123456789abcdef",
-  "registry_digest": "2e4d3896612b275c50b418cf2d32c1c8edd6e900a578d09de480411434c6cb56",
-  "endpoint_included": true,
-  "unsafe_runtime_eval_acknowledged": false,
-  "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
-  "capabilities": ["dev.pulp.session/control@1", "dev.pulp.trace/control@1", "dev.pulp.trace/session-control@1", "dev.pulp.ui/input@1"]
-}
-)";
+constexpr std::string_view kInstalledManifest = pulp::test::kInstalledHostE2eFixtureManifest;
 
 class MainThreadQueue {
   public:
@@ -121,7 +108,7 @@ std::shared_ptr<InspectorMainThreadRpc> main_thread_rpc(
 
 int main(int argc, char** argv) {
     if ((argc != 4 && argc != 13) || kStandalone[0] != 'P' || kShipping[0] != 'P' ||
-        kProfile[0] != 'P' || kManifest[0] != 'P' || kTraceControl[0] != 'P' ||
+        kProfile[0] != 'P' || kManifest.bytes[0] != 'P' || kTraceControl[0] != 'P' ||
         kTraceSession[0] != 'P' || kUiInput[0] != 'P')
         return 64;
     ControlHostPreflightDiagnostics diagnostics;

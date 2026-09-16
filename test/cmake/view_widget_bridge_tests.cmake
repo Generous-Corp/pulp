@@ -89,6 +89,8 @@ catch_discover_tests(pulp-test-inspector-test-input)
 add_executable(pulp-test-control-manifest test_control_manifest.cpp)
 target_link_libraries(pulp-test-control-manifest PRIVATE
     pulp::inspect-protocol Catch2::Catch2WithMain)
+target_include_directories(pulp-test-control-manifest PRIVATE
+    ${CMAKE_SOURCE_DIR}/test)
 catch_discover_tests(pulp-test-control-manifest
     PROPERTIES LABELS "inspect;control;manifest")
 
@@ -174,6 +176,9 @@ catch_discover_tests(pulp-test-control-connection-admission
 
 add_executable(pulp-control-trusted-host-fixture
     control_trusted_host_fixture.cpp)
+target_include_directories(pulp-control-trusted-host-fixture PRIVATE
+    ${CMAKE_SOURCE_DIR}/test
+    ${CMAKE_SOURCE_DIR}/inspect/include)
 # Guard direction check: the sanitizer guard decides whether the trusted-host
 # launch tests run, so an inverted one is silent both ways. This target carries
 # the same PULP_TEST_WITH_SANITIZER wiring, so each lane asserts its own
@@ -207,6 +212,8 @@ add_executable(pulp-test-control-host-enrollment
     test_control_host_enrollment.cpp)
 target_link_libraries(pulp-test-control-host-enrollment PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
+target_include_directories(pulp-test-control-host-enrollment PRIVATE
+    ${CMAKE_SOURCE_DIR}/test)
 target_compile_definitions(pulp-test-control-host-enrollment PRIVATE
     PULP_CONTROL_TRUSTED_HOST_FIXTURE="$<TARGET_FILE:pulp-control-trusted-host-fixture>")
 add_dependencies(pulp-test-control-host-enrollment
@@ -220,11 +227,15 @@ add_executable(pulp-control-enrollment-host-fixture
     control_enrollment_host_fixture.cpp)
 target_link_libraries(pulp-control-enrollment-host-fixture PRIVATE
     pulp::inspect-control)
+target_include_directories(pulp-control-enrollment-host-fixture PRIVATE
+    ${CMAKE_SOURCE_DIR}/test)
 if(APPLE)
     target_link_options(pulp-control-enrollment-host-fixture PRIVATE LINKER:-dead_strip)
 endif()
 target_link_libraries(pulp-test-control-endpoint-enrollment PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
+target_include_directories(pulp-test-control-endpoint-enrollment PRIVATE
+    ${CMAKE_SOURCE_DIR}/test)
 target_compile_definitions(pulp-test-control-endpoint-enrollment PRIVATE
     PULP_CONTROL_ENROLLMENT_HOST_FIXTURE="$<TARGET_FILE:pulp-control-enrollment-host-fixture>")
 add_dependencies(pulp-test-control-endpoint-enrollment
@@ -259,6 +270,8 @@ add_executable(pulp-control-trusted-host-e2e-fixture
     fixtures/control_trusted_host_e2e_fixture.cpp)
 target_link_libraries(pulp-control-trusted-host-e2e-fixture PRIVATE
     pulp::inspect-runtime)
+target_include_directories(pulp-control-trusted-host-e2e-fixture PRIVATE
+    ${CMAKE_SOURCE_DIR}/test)
 add_executable(pulp-test-control-trusted-host-e2e
     test_control_trusted_host_e2e.cpp)
 target_link_libraries(pulp-test-control-trusted-host-e2e PRIVATE
@@ -291,6 +304,8 @@ if(TARGET pulp::inspect)
     add_executable(pulp-control-installed-host-e2e-fixture
         fixtures/control_installed_host_e2e_fixture.cpp)
     target_link_libraries(pulp-control-installed-host-e2e-fixture PRIVATE pulp::inspect)
+    target_include_directories(pulp-control-installed-host-e2e-fixture PRIVATE
+        ${CMAKE_SOURCE_DIR}/test)
     pulp_stage_runtime_dependencies(pulp-control-installed-host-e2e-fixture)
     target_compile_definitions(pulp-test-control-trusted-host-e2e PRIVATE
         PULP_CONTROL_INSTALLED_HOST_E2E_FIXTURE="$<TARGET_FILE:pulp-control-installed-host-e2e-fixture>")
@@ -356,6 +371,8 @@ add_executable(pulp-control-host-preflight-fixture
     fixtures/control_host_preflight_fixture.cpp)
 target_link_libraries(pulp-control-host-preflight-fixture PRIVATE
     pulp::inspect-control)
+target_include_directories(pulp-control-host-preflight-fixture PRIVATE
+    ${CMAKE_SOURCE_DIR}/test)
 if(APPLE)
     target_link_options(pulp-control-host-preflight-fixture PRIVATE LINKER:-dead_strip)
 endif()
@@ -1022,6 +1039,10 @@ pulp_add_test_suite(pulp-test-text-editor-policy LIBRARIES pulp::view PROPERTIES
 # contract). Keeps the original test_text_editor.cpp file unchanged
 # so the existing single-line surface stays pinned in isolation.
 pulp_add_test_suite(pulp-test-text-editor-multiline LIBRARIES pulp::view)
+
+# The SelectableText capability: painted-line geometry exposed by Label and
+# TextEditor, plus the shared hit-test / rect arithmetic over it.
+pulp_add_test_suite(pulp-test-selectable-text LIBRARIES pulp::view)
 
 # TextEditor input pipeline tests (headless — validates focus, typing, Enter, backspace)
 pulp_add_test_suite(pulp-test-text-input LIBRARIES pulp::view)
