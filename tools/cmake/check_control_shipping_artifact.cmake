@@ -412,6 +412,7 @@ else()
         dev.pulp.sequencer/state.edit@1
         dev.pulp.sequencer/transport.loop.read@1
         dev.pulp.sequencer/transport.loop.write@1
+        dev.pulp.timeline/document-session@1
         dev.pulp.unavailable/operation@1)
     set(_capability_markers
         SESSION_DESCRIBE SESSION_CONTROL STATE_READ GPU_HEALTH_READ RENDER_OFFLINE
@@ -419,7 +420,8 @@ else()
         TRACE_SESSION_CONTROL STATE_WRITE TEST_INPUT AUTHORING_TWEAKS
         TELEMETRY_STREAM RUNTIME_RELOAD RUNTIME_EVAL ARTIFACT_READ
         SEQUENCER_STATE_READ SEQUENCER_STATE_EDIT
-        SEQUENCER_TRANSPORT_READ SEQUENCER_TRANSPORT_WRITE UNAVAILABLE)
+        SEQUENCER_TRANSPORT_READ SEQUENCER_TRANSPORT_WRITE
+        TIMELINE_DOCUMENT_SESSION UNAVAILABLE)
     set(_declared_marker_count 0)
     list(LENGTH _capability_contracts _capability_contract_count)
     math(EXPR _capability_contract_last "${_capability_contract_count} - 1")

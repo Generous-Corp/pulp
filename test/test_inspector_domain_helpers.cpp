@@ -27,7 +27,7 @@ TEST_CASE("Inspector method registry assigns one stable capability to every meth
           "[inspect][capabilities]") {
     const auto capabilities = inspector_capability_registry();
     const auto registry = inspector_method_registry();
-    REQUIRE(capabilities.size() == 24);
+    REQUIRE(capabilities.size() == 25);
     REQUIRE_FALSE(registry.empty());
 
     for (const auto& descriptor : capabilities) {
@@ -95,6 +95,7 @@ TEST_CASE("Inspector profiles separate observation, typed control, and runtime e
         InspectorCapability::SequencerStateEdit,
         InspectorCapability::SequencerTransportRead,
         InspectorCapability::SequencerTransportWrite,
+        InspectorCapability::TimelineDocumentSession,
     });
     REQUIRE(std::ranges::equal(observe, expected_observe));
     REQUIRE(std::ranges::equal(develop, expected_develop));

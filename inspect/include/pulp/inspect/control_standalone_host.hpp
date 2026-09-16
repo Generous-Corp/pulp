@@ -2,6 +2,7 @@
 
 #include <pulp/format/standalone_control_host.hpp>
 #include <pulp/inspect/control_host_development_executor.hpp>
+#include <pulp/inspect/control_timeline_document_session_executor.hpp>
 #include <pulp/state/sequencer_state_channel.hpp>
 
 #include <cstdint>
@@ -88,6 +89,20 @@ bool install_standalone_runtime_evaluator_factory(
 std::shared_ptr<RuntimeEvaluator>
 create_standalone_runtime_evaluator(format::Processor& processor,
                                     format::ViewBridge& bridge);
+
+using StandaloneTimelineDocumentSessionFactory =
+    std::optional<ControlTimelineDocumentSessionSource> (*)(const ControlAdmissionPlan&);
+
+/// Installs the host-owned binding between the broker's admitted plan and a
+/// live `timeline::DocumentSession`. A Standalone executable owns no canonical
+/// project, so without an installed factory the operation resolves to no
+/// source and the executor refuses; a host that does own a timeline — Forge
+/// Sequencer and Forge Modular both do — installs one and the same unified
+/// control reaches its live document.
+bool install_standalone_timeline_document_session_factory(
+    StandaloneTimelineDocumentSessionFactory factory) noexcept;
+std::optional<ControlTimelineDocumentSessionSource>
+create_standalone_timeline_document_session_source(const ControlAdmissionPlan& plan);
 
 } // namespace detail
 
