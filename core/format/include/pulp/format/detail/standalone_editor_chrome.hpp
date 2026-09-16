@@ -13,6 +13,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -438,11 +439,18 @@ inline void install_standalone_idle_callback(
 /// Builds the standalone window-open log message.
 ///
 /// `gpu_requested` is what the caller asked for; `gpu_resolved` is what the
-/// created window actually is. They diverge when a GPU host was requested but
-/// Skia is unavailable, so the process silently falls back to a CPU-only
-/// host. The reported `gpu=` value is always the RESOLVED one, and a
-/// divergence is called out explicitly, because this line is what a developer
-/// reads to decide whether the GPU path is live.
+/// created window actually is. The reported `gpu=` value is always the
+/// RESOLVED one. A deliberate CPU request (`!gpu_requested`) is not a
+/// fallback and never carries a marker, however the window resolved — nobody
+/// asked for GPU, so there is nothing to explain. A GPU request that did NOT
+/// resolve (`gpu_requested && !gpu_resolved`) IS a fallback, and this line is
+/// what a developer reads to decide whether the GPU path is live, so it is
+/// called out explicitly. `gpu_unavailable_reason`, when the caller can
+/// establish one (e.g. a specific Dawn/Skia init failure), names that cause;
+/// otherwise the marker stays cause-neutral (`gpu-unavailable`) rather than
+/// guessing — Skia can be fully compiled in and still fail to resolve a GPU
+/// host at runtime, so hardcoding "skia-unavailable" would assert a cause
+/// that was never established.
 ///
 /// Pure so the message can be asserted without a logging sink.
 [[nodiscard]] inline std::string format_standalone_window_open_message(
@@ -451,14 +459,21 @@ inline void install_standalone_idle_callback(
     bool gpu_requested,
     bool gpu_resolved,
     bool uses_script_ui,
-    const StandaloneEditorChrome& chrome) {
+    const StandaloneEditorChrome& chrome,
+    std::string_view gpu_unavailable_reason = {}) {
+    const bool is_fallback = gpu_requested && !gpu_resolved;
     return std::format(
         "Standalone: editor window open ({}x{}, gpu={}{}, mode={}, chrome={}, "
         "inspector=ready)",
         width,
         height,
         gpu_resolved,
-        (gpu_requested && !gpu_resolved) ? " (skia-unavailable)" : "",
+        is_fallback
+            ? std::format(
+                  " ({})",
+                  gpu_unavailable_reason.empty() ? "gpu-unavailable"
+                                                  : gpu_unavailable_reason)
+            : "",
         uses_script_ui ? "scripted" : "autoui",
         chrome.chrome_label());
 }
@@ -469,7 +484,8 @@ inline void log_standalone_window_open(
     const view::WindowHost& window,
     bool gpu_requested,
     bool uses_script_ui,
-    const StandaloneEditorChrome& chrome) {
+    const StandaloneEditorChrome& chrome,
+    std::string_view gpu_unavailable_reason = {}) {
     runtime::log_info(
         "{}",
         format_standalone_window_open_message(
@@ -478,7 +494,8 @@ inline void log_standalone_window_open(
             gpu_requested,
             window.is_gpu_backed(),
             uses_script_ui,
-            chrome));
+            chrome,
+            gpu_unavailable_reason));
 }
 
 } // namespace pulp::format::detail

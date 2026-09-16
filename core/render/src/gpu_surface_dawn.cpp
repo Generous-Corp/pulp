@@ -68,6 +68,13 @@ std::string dawn_texture_format_name(wgpu::TextureFormat format) {
     }
 }
 
+std::string dawn_string_view_to_string(wgpu::StringView view) {
+    if (view.data == nullptr || view.length == 0) {
+        return {};
+    }
+    return std::string(view.data, view.length);
+}
+
 wgpu::BackendType dawn_backend_preference(
     GpuSurface::AdapterBackendPreference preference) {
     switch (preference) {
@@ -399,9 +406,16 @@ public:
         info.null_backend = dawn_info.backendType == wgpu::BackendType::Null;
         info.backend_type = dawn_backend_type_name(dawn_info.backendType);
         info.architecture = info.backend_type;
-        info.name = "Native Dawn Adapter (" + info.backend_type + ")";
-        info.description = info.name;
-        info.vendor = "Dawn";
+        // Report the driver's own identity. Android's Vulkan driver blocklist
+        // matches on these strings, so a synthesized placeholder would make
+        // every entry in it unmatchable. Each field falls back to a generic
+        // label when the adapter leaves it empty.
+        const auto device = dawn_string_view_to_string(dawn_info.device);
+        const auto description = dawn_string_view_to_string(dawn_info.description);
+        const auto vendor = dawn_string_view_to_string(dawn_info.vendor);
+        info.name = device.empty() ? "Native Dawn Adapter (" + info.backend_type + ")" : device;
+        info.description = description.empty() ? info.name : description;
+        info.vendor = vendor.empty() ? "Dawn" : vendor;
         return info;
     }
 
