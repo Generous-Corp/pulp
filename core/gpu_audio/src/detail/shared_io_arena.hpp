@@ -162,9 +162,20 @@ class SharedIoArenaProvider {
     virtual bool submit(const SlotResources& resources, SlotToken token,
                         std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept = 0;
 
-    // Stops new provider activity, crosses the provider-specific loss/cancel
+    // Services provider callbacks on the serialized dispatcher and retries any
+    // terminal publication that previously found the inbox busy. This call may
+    // make accepted work visible to drain_completions(); it must not wait for a
+    // future callback or start a new provider lifecycle phase.
+    virtual void poll() noexcept = 0;
+
+    // Repeatable lifecycle-phase barrier over the bounded activity initiated
+    // before this call. It stops new submission activity for the current
+    // provider generation, crosses its provider-specific loss/cancel or
     // disposal boundary, makes every accepted submission terminal, pushes its
-    // result, and returns only when no later callback can occur.
+    // result, and returns only when no callback from that prior activity can
+    // occur. A later explicit retire_slot() may initiate a disposal-only
+    // callback wave; a second drain() closes that phase. After every old slot is
+    // destroyed, a later create_slot() may open a new preparation generation.
     virtual void drain() noexcept = 0;
 };
 

@@ -326,6 +326,8 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
         std::shared_ptr<SharedIoTerminalInbox> inbox;
         bool accepted = false;
         bool terminal = false;
+        bool completion_pending = false;
+        SharedIoTerminalStatus completion_status = SharedIoTerminalStatus::RetiredFailed;
         std::byte* output = nullptr;
     };
 
@@ -466,8 +468,28 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
             return false;
         if (request.accepted)
             previous[token.slot] = request;
-        request = Pending{token, std::move(inbox), true, false, resources.output};
+        request = Pending{
+            .token = token,
+            .inbox = std::move(inbox),
+            .accepted = true,
+            .output = resources.output,
+        };
         return true;
+    }
+
+    void poll() noexcept override {
+        ++poll_calls;
+        if (!complete_on_poll)
+            return;
+        for (std::size_t index = 0; index < pending.size(); ++index) {
+            auto& request = pending[index];
+            if (!request.accepted || (request.terminal && !request.completion_pending))
+                continue;
+            const auto status = request.completion_pending ? request.completion_status
+                                                           : completion_on_poll;
+            if (complete(index, status) == SharedIoTerminalInbox::PushResult::Busy)
+                ++poll_busy_publications;
+        }
     }
 
     void drain() noexcept override {
@@ -507,12 +529,21 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
         // The payload must be fully visible before Ready is release-published.
         if (status == SharedIoTerminalStatus::RetiredSuccess && request.output)
             request.output[0] = std::byte{0x6b};
-        // Finish every access to Pending before publishing Ready. Immediate
-        // dispatcher reuse after the release store may overwrite this record.
+        // Finish the success path's access to Pending before publishing Ready.
+        // Immediate dispatcher reuse after the release store may overwrite this
+        // record. Busy publishes nothing, so that path may safely restore the
+        // retained retry state afterward.
+        request.completion_status = status;
+        request.completion_pending = false;
         request.terminal = true;
         const auto inbox = request.inbox;
         const auto token = request.token;
-        return inbox->push(token, status);
+        const auto result = inbox->push(token, status);
+        if (result == SharedIoTerminalInbox::PushResult::Busy) {
+            request.terminal = false;
+            request.completion_pending = true;
+        }
+        return result;
     }
 
     SharedIoTerminalInbox::PushResult replay(std::size_t index, SharedIoTerminalStatus status) {
@@ -533,6 +564,21 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
         return result;
     }
 
+    bool hold_stale_completion_claim(std::size_t index) {
+        Pending& request = pending.at(index);
+        if (!request.accepted || held_claim || held_inbox)
+            return false;
+        auto attempt = request.inbox->try_claim(request.token.slot);
+        if (!attempt.claim)
+            return false;
+        held_claim = *attempt.claim;
+        held_inbox = request.inbox;
+        held_stale_token = request.token;
+        if (held_stale_token.slot_generation > 0)
+            --held_stale_token.slot_generation;
+        return true;
+    }
+
     std::uint32_t refuse_creation_at = std::numeric_limits<std::uint32_t>::max();
     std::uint32_t fail_after_partial_at = std::numeric_limits<std::uint32_t>::max();
     std::uint32_t fail_output_import_at = std::numeric_limits<std::uint32_t>::max();
@@ -540,10 +586,14 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
     bool reject_submissions = false;
     bool hold_stale_claim_on_reject = false;
     bool held_claim_failed = false;
+    bool complete_on_poll = false;
+    SharedIoTerminalStatus completion_on_poll = SharedIoTerminalStatus::RetiredSuccess;
     std::uint32_t create_calls = 0;
     std::uint32_t destroy_calls = 0;
     std::uint32_t retire_calls = 0;
     std::uint32_t live_allocations = 0;
+    std::uint32_t poll_calls = 0;
+    std::uint32_t poll_busy_publications = 0;
     std::uint32_t drain_calls = 0;
     std::uint32_t partial_allocations_created = 0;
     std::uint32_t partial_allocations_freed = 0;
@@ -709,6 +759,56 @@ TEST_CASE("shared IO arena expiry retains terminal credit and allocation until l
     CHECK(provider.host_frees == 2);
     CHECK_FALSE(provider.destroy_before_dispose);
     CHECK(provider.live_allocations == 0);
+}
+
+TEST_CASE("shared IO arena completion drain polls the provider before reading terminals",
+          "[gpu_audio][shared_io][arena][completion][poll]") {
+    FakeSharedIoProvider provider;
+    provider.complete_on_poll = true;
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(provider, arena_config(1)));
+    const auto token = publish_and_submit(arena, 150);
+
+    CHECK(provider.poll_calls == 0);
+    CHECK_FALSE(arena.acquire_output(token.preparation_epoch, token.stream_sequence));
+
+    const auto drained = arena.drain_completions();
+    CHECK(provider.poll_calls == 1);
+    CHECK(provider.poll_busy_publications == 0);
+    REQUIRE(drained.accepted == 1);
+    const auto output = arena.acquire_output(token.preparation_epoch, token.stream_sequence);
+    REQUIRE(output);
+    CHECK(std::to_integer<unsigned>(output->bytes.front()) == 0x6b);
+    REQUIRE(arena.release_output({output->token}));
+    REQUIRE(arena.release());
+}
+
+TEST_CASE("shared IO provider poll retains a busy terminal publication for retry",
+          "[gpu_audio][shared_io][arena][completion][poll][concurrency]") {
+    FakeSharedIoProvider provider;
+    provider.complete_on_poll = true;
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(provider, arena_config(1)));
+    const auto token = publish_and_submit(arena, 175);
+    REQUIRE(provider.hold_stale_completion_claim(0));
+
+    const auto blocked = arena.drain_completions();
+    CHECK(blocked.accepted == 0);
+    CHECK(provider.poll_calls == 1);
+    CHECK(provider.poll_busy_publications == 1);
+    CHECK_FALSE(arena.acquire_output(token.preparation_epoch, token.stream_sequence));
+
+    REQUIRE(provider.finish_held_stale_claim() ==
+            SharedIoTerminalInbox::PushResult::Rejected);
+    const auto retried = arena.drain_completions();
+    CHECK(provider.poll_calls == 2);
+    CHECK(provider.poll_busy_publications == 1);
+    REQUIRE(retried.accepted == 1);
+    const auto output = arena.acquire_output(token.preparation_epoch, token.stream_sequence);
+    REQUIRE(output);
+    CHECK(std::to_integer<unsigned>(output->bytes.front()) == 0x6b);
+    REQUIRE(arena.release_output({output->token}));
+    REQUIRE(arena.release());
 }
 
 TEST_CASE("shared IO arena terminal inbox rejects duplicate and stale generation callbacks",

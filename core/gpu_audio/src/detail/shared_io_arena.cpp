@@ -313,6 +313,10 @@ SharedIoArena::CompletionDrain SharedIoArena::drain_completions() noexcept {
     CompletionDrain result;
     if (!terminal_inbox_)
         return result;
+    // Native Dawn's AllowProcessEvents callbacks advance only when the owning
+    // instance is pumped. Keep that backend work on this serialized non-RT
+    // dispatcher, then consume the terminal records it published.
+    provider_->poll();
     retry_rejected_submissions();
     SharedIoTerminalInbox::Record record;
     while (terminal_inbox_->try_pop(record)) {
