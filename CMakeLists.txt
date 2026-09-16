@@ -661,7 +661,8 @@ if(PULP_BUILD_TESTS AND APPLE AND NOT IOS AND NOT PULP_IOS
         test/test_control_phase15_aggregate_e2e.cpp
         ${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp)
     target_include_directories(pulp-test-control-phase15-aggregate-e2e PRIVATE
-        ${CMAKE_SOURCE_DIR}/inspect/src)
+        ${CMAKE_SOURCE_DIR}/inspect/src
+        ${CMAKE_SOURCE_DIR}/test)
     target_link_libraries(pulp-test-control-phase15-aggregate-e2e PRIVATE
         pulp::inspect-client Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-phase15-aggregate-e2e PRIVATE

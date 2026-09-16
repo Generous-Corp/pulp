@@ -8329,6 +8329,83 @@
           "rationale": "No design-time capability is registered or removed. The artifact window is computed inside the renderer's program compiler and is reachable only through the trim an author already wrote on the placement."
         }
       }
+    },
+    {
+      "id": "control-fixture-manifest-digest-derivation",
+      "title": "Control fixture manifests and shipping markers derive from the canonical registry digest",
+      "classification": "ci_test_only",
+      "delivery_state": "pending",
+      "claim_id": "control-fixture-manifest-digest-derivation-20260914",
+      "owned_paths": [
+        "test/support/control_manifest_fixtures.hpp",
+        "test/control_enrollment_host_fixture.cpp",
+        "test/control_trusted_host_fixture.cpp",
+        "test/fixtures/control_host_preflight_fixture.cpp",
+        "test/fixtures/control_installed_host_e2e_fixture.cpp",
+        "test/fixtures/control_trusted_host_e2e_fixture.cpp",
+        "test/test_control_broker_daemon.cpp",
+        "test/test_control_endpoint_enrollment.cpp",
+        "test/test_control_host_enrollment.cpp",
+        "test/test_control_manifest.cpp",
+        "test/test_control_phase15_aggregate_e2e.cpp",
+        "test/test_control_trusted_host_e2e.cpp",
+        "test/test_control_trusted_host_inventory.cpp",
+        "tools/scripts/test_release_artifact_contents.py"
+      ],
+      "evidence": [
+        {
+          "path": "test/support/control_manifest_fixtures.hpp",
+          "needles": [
+            "#include <pulp/inspect/control_registry_digest.inc>",
+            "\"registry_digest\": \")\" PULP_CONTROL_REGISTRY_DIGEST_V1 R\"(\"",
+            "constexpr ControlManifestMarker control_manifest_marker(std::string_view manifest)"
+          ]
+        },
+        {
+          "path": "test/test_control_manifest.cpp",
+          "needles": [
+            "fixture shipping markers hash the manifest bytes the fixtures ship",
+            "expected_marker(pulp::test::kInstalledHostE2eFixtureManifest)",
+            "std::string(kControlRegistryDigest)"
+          ]
+        },
+        {
+          "path": "test/fixtures/control_installed_host_e2e_fixture.cpp",
+          "needles": [
+            "const volatile pulp::test::ControlManifestMarker kManifest =",
+            "pulp::test::kInstalledHostE2eFixtureManifest"
+          ]
+        },
+        {
+          "path": "tools/scripts/test_release_artifact_contents.py",
+          "needles": [
+            "def canonical_control_registry_digest() -> str:",
+            "CONTROL_REGISTRY_DIGEST_INCLUDE"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The manifests and shipping markers moved here are test fixtures. No SDK header, target or symbol changes: the canonical digest still lives in inspect/include/pulp/inspect/control_registry_digest.inc and the installed shipping helper keeps its own deliberate mirror, so an installed plugin sees byte-identical registry bytes and the same digest it saw before."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No offline Timeline command gains, loses or changes behaviour. The fixtures are compiled and launched by ctest only; `pulp seq` neither reads them nor is reached by them."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP tool is added or altered. The generated Timeline MCP schema is untouched, and nothing here is reachable as an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "No capability, operation, executor binding, grant or policy projection changes. The capability registry is not edited at all, so serialize_control_registry() emits the same bytes and kControlRegistryDigest keeps its value; the fixtures simply read that value instead of restating it, and their shipping markers are hashed from the same bytes they already carried."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No authoring capability an agent manifest could carry is added or removed. This changes only where a CI fixture gets a value it was previously retyping by hand."
+        }
+      }
     }
   ],
   "tombstones": []
