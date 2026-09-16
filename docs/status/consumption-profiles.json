@@ -118,12 +118,12 @@
           {
             "exported_as": "Pulp::gpu-audio",
             "closure_node_count": 70,
-            "public_header_count": 28
+            "public_header_count": 29
           },
           {
             "exported_as": "Pulp::render",
             "closure_node_count": 56,
-            "public_header_count": 16
+            "public_header_count": 17
           },
           {
             "exported_as": "Pulp::canvas",
@@ -1643,7 +1643,7 @@
             ]
           },
           "public_headers": {
-            "count": 28,
+            "count": 29,
             "roots": [
               "core/gpu_audio/include",
               "core/render/include"
@@ -3771,7 +3771,7 @@
             ]
           },
           "public_headers": {
-            "count": 16,
+            "count": 17,
             "roots": [
               "core/render/include"
             ],
