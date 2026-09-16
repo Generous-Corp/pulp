@@ -297,6 +297,17 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
         SOURCES test_timeline_cli_offline_render.cpp
         LIBRARIES pulp::tool-timeline pulp::host pulp::playback pulp::audio pulp::timeline
             pulp::runtime)
+    if(PULP_ENABLE_INSPECTOR)
+        # The live mutable-document control surface driven end to end over a real
+        # DocumentSession. It links the offline writer-profile library as well as
+        # the broker so each refusal is asserted from both sides in one vocabulary:
+        # the session's own ConflictCode and the broker's projection of it.
+        pulp_add_test_suite(pulp-test-control-timeline-document-session
+            SOURCES test_control_timeline_document_session.cpp
+            LIBRARIES pulp::inspect-runtime pulp::inspect-control pulp::tool-timeline
+                pulp::timeline
+            LABELS "inspect;control;timeline;document-session")
+    endif()
 endif()
 # The chord/scale context lane plus the compile-context subscription contract
 # it carries: the document type, its schema migrations, and the read side that
