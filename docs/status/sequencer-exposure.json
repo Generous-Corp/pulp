@@ -2173,7 +2173,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid — swing, a groove table or a per-step nudge — without running its own scheduler beside the kernel. The header also exposes the scheduling coordinate itself: coordinate_at(lane, tick) answers which step a lane's walk selects at a grid coordinate and upcoming_coordinate(lane) answers the step it will fire next, so a UI or a test can read the pipeline stage without pushing audio through the player.",
+          "rationale": "The bounded step player ships as the public header pulp/midi/step_player.hpp on Pulp::midi with a typed capability binding. StepPlayerStep carries timing_offset_ticks, so a consumer can place a hit off the grid \u2014 swing, a groove table or a per-step nudge \u2014 without running its own scheduler beside the kernel. The header also exposes the scheduling coordinate itself: coordinate_at(lane, tick) answers which step a lane's walk selects at a grid coordinate and upcoming_coordinate(lane) answers the step it will fire next, so a UI or a test can read the pipeline stage without pushing audio through the player.",
           "evidence": [
             {
               "kind": "sdk_header",
@@ -2254,7 +2254,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations — which is every LFO a musician can reach — no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from. set_lfo_rate_hz() and set_lfo_depth() report whether the value was taken and refuse the rates and depths prepare() refuses, so the config the bank reports stays one prepare() accepts.",
+          "rationale": "The fixed-memory per-voice LFO and envelope bank ships as the public header pulp/audio/voice_modulation_sources.hpp on Pulp::audio. set_lfo_wave(), set_lfo_rate_hz() and set_lfo_depth() reshape and retune the bank from the audio thread without disturbing phase or the lifecycle, so an LFO whose shape, rate and depth are live automation destinations \u2014 which is every LFO a musician can reach \u2014 no longer has to go through prepare(), which allocates, reseeds and restarts phase. Negative depth inverts the wave, which is how a consumer whose triangle convention is the inverse of the toolkit's adopts the bank without changing what it sounds like. Reshaping is live for the same reason: a consumer whose LFO shape is authored per patch would otherwise have to re-prepare a bank the audio thread is reading from. set_lfo_rate_hz() and set_lfo_depth() report whether the value was taken and refuse the rates and depths prepare() refuses, so the config the bank reports stays one prepare() accepts.",
           "evidence": [
             {
               "kind": "sdk_header",
@@ -4451,7 +4451,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "not_applicable",
-          "rationale": "The ledger schema and its checker are repository governance artifacts. No installed header, target, or exported symbol changes, and the offline writer-profile sources this gate reads are read only — tools/timeline/include/pulp/tools/timeline/writer_profile.hpp and tools/timeline/src/writer_profile.cpp are untouched."
+          "rationale": "The ledger schema and its checker are repository governance artifacts. No installed header, target, or exported symbol changes, and the offline writer-profile sources this gate reads are read only \u2014 tools/timeline/include/pulp/tools/timeline/writer_profile.hpp and tools/timeline/src/writer_profile.cpp are untouched."
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -5522,7 +5522,7 @@
         },
         "offline_timeline_cli": {
           "disposition": "exposed",
-          "rationale": "The CLI reaches the command through the canonical command-apply handler in tools/cli/cmd_seq.cpp, and the generated verb table carries pulp.timeline.command.set_dynamics_lane because the schema registry does. The reason this surface was not claimable on the command alone is that command_apply applies the decoded commands and then returns serialize_project() of the result, so a lane the sequence encoder did not carry would be destroyed by the same call that authored it — an edit that reports success and changes nothing. That defect is measured as closed rather than assumed: serialize_encode.cpp now writes a dynamics_lane member (grep -c dynamics reports 3 against a control of 4 for chord_scale, which is the lane already known to round-trip), and test_timeline_agent.cpp drives command_apply end to end, asserts the returned document carries the authored intensity bit pattern, reopens and validates that document, applies a second command whose expectation is what the first one wrote, and asserts the replayed first command is refused. The authority recorded here is the CLI's declared editor profile and the refusal codes that profile's admission can emit, not the command's own conflict codes.",
+          "rationale": "The CLI reaches the command through the canonical command-apply handler in tools/cli/cmd_seq.cpp, and the generated verb table carries pulp.timeline.command.set_dynamics_lane because the schema registry does. The reason this surface was not claimable on the command alone is that command_apply applies the decoded commands and then returns serialize_project() of the result, so a lane the sequence encoder did not carry would be destroyed by the same call that authored it \u2014 an edit that reports success and changes nothing. That defect is measured as closed rather than assumed: serialize_encode.cpp now writes a dynamics_lane member (grep -c dynamics reports 3 against a control of 4 for chord_scale, which is the lane already known to round-trip), and test_timeline_agent.cpp drives command_apply end to end, asserts the returned document carries the authored intensity bit pattern, reopens and validates that document, applies a second command whose expectation is what the first one wrote, and asserts the replayed first command is refused. The authority recorded here is the CLI's declared editor profile and the refusal codes that profile's admission can emit, not the command's own conflict codes.",
           "evidence": [
             {
               "kind": "cli_definition",
@@ -6383,7 +6383,7 @@
       "surfaces": {
         "installed_sdk": {
           "disposition": "exposed",
-          "rationale": "The controller playback program ships as the public header pulp/playback/program.hpp on Pulp::playback, and this slice makes that header a reviewed capability root rather than an unreviewed legacy path. ControllerProgramEvent is the value a host reads or writes to place a controller move on the playback timeline, and controller_program_event_less is the exported ordering predicate that decides how two moves at the same coordinate resolve — so a consumer can sort, merge or diff a controller program without re-deriving the engine's own tie-break.",
+          "rationale": "The controller playback program ships as the public header pulp/playback/program.hpp on Pulp::playback, and this slice makes that header a reviewed capability root rather than an unreviewed legacy path. ControllerProgramEvent is the value a host reads or writes to place a controller move on the playback timeline, and controller_program_event_less is the exported ordering predicate that decides how two moves at the same coordinate resolve \u2014 so a consumer can sort, merge or diff a controller program without re-deriving the engine's own tie-break.",
           "evidence": [
             {
               "kind": "sdk_header",
@@ -8888,6 +8888,8 @@
       "owned_paths": [
         ".agents/skills/timeline/SKILL.md",
         ".github/vellum-expansion-watch-events/20260912-pa-sequencer-transport-loop-watch.json",
+        "core/playback/include/pulp/playback/transport.hpp",
+        "core/playback/src/transport.cpp",
         "docs/reference/development-inspector-capabilities.md",
         "docs/status/gpu-vellum-handoff.yaml",
         "docs/status/sequencer-exposure.json",
@@ -8936,7 +8938,16 @@
           "path": "test/test_control_sequencer_transport_executor.cpp",
           "needles": [
             "set-range receipt carries the transport's acceptance, not the tick helper's",
-            "a negative document tick is carried rather than refused as out of range"
+            "a negative document tick is carried rather than refused as out of range",
+            "set-enabled ignores playhead publications when the loop is unchanged",
+            "transport loop read refuses reset and failed-prepare lifecycle state"
+          ]
+        },
+        {
+          "path": "core/playback/include/pulp/playback/transport.hpp",
+          "needles": [
+            "TransportLoopState",
+            "loop_state() const noexcept"
           ]
         }
       ],
@@ -8980,7 +8991,7 @@
         },
         "live_product_control": {
           "disposition": "exposed",
-          "rationale": "Product A now carries a typed sequencer transport loop capability pair. The Sensitive read reports the transport's own publication and the Control write applies action-discriminated set-range/set-enabled edits under a grant, both fenced onto the host main thread. This closes what the sequencer-loop-range-editor row names as its sole missing dependency without editing that released row.",
+          "rationale": "Product A now carries a typed sequencer transport loop capability pair. The Sensitive read reports the transport's accepted loop control state and the Control write applies action-discriminated set-range/set-enabled edits under a grant, both fenced onto the host main thread. This closes what the sequencer-loop-range-editor row names as its sole missing dependency without editing that released row.",
           "evidence": [
             {
               "kind": "capability_definition",
@@ -9046,7 +9057,9 @@
               "needles": [
                 "set-range receipt carries the transport's acceptance, not the tick helper's",
                 "set-enabled preserves an accepted range the audio thread has not yet published",
-                "a negative document tick is carried rather than refused as out of range"
+                "a negative document tick is carried rather than refused as out of range",
+                "set-enabled ignores playhead publications when the loop is unchanged",
+                "transport loop read refuses reset and failed-prepare lifecycle state"
               ]
             },
             {

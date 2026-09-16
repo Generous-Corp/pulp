@@ -27,9 +27,10 @@ using ControlSequencerTransportTargetResolver =
     std::function<std::optional<ControlSequencerTransportTarget>(const ControlAdmissionPlan&)>;
 
 /// Implements dev.pulp.sequencer/transport.loop.read@1. It reports the
-/// transport's own published playhead. A transport that has never published
-/// (sequence 0) is unprepared, and the operation refuses rather than inventing
-/// a loop that no transport has accepted.
+/// transport's accepted loop control state and current playing flag. A reset or
+/// failed prepare is unavailable even though an older playhead may have a
+/// nonzero sequence, and the operation never invents a loop that the transport
+/// has not accepted.
 ControlOperationExecutor make_control_sequencer_transport_read_executor(
     ControlSequencerTransportTargetResolver resolve_target);
 

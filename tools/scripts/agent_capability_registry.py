@@ -1083,7 +1083,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/playback/transport.hpp",
-        "fingerprint": "sha256:13685c53c2e82e28bff6b56edf5a82e94e78cbedb73539c6a0046d5dd0c7a1be",
+        "fingerprint": "sha256:fd25dfd0e69c3355cce4802bc9bb40771218d35cb4d7c2fd529749b25fceb993",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

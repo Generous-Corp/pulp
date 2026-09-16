@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -114,18 +113,6 @@ resolve_live_target(const ControlSequencerTransportTargetResolver& resolve_targe
     return target;
 }
 
-/// MasterTransport::set_loop publishes nothing: it records the desired loop and
-/// the audio thread republishes the playhead at its next block. So between an
-/// accepted edit and the next block the published playhead still carries the
-/// previous loop — permanently so while the transport is stopped. Remembering
-/// the loop the transport last accepted is what keeps set-enabled from toggling
-/// a superseded range back over an accepted edit. It is not an invented loop:
-/// set_loop returning None is the transport's own acceptance.
-struct AcceptedLoopRecord {
-    std::optional<timebase::LoopRegion> loop;
-    std::uint64_t publication_sequence = 0;
-};
-
 } // namespace
 
 ControlOperationExecutor make_control_sequencer_transport_read_executor(
@@ -154,24 +141,26 @@ ControlOperationExecutor make_control_sequencer_transport_read_executor(
                         "no live transport is bound to this registration",
                         ControlRetryClassification::AfterRefresh);
 
-        const auto playhead = target->transport->playhead();
-        if (playhead.sequence == 0)
+        const auto loop_state = target->transport->loop_state();
+        if (!loop_state.prepared)
             return fail(ControlResultCode::HostUnavailable,
                         "the transport has published no state, so it holds no loop to report",
                         ControlRetryClassification::AfterRefresh);
-        if (playhead.sequence > static_cast<std::uint64_t>(kMaximumWireInteger))
+        if (loop_state.sequence > static_cast<std::uint64_t>(kMaximumWireInteger))
             return fail(ControlResultCode::ResourceExhausted,
                         "the transport publication sequence exceeds the canonical wire range");
-        if (!tick_is_on_the_wire(playhead.loop.start.value) ||
-            !tick_is_on_the_wire(playhead.loop.end.value))
+        if (!tick_is_on_the_wire(loop_state.loop.start.value) ||
+            !tick_is_on_the_wire(loop_state.loop.end.value))
             return fail(ControlResultCode::ResourceExhausted,
                         "the transport loop bounds exceed the canonical wire range");
 
+        const auto playhead = target->transport->playhead();
+
         auto detail = choc::value::createObject("ControlSequencerTransportLoopReadResult");
-        detail.setMember("sequence", static_cast<std::int64_t>(playhead.sequence));
-        detail.setMember("enabled", playhead.loop.enabled);
-        detail.setMember("start_tick", playhead.loop.start.value);
-        detail.setMember("end_tick", playhead.loop.end.value);
+        detail.setMember("sequence", static_cast<std::int64_t>(loop_state.sequence));
+        detail.setMember("enabled", loop_state.loop.enabled);
+        detail.setMember("start_tick", loop_state.loop.start.value);
+        detail.setMember("end_tick", loop_state.loop.end.value);
         detail.setMember("playing", playhead.is_playing);
         return {.terminal_state = ControlReceiptState::Completed,
                 .result = {.detail_json = choc::json::toString(detail, true)}};
@@ -180,8 +169,7 @@ ControlOperationExecutor make_control_sequencer_transport_read_executor(
 
 ControlOperationExecutor make_control_sequencer_transport_write_executor(
     ControlSequencerTransportTargetResolver resolve_target) {
-    return [resolve_target = std::move(resolve_target),
-            accepted = std::make_shared<AcceptedLoopRecord>()](
+    return [resolve_target = std::move(resolve_target)](
                const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                const ControlExecutionContext& context) -> ControlExecutionOutcome {
         if (request.operation_id != "dev.pulp.sequencer/transport.loop.write@1" ||
@@ -258,19 +246,16 @@ ControlOperationExecutor make_control_sequencer_transport_write_executor(
 
         timebase::LoopRegion candidate{};
         if (set_enabled_action) {
-            const auto playhead = target->transport->playhead();
-            if (playhead.sequence == 0)
+            const auto loop_state = target->transport->loop_state();
+            if (!loop_state.prepared)
                 return fail(ControlResultCode::HostUnavailable,
                             "the transport has published no bounds for set-enabled to reuse",
                             ControlRetryClassification::AfterRefresh);
-            if (playhead.sequence != static_cast<std::uint64_t>(requested_sequence))
+            if (loop_state.sequence != static_cast<std::uint64_t>(requested_sequence))
                 return fail(ControlResultCode::StateConflict,
-                            "the transport republished its loop after expected_sequence was read",
+                            "the transport changed its loop after expected_sequence was read",
                             ControlRetryClassification::AfterRefresh);
-            const auto base = accepted->loop && accepted->publication_sequence == playhead.sequence
-                                  ? *accepted->loop
-                                  : playhead.loop;
-            candidate = timeline_editor::with_loop_enabled(base, requested_enabled);
+            candidate = timeline_editor::with_loop_enabled(loop_state.loop, requested_enabled);
         } else {
             const auto range = timeline_editor::loop_region_from_snapped_endpoints(
                 timebase::TickPosition{first_tick}, timebase::TickPosition{second_tick});
@@ -288,9 +273,7 @@ ControlOperationExecutor make_control_sequencer_transport_write_executor(
         if (verdict != playback::TransportError::None)
             return fail(ControlResultCode::InvalidRequest, std::string{transport_refusal(verdict)});
 
-        const auto published = target->transport->playhead();
-        accepted->loop = candidate;
-        accepted->publication_sequence = published.sequence;
+        const auto published = target->transport->loop_state();
         auto detail = choc::value::createObject("ControlSequencerTransportLoopWriteResult");
         detail.setMember("receipt_id", plan.receipt_id.value);
         detail.setMember("action", set_enabled_action ? "set-enabled" : "set-range");

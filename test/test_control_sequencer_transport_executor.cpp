@@ -117,6 +117,31 @@ TEST_CASE("transport loop read refuses an unprepared transport rather than inven
     CHECK(outcome.result.explanation.find("published no state") != std::string::npos);
 }
 
+TEST_CASE("transport loop read refuses reset and failed-prepare lifecycle state",
+          "[inspect][control][sequencer][transport][read]") {
+    {
+        PreparedTransport fixture;
+        auto executor = make_control_sequencer_transport_read_executor(bound(fixture.transport));
+        REQUIRE(executor(plan(), read_request(), context()).terminal_state ==
+                ControlReceiptState::Completed);
+
+        fixture.transport.reset();
+        auto reset = executor(plan(), read_request(), context());
+        CHECK(reset.terminal_state == ControlReceiptState::Failed);
+        CHECK(reset.result.result_code == ControlResultCode::HostUnavailable);
+    }
+
+    PreparedTransport fixture;
+    auto executor = make_control_sequencer_transport_read_executor(bound(fixture.transport));
+    playback::MasterTransportConfig invalid;
+    invalid.max_buffer_size = 0;
+    REQUIRE(fixture.transport.prepare(fixture.map, invalid) ==
+            playback::TransportError::InvalidFrameCount);
+    auto failed_prepare = executor(plan(), read_request(), context());
+    CHECK(failed_prepare.terminal_state == ControlReceiptState::Failed);
+    CHECK(failed_prepare.result.result_code == ControlResultCode::HostUnavailable);
+}
+
 TEST_CASE("transport loop read refuses when no transport is bound",
           "[inspect][control][sequencer][transport][read]") {
     auto executor = make_control_sequencer_transport_read_executor(
@@ -146,6 +171,17 @@ TEST_CASE("set-range receipt carries the transport's acceptance, not the tick he
     CHECK(detail["applied"].getBool());
     CHECK(detail["start_tick"].getInt64() == start);
     CHECK(detail["end_tick"].getInt64() == end);
+
+    // Accepted control state is readable immediately, even while stopped and
+    // before an audio block republishes its playhead.
+    auto reader = make_control_sequencer_transport_read_executor(bound(fixture.transport));
+    const auto immediate = reader(plan(), read_request(), context());
+    REQUIRE(immediate.terminal_state == ControlReceiptState::Completed);
+    const auto immediate_detail = detail_of(immediate);
+    CHECK(immediate_detail["sequence"].getInt64() == detail["sequence"].getInt64());
+    CHECK(immediate_detail["start_tick"].getInt64() == start);
+    CHECK(immediate_detail["end_tick"].getInt64() == end);
+    CHECK(immediate_detail["enabled"].getBool());
 
     // The transport, not the executor, is the authority on what was accepted.
     fixture.run_block(256);
@@ -241,20 +277,46 @@ TEST_CASE("set-enabled preserves an accepted range the audio thread has not yet 
     CHECK_FALSE(published.loop.enabled);
 }
 
-TEST_CASE("set-enabled refuses a stale publication sequence",
+TEST_CASE("set-enabled ignores playhead publications when the loop is unchanged",
           "[inspect][control][sequencer][transport][write]") {
     PreparedTransport fixture;
+    const auto start = fixture.tick_at_sample(0);
+    const auto end = fixture.tick_at_sample(96'000);
+    REQUIRE(fixture.transport.set_loop(
+                {false, timebase::TickPosition{start}, timebase::TickPosition{end}}) ==
+            playback::TransportError::None);
+    auto reader = make_control_sequencer_transport_read_executor(bound(fixture.transport));
+    const auto sequence =
+        detail_of(reader(plan(), read_request(), context()))["sequence"].getInt64();
+
     fixture.run_block(256);
-    const auto stale = fixture.transport.playhead().sequence;
     fixture.run_block(256);
-    REQUIRE(fixture.transport.playhead().sequence != stale);
 
     auto executor = make_control_sequencer_transport_write_executor(bound(fixture.transport));
     const auto outcome =
         executor(plan(),
                  write_request(R"({"action":"set-enabled","enabled":true,"expected_sequence":)" +
-                               std::to_string(static_cast<std::int64_t>(stale)) +
-                               R"(,"idempotency_key":"once"})"),
+                               std::to_string(sequence) + R"(,"idempotency_key":"once"})"),
+                 context());
+    CHECK(outcome.terminal_state == ControlReceiptState::Completed);
+}
+
+TEST_CASE("set-enabled refuses a stale loop sequence",
+          "[inspect][control][sequencer][transport][write]") {
+    PreparedTransport fixture;
+    auto reader = make_control_sequencer_transport_read_executor(bound(fixture.transport));
+    const auto stale = detail_of(reader(plan(), read_request(), context()))["sequence"].getInt64();
+    const auto start = fixture.tick_at_sample(0);
+    const auto end = fixture.tick_at_sample(96'000);
+    REQUIRE(fixture.transport.set_loop(
+                {true, timebase::TickPosition{start}, timebase::TickPosition{end}}) ==
+            playback::TransportError::None);
+
+    auto executor = make_control_sequencer_transport_write_executor(bound(fixture.transport));
+    const auto outcome =
+        executor(plan(),
+                 write_request(R"({"action":"set-enabled","enabled":false,"expected_sequence":)" +
+                               std::to_string(stale) + R"(,"idempotency_key":"once"})"),
                  context());
     CHECK(outcome.terminal_state == ControlReceiptState::Failed);
     CHECK(outcome.result.result_code == ControlResultCode::StateConflict);
