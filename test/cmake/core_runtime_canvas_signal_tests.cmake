@@ -418,6 +418,22 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
     SOURCES test_gpu_audio_transport.cpp
     LIBRARIES pulp::gpu-audio pulp::audio)
 
+# Private fixed-slot lifecycle used by the shared-memory GPU-audio dispatcher.
+# Dawn-free and deterministic: compile the exact production source directly so
+# fault/TSan iterations do not pull the 900-object public gpu-audio closure.
+pulp_add_test_suite(pulp-test-gpu-shared-io-slot-ledger
+    SOURCES test_gpu_shared_io_slot_ledger.cpp harness/rt_allocation_probe.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_arena.cpp
+    LIBRARIES Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# Separate full-library link check keeps the private production TU wired into
+# pulp::gpu-audio without burdening every focused lifecycle rebuild.
+pulp_add_test_suite(pulp-test-gpu-shared-io-arena-link
+    SOURCES test_gpu_shared_io_arena_link.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Flow pans: pure per-room constant-power pan math + GpuMultiConvolver::set_flow
 # (an atomic store). GPU-agnostic, so it runs — and keeps the flow math covered —
 # in the no-GPU coverage build too.

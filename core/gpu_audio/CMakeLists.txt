@@ -18,6 +18,7 @@ target_include_directories(pulp-gpu-audio
 target_sources(pulp-gpu-audio
     PRIVATE
         src/gpu_audio_transport.cpp
+        src/detail/shared_io_arena.cpp
 )
 
 target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
