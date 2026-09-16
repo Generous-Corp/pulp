@@ -188,8 +188,9 @@ void log_through_skia(SkLogHandler& handler, SkLogPriority priority, const char*
 
 TEST_CASE("an installed Skia handler forwards records into the same sink", "[gpu][diagnostics]") {
     if (install_skia_log_bridge() != SkiaLogBridgeStatus::installed) {
-        SUCCEED("another SkLogHandler owns this process; the bridge correctly declined");
-        return;
+        // Declining is correct behaviour, but it leaves the forwarding path
+        // unexercised: report that honestly rather than as a pass.
+        SKIP("another SkLogHandler owns this process, so forwarding is unverifiable here");
     }
 
     auto handler = SkLogHandler::GetInstance();
