@@ -4,6 +4,7 @@ description: Local and cloud CI for Pulp — validate branches, create PRs, merg
 requires:
   scripts:
     - tools/local-ci/local_ci.py
+    - tools/scripts/ctest_nonruns.py
   tools:
     - gh
 ---
@@ -705,6 +706,13 @@ command's output — into the job summary, with the XML kept in the
 `ctest-logs-<key>` artifact on green runs too. Same shape as the GPU-adapter
 observation above: `continue-on-error: true`, records the answer, asserts
 nothing.
+
+The renderer is `tools/scripts/ctest_nonruns.py`, shared with local artifact
+inspection. Pass an explicit CTest JUnit path and `--json` for bounded structured
+non-runs, counts, and the input digest. Exit 0 means the observation is readable,
+even when tests failed or skipped; exit 2 means unavailable/incomplete evidence,
+not a CTest verdict. Empty reports never claim that every test ran. No test is
+executed, provisioned, or selected by this helper.
 
 Four things bite when touching this:
 
@@ -9129,4 +9137,3 @@ every surface: a gate that reports "no binary" as "misformatted" is the
 false-verdict class this repo keeps paying for. The wiring — exit codes kept
 apart, the PyPI pin, hosted runner — is asserted by
 `tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).
-

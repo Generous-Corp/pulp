@@ -1767,7 +1767,7 @@ jobs:
       # them is real information rather than a fault: label exclusions, the
       # --exclude-regex list, and configure-time absence remove tests from the
       # report entirely — a broader class this step measures but does not close.
-      # No <testcase> entries at all means --output-junit did not take.
+      # An empty report provides no execution evidence; selection may be empty.
       - name: Observe ctest non-runs (non-Windows)
         if: always() && runner.os != 'Windows'
         continue-on-error: true
@@ -1785,65 +1785,9 @@ jobs:
           # finished run; the log can. Same reason the ctest-failure step below
           # echoes its names twice.
           echo "ctest-nonruns: registered(ctest -N raw lines)=$raw_lines registered(total)=${registered:-unknown}"
-          PULP_CTEST_JUNIT="$junit" \
-          PULP_CTEST_RAW_LINES="$raw_lines" \
-          PULP_CTEST_REGISTERED="${registered:-unknown}" \
-          python3 - >> "$GITHUB_STEP_SUMMARY" <<'PYEOF'
-          import os
-          import sys
-          import xml.etree.ElementTree as ET
-
-          leg = os.environ.get("PULP_CTEST_LEG", "")
-          junit = os.environ["PULP_CTEST_JUNIT"]
-          print(f"## ctest non-runs — {leg}")
-          if not os.path.isfile(junit):
-              print(
-                  "_No JUnit report — the job did not reach ctest "
-                  "(configure/build failure), or `--output-junit` did not take._"
-              )
-              raise SystemExit(0)
-          suite = ET.parse(junit).getroot()
-          cases = suite.findall("testcase")
-          # ctest statuses: "run", "fail", "notrun" (skipped), "disabled".
-          # A failure ran; only "notrun"/"disabled" are non-runs.
-          nonruns = [c for c in cases if c.get("status") in ("notrun", "disabled")]
-          print("")
-          print("| population | count |")
-          print("| --- | --- |")
-          print(f"| registered (`ctest -N` raw lines) | {os.environ['PULP_CTEST_RAW_LINES']} |")
-          print(f"| registered (`ctest -N` total) | {os.environ['PULP_CTEST_REGISTERED']} |")
-          print(f"| attempted (JUnit `tests=`) | {suite.get('tests')} |")
-          print(f"| reported non-runs (`notrun`/`disabled`) | {len(nonruns)} |")
-          print(f"| `<testcase>` entries in the report | {len(cases)} |")
-          print("")
-          # Same numbers to the job log, which (unlike the summary) is
-          # retrievable from a finished run.
-          print(
-              f"ctest-nonruns: attempted={suite.get('tests')} "
-              f"testcases={len(cases)} nonruns={len(nonruns)}",
-              file=sys.stderr,
-          )
-          if not cases:
-              print("_The report has no `<testcase>` entries: `--output-junit` did not take._")
-          if not nonruns:
-              print("_Every attempted test ran._")
-              raise SystemExit(0)
-          print("### Tests that did not run")
-          print("")
-          print("| test | reason | labels | output |")
-          print("| --- | --- | --- | --- |")
-          for case in sorted(nonruns, key=lambda c: c.get("name") or ""):
-              skipped = case.find("skipped")
-              reason = (skipped.get("message") if skipped is not None else None) or case.get("status") or ""
-              labels = ""
-              for prop in case.iterfind("properties/property"):
-                  if prop.get("name") == "cmake_labels":
-                      labels = prop.get("value") or ""
-              out = (case.findtext("system-out") or "").strip().splitlines()
-              detail = out[-1][:160] if out else ""
-              cell = lambda s: s.replace("|", "\\|").replace("\n", " ")
-              print(f"| `{case.get('name')}` | {cell(reason)} | {cell(labels)} | {cell(detail)} |")
-          PYEOF
+          python3 tools/scripts/ctest_nonruns.py "$junit" \
+            --registered "${registered:-unknown}" --raw-lines "$raw_lines" \
+            --leg "$PULP_CTEST_LEG" >> "$GITHUB_STEP_SUMMARY"
 
       # Observation, not a gate. Every GPU case in the suite skips when no
       # adapter is present, so a green `macos` check reads identically whether

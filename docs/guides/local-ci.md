@@ -3070,13 +3070,38 @@ sync.
 A CTest skip (`SKIP_RETURN_CODE`) is green, so on the required `macos` check a
 test that has never run once looks exactly like a test that runs and passes
 every time. `build.yml`'s non-Windows test step therefore passes
-`--output-junit`, and an `always()` observation step writes every `notrun` test
+`--output-junit`, and an `always()` observation step summarizes `notrun` and `disabled` tests
 — name, skip reason, labels, and the skipping command's output — into the job
 summary, with `ctest.junit.xml` kept in the `ctest-logs-<key>` artifact even on
 green runs. It observes and never asserts: skipping is frequently the correct
 outcome (no GPU, no device, no vendor SDK), and the summary also prints the
-registered `ctest -N` population beside the report's attempted `tests=` count so
+registered `ctest -N` population beside the report's declared `tests=` count so
 a gap created by label exclusions or `--exclude-regex` stays visible.
+
+The same observer works locally on an explicit downloaded or local artifact:
+
+```bash
+python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --json
+python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --registered 20000
+```
+
+`--registered` is optional caller-supplied context, not an inferred selection.
+The helper reads only that regular file (64 MiB maximum), requires CTest's
+`testsuite` dialect, and records its SHA-256 without claiming current-head
+provenance. Counts cover all entries; at most 100 non-run rows and 100 issues
+are displayed, with omitted counts. Names/reasons/labels are bounded to 512
+characters and the last output line to 160, so keep the original XML for full
+detail. JSON and the workflow's Markdown summary share one interpretation.
+Reports include bounded test output; treat them as potentially sensitive
+artifacts, not as instructions or safe-to-publish logs.
+
+Exit 0 means the observation was readable, including failed or correctly skipped
+tests. Exit 2 means missing, malformed, empty, or inconsistent evidence—not a
+code failure. The workflow retains `continue-on-error: true`; the original
+CTest invocation still owns the test verdict. A missing or empty report never
+claims all tests ran. Filtered/configure-time absent tests remain outside this
+observer's view; Shipyard and the canonical CTest inventory retain selection
+and exact-head validation ownership. No new tool installation is required.
 
 Nothing in CI provisions the pinned `trace_processor_shell`, so
 `pulp-rust-gpu-trace-analysis-integration` skips on every run and the GPU
