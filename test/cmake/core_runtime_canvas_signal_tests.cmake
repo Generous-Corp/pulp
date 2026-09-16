@@ -439,6 +439,14 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
     SOURCES test_gpu_audio_transport.cpp
     LIBRARIES pulp::gpu-audio pulp::audio)
 
+# Dawn-free private contract for P2's explicit algorithmic lead, typed
+# fallback, and bridge telemetry. This is a CPU/fake lane; it intentionally
+# does not expose or link raw provider handles.
+pulp_add_test_suite(pulp-test-gpu-audio-execution-contract
+    SOURCES test_gpu_audio_execution_contract.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Private fixed-slot lifecycle used by the shared-memory GPU-audio dispatcher.
 # Dawn-free and deterministic: compile the exact production source directly so
 # fault/TSan iterations do not pull the 900-object public gpu-audio closure.
