@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <thread>
 #include <vector>
@@ -24,6 +25,7 @@
 #include "support/thread_progress.hpp"
 #include <pulp/signal/convolver.hpp>
 #include <pulp/signal/convolver_messages.hpp>
+#include <pulp/signal/transition_mixer.hpp>
 
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
@@ -573,4 +575,273 @@ TEST_CASE("PartitionedConvolver swap to a shorter IR is age-aligned (distinct-pe
     }
 
     (void)swapper.drain_old();
+}
+
+namespace {
+// Render `blocks` blocks of the distinct stream through a convolver, flattened.
+// `swap_to` (when given) is staged and swapped in at block `swap_block`.
+std::vector<float> render_stream(const std::vector<float>& ir,
+                                 std::size_t block,
+                                 int blocks,
+                                 std::size_t fade,
+                                 const std::vector<float>* swap_to,
+                                 int swap_block) {
+    PartitionedConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block);
+    if (fade > 0) conv.set_crossfade(fade);
+    ConvolverIrSwapper swapper;
+
+    std::vector<float> out;
+    out.reserve(static_cast<std::size_t>(blocks) * block);
+    std::vector<float> in(block), o(block);
+    for (int b = 0; b < blocks; ++b) {
+        if (swap_to && b == swap_block) {
+            REQUIRE(swapper.stage_ir(swap_to->data(), swap_to->size(), block));
+            REQUIRE(conv.try_swap_ir(swapper));
+        }
+        for (std::size_t i = 0; i < block; ++i)
+            in[i] = distinct_sample_at(static_cast<std::size_t>(b) * block + i);
+        conv.process(in.data(), o.data(), block);
+        out.insert(out.end(), o.begin(), o.end());
+        (void)swapper.drain_old();
+    }
+    REQUIRE(conv.block_size_violations() == 0);
+    return out;
+}
+
+// A decaying, spectrally busy IR spanning `len` taps — energy in every partition,
+// so the steady-state output genuinely depends on the whole delay line.
+std::vector<float> make_dense_ir(std::size_t len, float phase) {
+    std::vector<float> ir(len, 0.0f);
+    for (std::size_t i = 0; i < len; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(len);
+        ir[i] = 0.5f * std::exp(-2.5f * t) *
+                std::sin(0.31f * static_cast<float>(i) + phase);
+    }
+    ir[0] = 1.0f;
+    return ir;
+}
+} // namespace
+
+// The cleanest possible statement of the crossfade's continuity contract: swap an
+// IR for a BIT-IDENTICAL copy of itself under a crossfade and nothing may change.
+// Both sides of the fade convolve the same input against the same coefficients,
+// and the default Smoothstep curve's gain law is equal-GAIN — (1-u, u), summing to
+// one — so blending a render with itself must reproduce it. Any deviation is the
+// convolver losing part of the input stream across the swap. (EqualPower sums to
+// one in POWER, so it would legitimately bulge on an identical pair; that is the
+// gain law, not the history, and is why this pins the default curve.)
+//
+// This needs a MULTI-PARTITION IR to say anything: with a single partition there
+// is almost no delay line to lose, which is why the click-free fade test above
+// (a 4-tap IR in a 64-sample block) passes either way.
+TEST_CASE("PartitionedConvolver crossfaded swap to an identical IR is inaudible",
+          "[signal][convolver][crossfade]") {
+    const std::size_t block = 64;
+    const std::size_t fade = 512;
+    const int blocks = 96, swap_block = 40;
+
+    auto ir = make_dense_ir(block * 12, 0.0f);   // 12 partitions of real history
+    auto identical = ir;                         // bit-identical copy
+    REQUIRE(identical == ir);
+
+    const auto reference = render_stream(ir, block, blocks, 0, nullptr, 0);
+    const auto swapped = render_stream(ir, block, blocks, fade, &identical, swap_block);
+
+    REQUIRE(swapped.size() == reference.size());
+    for (std::size_t i = 0; i < reference.size(); ++i)
+        REQUIRE_THAT(swapped[i], WithinAbs(reference[i], 1e-4f));
+}
+
+// Same contract on a LONG impulse. The history a swap can lose is bounded by the
+// IR's length, so a short-IR test understates the defect and can pass on a fix
+// that only carries a few partitions across. 128 partitions is the case that
+// hurts: a reverb-length IR losing its whole tail on every crossfaded swap.
+TEST_CASE("PartitionedConvolver crossfaded swap to an identical LONG IR is inaudible",
+          "[signal][convolver][crossfade]") {
+    const std::size_t block = 64;
+    const std::size_t partitions = 128;          // 8192 taps — ~171 ms at 48 kHz
+    const std::size_t fade = 512;
+    // Run well past the impulse length so a cold incoming IR cannot hide inside
+    // the measured window: the disturbance lasts exactly one impulse.
+    const int blocks = static_cast<int>(partitions) + 80;
+    const int swap_block = static_cast<int>(partitions) + 8;   // fully warm first
+
+    auto ir = make_dense_ir(block * partitions, 0.0f);
+    auto identical = ir;
+    REQUIRE(identical == ir);
+
+    const auto reference = render_stream(ir, block, blocks, 0, nullptr, 0);
+    const auto swapped = render_stream(ir, block, blocks, fade, &identical, swap_block);
+
+    REQUIRE(swapped.size() == reference.size());
+    for (std::size_t i = 0; i < reference.size(); ++i)
+        REQUIRE_THAT(swapped[i], WithinAbs(reference[i], 1e-4f));
+}
+
+// A genuinely CHANGED IR: the fade must be a blend of two continuous renders, not
+// a restart. The expectation is built from two convolvers that each ran the whole
+// stream from the start, so both references are warm at every sample; the
+// crossfade output must equal their mixer-weighted sum. That asserts the incoming
+// IR is rendering against the real input history — an incoming IR starting cold
+// would match a warm reference only after its own length had elapsed.
+TEST_CASE("PartitionedConvolver crossfade blends two continuous renders",
+          "[signal][convolver][crossfade]") {
+    const std::size_t block = 64;
+    const std::size_t fade = 512;
+    const int blocks = 96, swap_block = 40;
+
+    auto ir_a = make_dense_ir(block * 12, 0.0f);
+    auto ir_b = make_dense_ir(block * 12, 1.7f);   // different coefficients
+    REQUIRE(ir_a != ir_b);
+
+    const auto ref_a = render_stream(ir_a, block, blocks, 0, nullptr, 0);
+    const auto ref_b = render_stream(ir_b, block, blocks, 0, nullptr, 0);
+    const auto faded = render_stream(ir_a, block, blocks, fade, &ir_b, swap_block);
+
+    // The same mixer the convolver uses, stepped over the same positions.
+    TransitionMixerT<float> mixer;
+    mixer.configure(fade, TransitionCurve::Smoothstep);
+
+    const std::size_t swap_sample = static_cast<std::size_t>(swap_block) * block;
+    for (std::size_t i = 0; i < swap_sample; ++i)
+        REQUIRE_THAT(faded[i], WithinAbs(ref_a[i], 1e-4f));   // untouched before
+
+    bool saw_partial_blend = false;
+    for (std::size_t i = swap_sample; i < faded.size(); ++i) {
+        float old_gain = 0.0f, new_gain = 0.0f;
+        mixer.gains_at(i - swap_sample, old_gain, new_gain);
+        if (old_gain > 0.05f && new_gain > 0.05f) saw_partial_blend = true;
+        const float expected = ref_a[i] * old_gain + ref_b[i] * new_gain;
+        REQUIRE_THAT(faded[i], WithinAbs(expected, 1e-4f));
+    }
+    // Control: the window really did contain mid-fade samples, so the loop above
+    // tested the blend and not just its two endpoints.
+    REQUIRE(saw_partial_blend);
+    REQUIRE_THAT(faded.back(), WithinAbs(ref_b.back(), 1e-4f));   // settles on B
+}
+
+// Growing the shared ring (an IR with more partitions than the ring holds) must
+// still be allocation-free on the audio thread: the incoming state carries a
+// pre-allocated history spare built off-thread precisely so the swap never has to
+// allocate one, and the displaced ring leaves via the retire ring, never free().
+TEST_CASE("PartitionedConvolver swap that grows the input ring is allocation-free",
+          "[signal][convolver][rt]") {
+    const std::size_t block = 64;
+    PartitionedConvolver conv;
+    auto shortish = make_dense_ir(block * 2, 0.0f);
+    auto longer = make_dense_ir(block * 16, 0.4f);   // 8x the partitions
+    conv.load_ir(shortish.data(), shortish.size(), block);
+    conv.set_crossfade(256);
+
+    ConvolverIrSwapper swapper;
+    REQUIRE(swapper.stage_ir(longer.data(), longer.size(), block));
+
+    std::vector<float> in(block, 0.25f), out(block, 0.0f);
+    conv.process(in.data(), out.data(), block);
+    {
+        pulp::test::RtAllocationProbe probe;
+        REQUIRE(conv.try_swap_ir(swapper));   // grows the ring under the probe
+        conv.process(in.data(), out.data(), block);
+        REQUIRE_FALSE(probe.saw_allocation());
+    }
+    (void)swapper.drain_old();
+}
+
+// The shared ring keeps the high-water mark of partitions seen, so a detour
+// through a SHORT IR no longer throws away history the long IR will want back.
+// Under the old per-IR delay line the short IR's ring was the only thing carried,
+// so long -> short -> long silently truncated the stream to the short IR's length.
+TEST_CASE("PartitionedConvolver swap through a shorter IR and back keeps history",
+          "[signal][convolver][bg-swap]") {
+    const std::size_t block = 64;
+    auto long_ir = make_dense_ir(block * 12, 0.0f);
+    auto short_ir = make_dense_ir(block * 2, 0.8f);
+    const int blocks = 96;
+
+    const auto reference = render_stream(long_ir, block, blocks, 0, nullptr, 0);
+
+    PartitionedConvolver conv;
+    conv.load_ir(long_ir.data(), long_ir.size(), block);
+    ConvolverIrSwapper swapper;
+
+    std::vector<float> in(block), o(block), got;
+    got.reserve(static_cast<std::size_t>(blocks) * block);
+    for (int b = 0; b < blocks; ++b) {
+        if (b == 40) {
+            REQUIRE(swapper.stage_ir(short_ir.data(), short_ir.size(), block));
+            REQUIRE(conv.try_swap_ir(swapper));
+        } else if (b == 41) {   // straight back, one block later
+            REQUIRE(swapper.stage_ir(long_ir.data(), long_ir.size(), block));
+            REQUIRE(conv.try_swap_ir(swapper));
+        }
+        for (std::size_t i = 0; i < block; ++i)
+            in[i] = distinct_sample_at(static_cast<std::size_t>(b) * block + i);
+        conv.process(in.data(), o.data(), block);
+        got.insert(got.end(), o.begin(), o.end());
+        (void)swapper.drain_old();
+    }
+
+    // Only block 40 saw a different IR; from block 41 on the long IR must line up
+    // with a run that never left it — every partition of history still present.
+    for (std::size_t i = 41 * block; i < reference.size(); ++i)
+        REQUIRE_THAT(got[i], WithinAbs(reference[i], 1e-4f));
+}
+
+// A GESTURE is a BURST of IR swaps, and that is where losing the delay line stops
+// being a transient and becomes a dropout: each swap re-zeroes the history before
+// the previous one has refilled it, so the wet never recovers for the length of the
+// drag. A single-swap test measures one recovery, which looks like a dip rather
+// than the sustained hole a user actually hears.
+//
+// Stated on IDENTICAL impulses so the assertion can be exact. An envelope-depth
+// version of this was tried first and thrown away: a short-window RMS of broadband
+// material fluctuates by the very factor the artifact produces, so the metric read
+// the same ~0.23x with the fix, without it, and with no crossfade at all. There is
+// no threshold to pick there. Sample equality against a never-swapped reference has
+// none of that ambiguity.
+TEST_CASE("PartitionedConvolver crossfaded swap burst keeps the stream continuous",
+          "[signal][convolver][crossfade]") {
+    const std::size_t block = 64;
+    const std::size_t partitions = 64;          // 4096 taps of history to lose
+    const std::size_t fade = 256;               // 4 blocks; shorter than the cadence
+    const int warm = 80, every = 6, swaps = 24;
+    const int blocks = warm + every * swaps + 120;
+
+    auto ir = make_dense_ir(block * partitions, 0.0f);
+    auto identical = ir;
+    REQUIRE(identical == ir);
+
+    const auto reference = render_stream(ir, block, blocks, 0, nullptr, 0);
+
+    PartitionedConvolver conv;
+    conv.load_ir(ir.data(), ir.size(), block);
+    conv.set_crossfade(fade);
+    ConvolverIrSwapper swapper;
+
+    std::vector<float> in(block), o(block), got;
+    got.reserve(static_cast<std::size_t>(blocks) * block);
+    int accepted = 0;
+    for (int b = 0; b < blocks; ++b) {
+        const int g = b - warm;
+        if (g >= 0 && g % every == 0 && g / every < swaps) {
+            REQUIRE(swapper.stage_ir(identical.data(), identical.size(), block));
+            if (conv.try_swap_ir(swapper)) ++accepted;
+        }
+        for (std::size_t i = 0; i < block; ++i)
+            in[i] = distinct_sample_at(static_cast<std::size_t>(b) * block + i);
+        conv.process(in.data(), o.data(), block);
+        got.insert(got.end(), o.begin(), o.end());
+        (void)swapper.drain_old();
+    }
+    REQUIRE(conv.block_size_violations() == 0);
+    // Control: the burst really happened. try_swap_ir refuses while a fade is in
+    // flight, so a fade longer than the offer cadence would quietly reduce this to
+    // a handful of swaps and the test would be asserting continuity it never
+    // stressed. Every offer here must have been taken.
+    REQUIRE(accepted == swaps);
+
+    REQUIRE(got.size() == reference.size());
+    for (std::size_t i = 0; i < reference.size(); ++i)
+        REQUIRE_THAT(got[i], WithinAbs(reference[i], 1e-4f));
 }

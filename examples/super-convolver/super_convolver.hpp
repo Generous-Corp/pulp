@@ -856,24 +856,20 @@ public:
         // silence, which the host's PDC accounts for; after that, wet.)
         rebuild_ir_inline(current_size());   // first IR loaded synchronously (CPU)
 
-        // Crossfade every LIVE IR swap, and give it TIME.
+        // Crossfade every LIVE IR swap.
         //
-        // This used to be kInternalBlock — 512 samples, ~11 ms — justified as "long enough to
-        // be inaudible as a transition". That reasoning assumed the incoming IR starts from
-        // the CARRIED input history. On the crossfade path it does NOT: ConvolverIrSwapper
-        // deliberately skips the carry there, because the displaced IR is still rendering
-        // from that history in parallel and carrying it would swap it out from under the
-        // fade-out. So the new convolver starts COLD — its frequency-domain delay line is
-        // empty, and its output has to build up from silence over the IR's own length.
+        // The length here is a TASTE choice — how fast the room should appear to change —
+        // and nothing more. Both sides of a PartitionedConvolver fade render from the
+        // convolver's single shared input history, so the incoming IR is already warm the
+        // instant the fade starts and a swap is continuous at any fade length; ~150 ms is
+        // simply the usual figure for morphing convolution IRs. The cost is a doubled MAC
+        // for that window (the input transform is shared, not doubled), which is a blip
+        // against a knob drag.
         //
-        // Fading a full old tail into a cold new one in 11 ms is therefore not a transition,
-        // it is a DIP: the wet drops out and climbs back. Drag Size and you get one of those
-        // per completed rebuild — which is exactly the crackle a user hears.
-        //
-        // The fix is to let the fade last long enough that the incoming IR has meaningfully
-        // filled its delay line while the outgoing one is still carrying the sound. ~150 ms
-        // is the usual figure for morphing convolution IRs and it is what this uses. The cost
-        // is a doubled convolution for that window, which is a blip against a knob drag.
+        // The length is NOT load-bearing for continuity, and picking it to buy continuity
+        // does not work: a cold incoming IR is disturbed for its own full length whatever
+        // the fade, so the dip a short fade used to produce here needed the convolver
+        // fixed, not a longer fade.
         const auto fade_len = static_cast<std::size_t>(sample_rate_ * kIrCrossfadeSeconds);
         for (auto& c : conv_) c.set_crossfade(std::max<std::size_t>(kInternalBlock, fade_len));
 
