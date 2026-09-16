@@ -324,8 +324,8 @@ OperationResult explain(std::string_view project, std::uint32_t sample_rate) {
 }
 
 OperationResult render(std::string_view project, const std::filesystem::path& output,
-                       std::uint32_t sample_rate) {
-    return render(ProjectSource::auto_detect(project), output, sample_rate);
+                       std::uint32_t sample_rate, std::uint32_t tail_frames) {
+    return render(ProjectSource::auto_detect(project), output, sample_rate, tail_frames);
 }
 
 OperationResult schema() {

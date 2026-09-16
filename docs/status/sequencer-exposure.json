@@ -8329,6 +8329,134 @@
           "rationale": "No design-time capability is registered or removed. The artifact window is computed inside the renderer's program compiler and is reachable only through the trim an author already wrote on the placement."
         }
       }
+    },
+    {
+      "id": "offline-timeline-render-tail",
+      "title": "Explicit render tail on the offline timeline render verb",
+      "classification": "offline_cli_mcp",
+      "delivery_state": "pending",
+      "claim_id": "e4a6dc69-a3ab-4d77-8e2c-fcd266bc3fb8",
+      "owned_paths": [
+        ".agents/skills/timeline/SKILL.md",
+        ".github/vellum-expansion-watch-events/20260914-pr8385-timeline-render-tail-watch.json",
+        "core/timeline/schema/timeline_mcp_tools.json",
+        "core/timeline/tools/schema_mcp_emit.py",
+        "core/timeline/tools/test_schema_mcp_emit.py",
+        "docs/reference/cli.md",
+        "docs/status/cli-commands.yaml",
+        "docs/status/pulp-tooling-disposition.json",
+        "docs/status/sequencer-exposure.json",
+        "test/cmake/cli_tests.cmake",
+        "test/test_cli_timeline_render_shellout.cpp",
+        "test/test_timeline_cli_offline_render.cpp",
+        "tools/cli/cmd_seq.cpp",
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "tools/timeline/include/pulp/tools/timeline/agent.hpp",
+        "tools/timeline/src/timeline_agent.cpp",
+        "tools/timeline/src/timeline_render.cpp"
+      ],
+      "evidence": [
+        {
+          "path": "tools/timeline/src/timeline_render.cpp",
+          "needles": [
+            "options.tail_frames = tail_frames;",
+            "sequence plus tail exceeds the in-memory render budget"
+          ]
+        },
+        {
+          "path": "tools/cli/cmd_seq.cpp",
+          "needles": [
+            "parse_tail_frames",
+            "--tail-frames"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The tail control itself is host::TimelineOfflineRenderOptions::tail_frames, an already-installed host field this slice does not change. The entry point the slice widens lives in tools/timeline, which PulpInstallRules.cmake does not export as a header subsystem, so no installed SDK surface moves."
+        },
+        "offline_timeline_cli": {
+          "disposition": "exposed",
+          "rationale": "pulp render --tail-frames <n> renders n frames after the sequence ends, so a ringing delay, reverb, or release is captured instead of cut. Zero stays the default, so an unflagged render keeps the length it has always produced.",
+          "evidence": [
+            {
+              "kind": "cli_definition",
+              "path": "docs/status/cli-commands.yaml",
+              "needles": [
+                "--tail-frames"
+              ]
+            },
+            {
+              "kind": "cli_handler",
+              "path": "tools/cli/cmd_seq.cpp",
+              "needles": [
+                "parse_tail_frames",
+                "--tail-frames requires a value"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "test/test_cli_timeline_render_shellout.cpp",
+              "needles": [
+                "pulp render rejects a tail option with no value"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "offline_timeline_mcp": {
+          "disposition": "exposed",
+          "rationale": "pulp_timeline_render accepts an optional bounded tail_frames integer. Absent means zero; a present but unparsable value is refused rather than silently read as absent.",
+          "evidence": [
+            {
+              "kind": "mcp_definition",
+              "path": "core/timeline/schema/timeline_mcp_tools.json",
+              "needles": [
+                "tail_frames"
+              ]
+            },
+            {
+              "kind": "mcp_handler",
+              "path": "tools/mcp/mcp_timeline_tools.cpp",
+              "needles": [
+                "timeline_tail_frames",
+                "handle_timeline_render"
+              ]
+            },
+            {
+              "kind": "test",
+              "path": "core/timeline/tools/test_schema_mcp_emit.py",
+              "needles": [
+                "render exposes the tail as an explicit bounded integer option"
+              ]
+            }
+          ],
+          "authority": {
+            "admission": "read_only",
+            "writer_profile": null,
+            "bounds": null,
+            "refusal_codes": []
+          }
+        },
+        "live_product_control": {
+          "disposition": "gap",
+          "rationale": "Bounce length is not a live Product A control: no live typed operation renders a timeline offline or selects a tail for one.",
+          "dependencies": [
+            "product-a-timeline-document-session"
+          ],
+          "owner": "sequencer-control-closure"
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "The tail is an argument to an offline render, not a design-time authoring capability; it grants no authority over a document."
+        }
+      }
     }
   ],
   "tombstones": []

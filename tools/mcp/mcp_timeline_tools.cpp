@@ -31,6 +31,7 @@ struct TimelineArguments {
     const pulp::timeline::JsonValue* commands = nullptr;
     const pulp::timeline::JsonValue* output = nullptr;
     const pulp::timeline::JsonValue* sample_rate = nullptr;
+    const pulp::timeline::JsonValue* tail_frames = nullptr;
     const pulp::timeline::JsonValue* input = nullptr;
     const pulp::timeline::JsonValue* format = nullptr;
     const pulp::timeline::JsonValue* accept_losses = nullptr;
@@ -61,6 +62,7 @@ parse_timeline_arguments(const std::string& params_json) {
     result.commands = root.find("commands");
     result.output = root.find("output");
     result.sample_rate = root.find("sample_rate");
+    result.tail_frames = root.find("tail_frames");
     result.input = root.find("input");
     result.format = root.find("format");
     result.accept_losses = root.find("accept_losses");
@@ -119,6 +121,23 @@ timeline_sample_rate(const pulp::timeline::JsonValue* value) {
         parsed.value() > pulp::timebase::kMaximumCompiledSampleRate) {
         return pulp::runtime::Err(
             std::string("Error: sample_rate must be an integer between 1 and 768000"));
+    }
+    return pulp::runtime::Ok(parsed.value());
+}
+
+/// Reads the optional render tail, in frames.
+///
+/// Absent means zero, the length every render produced before the control
+/// existed. A present but unparsable value is refused rather than silently
+/// treated as absent, so a caller never gets a shorter file than it asked for.
+pulp::runtime::Result<std::uint32_t, std::string>
+timeline_tail_frames(const pulp::timeline::JsonValue* value) {
+    if (value == nullptr)
+        return pulp::runtime::Ok(std::uint32_t{0});
+    auto parsed = pulp::timeline::parse_u32_number(*value, "tail_frames");
+    if (!parsed) {
+        return pulp::runtime::Err(
+            std::string("Error: tail_frames must be an integer between 0 and 4294967295"));
     }
     return pulp::runtime::Ok(parsed.value());
 }
@@ -301,9 +320,13 @@ std::string handle_timeline_render(const std::string& params_json) {
     auto sample_rate = timeline_sample_rate(arguments.value().sample_rate);
     if (!sample_rate)
         return timeline_argument_error(sample_rate.error());
+    auto tail_frames = timeline_tail_frames(arguments.value().tail_frames);
+    if (!tail_frames)
+        return timeline_argument_error(tail_frames.error());
     return timeline_result(pulp::tools::timeline::render(
         timeline_project_source(*project),
-        pulp::tools::timeline::filesystem_path_from_utf8(*output), sample_rate.value()));
+        pulp::tools::timeline::filesystem_path_from_utf8(*output), sample_rate.value(),
+        tail_frames.value()));
 }
 
 std::string handle_timeline_export(const std::string& params_json) {
