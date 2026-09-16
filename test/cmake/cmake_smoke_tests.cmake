@@ -588,6 +588,27 @@ if(UNIX)
         TIMEOUT 30)
 endif()
 if(Python3_Interpreter_FOUND)
+    # The frozen C0 ABI receipt was captured on darwin-arm64. Register its
+    # governed nested build on the matching platform; the portable verifier
+    # selftests remain part of every Python-enabled test manifest.
+    if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+        add_test(NAME sample-region-compat-baseline
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/sample_region_compat_baseline.py"
+                --repo "${CMAKE_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}/sample-region-compat-baseline-build"
+                --negative-controls)
+        set_tests_properties(sample-region-compat-baseline PROPERTIES
+            LABELS "compatibility;sample-region"
+            TIMEOUT 3600)
+    endif()
+    add_test(NAME sample-region-compat-baseline-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_sample_region_compat_baseline.py")
+    set_tests_properties(sample-region-compat-baseline-selftest PROPERTIES
+        LABELS "compatibility;sample-region"
+        TIMEOUT 120)
+
     # tools/mcp is added after test/, so TARGET is necessarily false here even
     # in the normal build. Mirror its platform/top-level admission instead.
     if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)

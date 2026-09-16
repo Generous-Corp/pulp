@@ -49,7 +49,9 @@ void print_seq_usage() {
 
 void print_render_usage() {
     std::cout << "Usage: pulp render <project.json> --out <file.wav> "
-                 "[--sample-rate <hz>]\n";
+                 "[--sample-rate <hz>] [--tail-frames <n>]\n"
+                 "       --tail-frames renders n extra frames after the sequence ends so a\n"
+                 "       ringing delay, reverb, or release is captured instead of cut.\n";
 }
 
 int emit(OperationResult result) {
@@ -128,6 +130,20 @@ std::optional<std::uint32_t> parse_sample_rate(std::string_view text) {
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
     if (error != std::errc{} || end != text.data() + text.size() || value == 0 ||
         value > pulp::timebase::kMaximumCompiledSampleRate)
+        return std::nullopt;
+    return static_cast<std::uint32_t>(value);
+}
+
+/// Parses an unsigned decimal frame count, rejecting trailing characters.
+///
+/// Zero is a legal tail: it is the length every render produced before the
+/// option existed. The upper bound is the width the renderer accepts; whether a
+/// given tail actually fits is the render budget's decision, not the parser's.
+std::optional<std::uint32_t> parse_tail_frames(std::string_view text) {
+    std::uint64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() ||
+        value > std::numeric_limits<std::uint32_t>::max())
         return std::nullopt;
     return static_cast<std::uint32_t>(value);
 }
@@ -521,6 +537,7 @@ int cmd_render(const std::vector<std::string>& args) {
     fs::path project;
     fs::path output;
     std::uint32_t sample_rate = 48'000;
+    std::uint32_t tail_frames = 0;
     for (std::size_t index = 0; index < args.size(); ++index) {
         if (args[index] == "--out") {
             if (++index == args.size()) {
@@ -539,6 +556,17 @@ int cmd_render(const std::vector<std::string>& args) {
                 return 2;
             }
             sample_rate = *parsed;
+        } else if (args[index] == "--tail-frames") {
+            if (++index == args.size()) {
+                std::cerr << "pulp render: --tail-frames requires a value\n";
+                return 2;
+            }
+            const auto parsed = parse_tail_frames(args[index]);
+            if (!parsed) {
+                std::cerr << "pulp render: --tail-frames must be between 0 and 4294967295\n";
+                return 2;
+            }
+            tail_frames = *parsed;
         } else if (args[index].starts_with("-")) {
             std::cerr << "pulp render: unknown option: " << args[index] << "\n";
             return 2;
@@ -553,5 +581,6 @@ int cmd_render(const std::vector<std::string>& args) {
         print_render_usage();
         return 2;
     }
-    return emit(pulp::tools::timeline::render(ProjectSource::file(project), output, sample_rate));
+    return emit(pulp::tools::timeline::render(ProjectSource::file(project), output, sample_rate,
+                                             tail_frames));
 }
