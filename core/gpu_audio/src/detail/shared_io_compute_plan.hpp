@@ -64,6 +64,14 @@ class SharedIoComputePlan {
     bool expire_delivery(const Completion& completion) noexcept {
         return arena_.expire_delivery(completion.token.slot);
     }
+    // Terminal failure and expired success retain storage until this explicit
+    // non-RT disposition relinquishes the exact token.
+    bool discard_completion(const Completion& completion) noexcept {
+        return arena_.discard(completion.token.slot);
+    }
+    // Host/quiescent only. Reuses the persistent slot allocations while
+    // advancing epoch identity, so prior completion/token records are stale.
+    bool reprime_when_quiescent() noexcept;
     bool release_output(const SharedIoArena::ReleaseRecord& record) noexcept {
         return arena_.release_output(record);
     }
