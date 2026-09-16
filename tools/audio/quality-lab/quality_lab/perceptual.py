@@ -30,9 +30,16 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from typing import Any
 
 VISQOL_ENV = "PULP_VISQOL_BIN"
+# ViSQOL's audio mode is defined at 48 kHz, and its own WAV reader
+# (`src/wav_reader.cc`) accepts 16-bit PCM only — anything else is rejected with
+# "Error parsing WAV Header - Expected 16bit samples." The lab writes float32 WAVs
+# (`audio_io.save_wav`), so a pair straight off the pipeline is unreadable by ViSQOL
+# and must be transcoded first.
+VISQOL_REQUIRED_SR = 48000
 PEAQ_ENV = "PULP_PEAQ_BIN"
 AQUATK_ENV = "PULP_AQUATK_BIN"
 
@@ -47,13 +54,53 @@ def _resolve(env_var: str) -> tuple[str | None, str]:
     return resolved, ""
 
 
+_VERSION_TRIPLE = re.compile(r"\b\d+\.\d+\.\d+\b")
+
+
 def parse_mos(text: str) -> float | None:
-    """Pull a MOS-LQO float (1..5) from a ViSQOL stdout line. Robust to format drift."""
-    m = re.search(r"MOS[-_ ]?LQO\s*[:=]?\s*([0-9]+\.[0-9]+)", text, re.IGNORECASE)
+    """Pull a MOS-LQO float from ViSQOL's console output. Robust to format drift.
+
+    ViSQOL prints `MOS-LQO:\t\t<value>` with default ostream precision, so an exactly
+    integral score arrives as `4` rather than `4.0` — hence the optional fraction.
+
+    The bare-float fallback exists only for format drift and is deliberately narrow: a
+    dotted version triple is stripped first so a banner like "ViSQOL 3.3.3" cannot be
+    read as a score. Callers must apply it to stdout only — ViSQOL writes diagnostics to
+    stderr, where any incidental float would otherwise become a fabricated MOS.
+    """
+    m = re.search(r"MOS[-_ ]?LQO\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
     if m:
         return float(m.group(1))
-    m = re.search(r"\b([1-4]\.[0-9]+|5\.0+)\b", text)  # fallback: a plausible MOS value
+    cleaned = _VERSION_TRIPLE.sub(" ", text)
+    m = re.search(r"\b([1-4]\.[0-9]+|5\.0+)\b", cleaned)  # fallback: a plausible MOS
     return float(m.group(1)) if m else None
+
+
+def prepare_for_visqol(path: str, tmpdir: str) -> tuple[str, str | None]:
+    """Make one WAV readable by ViSQOL, returning `(path_to_use, error_or_None)`.
+
+    Transcodes to 16-bit PCM when needed (the lab's own exports are float32) and refuses
+    a sample rate ViSQOL's audio mode is not defined at, rather than letting it through
+    to be silently mis-scored. When soundfile is unavailable the original path is handed
+    through unchanged — the adapter degrades, it never blocks.
+    """
+    try:
+        import soundfile as sf
+    except Exception:
+        return path, None
+    try:
+        info = sf.info(path)
+    except Exception as exc:
+        return path, f"cannot read {os.path.basename(path)}: {exc}"
+    if int(info.samplerate) != VISQOL_REQUIRED_SR:
+        return path, (f"{os.path.basename(path)} is {info.samplerate} Hz; ViSQOL audio "
+                      f"mode requires {VISQOL_REQUIRED_SR} Hz — resample before comparing")
+    if info.subtype == "PCM_16":
+        return path, None
+    out = os.path.join(tmpdir, os.path.basename(path) + ".pcm16.wav")
+    data, sr = sf.read(path, always_2d=True)
+    sf.write(out, data, sr, subtype="PCM_16")
+    return out, None
 
 
 def run_visqol(reference_wav: str, candidate_wav: str, timeout_s: float = 180.0) -> dict[str, Any]:
@@ -63,15 +110,28 @@ def run_visqol(reference_wav: str, candidate_wav: str, timeout_s: float = 180.0)
     if binary is None:
         return {"tool": "visqol", "status": "skipped", "reason": reason, "mos_lqo": None}
     try:
-        proc = subprocess.run(
-            [binary, "--reference_file", reference_wav, "--degraded_file", candidate_wav,
-             "--use_speech_mode=false"],
-            capture_output=True, text=True, timeout=timeout_s,
-        )
-        mos = parse_mos(proc.stdout + "\n" + proc.stderr)
+        with tempfile.TemporaryDirectory(prefix="visqol-in-") as tmpdir:
+            ref, ref_err = prepare_for_visqol(reference_wav, tmpdir)
+            cand, cand_err = prepare_for_visqol(candidate_wav, tmpdir)
+            if ref_err or cand_err:
+                return {"tool": "visqol", "status": "error", "mos_lqo": None,
+                        "reason": "; ".join(e for e in (ref_err, cand_err) if e)}
+            proc = subprocess.run(
+                [binary, "--reference_file", ref, "--degraded_file", cand,
+                 "--use_speech_mode=false"],
+                capture_output=True, text=True, timeout=timeout_s,
+            )
+        # Parse stdout ONLY. ViSQOL prints the score to stdout and routes every
+        # diagnostic to stderr, and it exits 0 even when a comparison fails (`main.cc`
+        # logs the error and continues), so neither the exit code nor stderr can be
+        # trusted — scanning stderr turns an incidental float in an error message or a
+        # file path into a fabricated MOS for a run that produced no score at all.
+        mos = parse_mos(proc.stdout)
         if mos is None:
+            tail = [ln for ln in (proc.stderr or "").strip().splitlines() if ln][-3:]
+            detail = f"; stderr: {' | '.join(tail)}" if tail else ""
             return {"tool": "visqol", "status": "error", "mos_lqo": None,
-                    "reason": "could not parse MOS-LQO from output", "exit": proc.returncode}
+                    "reason": f"no MOS-LQO on stdout{detail}", "exit": proc.returncode}
         return {"tool": "visqol", "status": "ok", "mos_lqo": round(mos, 3),
                 "mode": "audio", "advisory": True}
     except subprocess.TimeoutExpired:

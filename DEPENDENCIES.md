@@ -108,7 +108,9 @@ directories and used under their own licenses. Intentionally absent from
 
 | Tool | License | Used For | Pulp Boundary |
 |------|---------|----------|---------------|
+| Cmajor toolchain (`cmaj`) | GPL-3.0 or separately licensed commercial distribution | Optional validation and artifact generation from developer-owned `.cmajorpatch` sources | Developer supplies and licenses the executable independently. Pulp invokes it only through `tools/scripts/cmajor_external.py`; it is never committed, downloaded, bundled, exported, shipped, or required by the normal build or public CI. Generated artifacts remain developer-owned inputs and are not checked into Pulp. |
 | esbuild | MIT | Build-time JS/TS bundler for `@pulp/react`, `pulp-import-ir`, the Figma plugin, and the Three.js IIFE bundle | `npm` devDependency, installed on demand; build-time only. Never committed, bundled, exported by `cmake --install`, shipped in plugins, or required by public CI. |
+| Faust compiler (`faust`) | GPL-2.0-or-later | Optional offline C++ artifact generation from developer-owned `.dsp` sources | Developer supplies the executable independently. Pulp's CMake helper invokes it only when found; it is never committed, downloaded, bundled, exported, shipped, or required by the normal build or public CI. Pulp's checked-in example DSP implementations are Pulp-owned references, not claimed compiler output. |
 | fflate | MIT | Deflate/zip in the developer-only Figma plugin (`tools/figma-plugin`) | Same boundary. |
 | ffmpeg-static | Wrapper MIT; bundled FFmpeg binaries GPL/LGPL | Encodes captured frames into the MP4 used by the video-proof composer | `npm` devDependency in `tools/local-ci`; runtime also accepts a system `PULP_FFMPEG`/`PATH` ffmpeg. Same boundary. |
 | json-schema-to-typescript | MIT | Generates TypeScript types from JSON Schema for the Figma plugin | Same boundary. |

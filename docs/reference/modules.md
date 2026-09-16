@@ -1112,7 +1112,7 @@ processors while keeping the third-party toolchain developer-supplied.
 
 | Lane | What It Does | Guide |
 |------|--------------|-------|
-| FAUST | Offline code generation into checked-in C++ headers | [FAUST guide](../guides/faust.md) |
+| FAUST | Pulp reference DSP adaptation plus optional external code generation | [FAUST guide](../guides/faust.md) |
 | Cmajor | External Cmajor toolchain validation and generation | [Cmajor guide](../guides/cmajor.md) |
 | JSFX | Bounded source-only JSFX subset parsing and validation | [JSFX guide](../guides/jsfx.md) |
 

@@ -1,3 +1,5 @@
+#include "support/control_manifest_fixtures.hpp"
+
 #include <pulp/inspect/control_host_enrollment.hpp>
 #include <pulp/runtime/crypto.hpp>
 
@@ -19,21 +21,7 @@ namespace fs = std::filesystem;
 using namespace std::chrono_literals;
 using namespace pulp::inspect;
 
-constexpr std::string_view kManifest = R"({
-  "schema": "dev.pulp.control/artifact-manifest@1",
-  "schema_version": 1,
-  "profile": "developer-local",
-  "target": "pulp-control-trusted-host-fixture",
-  "product_name": "Pulp Trusted Host Fixture",
-  "bundle_id": "dev.pulp.test.trusted-host-fixture",
-  "build_id": "build:0123456789abcdef0123456789abcdef",
-  "registry_digest": "1010e23c360febd946335c5c91d0c8d9ad9a67dca7bfcceedce38a0bf5ebe1c8",
-  "endpoint_included": true,
-  "unsafe_runtime_eval_acknowledged": false,
-  "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
-  "capabilities": ["dev.pulp.instance/read@1"]
-}
-)";
+constexpr std::string_view kManifest = pulp::test::kTrustedHostFixtureManifest;
 
 struct Fixture {
     Fixture() {

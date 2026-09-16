@@ -1,3 +1,5 @@
+#include "support/control_manifest_fixtures.hpp"
+
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/inspect/control_host_bootstrap.hpp>
 #include <pulp/inspect/control_host_preflight.hpp>
@@ -26,9 +28,8 @@ namespace {
 const volatile char kStandalone[] = "PULP_STANDALONE_COMPONENT_V1";
 const volatile char kShipping[] = "PULP_INSPECT_SHIPPING_MANIFEST_V1";
 const volatile char kProfile[] = "PULP_CONTROL_PROFILE_DEVELOPER_LOCAL_V1";
-const volatile char kManifest[] =
-    "PULP_CONTROL_MANIFEST_SHA256_7a00e4810e89256641ae859cefa525b58f1a265c7c760fb649408ac1283300d9_"
-    "V1";
+const volatile pulp::test::ControlManifestMarker kManifest =
+    pulp::test::kTrustedHostFixtureMarker;
 const volatile char kCapability[] = "PULP_INSPECT_CAPABILITY_SESSION_DESCRIBE_V1";
 
 bool contains_authority_material(std::string_view value) {
@@ -135,8 +136,8 @@ bool finish_without_valid_receipt(pulp::inspect::ControlHostBootstrapHandle hand
 } // namespace
 
 int main(int argc, char** argv) {
-    if (kStandalone[0] != 'P' || kShipping[0] != 'P' || kProfile[0] != 'P' || kManifest[0] != 'P' ||
-        kCapability[0] != 'P')
+    if (kStandalone[0] != 'P' || kShipping[0] != 'P' || kProfile[0] != 'P' ||
+        kManifest.bytes[0] != 'P' || kCapability[0] != 'P')
         return 73;
     for (int index = 0; index < argc; ++index)
         if (contains_authority_material(argv[index]))

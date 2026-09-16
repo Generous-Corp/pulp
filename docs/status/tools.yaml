@@ -48,11 +48,25 @@ sweep:
     - tools/harness
     - tools/audio
   include_paths:
+    - tools/scripts/ctest_nonruns.py
     - tools/scripts/figma_import_diff.py
     - tools/scripts/gpu_trace_overhead_acceptance.py
     - tools/scripts/render-figma-import.sh
 
 tools:
+  # ── CI and test evidence ────────────────────────────────────────────────
+  - name: ctest-nonruns
+    path: tools/scripts/ctest_nonruns.py
+    category: test-evidence
+    use_when: Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift.
+    invocation: python3 tools/scripts/ctest_nonruns.py <current-ctest.junit.xml> [--baseline <known-good-ctest.junit.xml>] [--json]
+    inputs: One explicit CTest JUnit artifact and, optionally, a baseline artifact produced with a comparable selection.
+    outputs: Bounded Markdown or `pulp.ctest-nonruns.v2` JSON with input digests, status counts, non-run reasons, duplicate-safe status transitions, and tests present in only one artifact.
+    caveat: Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
+    availability: always
+    skill: ci
+    docs: guides/local-ci.md
+
   # ── Visual comparison — the tools the hand-roll incident was about ────────
   - name: fidelity-diff
     path: tools/import-design/fidelity_diff.py

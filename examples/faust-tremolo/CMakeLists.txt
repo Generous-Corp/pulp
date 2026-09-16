@@ -1,5 +1,5 @@
 # FaustTremolo — FAUST DSL tremolo effect example
-# Validates: modulation effect, phase-based oscillator in generated DSP
+# Validates: modulation effect and phase-based oscillator in the reference DSP
 
 if(PULP_BUILD_TESTS)
     add_executable(pulp-faust-tremolo-test test_faust_tremolo.cpp)

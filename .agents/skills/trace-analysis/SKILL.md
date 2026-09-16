@@ -552,6 +552,22 @@ If you need per-recording GPU time in a capture, enable it explicitly on the
 host's Options. If a trace shows no `gpu_render_time`, check that flag before
 suspecting the adapter.
 
+## GPU errors arrive as `gpu.diagnostic` instant events
+
+A Dawn uncaptured-error / device-lost callback and a Skia log record no longer
+live only in `runtime::log_error` output. `core/render/src/gpu_diagnostics.cpp`
+forwards them into the timeline as zero-duration instant events named
+`gpu.diagnostic` on category `gpu`, with the severity and the message text
+riding along as debug annotations. They keep their `log_error` calls, so a log
+and a trace should agree — a diagnostic in one and not the other means the
+bridge was off, not that the event did not happen.
+
+The Skia half is gated: it installs an `SkLogHandler` only when tracing is
+compiled in or `PULP_GPU_LOG_BRIDGE` is set, and only when nothing else already
+owns Skia's process-global handler. A capture with Dawn diagnostics but no Skia
+ones is therefore an ordinary outcome (a host already held the slot), not a
+dropped event. `skia_log_bridge_state()` reports which it was.
+
 ## DPR experiment traces reuse A2T
 
 A4 DPR trials do not introduce a second profiler or a new ad-hoc SQL report.

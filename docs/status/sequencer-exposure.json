@@ -100,9 +100,9 @@
         },
         "live_product_control": {
           "disposition": "gap",
-          "rationale": "Product A has no typed operation and executor for sequencer grid snapshots or edits.",
+          "rationale": "A typed Product A operation and executor for sequencer grid snapshots and edits now exist, but this row cannot carry that closure. The row is released, so its evidence resolves against the merge it shipped in rather than against the current tree; an exposed claim here would assert a live control that did not exist in that snapshot. The closure is recorded instead on the pending row product-a-sequencer-state-control, whose live_product_control surface is exposed and whose evidence resolves against the tree that contains the executor. This surface stays a gap only as the pointer to that row.",
           "dependencies": [
-            "product-a-sequencer-state-operation"
+            "product-a-sequencer-state-control"
           ],
           "owner": "sequencer-control-closure"
         },
@@ -2037,7 +2037,7 @@
       "id": "windows-mcp-string-chunks",
       "title": "Portable generated Timeline MCP document string chunks",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "a4565ce5-05df-467e-b284-1edf94c63a11",
       "owned_paths": [
         "test/cmake/timeline_tests.cmake",
@@ -2048,6 +2048,12 @@
         "tools/cmake/PulpCppStringChunks.cmake",
         "docs/status/sequencer-exposure.json"
       ],
+      "release": {
+        "pr": 8034,
+        "accepted_head": "efe88295894770991fa3060cee0766eead3407da",
+        "merge_sha": "d018d5bd1b35af12959d476a6a3506e2253767d3",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/mcp/timeline_mcp_tools.h.in",
@@ -2095,11 +2101,17 @@
       "id": "sequencer-api-docs-diagnostic-privacy",
       "title": "Private-path-safe Sequencer API documentation diagnostics",
       "classification": "ci_test_only",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "codeql-alert-124-20260827",
       "owned_paths": [
         "tools/scripts/timeline_api_docs_check.py"
       ],
+      "release": {
+        "pr": 7853,
+        "accepted_head": "b3e79c926aefd5d9bacc0de006f722ed6156a020",
+        "merge_sha": "a4a45d8536f9207cf61c3921eeab33a8a736aa76",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/scripts/timeline_api_docs_check.py",
@@ -2299,7 +2311,7 @@
       "id": "timebase-foundation-link-boundary",
       "title": "Timebase links the header-only foundation target instead of the full runtime",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "dsp-foundation-link-boundary-20260829",
       "owned_paths": [
         ".agents/skills/playback/SKILL.md",
@@ -2311,6 +2323,12 @@
         "tools/cmake/PulpInstallRules.cmake",
         "tools/scripts/timeline_engine_dependency_floor_check.py"
       ],
+      "release": {
+        "pr": 7904,
+        "accepted_head": "b4ca49dcf2652ad99f0da67a68d60823008bdb0c",
+        "merge_sha": "aaa78ac62efd9425b409ca67051af2b18306bbfe",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "examples/timeline-sdk-consumer/CMakeLists.txt",
@@ -2400,7 +2418,7 @@
       "id": "signal-fir-equiripple-design",
       "title": "Equiripple FIR design by the Remez exchange",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "signal-fir-equiripple-design-20260830",
       "owned_paths": [
         "core/signal/include/pulp/signal/fir_design.hpp",
@@ -2409,6 +2427,12 @@
         "docs/reference/fir-design.md",
         "docs/status/agent-capabilities.json"
       ],
+      "release": {
+        "pr": 7916,
+        "accepted_head": "02ef91d441163fc9ac3d04bf530fd81324f19cc8",
+        "merge_sha": "e96d9bce6a2e0c20bda0844181182f5d3b055176",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/signal/include/pulp/signal/fir_design.hpp",
@@ -2736,13 +2760,19 @@
       "id": "signal-spectral-mask-realtime-layout",
       "title": "Realtime spectral-mask layout adoption",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "signal-spectral-mask-realtime-layout-20260901",
       "owned_paths": [
         "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
         "test/test_spectral_primitives.cpp",
         "docs/status/agent-capabilities.json"
       ],
+      "release": {
+        "pr": 7996,
+        "accepted_head": "e7e72f0c6c720a8b7333dfdaa397c334f979b120",
+        "merge_sha": "bb0559e33c57d10f6d12864c1394ca29fdf7bff4",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
@@ -2912,7 +2942,7 @@
       "id": "standalone-open-documents-installed-sdk",
       "title": "Standalone document-open seam ships with the selected SDK",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "standalone-open-documents-20260903",
       "owned_paths": [
         "tools/cmake/PulpInstallRules.cmake",
@@ -2920,6 +2950,12 @@
         "core/format/include/pulp/format/standalone.hpp",
         "core/view/include/pulp/view/window_host.hpp"
       ],
+      "release": {
+        "pr": 8032,
+        "accepted_head": "24ee29550bc2ca12b401bc97717f2a0af60e1baa",
+        "merge_sha": "bc7d6999229f189f18a82a8f03aa4a576bca21d7",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/cmake/PulpInstallRules.cmake",
@@ -3090,10 +3126,10 @@
         },
         "offline_timeline_cli": {
           "disposition": "gap",
-          "rationale": "No `pulp seq` operation reads or writes controller lanes yet. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to restricted proposal-safe writers. Dependency: this row's runtime must land first so the CLI does not publish an operation whose backend refuses valid input.",
+          "rationale": "No `pulp seq` operation reads or writes controller lanes yet. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to restricted proposal-safe writers. Dependency: offline-timeline-expression-lane-commands, the typed clip expression-lane command set that would carry this runtime onto the CLI.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "midi-expression-playback"
+            "offline-timeline-expression-lane-commands"
           ]
         },
         "offline_timeline_mcp": {
@@ -3101,7 +3137,7 @@
           "rationale": "The generated Timeline MCP schema exposes no controller-lane operation. Owner: NW-D (P0-40-CONTROLS).",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "midi-expression-playback"
+            "offline-timeline-expression-lane-commands"
           ]
         },
         "live_product_control": {
@@ -3109,8 +3145,7 @@
           "rationale": "Product A live timeline authority is absent for the sequencer generally, not merely for controllers. Owner: NW-D, and only where that source is Pulp-owned; otherwise it stays a recorded cross-repository dependency rather than a Pulp change.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
-            "midi-expression-playback"
+            "product-a-timeline-document-session"
           ]
         },
         "design_time_agent_manifest": {
@@ -3118,7 +3153,7 @@
           "rationale": "No agent-capability row yet advertises controller playback. Owner: NW-D, which closes the capability surface once the runtime operations it would advertise are executable.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "midi-expression-playback"
+            "sequence-controller-playback-program"
           ]
         }
       }
@@ -3212,7 +3247,7 @@
           "rationale": "Product A live timeline authority is absent for the sequencer generally. The wire section is the transport such a control lane would publish over, so this row is a dependency of that closure rather than a step of it. Owner: NW-D, and only where that source is Pulp-owned.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
+            "product-a-timeline-document-session",
             "midi-expression-playback"
           ]
         },
@@ -3299,7 +3334,7 @@
           "rationale": "`pulp seq` can author a track mixer and a clip's playback properties, but nothing reports whether a given nesting will compose or refuse, so an author still discovers a refusal at compile time. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to proposal-safe writers and can then surface the refusal codes.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-sequence-gain-composition"
+            "offline-timeline-nesting-refusal-preview"
           ]
         },
         "offline_timeline_mcp": {
@@ -3307,7 +3342,7 @@
           "rationale": "The generated Timeline MCP schema carries no operation that reports nested-mixer composability or its refusal codes. Owner: NW-D (P0-40-CONTROLS).",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-sequence-gain-composition"
+            "offline-timeline-nesting-refusal-preview"
           ]
         },
         "live_product_control": {
@@ -3315,8 +3350,7 @@
           "rationale": "Product A live timeline authority is absent for the sequencer generally, not merely for nested mixer state. Owner: NW-D, and only where that source is Pulp-owned; otherwise it stays a recorded cross-repository dependency.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
-            "nested-sequence-gain-composition"
+            "product-a-timeline-document-session"
           ]
         },
         "design_time_agent_manifest": {
@@ -3324,7 +3358,7 @@
           "rationale": "No agent-capability row advertises what a nested sequence preserves. An agent building reusable patterns still cannot discover that a child fader composes over media and refuses over notes. Owner: NW-D, once the runtime it would advertise is complete across the remaining NW-C slices.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-sequence-gain-composition"
+            "nested-sequence-composition-capability-row"
           ]
         }
       }
@@ -3474,7 +3508,7 @@
           "rationale": "No `pulp seq` operation reports or sets a device chain's event latency, and none should until an event-to-event device executes: a CLI reading a shift that is structurally zero would publish a number with no content. Owner: the sequencer control closure lane, gated on event-to-event execution landing first.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "event-stream-pdc-contract"
+            "event-to-event-device-and-catalog"
           ]
         },
         "offline_timeline_mcp": {
@@ -3482,24 +3516,19 @@
           "rationale": "The generated Timeline MCP schema exposes no event-latency or compensation operation, for the same reason as the CLI surface. Owner: the sequencer control closure lane.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "event-stream-pdc-contract"
+            "event-to-event-device-and-catalog"
           ]
         },
         "live_product_control": {
-          "disposition": "gap",
-          "rationale": "This slice refuses live input into a compensated event chain rather than exposing a monitoring control for it, so there is no behaviour here for a live surface to project. A per-track monitor policy is the prerequisite for any live control, not a projection of what shipped here.",
-          "owner": "sequencer-control-closure",
-          "dependencies": [
-            "product-a-sequencer-state-operation",
-            "event-stream-pdc-contract"
-          ]
+          "disposition": "not_applicable",
+          "rationale": "This slice refuses live input into a compensated event chain rather than exposing a monitoring control for it, so there is no behaviour here for a live surface to project. A per-track monitor policy is the prerequisite for any live control, not a projection of what shipped here."
         },
         "design_time_agent_manifest": {
           "disposition": "gap",
           "rationale": "No agent-capability row advertises event-chain compensation. Advertising it now would claim an executable event-device chain that does not exist; the capability becomes advertisable when event-to-event execution lands.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "event-stream-pdc-contract"
+            "event-to-event-device-and-catalog"
           ]
         }
       }
@@ -3654,7 +3683,7 @@
       "id": "offline-apply-retry-and-staleness",
       "title": "Retry token and expected revision on offline session applies",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
       "owned_paths": [
         "tools/mcp/mcp_timeline_tools.cpp",
@@ -3666,6 +3695,12 @@
         "test/test_mcp_timeline_sessions.cpp",
         "core/timeline/tools/test_schema_mcp_emit.py"
       ],
+      "release": {
+        "pr": 8128,
+        "accepted_head": "6fb82c925c2bede2a0ccc05306422b56e700dd1d",
+        "merge_sha": "603acc906ea307459c0aef3e558bfc6a92b915b5",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/timeline/schema/timeline_mcp_tools.json",
@@ -3866,7 +3901,7 @@
       "id": "offline-validate-compile-diagnostics",
       "title": "Compile refusals reported as validate diagnostics on the offline CLI and MCP",
       "classification": "offline_cli_mcp",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "38ef887d-accb-4cf6-8299-9a7903cf17db",
       "owned_paths": [
         "tools/timeline/include/pulp/tools/timeline/agent.hpp",
@@ -3880,6 +3915,12 @@
         ".agents/skills/playback/SKILL.md",
         "tools/scripts/negative_capability_check.py"
       ],
+      "release": {
+        "pr": 8134,
+        "accepted_head": "4841cb30a779960ab1d8e09d74594471f356c0bc",
+        "merge_sha": "059e0a1c0d09ecbba266d6aa1ae295ef0064b678",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/timeline/src/timeline_agent.cpp",
@@ -4002,13 +4043,19 @@
       "id": "negative-capability-case-label-precision",
       "title": "Negative-capability gate reads a switch label as a destination, not a refusal",
       "classification": "ci_test_only",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "negative-capability-case-label-20260909",
       "owned_paths": [
         "test/cmake/timeline_tests.cmake",
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8136,
+        "accepted_head": "fd261454c63cf3b6534095c75aaaa3f63d3f074e",
+        "merge_sha": "8ef26afb49016c08a005c71d5335477a36dd06dd",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "test/cmake/timeline_tests.cmake",
@@ -4056,12 +4103,18 @@
       "id": "trace-cli-reachability",
       "title": "Perfetto tracing reachable from the CLI without hand-editing a CMake cache",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "trace-cli-reachability-20260909",
       "owned_paths": [
         "docs/status/cli-commands.yaml",
         "docs/reference/cli.md"
       ],
+      "release": {
+        "pr": 8113,
+        "accepted_head": "00a154200de055ab1077e5df4157f8451462289d",
+        "merge_sha": "45f02c7f573acc27abe83136920f4c2a1ab60799",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "docs/status/cli-commands.yaml",
@@ -4304,11 +4357,17 @@
       "id": "installed-mcp-server-rpath",
       "title": "Installed MCP server resolves its GPU dependency from the SDK prefix",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "installed-mcp-server-rpath-20260910",
       "owned_paths": [
         "tools/mcp/CMakeLists.txt"
       ],
+      "release": {
+        "pr": 8145,
+        "accepted_head": "61bcce2c6e401cd36fe738b749745674e1bf86f8",
+        "merge_sha": "68694f4a89bd28a02085545db159421a9af9159f",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/mcp/CMakeLists.txt",
@@ -4416,7 +4475,7 @@
       "id": "nested-trimmed-groove-chase",
       "title": "Groove-chased notes survive a trimmed nested placement",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "588515e2-d977-4581-9a0b-138057a6f6ef",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -4430,6 +4489,12 @@
         ".agents/skills/timeline/SKILL.md",
         "docs/guides/timeline-sdk.md"
       ],
+      "release": {
+        "pr": 8166,
+        "accepted_head": "b5cc0235330b0aa86acb7724cb53a6838b22ef07",
+        "merge_sha": "396660ac190789d28e1628df961ac6c74c3278e1",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
@@ -4483,7 +4548,7 @@
       "id": "nested-trimmed-audio-leaf-fade",
       "title": "A trim that cuts an audio leaf's own fade shortens the fade instead of refusing",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "8b6831cf-d83c-4567-9123-41d57f900d41",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -4493,6 +4558,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8187,
+        "accepted_head": "915d108ae88008760e079d861112ccc68cb0d01b",
+        "merge_sha": "24f80c506f8b82c434b5b5f58a1cb10efc7b19cd",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
@@ -4625,7 +4696,7 @@
       "id": "nested-substitution-state-refusal-split",
       "title": "Nested child track states split by whether they substitute content",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "ce3e007c-374a-4704-8e8c-cd35a795d583",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -4638,6 +4709,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8177,
+        "accepted_head": "246f2917cfc96a3e47145e321b0333fd31de1123",
+        "merge_sha": "9962805cca2c839015c01721d24e63145ce277e1",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
@@ -4702,7 +4779,7 @@
           "rationale": "The CLI now names both refusals distinctly instead of reporting a shared code, but it can neither author a child track's freeze, take lanes or record-arm state nor report in advance that a nesting will refuse: those states reach a project through loading, not through any `pulp seq` verb. An author still discovers a frozen or comped nesting only at compile time. Owner: NW-D (P0-40-CONTROLS), which binds the CLI to proposal-safe writers and can then surface these codes.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-substitution-state-refusal-split"
+            "offline-timeline-nesting-refusal-preview"
           ]
         },
         "offline_timeline_mcp": {
@@ -4710,7 +4787,7 @@
           "rationale": "The generated Timeline MCP schema carries no operation that reports whether a nested child will substitute its arrangement, and none that authors the states which decide it. Owner: NW-D (P0-40-CONTROLS).",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-substitution-state-refusal-split"
+            "offline-timeline-nesting-refusal-preview"
           ]
         },
         "live_product_control": {
@@ -4718,8 +4795,7 @@
           "rationale": "Product A live timeline authority is absent for the sequencer generally, so neither the two documents that now compile nor the two named refusals are reachable as a live control. Owner: NW-D, and only where that source is Pulp-owned; otherwise it stays a recorded cross-repository dependency.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
-            "nested-substitution-state-refusal-split"
+            "product-a-timeline-document-session"
           ]
         },
         "design_time_agent_manifest": {
@@ -4727,7 +4803,7 @@
           "rationale": "No agent-capability row advertises which child-track states survive nesting. An agent building reusable patterns still cannot discover that record-arm and an unselected take lane nest freely while freeze and a selected lane refuse. Owner: NW-D, once the runtime it would advertise is complete across the remaining NW-C slices.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "nested-substitution-state-refusal-split"
+            "nested-sequence-composition-capability-row"
           ]
         }
       }
@@ -4736,12 +4812,18 @@
       "id": "negative-capability-selftest-derivation",
       "title": "Negative-capability selftest derives its subjects from the allowlist it guards",
       "classification": "ci_test_only",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "negative-capability-selftest-derivation-20260911",
       "owned_paths": [
         "tools/scripts/negative_capability_check.py",
         ".agents/skills/playback/SKILL.md"
       ],
+      "release": {
+        "pr": 8197,
+        "accepted_head": "a1406a376dbee72a2a8da5d523997f28327e40c8",
+        "merge_sha": "dea7b2c93518008796913bb7ed23fa176dbb2546",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/scripts/negative_capability_check.py",
@@ -5002,13 +5084,8 @@
           ]
         },
         "live_product_control": {
-          "disposition": "gap",
-          "rationale": "The fold removes a per-block refusal that a live surface could previously have surfaced as a loop-end failure; it adds no control a musician sets. A live surface still cannot read or set event-domain latency, and live input into a compensated chain remains refused, so there is no live control to project here. Owner: the sequencer control closure lane.",
-          "owner": "sequencer-control-closure",
-          "dependencies": [
-            "product-a-sequencer-state-operation",
-            "event-stream-pdc-contract"
-          ]
+          "disposition": "not_applicable",
+          "rationale": "The fold removes a per-block refusal that a live surface could previously have surfaced as a loop-end failure; it adds no control a musician sets. A live surface still cannot read or set event-domain latency, and live input into a compensated chain remains refused, so there is no live control to project here."
         },
         "design_time_agent_manifest": {
           "disposition": "gap",
@@ -5856,7 +5933,7 @@
           "rationale": "Nothing here is a live control. The device chain is authored in the document and resolved at admission on the control thread; there is no Product A capability ID, operation, executor or policy projection that names a device chain, and inventing one from this slice would advertise a live authority no executor implements. The live surface becomes projectable when the sequencer control tranche lands a timeline document capability, not as a side effect of a device becoming executable.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
+            "product-a-timeline-document-session",
             "event-stream-pdc-contract"
           ]
         },
@@ -5955,7 +6032,7 @@
       "id": "clap-bundle-package-declaration",
       "title": "Contents/PkgInfo written into the CLAP bundle pulp_add_plugin() produces, declaring it a package",
       "classification": "public_sdk",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "7ec955f8-c18d-4526-b728-d7e6061ed48c",
       "owned_paths": [
         "tools/cmake/PulpPluginFormats.cmake",
@@ -5964,6 +6041,12 @@
         "tools/scripts/versioning.json",
         "docs/status/sequencer-exposure.json"
       ],
+      "release": {
+        "pr": 8297,
+        "accepted_head": "b62fcd8d7c9bfb70c670c9110c345e46f5d5f98c",
+        "merge_sha": "59a9bcbd22f97e821c0ed41b281c130c19c5e8a0",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "tools/cmake/PulpPluginFormats.cmake",
@@ -7930,7 +8013,7 @@
       "id": "nested-child-automation-refusal-split",
       "title": "Nested child-track automation refused by three cause-specific codes, each a named gap",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "4ba74e56-8b5d-4fcf-8cbc-3f3336293ac4",
       "owned_paths": [
         ".agents/skills/playback/SKILL.md",
@@ -7946,6 +8029,12 @@
         "tools/scripts/negative_capability_allowlist.json",
         "tools/timeline/src/timeline_agent.cpp"
       ],
+      "release": {
+        "pr": 8412,
+        "accepted_head": "930ceb2646013605df42f48e9482a5eea45cb3d8",
+        "merge_sha": "6691ecdfc8f3a0b4cc5cafa3969e33f46afc2dca",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/include/pulp/playback/program_compiler.hpp",
@@ -8134,7 +8223,7 @@
       "id": "nested-freeze-retime-predicate",
       "title": "A nested freeze refuses only where the nesting actually re-times it",
       "classification": "engine_internal",
-      "delivery_state": "pending",
+      "delivery_state": "released",
       "claim_id": "7e26afef-066a-4c42-b9da-78d244c479f2",
       "owned_paths": [
         "core/playback/src/sequence_content_lowerer.cpp",
@@ -8144,6 +8233,12 @@
         ".agents/skills/playback/SKILL.md",
         ".agents/skills/timeline/SKILL.md"
       ],
+      "release": {
+        "pr": 8410,
+        "accepted_head": "d0319c2c24d87b0ddd3aa9cd190addc0a98585c8",
+        "merge_sha": "bcb8a6c4153e0743c61b8598048feaa5bc1f42d7",
+        "integration_mode": "merge"
+      },
       "evidence": [
         {
           "path": "core/playback/src/sequence_content_lowerer.cpp",
@@ -8199,7 +8294,7 @@
           "rationale": "Product A live timeline authority is absent for the sequencer generally, so neither the documents that now compile nor the surviving refusal is reachable as a live control. Owner: NW-D, and only where that source is Pulp-owned.",
           "owner": "sequencer-control-closure",
           "dependencies": [
-            "product-a-sequencer-state-operation",
+            "product-a-timeline-document-session",
             "nested-substitution-state-refusal-split"
           ]
         },
@@ -8455,6 +8550,83 @@
         "design_time_agent_manifest": {
           "disposition": "not_applicable",
           "rationale": "The tail is an argument to an offline render, not a design-time authoring capability; it grants no authority over a document."
+        }
+      }
+    },
+    {
+      "id": "control-fixture-manifest-digest-derivation",
+      "title": "Control fixture manifests and shipping markers derive from the canonical registry digest",
+      "classification": "ci_test_only",
+      "delivery_state": "pending",
+      "claim_id": "control-fixture-manifest-digest-derivation-20260914",
+      "owned_paths": [
+        "test/support/control_manifest_fixtures.hpp",
+        "test/control_enrollment_host_fixture.cpp",
+        "test/control_trusted_host_fixture.cpp",
+        "test/fixtures/control_host_preflight_fixture.cpp",
+        "test/fixtures/control_installed_host_e2e_fixture.cpp",
+        "test/fixtures/control_trusted_host_e2e_fixture.cpp",
+        "test/test_control_broker_daemon.cpp",
+        "test/test_control_endpoint_enrollment.cpp",
+        "test/test_control_host_enrollment.cpp",
+        "test/test_control_manifest.cpp",
+        "test/test_control_phase15_aggregate_e2e.cpp",
+        "test/test_control_trusted_host_e2e.cpp",
+        "test/test_control_trusted_host_inventory.cpp",
+        "tools/scripts/test_release_artifact_contents.py"
+      ],
+      "evidence": [
+        {
+          "path": "test/support/control_manifest_fixtures.hpp",
+          "needles": [
+            "#include <pulp/inspect/control_registry_digest.inc>",
+            "\"registry_digest\": \")\" PULP_CONTROL_REGISTRY_DIGEST_V1 R\"(\"",
+            "constexpr ControlManifestMarker control_manifest_marker(std::string_view manifest)"
+          ]
+        },
+        {
+          "path": "test/test_control_manifest.cpp",
+          "needles": [
+            "fixture shipping markers hash the manifest bytes the fixtures ship",
+            "expected_marker(pulp::test::kInstalledHostE2eFixtureManifest)",
+            "std::string(kControlRegistryDigest)"
+          ]
+        },
+        {
+          "path": "test/fixtures/control_installed_host_e2e_fixture.cpp",
+          "needles": [
+            "const volatile pulp::test::ControlManifestMarker kManifest =",
+            "pulp::test::kInstalledHostE2eFixtureManifest"
+          ]
+        },
+        {
+          "path": "tools/scripts/test_release_artifact_contents.py",
+          "needles": [
+            "def canonical_control_registry_digest() -> str:",
+            "CONTROL_REGISTRY_DIGEST_INCLUDE"
+          ]
+        }
+      ],
+      "surfaces": {
+        "installed_sdk": {
+          "disposition": "not_applicable",
+          "rationale": "The manifests and shipping markers moved here are test fixtures. No SDK header, target or symbol changes: the canonical digest still lives in inspect/include/pulp/inspect/control_registry_digest.inc and the installed shipping helper keeps its own deliberate mirror, so an installed plugin sees byte-identical registry bytes and the same digest it saw before."
+        },
+        "offline_timeline_cli": {
+          "disposition": "not_applicable",
+          "rationale": "No offline Timeline command gains, loses or changes behaviour. The fixtures are compiled and launched by ctest only; `pulp seq` neither reads them nor is reached by them."
+        },
+        "offline_timeline_mcp": {
+          "disposition": "not_applicable",
+          "rationale": "No MCP tool is added or altered. The generated Timeline MCP schema is untouched, and nothing here is reachable as an MCP operation."
+        },
+        "live_product_control": {
+          "disposition": "not_applicable",
+          "rationale": "No capability, operation, executor binding, grant or policy projection changes. The capability registry is not edited at all, so serialize_control_registry() emits the same bytes and kControlRegistryDigest keeps its value; the fixtures simply read that value instead of restating it, and their shipping markers are hashed from the same bytes they already carried."
+        },
+        "design_time_agent_manifest": {
+          "disposition": "not_applicable",
+          "rationale": "No authoring capability an agent manifest could carry is added or removed. This changes only where a CI fixture gets a value it was previously retyping by hand."
         }
       }
     },
