@@ -1,0 +1,110 @@
+name: Codex review request
+
+# Codex's automatic code review fires on PR open only for PRs whose author is a
+# GitHub *User*. A PR opened by an App — every PR `shipyard pr` creates, which is
+# the mandated path for agents — is skipped, so it merges with no review unless a
+# human types `@codex review` by hand. Codex reports the distinction itself: the
+# "Review trigger" cell in its summary comment reads `PR opened` on User-authored
+# PRs and `Manual request` on the App-authored ones that were reviewed at all.
+#
+# The skip is Codex-side behavior and is not configurable from this repository.
+# This workflow is the in-repo mitigation: it issues the same `@codex review`
+# request a human would, then PROVES a review actually started. It fails loudly
+# when no review appears, because a review-coverage mitigation that can no-op in
+# silence reproduces the gap it exists to close.
+#
+# Codex signals "reviewed, found nothing" with a THUMBS_UP reaction on the PR
+# rather than a comment, so the verification below accepts either signal.
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: codex-review-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  request:
+    # App-authored PRs only, and never from a fork: a fork PR carries a User
+    # author (so Codex already reviews it) and only a read-only token.
+    if: >-
+      github.event.pull_request.user.type == 'Bot' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    name: Request Codex review on an App-authored PR
+
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      REPO: ${{ github.repository }}
+      # A real user PAT, so the request carries the same identity as the manual
+      # `@codex review` comments that are known to work. GITHUB_TOKEN is the
+      # fallback; whether Codex honours a request from it is unproven, which is
+      # why the verification step below reports which identity was used.
+      GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+      HAS_RELEASE_PAT: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
+      CODEX_LOGIN: chatgpt-codex-connector[bot]
+      REVIEW_MARKER: '<!-- codex-pull-request-review-summary -->'
+
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Request a review if Codex has not already responded
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$HAS_RELEASE_PAT" = "true" ]; then
+              identity="RELEASE_BOT_TOKEN (user PAT)"
+          else
+              identity="GITHUB_TOKEN (App)"
+              echo "::warning::RELEASE_BOT_TOKEN is unset; requesting as GITHUB_TOKEN." \
+                   "Codex is not known to honour a request from an App identity."
+          fi
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          echo "Requesting as: $identity"
+
+          # Idempotent: a re-run, or a PR Codex picked up anyway, must not stack
+          # duplicate requests.
+          if bash tools/scripts/codex_review_signal.sh "$REPO" "$PR"; then
+              echo "Codex already responded on #$PR — not requesting again."
+              echo "already=true" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          echo "already=false" >> "$GITHUB_OUTPUT"
+
+          gh pr comment "$PR" --repo "$REPO" --body '@codex review'
+          echo "Requested a Codex review on #$PR."
+
+      - name: Verify a review actually started
+        if: steps.request.outputs.already != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Codex answers a manual request in well under a minute in practice.
+          # Two spaced checks, not a poll loop: this is a seconds-scale wait, and
+          # a tight loop would trip GitHub's secondary rate limit.
+          for wait in 60 120; do
+              sleep "$wait"
+              if bash tools/scripts/codex_review_signal.sh "$REPO" "$PR"; then
+                  echo "Codex review confirmed on #$PR."
+                  exit 0
+              fi
+              echo "No Codex signal yet on #$PR."
+          done
+
+          echo "::error::Requested a Codex review on #$PR as" \
+               "${{ steps.request.outputs.identity }} but Codex did not respond" \
+               "within 3 minutes. This PR is unreviewed. If the identity above is" \
+               "GITHUB_TOKEN, set the RELEASE_BOT_TOKEN secret; if it is already a" \
+               "user PAT, the Codex integration itself is not responding."
+          exit 1

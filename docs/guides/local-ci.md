@@ -897,6 +897,59 @@ between the remote HEAD and the target SHA. Typical cycles drop from
 full bundle automatically when the delta would be larger than the full
 pack.
 
+## Codex does not auto-review App-authored PRs
+
+Codex's automatic code review fires on PR open only when the pull request's
+author is a GitHub *User*. A PR opened by a GitHub App is skipped. Because
+`shipyard pr` opens PRs as `shipyard-local[bot]`, and that is the mandated path
+for agents, the default outcome is that agent-opened PRs merge with no review
+while human-opened ones are reviewed.
+
+Codex reports the distinction itself. Its review-summary comment carries a
+"Review trigger" cell that reads `PR opened` on a User-authored PR and
+`Manual request` on an App-authored one — the App-authored PRs that were
+reviewed at all had been reviewed because somebody typed `@codex review` by
+hand.
+
+**The skip is Codex-side and is not configurable from this repository.** There
+is no workflow trigger, `github.actor` guard, or repository setting here that
+suppresses it; changing the behaviour at the source would mean changing the
+Codex integration's own rules. What this repository can do is ask.
+
+`.github/workflows/codex-review-request.yml` is that ask. On a PR opened by an
+App it posts the same `@codex review` comment a human would, using
+`RELEASE_BOT_TOKEN` — a real user PAT — so the request carries the identity
+that is known to work. It then verifies, twice over three minutes, that a
+review actually started, and fails if none did.
+
+The verification is the point. A mitigation that posts a comment and never
+checks whether anything came back can no-op in silence, which is the same
+failure it exists to correct — a PR would look covered while being exactly as
+unreviewed as before. Because the job fails loudly instead, an unreviewed PR is
+visible rather than assumed.
+
+Two details make the check honest, and both live in
+`tools/scripts/codex_review_signal.sh` (self-tested by
+`test_codex_review_signal.sh`, ctest `codex-review-signal-selftest`):
+
+- **A clean review leaves no comment.** Codex signals "reviewed, found nothing"
+  with a THUMBS_UP reaction on the pull request (`+1` over the REST API) rather
+  than prose. Reading comments alone would count every clean review as a PR that
+  was never looked at, so the reaction is accepted as proof of review and stays
+  an observable signal in its own right.
+- **An unreachable API is not a finding.** Any `gh` failure exits 2, distinct
+  from the exit 1 that means "reviewed by nobody", so an outage can never be
+  mistaken for an unreviewed PR.
+
+If `RELEASE_BOT_TOKEN` is unset the workflow still requests a review, as
+`GITHUB_TOKEN`, and says so — whether Codex honours a request from an App
+identity is unproven, and the verification step reports which identity was used
+so a failure points at the right cause.
+
+This workflow requests reviews; it does not audit whether older PRs got one.
+`.github/workflows/post-merge-review-sweep.yml` remains the separate,
+scheduled sweep that collects bot review comments on already-merged PRs.
+
 ## Keeping fleet Macs on the Shipyard pin (optional)
 
 `tools/shipyard.toml` pins the Shipyard version every checkout uses, and

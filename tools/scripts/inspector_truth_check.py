@@ -574,6 +574,31 @@ def operation_doc_errors(
     return errors
 
 
+def undocumented_reality_errors(
+    definitions: list[CapabilityDefinition], capability_doc: str
+) -> list[str]:
+    """Every capability must describe what it actually does today.
+
+    `--write` fills a capability it has no prose for with a placeholder, so the
+    check has to reject that placeholder; otherwise a newly registered
+    capability ships documented only by the generator's own filler.
+    """
+    errors: list[str] = []
+    reality = {
+        capability_id: prose
+        for capability_id, _, _, prose in CAPABILITY_ROW_RE.findall(capability_doc)
+    }
+    for definition in definitions:
+        if reality.get(definition.legacy_id) != UNDOCUMENTED_REALITY:
+            continue
+        errors.append(
+            "development inspector docs leave the current reality of "
+            f"`{definition.legacy_id}` undocumented; replace the placeholder with "
+            "prose describing what the capability does today"
+        )
+    return errors
+
+
 def check_root(
     root: pathlib.Path,
     *,
@@ -630,6 +655,7 @@ def check_root(
                 f"`{definition.legacy_id}`; expected {expected_text}"
             )
 
+    errors.extend(undocumented_reality_errors(capability_definitions, capability_doc))
     errors.extend(
         operation_doc_errors(capability_definitions, control_operations, capability_doc)
     )

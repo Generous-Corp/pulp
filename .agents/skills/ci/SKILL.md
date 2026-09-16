@@ -921,6 +921,33 @@ therefore holds only for whoever remembered to run it — which is why
 `gpu_handoff_pin_freshness.py` (gate 6b2), wired that way, does not actually gate
 a push today.
 
+## A PR you opened with `shipyard pr` is not automatically code-reviewed
+
+Codex's automatic review fires on PR open only for PRs whose author is a GitHub
+*User*. `shipyard pr` opens PRs as `shipyard-local[bot]`, an App — so the path
+this skill tells you to use is exactly the path Codex skips. Human-opened PRs
+get reviewed; yours do not, unless something asks.
+
+Codex states the trigger in its own summary comment: the "Review trigger" cell
+reads `PR opened` on a User-authored PR and `Manual request` on an App-authored
+one. That cell is the fastest way to tell which kind of review a PR received.
+
+`.github/workflows/codex-review-request.yml` closes this by posting `@codex
+review` on App-authored PRs as `RELEASE_BOT_TOKEN` (a real user PAT, the
+identity known to work), then verifying a review actually started and failing
+when none did. The skip itself is Codex-side and cannot be fixed from this
+repository — only requested around.
+
+**Do not read "no Codex comment" as "no findings".** A clean review leaves a
+THUMBS_UP reaction on the PR and no prose at all, so comments alone cannot
+separate *reviewed clean* from *never reviewed* — the same absence-is-ambiguous
+trap as a green ctest that never ran. `tools/scripts/codex_review_signal.sh`
+accepts either signal and exits 2 (not 1) when the API is unreachable, so an
+outage cannot masquerade as an unreviewed PR.
+
+If you want a review on a PR the workflow did not cover, comment `@codex review`
+on it yourself; that manual path works on App-authored PRs and always has.
+
 ## Pre-flight: plugin ↔ CLI skew check
 
 Before shelling out to `pulp` (or `shipyard pr`, which ultimately
