@@ -80,9 +80,9 @@ if [ -n "$DISK" ]; then tart set "$VM" --disk-size "$DISK"; note "disk → ${DIS
 
 note "booting with host mounts (src/fetchcontent ro, ccache rw); Skia is baked into the golden"
 tart run --no-graphics \
-  --dir="src:$SRC:ro" \
+  --dir="src:${SRC}:ro" \
   --dir="ccache:$CACHE_ROOT/ccache" \
-  --dir="fetchcontent:$FETCHCONTENT_SOURCE_ROOT:ro" \
+  --dir="fetchcontent:${FETCHCONTENT_SOURCE_ROOT}:ro" \
   "$VM" >/dev/null 2>&1 & RPID=$!
 
 # Wait for IP + ssh.
