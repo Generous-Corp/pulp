@@ -244,6 +244,86 @@ and assert the draw origin on both branches of the cache predicate.
   every sibling in the row. Check `text_direction_` before returning an advance
   from any width path.
 
+## Selection geometry is recorded at PAINT, and only paint can record it
+
+`Label` implements `SelectableText` (`core/view/include/pulp/view/selectable_text.hpp`)
+by appending one `SelectableLine` next to every `fill_text` it emits. That looks
+like an odd place to put it until you try the alternative: the only moment at
+which the **painted** line string, its **draw origin**, and a live `Canvas` to
+ask `text_x_for_byte()` all exist together is immediately before the draw call.
+Re-deriving the same geometry from `text_` afterwards reproduces neither the
+text-transform, nor the shaper's break positions, nor the line clamp, nor the
+ellipsis — so the band would sit on glyphs that are not there.
+
+**The recorder is gated, and the gate is a performance contract, not a
+preference.** It calls `canvas.text_x_for_byte()` once per grapheme cluster, so
+running it on every Label in every Pulp UI would add real per-paint work to
+trees that will never be selected. `Label::is_selectable()` resolves to the
+nearest enclosing `View::set_text_selection_region()` — walked, never cached, so
+a reparent cannot leave a stale answer — with a per-Label `SelectionPolicy`
+override in both directions. Outside a region a Label paints exactly the
+commands it painted before this existed, which is also what keeps a drag on a
+value readout from becoming a text selection.
+
+Consequences that are easy to get wrong:
+
+- **Offsets are into `text_`, not into `display_text`.** They only coincide
+  because all three `TextTransform` cases are per-`char` `toupper`/`tolower`/
+  capitalize, which are byte-length preserving for every input. **A
+  locale-aware or Unicode-correct transform would break that silently** —
+  `ß`→`SS` grows by a byte and every offset after it would be wrong, with
+  nothing failing. If you make the transform Unicode-correct, the recorder has
+  to carry an explicit display→source offset map.
+- **A shaped line's source offset cannot be accumulated from line lengths.**
+  `TextShaper` drops the whitespace it broke at, so consecutive
+  `ShapedLayout::Line::text` values are not contiguous in the source. The
+  recorder scans forward (`display_text.find(line, cursor)`) instead. Summing
+  `line.size()` drifts by one byte per soft break, which looks correct on the
+  first line and progressively wrong after it.
+- **Only what is PAINTED is selectable.** A clamped or ellipsised Label
+  deliberately reports less than its full string, and the appended U+2026 is
+  never recorded — it is not in the source. That is the intended contract: you
+  cannot select text that is not on screen.
+- **Three paint paths do not record, and say so rather than guessing.**
+  Attributed runs (`paint_attributed_lines_`), rotated vertical text, and a
+  Label whose inline editor is open all leave `SelectableLayout::measured`
+  false. Vertical is the interesting one: the canvas is already rotated at that
+  point, so any coordinate recorded there would be in a space the pointer never
+  arrives in. `measured == false` means UNKNOWN, never "no text" — the same
+  distinction `PaintedTextExtents::measured` carries, and for the same reason.
+- **Use `canvas.text_x_for_byte()`, never a sum of `measure_text()` prefixes.**
+  The two disagree by exactly the kerning and ligature adjustments, which is
+  the difference between a band that sits on the glyphs and one that creeps.
+  `ShapedOffsetCanvas` in `test/support/text_editor_test_utils.hpp` exists to
+  make that divergence visible in a test; a Label that re-summed advances fails
+  against it and passes against `RecordingCanvas`.
+- **Boundaries are grapheme clusters (`canvas::cluster_step`), not bytes.** A
+  byte offset inside a multi-byte sequence has no x of its own, and handing one
+  out lets a selection slice a UTF-8 sequence in half on the way to the
+  clipboard.
+
+Two traps found while covering this, both worth knowing before you touch it:
+
+- **`View::wants_mouse_input()` is vestigial — overriding it routes nothing.**
+  `View::hit_test` gates only on `visible_` / `enabled_` / `hit_testable_` /
+  `pointer_events_`; it never consults `wants_mouse_input()`. Roughly sixty
+  classes override it and only `virtual_list` / `virtual_grid` read it. A Label
+  is therefore already a pointer target whether or not it wants to be, so
+  selection had to be gated by the content region rather than by that
+  predicate.
+- **A fixture that paints every widget cannot see the fallback that matters.**
+  `full_range`'s unmeasured branch is what makes a never-painted middle widget
+  contribute its whole string, and it sat at 0% coverage behind a 94%
+  aggregate precisely because every fixture painted everything. If you add a
+  document-order case, leave at least one widget unpainted on purpose.
+
+`TextEditor` publishes the same capability from its existing private
+`LayoutSnapshot`, and `char_index_at_point()` is now public for the same
+reason. The two must agree: `pulp-test-selectable-text` walks the whole run
+asserting `selectable_index_at_point()` and `char_index_at_point()` return the
+same byte at every x. If you touch either hit-test, that is the test that
+notices.
+
 ## How to verify a change here
 
 A baseline change that does not move a number is not a fix. Measure before and
@@ -264,7 +344,7 @@ judged current and the binary keeps the old code. A stale object during the
 cover this" and sends you to rewrite a test that was already correct.
 
 Suites that cover this surface: `pulp-test-design-import`,
-`pulp-test-widgets-label`, `pulp-test-typography-inheritance`,
+`pulp-test-selectable-text`, `pulp-test-widgets-label`, `pulp-test-typography-inheritance`,
 `pulp-test-widget-metrics`, `pulp-test-canvas-fonts`, `pulp-test-text-shaper`,
 `pulp-test-bidi-text`. They are registered by **target** name in
 `test/cmake/view_widget_bridge_tests.cmake` — grepping cmake for a test's

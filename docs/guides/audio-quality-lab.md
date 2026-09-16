@@ -391,7 +391,18 @@ which env-paths you set, and public CI (none set) skips the whole layer:
 [ViSQOL](https://github.com/google/visqol) (`PULP_VISQOL_BIN`, MOS-LQO),
 [PEAQ](https://en.wikipedia.org/wiki/PEAQ) (`PULP_PEAQ_BIN`, ITU-R BS.1387 ODG), and
 [AQUA-Tk](https://github.com/Ashvala/AQUA-Tk) (`PULP_AQUATK_BIN`, PEAQ-family ODG). GPL
-tools stay developer-local. Advisory only. This layer is deliberately **full-reference,
+tools stay developer-local. Advisory only.
+
+The perceptual layer is consulted from `pipeline.run_and_export()` — that is, `run` with
+`--out-dir`. `compare` and `regression-net` do not reach it.
+
+ViSQOL's input contract is narrow and its failures are quiet, so the adapter enforces the
+contract before invoking it: audio mode is defined at **48 kHz**, and ViSQOL's WAV reader
+accepts **16-bit PCM only** (the lab itself writes float32, so the adapter transcodes a
+16-bit copy rather than handing over a file ViSQOL cannot open). A pair at any other
+sample rate is refused with the reason instead of being scored meaninglessly. ViSQOL also
+exits 0 when a comparison fails, so a run that produced no score is reported as
+`status: error` with ViSQOL's own stderr attached — never as a MOS. This layer is deliberately **full-reference,
 music/general-audio**: speech-intelligibility metrics (PESQ, POLQA) and no-reference
 neural speech metrics (DNSMOS, NISQA) are out of scope — they’re band-limited or tuned to
 speech and don’t fit the reference-vs-candidate contract on musical material.

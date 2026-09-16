@@ -358,6 +358,68 @@ TEST_CASE("decode refuses a forged chase receipt and a malformed address",
     REQUIRE_FALSE(deserialize_commands(envelope(wide_status), registry));
 }
 
+TEST_CASE("a non-destructive writer is refused a lane edit that drops points",
+          "[timeline][midi-expression-command][capabilities]") {
+    // The proposal profile an MCP caller gets by default: every class, no
+    // destructive intent. A point edit declares Note/Modify, so nothing in the
+    // command's declared authority alone would stop this writer from clearing
+    // a lane that took real work to author.
+    const auto proposal = non_destructive_capabilities();
+    const std::vector<MidiLanePoint> current{{{8}, {0}, 0}, {{10}, {48}, 0xffffffff}};
+
+    auto session = take(DocumentSession::create(project_with_lanes({expression_lane()})));
+    auto writer = take(session->register_writer(proposal));
+    const auto before = lanes_of(*session->snapshot());
+    const auto revision_before = session->revision();
+
+    // Emptying the lane retires both point identities, so admission must refuse
+    // it on the destructive axis even though the command is a Modify.
+    auto cleared = session->submit(
+        writer, session_one(writer, session->revision(),
+                            SetMidiExpressionLanePoints{{2}, {3}, {4}, {11}, current, {}}));
+    REQUIRE_FALSE(cleared);
+    CHECK(cleared.error().code == ConflictCode::CapabilityDenied);
+
+    // Dropping one of the two is the same refusal: the axis is whether any
+    // identity is retired, not whether the lane ends up empty.
+    auto trimmed = session->submit(
+        writer,
+        session_one(writer, session->revision(),
+                    SetMidiExpressionLanePoints{{2}, {3}, {4}, {11}, current, {current[0]}}));
+    REQUIRE_FALSE(trimmed);
+    CHECK(trimmed.error().code == ConflictCode::CapabilityDenied);
+
+    // Nothing landed: the refusal is admission, not a partial edit rolled back.
+    CHECK(lanes_of(*session->snapshot()) == before);
+    CHECK(session->revision() == revision_before);
+
+    // Control -- the same writer, the same command, the same lane, changing a
+    // value in place. It must be admitted, or the refusals above would prove
+    // only that this writer cannot edit points at all.
+    const std::vector<MidiLanePoint> revalued{{{8}, {0}, 0x40000000}, {{10}, {48}, 0xffffffff}};
+    REQUIRE(session->submit(
+        writer, session_one(writer, session->revision(),
+                            SetMidiExpressionLanePoints{{2}, {3}, {4}, {11}, current, revalued})));
+    CHECK(session_content(*session).lanes()[0].points[0].value == 0x40000000u);
+
+    // Control -- adding a point keeps every identity the lane had, so it is
+    // admitted too. Authoring is open to a proposal writer; abandonment is not.
+    const std::vector<MidiLanePoint> grown{
+        {{8}, {0}, 0x40000000}, {{10}, {48}, 0xffffffff}, {{43}, {96}, 0x20000000}};
+    REQUIRE(session->submit(
+        writer, session_one(writer, session->revision(),
+                            SetMidiExpressionLanePoints{{2}, {3}, {4}, {11}, revalued, grown})));
+    CHECK(session_content(*session).lanes()[0].points.size() == 3);
+
+    // Control -- a writer holding the destructive intent clears the same lane,
+    // so the refusals above are the mask rather than the command being invalid.
+    auto editor = take(session->register_writer(unrestricted_capabilities()));
+    REQUIRE(session->submit(editor, session_one(editor, session->revision(),
+                                                SetMidiExpressionLanePoints{
+                                                    {2}, {3}, {4}, {11}, grown, {}})));
+    CHECK(session_content(*session).lanes()[0].points.empty());
+}
+
 TEST_CASE("a writer holding note modify may author and edit a lane but not abandon one",
           "[timeline][midi-expression-command][capabilities]") {
     constexpr auto insert = command_authority_of<InsertMidiExpressionLane>();
