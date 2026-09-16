@@ -19,11 +19,23 @@ class SharedIoTransportBridge {
         bool late = false;
         Disposition disposition = Disposition::Reprime;
     };
-    bool prepare(std::uint32_t capacity, std::uint64_t first_sequence);
+    bool prepare(std::uint32_t capacity, std::uint64_t preparation_epoch,
+                 std::uint64_t first_sequence);
+    // A completion must belong to the active preparation. A terminal failure at
+    // the chronological head fences every later result until reset() selects
+    // the first accepted sequence of the next epoch.
     bool record(const SharedIoComputePlan::Completion& completion) noexcept;
     std::optional<Result> collect_next() noexcept;
-    void reset(std::uint64_t first_sequence) noexcept;
-    std::uint64_t next_sequence() const noexcept { return next_sequence_; }
+    void reset(std::uint64_t preparation_epoch, std::uint64_t first_sequence) noexcept;
+    std::uint64_t preparation_epoch() const noexcept {
+        return preparation_epoch_;
+    }
+    bool reprime_required() const noexcept {
+        return reprime_required_;
+    }
+    std::uint64_t next_sequence() const noexcept {
+        return next_sequence_;
+    }
     std::size_t pending() const noexcept;
 
   private:
@@ -32,7 +44,9 @@ class SharedIoTransportBridge {
         bool present = false;
     };
     std::vector<Entry> entries_;
+    std::uint64_t preparation_epoch_ = 0;
     std::uint64_t next_sequence_ = 0;
+    bool reprime_required_ = false;
 };
 
 } // namespace pulp::gpu_audio::detail
