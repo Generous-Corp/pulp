@@ -1155,6 +1155,23 @@ the child groove exactly once rather than composing it with the parent. A
 trimmed nested MIDI leaf with authored groove is currently refused because the
 source-window chase rule for displaced notes is intentionally undefined.
 
+### A tick edit finer than a frame is authorable and real, but renders as nothing
+
+Ticks resolve far finer than frames. `kTicksPerQuarter` is 705'600, which at
+120 BPM and 48 kHz is about 29.4 ticks to a frame, so a document can author a
+placement trim that the frame grid cannot represent: the clip's tick window
+genuinely narrows while the frames it selects do not move at all. Both readings
+are correct at their own resolution, and nothing downstream is entitled to treat
+the disagreement as a contradiction.
+
+That matters whenever a document edit is checked against something measured in
+frames. Write the check as an implication in the direction that survives the gap
+-- a narrowed frame window implies a narrowed tick window, never the reverse --
+and pick fixture numbers deliberately: every trim expressed as a fraction of a
+quarter note lands exactly on a frame boundary at that tempo and rate, so a
+table built from them is blind to the case entirely. The playback skill carries
+the render-side statement of the same fact.
+
 ### Downgrade refusals: refuse on *authored* data, not just audible data
 
 The recipe says a downgrade must refuse rather than lie. The narrower trap is

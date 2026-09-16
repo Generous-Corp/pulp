@@ -205,19 +205,27 @@ validate_clip_program(const AudioClipRendererProgram& clip,
             clip.offline_stretch_artifact->key.target_frame_count != clip.audio->num_frames() ||
             clip.offline_stretch_artifact->key.channel_count != clip.audio->num_channels() ||
             // The artifact is keyed to the authored range; this clip may be a
-            // window onto part of it, so the two agree by containment. The
-            // equivalence below is what keeps that from being a licence to
-            // disagree: reading the whole artifact and covering the whole
-            // authored range are the same statement, and a program claiming one
-            // without the other has lost the correspondence between them.
+            // window onto part of it, so the two agree by containment. Covering
+            // the whole authored range then has to mean reading the whole
+            // artifact: a program claiming the full tick range while pointing at
+            // a sub-span of frames would play frames that describe other ticks.
+            //
+            // The converse is deliberately not asserted, because it is not true.
+            // Ticks resolve far finer than frames, so a window may correctly
+            // read the whole artifact while covering less than the whole
+            // authored range: a trim of a few ticks is a trim of no frames at
+            // all, and there is no sub-frame edge for the window to move to.
+            // The slack that leaves is bounded to exactly that much. The
+            // source_frame_count check above ties the window's length to the
+            // clip's own timeline length, so a tick window short enough to carry
+            // audible material is short in frames too and fails there instead.
             clip.offline_stretch_artifact->key.musical_tick_start.value >
                 clip.musical_tick_start.value ||
             clip.offline_stretch_artifact->key.musical_tick_end.value <
                 clip.musical_tick_end.value ||
-            (clip.source_start == 0 && clip.source_frame_count == clip.audio->num_frames()) !=
-                (clip.offline_stretch_artifact->key.musical_tick_start ==
-                     clip.musical_tick_start &&
-                 clip.offline_stretch_artifact->key.musical_tick_end == clip.musical_tick_end) ||
+            (clip.offline_stretch_artifact->key.musical_tick_start == clip.musical_tick_start &&
+             clip.offline_stretch_artifact->key.musical_tick_end == clip.musical_tick_end &&
+             (clip.source_start != 0 || clip.source_frame_count != clip.audio->num_frames())) ||
             clip.offline_stretch_artifact->key.timeline_sample_rate.denominator != 1 ||
             clip.offline_stretch_artifact->key.algorithm !=
                 OfflineStretchAlgorithmConfig{limits.offline_stretch_algorithm_version,
