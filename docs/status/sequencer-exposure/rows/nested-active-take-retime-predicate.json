@@ -68,7 +68,7 @@
       "rationale": "Product A live timeline authority is absent for the sequencer generally, so neither the documents that now compile nor the surviving refusal is reachable as a live control. Owner: NW-D, and only where that source is Pulp-owned.",
       "owner": "sequencer-control-closure",
       "dependencies": [
-        "product-a-sequencer-state-operation",
+        "product-a-timeline-document-session",
         "nested-substitution-state-refusal-split"
       ]
     },

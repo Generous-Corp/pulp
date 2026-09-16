@@ -25,7 +25,7 @@
       "unset_fallback": "pulp-gate-fast"
     }
   },
-  "_note_routing_controls": "Exact-value controls that affect routing without being runs-on selectors. The overflow idle probe must target the same fast runner class as the required macOS selector; otherwise an idle rollback-only M1 can suppress overflow for work it cannot serve.",
+  "_note_routing_controls": "Exact-value controls that affect routing without being runs-on selectors. The overflow busy probe must name a label the required macOS gate actually dispatches, or it cannot observe the capacity it is deciding about. The original rationale for pinning it -- that an idle M1 which cannot serve the gate would otherwise suppress overflow -- does not hold: M1 is in the gate pool on equal terms with M3 and M5, and was observed executing the required `macos` job on runners m1-pulp-gate-slot2-02-46804-2 and -3 (2026-09-16). The live gap is a different one: build.yml removes pulp-gate-fast and appends exactly one event-class label, so a dispatched gate job never carries this value and the probe counts zero. Measured 2026-09-15 across four consecutive build.yml runs: 0 of 4 macos jobs carried pulp-gate-fast, 4 of 4 carried pulp-build-pr-head. That is inert while overflow is contracted to the local-only sentinel, so it is recorded here rather than retuned blind; re-tune this control as part of re-enabling overflow.",
   "event_class_v2": {
     "variable": "PULP_LOCAL_MACOS_RUNS_ON_JSON",
     "repo": "Generous-Corp/pulp",
