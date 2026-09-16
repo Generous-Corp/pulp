@@ -29,8 +29,10 @@ configurations without that `node_modules/esbuild` installation still register
 the dependency-free suites, but they do not claim the canonicalization proof.
 
 The macOS runner is chosen by the resolver in `build.yml`, which normally honors
-`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the fast M3/M5 VM pool. For a pull
-request whose head branch lives in **another repository**,
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the M1/M3/M5 event-class JIT VM
+pool. All three hosts serve the required gate on equal terms — M1 waits 10
+minutes before taking Pulp work, which is latency policy, not an inability to
+serve it. For a pull request whose head branch lives in **another repository**,
 both self-hosted selectors are ignored and the leg falls through to the
 GitHub-hosted `macos-15` label.
 
@@ -2172,7 +2174,7 @@ paid break-glass option and is never selected automatically.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `2` | BUSY count that triggers overflow. Raise when Plan A's 2nd local runner lands. |
-| `PULP_LOCAL_MAC_RUNNER_LABEL` | `pulp-gate-fast` | Label the busy probe filters runners by. It must match the required gate class so rollback-only M1 capacity cannot suppress overflow. |
+| `PULP_LOCAL_MAC_RUNNER_LABEL` | `pulp-gate-fast` | Label the busy probe looks for in a macOS job's `labels` array. It must name a label the gate actually dispatches, and today it does not: `build.yml` strips `pulp-gate-fast` and appends one event-class label, so a dispatched `macos` job never carries this value and the probe always counts zero. Inert while overflow is the `local-only` sentinel; re-tune it before re-enabling overflow rather than reading the pinned value as proven. |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["macos-15"]` when unset | Generic overflow selector JSON, or the bare sentinel `local-only` to keep work local. |
 
 **Disabling overflow** (the live state):
