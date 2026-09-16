@@ -417,3 +417,171 @@ TEST_CASE("a hook that attaches on every notification still terminates",
     REQUIRE(spawned > 0);
     root.set_frame_clock(nullptr);
 }
+
+// ── Structural mutation invalidates layout ──────────────────────────────────
+//
+// `layout_children_if_needed()` and `WidgetBridge::ensure_layout()` both elide
+// the layout pass while `applied_layout_generation_ == tree_layout_generation()`.
+// A structural mutation changes what the flex/grid solve would produce, so it
+// must move that counter or the elision serves the PREVIOUS structure's boxes:
+// children land in the slots the old child set was solved into, and a reparented
+// child keeps the box its former parent gave it.
+//
+// These cases assert on COUNTS rather than on one probe child. A single
+// "the new child has a box" presence check passes while every pre-existing
+// sibling is still sitting in a stale slot, which is the half of the defect
+// that actually corrupts a panel.
+
+namespace {
+
+constexpr float kSlotWidth = 60.0f;
+constexpr float kRowWidth = 400.0f;
+
+// A fixed-size row whose children tile at 0, 60, 120, ... so an expected box is
+// arithmetic rather than a golden value.
+std::unique_ptr<View> make_row() {
+    auto row = std::make_unique<View>();
+    row->set_bounds({0, 0, kRowWidth, 40});
+    row->flex().direction = FlexDirection::row;
+    row->flex().preferred_width = kRowWidth;
+    row->flex().preferred_height = 40.0f;
+    return row;
+}
+
+View* append_slot(View& row) {
+    auto slot = std::make_unique<View>();
+    slot->flex().preferred_width = kSlotWidth;
+    slot->flex().preferred_height = 20.0f;
+    auto* raw = slot.get();
+    row.add_child(std::move(slot));
+    return raw;
+}
+
+// How many children sit in the tiled slot their index entitles them to. The
+// count is the measurement: `== child_count()` is a reflowed row, and anything
+// less names exactly how many children the elided pass stranded.
+std::size_t children_in_their_own_slot(const View& row) {
+    std::size_t placed = 0;
+    for (std::size_t i = 0; i < row.child_count(); ++i) {
+        const auto bounds = row.child_at(i)->bounds();
+        if (bounds.x == static_cast<float>(i) * kSlotWidth && bounds.width == kSlotWidth)
+            ++placed;
+    }
+    return placed;
+}
+
+} // namespace
+
+TEST_CASE("a structural mutation leaves the tree's layout stale", "[view][layout]") {
+    auto row = make_row();
+    append_slot(*row);
+    append_slot(*row);
+    row->layout_children_if_needed();
+    // Control: the gate really does go quiet on an unmutated tree, so the
+    // assertions below are reading a mutation signal and not a stuck counter.
+    REQUIRE(row->layout_is_current());
+
+    SECTION("adding a child") {
+        append_slot(*row);
+        CHECK_FALSE(row->layout_is_current());
+    }
+    SECTION("removing a child") {
+        row->remove_child(row->child_at(0));
+        CHECK_FALSE(row->layout_is_current());
+    }
+    SECTION("reordering children") {
+        REQUIRE(row->move_child_to_index(row->child_at(0), 1));
+        CHECK_FALSE(row->layout_is_current());
+    }
+}
+
+TEST_CASE("a child added to a laid-out row reflows the whole row", "[view][layout]") {
+    auto row = make_row();
+    for (int i = 0; i < 3; ++i)
+        append_slot(*row);
+    row->layout_children_if_needed();
+    // Control: a pass that placed nothing would make the post-add count
+    // meaningless, so prove the starting row is fully placed.
+    REQUIRE(children_in_their_own_slot(*row) == 3);
+
+    append_slot(*row);
+    row->layout_children_if_needed();
+
+    REQUIRE(row->child_count() == 4);
+    // On the defect this is 3: the three originals keep the boxes the 3-child
+    // solve gave them and the newcomer is still at the default zero rect —
+    // which puts it exactly on top of the first child.
+    CHECK(children_in_their_own_slot(*row) == 4);
+    CHECK(row->child_at(3)->bounds().width == kSlotWidth);
+}
+
+TEST_CASE("removing a child closes the gap it left", "[view][layout]") {
+    auto row = make_row();
+    for (int i = 0; i < 4; ++i)
+        append_slot(*row);
+    row->layout_children_if_needed();
+    REQUIRE(children_in_their_own_slot(*row) == 4);
+
+    auto removed = row->remove_child(row->child_at(1));
+    REQUIRE(removed != nullptr);
+    row->layout_children_if_needed();
+
+    REQUIRE(row->child_count() == 3);
+    // On the defect this is 1: only the child at index 0 still happens to
+    // occupy its own slot; the two survivors keep their pre-removal boxes and
+    // leave a hole where the removed child was.
+    CHECK(children_in_their_own_slot(*row) == 3);
+}
+
+TEST_CASE("a reparented child is re-boxed by its new parent, not its old one", "[view][layout]") {
+    auto source = make_row();
+    for (int i = 0; i < 3; ++i)
+        append_slot(*source);
+    source->layout_children_if_needed();
+    REQUIRE(children_in_their_own_slot(*source) == 3);
+
+    // The last slot carries a non-zero x from its old parent, so "kept the old
+    // box" and "never got a box" are distinguishable outcomes here.
+    View* travelling = source->child_at(2);
+    const auto box_in_source = travelling->bounds();
+    REQUIRE(box_in_source.x == 2 * kSlotWidth);
+
+    auto destination = make_row();
+    append_slot(*destination);
+    destination->layout_children_if_needed();
+    REQUIRE(children_in_their_own_slot(*destination) == 1);
+
+    auto moved = source->remove_child(travelling);
+    REQUIRE(moved != nullptr);
+    destination->add_child(std::move(moved));
+    destination->layout_children_if_needed();
+
+    REQUIRE(destination->child_count() == 2);
+    // On the defect the reparented child still reports x == 120 — its old
+    // parent's third slot — while its new parent only has two.
+    CHECK(children_in_their_own_slot(*destination) == 2);
+    CHECK(destination->child_at(1)->bounds().x == kSlotWidth);
+}
+
+TEST_CASE("reordering children re-solves the row in the new order", "[view][layout]") {
+    auto row = make_row();
+    View* first = append_slot(*row);
+    View* second = append_slot(*row);
+    // Distinct widths make the swap observable: equal-width slots would tile
+    // identically in either order and the assertion could not fail.
+    first->flex().preferred_width = 40.0f;
+    second->flex().preferred_width = 90.0f;
+    row->layout_children_if_needed();
+    REQUIRE(first->bounds().x == 0.0f);
+    REQUIRE(second->bounds().x == 40.0f);
+
+    REQUIRE(row->move_child_to_index(first, 1));
+    row->layout_children_if_needed();
+
+    // move_child_to_index publishes a structure change, whose comment claims it
+    // "makes the next layout pass rebuild the Yoga tree in the new order".
+    // Publishing does not move the layout generation, so on the defect the pass
+    // is elided and both children keep their pre-reorder x.
+    CHECK(second->bounds().x == 0.0f);
+    CHECK(first->bounds().x == 90.0f);
+}
