@@ -40,14 +40,15 @@ constexpr int kPassed = 0;
 constexpr int kFailed = 1;
 constexpr int kUnavailable = 77;
 constexpr auto kWaitLimit = std::chrono::seconds(10);
+constexpr auto kProbeLimit = std::chrono::seconds(15);
 
 struct OwnedAllocation {
-    void* pointer = nullptr;
+    std::atomic<void*> pointer{nullptr};
     std::atomic<unsigned> dispose_count{0};
 
     ~OwnedAllocation() {
-        if (pointer)
-            std::free(pointer);
+        if (void* owned = pointer.exchange(nullptr, std::memory_order_acq_rel))
+            std::free(owned);
     }
 };
 
@@ -76,9 +77,12 @@ struct ErrorScopeState {
 
 void dispose_allocation(void* userdata) {
     auto* allocation = static_cast<OwnedAllocation*>(userdata);
-    ++allocation->dispose_count;
-    std::free(allocation->pointer);
-    allocation->pointer = nullptr;
+    if (void* owned = allocation->pointer.exchange(nullptr, std::memory_order_acq_rel))
+        std::free(owned);
+    // Publish terminal disposal only after the allocation is no longer owned
+    // by either the callback or the enclosing probe. The waiter uses an
+    // acquire load before allowing stack teardown.
+    allocation->dispose_count.fetch_add(1, std::memory_order_release);
 }
 
 std::string dawn_sha() {
@@ -198,8 +202,10 @@ void print_receipt(const Receipt& r) {
               << ",\"output_disposals\":" << r.output_disposals << "}\n";
 }
 
-template <typename Predicate> bool pump_until(wgpu::Instance& instance, Predicate done) {
-    const auto deadline = std::chrono::steady_clock::now() + kWaitLimit;
+template <typename Predicate>
+bool pump_until(wgpu::Instance& instance, std::chrono::steady_clock::time_point probe_deadline,
+                Predicate done) {
+    const auto deadline = std::min(probe_deadline, std::chrono::steady_clock::now() + kWaitLimit);
     while (!done() && std::chrono::steady_clock::now() < deadline) {
         instance.ProcessEvents();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -212,7 +218,11 @@ size_t round_up(size_t value, size_t alignment) {
 }
 
 bool allocate(OwnedAllocation& allocation, size_t alignment, size_t size) {
-    return posix_memalign(&allocation.pointer, alignment, size) == 0;
+    void* pointer = nullptr;
+    if (posix_memalign(&pointer, alignment, size) != 0)
+        return false;
+    allocation.pointer.store(pointer, std::memory_order_release);
+    return true;
 }
 
 } // namespace
@@ -254,6 +264,7 @@ int main(int argc, char** argv) {
     wgpu::Instance instance(native_instance->Get());
     if (!instance)
         return finish(kFailed, "failed", "instance_creation_failed");
+    const auto probe_deadline = std::chrono::steady_clock::now() + kProbeLimit;
 
     const char* enabled_toggles[] = {"allow_unsafe_apis"};
     wgpu::DawnTogglesDescriptor adapter_toggles{};
@@ -272,7 +283,7 @@ int main(int argc, char** argv) {
                                     adapter_request->adapter = std::move(result);
                                 adapter_request->done = true;
                             });
-    if (!pump_until(instance, [&] { return adapter_request->done.load(); })) {
+    if (!pump_until(instance, probe_deadline, [&] { return adapter_request->done.load(); })) {
         return finish(kFailed, "failed", "adapter_request_timeout");
     }
     if (adapter_request->status != wgpu::RequestAdapterStatus::Success || !adapter_request->adapter)
@@ -333,7 +344,7 @@ int main(int argc, char** argv) {
                 device_request->device = std::move(result);
             device_request->done = true;
         });
-    if (!pump_until(instance, [&] { return device_request->done.load(); })) {
+    if (!pump_until(instance, probe_deadline, [&] { return device_request->done.load(); })) {
         return finish(kFailed, "failed", "device_request_timeout");
     }
     if (device_request->status != wgpu::RequestDeviceStatus::Success || !device_request->device) {
@@ -348,7 +359,7 @@ int main(int argc, char** argv) {
                 state->type = type;
                 state->done = true;
             });
-        return pump_until(instance, [&] { return state->done.load(); }) &&
+        return pump_until(instance, probe_deadline, [&] { return state->done.load(); }) &&
                state->status == wgpu::PopErrorScopeStatus::Success &&
                state->type == wgpu::ErrorType::NoError;
     };
@@ -360,15 +371,15 @@ int main(int argc, char** argv) {
         !allocate(output, allocation_alignment, bytes)) {
         return finish(kFailed, "failed", "aligned_allocation_failed");
     }
-    auto* input_samples = static_cast<float*>(input.pointer);
-    auto* output_samples = static_cast<float*>(output.pointer);
+    auto* input_samples = static_cast<float*>(input.pointer.load(std::memory_order_acquire));
+    auto* output_samples = static_cast<float*>(output.pointer.load(std::memory_order_acquire));
     for (size_t i = 0; i < samples; ++i) {
         input_samples[i] = static_cast<float>(i % 97) * 0.125f - 3.0f;
         output_samples[i] = -9999.0f;
     }
 
     wgpu::BufferHostMappedPointer input_host{};
-    input_host.pointer = input.pointer;
+    input_host.pointer = input_samples;
     input_host.disposeCallback = dispose_allocation;
     input_host.userdata = &input;
     wgpu::BufferDescriptor input_desc{};
@@ -378,7 +389,7 @@ int main(int argc, char** argv) {
     input_desc.usage = wgpu::BufferUsage::Storage;
 
     wgpu::BufferHostMappedPointer output_host{};
-    output_host.pointer = output.pointer;
+    output_host.pointer = output_samples;
     output_host.disposeCallback = dispose_allocation;
     output_host.userdata = &output;
     wgpu::BufferDescriptor output_desc{};
@@ -395,8 +406,9 @@ int main(int argc, char** argv) {
     if (!buffers_valid || !input_buffer || !output_buffer) {
         input_buffer = nullptr;
         output_buffer = nullptr;
-        pump_until(instance, [&] {
-            return input.dispose_count.load() == 1 && output.dispose_count.load() == 1;
+        pump_until(instance, probe_deadline, [&] {
+            return input.dispose_count.load(std::memory_order_acquire) == 1 &&
+                   output.dispose_count.load(std::memory_order_acquire) == 1;
         });
         receipt.input_disposals = input.dispose_count;
         receipt.output_disposals = output.dispose_count;
@@ -407,8 +419,9 @@ int main(int argc, char** argv) {
         output_buffer.Destroy();
         input_buffer = nullptr;
         output_buffer = nullptr;
-        const bool disposed = pump_until(instance, [&] {
-            return input.dispose_count.load() == 1 && output.dispose_count.load() == 1;
+        const bool disposed = pump_until(instance, probe_deadline, [&] {
+            return input.dispose_count.load(std::memory_order_acquire) == 1 &&
+                   output.dispose_count.load(std::memory_order_acquire) == 1;
         });
         receipt.input_disposals = input.dispose_count;
         receipt.output_disposals = output.dispose_count;
@@ -479,8 +492,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
                                       completion->status = status;
                                       completion->done = true;
                                   });
-        const bool completed = pump_until(instance, [&] { return completion->done.load(); }) &&
-                               completion->status == wgpu::QueueWorkDoneStatus::Success;
+        const bool completed =
+            pump_until(instance, probe_deadline, [&] { return completion->done.load(); }) &&
+            completion->status == wgpu::QueueWorkDoneStatus::Success;
         if (completed)
             ++receipt.dispatches;
         return completed;
