@@ -1,5 +1,4 @@
 #include <pulp/host/custom_node_type.hpp>
-#include <pulp/host/sample_kernel.hpp>
 
 #include <type_traits>
 

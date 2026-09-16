@@ -43,7 +43,6 @@ target_link_libraries(consumer PRIVATE Pulp::host)
 file(WRITE "${_source}/main.cpp" [=[
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
-#include <pulp/host/sample_kernel.hpp>
 
 #include <cstdint>
 #include <type_traits>

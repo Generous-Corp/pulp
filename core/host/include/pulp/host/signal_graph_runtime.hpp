@@ -21,7 +21,6 @@
 #include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
-#include <pulp/host/sample_kernel.hpp>
 #include <pulp/host/signal_graph_connection.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/signal_graph_node.hpp>
