@@ -524,6 +524,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME fleet-runner-policy-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/fleet/test_fleet_lib.py")
 
+    # Fleet remote probe: a non-login ssh shell gets a minimal PATH that omits
+    # ~/.local/bin, so `ssh host 'command -v <tool>'` reports an installed tool
+    # as MISSING, and `command -v` answers with the shell's opinion of a name
+    # (a whence/hook.sh function resolves regardless of PATH). The probe scans
+    # PATH for an executable FILE and refuses to report absence when any of its
+    # self-checks fail. These tests pin that refusal.
+    add_test(NAME fleet-remote-probe-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/fleet/test_probe_remote.py")
+
     # Planning-gitlink guard: reject an accidental `planning` submodule pointer
     # bump (a `git reset --hard` + `git add -A` re-staging the drifted gitlink);
     # a deliberate re-pin passes with a `Planning-Bump:` trailer.

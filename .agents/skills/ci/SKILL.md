@@ -7701,6 +7701,15 @@ drift; humans run `shipyard update` to apply.
   lacks `/opt/homebrew/bin` and reports Homebrew tools as missing — this
   produces a FALSE "tart is not installed" census result. Use
   `ssh host 'zsh -lc "…"'` for any host census.
+  **Better: do not hand-roll the census.** `python3 tools/fleet/probe_remote.py
+  --hosts m1,m3 shipyard tart` runs under a login shell, resolves an executable
+  FILE by scanning PATH (never `command -v`, which answers with the shell's
+  opinion — `ghapp`/`shipyard` are *functions* from `~/.config/whence/hook.sh`
+  and resolve regardless of PATH), prints *where* each binary is plus its
+  version, and exits **3** rather than claiming absence when the connection,
+  the shell, or one of its own controls fails. This rule was written here and
+  still produced a false `shipyard: MISSING` on m3 twice in two days, which is
+  why it is now a tool and not only a sentence.
 - **`TART_HOME` is per-host BY DESIGN — never default it.** Every Pulp VM tool
   now resolves it through `tools/ci/lib/tart-home.sh`: explicit environment,
   then the host profile's `vm_home`, otherwise a loud error. Do not restore a
