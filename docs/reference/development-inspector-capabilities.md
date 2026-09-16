@@ -66,6 +66,7 @@ availability.
 | `dev.pulp.artifact/read@1` (`artifact.read`) | no | no | Publication-bound typed client rechecks exact original lineage and broker ACL for every chunk |
 | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | yes | yes | Main-thread executor copies one `state::SequencerStateChannel` UI-side triple-buffer snapshot and seqlock playhead out of the channel before returning; it never touches the audio-side publication methods and never drains the applied-edit queue the owning UI consumer needs |
 | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | no | yes | Grant-controlled main-thread executor submits one bounded typed step edit into the single-producer command FIFO; a full FIFO refuses with a retryable `ResourceExhausted` rather than blocking or dropping, and no audio-thread method is reachable from the operation |
+| `dev.pulp.timeline/document-session@1` (`timeline.document.session`) | no | yes | Controller-gated background executor opens, applies, diffs, undoes, and redoes one exact-instance `timeline::DocumentSession`; the broker projects the session's own `CommandAuthority`/`ConflictCode` verdict rather than re-deciding it, refuses a writer profile escalation to `trusted`, and carries optimistic `expected_revision` plus `idempotency_key` replay through unchanged |
 | `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
 <!-- END GENERATED capability-matrix -->
 
@@ -107,6 +108,7 @@ executor on the target host fails closed.
 | `dev.pulp.telemetry/subscribe@1` | `dev.pulp.telemetry/subscribe@1` (`telemetry.stream`) | `stream` |
 | `dev.pulp.runtime/reload@1` | `dev.pulp.runtime/reload@1` (`runtime.reload`) | `receipt` |
 | `dev.pulp.runtime/evaluate@1` | `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | `receipt` |
+| `dev.pulp.timeline/document-session@1` | `dev.pulp.timeline/document-session@1` (`timeline.document.session`) | `receipt` |
 | `dev.pulp.artifact/read@1` | `dev.pulp.artifact/read@1` (`artifact.read`) | `artifact-chunk` |
 | `dev.pulp.sequencer/state.read@1` | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | `response` |
 | `dev.pulp.sequencer/state.edit@1` | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | `receipt` |
