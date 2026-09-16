@@ -1,0 +1,44 @@
+0:~Processor()=default
+1:PluginDescriptor descriptor()const=0
+2:void define_parameters(state::StateStore&)=0
+3:void prepare(const PrepareContext&)=0
+4:void release()
+5:void suspend()
+6:void resume()
+7:std::vector<uint8_t>serialize_plugin_state()const
+8:bool deserialize_plugin_state(std::span<const uint8_t>)
+9:void on_memory_pressure(MemoryPressure)
+10:int latency_samples()const
+11:bool is_bus_layout_supported(const BusesLayout&)const
+12:void process(audio::BufferView<float>&,const audio::BufferView<const float>&,midi::MidiBuffer&,midi::MidiBuffer&,const ProcessContext&)=0
+13:bool has_editor()const
+14:std::pair<uint32_t,uint32_t>editor_size()const
+15:ViewSize view_size()const
+16:std::unique_ptr<view::View>create_view()
+17:void on_view_opened(view::View&)
+18:void on_view_closed(view::View&)
+19:void on_view_resized(view::View&,uint32_t,uint32_t)
+20:void on_host_transport_changed(bool,double)
+21:void on_host_tempo_changed(double)
+22:std::unique_ptr<class AraDocumentController>create_ara_document_controller()
+23:view::ScriptedUiSession*active_scripted_ui()
+24:const view::ScriptedUiSession*active_scripted_ui()const
+25:std::vector<SettingsSection>settings_sections()
+26:PrepareResourceUsage estimate_prepare_resources(const PrepareContext&)const
+27:PrepareResourceLimit check_prepare_resource_limits(const PrepareContext&)const
+28:void process(ProcessBuffers&,midi::MidiBuffer&,midi::MidiBuffer&,const ProcessContext&)
+29:std::vector<std::byte>serialize_dsp_state()const
+30:bool restore_dsp_state(const std::vector<std::byte>&)
+31:bool supports_editor_reload()const
+32:std::uint64_t editor_reload_generation()const
+33:void process_f64(audio::BufferView<double>&,const audio::BufferView<const double>&,midi::MidiBuffer&,midi::MidiBuffer&,const ProcessContext&)
+34:void process_f64(ProcessBuffers64&,midi::MidiBuffer&,midi::MidiBuffer&,const ProcessContext&)
+35:void on_non_realtime_tick()
+36:bool non_realtime_tick_pending()const
+37:std::vector<NoteName>note_names()const
+38:view::ValueChannelSet*value_channels()
+39:void visit_value_channels(const std::function<void(view::ValueChannelSet*)>&)
+40:void visit_active_scripted_ui(const std::function<void(view::ScriptedUiSession*)>&)
+41:void visit_active_scripted_ui(const std::function<void(const view::ScriptedUiSession*)>&)const
+42:bool supports_in_place_scripted_ui_reload()const
+43:bool reload_active_scripted_ui_in_place(std::string*)

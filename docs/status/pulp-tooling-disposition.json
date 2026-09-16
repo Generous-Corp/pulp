@@ -2981,6 +2981,10 @@
           {
             "name": "--sample-rate",
             "kind": "option"
+          },
+          {
+            "name": "--tail-frames",
+            "kind": "option"
           }
         ],
         "subcommands": []

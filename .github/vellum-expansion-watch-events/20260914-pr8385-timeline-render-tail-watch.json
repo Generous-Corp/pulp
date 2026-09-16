@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260914-pr8385-timeline-render-tail-watch",
+  "created_at": "2026-09-14T21:43:22Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Exposes the offline timeline renderer's existing tail as an explicit option on the render verb. `pulp render --tail-frames <n>` and the MCP tool's optional `tail_frames` render n frames after the transport stops, so a delay, reverb, or release envelope still ringing past the last event is captured instead of cut at it. Zero stays the default on every path, so an unflagged render produces exactly the file it produced before; the tail is charged against the same in-memory render budget as the sequence and is refused with its own message when it does not fit, rather than truncated. The renderer's own `tail_frames` field was already public in core/host; this slice only carries it out to the two offline surfaces.\n\nThe family is crossed by exactly one path: docs/status/cli-commands.yaml, the repo-wide CLI command manifest, which is a design-output-and-packaging selector. That edit documents the new --tail-frames option on the existing `render` command and nothing else. Measured with the checker's own _matches() against the pinned acceptance scopes, with a positive and a negative control: of the 15 changed paths in this branch, that one file is the only selector hit in any family, and docs/reference/cli.md crosses none. No importer, design-import, packaging, template, release-workflow or installed-SDK-staging code changes. Registered as watch-only so the family's coverage stays honest about a documentation edit that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-timeline-cli-offline-render [tail] (4187 assertions; tail length, bit-for-bit parity with render_timeline_offline, over-budget refusal)",
+    "pulp-test-cli-shellout [tail] (27 assertions; --tail-frames exit code and stderr against the built binary)",
+    "tools/scripts/confirm_failure.sh (CONFIRMED for the tail padding; the shell-out lane is structurally INCONCLUSIVE and was negative-controlled manually against pulp-cpp)",
+    "python3 core/timeline/tools/test_schema_mcp_emit.py (MCP tail_frames property; CONFIRMED via confirm_failure.sh --no-build)",
+    "python3 tools/scripts/schema_drift_check.py (timeline_mcp_tools.json re-emitted, not hand-edited)",
+    "python3 tools/scripts/pulp_tooling_disposition.py (inventory regenerated for the new option)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

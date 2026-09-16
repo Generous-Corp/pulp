@@ -42,7 +42,7 @@ std::optional<timebase::TickPosition> covering_tick(const timebase::CompiledTemp
 } // namespace
 
 OperationResult render(const ProjectSource& project, const std::filesystem::path& output,
-                       std::uint32_t sample_rate) {
+                       std::uint32_t sample_rate, std::uint32_t tail_frames) {
     if (sample_rate == 0 || sample_rate > timebase::kMaximumCompiledSampleRate || output.empty())
         return detail::failure("render", "output and sample_rate between 1 and 768000 are required",
                                {}, 2);
@@ -79,8 +79,15 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
         for (const auto& asset : assets->assets())
             channels = std::max(channels, asset.audio->num_channels());
     const auto bytes_per_frame = static_cast<std::uint64_t>(channels) * sizeof(float);
-    if (frames > detail::kMaxRenderPcmBytes / bytes_per_frame)
+    const auto budget_frames = detail::kMaxRenderPcmBytes / bytes_per_frame;
+    if (frames > budget_frames)
         return detail::failure("render", "sequence exceeds the in-memory render budget");
+    // Subtracting from the remaining budget rather than summing first: the sum
+    // is only safe once the region is known to fit.
+    if (tail_frames > budget_frames - frames)
+        return detail::failure("render",
+                               "sequence plus tail exceeds the in-memory render budget");
+    const auto total_frames = frames + tail_frames;
 
     constexpr std::uint32_t block_size = 512;
     host::SignalGraph graph;
@@ -96,9 +103,11 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
         // A program with no tracks renders silence. The offline renderer refuses
         // an empty route span as an under-specified request, so the graph stays
         // out of the way and the zero-filled buffer is written as it always was.
+        // The tail is still padded here, so a requested tail lengthens the file
+        // by the same amount whether or not the program has routes.
         try {
-            rendered.channels.assign(channels,
-                                     std::vector<float>(static_cast<std::size_t>(frames), 0.0f));
+            rendered.channels.assign(
+                channels, std::vector<float>(static_cast<std::size_t>(total_frames), 0.0f));
         } catch (const std::bad_alloc&) {
             return detail::failure("render", "could not allocate the in-memory render buffer");
         } catch (const std::length_error&) {
@@ -122,9 +131,10 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
         host::TimelineOfflineRenderOptions options;
         options.start_tick = timebase::TickPosition{0};
         options.end_tick = *end_tick;
-        // The verb exposes no tail, so the output ends exactly at the sequence
-        // end. A ringing delay or reverb is cut there, as it has always been.
-        options.tail_frames = 0;
+        // Zero ends the output exactly at the sequence end, cutting a ringing
+        // delay or reverb there; a caller asks for the tail explicitly so an
+        // unflagged render keeps producing the length it always has.
+        options.tail_frames = tail_frames;
 
         host::TimelineOfflineRenderResult result;
         try {
@@ -155,7 +165,8 @@ OperationResult render(const ProjectSource& project, const std::filesystem::path
                    std::to_string(rendered_frames) +
                    "\",\"ok\":true,\"output\":" +
                    pulp::timeline::quote_json_string(output_utf8) +
-                   ",\"sample_rate\":" + std::to_string(sample_rate) + "}"};
+                   ",\"sample_rate\":" + std::to_string(sample_rate) +
+                   ",\"tail_frames\":" + std::to_string(tail_frames) + "}"};
 }
 
 } // namespace pulp::tools::timeline
