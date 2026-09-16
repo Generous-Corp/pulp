@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 49,
+  "manifest_revision": 50,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -13733,6 +13733,20 @@
               "size()",
               "spec()",
               "drift_cents(std::size_t voice, std::uint64_t absolute_frame)"
+            ],
+            "enums": []
+          }
+        ],
+        "unit_delay.hpp": [
+          {
+            "class": "UnitDelayT",
+            "qualified_name": "pulp::signal::UnitDelayT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process(SampleType input)",
+              "reset()",
+              "publish()",
+              "commit(SampleType input)"
             ],
             "enums": []
           }
