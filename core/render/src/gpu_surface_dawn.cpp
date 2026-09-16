@@ -411,9 +411,7 @@ public:
         const auto device = dawn_string_view_to_string(dawn_info.device);
         const auto description = dawn_string_view_to_string(dawn_info.description);
         const auto vendor = dawn_string_view_to_string(dawn_info.vendor);
-        info.name = device.empty()
-            ? "Native Dawn Adapter (" + info.backend_type + ")"
-            : device;
+        info.name = device.empty() ? "Native Dawn Adapter (" + info.backend_type + ")" : device;
         info.description = description.empty() ? info.name : description;
         info.vendor = vendor.empty() ? "Dawn" : vendor;
         return info;
