@@ -194,7 +194,10 @@ TEST_CASE("GraphRuntimeAutomationScratch enforces dense admission limits and rep
 
     auto per_node_over = dense_plan(std::array<std::uint32_t, 1>{65});
     REQUIRE(per_node_over.ok());
-    REQUIRE_FALSE(scratch.reset(per_node_over.plan, 64));
+    REQUIRE(scratch.reset(per_node_over.plan, 1));
+    REQUIRE(scratch.prepared_stats().dense_lane_count == 65);
+    const auto per_node_over_bindings = dense_bindings(per_node_over.plan);
+    REQUIRE_FALSE(scratch.reset(per_node_over.plan, per_node_over_bindings, 64));
     REQUIRE(scratch.prepared_stats().dense_lane_count == 0);
 
     auto graph_limit = dense_plan(std::array<std::uint32_t, 4>{64, 64, 64, 64});
@@ -206,9 +209,13 @@ TEST_CASE("GraphRuntimeAutomationScratch enforces dense admission limits and rep
 
     auto graph_over = dense_plan(std::array<std::uint32_t, 5>{64, 64, 64, 64, 1});
     REQUIRE(graph_over.ok());
-    REQUIRE_FALSE(scratch.reset(graph_over.plan, 64));
+    REQUIRE(scratch.reset(graph_over.plan, 1));
+    REQUIRE(scratch.prepared_stats().dense_lane_count == 257);
+    const auto graph_over_bindings = dense_bindings(graph_over.plan);
+    REQUIRE_FALSE(scratch.reset(graph_over.plan, graph_over_bindings, 64));
 
-    REQUIRE_FALSE(scratch.reset(per_node_limit.plan, Scratch::kMaxDenseFrames + 1));
+    REQUIRE_FALSE(
+        scratch.reset(per_node_limit.plan, per_node_bindings, Scratch::kMaxDenseFrames + 1));
     REQUIRE_FALSE(scratch.reset(per_node_limit.plan, std::numeric_limits<std::uint32_t>::max()));
 }
 

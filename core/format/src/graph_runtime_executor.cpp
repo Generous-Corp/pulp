@@ -353,11 +353,15 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
         const float* vals = automation.dense_buffer(node_index, i);
         const float lo = std::min(dense_lo[i], dense_hi[i]);
         const float hi = std::max(dense_lo[i], dense_hi[i]);
+        const bool clamp_values =
+            delivery == AudioRateModulationDelivery::DenseViews || dense_add[i];
         for (std::uint32_t f = 0; f < frames; ++f) {
             float v = vals[f];
-            v = std::clamp(v, lo, hi);
-            // Clamp is part of the canonical gathered representation for both
-            // delivery policies and every mix mode.
+            if (clamp_values)
+                v = std::clamp(v, lo, hi);
+            // DenseViews exposes the bounded canonical representation directly.
+            // Legacy Replace preserves the historical ParameterEventQueue values;
+            // Add remains bounded after accumulation.
             automation.dense_buffer(node_index, i)[f] = v;
             if (delivery == AudioRateModulationDelivery::LegacyParameterEvents &&
                 !queue->push({pid, static_cast<std::int32_t>(f), v, 0})) {
@@ -628,9 +632,13 @@ bool GraphRuntimeAutomationScratch::reset(const graph::GraphRuntimePlan& plan,
         node_sparse_first_.assign(node_count, 0);
         node_sparse_count_.assign(node_count, 0);
         std::uint32_t total_dense = 0;
+        std::uint32_t total_dense_views = 0;
         std::uint32_t total_sparse = 0;
         for (std::uint32_t n = 0; n < node_count; ++n) {
             const auto& node = plan.nodes[n];
+            const bool dense_delivery =
+                !bindings.empty() && bindings[n].audio_rate_modulation_delivery ==
+                                         AudioRateModulationDelivery::DenseViews;
             node_dense_first_[n] = static_cast<std::uint32_t>(dense_params_.size());
             node_sparse_first_[n] = total_sparse;
             for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
@@ -648,8 +656,9 @@ bool GraphRuntimeAutomationScratch::reset(const graph::GraphRuntimePlan& plan,
                         }
                     }
                     if (seen) continue;
-                    if (node_dense_count_[n] >= kMaxDenseLanesPerNode ||
-                        total_dense >= kMaxDenseLanesPerGraph || max_frames > kMaxDenseFrames ||
+                    if ((dense_delivery && (node_dense_count_[n] >= kMaxDenseLanesPerNode ||
+                                            total_dense_views >= kMaxDenseLanesPerGraph ||
+                                            max_frames > kMaxDenseFrames)) ||
                         total_dense > std::numeric_limits<std::uint32_t>::max() / max_frames) {
                         clear();
                         return false;
@@ -657,6 +666,8 @@ bool GraphRuntimeAutomationScratch::reset(const graph::GraphRuntimePlan& plan,
                     dense_params_.push_back({conn.automation.param_id, total_dense * max_frames});
                     ++node_dense_count_[n];
                     ++total_dense;
+                    if (dense_delivery)
+                        ++total_dense_views;
                 } else {
                     bool seen = false;
                     for (std::uint32_t k = 0; k < node_sparse_count_[n]; ++k) {
@@ -674,9 +685,6 @@ bool GraphRuntimeAutomationScratch::reset(const graph::GraphRuntimePlan& plan,
                     ++total_sparse;
                 }
             }
-            const bool dense_delivery =
-                !bindings.empty() && bindings[n].audio_rate_modulation_delivery ==
-                                         AudioRateModulationDelivery::DenseViews;
             constexpr std::size_t capacity = state::ParameterEventQueue::kCapacity;
             const std::size_t dense_count = node_dense_count_[n];
             const std::size_t sparse_count = node_sparse_count_[n];
