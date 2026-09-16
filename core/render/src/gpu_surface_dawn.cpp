@@ -11,11 +11,12 @@
 // When Skia is available, we use Dawn's C++ API (which Skia requires).
 // This ensures a single Dawn device can be shared with SkiaSurface.
 
+#include "dawn/dawn_proc.h"
+#include "dawn/native/DawnNative.h"
+#include "webgpu/webgpu_cpp.h"
+#include <pulp/render/gpu_diagnostics.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
-#include "webgpu/webgpu_cpp.h"
-#include "dawn/native/DawnNative.h"
-#include "dawn/dawn_proc.h"
 
 namespace pulp::render {
 
@@ -264,6 +265,7 @@ public:
 #endif
                 runtime::log_error("GpuSurface: WebGPU error ({}): {}",
                     static_cast<int>(type), msg);
+                emit_gpu_diagnostic(GpuDiagnosticSeverity::error, "dawn.uncaptured_error", msg);
             });
 
         adapter_.RequestDevice(
