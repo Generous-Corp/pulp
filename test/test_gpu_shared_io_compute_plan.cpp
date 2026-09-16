@@ -114,7 +114,7 @@ TEST_CASE("shared IO compute plan keeps deadline outside slot token",
 TEST_CASE("shared IO bridge never leapfrogs a delayed head",
           "[gpu_audio][shared_io][p2]") {
     SharedIoTransportBridge bridge;
-    REQUIRE(bridge.prepare(3, 10));
+    REQUIRE(bridge.prepare(3, 1, 10));
     SharedIoComputePlan::Completion second{
         {{1, 1, 11, 1}, 100}, SharedIoArena::CompletionStatus::RetiredSuccess, false};
     SharedIoComputePlan::Completion first{
@@ -129,6 +129,39 @@ TEST_CASE("shared IO bridge never leapfrogs a delayed head",
     result = bridge.collect_next();
     REQUIRE(result);
     CHECK(result->sequence == 11);
+    CHECK(result->disposition == SharedIoTransportBridge::Disposition::Deliver);
+}
+
+TEST_CASE("shared IO bridge fences later work after a failed chronological head",
+          "[gpu_audio][shared_io][p2]") {
+    SharedIoTransportBridge bridge;
+    REQUIRE(bridge.prepare(3, 4, 40));
+    SharedIoComputePlan::Completion successor{
+        {{1, 4, 41, 1}, 100}, SharedIoArena::CompletionStatus::RetiredSuccess, false};
+    SharedIoComputePlan::Completion failure{
+        {{0, 4, 40, 1}, 100}, SharedIoArena::CompletionStatus::RetiredFailed, false};
+    REQUIRE(bridge.record(successor));
+    REQUIRE(bridge.record(failure));
+
+    auto result = bridge.collect_next();
+    REQUIRE(result);
+    CHECK(result->sequence == 40);
+    CHECK(result->disposition == SharedIoTransportBridge::Disposition::Reprime);
+    CHECK(bridge.reprime_required());
+    CHECK(bridge.pending() == 0);
+    CHECK_FALSE(bridge.collect_next());
+    CHECK_FALSE(bridge.record(successor));
+
+    bridge.reset(5, 50);
+    CHECK_FALSE(bridge.reprime_required());
+    SharedIoComputePlan::Completion stale{
+        {{0, 4, 50, 1}, 100}, SharedIoArena::CompletionStatus::RetiredSuccess, false};
+    SharedIoComputePlan::Completion reprime{
+        {{0, 5, 50, 1}, 100}, SharedIoArena::CompletionStatus::RetiredSuccess, false};
+    CHECK_FALSE(bridge.record(stale));
+    REQUIRE(bridge.record(reprime));
+    result = bridge.collect_next();
+    REQUIRE(result);
     CHECK(result->disposition == SharedIoTransportBridge::Disposition::Deliver);
 }
 
