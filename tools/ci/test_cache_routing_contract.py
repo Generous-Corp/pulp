@@ -30,7 +30,8 @@ class CacheRoutingContractTests(unittest.TestCase):
         body = DIRECT_TART.read_text(encoding="utf-8")
         canonical = "$HOME/Library/Caches/Pulp/fetchcontent-src"
         self.assertIn(canonical, body)
-        self.assertIn('--dir="fetchcontent:$FETCHCONTENT_SOURCE_ROOT:ro"', body)
+        self.assertIn('--dir="fetchcontent:${FETCHCONTENT_SOURCE_ROOT}:ro"', body)
+        self.assertNotIn('--dir="fetchcontent:$FETCHCONTENT_SOURCE_ROOT:ro"', body)
         self.assertIn(
             'export PULP_SHARED_FETCHCONTENT_SOURCE_DIR="$HOME/Library/Caches/Pulp/fetchcontent-src"',
             body,

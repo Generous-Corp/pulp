@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "review_cadence_days": 90,
+  "rules": [
+    {
+      "id": "zsh-colon-expansion",
+      "owner": "Pulp CI",
+      "introduced": "2026-09-16",
+      "review_after": "2026-12-15",
+      "evidence": "Repeated M3/M5 agent failures involving $root:path and Tart mount paths",
+      "regression": "tools/scripts/test_shell_portability_check.py"
+    },
+    {
+      "id": "bash-pipestatus-in-zsh",
+      "owner": "Pulp CI",
+      "introduced": "2026-09-16",
+      "review_after": "2026-12-15",
+      "evidence": "Repeated empty PIPESTATUS reports in zsh SSH sessions",
+      "regression": "tools/scripts/test_shell_portability_check.py"
+    }
+  ]
+}
