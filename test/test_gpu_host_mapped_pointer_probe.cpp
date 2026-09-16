@@ -1,6 +1,7 @@
 #include "dawn/dawn_proc.h"
 #include "dawn/dawn_version.h"
 #include "dawn/native/DawnNative.h"
+#include "support/dawn_transfer_call_counter.hpp"
 #include "webgpu/webgpu_cpp.h"
 
 #include <algorithm>
@@ -79,6 +80,32 @@ struct ErrorScopeState {
     wgpu::PopErrorScopeStatus status = wgpu::PopErrorScopeStatus::Error;
     wgpu::ErrorType type = wgpu::ErrorType::Unknown;
 };
+
+struct MapRequestState {
+    std::atomic<bool> done{false};
+    wgpu::MapAsyncStatus status = wgpu::MapAsyncStatus::Error;
+};
+
+enum class TransferNegativeControl {
+    None,
+    WriteBuffer,
+    CopyBufferToBuffer,
+    MapAsync,
+};
+
+const char* transfer_negative_control_name(TransferNegativeControl control) {
+    switch (control) {
+    case TransferNegativeControl::WriteBuffer:
+        return "queue_write_buffer";
+    case TransferNegativeControl::CopyBufferToBuffer:
+        return "copy_buffer_to_buffer";
+    case TransferNegativeControl::MapAsync:
+        return "buffer_map_async";
+    case TransferNegativeControl::None:
+        return "none";
+    }
+    return "unknown";
+}
 
 void dispose_allocation(void* userdata) {
     auto* allocation = static_cast<OwnedAllocation*>(userdata);
@@ -194,10 +221,21 @@ struct Receipt {
     std::string runtime_version_status = "unverified";
     std::string provider_identity_status = "unverified";
     bool proc_table_install_attempted = false;
+    bool transfer_counter_measured = false;
+    bool transfer_counter_oracle = false;
+    std::string transfer_counter_negative_control = "none";
+    std::uint64_t queue_write_buffer_calls = 0;
+    std::uint64_t queue_write_buffer_bytes = 0;
+    std::uint64_t copy_buffer_to_buffer_calls = 0;
+    std::uint64_t copy_buffer_to_buffer_bytes = 0;
+    std::uint64_t buffer_map_async_calls = 0;
+    std::uint64_t buffer_map_async_bytes = 0;
+    std::uint64_t queue_submit_calls = 0;
+    std::uint64_t submitted_command_buffers = 0;
 };
 
 void print_receipt(const Receipt& r) {
-    std::cout << "{\"schema\":\"pulp.gpu-host-mapped-pointer-probe.v1\""
+    std::cout << "{\"schema\":\"pulp.gpu-host-mapped-pointer-probe.v2\""
               << ",\"status\":\"" << r.status << "\""
               << ",\"reason\":\"" << r.reason << "\""
               << ",\"dawn_sha\":\"" << r.header_dawn_revision << "\""
@@ -225,7 +263,19 @@ void print_receipt(const Receipt& r) {
               << ",\"oracle\":" << (r.oracle ? "true" : "false")
               << ",\"validation_errors\":" << r.validation_errors
               << ",\"dispatches\":" << r.dispatches << ",\"input_disposals\":" << r.input_disposals
-              << ",\"output_disposals\":" << r.output_disposals << "}\n";
+              << ",\"output_disposals\":" << r.output_disposals << ",\"transfer_counter_measured\":"
+              << (r.transfer_counter_measured ? "true" : "false")
+              << ",\"transfer_counter_oracle\":" << (r.transfer_counter_oracle ? "true" : "false")
+              << ",\"transfer_counter_negative_control\":\"" << r.transfer_counter_negative_control
+              << "\""
+              << ",\"queue_write_buffer_calls\":" << r.queue_write_buffer_calls
+              << ",\"queue_write_buffer_bytes\":" << r.queue_write_buffer_bytes
+              << ",\"copy_buffer_to_buffer_calls\":" << r.copy_buffer_to_buffer_calls
+              << ",\"copy_buffer_to_buffer_bytes\":" << r.copy_buffer_to_buffer_bytes
+              << ",\"buffer_map_async_calls\":" << r.buffer_map_async_calls
+              << ",\"buffer_map_async_bytes\":" << r.buffer_map_async_bytes
+              << ",\"queue_submit_calls\":" << r.queue_submit_calls
+              << ",\"submitted_command_buffers\":" << r.submitted_command_buffers << "}\n";
 }
 
 template <typename Predicate>
@@ -279,6 +329,7 @@ int main(int argc, char** argv) {
     bool verify_feature_gate_negative_control = false;
     bool verify_setter_order_negative_control = false;
     const char* provider_identity_negative_control = nullptr;
+    TransferNegativeControl transfer_negative_control = TransferNegativeControl::None;
     if (argc == 2 && std::strcmp(argv[1], "--verify-oracle-negative-control") == 0) {
         verify_oracle_negative_control = true;
     } else if (argc >= 2 && argc <= 3 &&
@@ -295,9 +346,20 @@ int main(int argc, char** argv) {
         verify_setter_order_negative_control = true;
     } else if (argc == 2 && std::strcmp(argv[1], "--verify-feature-gate-negative-control") == 0) {
         verify_feature_gate_negative_control = true;
+    } else if (argc == 2 &&
+               std::strcmp(argv[1], "--verify-write-buffer-counter-negative-control") == 0) {
+        transfer_negative_control = TransferNegativeControl::WriteBuffer;
+    } else if (argc == 2 &&
+               std::strcmp(argv[1], "--verify-copy-buffer-counter-negative-control") == 0) {
+        transfer_negative_control = TransferNegativeControl::CopyBufferToBuffer;
+    } else if (argc == 2 &&
+               std::strcmp(argv[1], "--verify-map-async-counter-negative-control") == 0) {
+        transfer_negative_control = TransferNegativeControl::MapAsync;
     } else if (argc != 1) {
         return finish(kFailed, "failed", "invalid_arguments");
     }
+    receipt.transfer_counter_negative_control =
+        transfer_negative_control_name(transfer_negative_control);
 
 #if !defined(__aarch64__) && !defined(__arm64__)
     return finish(kUnavailable, "unavailable", "apple_silicon_required");
@@ -347,6 +409,10 @@ int main(int argc, char** argv) {
     }
     receipt.provider_identity_status = has_exact_expectation ? "passed" : "unverified";
     install_proc_table();
+    // This must precede every Dawn object below. Reverse destruction then
+    // retires all wrappers and callbacks before the process-global proc table
+    // is restored by the counter.
+    pulp::test::DawnTransferCallCounter transfer_counter;
 
     wgpu::InstanceDescriptor instance_desc{};
     auto native_instance = std::make_unique<dawn::native::Instance>(
@@ -647,8 +713,78 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     }
 
     auto queue = device.GetQueue();
-    auto dispatch = [&] {
+
+    constexpr std::uint64_t kControlBytes = sizeof(std::uint32_t);
+    wgpu::Buffer transfer_control_source;
+    wgpu::Buffer transfer_control_destination;
+    if (transfer_negative_control != TransferNegativeControl::None) {
+        device.PushErrorScope(wgpu::ErrorFilter::Validation);
+        wgpu::BufferDescriptor control_desc{};
+        control_desc.size = kControlBytes;
+        switch (transfer_negative_control) {
+        case TransferNegativeControl::WriteBuffer:
+            control_desc.label = "P1 WriteBuffer counter control";
+            control_desc.usage = wgpu::BufferUsage::CopyDst;
+            transfer_control_destination = device.CreateBuffer(&control_desc);
+            break;
+        case TransferNegativeControl::CopyBufferToBuffer:
+            control_desc.label = "P1 copy counter source";
+            control_desc.usage = wgpu::BufferUsage::CopySrc;
+            transfer_control_source = device.CreateBuffer(&control_desc);
+            control_desc.label = "P1 copy counter destination";
+            control_desc.usage = wgpu::BufferUsage::CopyDst;
+            transfer_control_destination = device.CreateBuffer(&control_desc);
+            break;
+        case TransferNegativeControl::MapAsync:
+            control_desc.label = "P1 MapAsync counter control";
+            control_desc.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst;
+            transfer_control_destination = device.CreateBuffer(&control_desc);
+            break;
+        case TransferNegativeControl::None:
+            break;
+        }
+        auto control_scope = std::make_shared<ErrorScopeState>();
+        const bool controls_valid = pop_error_scope(control_scope);
+        const bool source_required =
+            transfer_negative_control == TransferNegativeControl::CopyBufferToBuffer;
+        if (!controls_valid || !transfer_control_destination ||
+            (source_required && !transfer_control_source)) {
+            release_host_buffers();
+            return finish(kFailed, "failed", "transfer_counter_control_buffer_creation_failed");
+        }
+    }
+
+    // Setup is complete and the queue is idle. Measure only the two-dispatch
+    // data-plane interval (plus the one requested planted operation).
+    transfer_counter.reset();
+    if (transfer_negative_control == TransferNegativeControl::WriteBuffer) {
+        constexpr std::uint32_t planted_value = 0x504c5055;
+        queue.WriteBuffer(transfer_control_destination, 0, &planted_value, sizeof(planted_value));
+    } else if (transfer_negative_control == TransferNegativeControl::MapAsync) {
+        auto map_request = std::make_shared<MapRequestState>();
+        transfer_control_destination.MapAsync(
+            wgpu::MapMode::Read, 0, kControlBytes, wgpu::CallbackMode::AllowProcessEvents,
+            [map_request](wgpu::MapAsyncStatus status, wgpu::StringView) {
+                map_request->status = status;
+                map_request->done = true;
+            });
+        if (!pump_until(instance, probe_deadline, [&] { return map_request->done.load(); })) {
+            release_host_buffers();
+            return finish(kFailed, "failed", "transfer_counter_map_timeout");
+        }
+        if (map_request->status != wgpu::MapAsyncStatus::Success) {
+            release_host_buffers();
+            return finish(kFailed, "failed", "transfer_counter_map_failed");
+        }
+        transfer_control_destination.Unmap();
+    }
+
+    auto dispatch = [&](bool plant_copy) {
         auto encoder = device.CreateCommandEncoder();
+        if (plant_copy) {
+            encoder.CopyBufferToBuffer(transfer_control_source, 0, transfer_control_destination, 0,
+                                       kControlBytes);
+        }
         auto pass = encoder.BeginComputePass();
         pass.SetPipeline(pipeline);
         pass.SetBindGroup(0, bind_group);
@@ -680,7 +816,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         return true;
     };
 
-    if (!dispatch() || !output_matches()) {
+    if (!dispatch(transfer_negative_control == TransferNegativeControl::CopyBufferToBuffer) ||
+        !output_matches()) {
         release_host_buffers();
         return finish(kFailed, "failed", "first_round_trip_failed");
     }
@@ -691,9 +828,52 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         input_samples[i] = static_cast<float>((i * 7) % 113) * -0.0625f + 2.0f;
         output_samples[i] = 7777.0f;
     }
-    if (!dispatch() || !output_matches()) {
+    if (!dispatch(false) || !output_matches()) {
         release_host_buffers();
         return finish(kFailed, "failed", "persistent_reuse_failed");
+    }
+
+    const auto transfer_snapshot = transfer_counter.snapshot();
+    receipt.transfer_counter_measured = true;
+    receipt.queue_write_buffer_calls = transfer_snapshot.queue_write_buffer_calls;
+    receipt.queue_write_buffer_bytes = transfer_snapshot.queue_write_buffer_bytes;
+    receipt.copy_buffer_to_buffer_calls = transfer_snapshot.copy_buffer_to_buffer_calls;
+    receipt.copy_buffer_to_buffer_bytes = transfer_snapshot.copy_buffer_to_buffer_bytes;
+    receipt.buffer_map_async_calls = transfer_snapshot.buffer_map_async_calls;
+    receipt.buffer_map_async_bytes = transfer_snapshot.buffer_map_async_bytes;
+    receipt.queue_submit_calls = transfer_snapshot.queue_submit_calls;
+    receipt.submitted_command_buffers = transfer_snapshot.submitted_command_buffers;
+
+    const bool submission_counts_match =
+        receipt.queue_submit_calls == 2 && receipt.submitted_command_buffers == 2;
+    const bool no_write =
+        receipt.queue_write_buffer_calls == 0 && receipt.queue_write_buffer_bytes == 0;
+    const bool no_copy =
+        receipt.copy_buffer_to_buffer_calls == 0 && receipt.copy_buffer_to_buffer_bytes == 0;
+    const bool no_map = receipt.buffer_map_async_calls == 0 && receipt.buffer_map_async_bytes == 0;
+    switch (transfer_negative_control) {
+    case TransferNegativeControl::None:
+        receipt.transfer_counter_oracle = submission_counts_match && no_write && no_copy && no_map;
+        break;
+    case TransferNegativeControl::WriteBuffer:
+        receipt.transfer_counter_oracle =
+            submission_counts_match && receipt.queue_write_buffer_calls == 1 &&
+            receipt.queue_write_buffer_bytes == kControlBytes && no_copy && no_map;
+        break;
+    case TransferNegativeControl::CopyBufferToBuffer:
+        receipt.transfer_counter_oracle =
+            submission_counts_match && no_write && receipt.copy_buffer_to_buffer_calls == 1 &&
+            receipt.copy_buffer_to_buffer_bytes == kControlBytes && no_map;
+        break;
+    case TransferNegativeControl::MapAsync:
+        receipt.transfer_counter_oracle = submission_counts_match && no_write && no_copy &&
+                                          receipt.buffer_map_async_calls == 1 &&
+                                          receipt.buffer_map_async_bytes == kControlBytes;
+        break;
+    }
+    if (!receipt.transfer_counter_oracle) {
+        release_host_buffers();
+        return finish(kFailed, "failed", "transfer_counter_oracle_mismatch");
     }
 
     receipt.validation_errors = validation_errors->load();
@@ -723,6 +903,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
         }
         return finish(kPassed, "passed", "oracle_negative_control_detected");
     }
+    if (transfer_negative_control != TransferNegativeControl::None)
+        return finish(kPassed, "passed", "transfer_counter_negative_control_detected");
     if (!receipt.oracle)
         return finish(kFailed, "failed", "oracle_mismatch");
     return finish(kPassed, "passed", "ok");
