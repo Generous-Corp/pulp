@@ -69,8 +69,19 @@ bool SharedIoComputePlan::cancel(const SubmitToken& token) noexcept {
     return arena_.discard(token.slot);
 }
 
-void SharedIoComputePlan::on_terminal(void* context,
-                                      const SharedIoSlotLedger::SlotToken& token,
+bool SharedIoComputePlan::reprime_when_quiescent() noexcept {
+    if (!prepared() || completion_read_ != completion_write_ || !arena_.quiescent())
+        return false;
+    arena_.begin_retirement();
+    if (!arena_.reset_when_quiescent())
+        return false;
+    std::fill(pending_.begin(), pending_.end(), Pending{});
+    completion_read_ = completion_write_ = 0;
+    telemetry_ = {};
+    return true;
+}
+
+void SharedIoComputePlan::on_terminal(void* context, const SharedIoSlotLedger::SlotToken& token,
                                       SharedIoArena::CompletionStatus status) noexcept {
     static_cast<SharedIoComputePlan*>(context)->record_terminal(token, status);
 }

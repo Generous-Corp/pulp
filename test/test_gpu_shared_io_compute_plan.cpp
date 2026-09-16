@@ -71,17 +71,22 @@ class FakeProvider final : public SharedIoArenaProvider {
 
     bool submit(const SlotResources& resources, SlotToken token,
                 std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept override {
+        if (!accept_submissions)
+            return false;
         auto* slot = static_cast<Slot*>(resources.opaque);
         const auto count = resources.input_size / sizeof(float);
         auto* in = reinterpret_cast<const float*>(slot->input);
         auto* out = reinterpret_cast<float*>(slot->output);
         for (std::size_t i = 0; i < count && i < resources.output_size / sizeof(float); ++i)
             out[i] = in[i] * 2.0f;
-        return inbox->push(token, CompletionStatus::RetiredSuccess) ==
-               SharedIoTerminalInbox::PushResult::Accepted;
+        return inbox->push(token, terminal_status) == SharedIoTerminalInbox::PushResult::Accepted;
     }
     void poll() noexcept override {}
-    bool drain() noexcept override { return true; }
+    bool drain() noexcept override {
+        return true;
+    }
+    bool accept_submissions = true;
+    CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
     std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
     std::vector<Slot*> slots_;
 };
@@ -180,4 +185,86 @@ TEST_CASE("shared IO slot buffer capability lifetime expires with provider",
         CHECK(handle.has_lifetime());
     }
     CHECK_FALSE(handle.has_lifetime());
+}
+
+TEST_CASE("shared IO compute plan reprimes persistent slots only after quiescence",
+          "[gpu_audio][shared_io][p2]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    const auto first_epoch = plan.preparation_epoch();
+    auto first = plan.acquire_input(20, 0);
+    REQUIRE(first);
+    REQUIRE(plan.submit({first->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    CHECK_FALSE(plan.reprime_when_quiescent());
+
+    auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    auto output = plan.acquire_output(*completion);
+    REQUIRE(output);
+    REQUIRE(plan.release_output({output->token}));
+    output.reset();
+
+    REQUIRE(plan.reprime_when_quiescent());
+    CHECK(plan.preparation_epoch() == first_epoch + 1);
+    CHECK_FALSE(plan.submit({first->token, 0}));
+
+    auto reprime = plan.acquire_input(21, 0);
+    REQUIRE(reprime);
+    CHECK(reprime->token.preparation_epoch == first_epoch + 1);
+    REQUIRE(plan.cancel({reprime->token, 0}));
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO compute plan bounds saturation and retires refused or failed input",
+          "[gpu_audio][shared_io][p2]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 2, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+
+    auto first = plan.acquire_input(30, 0);
+    auto second = plan.acquire_input(31, 0);
+    REQUIRE(first);
+    REQUIRE(second);
+    CHECK_FALSE(plan.acquire_input(32, 0));
+    REQUIRE(plan.submit({first->token, 0}));
+    REQUIRE(plan.submit({second->token, 0}));
+    REQUIRE(plan.drain(0) == 2);
+    CHECK_FALSE(plan.acquire_input(32, 0));
+
+    for (std::uint64_t sequence : {30u, 31u}) {
+        auto completion = plan.pop_completion();
+        REQUIRE(completion);
+        CHECK(completion->token.slot.stream_sequence == sequence);
+        auto output = plan.acquire_output(*completion);
+        REQUIRE(output);
+        REQUIRE(plan.release_output({output->token}));
+    }
+
+    provider.accept_submissions = false;
+    auto refused = plan.acquire_input(32, 0);
+    REQUIRE(refused);
+    CHECK_FALSE(plan.submit({refused->token, 0}));
+    auto after_refusal = plan.acquire_input(33, 0);
+    REQUIRE(after_refusal);
+    REQUIRE(plan.cancel({after_refusal->token, 0}));
+
+    provider.accept_submissions = true;
+    provider.terminal_status = SharedIoArena::CompletionStatus::RetiredFailed;
+    auto failed = plan.acquire_input(34, 0);
+    REQUIRE(failed);
+    REQUIRE(plan.submit({failed->token, 0}));
+    REQUIRE(plan.drain(0) == 1);
+    auto failure = plan.pop_completion();
+    REQUIRE(failure);
+    CHECK(failure->status == SharedIoArena::CompletionStatus::RetiredFailed);
+    CHECK_FALSE(plan.acquire_output(*failure));
+    REQUIRE(plan.discard_completion(*failure));
+    auto after_failure = plan.acquire_input(35, 0);
+    REQUIRE(after_failure);
+    REQUIRE(plan.cancel({after_failure->token, 0}));
+    REQUIRE(plan.release());
 }
