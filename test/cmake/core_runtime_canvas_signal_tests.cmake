@@ -447,6 +447,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-execution-contract
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Dawn-free private reducer for exact lead-delivery and typed miss handling.
+# prepare() owns the only allocation; callback delivery is bounded and atomic.
+pulp_add_test_suite(pulp-test-gpu-audio-execution-controller
+    SOURCES test_gpu_audio_execution_controller.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Private fixed-slot lifecycle used by the shared-memory GPU-audio dispatcher.
 # Dawn-free and deterministic: compile the exact production source directly so
 # fault/TSan iterations do not pull the 900-object public gpu-audio closure.
