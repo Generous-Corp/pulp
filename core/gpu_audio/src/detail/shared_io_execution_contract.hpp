@@ -158,6 +158,9 @@ public:
         callback_blocks_.fetch_add(1, std::memory_order_relaxed);
         if (deadline_miss) deadline_misses_.fetch_add(1, std::memory_order_relaxed);
     }
+    void record_deadline_miss() noexcept {
+        deadline_misses_.fetch_add(1, std::memory_order_relaxed);
+    }
     void record_submit() noexcept { submitted_blocks_.fetch_add(1, std::memory_order_relaxed); }
     void record_retired(bool success) noexcept {
         (success ? retired_success_ : retired_failure_).fetch_add(1, std::memory_order_relaxed);

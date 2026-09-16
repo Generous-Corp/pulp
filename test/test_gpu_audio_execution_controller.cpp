@@ -44,6 +44,28 @@ TEST_CASE("execution controller admits lead independently of pipeline depth",
     REQUIRE(wet.expected_sequence == 0);
 }
 
+TEST_CASE("execution controller sustains a lead larger than physical depth",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    auto delayed_contract = contract();
+    delayed_contract.algorithmic_lead_blocks = 5;
+    delayed_contract.pipeline_depth = 2;
+
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(delayed_contract));
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
+
+    for (std::uint64_t sequence = 0; sequence < 5; ++sequence)
+        REQUIRE(controller.deliver(sequence).path == SharedIoDeliveryPath::Priming);
+    REQUIRE(controller.deliver(5).path == SharedIoDeliveryPath::Gpu);
+
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(2, SharedIoCompletion::Success));
+    REQUIRE(controller.deliver(6).path == SharedIoDeliveryPath::Gpu);
+}
+
 TEST_CASE("execution controller requires exact sequences and reports typed fallback",
           "[gpu_audio][shared_io][controller]") {
     SharedIoTelemetry telemetry;
@@ -118,6 +140,26 @@ TEST_CASE("execution controller counts silence as a typed miss fallback",
     REQUIRE(miss.path == SharedIoDeliveryPath::Silence);
     REQUIRE(miss.fallback_reason == SharedIoFallbackReason::DeadlineExceeded);
     REQUIRE(telemetry.snapshot().fallback_blocks == 1);
+}
+
+TEST_CASE("execution controller accounts for every callback and sequence-gap silence",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(contract(MissPolicy::Silence), &telemetry));
+
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+    const auto gap = controller.deliver(2);
+    REQUIRE(gap.path == SharedIoDeliveryPath::Silence);
+    REQUIRE(gap.fallback_reason == SharedIoFallbackReason::SequenceGap);
+    REQUIRE(gap.resynced);
+
+    const auto stats = telemetry.snapshot();
+    REQUIRE(stats.callback_blocks == 2);
+    REQUIRE(stats.delivered_blocks == 2);
+    REQUIRE(stats.fallback_blocks == 1);
+    REQUIRE(stats.deadline_misses == 0);
+    REQUIRE(stats.resync_drops == 1);
 }
 
 TEST_CASE("controller callback delivery performs no allocation",

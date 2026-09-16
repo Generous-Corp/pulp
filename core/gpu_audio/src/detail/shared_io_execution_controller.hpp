@@ -179,11 +179,15 @@ class SharedIoExecutionController {
             result.fallback_reason = SharedIoFallbackReason::Teardown;
             return result;
         }
+        if (telemetry_)
+            telemetry_->record_callback_block(false);
         if (callback_started_ && callback_sequence != next_callback_sequence_) {
             result.fallback_reason = SharedIoFallbackReason::SequenceGap;
             result.resynced = true;
             if (telemetry_)
                 telemetry_->record_resync_drop();
+            if (telemetry_)
+                telemetry_->record_delivery(true, false);
             next_callback_sequence_ = callback_sequence + 1;
             return result;
         }
@@ -241,7 +245,7 @@ class SharedIoExecutionController {
         result.path = fallback_path();
         result.fallback_reason = SharedIoFallbackReason::DeadlineExceeded;
         if (telemetry_)
-            telemetry_->record_callback_block(true);
+            telemetry_->record_deadline_miss();
         if (telemetry_)
             telemetry_->record_delivery(result.uses_fallback(), late);
         result.resynced = late;
