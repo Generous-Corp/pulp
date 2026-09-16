@@ -3106,7 +3106,10 @@ provenance. Counts cover all entries; at most 100 non-run rows, 100 comparison
 rows total, and 100 issues are displayed, with omitted counts.
 Names/reasons/labels are bounded to 512
 characters and the last output line to 160, so keep the original XML for full
-detail. `pulp.ctest-nonruns.v2` JSON and the workflow's Markdown summary share
+detail. When comparison rows exceed the shared budget, newly failing tests, new
+non-runs, and failing or non-running current-only groups are retained before
+recoveries; digest order
+breaks ties. `pulp.ctest-nonruns.v2` JSON and the workflow's Markdown summary share
 one interpretation. `--json-output <path>` writes the same object to a regular,
 non-symlink file while retaining Markdown on stdout, which is how CI publishes
 the job summary and agent-readable artifact from one observation.

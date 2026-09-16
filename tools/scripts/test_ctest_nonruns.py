@@ -109,7 +109,7 @@ class ObservationTests(unittest.TestCase):
         observer.compare(report, cases, baseline)
         comparison = report["comparison"]
         self.assertEqual(comparison["status"], "observed")
-        self.assertEqual(comparison["transition_counts"], {"new_nonrun": 1, "recovered": 1, "changed": 1, "ambiguous_duplicate_groups": 1})
+        self.assertEqual(comparison["transition_counts"], {"newly_failed": 0, "new_nonrun": 1, "changed": 0, "failure_cleared": 1, "recovered": 1, "ambiguous_duplicate_groups": 1})
         self.assertFalse(any(row["name"] == "same" for row in comparison["transitions"]))
         self.assertEqual(comparison["ambiguous_duplicate_groups"][0]["name"], "ambiguous")
         self.assertIn("Changes from baseline", observer.markdown(report))
@@ -124,6 +124,29 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(report["comparison"]["status"], "unavailable")
         self.assertEqual(report["observation"], "incomplete")
+
+    def test_invalid_baseline_preserves_omitted_issue_count(self):
+        baseline = self.root / "baseline.xml"
+        count = observer.MAX_ROWS + 5
+        baseline.write_text(f'<testsuite tests="{count}">' + ''.join(f'<testcase name="bad-{i}" status="future"/>' for i in range(count)) + '</testsuite>', encoding="utf-8")
+        self.report.write_text('<testsuite tests="1"><testcase name="ok" status="run"/></testsuite>', encoding="utf-8")
+        report, cases = observer.observe_with_cases(self.report)
+        observer.compare(report, cases, baseline)
+        self.assertEqual(len(report["comparison"]["baseline"]["issues"]), observer.MAX_ROWS)
+        self.assertEqual(report["comparison"]["baseline"]["omitted_issues"], 5)
+
+    def test_comparison_budget_prioritizes_new_nonrun_over_recoveries(self):
+        baseline = self.root / "baseline.xml"
+        recoveries = observer.MAX_ROWS
+        baseline.write_text(f'<testsuite tests="{recoveries + 2}"><testcase name="important-new-skip" status="run"/><testcase name="important-new-failure" status="notrun"/>' + ''.join(f'<testcase name="recovered-{i}" status="notrun"/>' for i in range(recoveries)) + '</testsuite>', encoding="utf-8")
+        self.report.write_text(f'<testsuite tests="{recoveries + 2}"><testcase name="important-new-skip" status="notrun"/><testcase name="important-new-failure" status="fail"><failure/></testcase>' + ''.join(f'<testcase name="recovered-{i}" status="run"/>' for i in range(recoveries)) + '</testsuite>', encoding="utf-8")
+        report, cases = observer.observe_with_cases(self.report)
+        observer.compare(report, cases, baseline)
+        comparison = report["comparison"]
+        self.assertTrue(any(row["name"] == "important-new-skip" for row in comparison["transitions"]))
+        failure = next(row for row in comparison["transitions"] if row["name"] == "important-new-failure")
+        self.assertEqual(failure["kind"], "newly_failed")
+        self.assertEqual(comparison["omitted_transitions"], 2)
 
     def test_comparison_has_one_global_row_budget(self):
         baseline = self.root / "baseline.xml"

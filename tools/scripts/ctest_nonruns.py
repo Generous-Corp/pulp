@@ -144,6 +144,7 @@ def compare(report: dict, cases: list[dict], baseline_path: Path) -> None:
             "baseline": {
                 "input": str(baseline_path), "sha256": baseline["sha256"],
                 "observation": baseline["observation"], "issues": baseline["issues"],
+                "omitted_issues": baseline["omitted_issues"],
             },
             "status": "unavailable",
         }
@@ -168,7 +169,8 @@ def compare(report: dict, cases: list[dict], baseline_path: Path) -> None:
     transitions = []
     ambiguous_duplicate_groups = []
     transition_counts = {
-        "new_nonrun": 0, "recovered": 0, "changed": 0,
+        "newly_failed": 0, "new_nonrun": 0, "changed": 0,
+        "failure_cleared": 0, "recovered": 0,
         "ambiguous_duplicate_groups": 0,
     }
     nonrun = {"notrun", "disabled"}
@@ -193,9 +195,13 @@ def compare(report: dict, cases: list[dict], baseline_path: Path) -> None:
         after = after_group[0]
         if before["status"] == after["status"]:
             continue
-        if after["status"] in nonrun and before["status"] not in nonrun:
+        if after["status"] == "fail" and before["status"] != "fail":
+            kind = "newly_failed"
+        elif after["status"] in nonrun and before["status"] not in nonrun:
             kind = "new_nonrun"
-        elif before["status"] in nonrun and after["status"] not in nonrun:
+        elif before["status"] == "fail" and after["status"] == "run":
+            kind = "failure_cleared"
+        elif before["status"] in nonrun and after["status"] == "run":
             kind = "recovered"
         else:
             kind = "changed"
@@ -213,14 +219,28 @@ def compare(report: dict, cases: list[dict], baseline_path: Path) -> None:
 
     current_only = unmatched(current_by_name.keys() - baseline_by_name.keys(), current_by_name)
     baseline_only = unmatched(baseline_by_name.keys() - current_by_name.keys(), baseline_by_name)
-    remaining = MAX_ROWS
-    shown_transitions = transitions[:remaining]
-    remaining -= len(shown_transitions)
-    shown_ambiguous = ambiguous_duplicate_groups[:remaining]
-    remaining -= len(shown_ambiguous)
-    shown_current_only = current_only[:remaining]
-    remaining -= len(shown_current_only)
-    shown_baseline_only = baseline_only[:remaining]
+    candidates = []
+    transition_priority = {
+        "newly_failed": 0, "new_nonrun": 0, "changed": 1,
+        "failure_cleared": 4, "recovered": 5,
+    }
+    candidates.extend((transition_priority[row["kind"]], row["name_sha256"], "transitions", row)
+                      for row in transitions)
+    candidates.extend((2, row["name_sha256"], "ambiguous", row)
+                      for row in ambiguous_duplicate_groups)
+    for row in current_only:
+        statuses = row["status_counts"]
+        priority = 0 if statuses["notrun"] or statuses["disabled"] else (1 if statuses["fail"] else 3)
+        candidates.append((priority, row["name_sha256"], "current_only", row))
+    candidates.extend((4, row["name_sha256"], "baseline_only", row)
+                      for row in baseline_only)
+    selected = candidates
+    if len(candidates) > MAX_ROWS:
+        selected = sorted(candidates, key=lambda item: (item[0], item[1]))[:MAX_ROWS]
+    shown_transitions = [row for _, _, category, row in selected if category == "transitions"]
+    shown_ambiguous = [row for _, _, category, row in selected if category == "ambiguous"]
+    shown_current_only = [row for _, _, category, row in selected if category == "current_only"]
+    shown_baseline_only = [row for _, _, category, row in selected if category == "baseline_only"]
     report["comparison"] = {
         "status": "observed",
         "baseline": {
@@ -244,6 +264,7 @@ def compare(report: dict, cases: list[dict], baseline_path: Path) -> None:
             "Unique test names are matched by the SHA-256 of the full CTest name.",
             "Same-name duplicates are compared only as status-count groups; per-case transitions are intentionally not guessed.",
             "Artifact-only comparison cannot distinguish filtering, configuration, or source changes.",
+            "The shared row budget prioritizes new non-runs, failures, ambiguous duplicates, and current-only groups before recoveries.",
             "A transition is evidence to investigate, not a test-policy verdict.",
         ],
     }
@@ -308,7 +329,8 @@ def markdown(report: dict, leg: str = "") -> str:
     if comparison and comparison["status"] == "observed":
         counts = comparison["transition_counts"]
         lines += ["", "### Changes from baseline artifact", "",
-                  f"New non-runs: {counts['new_nonrun']}; recovered: {counts['recovered']}; "
+                  f"New failures: {counts['newly_failed']}; new non-runs: {counts['new_nonrun']}; "
+                  f"failures cleared: {counts['failure_cleared']}; recovered: {counts['recovered']}; "
                   f"other status changes: {counts['changed']}; ambiguous duplicate groups: "
                   f"{counts['ambiguous_duplicate_groups']}; current-only: {comparison['current_only_count']}; "
                   f"baseline-only: {comparison['baseline_only_count']}."]
