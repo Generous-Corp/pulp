@@ -59,6 +59,10 @@ class SignalGraph::PreparedTopologyEdit {
     /// Transfers a pathless Pulp-owned slot into this disposable candidate.
     NodeId add_owned_builtin_plugin_node(std::unique_ptr<PluginSlot> slot, int num_inputs,
                                          int num_outputs, const std::string& name);
+    NodeId add_processor_node(std::shared_ptr<format::ProcessorNodeInstance> processor,
+                              const std::string& name = {});
+    NodeId add_processor_node(std::unique_ptr<format::Processor> processor,
+                              const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id, const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id, int version,
                            const std::string& name = {});
@@ -117,6 +121,11 @@ class SignalGraph::PreparedTopologyEdit {
         std::function<void(void*)> release;
         bool touched = false;
     };
+    struct QuiescedProcessorLifecycle {
+        std::shared_ptr<format::ProcessorNodeInstance> processor;
+        int input_channels = 0;
+        int output_channels = 0;
+    };
 
     template <typename Fn> NodeId add_node_(Fn&& fn) {
         if (mutation_failed_ || committed_ || prepare_attempted_) {
@@ -149,6 +158,7 @@ class SignalGraph::PreparedTopologyEdit {
     std::vector<NodeId> prepared_new_custom_ids_;
     std::vector<QuiescedPluginLifecycle> quiesced_plugins_;
     std::vector<QuiescedCustomLifecycle> quiesced_customs_;
+    std::vector<QuiescedProcessorLifecycle> quiesced_processors_;
     std::uint64_t base_authoring_generation_ = 0;
     std::shared_ptr<SignalGraph::CompiledGraph> base_live_;
     bool base_canonical_routing_ = false;
