@@ -4928,10 +4928,15 @@ runs on the local M1s or overflows to github-hosted `macos-15`. The rule:
 **The probe must count only macOS Build-and-Test jobs that are RIGHT NOW
 `status == "in_progress"` on a local M1** — a job whose `status` is
 `in_progress` *and* whose `labels` array contains the local self-hosted
-label (`PULP_LOCAL_MAC_RUNNER_LABEL`, default `pulp-gate-fast`). The probe
-label must match the required selector's fast runner class; otherwise an idle
-rollback-only M1 can suppress overflow for work it cannot serve. Everything
-else counts 0:
+label (`PULP_LOCAL_MAC_RUNNER_LABEL`, default `pulp-gate-fast`). That probe
+label must name a label the gate actually dispatches, and today it does not:
+`build.yml` strips `pulp-gate-fast` and appends one event-class label, so a
+dispatched `macos` job never carries it and the probe counts zero (measured
+2026-09-15: 0 of 4 consecutive `macos` jobs carried `pulp-gate-fast`, 4 of 4
+carried `pulp-build-pr-head`). It is inert while overflow is the `local-only`
+sentinel; re-tune it as part of re-enabling overflow. Do not recover the older
+rationale that an idle *rollback-only* M1 would otherwise suppress overflow —
+M1 serves the required gate on equal terms. Everything else counts 0:
 
 - A `queued` Build-and-Test run has dispatched nothing — never enumerate
   queued runs at all; the probe lists only `status=in_progress` runs.
