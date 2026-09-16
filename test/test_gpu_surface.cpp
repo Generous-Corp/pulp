@@ -17,6 +17,9 @@ constexpr const char* kNoGpu =
 constexpr const char* kNoSurfaceInit =
     "GpuSurface would not initialize (no GPU adapter available)";
 
+constexpr const char* kNullBackendHasNoIdentity =
+    "adapter is Dawn's Null backend: it reports no driver identity";
+
 }  // namespace
 
 // Every other case here treats a missing adapter as a reason to SKIP, which is
@@ -198,6 +201,41 @@ TEST_CASE("GpuSurface adapter_info reflects initialization state", "[render][gpu
     REQUIRE_FALSE(after.architecture.empty());
     REQUIRE_FALSE(after.description.empty());
     REQUIRE_FALSE(after.preferred_canvas_format.empty());
+}
+
+TEST_CASE("GpuSurface adapter_info reports the driver's own identity",
+          "[render][gpu][adapter-identity]") {
+    auto surface = GpuSurface::create_dawn();
+    if (!surface) SKIP(kNoGpu);
+
+    GpuSurface::Config config{};
+    config.width = 64;
+    config.height = 32;
+    config.native_surface_handle = nullptr;
+    if (!surface->initialize(config)) SKIP(kNoSurfaceInit);
+
+    const auto info = surface->adapter_info();
+    REQUIRE(info.available);
+    // The Null backend validates API calls against no driver, so it has no
+    // identity to report and its blank fields land on the generic fallbacks.
+    if (info.null_backend) SKIP(kNullBackendHasNoIdentity);
+
+    INFO("name: " << info.name);
+    INFO("vendor: " << info.vendor);
+    INFO("description: " << info.description);
+
+    // Android's Vulkan driver policy matches a blocklist against exactly these
+    // three fields, so an identity assembled from the backend name alone would
+    // make every entry in that list unmatchable. A backing adapter must supply
+    // at least one field the generic fallbacks could not have produced.
+    const bool generic_name =
+        info.name == "Native Dawn Adapter (" + info.backend_type + ")"
+        || info.name == "Native WebGPU Adapter (" + info.backend_type + ")";
+    const bool generic_vendor = info.vendor == "Dawn" || info.vendor == "wgpu-native";
+    const bool generic_description = info.description == info.name;
+    const bool identity_is_generic =
+        generic_name && generic_vendor && generic_description;
+    REQUIRE_FALSE(identity_is_generic);
 }
 
 TEST_CASE("GpuSurface begin_frame before initialize returns false", "[render][gpu]") {
