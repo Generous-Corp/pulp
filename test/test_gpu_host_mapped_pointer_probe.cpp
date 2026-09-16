@@ -17,6 +17,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include <sys/sysctl.h>
@@ -265,7 +266,17 @@ int main(int argc, char** argv) {
         print_receipt(receipt);
         return code;
     };
+    auto finish_feature_gate = [&](int code, std::string status, std::string reason) {
+        receipt.validation_errors = validation_errors->load();
+        if (code == kPassed && receipt.validation_errors != 0) {
+            code = kFailed;
+            status = "failed";
+            reason = "feature_gate_validation_error";
+        }
+        return finish(code, std::move(status), std::move(reason));
+    };
     bool verify_oracle_negative_control = false;
+    bool verify_feature_gate_negative_control = false;
     bool verify_setter_order_negative_control = false;
     const char* provider_identity_negative_control = nullptr;
     if (argc == 2 && std::strcmp(argv[1], "--verify-oracle-negative-control") == 0) {
@@ -282,6 +293,8 @@ int main(int argc, char** argv) {
                std::strcmp(argv[1], "--verify-provider-setter-order-negative-control") == 0) {
         provider_identity_negative_control = "proc";
         verify_setter_order_negative_control = true;
+    } else if (argc == 2 && std::strcmp(argv[1], "--verify-feature-gate-negative-control") == 0) {
+        verify_feature_gate_negative_control = true;
     } else if (argc != 1) {
         return finish(kFailed, "failed", "invalid_arguments");
     }
@@ -361,29 +374,45 @@ int main(int argc, char** argv) {
                                 adapter_request->done = true;
                             });
     if (!pump_until(instance, probe_deadline, [&] { return adapter_request->done.load(); })) {
+        if (verify_feature_gate_negative_control)
+            return finish_feature_gate(kFailed, "failed", "adapter_request_timeout");
         return finish(kFailed, "failed", "adapter_request_timeout");
     }
-    if (adapter_request->status != wgpu::RequestAdapterStatus::Success || !adapter_request->adapter)
+    if (adapter_request->status != wgpu::RequestAdapterStatus::Success ||
+        !adapter_request->adapter) {
+        if (verify_feature_gate_negative_control)
+            return finish_feature_gate(kUnavailable, "unavailable", "no_adapter");
         return finish(kUnavailable, "unavailable", "no_adapter");
+    }
     wgpu::Adapter adapter = std::move(adapter_request->adapter);
 
     wgpu::AdapterInfo info{};
-    if (adapter.GetInfo(&info) != wgpu::Status::Success)
+    if (adapter.GetInfo(&info) != wgpu::Status::Success) {
+        if (verify_feature_gate_negative_control)
+            return finish_feature_gate(kFailed, "failed", "adapter_info_failed");
         return finish(kFailed, "failed", "adapter_info_failed");
+    }
     receipt.adapter = json_escape(info.device);
     receipt.vendor = json_escape(info.vendor);
     receipt.vendor_id = info.vendorID;
     receipt.adapter_type = adapter_type_name(info.adapterType);
     receipt.backend = backend_name(info.backendType);
     if (info.backendType != wgpu::BackendType::Metal) {
+        if (verify_feature_gate_negative_control)
+            return finish_feature_gate(kUnavailable, "unavailable", "metal_adapter_required");
         return finish(kUnavailable, "unavailable", "metal_adapter_required");
     }
     if (receipt.vendor_id != 0x106b) {
+        if (verify_feature_gate_negative_control)
+            return finish_feature_gate(kUnavailable, "unavailable", "apple_gpu_required");
         return finish(kUnavailable, "unavailable", "apple_gpu_required");
     }
 
     receipt.feature = adapter.HasFeature(wgpu::FeatureName::HostMappedPointer);
     if (!receipt.feature) {
+        if (verify_feature_gate_negative_control)
+            return finish_feature_gate(kUnavailable, "unavailable",
+                                       "enabled_positive_control_feature_missing");
         return finish(kUnavailable, "unavailable", "host_mapped_pointer_missing");
     }
 
@@ -393,6 +422,8 @@ int main(int argc, char** argv) {
     if (adapter.GetLimits(&limits) != wgpu::Status::Success ||
         host_limits.hostMappedPointerAlignment == wgpu::kLimitU32Undefined ||
         host_limits.hostMappedPointerAlignment == 0) {
+        if (verify_feature_gate_negative_control)
+            return finish_feature_gate(kFailed, "failed", "host_pointer_alignment_unavailable");
         return finish(kFailed, "failed", "host_pointer_alignment_unavailable");
     }
     receipt.alignment = host_limits.hostMappedPointerAlignment;
@@ -422,10 +453,73 @@ int main(int argc, char** argv) {
             device_request->done = true;
         });
     if (!pump_until(instance, probe_deadline, [&] { return device_request->done.load(); })) {
+        if (verify_feature_gate_negative_control)
+            return finish_feature_gate(kFailed, "failed",
+                                       "enabled_positive_control_device_request_timeout");
         return finish(kFailed, "failed", "device_request_timeout");
     }
-    if (device_request->status != wgpu::RequestDeviceStatus::Success || !device_request->device) {
+    if (device_request->status != wgpu::RequestDeviceStatus::Success) {
+        if (verify_feature_gate_negative_control) {
+            const char* reason =
+                device_request->status == wgpu::RequestDeviceStatus::CallbackCancelled
+                    ? "enabled_positive_control_device_request_cancelled"
+                    : "enabled_positive_control_device_request_rejected";
+            return finish_feature_gate(kFailed, "failed", reason);
+        }
         return finish(kFailed, "failed", "device_creation_failed");
+    }
+    if (!device_request->device) {
+        if (verify_feature_gate_negative_control)
+            return finish_feature_gate(kFailed, "failed",
+                                       "enabled_positive_control_null_device_on_success");
+        return finish(kFailed, "failed", "device_creation_failed");
+    }
+    if (verify_feature_gate_negative_control) {
+        // The adapter was discovered with unsafe APIs enabled so that it advertises
+        // HostMappedPointer. Keep that adapter and required feature identical to the
+        // successful request above, whose device remains alive in device_request,
+        // then prove device creation rejects the feature when its unsafe toggle is
+        // explicitly disabled.
+        wgpu::DawnTogglesDescriptor disabled_device_toggles{};
+        disabled_device_toggles.disabledToggleCount = 1;
+        disabled_device_toggles.disabledToggles = enabled_toggles;
+        wgpu::DeviceDescriptor disabled_device_desc{};
+        disabled_device_desc.label = "Pulp GPU audio feature-gate negative control";
+        disabled_device_desc.nextInChain = &disabled_device_toggles;
+        disabled_device_desc.requiredFeatureCount = 1;
+        disabled_device_desc.requiredFeatures = required_features;
+        disabled_device_desc.SetUncapturedErrorCallback(
+            [](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView,
+               std::atomic<unsigned>* errors) { ++*errors; },
+            validation_errors.get());
+
+        auto disabled_request = std::make_shared<DeviceRequestState>();
+        adapter.RequestDevice(&disabled_device_desc, wgpu::CallbackMode::AllowProcessEvents,
+                              [disabled_request](wgpu::RequestDeviceStatus status,
+                                                 wgpu::Device result, wgpu::StringView) {
+                                  disabled_request->status = status;
+                                  if (status == wgpu::RequestDeviceStatus::Success)
+                                      disabled_request->device = std::move(result);
+                                  disabled_request->done = true;
+                              });
+        if (!pump_until(instance, probe_deadline, [&] { return disabled_request->done.load(); }))
+            return finish_feature_gate(kFailed, "failed", "feature_gate_device_request_timeout");
+        if (disabled_request->status == wgpu::RequestDeviceStatus::Success) {
+            const char* reason = disabled_request->device ? "feature_gate_device_request_accepted"
+                                                          : "feature_gate_null_device_on_success";
+            return finish_feature_gate(kFailed, "failed", reason);
+        }
+        if (disabled_request->status == wgpu::RequestDeviceStatus::CallbackCancelled)
+            return finish_feature_gate(kFailed, "failed", "feature_gate_device_request_cancelled");
+        if (disabled_request->status != wgpu::RequestDeviceStatus::Error)
+            return finish_feature_gate(kFailed, "failed", "feature_gate_request_unexpected_status");
+        // RequestDevice error strings are diagnostic text, not a stable API contract. The
+        // causal control is the adjacent successful request on this same adapter with the
+        // same required feature; this request differs only by explicitly disabling the
+        // feature's unsafe-API toggle and must return Error without a device.
+        return finish_feature_gate(
+            kPassed, "passed",
+            "required_feature_device_request_rejected_when_unsafe_toggle_disabled");
     }
     wgpu::Device device = std::move(device_request->device);
     auto pop_error_scope = [&](const std::shared_ptr<ErrorScopeState>& state) {

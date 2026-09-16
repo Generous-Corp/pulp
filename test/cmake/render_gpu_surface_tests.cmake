@@ -213,6 +213,9 @@
         add_test(NAME pulp-gpu-host-mapped-pointer-oracle-negative-control
             COMMAND pulp-gpu-host-mapped-pointer-probe
                 --verify-oracle-negative-control)
+        add_test(NAME pulp-gpu-host-mapped-pointer-feature-gate-negative-control
+            COMMAND pulp-gpu-host-mapped-pointer-probe
+                --verify-feature-gate-negative-control)
         if(_pulp_gpu_audio_target_is_arm64)
             add_test(NAME pulp-gpu-host-mapped-pointer-provider-negative-control
                 COMMAND "${CMAKE_COMMAND}"
@@ -227,6 +230,7 @@
         set_tests_properties(
             pulp-gpu-host-mapped-pointer-probe
             pulp-gpu-host-mapped-pointer-oracle-negative-control
+            pulp-gpu-host-mapped-pointer-feature-gate-negative-control
             PROPERTIES
                 RESOURCE_LOCK pulp_gpu
                 SKIP_RETURN_CODE 77
@@ -235,6 +239,7 @@
             set_tests_properties(
                 pulp-gpu-host-mapped-pointer-probe
                 pulp-gpu-host-mapped-pointer-oracle-negative-control
+                pulp-gpu-host-mapped-pointer-feature-gate-negative-control
                 PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
             if(_pulp_gpu_audio_target_is_arm64)
                 set_tests_properties(
