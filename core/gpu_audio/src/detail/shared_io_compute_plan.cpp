@@ -2,15 +2,23 @@
 
 #include <algorithm>
 #include <chrono>
+#include <utility>
 
 namespace pulp::gpu_audio::detail {
 
 bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config& config) {
+    return prepare(provider, config, {});
+}
+
+bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config& config,
+                                  std::unique_ptr<SharedIoPreparedProgram> program) {
     if (config.slots == 0 || config.input_bytes_per_slot == 0 ||
-        config.output_bytes_per_slot == 0 || !arena_.prepare(
-            provider, {.slots = config.slots,
-                       .input_bytes_per_slot = config.input_bytes_per_slot,
-                       .output_bytes_per_slot = config.output_bytes_per_slot}))
+        config.output_bytes_per_slot == 0 ||
+        !arena_.prepare(provider,
+                        {.slots = config.slots,
+                         .input_bytes_per_slot = config.input_bytes_per_slot,
+                         .output_bytes_per_slot = config.output_bytes_per_slot},
+                        std::move(program)))
         return false;
     pending_.assign(config.slots, {});
     completions_.assign(static_cast<std::size_t>(config.slots) * 2 + 1, {});

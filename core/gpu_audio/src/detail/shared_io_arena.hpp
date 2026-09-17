@@ -204,6 +204,31 @@ class SharedIoArenaProvider {
     virtual bool drain() noexcept = 0;
 };
 
+// Private backend-neutral owner for a prepared compute program. The arena
+// supplies only provider-certified slot capabilities at prepare time and keeps
+// the program alive until every accepted submission is terminal. This leaves
+// the P1 provider's ordinary submit() contract as its affine mechanism probe
+// while later DSP programs reuse the same allocation and retirement machinery.
+class SharedIoPreparedProgram {
+  public:
+    using SlotBufferHandle = SharedIoArenaProvider::SlotBufferHandle;
+    using SlotResources = SharedIoArenaProvider::SlotResources;
+    using SlotToken = SharedIoArenaProvider::SlotToken;
+
+    virtual ~SharedIoPreparedProgram() = default;
+    virtual bool prepare(SharedIoArenaProvider& provider,
+                         std::span<const SlotBufferHandle> slots) noexcept = 0;
+    // The provider submit contract applies unchanged: after any backend queue
+    // submission attempt this must return true and retire exactly once through
+    // the supplied inbox. False is reserved for proven pre-submit refusal.
+    virtual bool submit(SharedIoArenaProvider& provider, const SlotResources& resources,
+                        SlotToken token,
+                        std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept = 0;
+    // Called only after provider drain and ledger/inbox quiescence, before slot
+    // buffers retire. False preserves the complete prepared transaction.
+    virtual bool release() noexcept = 0;
+};
+
 // Prepared, fixed-capacity owner for shared CPU/GPU I/O slots. All methods other
 // than the provider callback are called by one serialized non-RT dispatcher.
 // prepare()/release() establish and destroy allocation ownership. Pulp-owned
@@ -270,6 +295,8 @@ class SharedIoArena {
     SharedIoArena& operator=(SharedIoArena&&) = delete;
 
     bool prepare(SharedIoArenaProvider& provider, const Config& config);
+    bool prepare(SharedIoArenaProvider& provider, const Config& config,
+                 std::unique_ptr<SharedIoPreparedProgram> program);
     // Host/quiescent teardown. Calling this explicitly asserts every producer
     // has returned its write lease and every consumer has stopped reading its
     // output lease. The provider is then terminally drained before resources are
@@ -338,6 +365,7 @@ class SharedIoArena {
     std::vector<SharedIoArenaProvider::SlotResources> resources_;
     std::vector<RejectedSubmission> rejected_submissions_;
     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox_;
+    std::unique_ptr<SharedIoPreparedProgram> program_;
     bool prepared_ = false;
 };
 

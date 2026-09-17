@@ -482,6 +482,13 @@ pulp_add_test_suite(pulp-test-gpu-shared-io-compute-plan
     LIBRARIES pulp::gpu-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Deterministic Dawn-free chronology/OLA reducer. It compiles the private source
+# directly so this test remains independent of real-provider availability.
+pulp_add_test_suite(pulp-test-gpu-shared-io-convolution-executor
+    SOURCES test_gpu_shared_io_convolution_executor.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_convolution_executor.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Flow pans: pure per-room constant-power pan math + GpuMultiConvolver::set_flow
 # (an atomic store). GPU-agnostic, so it runs — and keeps the flow math covered —
 # in the no-GPU coverage build too.

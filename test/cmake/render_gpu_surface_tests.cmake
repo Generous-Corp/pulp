@@ -384,6 +384,34 @@
                     "${PROJECT_SOURCE_DIR}/test/test_gpu_dawn_vellum_d15_source.py")
             set_tests_properties(pulp-gpu-dawn-vellum-d15-source PROPERTIES
                 TIMEOUT 20)
+
+            add_executable(pulp-gpu-shared-io-private-convolution-probe
+                test_gpu_shared_io_private_convolution_probe.cpp)
+            target_link_libraries(pulp-gpu-shared-io-private-convolution-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-shared-io-private-convolution-probe PRIVATE
+                ../core/gpu_audio/src)
+            add_dependencies(pulp-gpu-shared-io-private-convolution-probe
+                pulp-gpu-dawn-shared-io-provider-probe)
+            add_test(NAME pulp-gpu-shared-io-private-convolution-probe
+                COMMAND pulp-gpu-shared-io-private-convolution-probe)
+            add_test(NAME pulp-gpu-shared-io-private-convolution-prepare-scope-negative-control
+                COMMAND pulp-gpu-shared-io-private-convolution-probe
+                    --scenario=prepare-scope-failure)
+            add_test(NAME pulp-gpu-shared-io-private-convolution-submit-scope-negative-control
+                COMMAND pulp-gpu-shared-io-private-convolution-probe
+                    --scenario=submit-scope-failure)
+            set_tests_properties(pulp-gpu-shared-io-private-convolution-probe PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                TIMEOUT 60)
+            set_tests_properties(
+                pulp-gpu-shared-io-private-convolution-prepare-scope-negative-control
+                pulp-gpu-shared-io-private-convolution-submit-scope-negative-control
+                PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 60)
         endif()
 
         unset(_pulp_gpu_audio_asset_sha256)
