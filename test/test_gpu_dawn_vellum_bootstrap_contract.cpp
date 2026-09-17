@@ -86,9 +86,10 @@ int main() {
         .callback = &reject_reentry,
         .context = &reentry,
     };
-    if (!require(vellum::graphics::register_dawn_bootstrap(
-                     bootstrap, "pulp-d15-provider", &error) && reentry.rejected_reentry,
-                 "coordinator did not reject re-entry before completing once-bootstrap")) {
+    if (!require(
+            vellum::graphics::register_dawn_bootstrap(bootstrap, "pulp-d15-provider", &error) &&
+                reentry.rejected_reentry,
+            "coordinator did not reject re-entry before completing once-bootstrap")) {
         return 1;
     }
     if (!require(vellum::graphics::dawn_bootstrap_is_registered(&error),
@@ -99,8 +100,8 @@ int main() {
                  "same provider registration was not idempotent")) {
         return 1;
     }
-    return require(!vellum::graphics::register_dawn_bootstrap(
-                       bootstrap, "pulp-d15-provider-mismatch", &error),
+    return require(!vellum::graphics::register_dawn_bootstrap(bootstrap,
+                                                              "pulp-d15-provider-mismatch", &error),
                    "different provider revision was accepted after bootstrap")
                ? 0
                : 1;

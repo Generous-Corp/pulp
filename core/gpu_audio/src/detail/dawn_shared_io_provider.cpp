@@ -64,16 +64,16 @@ struct VellumOverrideBootstrap {
     const DawnProcTable* override = nullptr;
 };
 
-vellum::graphics::DawnBootstrapResult install_vellum_override(
-    const vellum::graphics::DawnBootstrapRequest& request, void* opaque, std::string* error) {
+vellum::graphics::DawnBootstrapResult
+install_vellum_override(const vellum::graphics::DawnBootstrapRequest& request, void* opaque,
+                        std::string* error) {
     const auto* context = static_cast<const VellumOverrideBootstrap*>(opaque);
     const auto header = revision(dawn::kDawnVersion.data());
     const auto proc = revision(dawnProcGetVersion());
     const DawnProcTable& native = dawn::native::GetProcs();
     const auto native_revision = revision(native.version);
-    const auto* selected = context == nullptr || context->override == nullptr
-                               ? &native
-                               : context->override;
+    const auto* selected =
+        context == nullptr || context->override == nullptr ? &native : context->override;
     if (context == nullptr || request.abi_version != vellum::graphics::kDawnBootstrapAbiVersion ||
         request.expected_dawn_revision != context->expected || header.empty() || header != proc ||
         header != native_revision || header != context->expected ||
