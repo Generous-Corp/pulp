@@ -538,11 +538,19 @@ describe('host-config materialized metadata', () => {
             const create = PulpHostConfig.createInstance as
                 (type: string, props: unknown, root: unknown,
                  context: unknown, handle: unknown) => unknown;
-            const instance = create('div', { children: 'Theme' },
+            const initial = { children: 'Theme', style: { position: 'fixed', width: '80%' } };
+            const instance = create('div', initial,
                 { rootId: '', nextId: 0 }, {}, {}) as {
-                    _dom: { _textContent: string };
+                    _dom: { _textContent: string; __pulpAuthoredLayout__: Record<string, unknown> };
                 };
             expect(instance._dom._textContent).toBe('Theme');
+            expect(instance._dom.__pulpAuthoredLayout__).toMatchObject({
+                position: 'fixed', width: '80%',
+            });
+            const update = PulpHostConfig.commitUpdate as (...args: unknown[]) => void;
+            update(instance, null, 'div', initial,
+                { children: 'Theme', style: { position: 'fixed', width: 230 } }, null);
+            expect(instance._dom.__pulpAuthoredLayout__.width).toBe(230);
         } finally {
             host.Element = oldElement;
         }
