@@ -511,8 +511,9 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::reject_sample_region_(
     return result;
 }
 
-SampleRegionResult SignalGraph::PreparedTopologyEdit::replace_sample_region_(
-    SampleRegionDefinition definition, bool declaration) {
+SampleRegionResult
+SignalGraph::PreparedTopologyEdit::replace_sample_region_(SampleRegionDefinition definition,
+                                                          bool declaration) {
     if (mutation_failed_ || committed_ || prepare_attempted_)
         return reject_sample_region_(definition.region_id, SampleRegionRefusalReason::PrepareFailed,
                                      "the topology edit no longer accepts mutations");
@@ -523,10 +524,12 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::replace_sample_region_(
     });
     if ((declaration && found != definitions.end()) || (!declaration && found == definitions.end()))
         return reject_sample_region_(definition.region_id, SampleRegionRefusalReason::UnknownRegion,
-                                     declaration ? "region ID already exists" : "region does not exist");
+                                     declaration ? "region ID already exists"
+                                                 : "region does not exist");
     const auto proof = candidate_->sample_region_metadata_proof_locked_(definition, false);
     if (!proof.accepted)
-        return reject_sample_region_(proof.region_id, proof.reason, proof.message, proof.offending_node);
+        return reject_sample_region_(proof.region_id, proof.reason, proof.message,
+                                     proof.offending_node);
     std::sort(definition.members.begin(), definition.members.end(),
               [](const auto& left, const auto& right) { return left.node < right.node; });
     const auto boundary_less = [&](NodeId left, NodeId right) {
@@ -539,15 +542,18 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::replace_sample_region_(
         const auto ri = index(right);
         return li == ri ? left < right : li < ri;
     };
-    std::sort(definition.input_boundaries.begin(), definition.input_boundaries.end(), boundary_less);
-    std::sort(definition.output_boundaries.begin(), definition.output_boundaries.end(), boundary_less);
+    std::sort(definition.input_boundaries.begin(), definition.input_boundaries.end(),
+              boundary_less);
+    std::sort(definition.output_boundaries.begin(), definition.output_boundaries.end(),
+              boundary_less);
     std::sort(definition.promoted_parameters.begin(), definition.promoted_parameters.end(),
               [](const auto& left, const auto& right) { return left.param_id < right.param_id; });
     const auto id = definition.region_id;
     if (declaration) {
         definitions.push_back(std::move(definition));
-        std::sort(definitions.begin(), definitions.end(),
-                  [](const auto& left, const auto& right) { return left.region_id < right.region_id; });
+        std::sort(definitions.begin(), definitions.end(), [](const auto& left, const auto& right) {
+            return left.region_id < right.region_id;
+        });
     } else {
         *found = std::move(definition);
     }
@@ -559,8 +565,8 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::replace_sample_region_(
     return result;
 }
 
-SampleRegionResult SignalGraph::PreparedTopologyEdit::declare_sample_region(
-    SampleRegionDefinition definition) {
+SampleRegionResult
+SignalGraph::PreparedTopologyEdit::declare_sample_region(SampleRegionDefinition definition) {
     return replace_sample_region_(std::move(definition), true);
 }
 
@@ -573,7 +579,8 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::remove_sample_region(Sampl
     const auto found = std::find_if(definitions.begin(), definitions.end(),
                                     [&](const auto& value) { return value.region_id == id; });
     if (found == definitions.end())
-        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion, "region does not exist");
+        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion,
+                                     "region does not exist");
     definitions.erase(found);
     candidate_->invalidate_live_locked_();
     SampleRegionResult result;
@@ -583,16 +590,19 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::remove_sample_region(Sampl
     return result;
 }
 
-SampleRegionResult SignalGraph::PreparedTopologyEdit::add_sample_region_member(
-    SampleRegionId id, NodeId member, SampleKernelConfig config) {
+SampleRegionResult
+SignalGraph::PreparedTopologyEdit::add_sample_region_member(SampleRegionId id, NodeId member,
+                                                            SampleKernelConfig config) {
     auto definition = sample_region(id);
     if (!definition)
-        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion, "region does not exist");
+        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion,
+                                     "region does not exist");
     const auto* current = candidate_->node(member);
     if (current == nullptr)
         return reject_sample_region_(id, SampleRegionRefusalReason::UnknownMember,
                                      "member node does not exist", member);
-    definition->members.push_back({member, current->custom_type_id, current->custom_type_version, config});
+    definition->members.push_back(
+        {member, current->custom_type_id, current->custom_type_version, config});
     if (current->custom_type_id == "pulp.core.sample-region.input")
         definition->input_boundaries.push_back(member);
     if (current->custom_type_id == "pulp.core.sample-region.output")
@@ -600,11 +610,12 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::add_sample_region_member(
     return replace_sample_region_(std::move(*definition), false);
 }
 
-SampleRegionResult SignalGraph::PreparedTopologyEdit::remove_sample_region_member(
-    SampleRegionId id, NodeId member) {
+SampleRegionResult SignalGraph::PreparedTopologyEdit::remove_sample_region_member(SampleRegionId id,
+                                                                                  NodeId member) {
     auto definition = sample_region(id);
     if (!definition)
-        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion, "region does not exist");
+        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion,
+                                     "region does not exist");
     const auto found = std::find_if(definition->members.begin(), definition->members.end(),
                                     [&](const auto& value) { return value.node == member; });
     if (found == definition->members.end())
@@ -616,11 +627,13 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::remove_sample_region_membe
     return replace_sample_region_(std::move(*definition), false);
 }
 
-SampleRegionResult SignalGraph::PreparedTopologyEdit::set_sample_kernel_config(
-    SampleRegionId id, NodeId member, SampleKernelConfig config) {
+SampleRegionResult
+SignalGraph::PreparedTopologyEdit::set_sample_kernel_config(SampleRegionId id, NodeId member,
+                                                            SampleKernelConfig config) {
     auto definition = sample_region(id);
     if (!definition)
-        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion, "region does not exist");
+        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion,
+                                     "region does not exist");
     const auto found = std::find_if(definition->members.begin(), definition->members.end(),
                                     [&](const auto& value) { return value.node == member; });
     if (found == definition->members.end())
@@ -641,7 +654,8 @@ SampleRegionResult SignalGraph::PreparedTopologyEdit::connect_in_sample_region(
                                      candidate_->sample_region_definitions_.end(),
                                      [&](const auto& value) { return value.region_id == id; });
     if (region == candidate_->sample_region_definitions_.end())
-        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion, "region does not exist");
+        return reject_sample_region_(id, SampleRegionRefusalReason::UnknownRegion,
+                                     "region does not exist");
     const auto edge_failure = [&](SampleRegionRefusalReason reason, const char* message) {
         auto result = reject_sample_region_(id, reason, message, destination);
         result.has_offending_connection = true;
@@ -677,8 +691,8 @@ SampleRegionProof SignalGraph::PreparedTopologyEdit::prove_sample_region(SampleR
     return candidate_->prove_sample_region(id);
 }
 
-std::optional<SampleRegionDescriptor> SignalGraph::PreparedTopologyEdit::sample_region(
-    SampleRegionId id) const {
+std::optional<SampleRegionDescriptor>
+SignalGraph::PreparedTopologyEdit::sample_region(SampleRegionId id) const {
     return candidate_->sample_region(id);
 }
 
@@ -695,9 +709,8 @@ SignalGraph::PreparedTopologyEdit::sample_region_preparation_result_(double samp
             return Result::PreflightFailed;
         return std::nullopt;
     }
-    candidate_->sample_region_proof_block_size_ = max_block_size > 0
-                                                     ? static_cast<std::uint32_t>(max_block_size)
-                                                     : 0;
+    candidate_->sample_region_proof_block_size_ =
+        max_block_size > 0 ? static_cast<std::uint32_t>(max_block_size) : 0;
     if (!std::isfinite(sample_rate) || sample_rate <= 0.0 ||
         !candidate_->validate_generated_graph(max_block_size).accepted)
         return Result::PreflightFailed;
@@ -711,7 +724,8 @@ SignalGraph::PreparedTopologyEdit::sample_region_preparation_result_(double samp
         return Result::PreflightFailed;
     for (const auto& node : candidate_->nodes_) {
         if (node.type == NodeType::Custom &&
-            candidate_->sample_kernel_type(node.custom_type_id, node.custom_type_version) != nullptr &&
+            candidate_->sample_kernel_type(node.custom_type_id, node.custom_type_version) !=
+                nullptr &&
             candidate_->sample_region_for_node_locked_(node.id) == 0)
             return Result::PreflightFailed;
     }

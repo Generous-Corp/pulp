@@ -22,7 +22,9 @@ static_assert(std::is_copy_constructible_v<SampleRegionDefinition>);
 static_assert(std::is_copy_constructible_v<SampleRegionDescriptor>);
 static_assert(std::is_copy_constructible_v<SampleRegionResult>);
 
-SampleKernelConfig none() { return {SampleKernelConfigKind::None, 0, 0.0f}; }
+SampleKernelConfig none() {
+    return {SampleKernelConfigKind::None, 0, 0.0f};
+}
 SampleKernelConfig boundary(std::uint32_t index = 0) {
     return {SampleKernelConfigKind::BoundaryIndex, index, 0.0f};
 }
@@ -203,11 +205,12 @@ TEST_CASE("Sample region producer and boundary defects retain exact proof diagno
         REQUIRE(fixture.edit->disconnect(fixture.region_input, 0, fixture.add, 0));
     }
     SECTION("implicit multi-producer port") {
-        REQUIRE(fixture.edit->connect_in_sample_region(9, fixture.region_input, 0,
-                                                       fixture.add, 1).accepted);
+        REQUIRE(fixture.edit->connect_in_sample_region(9, fixture.region_input, 0, fixture.add, 1)
+                    .accepted);
     }
     SECTION("noncontiguous boundary index") {
-        REQUIRE(fixture.edit->set_sample_kernel_config(9, fixture.region_input, boundary(2)).accepted);
+        REQUIRE(
+            fixture.edit->set_sample_kernel_config(9, fixture.region_input, boundary(2)).accepted);
         expected = Reason::InvalidBoundary;
     }
     SECTION("duplicate boundary index") {
@@ -221,8 +224,9 @@ TEST_CASE("Sample region producer and boundary defects retain exact proof diagno
         expected = Reason::InvalidBoundaryCrossing;
     }
     SECTION("illegal output boundary to internal member") {
-        REQUIRE(fixture.edit->connect_in_sample_region(9, fixture.region_output, 0,
-                                                       fixture.delay, 0).accepted);
+        REQUIRE(
+            fixture.edit->connect_in_sample_region(9, fixture.region_output, 0, fixture.delay, 0)
+                .accepted);
     }
     SECTION("legacy feedback inside the region") {
         REQUIRE(fixture.edit->disconnect(fixture.delay, 0, fixture.add, 1));
@@ -255,8 +259,12 @@ TEST_CASE("Sample region impossible identities and malformed configurations fail
         definition.region_id = 0;
         expected = Reason::UnknownRegion;
     }
-    SECTION("missing member") { definition.members.front().node = 100000; }
-    SECTION("duplicate member") { definition.members.push_back(definition.members.front()); }
+    SECTION("missing member") {
+        definition.members.front().node = 100000;
+    }
+    SECTION("duplicate member") {
+        definition.members.push_back(definition.members.front());
+    }
     SECTION("ordinary graph node") {
         definition.members.front().node = fixture.gain;
         expected = Reason::UnsupportedNodeKind;
@@ -266,7 +274,8 @@ TEST_CASE("Sample region impossible identities and malformed configurations fail
         expected = Reason::UnresolvedSampleKernel;
     }
     SECTION("missing exact descriptor") {
-        const auto unknown = fixture.edit->add_unresolved_custom_node("pulp.test.unknown", 4, 1, 1, "unknown");
+        const auto unknown =
+            fixture.edit->add_unresolved_custom_node("pulp.test.unknown", 4, 1, 1, "unknown");
         definition.members.push_back({unknown, "pulp.test.unknown", 4, none()});
         expected = Reason::UnresolvedSampleKernel;
     }
@@ -276,9 +285,11 @@ TEST_CASE("Sample region impossible identities and malformed configurations fail
     }
     SECTION("nonfinite constant") {
         const auto constant = fixture.edit->add_custom_node("pulp.core.sample-region.constant");
-        definition.members.push_back({constant, "pulp.core.sample-region.constant", 1,
-                                      {SampleKernelConfigKind::FiniteConstant, 0,
-                                       std::numeric_limits<float>::infinity()}});
+        definition.members.push_back(
+            {constant,
+             "pulp.core.sample-region.constant",
+             1,
+             {SampleKernelConfigKind::FiniteConstant, 0, std::numeric_limits<float>::infinity()}});
         expected = Reason::InvalidKernelConfig;
     }
     SECTION("unused config payload") {
@@ -306,7 +317,8 @@ TEST_CASE("Sample region membership and edge scope cannot be bypassed",
               Reason::MemberInMultipleRegions);
     }
     SECTION("duplicate region") {
-        CHECK(fixture.edit->declare_sample_region(fixture.definition()).reason == Reason::UnknownRegion);
+        CHECK(fixture.edit->declare_sample_region(fixture.definition()).reason ==
+              Reason::UnknownRegion);
     }
     SECTION("unknown region") {
         CHECK(fixture.edit->connect_in_sample_region(18, fixture.delay, 0, fixture.add, 1).reason ==
@@ -321,7 +333,8 @@ TEST_CASE("Sample region membership and edge scope cannot be bypassed",
               Reason::InvalidProducerCardinality);
     }
     SECTION("region-aware crossing") {
-        const auto result = fixture.edit->connect_in_sample_region(9, fixture.input, 0, fixture.add, 1);
+        const auto result =
+            fixture.edit->connect_in_sample_region(9, fixture.input, 0, fixture.add, 1);
         CHECK(result.reason == Reason::InvalidBoundaryCrossing);
         CHECK(result.has_offending_connection);
         CHECK(result.offending_connection.source == fixture.input);
@@ -385,7 +398,9 @@ TEST_CASE("Sample region quotient refuses an exterior cycle even when the flat g
     definition.region_id = 1;
     definition.members = {
         {input, "pulp.core.sample-region.input", 1, boundary()},
-        {constant, "pulp.core.sample-region.constant", 1,
+        {constant,
+         "pulp.core.sample-region.constant",
+         1,
          {SampleKernelConfigKind::FiniteConstant, 0, 0.25f}},
         {first_output, "pulp.core.sample-region.output", 1, boundary(0)},
         {second_output, "pulp.core.sample-region.output", 1, boundary(1)},
@@ -393,7 +408,8 @@ TEST_CASE("Sample region quotient refuses an exterior cycle even when the flat g
     definition.input_boundaries = {input};
     definition.output_boundaries = {second_output, first_output};
     REQUIRE(edit->declare_sample_region(definition).accepted);
-    CHECK(edit->sample_region(1)->output_boundaries == std::vector<NodeId>{first_output, second_output});
+    CHECK(edit->sample_region(1)->output_boundaries ==
+          std::vector<NodeId>{first_output, second_output});
     CHECK(edit->prove_sample_region(1).reason == Reason::CycleCrossesRegionBoundary);
     CHECK(edit->prepare(48000.0, 64) == Result::PreflightFailed);
     CHECK(edit->commit() == Result::NotPrepared);
@@ -410,7 +426,9 @@ TEST_CASE("Sample region promoted metadata is canonical and checked against its 
     REQUIRE(fixture.edit->connect(parameter, 0, multiply, 1));
     REQUIRE(fixture.edit->connect(multiply, 0, fixture.region_output, 0));
     auto definition = fixture.definition();
-    definition.members.push_back({parameter, "pulp.core.sample-region.parameter", 1,
+    definition.members.push_back({parameter,
+                                  "pulp.core.sample-region.parameter",
+                                  1,
                                   {SampleKernelConfigKind::PromotedParameterId, 29, 0.0f}});
     definition.members.push_back({multiply, "pulp.core.sample-region.multiply", 1, none()});
     SampleRegionPromotedParameter promoted;
@@ -421,7 +439,9 @@ TEST_CASE("Sample region promoted metadata is canonical and checked against its 
     promoted.bound_node_id = parameter;
     definition.promoted_parameters = {promoted};
     bool valid = false;
-    SECTION("exact control rate manifest") { valid = true; }
+    SECTION("exact control rate manifest") {
+        valid = true;
+    }
     SECTION("unsupported parameter rate") {
         definition.promoted_parameters[0].rate = pulp::state::ParamRate::AudioRate;
     }
@@ -434,7 +454,9 @@ TEST_CASE("Sample region promoted metadata is canonical and checked against its 
     SECTION("nonfinite range") {
         definition.promoted_parameters[0].range.max = std::numeric_limits<float>::infinity();
     }
-    SECTION("missing manifest entry") { definition.promoted_parameters.clear(); }
+    SECTION("missing manifest entry") {
+        definition.promoted_parameters.clear();
+    }
     REQUIRE(fixture.edit->declare_sample_region(definition).accepted);
     REQUIRE(fixture.edit->connect_in_sample_region(9, fixture.delay, 0, fixture.add, 1).accepted);
     const auto proof = fixture.edit->prove_sample_region(9);
@@ -486,7 +508,7 @@ TEST_CASE("Rejected region preparation never enters a retained custom lifecycle"
     custom.prepare = [&](void*, double, int) { ++prepare_calls; };
     custom.release = [&](void*) { ++release_calls; };
     custom.process_instance = [](void*, pulp::audio::BufferView<float>& output,
-                                  const pulp::audio::BufferView<const float>& input, int frames) {
+                                 const pulp::audio::BufferView<const float>& input, int frames) {
         for (int i = 0; i < frames; ++i)
             output.channel(0)[i] = input.channel(0)[i];
     };

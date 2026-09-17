@@ -849,7 +849,7 @@ SampleRegionProof authoring_refusal(SampleRegionId id, SampleRegionRefusalReason
 
 SampleRegionConnection region_connection(const Connection& connection) {
     SampleRegionConnection result{connection.source_node, connection.source_port,
-                                   connection.dest_node, connection.dest_port};
+                                  connection.dest_node, connection.dest_port};
     result.legacy_feedback = connection.feedback;
     if (connection.midi)
         result.lane = SampleRegionConnectionLane::Midi;
@@ -899,8 +899,9 @@ bool SignalGraph::has_sample_kernel_nodes_locked_() const {
     });
 }
 
-SampleRegionProof SignalGraph::sample_region_metadata_proof_locked_(
-    const SampleRegionDefinition& definition, bool complete) const {
+SampleRegionProof
+SignalGraph::sample_region_metadata_proof_locked_(const SampleRegionDefinition& definition,
+                                                  bool complete) const {
     assert_graph_mutation_locked_();
     const auto fail = [&](SampleRegionRefusalReason reason, std::string message, NodeId node = 0) {
         return authoring_refusal(definition.region_id, reason, std::move(message), node);
@@ -910,7 +911,8 @@ SampleRegionProof SignalGraph::sample_region_metadata_proof_locked_(
     std::unordered_map<NodeId, const SampleRegionKernelNode*> members;
     for (const auto& member : definition.members) {
         if (!members.emplace(member.node, &member).second)
-            return fail(SampleRegionRefusalReason::UnknownMember, "duplicate member ID", member.node);
+            return fail(SampleRegionRefusalReason::UnknownMember, "duplicate member ID",
+                        member.node);
         const auto* current = node(member.node);
         if (current == nullptr)
             return fail(SampleRegionRefusalReason::UnknownMember, "member node does not exist",
@@ -942,8 +944,8 @@ SampleRegionProof SignalGraph::sample_region_metadata_proof_locked_(
     }
     for (const bool input : {true, false}) {
         const auto& boundaries = input ? definition.input_boundaries : definition.output_boundaries;
-        const std::string_view type = input ? "pulp.core.sample-region.input"
-                                            : "pulp.core.sample-region.output";
+        const std::string_view type =
+            input ? "pulp.core.sample-region.input" : "pulp.core.sample-region.output";
         std::unordered_set<NodeId> unique;
         for (const auto id : boundaries) {
             const auto found = members.find(id);
@@ -967,10 +969,12 @@ SampleRegionProof SignalGraph::sample_region_metadata_proof_locked_(
     for (const auto& parameter : definition.promoted_parameters) {
         if (parameter.param_id == 0 || !ids.insert(parameter.param_id).second)
             return fail(SampleRegionRefusalReason::DuplicatePromotedParameter,
-                        "promoted parameter IDs must be unique and nonzero", parameter.bound_node_id);
+                        "promoted parameter IDs must be unique and nonzero",
+                        parameter.bound_node_id);
         if (!keys.insert(parameter.key).second)
             return fail(SampleRegionRefusalReason::ParameterContractMismatch,
-                        "promoted parameter keys must be unique in each region", parameter.bound_node_id);
+                        "promoted parameter keys must be unique in each region",
+                        parameter.bound_node_id);
         for (const auto& other : sample_region_definitions_) {
             if (other.region_id == definition.region_id)
                 continue;
@@ -987,9 +991,9 @@ SampleRegionProof SignalGraph::sample_region_metadata_proof_locked_(
         const auto member = members.find(parameter.bound_node_id);
         if (parameter.key.empty() || parameter.name.empty() || !std::isfinite(range.min) ||
             !std::isfinite(range.max) || !std::isfinite(range.default_value) ||
-            !std::isfinite(range.step) || !std::isfinite(range.skew) ||
-            range.min > range.max || range.default_value < range.min ||
-            range.default_value > range.max || range.step < 0.0f || range.skew <= 0.0f ||
+            !std::isfinite(range.step) || !std::isfinite(range.skew) || range.min > range.max ||
+            range.default_value < range.min || range.default_value > range.max ||
+            range.step < 0.0f || range.skew <= 0.0f ||
             parameter.rate != state::ParamRate::ControlRate ||
             parameter.smoothing_ramp_seconds != 0.0f || parameter.bound_port != 0 ||
             member == members.end() ||
@@ -1007,16 +1011,15 @@ SampleRegionProof SignalGraph::sample_region_metadata_proof_locked_(
     return result;
 }
 
-SampleRegionCandidate SignalGraph::sample_region_candidate_locked_(
-    const SampleRegionDefinition& definition) const {
+SampleRegionCandidate
+SignalGraph::sample_region_candidate_locked_(const SampleRegionDefinition& definition) const {
     assert_graph_mutation_locked_();
     SampleRegionCandidate candidate;
     candidate.region_id = definition.region_id;
-    candidate.registry = {this, [](const void* context, std::string_view type_id,
-                                   int version) noexcept {
-                              return static_cast<const SignalGraph*>(context)->sample_kernel_type(
-                                  type_id, version);
-                          }};
+    candidate.registry = {
+        this, [](const void* context, std::string_view type_id, int version) noexcept {
+            return static_cast<const SignalGraph*>(context)->sample_kernel_type(type_id, version);
+        }};
     candidate.members = definition.members;
     candidate.limits = definition.limits;
     candidate.max_block_size = sample_region_proof_block_size_;
@@ -1093,10 +1096,12 @@ SampleRegionProof SignalGraph::sample_region_exterior_proof_locked_() const {
 
 SampleRegionProof SignalGraph::sample_region_proof_locked_(SampleRegionId id) const {
     assert_graph_mutation_locked_();
-    const auto found = std::find_if(sample_region_definitions_.begin(), sample_region_definitions_.end(),
-                                    [&](const auto& definition) { return definition.region_id == id; });
+    const auto found =
+        std::find_if(sample_region_definitions_.begin(), sample_region_definitions_.end(),
+                     [&](const auto& definition) { return definition.region_id == id; });
     if (found == sample_region_definitions_.end())
-        return authoring_refusal(id, SampleRegionRefusalReason::UnknownRegion, "region does not exist");
+        return authoring_refusal(id, SampleRegionRefusalReason::UnknownRegion,
+                                 "region does not exist");
     auto proof = sample_region_metadata_proof_locked_(*found);
     if (!proof.accepted)
         return proof;
@@ -1127,7 +1132,8 @@ SampleRegionProof SignalGraph::sample_region_proof_locked_(SampleRegionId id) co
             sample_kernel_type(current.custom_type_id, current.custom_type_version) != nullptr &&
             sample_region_for_node_locked_(current.id) == 0)
             return authoring_refusal(id, SampleRegionRefusalReason::SampleKernelOutsideRegion,
-                                     "a scalar kernel is outside every declared region", current.id);
+                                     "a scalar kernel is outside every declared region",
+                                     current.id);
     }
     proof = pulp::host::prove_sample_region(sample_region_candidate_locked_(*found));
     auto exterior = sample_region_exterior_proof_locked_();
@@ -1302,8 +1308,7 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port,
                           NodeId dest, PortIndex dest_port) {
     GraphMutationLock mutation_lock(*this);
     if (prepared_edit_origin_ == nullptr &&
-        (sample_region_for_node_locked_(source) != 0 ||
-         sample_region_for_node_locked_(dest) != 0))
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
     const GraphNode* src_n = node(source);
     const GraphNode* dst_n = node(dest);
@@ -1321,8 +1326,7 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port,
 bool SignalGraph::connect_midi(NodeId source, NodeId dest) {
     GraphMutationLock mutation_lock(*this);
     if (prepared_edit_origin_ == nullptr &&
-        (sample_region_for_node_locked_(source) != 0 ||
-         sample_region_for_node_locked_(dest) != 0))
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
     if (!node(source) || !node(dest)) return false;
     if (would_create_cycle(source, dest)) return false;
@@ -1341,8 +1345,7 @@ bool SignalGraph::connect_sidechain(NodeId source, PortIndex source_port,
     // instead of silently routing into a regular audio port.
     GraphMutationLock mutation_lock(*this);
     if (prepared_edit_origin_ == nullptr &&
-        (sample_region_for_node_locked_(source) != 0 ||
-         sample_region_for_node_locked_(dest) != 0))
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
     const GraphNode* src_n = node(source);
     const GraphNode* dst_n = node(dest);
@@ -1371,8 +1374,7 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port,
                                      AutomationMix mix) {
     GraphMutationLock mutation_lock(*this);
     if (prepared_edit_origin_ == nullptr &&
-        (sample_region_for_node_locked_(src) != 0 ||
-         sample_region_for_node_locked_(dest) != 0))
+        (sample_region_for_node_locked_(src) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
     const GraphNode* src_n = node(src);
     const GraphNode* dst_n = node(dest);
@@ -1433,8 +1435,7 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     // is a lock-free helper that assumes the caller holds it (it scans nodes_).
     GraphMutationLock mutation_lock(*this);
     if (prepared_edit_origin_ == nullptr &&
-        (sample_region_for_node_locked_(src) != 0 ||
-         sample_region_for_node_locked_(dest) != 0))
+        (sample_region_for_node_locked_(src) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
     const GraphNode* src_n = node(src);
     const GraphNode* dst_n = node(dest);
@@ -1749,8 +1750,7 @@ bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
                                    NodeId dest, PortIndex dest_port) {
     GraphMutationLock mutation_lock(*this);
     if (prepared_edit_origin_ == nullptr &&
-        (sample_region_for_node_locked_(source) != 0 ||
-         sample_region_for_node_locked_(dest) != 0))
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
     const GraphNode* src_n = node(source);
     const GraphNode* dst_n = node(dest);
@@ -1768,8 +1768,7 @@ bool SignalGraph::disconnect(NodeId source, PortIndex source_port,
                              NodeId dest, PortIndex dest_port) {
     GraphMutationLock mutation_lock(*this);
     if (prepared_edit_origin_ == nullptr &&
-        (sample_region_for_node_locked_(source) != 0 ||
-         sample_region_for_node_locked_(dest) != 0))
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
         return false;
     Connection target{source, source_port, dest, dest_port};
     auto it = std::find(connections_.begin(), connections_.end(), target);

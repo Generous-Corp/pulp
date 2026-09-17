@@ -1441,11 +1441,11 @@ private:
     // const_cast. Caller holds graph_mutation_mutex_ (same contract as node()).
     GraphNode* node_mut_locked_(NodeId id);
     SampleRegionId sample_region_for_node_locked_(NodeId id) const;
-    SampleRegionCandidate sample_region_candidate_locked_(
-        const SampleRegionDefinition& definition) const;
+    SampleRegionCandidate
+    sample_region_candidate_locked_(const SampleRegionDefinition& definition) const;
     SampleRegionProof sample_region_proof_locked_(SampleRegionId id) const;
-    SampleRegionProof sample_region_metadata_proof_locked_(
-        const SampleRegionDefinition& definition, bool complete = true) const;
+    SampleRegionProof sample_region_metadata_proof_locked_(const SampleRegionDefinition& definition,
+                                                           bool complete = true) const;
     SampleRegionProof sample_region_exterior_proof_locked_() const;
     bool has_sample_kernel_nodes_locked_() const;
     void append_connection_locked_(Connection connection);

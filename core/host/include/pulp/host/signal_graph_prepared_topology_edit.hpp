@@ -125,13 +125,10 @@ class SignalGraph::PreparedTopologyEdit {
     std::optional<Result> baseline_removal_rejection_locked_() const;
     bool rollback_quiesced_lifecycles_locked_() noexcept;
     void release_new_custom_instances_() noexcept;
-    SampleRegionResult replace_sample_region_(SampleRegionDefinition definition,
-                                              bool declaration);
-    SampleRegionResult reject_sample_region_(SampleRegionId id,
-                                             SampleRegionRefusalReason reason,
+    SampleRegionResult replace_sample_region_(SampleRegionDefinition definition, bool declaration);
+    SampleRegionResult reject_sample_region_(SampleRegionId id, SampleRegionRefusalReason reason,
                                              std::string message, NodeId node = 0);
-    std::optional<Result> sample_region_preparation_result_(double sample_rate,
-                                                           int max_block_size);
+    std::optional<Result> sample_region_preparation_result_(double sample_rate, int max_block_size);
 
     struct QuiescedPluginLifecycle {
         std::shared_ptr<PluginSlot> plugin;
