@@ -18,6 +18,7 @@ using Reason = SampleRegionRefusalReason;
 static_assert(static_cast<int>(Result::Prepared) == 0);
 static_assert(static_cast<int>(Result::AlreadyCommitted) == 18);
 static_assert(static_cast<int>(Result::RegionRuntimeUnavailable) == 19);
+static_assert(static_cast<int>(Result::ParameterContractMismatch) == 20);
 static_assert(std::is_copy_constructible_v<SampleRegionDefinition>);
 static_assert(std::is_copy_constructible_v<SampleRegionDescriptor>);
 static_assert(std::is_copy_constructible_v<SampleRegionResult>);
@@ -30,6 +31,7 @@ SampleKernelConfig boundary(std::uint32_t index = 0) {
 }
 
 struct Fixture {
+    std::unique_ptr<SampleRegionParameterOwner> parameter_owner;
     SignalGraph graph;
     NodeId input = graph.add_input_node(1);
     NodeId gain = graph.add_gain_node();
@@ -45,7 +47,12 @@ struct Fixture {
         REQUIRE(graph.connect(gain, 0, output, 0));
         REQUIRE(graph.set_node_gain(gain, 0.5f));
         REQUIRE(graph.prepare(48000.0, 64));
+        parameter_owner = SampleRegionParameterOwner::create(
+            {},
+            SampleRegionParameterContract::from_regions(std::span<const SampleRegionDefinition>{}));
+        REQUIRE(parameter_owner);
         edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit->bind_sample_region_parameters(parameter_owner->binding()).accepted);
         REQUIRE(register_builtin_sample_region_types(*edit));
         region_input = edit->add_custom_node("pulp.core.sample-region.input");
         add = edit->add_custom_node("pulp.core.sample-region.add");
@@ -439,8 +446,18 @@ TEST_CASE("Sample region promoted metadata is canonical and checked against its 
     promoted.bound_node_id = parameter;
     definition.promoted_parameters = {promoted};
     bool valid = false;
+    bool bind = true;
+    bool change_after_binding = false;
     SECTION("exact control rate manifest") {
         valid = true;
+    }
+    SECTION("missing binding") {
+        valid = true;
+        bind = false;
+    }
+    SECTION("inherited binding rejects changed metadata") {
+        valid = true;
+        change_after_binding = true;
     }
     SECTION("unsupported parameter rate") {
         definition.promoted_parameters[0].rate = pulp::state::ParamRate::AudioRate;
@@ -459,11 +476,26 @@ TEST_CASE("Sample region promoted metadata is canonical and checked against its 
     }
     REQUIRE(fixture.edit->declare_sample_region(definition).accepted);
     REQUIRE(fixture.edit->connect_in_sample_region(9, fixture.delay, 0, fixture.add, 1).accepted);
+    std::unique_ptr<SampleRegionParameterOwner> promoted_owner;
+    if (valid && bind) {
+        promoted_owner = SampleRegionParameterOwner::create(
+            {}, fixture.edit->sample_region_parameter_contract());
+        REQUIRE(promoted_owner);
+        REQUIRE(fixture.edit->bind_sample_region_parameters(promoted_owner->binding()).accepted);
+    }
+    if (change_after_binding) {
+        REQUIRE(fixture.edit->remove_sample_region(9).accepted);
+        definition.promoted_parameters[0].name = "Changed coefficient";
+        REQUIRE(fixture.edit->declare_sample_region(definition).accepted);
+    }
     const auto proof = fixture.edit->prove_sample_region(9);
     CHECK(proof.accepted == valid);
     CHECK(proof.reason == (valid ? Reason::None : Reason::ParameterContractMismatch));
-    CHECK(fixture.edit->prepare(48000.0, 64) ==
-          (valid ? Result::RegionRuntimeUnavailable : Result::PreflightFailed));
+    const auto expected_prepare = !valid ? Result::PreflightFailed
+                                  : (!bind || change_after_binding)
+                                      ? Result::ParameterContractMismatch
+                                      : Result::RegionRuntimeUnavailable;
+    CHECK(fixture.edit->prepare(48000.0, 64) == expected_prepare);
     CHECK(fixture.edit->commit() == Result::NotPrepared);
     fixture.check_owner();
 }
@@ -537,6 +569,10 @@ TEST_CASE("Rejected region preparation never enters a retained custom lifecycle"
     definition.output_boundaries = {region_output};
     REQUIRE(edit->declare_sample_region(definition).accepted);
     REQUIRE(edit->prove_sample_region(1).accepted);
+    auto parameter_owner =
+        SampleRegionParameterOwner::create({}, edit->sample_region_parameter_contract());
+    REQUIRE(parameter_owner);
+    REQUIRE(edit->bind_sample_region_parameters(parameter_owner->binding()).accepted);
     CHECK(edit->prepare_quiesced(96000.0, 128) == Result::RegionRuntimeUnavailable);
     CHECK(prepare_calls == 1);
     CHECK(release_calls == 0);
