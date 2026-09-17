@@ -177,6 +177,74 @@ std::string copy_string(wgpu::StringView value) {
 
 } // namespace
 
+constexpr auto kSharedIoFftWgsl = R"wgsl(
+// One radix-2 Stockham auto-sort FFT pass over interleaved complex data.
+// Result is naturally ordered (no separate bit-reversal pass). log2(N) passes
+// ping-pong between two buffers; `ns` doubles each pass (1, 2, 4, ... N/2).
+// sign = -1 forward, +1 inverse (the host applies the 1/N inverse scale).
+// Reference: Lloyd/Boyd/Govindaraju, "Fast Computation of General Fourier
+// Transforms on GPUs" (Stockham radix-2 formulation).
+
+struct FftParams {
+    n     : u32,
+    ns    : u32,
+    sign  : f32,
+    batch : u32,   // number of independent transforms packed back-to-back
+};
+
+@group(0) @binding(0) var<storage, read>       src    : array<f32>;
+@group(0) @binding(1) var<storage, read_write> dst    : array<f32>;
+@group(0) @binding(2) var<uniform>             params : FftParams;
+
+const PI : f32 = 3.1415926535897932;
+
+// Batched radix-2 Stockham pass. Each of `batch` transforms occupies a
+// contiguous n-complex span; thread tid maps to (transform b, butterfly j).
+// batch == 1 is bit-for-bit identical to the single-transform path.
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let half = params.n / 2u;
+    let tid = gid.x;
+    if (tid >= params.batch * half) {
+        return;
+    }
+    let b = tid / half;
+    let j = tid - b * half;
+    let base = b * params.n;   // complex-element offset of this transform
+
+    let v0_re = src[2u * (base + j)];
+    let v0_im = src[2u * (base + j) + 1u];
+    let k = j + half;
+    let v1_re = src[2u * (base + k)];
+    let v1_im = src[2u * (base + k) + 1u];
+
+    let angle = params.sign * 2.0 * PI * f32(j % params.ns) / f32(params.ns * 2u);
+    let tw_re = cos(angle);
+    let tw_im = sin(angle);
+
+    // u1 = twiddle * v1
+    let u1_re = tw_re * v1_re - tw_im * v1_im;
+    let u1_im = tw_re * v1_im + tw_im * v1_re;
+
+    let y0_re = v0_re + u1_re;
+    let y0_im = v0_im + u1_im;
+    let y1_re = v0_re - u1_re;
+    let y1_im = v0_im - u1_im;
+
+    let idxD = (j / params.ns) * params.ns * 2u + (j % params.ns);
+    dst[2u * (base + idxD)]                   = y0_re;
+    dst[2u * (base + idxD) + 1u]              = y0_im;
+    dst[2u * (base + idxD + params.ns)]       = y1_re;
+    dst[2u * (base + idxD + params.ns) + 1u]  = y1_im;
+}
+)wgsl";
+
+constexpr auto kSharedIoMulWgsl = R"wgsl(
+@group(0) @binding(0) var<storage,read> a:array<f32>;
+@group(0) @binding(1) var<storage,read> ir:array<f32>;
+@group(0) @binding(2) var<storage,read_write> out:array<f32>;
+@compute @workgroup_size(256) fn main(@builtin(global_invocation_id) id:vec3u) { let i=id.x; let p=i*2u; if(p+1u>=arrayLength(&a)){return;} let k=p%(arrayLength(&ir)); let ar=a[p];let ai=a[p+1u];let br=ir[k];let bi=ir[k+1u];out[p]=ar*br-ai*bi;out[p+1u]=ar*bi+ai*br; })wgsl";
+
 struct DawnSharedIoProvider::Impl {
     struct RequestAdapter {
         std::atomic<bool> done{false};
@@ -232,6 +300,24 @@ struct DawnSharedIoProvider::Impl {
         Submission submission;
         bool retired = false;
     };
+
+    struct ConvolutionPlan {
+        std::uint32_t fft_size = 0, channels = 0, logical_frames = 0, log2 = 0;
+        std::size_t bytes = 0;
+        wgpu::ComputePipeline fft, multiply;
+        wgpu::Buffer ir;
+        std::vector<wgpu::Buffer> forward_uniforms, inverse_uniforms;
+        struct SlotGroups {
+            // Submissions from different arena slots may overlap. Keep every
+            // writable FFT intermediate slot-local; only immutable IR and
+            // uniforms are shared by the prepared program.
+            wgpu::Buffer a, b, product;
+            std::vector<wgpu::BindGroup> forward, inverse;
+            wgpu::BindGroup multiply;
+        };
+        std::vector<SlotGroups> slots;
+    };
+    std::unique_ptr<ConvolutionPlan> convolution;
 
     explicit Impl(Options value) : options(std::move(value)) {}
 
@@ -525,6 +611,59 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     std::shared_ptr<const void> lifetime = std::make_shared<int>(0);
 };
 
+class DawnSharedIoConvolutionProgram final : public SharedIoPreparedProgram {
+  public:
+    DawnSharedIoConvolutionProgram(DawnSharedIoProvider& provider,
+                                   const SharedIoConvolutionProgramSpec& spec)
+        : provider_(&provider), fft_size_(spec.fft_size), channels_(spec.channels),
+          logical_frames_(spec.logical_frames), ir_length_(spec.ir_length),
+          normalized_ir_spectrum_(spec.normalized_ir_spectrum.begin(),
+                                  spec.normalized_ir_spectrum.end()) {}
+
+    bool prepare(SharedIoArenaProvider& provider,
+                 std::span<const SlotBufferHandle> slots) noexcept override {
+        if (&provider != provider_ || prepared_ || slots.empty())
+            return false;
+        for (const auto& slot : slots) {
+            if (slot.provider != provider_ || !provider_->validate_slot_buffers(slot))
+                return false;
+        }
+        const SharedIoConvolutionProgramSpec spec{
+            .fft_size = fft_size_,
+            .channels = channels_,
+            .logical_frames = logical_frames_,
+            .ir_length = ir_length_,
+            .normalized_ir_spectrum = normalized_ir_spectrum_,
+        };
+        prepared_ = provider_->prepare_convolution_program(spec);
+        return prepared_;
+    }
+
+    bool submit(SharedIoArenaProvider& provider, const SlotResources& resources, SlotToken token,
+                std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept override {
+        return prepared_ && &provider == provider_ &&
+               provider_->submit_convolution_program(resources, token, std::move(terminal_inbox));
+    }
+
+    bool release() noexcept override {
+        if (!prepared_)
+            return true;
+        if (!provider_->release_convolution_program())
+            return false;
+        prepared_ = false;
+        return true;
+    }
+
+  private:
+    DawnSharedIoProvider* provider_ = nullptr;
+    std::uint32_t fft_size_ = 0;
+    std::uint32_t channels_ = 0;
+    std::uint32_t logical_frames_ = 0;
+    std::uint32_t ir_length_ = 0;
+    std::vector<float> normalized_ir_spectrum_;
+    bool prepared_ = false;
+};
+
 DawnSharedIoProvider::DawnSharedIoProvider(std::unique_ptr<Impl> impl) noexcept
     : impl_(std::move(impl)) {}
 
@@ -536,6 +675,10 @@ DawnSharedIoProvider::~DawnSharedIoProvider() {
         // Leak the complete provider state, including Dawn owners and imported
         // pages, rather than permit a late callback or GPU access to hit freed
         // storage. The arena contract makes this an invariant-failure fallback.
+        impl_.release();
+        return;
+    }
+    if (!release_convolution_program()) {
         impl_.release();
         return;
     }
@@ -574,6 +717,15 @@ DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& o
         result.reason = "provider_initialization_exception";
     }
     return result;
+}
+
+std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_convolution_program(
+    const SharedIoConvolutionProgramSpec& spec) noexcept {
+    try {
+        return std::make_unique<DawnSharedIoConvolutionProgram>(*this, spec);
+    } catch (...) {
+        return {};
+    }
 }
 
 bool DawnSharedIoProvider::create_slot(std::uint32_t slot_index, std::size_t input_bytes,
@@ -771,7 +923,7 @@ void DawnSharedIoProvider::destroy_slot(SlotResources& resources) noexcept {
 }
 
 bool DawnSharedIoProvider::acquire_slot_buffers(const SlotResources& resources,
-                                                  SlotBufferHandle& handle) const noexcept {
+                                                SlotBufferHandle& handle) const noexcept {
     auto* slot = static_cast<Impl::Slot*>(resources.opaque);
     if (!impl_ || !slot || slot->retired || !slot->input_buffer || !slot->output_buffer ||
         resources.opaque != slot || resources.input == nullptr || resources.output == nullptr)
@@ -801,18 +953,292 @@ bool DawnSharedIoProvider::validate_slot_buffers(const SlotBufferHandle& handle)
     return false;
 }
 
+bool DawnSharedIoProvider::prepare_convolution_program(
+    const SharedIoConvolutionProgramSpec& spec) noexcept {
+    if (!impl_ || !impl_->accepting || impl_->convolution || spec.fft_size < 2 ||
+        (spec.fft_size & (spec.fft_size - 1)) != 0 || spec.channels == 0 ||
+        spec.logical_frames == 0 || spec.ir_length == 0 ||
+        std::uint64_t(spec.logical_frames) + spec.ir_length - 1u > spec.fft_size ||
+        spec.normalized_ir_spectrum.size() != spec.fft_size * 2u) {
+        return false;
+    }
+    const auto bytes64 = std::uint64_t(spec.fft_size) * spec.channels * 2u * sizeof(float);
+    if (bytes64 > std::numeric_limits<std::uint32_t>::max())
+        return false;
+    for (const auto* slot : impl_->slots) {
+        if (slot == nullptr || slot->retired || slot->index >= impl_->slots.size() ||
+            slot->input_logical_bytes < bytes64 || slot->output_logical_bytes < bytes64) {
+            return false;
+        }
+    }
+
+    bool error_scopes_pushed = false;
+    try {
+        auto plan = std::make_unique<Impl::ConvolutionPlan>();
+        plan->fft_size = spec.fft_size;
+        plan->channels = spec.channels;
+        plan->logical_frames = spec.logical_frames;
+        plan->bytes = static_cast<std::size_t>(bytes64);
+        for (auto size = spec.fft_size; size > 1; size >>= 1)
+            ++plan->log2;
+
+        auto pipeline = [&](const char* source) {
+            wgpu::ShaderSourceWGSL wgsl{};
+            wgsl.code = source;
+            wgpu::ShaderModuleDescriptor shader_descriptor{};
+            shader_descriptor.nextInChain = &wgsl;
+            auto module = impl_->device.CreateShaderModule(&shader_descriptor);
+            wgpu::ComputePipelineDescriptor pipeline_descriptor{};
+            pipeline_descriptor.compute.module = module;
+            pipeline_descriptor.compute.entryPoint = "main";
+            return impl_->device.CreateComputePipeline(&pipeline_descriptor);
+        };
+
+        auto make_buffer = [&](std::size_t bytes, wgpu::BufferUsage usage) {
+            wgpu::BufferDescriptor descriptor{};
+            descriptor.size = bytes;
+            descriptor.usage = usage;
+            return impl_->device.CreateBuffer(&descriptor);
+        };
+        auto bind_three = [&](const wgpu::ComputePipeline& pipeline_value,
+                              const wgpu::Buffer& first, const wgpu::Buffer& second,
+                              const wgpu::Buffer& third) {
+            wgpu::BindGroupEntry entries[3]{};
+            for (std::uint32_t index = 0; index < 3; ++index)
+                entries[index].binding = index;
+            entries[0].buffer = first;
+            entries[0].size = first.GetSize();
+            entries[1].buffer = second;
+            entries[1].size = second.GetSize();
+            entries[2].buffer = third;
+            entries[2].size = third.GetSize();
+            wgpu::BindGroupDescriptor descriptor{};
+            descriptor.layout = pipeline_value.GetBindGroupLayout(0);
+            descriptor.entryCount = 3;
+            descriptor.entries = entries;
+            return impl_->device.CreateBindGroup(&descriptor);
+        };
+
+        impl_->push_error_scopes();
+        error_scopes_pushed = true;
+        const auto fail_preparation = [&] {
+            if (error_scopes_pushed) {
+                (void)impl_->pop_error_scopes();
+                error_scopes_pushed = false;
+            }
+            return false;
+        };
+        if (impl_->options.fault == Fault::ConvolutionPrepareAfterScopesFailure) {
+            ++impl_->stats.fault_injections;
+            return fail_preparation();
+        }
+        plan->fft = pipeline(kSharedIoFftWgsl);
+        plan->multiply = pipeline(kSharedIoMulWgsl);
+        const auto storage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+        plan->ir =
+            make_buffer(static_cast<std::size_t>(spec.fft_size) * 2u * sizeof(float), storage);
+        if (!plan->fft || !plan->multiply || !plan->ir)
+            return fail_preparation();
+
+        impl_->queue.WriteBuffer(plan->ir, 0, spec.normalized_ir_spectrum.data(),
+                                 static_cast<std::size_t>(spec.fft_size) * 2u * sizeof(float));
+        struct Params {
+            std::uint32_t n;
+            std::uint32_t ns;
+            float sign;
+            std::uint32_t batch;
+        };
+        for (std::uint32_t stage = 0; stage < plan->log2; ++stage) {
+            const auto uniform_usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+            auto forward = make_buffer(sizeof(Params), uniform_usage);
+            auto inverse = make_buffer(sizeof(Params), uniform_usage);
+            if (!forward || !inverse)
+                return fail_preparation();
+            const Params forward_params{plan->fft_size, 1u << stage, -1.0f, plan->channels};
+            const Params inverse_params{plan->fft_size, 1u << stage, 1.0f, plan->channels};
+            impl_->queue.WriteBuffer(forward, 0, &forward_params, sizeof(forward_params));
+            impl_->queue.WriteBuffer(inverse, 0, &inverse_params, sizeof(inverse_params));
+            plan->forward_uniforms.push_back(std::move(forward));
+            plan->inverse_uniforms.push_back(std::move(inverse));
+        }
+
+        plan->slots.resize(impl_->slots.size());
+        for (const auto* slot : impl_->slots) {
+            auto& groups = plan->slots[slot->index];
+            groups.a = make_buffer(plan->bytes, storage);
+            groups.b = make_buffer(plan->bytes, storage);
+            groups.product = make_buffer(plan->bytes, storage);
+            if (!groups.a || !groups.b || !groups.product)
+                return fail_preparation();
+            wgpu::Buffer source = slot->input_buffer;
+            wgpu::Buffer destination = groups.a;
+            for (std::uint32_t stage = 0; stage < plan->log2; ++stage) {
+                auto group =
+                    bind_three(plan->fft, source, destination, plan->forward_uniforms[stage]);
+                if (!group)
+                    return fail_preparation();
+                groups.forward.push_back(std::move(group));
+                source = destination;
+                destination = destination.Get() == groups.a.Get() ? groups.b : groups.a;
+            }
+            groups.multiply = bind_three(plan->multiply, source, plan->ir, groups.product);
+            if (!groups.multiply)
+                return fail_preparation();
+
+            source = groups.product;
+            destination = groups.a;
+            for (std::uint32_t stage = 0; stage < plan->log2; ++stage) {
+                if (stage + 1u == plan->log2)
+                    destination = slot->output_buffer;
+                auto group =
+                    bind_three(plan->fft, source, destination, plan->inverse_uniforms[stage]);
+                if (!group)
+                    return fail_preparation();
+                groups.inverse.push_back(std::move(group));
+                source = destination;
+                if (stage + 1u < plan->log2)
+                    destination = destination.Get() == groups.a.Get() ? groups.b : groups.a;
+            }
+        }
+
+        const bool scopes_clean = impl_->pop_error_scopes();
+        error_scopes_pushed = false;
+        if (!scopes_clean)
+            return false;
+        impl_->convolution = std::move(plan);
+        return true;
+    } catch (...) {
+        if (error_scopes_pushed)
+            (void)impl_->pop_error_scopes();
+        return false;
+    }
+}
+
+bool DawnSharedIoProvider::submit_convolution_program(
+    const SlotResources& resources, SlotToken token,
+    std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept {
+    return submit_impl(resources, token, std::move(inbox), true);
+}
+
 bool DawnSharedIoProvider::submit(const SlotResources& resources, SlotToken token,
                                   std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept {
+    return submit_impl(resources, token, std::move(terminal_inbox), false);
+}
+
+bool DawnSharedIoProvider::release_convolution_program() noexcept {
+    if (!impl_)
+        return true;
+    for (const auto* slot : impl_->slots) {
+        if (slot->submission.accepted)
+            return false;
+    }
+    impl_->convolution.reset();
+    return true;
+}
+
+bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken token,
+                                       std::shared_ptr<SharedIoTerminalInbox> terminal_inbox,
+                                       bool use_convolution) noexcept {
     auto* slot = static_cast<Impl::Slot*>(resources.opaque);
-    if (!impl_->accepting || !slot || slot->retired || slot->submission.accepted ||
+    if (!impl_ || !impl_->accepting || !terminal_inbox || !slot || slot->retired ||
+        slot->submission.accepted || resources.input != slot->input ||
+        resources.output != slot->output || resources.input_size != slot->input_logical_bytes ||
+        resources.output_size != slot->output_logical_bytes ||
         (impl_->options.fault == Fault::RejectBeforeSubmit &&
          impl_->options.fault_slot == slot->index)) {
         return false;
     }
+
+    const Impl::ConvolutionPlan* convolution = nullptr;
+    if (use_convolution) {
+        convolution = impl_->convolution.get();
+        if (convolution == nullptr || slot->index >= convolution->slots.size())
+            return false;
+        const auto& groups = convolution->slots[slot->index];
+        if (groups.forward.size() != convolution->log2 ||
+            groups.inverse.size() != convolution->log2 || !groups.multiply) {
+            return false;
+        }
+    } else if (!impl_->pipeline || !slot->bind_group) {
+        return false;
+    }
+
+    impl_->push_error_scopes();
+    if (use_convolution && impl_->options.fault == Fault::ConvolutionSubmitAfterScopesFailure) {
+        ++impl_->stats.fault_injections;
+        (void)impl_->pop_error_scopes();
+        return false;
+    }
+    if (impl_->options.fault == Fault::ForceLossBeforeSubmit)
+        impl_->device.ForceLoss(wgpu::DeviceLostReason::Unknown, "P1 loss before submit");
+    if (impl_->options.fault == Fault::PlantWriteBuffer) {
+        constexpr float planted = -123.0f;
+        impl_->queue.WriteBuffer(slot->input_buffer, 0, &planted, sizeof(planted));
+    }
+    auto encoder = impl_->device.CreateCommandEncoder();
+    if (!encoder) {
+        (void)impl_->pop_error_scopes();
+        return false;
+    }
+    if (impl_->options.fault == Fault::PlantCopyBuffer) {
+        encoder.CopyBufferToBuffer(slot->input_buffer, 0, slot->output_buffer, 0, sizeof(float));
+    }
+    if (impl_->options.fault == Fault::PlantMapAsync) {
+        wgpu::BufferDescriptor control_descriptor{};
+        control_descriptor.size = sizeof(float);
+        control_descriptor.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst;
+        auto control = impl_->device.CreateBuffer(&control_descriptor);
+        control.MapAsync(wgpu::MapMode::Read, 0, sizeof(float),
+                         wgpu::CallbackMode::AllowProcessEvents,
+                         [](wgpu::MapAsyncStatus, wgpu::StringView) {});
+    }
+    if (convolution != nullptr) {
+        const auto& plan = *convolution;
+        const auto& groups = plan.slots[slot->index];
+        const auto fft_wg = (plan.channels * (plan.fft_size / 2u) + 255u) / 256u;
+        for (const auto& group : groups.forward) {
+            auto pass = encoder.BeginComputePass();
+            pass.SetPipeline(plan.fft);
+            pass.SetBindGroup(0, group);
+            pass.DispatchWorkgroups(fft_wg);
+            pass.End();
+        }
+        {
+            auto pass = encoder.BeginComputePass();
+            pass.SetPipeline(plan.multiply);
+            pass.SetBindGroup(0, groups.multiply);
+            pass.DispatchWorkgroups((plan.channels * plan.fft_size + 255u) / 256u);
+            pass.End();
+        }
+        for (const auto& group : groups.inverse) {
+            auto pass = encoder.BeginComputePass();
+            pass.SetPipeline(plan.fft);
+            pass.SetBindGroup(0, group);
+            pass.DispatchWorkgroups(fft_wg);
+            pass.End();
+        }
+    } else {
+        auto pass = encoder.BeginComputePass();
+        pass.SetPipeline(impl_->pipeline);
+        pass.SetBindGroup(0, slot->bind_group);
+        const auto samples =
+            std::min(slot->input_logical_bytes, slot->output_logical_bytes) / sizeof(float);
+        pass.DispatchWorkgroups(static_cast<std::uint32_t>((samples + 63) / 64));
+        if (impl_->options.fault == Fault::InvalidCommandAfterSubmit)
+            pass.DispatchWorkgroups(std::numeric_limits<std::uint32_t>::max());
+        pass.End();
+    }
+    auto commands = encoder.Finish();
+    if (!commands) {
+        (void)impl_->pop_error_scopes();
+        return false;
+    }
+
     auto& submission = slot->submission;
     ++submission.generation;
     if (!submission.tracker.begin(submission.generation, impl_->uncaptured_error_generation.load(
                                                              std::memory_order_acquire))) {
+        (void)impl_->pop_error_scopes();
         return false;
     }
     submission.queue.store(0, std::memory_order_release);
@@ -830,36 +1256,6 @@ bool DawnSharedIoProvider::submit(const SlotResources& resources, SlotToken toke
     submission.held_busy_claim.reset();
     submission.held_busy_released = false;
 
-    impl_->push_error_scopes();
-    if (impl_->options.fault == Fault::ForceLossBeforeSubmit)
-        impl_->device.ForceLoss(wgpu::DeviceLostReason::Unknown, "P1 loss before submit");
-    if (impl_->options.fault == Fault::PlantWriteBuffer) {
-        constexpr float planted = -123.0f;
-        impl_->queue.WriteBuffer(slot->input_buffer, 0, &planted, sizeof(planted));
-    }
-    auto encoder = impl_->device.CreateCommandEncoder();
-    if (impl_->options.fault == Fault::PlantCopyBuffer) {
-        encoder.CopyBufferToBuffer(slot->input_buffer, 0, slot->output_buffer, 0, sizeof(float));
-    }
-    if (impl_->options.fault == Fault::PlantMapAsync) {
-        wgpu::BufferDescriptor control_descriptor{};
-        control_descriptor.size = sizeof(float);
-        control_descriptor.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst;
-        auto control = impl_->device.CreateBuffer(&control_descriptor);
-        control.MapAsync(wgpu::MapMode::Read, 0, sizeof(float),
-                         wgpu::CallbackMode::AllowProcessEvents,
-                         [](wgpu::MapAsyncStatus, wgpu::StringView) {});
-    }
-    auto pass = encoder.BeginComputePass();
-    pass.SetPipeline(impl_->pipeline);
-    pass.SetBindGroup(0, slot->bind_group);
-    const auto samples =
-        std::min(slot->input_logical_bytes, slot->output_logical_bytes) / sizeof(float);
-    pass.DispatchWorkgroups(static_cast<std::uint32_t>((samples + 63) / 64));
-    if (impl_->options.fault == Fault::InvalidCommandAfterSubmit)
-        pass.DispatchWorkgroups(std::numeric_limits<std::uint32_t>::max());
-    pass.End();
-    auto commands = encoder.Finish();
     impl_->queue.Submit(1, &commands);
     submission.accepted = true;
     if (impl_->options.fault == Fault::ForceLossBetweenSubmitAndCompletionRegistration)

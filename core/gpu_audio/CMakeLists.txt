@@ -21,6 +21,7 @@ target_sources(pulp-gpu-audio
         src/detail/shared_io_arena.cpp
         src/detail/dawn_submission_tracker.cpp
         src/detail/shared_io_compute_plan.cpp
+        src/detail/shared_io_convolution_executor.cpp
         src/detail/shared_io_transport_bridge.cpp
 )
 

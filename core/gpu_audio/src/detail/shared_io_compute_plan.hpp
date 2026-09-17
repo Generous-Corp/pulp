@@ -45,6 +45,8 @@ class SharedIoComputePlan {
     SharedIoComputePlan& operator=(const SharedIoComputePlan&) = delete;
 
     bool prepare(SharedIoArenaProvider& provider, const Config& config);
+    bool prepare(SharedIoArenaProvider& provider, const Config& config,
+                 std::unique_ptr<SharedIoPreparedProgram> program);
     bool prepared() const noexcept { return arena_.prepared(); }
     std::uint64_t preparation_epoch() const noexcept { return arena_.preparation_epoch(); }
     std::optional<SharedIoArena::WriteLease>
