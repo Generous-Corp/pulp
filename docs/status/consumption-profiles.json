@@ -6127,93 +6127,98 @@
         "ranked_by_closure": [
           {
             "exported_as": "Pulp::inspect-standalone-runtime",
-            "closure_node_count": 88,
-            "public_header_count": 74
+            "closure_node_count": 92,
+            "public_header_count": 75
           },
           {
             "exported_as": "Pulp::host",
-            "closure_node_count": 82,
-            "public_header_count": 209
-          },
-          {
-            "exported_as": "Pulp::inspect-offline-runtime",
-            "closure_node_count": 80,
-            "public_header_count": 74
+            "closure_node_count": 84,
+            "public_header_count": 214
           },
           {
             "exported_as": "Pulp::inspect",
-            "closure_node_count": 79,
-            "public_header_count": 74
+            "closure_node_count": 83,
+            "public_header_count": 75
+          },
+          {
+            "exported_as": "Pulp::inspect-offline-runtime",
+            "closure_node_count": 82,
+            "public_header_count": 75
+          },
+          {
+            "exported_as": "Pulp::inspect-ui-runtime",
+            "closure_node_count": 81,
+            "public_header_count": 75
           },
           {
             "exported_as": "Pulp::standalone",
-            "closure_node_count": 79,
+            "closure_node_count": 81,
             "public_header_count": 136
           },
           {
             "exported_as": "Pulp::standalone-native",
-            "closure_node_count": 79,
+            "closure_node_count": 81,
             "public_header_count": 136
           },
           {
             "exported_as": "Pulp::format",
-            "closure_node_count": 77,
+            "closure_node_count": 79,
             "public_header_count": 136
           },
           {
-            "exported_as": "Pulp::inspect-ui-runtime",
-            "closure_node_count": 77,
-            "public_header_count": 74
-          },
-          {
             "exported_as": "Pulp::format-view",
-            "closure_node_count": 76,
+            "closure_node_count": 78,
             "public_header_count": 136
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
-            "closure_node_count": 72,
-            "public_header_count": 74
+            "closure_node_count": 74,
+            "public_header_count": 75
           },
           {
             "exported_as": "Pulp::inspect-telemetry",
-            "closure_node_count": 71,
-            "public_header_count": 74
+            "closure_node_count": 73,
+            "public_header_count": 75
           },
           {
             "exported_as": "Pulp::view",
-            "closure_node_count": 71,
+            "closure_node_count": 73,
             "public_header_count": 213
           },
           {
             "exported_as": "Pulp::view-native",
-            "closure_node_count": 71,
+            "closure_node_count": 73,
             "public_header_count": 213
           },
           {
             "exported_as": "Pulp::view-script",
-            "closure_node_count": 70,
+            "closure_node_count": 72,
             "public_header_count": 213
           },
           {
             "exported_as": "Pulp::view-core",
-            "closure_node_count": 69,
+            "closure_node_count": 71,
             "public_header_count": 213
           },
           {
             "exported_as": "Pulp::gpu-audio",
-            "closure_node_count": 68,
+            "closure_node_count": 70,
             "public_header_count": 29
           },
           {
             "exported_as": "Pulp::render",
-            "closure_node_count": 54,
+            "closure_node_count": 56,
             "public_header_count": 17
           },
           {
             "exported_as": "Pulp::canvas",
             "closure_node_count": 42,
             "public_header_count": 46
+          },
+          {
+            "exported_as": "Pulp::inspect-runtime",
+            "closure_node_count": 39,
+            "public_header_count": 75
           },
           {
             "exported_as": "Pulp::sequence",
@@ -6256,14 +6261,9 @@
             "public_header_count": 113
           },
           {
-            "exported_as": "Pulp::inspect-runtime",
-            "closure_node_count": 29,
-            "public_header_count": 74
-          },
-          {
             "exported_as": "Pulp::inspect-client",
             "closure_node_count": 23,
-            "public_header_count": 74
+            "public_header_count": 75
           },
           {
             "exported_as": "Pulp::osc",
@@ -6278,7 +6278,7 @@
           {
             "exported_as": "Pulp::inspect-control",
             "closure_node_count": 22,
-            "public_header_count": 74
+            "public_header_count": 75
           },
           {
             "exported_as": "Pulp::smf-interchange",
@@ -6336,14 +6336,19 @@
             "public_header_count": 33
           },
           {
+            "exported_as": "Pulp::sdl3-static",
+            "closure_node_count": 18,
+            "public_header_count": 0
+          },
+          {
             "exported_as": "Pulp::inspect-authoring",
             "closure_node_count": 17,
-            "public_header_count": 74
+            "public_header_count": 75
           },
           {
             "exported_as": "Pulp::inspect-protocol",
             "closure_node_count": 17,
-            "public_header_count": 74
+            "public_header_count": 75
           },
           {
             "exported_as": "Pulp::sample-bank-manifest",
@@ -6354,11 +6359,6 @@
             "exported_as": "Pulp::runtime",
             "closure_node_count": 16,
             "public_header_count": 61
-          },
-          {
-            "exported_as": "Pulp::sdl3-static",
-            "closure_node_count": 16,
-            "public_header_count": 0
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -7176,7 +7176,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 77,
+            "node_count": 79,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7221,7 +7221,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 56,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7265,6 +7265,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -7272,6 +7273,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -7395,7 +7397,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/format",
           "closure": {
-            "node_count": 76,
+            "node_count": 78,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7439,7 +7441,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 56,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7483,6 +7485,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -7490,6 +7493,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -7555,7 +7559,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/gpu_audio",
           "closure": {
-            "node_count": 68,
+            "node_count": 70,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7590,7 +7594,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 53,
+            "count": 55,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7630,6 +7634,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -7637,6 +7642,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -7667,6 +7673,7 @@
             "pulp-render",
             "pulp-runtime",
             "pulp-signal",
+            "skia::skia",
             "system:Threads::Threads"
           ]
         },
@@ -7741,7 +7748,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/host",
           "closure": {
-            "node_count": 82,
+            "node_count": 84,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7789,7 +7796,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 58,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -7835,6 +7842,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -7842,6 +7850,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -7859,7 +7868,7 @@
             ]
           },
           "public_headers": {
-            "count": 209,
+            "count": 214,
             "roots": [
               "core/format/include",
               "core/host/include"
@@ -7921,7 +7930,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 79,
+            "node_count": 83,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -7931,6 +7940,7 @@
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
+              "pulp-playback",
               "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
@@ -7938,6 +7948,7 @@
               "pulp-state",
               "pulp-timebase",
               "pulp-timeline",
+              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -7968,7 +7979,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 60,
+            "count": 62,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8016,6 +8027,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -8023,6 +8035,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -8040,7 +8053,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8107,7 +8120,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8175,7 +8188,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8241,7 +8254,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8261,7 +8274,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 80,
+            "node_count": 82,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8309,7 +8322,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 59,
+            "count": 61,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8356,6 +8369,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -8363,6 +8377,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -8380,7 +8395,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8441,7 +8456,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8457,17 +8472,22 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 29,
+            "node_count": 39,
             "pulp_targets": [
+              "pulp-audio",
               "pulp-events",
               "pulp-foundation",
+              "pulp-midi",
               "pulp-music",
               "pulp-platform",
+              "pulp-playback",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
+              "pulp-signal",
               "pulp-state",
               "pulp-timebase",
               "pulp-timeline",
+              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model"
             ],
             "third_party_targets": [
@@ -8485,7 +8505,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 19,
+            "count": 24,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -8502,8 +8522,13 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
+              "AudioToolbox",
               "Cocoa",
+              "CoreAudio",
+              "CoreBluetooth",
               "CoreFoundation",
+              "CoreMIDI",
               "CoreServices",
               "Foundation",
               "Security",
@@ -8515,7 +8540,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8525,8 +8550,10 @@
             "pulp-events",
             "pulp-inspect-control",
             "pulp-inspect-protocol",
+            "pulp-playback",
             "pulp-state",
             "pulp-timeline",
+            "pulp-timeline-editor",
             "pulp-tool-gpu-health-model"
           ]
         },
@@ -8536,7 +8563,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 72,
+            "node_count": 74,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8576,7 +8603,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 55,
+            "count": 57,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8619,6 +8646,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -8626,6 +8654,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -8643,7 +8672,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8659,7 +8688,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 88,
+            "node_count": 92,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8674,6 +8703,7 @@
               "pulp-music",
               "pulp-native-components",
               "pulp-platform",
+              "pulp-playback",
               "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
@@ -8681,6 +8711,7 @@
               "pulp-state",
               "pulp-timebase",
               "pulp-timeline",
+              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -8715,7 +8746,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 64,
+            "count": 66,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8767,6 +8798,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -8774,6 +8806,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -8791,7 +8824,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8810,7 +8843,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 71,
+            "node_count": 73,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8849,7 +8882,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 56,
+            "count": 58,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -8893,6 +8926,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -8900,6 +8934,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -8917,7 +8952,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -8934,7 +8969,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 77,
+            "node_count": 81,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -8944,6 +8979,7 @@
               "pulp-midi",
               "pulp-music",
               "pulp-platform",
+              "pulp-playback",
               "pulp-render",
               "pulp-runtime",
               "pulp-sample-bank-manifest",
@@ -8951,6 +8987,7 @@
               "pulp-state",
               "pulp-timebase",
               "pulp-timeline",
+              "pulp-timeline-editor",
               "pulp-tool-gpu-health-model",
               "pulp-view",
               "pulp-view-core",
@@ -8979,7 +9016,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 58,
+            "count": 60,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -9025,6 +9062,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -9032,6 +9070,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -9049,7 +9088,7 @@
             ]
           },
           "public_headers": {
-            "count": 74,
+            "count": 75,
             "roots": [
               "inspect/include"
             ],
@@ -9675,7 +9714,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/render",
           "closure": {
-            "node_count": 54,
+            "node_count": 56,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -9701,7 +9740,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 48,
+            "count": 50,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -9739,12 +9778,14 @@
               "CoreAudio",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMedia",
               "CoreServices",
               "CoreText",
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -9941,7 +9982,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 16,
+            "node_count": 18,
             "pulp_targets": [],
             "third_party_targets": [
               "SDL3-static",
@@ -9949,7 +9990,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 16,
+            "count": 18,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers"
@@ -9962,10 +10003,12 @@
               "Carbon",
               "Cocoa",
               "CoreAudio",
+              "CoreHaptics",
               "CoreMedia",
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "Metal",
               "QuartzCore",
@@ -9987,10 +10030,12 @@
             "framework:Carbon",
             "framework:Cocoa",
             "framework:CoreAudio",
+            "framework:CoreHaptics",
             "framework:CoreMedia",
             "framework:CoreVideo",
             "framework:ForceFeedback",
             "framework:Foundation",
+            "framework:GameController",
             "framework:IOKit",
             "framework:Metal",
             "framework:QuartzCore",
@@ -10333,7 +10378,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 79,
+            "node_count": 81,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -10380,7 +10425,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 57,
+            "count": 59,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -10425,6 +10470,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -10432,6 +10478,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -10468,7 +10515,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "",
           "closure": {
-            "node_count": 79,
+            "node_count": 81,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -10515,7 +10562,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 57,
+            "count": 59,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -10560,6 +10607,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -10567,6 +10615,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -10919,7 +10968,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 71,
+            "node_count": 73,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -10958,7 +11007,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 54,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -11000,6 +11049,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -11007,6 +11057,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -11040,7 +11091,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 69,
+            "node_count": 71,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -11077,7 +11128,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 54,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -11119,6 +11170,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -11126,6 +11178,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -11176,7 +11229,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 71,
+            "node_count": 73,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -11215,7 +11268,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 54,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -11257,6 +11310,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -11264,6 +11318,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",
@@ -11297,7 +11352,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/view",
           "closure": {
-            "node_count": 70,
+            "node_count": 72,
             "pulp_targets": [
               "pulp-audio",
               "pulp-bundled-fonts",
@@ -11335,7 +11390,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 54,
+            "count": 56,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -11377,6 +11432,7 @@
               "CoreBluetooth",
               "CoreFoundation",
               "CoreGraphics",
+              "CoreHaptics",
               "CoreMIDI",
               "CoreMedia",
               "CoreServices",
@@ -11384,6 +11440,7 @@
               "CoreVideo",
               "ForceFeedback",
               "Foundation",
+              "GameController",
               "IOKit",
               "IOSurface",
               "ImageIO",

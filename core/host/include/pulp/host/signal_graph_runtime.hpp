@@ -24,6 +24,7 @@
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/sample_region_authoring.hpp>
+#include <pulp/host/sample_region_runtime.hpp>
 #include <pulp/host/signal_graph_connection.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/signal_graph_node.hpp>
@@ -977,6 +978,10 @@ private:
     };
 
     struct CompiledGraph {
+        // Private executable topology. For ordinary graphs this is a copy of
+        // nodes_; region-bearing graphs replace each admitted region with one
+        // synthetic Custom anchor while leaving public authoring state intact.
+        std::vector<GraphNode> executable_nodes;
         std::vector<NodeId> order;
         std::vector<Connection> connections;
         std::vector<std::uint64_t> connection_identities;
@@ -1043,6 +1048,13 @@ private:
         //    instances built by the old factory → not reinit-free).
         std::unordered_map<NodeId, const void*> custom_instances;
         std::uint64_t custom_registry_generation = 0;
+
+        // Sample-region state and callbacks ride the same RCU lifetime as the
+        // executable topology. Snapshots produced by a reinit-free edit own a
+        // distinct bank view whose exact-key cells and execution domain are
+        // shared with the preceding generation.
+        std::shared_ptr<SampleRegionStateBank> sample_region_bank;
+        std::vector<std::shared_ptr<PreparedSampleRegion>> sample_regions;
 
         // ONE routed-executor path: the plan snapshot, the scratch pool sized for
         // exactly that snapshot, the stable binding storage its bindings' user_data
@@ -1162,6 +1174,11 @@ private:
     std::vector<SampleRegionDefinition> sample_region_definitions_;
     const SampleRegionParameterBinding* sample_region_parameter_binding_ = nullptr;
     std::uint32_t sample_region_proof_block_size_ = 16384;
+    // Control-thread staging consumed by compile_(). These objects are built
+    // only after the complete region proof succeeds and are copied into the
+    // resulting CompiledGraph snapshot.
+    std::shared_ptr<SampleRegionStateBank> prepared_sample_region_bank_;
+    std::vector<std::shared_ptr<PreparedSampleRegion>> prepared_sample_regions_;
     // Bumped on every register_custom_node_type; captured into each CompiledGraph
     // so the 2.2b reinit-free-swap predicate can reject a candidate compiled after
     // the custom registry changed (M6 — prevents binding new callbacks to
