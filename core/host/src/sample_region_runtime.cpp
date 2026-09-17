@@ -20,8 +20,8 @@ SampleRegionStateCell::SampleRegionStateCell(SampleRegionStateKey key,
                                              SampleKernelDescriptor descriptor,
                                              PreparedSampleKernelConfig config,
                                              void* storage) noexcept
-    : key_(std::move(key)), descriptor_(std::move(descriptor)), config_(config),
-      storage_(storage) {}
+    : key_(std::move(key)), descriptor_(std::move(descriptor)), config_(config), storage_(storage) {
+}
 
 SampleRegionStateCell::~SampleRegionStateCell() {
     if (constructed_ && descriptor_.destroy != nullptr)

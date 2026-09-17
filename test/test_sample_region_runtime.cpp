@@ -1143,6 +1143,23 @@ TEST_CASE("Clearing a committed sample region removes its authoring and prepared
     REQUIRE(fixture.graph.prepare(kSampleRate, kPreparedMaximum));
 }
 
+TEST_CASE("Sample region quotient permits unrelated reinit-free live swaps",
+          "[sample-region][runtime][continuity][prepared-swap]") {
+    const std::array impulse{1.0f};
+    const std::array silence{0.0f};
+    AllpassFixture fixture;
+    CHECK(render(fixture.graph, impulse, 1)[0] == Approx(0.5f));
+
+    fixture.graph.begin_swap_edit();
+    REQUIRE(fixture.graph.set_node_gain(fixture.outer_gain, 0.75f));
+    REQUIRE(fixture.graph.prepare_swap(kSampleRate, kPreparedMaximum) ==
+            SignalGraph::SwapResult::Swapped);
+
+    // The allpass delay identities survive the outer gain edit, so the exact
+    // next retained sample is unchanged rather than resetting to silence.
+    CHECK(render(fixture.graph, silence, 1)[0] == Approx(0.75f));
+}
+
 TEST_CASE("Stale sample region edits preserve snapshot binding generation and state",
           "[sample-region][runtime][comp][continuity]") {
     const std::array impulse{1.0f};
@@ -1202,7 +1219,7 @@ TEST_CASE("Old sample region execution snapshots fail closed after newer generat
 
     CHECK(render(fixture.graph, silence, 1)[0] == Approx(0.75f));
 
-    std::array<float, 1> old_output{123.0f};
+    std::array<float, 4> old_output{123.0f, 456.0f, 789.0f, 321.0f};
     const float* input_channels[] = {silence.data()};
     float* output_channels[] = {old_output.data()};
     audio::BufferView<const float> in(input_channels, 1, silence.size());
@@ -1210,6 +1227,9 @@ TEST_CASE("Old sample region execution snapshots fail closed after newer generat
     const auto failures_before = fixture.graph.routed_only_execution_failures();
     old_snapshot.process(out, in, 1);
     CHECK(old_output[0] == 0.0f);
+    CHECK(old_output[1] == 456.0f);
+    CHECK(old_output[2] == 789.0f);
+    CHECK(old_output[3] == 321.0f);
     CHECK(fixture.graph.routed_only_execution_failures() == failures_before + 1);
 }
 

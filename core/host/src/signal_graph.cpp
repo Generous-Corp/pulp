@@ -2447,6 +2447,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     // members hidden by the private quotient.  Record those identities before
     // replacing each region with its synthetic executable anchor.
     for (const auto& authored : nodes_) {
+        cg->authored_shapes[authored.id] = {authored.type, authored.num_input_ports,
+                                            authored.num_output_ports};
         if (authored.type == NodeType::Custom)
             cg->custom_instances[authored.id] = authored.custom_instance.get();
     }
@@ -3681,7 +3683,8 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         // Contention and stale-snapshot re-entry fail without touching retained
         // state cells. The caller still receives a deterministic silent block.
         if (!sample_region_admission) {
-            output.clear();
+            for (std::size_t c = 0; c < output.num_channels(); ++c)
+                std::fill_n(output.channel_ptr(c), num_samples, 0.0f);
             routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
             return;
         }

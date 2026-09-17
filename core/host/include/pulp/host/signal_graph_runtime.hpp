@@ -1024,6 +1024,10 @@ private:
             NodeShape shape{};
             NodeRuntime* runtime = nullptr;
         };
+        // The authored node identities captured before sample-region quotienting.
+        // Live-swap eligibility compares against this map; `shapes` below is the
+        // executable topology and intentionally omits region interior nodes.
+        std::unordered_map<NodeId, NodeShape> authored_shapes;
         std::unordered_map<NodeId, NodeShape> shapes;
         std::vector<OrderedRuntime> ordered_runtime;
         // Per-node live-DSP timing, prepared at compile in ordered_runtime order
