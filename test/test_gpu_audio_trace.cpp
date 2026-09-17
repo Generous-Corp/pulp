@@ -119,6 +119,9 @@ class ProductTraceProvider final : public SharedIoArenaProvider {
         return submit_program(resources, token, std::move(inbox));
     }
 
+    bool can_resume_after_drain() const noexcept override {
+        return true;
+    }
     void poll() noexcept override {}
 
     bool drain() noexcept override {
@@ -473,7 +476,8 @@ TEST_CASE("traced callback disposition is allocation free and rejects duplicate 
     const auto duplicate = fixture.session.consume_output(callback, output);
     const auto allocations = probe.allocation_count();
     REQUIRE(allocations == 0);
-    REQUIRE(first == Delivery::Missing);
+    REQUIRE(first == Delivery::EpochChanged);
+    REQUIRE(fixture.session.recovery_reason() == SharedIoRecoveryReason::InputSaturated);
     REQUIRE(duplicate == Delivery::Invalid);
     const auto records = take_records(fixture.session);
     REQUIRE(records.size() == 2);
@@ -724,4 +728,65 @@ TEST_CASE("worker and callback trace queues publish concurrently with independen
             REQUIRE(values[sequence] == sequence);
     }
     REQUIRE(recorder.stats().invalid == 0);
+}
+
+TEST_CASE("transport final disposition replaces bridge silence exactly once",
+          "[gpu_audio][trace][delivery]") {
+    ProductTraceFixture fixture;
+    fixture.prepare();
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output;
+    for (std::uint64_t sequence = 0; sequence < 3; ++sequence) {
+        auto callback = fixture.session.begin_callback(input, sequence);
+        REQUIRE(callback.valid());
+        fixture.session.consume_output(callback, output, true);
+        REQUIRE(fixture.session.complete_callback_delivery(
+            callback, sequence < 2 ? SharedIoDeliveryDisposition::Priming
+                                   : SharedIoDeliveryDisposition::CpuFallbackDelivered));
+        REQUIRE_FALSE(fixture.session.complete_callback_delivery(
+            callback, SharedIoDeliveryDisposition::SilenceDelivered));
+    }
+    std::vector<SharedIoTraceRecord> records;
+    fixture.session.drain_trace_records(256,
+                                        [&](const auto& record) { records.push_back(record); });
+    REQUIRE(records.size() == 2);
+    CHECK(records[0].kind == SharedIoTraceKind::Eligible);
+    CHECK(records[1].kind == SharedIoTraceKind::Delivery);
+    CHECK(records[1].delivery == SharedIoDeliveryDisposition::CpuFallbackDelivered);
+    CHECK(records[1].delivery_reason == SharedIoFallbackReason::InputSaturated);
+    CHECK(fixture.session.trace_stats().invalid == 0);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("deferred callback delivery prevents epoch replacement and forged GPU success",
+          "[gpu_audio][trace][delivery]") {
+    SharedIoStampedBridge bridge;
+    REQUIRE(bridge.prepare({.capacity = 2, .channels = 1, .block_size = 2}, 1));
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output;
+    auto callback = bridge.begin_callback(input);
+    CHECK(bridge.consume_output(callback, output, nullptr, true) ==
+          SharedIoStampedBridge::Delivery::Priming);
+    CHECK_FALSE(
+        bridge.complete_callback_delivery(callback, SharedIoDeliveryDisposition::GpuDelivered));
+    bridge.suspend_delivery();
+    CHECK_FALSE(bridge.activate_epoch(2));
+    REQUIRE(bridge.complete_callback_delivery(callback, SharedIoDeliveryDisposition::Priming));
+    REQUIRE(bridge.activate_epoch(2));
+}
+
+TEST_CASE("recovery atomically closes future worker reservations without reclaiming the active one",
+          "[gpu_audio][trace][concurrency][recovery]") {
+    SharedIoStampedBridge bridge;
+    REQUIRE(bridge.prepare({.capacity = 2, .channels = 1, .block_size = 2}, 1));
+    REQUIRE(bridge.begin_worker_admission());
+    std::thread callback([&] { bridge.request_recovery(SharedIoRecoveryReason::SequenceGap); });
+    callback.join();
+    CHECK_FALSE(bridge.begin_worker_admission());
+    CHECK_FALSE(bridge.activate_epoch(2));
+    bridge.end_worker_admission();
+    CHECK_FALSE(bridge.begin_worker_admission());
+    REQUIRE(bridge.activate_epoch(2));
+    REQUIRE(bridge.begin_worker_admission());
+    bridge.end_worker_admission();
 }

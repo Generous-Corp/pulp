@@ -1,4 +1,5 @@
 #include "dawn_shared_io_provider.hpp"
+#include "dawn_shared_io_convolution_session.hpp"
 
 #include "dawn_submission_tracker.hpp"
 
@@ -728,6 +729,53 @@ std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_convolution_
     }
 }
 
+DawnSharedIoConvolutionSessionCreateResult create_dawn_shared_io_convolution_session(
+    const DawnSharedIoConvolutionSessionOptions& options) noexcept {
+    DawnSharedIoConvolutionSessionCreateResult result;
+    try {
+        auto created = DawnSharedIoProvider::create(options.provider);
+        result.availability = created.availability;
+        if (!created.provider) {
+            result.reason = DawnSharedIoConvolutionSessionCreateResult::Reason::ProviderUnavailable;
+            return result;
+        }
+
+        const auto& config = options.session.pipeline;
+        auto program = created.provider->make_convolution_program(
+            {.fft_size = config.fft_size,
+             .channels = config.channels,
+             .logical_frames = config.block_size,
+             .ir_length = config.ir_length,
+             .normalized_ir_spectrum = options.normalized_ir_spectrum});
+        if (!program) {
+            result.availability = DawnSharedIoProvider::Availability::Failed;
+            result.reason =
+                DawnSharedIoConvolutionSessionCreateResult::Reason::ProgramConstructionFailed;
+            return result;
+        }
+
+        auto session = std::make_unique<SharedIoConvolutionSession>();
+        if (!session->prepare({std::move(created.provider), std::move(program)}, options.session)) {
+            // Preparation can retain a physically live arena after an
+            // unproven drain. Return that owner so the caller can retry its
+            // cleanup barrier; destroying it here would violate the provider
+            // lifetime transaction.
+            result.session = std::move(session);
+            result.availability = DawnSharedIoProvider::Availability::Failed;
+            result.reason =
+                DawnSharedIoConvolutionSessionCreateResult::Reason::SessionPreparationFailed;
+            return result;
+        }
+        result.session = std::move(session);
+        result.availability = DawnSharedIoProvider::Availability::Ready;
+        result.reason = DawnSharedIoConvolutionSessionCreateResult::Reason::Ready;
+    } catch (...) {
+        result.availability = DawnSharedIoProvider::Availability::Failed;
+        result.reason = DawnSharedIoConvolutionSessionCreateResult::Reason::ConstructionException;
+    }
+    return result;
+}
+
 bool DawnSharedIoProvider::create_slot(std::uint32_t slot_index, std::size_t input_bytes,
                                        std::size_t output_bytes,
                                        SlotResources& resources) noexcept {
@@ -1391,6 +1439,12 @@ bool DawnSharedIoProvider::drain() noexcept {
     if (impl_->slots.empty() && impl_->reusable && !impl_->device_destroyed)
         impl_->accepting = true;
     return physically_drained;
+}
+
+bool DawnSharedIoProvider::device_lost() const noexcept {
+    return impl_ &&
+           (impl_->device_destroyed || impl_->device_lost.load(std::memory_order_acquire) ||
+            dawn::native::IsDeviceLost(impl_->device.Get()));
 }
 
 std::uint32_t DawnSharedIoProvider::alignment() const noexcept {

@@ -72,7 +72,21 @@ class SharedIoConvolutionSession {
     // Callback only: fixed bridge records and the executor watermark, with no
     // provider/program/plan access.
     Callback begin_callback(std::span<const float> samples) noexcept;
-    Delivery consume_output(const Callback&, std::span<float> output) noexcept;
+    Callback begin_callback(std::span<const float> samples, std::uint64_t sequence) noexcept {
+        return prepared_ ? pipeline_.begin_callback(samples, sequence) : Callback{};
+    }
+    void request_recovery(SharedIoRecoveryReason reason) noexcept {
+        pipeline_.request_recovery(reason);
+    }
+    SharedIoRecoveryReason recovery_reason() const noexcept {
+        return pipeline_.recovery_reason();
+    }
+    bool complete_callback_delivery(const Callback& callback,
+                                    SharedIoDeliveryDisposition actual) noexcept {
+        return pipeline_.complete_callback_delivery(callback, actual);
+    }
+    Delivery consume_output(const Callback&, std::span<float> output,
+                            bool defer_delivery = false) noexcept;
 
     // Serialized non-RT only. It owns provider polling, plan completion
     // disposition, planar-to-complex packing, submission, and bridge leases.
@@ -82,6 +96,9 @@ class SharedIoConvolutionSession {
     // leases returned. Drains the old provider phase, discards old plan tokens,
     // then advances both plan and pipeline to the same monotonic epoch.
     bool fence_and_reprime() noexcept;
+    // Same stopped/joined caller contract. Drains exact physical work but keeps
+    // the bridge CPU-only; offline processing cannot silently reactivate it.
+    bool fence_for_offline() noexcept;
     bool release() noexcept;
 
     bool prepared() const noexcept {
@@ -135,6 +152,7 @@ class SharedIoConvolutionSession {
     bool drain_completions(std::uint64_t now_ns, ServiceResult&) noexcept;
     bool submit_available(ServiceResult&) noexcept;
     bool discard_all_completions() noexcept;
+    bool drain_quiescent() noexcept;
 
     // Declared before plan_ so it outlives plan_ during destruction.
     std::unique_ptr<SharedIoArenaProvider> provider_;

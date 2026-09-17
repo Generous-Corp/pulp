@@ -46,12 +46,32 @@ class SharedIoConvolutionPipeline {
     // Callback only. These functions perform bounded fixed-record copies and
     // atomics only: no GPU API, allocation, lock, wait, Objective-C, or Perfetto.
     Callback begin_callback(std::span<const float> samples) noexcept;
-    Delivery consume_output(const Callback&, std::span<float> output) noexcept;
+    Callback begin_callback(std::span<const float> samples, std::uint64_t sequence) noexcept {
+        return bridge_.begin_callback(samples, sequence);
+    }
+    void request_recovery(SharedIoRecoveryReason reason) noexcept {
+        bridge_.request_recovery(reason);
+    }
+    SharedIoRecoveryReason recovery_reason() const noexcept {
+        return bridge_.recovery_reason();
+    }
+    bool complete_callback_delivery(const Callback& callback,
+                                    SharedIoDeliveryDisposition actual) noexcept {
+        return bridge_.complete_callback_delivery(callback, actual);
+    }
+    Delivery consume_output(const Callback&, std::span<float> output,
+                            bool defer_delivery = false) noexcept;
 
     // Serialized non-RT dispatcher only. An ingress lease remains immutable
     // until release_input(). The provider later returns the same stamp as a
     // terminal FFT block to record_terminal(), then drain_terminals() performs
     // chronological OLA and publishes any ready wet record.
+    bool begin_worker_admission() noexcept {
+        return bridge_.begin_worker_admission();
+    }
+    void end_worker_admission() noexcept {
+        bridge_.end_worker_admission();
+    }
     std::optional<Lease> acquire_input() noexcept;
     bool release_input(const Lease&) noexcept;
     bool record_terminal(Stamp, Terminal, std::span<const float> interleaved_time,
@@ -72,7 +92,7 @@ class SharedIoConvolutionPipeline {
         return prepared_;
     }
     bool fenced() const noexcept {
-        return executor_.fenced();
+        return executor_.fenced() || recovery_reason() != SharedIoRecoveryReason::None;
     }
     std::uint64_t epoch() const noexcept {
         return epoch_;

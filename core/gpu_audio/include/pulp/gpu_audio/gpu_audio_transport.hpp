@@ -1,9 +1,9 @@
 #pragma once
 
 #include <atomic>
-#include <mutex>
 #include <chrono>
 #include <cstdint>
+#include <mutex>
 #include <semaphore>
 #include <thread>
 #include <vector>
@@ -28,11 +28,11 @@ namespace pulp::gpu_audio {
 /// Latency is established by priming the output ring with `latency_blocks` of
 /// silence at prepare(); the host is told `latency_samples()` for PDC.
 class GpuAudioTransport {
-public:
+  public:
     // The node's descriptor is the single source of truth for channels, block
     // size, and latency. Config only carries transport knobs.
     struct Config {
-        uint32_t ring_blocks = 4;        // ring capacity, in blocks (>= latency+2)
+        uint32_t ring_blocks = 4; // ring capacity, in blocks (>= latency+2)
         // Spawn an internal non-RT worker thread that drives pump(). The worker
         // POLLS the input ring (the audio thread never signals it), so the RT
         // path stays fully decoupled and lock-free. When false, the caller
@@ -49,9 +49,9 @@ public:
     };
 
     struct Stats {
-        std::uint64_t produced_blocks = 0;   // blocks the worker completed
-        std::uint64_t miss_blocks = 0;       // RT reads with no ready output
-        std::uint64_t input_dropped_frames = 0;   // RT writes lost to a full input ring
+        std::uint64_t produced_blocks = 0;      // blocks the worker completed
+        std::uint64_t miss_blocks = 0;          // RT reads with no ready output
+        std::uint64_t input_dropped_frames = 0; // RT writes lost to a full input ring
         // Wet blocks the worker dropped to realign the stream after a miss. Each
         // miss already emitted a substitute (dry/fallback) block for that timeline
         // slot, so its late-arriving wet counterpart is redundant; dropping it
@@ -67,7 +67,9 @@ public:
     };
 
     GpuAudioTransport() = default;
-    ~GpuAudioTransport() { release(); }
+    ~GpuAudioTransport() {
+        release();
+    }
 
     GpuAudioTransport(const GpuAudioTransport&) = delete;
     GpuAudioTransport& operator=(const GpuAudioTransport&) = delete;
@@ -81,15 +83,20 @@ public:
     bool prepare(GpuAudioNode* node, const Config& config);
     void release() noexcept;
 
-    bool is_prepared() const noexcept { return prepared_; }
-    uint32_t latency_samples() const noexcept { return latency_blocks_ * block_size_; }
+    bool is_prepared() const noexcept {
+        return prepared_;
+    }
+    uint32_t latency_samples() const noexcept {
+        return latency_blocks_ * block_size_;
+    }
 
     /// Real-time-safe. Writes `n` input frames to the worker and reads the
     /// `latency_blocks`-delayed output. `n` must equal block_size. On a miss
     /// (worker not ready) the node's MissPolicy fills `output`. No allocation,
-    /// locking, or blocking.
-    void process(const audio::BufferView<const float>& input,
-                 audio::BufferView<float>& output, uint32_t n) noexcept;
+    /// locking, or blocking. Calls to process() and process_offline() share one
+    /// callback timeline and must never overlap.
+    void process(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
+                 uint32_t n) noexcept;
 
     /// Offline / faster-than-real-time render path. NOT real-time-safe — it
     /// drives the node SYNCHRONOUSLY on the calling thread (blocking GPU readback
@@ -101,7 +108,10 @@ public:
     /// stays sample-aligned between realtime playback and an offline bounce. While
     /// this is in use the background worker yields (a shared mutex serializes node
     /// access); switch back to process() to resume async realtime operation. `n`
-    /// must equal block_size.
+    /// must equal block_size. The experimental shared provider is fenced into
+    /// continuously primed CPU fallback here; a new host preparation is required
+    /// before it may admit GPU work again. The callback must already be stopped
+    /// before crossing this non-RT boundary.
     void process_offline(const audio::BufferView<const float>& input,
                          audio::BufferView<float>& output, uint32_t n) noexcept;
 
@@ -111,7 +121,7 @@ public:
 
     Stats stats() const noexcept;
 
-private:
+  private:
     GpuAudioNode* node_ = nullptr;
     // Derived from the node descriptor + config at prepare(); authoritative for
     // the RT path so it never calls the (allocating) descriptor().
@@ -122,6 +132,10 @@ private:
     // Fails closed until prepare() copies the node's declared policy in.
     MissPolicy miss_policy_ = MissPolicy::Silence;
     bool prepared_ = false;
+
+    void reset_staged_transport_state() noexcept;
+    void process_shared(const audio::BufferView<const float>&, audio::BufferView<float>&,
+                        std::uint32_t, std::uint64_t) noexcept;
 
     audio::PlanarAudioRingBuffer input_ring_;
     audio::PlanarAudioRingBuffer output_ring_;
@@ -136,8 +150,8 @@ private:
 
     std::atomic<std::uint64_t> produced_blocks_{0};
     std::atomic<std::uint64_t> miss_blocks_{0};
-    std::atomic<std::uint64_t> input_dropped_blocks_{0};  // whole-block input drops
-    std::atomic<std::uint64_t> resynced_blocks_{0};       // late wet blocks dropped to realign
+    std::atomic<std::uint64_t> input_dropped_blocks_{0}; // whole-block input drops
+    std::atomic<std::uint64_t> resynced_blocks_{0};      // late wet blocks dropped to realign
     // Resync debt: output slots a miss already substituted for, whose late wet
     // counterparts must still be dropped to realign the stream. Incremented on a
     // miss, decremented as those blocks are drained. Touched ONLY by process() on
@@ -166,6 +180,19 @@ private:
     // unchanged.
     bool wake_on_write_ = false;
     std::counting_semaphore<> wake_sem_{0};
+
+    // Private callback-side GPU path captured at prepare() from the concrete
+    // node. These are plain function pointers so the RT process path does not
+    // allocate, lock, or touch a public base-class extension.
+    void* realtime_gpu_context_ = nullptr;
+    std::uint8_t (*realtime_gpu_process_)(void*, const audio::BufferView<const float>&,
+                                          audio::BufferView<float>&, std::uint32_t,
+                                          std::uint64_t) noexcept = nullptr;
+    std::uint32_t (*realtime_gpu_service_)(void*, std::uint64_t) noexcept = nullptr;
+    bool (*realtime_gpu_fence_)(void*) noexcept = nullptr;
+    void (*realtime_gpu_delivered_)(void*, std::uint64_t, std::uint8_t) noexcept = nullptr;
+    std::uint64_t callback_sequence_ = 0; // one monotonic RT/offline callback timeline
+    bool realtime_gpu_fenced_for_offline_ = false;
 
     // Synchronous (offline) drive. When `synchronous_` is set, the background
     // worker yields and process_offline() pumps the node inline under

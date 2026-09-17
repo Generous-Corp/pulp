@@ -11,6 +11,14 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
       ir_(std::move(impulse_response)) {}
 
+struct GpuConvolver::SharedIoState {};
+
+GpuConvolver::~GpuConvolver() = default;
+
+bool GpuConvolver::has_realtime_shared_io() const noexcept {
+    return false;
+}
+
 GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
     GpuAudioNodeDescriptor d;
     d.name = "gpu-convolver";
@@ -26,7 +34,8 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
 
 bool GpuConvolver::prepare() {
     prepared_ = false;
-    if (channels_ == 0 || block_ == 0 || ir_.empty()) return false;
+    if (channels_ == 0 || block_ == 0 || ir_.empty())
+        return false;
 
     // The fallback is a signal::PartitionedConvolver loaded at `block_`, and
     // load_ir() rounds a non-power-of-two block UP to the next power of two for
@@ -35,10 +44,12 @@ bool GpuConvolver::prepare() {
     // Here that is fatal rather than degrading: with no render backend the
     // fallback is the ONLY audio path, so the node would emit nothing but
     // silence. Refuse to prepare instead.
-    if ((block_ & (block_ - 1u)) != 0u) return false;
+    if ((block_ & (block_ - 1u)) != 0u)
+        return false;
 
     fft_size_ = 1;
-    while (fft_size_ < block_ + static_cast<uint32_t>(ir_.size())) fft_size_ <<= 1;
+    while (fft_size_ < block_ + static_cast<uint32_t>(ir_.size()))
+        fft_size_ <<= 1;
 
     // Same continuously-fed fallback + latency-alignment delay ring as the render
     // build; here it is the ONLY audio path (no GPU device).
@@ -51,8 +62,8 @@ bool GpuConvolver::prepare() {
 
 void GpuConvolver::process_block(const audio::BufferView<const float>& input,
                                  audio::BufferView<float>& output, uint32_t n) {
-    if (!prepared_ || n != block_ ||
-        input.num_channels() < channels_ || output.num_channels() < channels_) {
+    if (!prepared_ || n != block_ || input.num_channels() < channels_ ||
+        output.num_channels() < channels_) {
         output.clear();
         return;
     }
@@ -93,8 +104,7 @@ void GpuMultiConvolver::process_block(const audio::BufferView<const float>&,
 }
 
 void GpuMultiConvolver::process_cpu_fallback(const audio::BufferView<const float>&,
-                                             audio::BufferView<float>& output,
-                                             uint32_t) noexcept {
+                                             audio::BufferView<float>& output, uint32_t) noexcept {
     output.clear();
 }
 

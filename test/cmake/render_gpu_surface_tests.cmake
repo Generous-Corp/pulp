@@ -130,6 +130,9 @@
                 "${PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256}")
         endif()
 
+        target_compile_definitions(pulp-gpu-audio PRIVATE
+            PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+
         add_executable(pulp-gpu-host-mapped-pointer-probe
             test_gpu_host_mapped_pointer_probe.cpp)
         target_link_libraries(pulp-gpu-host-mapped-pointer-probe PRIVATE
@@ -408,6 +411,41 @@
             set_tests_properties(
                 pulp-gpu-shared-io-private-convolution-prepare-scope-negative-control
                 pulp-gpu-shared-io-private-convolution-submit-scope-negative-control
+                PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 60)
+
+            # This goes through the private session factory rather than
+            # driving the plan and executor separately: one real provider
+            # creates its paired program, the session owns both, and callback
+            # ingress/egress stays free of GPU transfers.
+            add_executable(pulp-gpu-shared-io-convolution-session-probe
+                test_gpu_shared_io_convolution_session_probe.cpp)
+            target_link_libraries(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                ../core/gpu_audio/src)
+            target_compile_definitions(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                target_link_libraries(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                    Vellum::Gpu Vellum::DawnHeaders)
+            endif()
+            add_dependencies(pulp-gpu-shared-io-convolution-session-probe
+                pulp-gpu-dawn-shared-io-provider-probe)
+            add_test(NAME pulp-gpu-shared-io-convolution-session-probe
+                COMMAND pulp-gpu-shared-io-convolution-session-probe)
+            add_test(NAME pulp-gpu-shared-io-convolution-session-prepare-scope-negative-control
+                COMMAND pulp-gpu-shared-io-convolution-session-probe
+                    --scenario=prepare-scope-failure)
+            add_test(NAME pulp-gpu-shared-io-convolution-session-submit-scope-negative-control
+                COMMAND pulp-gpu-shared-io-convolution-session-probe
+                    --scenario=submit-scope-failure)
+            set_tests_properties(
+                pulp-gpu-shared-io-convolution-session-probe
+                pulp-gpu-shared-io-convolution-session-prepare-scope-negative-control
+                pulp-gpu-shared-io-convolution-session-submit-scope-negative-control
                 PROPERTIES
                     FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                     RESOURCE_LOCK pulp_gpu

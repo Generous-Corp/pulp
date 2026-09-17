@@ -437,7 +437,10 @@ pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
 # runs on no-GPU CI too.
 pulp_add_test_suite(pulp-test-gpu-audio-transport
     SOURCES test_gpu_audio_transport.cpp
-    LIBRARIES pulp::gpu-audio pulp::audio)
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/gpu_audio_transport.cpp
+    LIBRARIES pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
 # Dawn-free private contract for P2's explicit algorithmic lead, typed
 # fallback, and bridge telemetry. This is a CPU/fake lane; it intentionally
@@ -533,7 +536,12 @@ pulp_add_test_suite(pulp-test-flow-pans
 pulp_add_test_suite(pulp-test-gpu-convolver
     SOURCES test_gpu_convolver.cpp
     LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
     PROPERTIES RESOURCE_LOCK pulp_gpu)
+if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
+    target_compile_definitions(pulp-test-gpu-convolver PRIVATE
+        PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+endif()
 
 if(PULP_HAS_SKIA)
     # GPU STFT primitive: window+FFT analyze, inverse-FFT synthesize,

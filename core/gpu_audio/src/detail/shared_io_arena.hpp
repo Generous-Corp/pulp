@@ -131,7 +131,9 @@ class SharedIoArenaProvider {
         std::uint64_t generation = 0;
         std::weak_ptr<const void> lifetime;
 
-        bool has_lifetime() const noexcept { return !lifetime.expired(); }
+        bool has_lifetime() const noexcept {
+            return !lifetime.expired();
+        }
     };
 
     struct SlotResources {
@@ -165,7 +167,9 @@ class SharedIoArenaProvider {
     virtual bool acquire_slot_buffers(const SlotResources&, SlotBufferHandle&) const noexcept {
         return false;
     }
-    virtual bool validate_slot_buffers(const SlotBufferHandle&) const noexcept { return false; }
+    virtual bool validate_slot_buffers(const SlotBufferHandle&) const noexcept {
+        return false;
+    }
 
     // Accepted work completes exactly once through the independently retained
     // inbox. Rejection must not push. A provider must correlate the token with
@@ -190,6 +194,17 @@ class SharedIoArenaProvider {
     // make accepted work visible to drain_completions(); it must not wait for a
     // future callback or start a new provider lifecycle phase.
     virtual void poll() noexcept = 0;
+    // Serialized non-RT diagnostic. A lost provider cannot open another epoch;
+    // retirement still requires the independent physical drain barrier.
+    virtual bool device_lost() const noexcept {
+        return false;
+    }
+    // Affirmative proof that the same prepared provider can accept a fresh
+    // logical epoch after drain. Providers that require a new preparation
+    // transaction leave this false and remain CPU-only until reconstructed.
+    virtual bool can_resume_after_drain() const noexcept {
+        return false;
+    }
 
     // Repeatable lifecycle-phase barrier over the bounded activity initiated
     // before this call. It stops new submission activity for the current
@@ -283,7 +298,9 @@ class SharedIoArena {
         using Callback = void (*)(void*, const SlotToken&, CompletionStatus) noexcept;
         void* context = nullptr;
         Callback callback = nullptr;
-        explicit operator bool() const noexcept { return callback != nullptr; }
+        explicit operator bool() const noexcept {
+            return callback != nullptr;
+        }
     };
 
     SharedIoArena() = default;
@@ -333,7 +350,9 @@ class SharedIoArena {
         return ledger_.expire_delivery(token);
     }
     CompletionDrain drain_completions(CompletionObserver observer) noexcept;
-    CompletionDrain drain_completions() noexcept { return drain_completions(CompletionObserver{}); }
+    CompletionDrain drain_completions() noexcept {
+        return drain_completions(CompletionObserver{});
+    }
     std::optional<OutputLease> acquire_output(std::uint64_t expected_epoch,
                                               std::uint64_t expected_sequence) noexcept;
     bool release_output(const ReleaseRecord& record) noexcept {

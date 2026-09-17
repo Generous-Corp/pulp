@@ -106,6 +106,13 @@ class FakeProvider final : public SharedIoArenaProvider {
         return false; // This session requires the transferred prepared program.
     }
 
+    bool device_lost() const noexcept override {
+        return lost;
+    }
+    bool can_resume_after_drain() const noexcept override {
+        return resume_supported;
+    }
+
     void poll() noexcept override {
         ++state_->polls;
         if (auto_complete)
@@ -157,6 +164,8 @@ class FakeProvider final : public SharedIoArenaProvider {
     bool accept_submissions = true;
     bool auto_complete = true;
     bool allow_drain = true;
+    bool lost = false;
+    bool resume_supported = true;
     CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
 
   private:
@@ -459,5 +468,126 @@ TEST_CASE(
     REQUIRE_FALSE(identity(planted_wrong_output));
     // The first assertion catches callback-path allocation; the second makes
     // the fixed-record delivery expectation reject a swapped output mutation.
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared session gap closes admission and survives a failed physical drain",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare(1);
+    fixture.provider->auto_complete = false;
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+    callback(fixture.session, b, output);
+    REQUIRE(fixture.session.service(2).submitted == 0); // retained ingress lease
+    const auto gap = fixture.session.begin_callback(a, 4);
+    REQUIRE(gap.valid());
+    CHECK(gap.stamp == SharedIoStampedBridge::Stamp{0, 4});
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::SequenceGap);
+    CHECK(fixture.session.consume_output(gap, output) == Session::Delivery::EpochChanged);
+    CHECK(fixture.session.service(3).submitted == 0);
+    fixture.provider->allow_drain = false;
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+    CHECK_FALSE(fixture.session.release());
+    CHECK(fixture.session.prepared());
+    CHECK(fixture.session.epoch() == 1);
+    CHECK_FALSE(fixture.state->program_released);
+    CHECK_FALSE(fixture.state->program_destroyed);
+    CHECK(fixture.state->submits == 1);
+    fixture.provider->allow_drain = true;
+    REQUIRE(fixture.session.fence_and_reprime());
+    CHECK(fixture.session.epoch() == 2);
+    CHECK(fixture.session.next_sequence() == 5);
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::None);
+    CHECK(callback(fixture.session, b, output).stamp == SharedIoStampedBridge::Stamp{2, 5});
+    CHECK(fixture.session.service(4).submitted == 1);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared session rejects stale callback identity without advancing its timeline",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare();
+    std::array<float, 2> output;
+    const auto first = callback(fixture.session, a, output);
+    CHECK_FALSE(fixture.session.begin_callback(a, 0).valid());
+    CHECK(fixture.session.next_sequence() == 1);
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::InvalidCallback);
+    const auto current = fixture.session.begin_callback(b, 1);
+    CHECK(fixture.session.consume_output(first, output) == Session::Delivery::Invalid);
+    CHECK(fixture.session.consume_output(current, output) == Session::Delivery::Priming);
+    CHECK(fixture.session.service(1).submitted == 0);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared session ingress saturation remains CPU-only until a quiescent reprime",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare();
+    std::array<float, 2> output;
+    for (int sequence = 0; sequence < 9; ++sequence)
+        callback(fixture.session, a, output);
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::InputSaturated);
+    CHECK(fixture.session.service(1).submitted == 0);
+    CHECK(fixture.state->submits == 0);
+    const auto cpu = callback(fixture.session, b, output);
+    CHECK(cpu.stamp.epoch == 0);
+    REQUIRE(fixture.session.fence_and_reprime());
+    CHECK(callback(fixture.session, a, output).stamp.epoch == 2);
+    CHECK(fixture.session.service(2).submitted == 1);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared session loss retires exact work but never reprimes the lost provider",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare();
+    fixture.provider->auto_complete = false;
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+    fixture.provider->lost = true;
+    fixture.provider->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+    fixture.provider->complete_all();
+    CHECK(fixture.session.service(2).terminal_records == 1);
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::ProviderLost);
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+    CHECK(fixture.session.epoch() == 1);
+    CHECK(callback(fixture.session, b, output).stamp.epoch == 0);
+    CHECK(fixture.session.service(3).submitted == 0);
+    CHECK(fixture.state->submits == 1);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared session offline fence retires work and leaves future callbacks CPU-only",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare();
+    fixture.provider->auto_complete = false;
+    std::array<float, 2> output;
+    callback(fixture.session, a, output);
+    REQUIRE(fixture.session.service(1).submitted == 1);
+    REQUIRE(fixture.session.fence_for_offline());
+    CHECK(fixture.session.epoch() == 1);
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::OfflineFence);
+    for (int index = 0; index < 6; ++index)
+        CHECK(callback(fixture.session, b, output).stamp.epoch == 0);
+    CHECK(fixture.session.service(2).submitted == 0);
+    CHECK(fixture.state->submits == 1);
+    REQUIRE(fixture.session.release());
+}
+
+TEST_CASE("shared session requires affirmative provider resume proof before reopening admission",
+          "[gpu_audio][shared_io][session][recovery]") {
+    Fixture fixture;
+    fixture.prepare();
+    fixture.provider->resume_supported = false;
+    CHECK_FALSE(fixture.session.fence_and_reprime());
+    CHECK(fixture.session.epoch() == 1);
+    CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::ProviderFailure);
+    std::array<float, 2> output;
+    CHECK(callback(fixture.session, a, output).stamp.epoch == 0);
+    CHECK(fixture.session.service(1).submitted == 0);
     REQUIRE(fixture.session.release());
 }
