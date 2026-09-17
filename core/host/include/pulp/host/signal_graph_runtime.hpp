@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/live_dsp_telemetry.hpp>
 #include <pulp/audio/load_measurer.hpp>
@@ -22,6 +23,7 @@
 #include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/sample_region_authoring.hpp>
 #include <pulp/host/signal_graph_connection.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 #include <pulp/host/signal_graph_node.hpp>
@@ -161,6 +163,9 @@ public:
     const CustomNodeType* custom_node_type(std::string_view type_id,
                                            int version) const;
     const SampleKernelDescriptor* sample_kernel_type(std::string_view type_id, int version) const;
+    SampleRegionProof prove_sample_region(SampleRegionId id) const;
+    std::optional<SampleRegionDescriptor> sample_region(SampleRegionId id) const;
+    std::vector<SampleRegionDescriptor> sample_regions() const;
     NodeId add_custom_node(std::string_view type_id,
                            const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id,
@@ -1150,6 +1155,8 @@ private:
     std::uint64_t next_connection_identity_{1};
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     std::unordered_map<std::string, SampleKernelDescriptor> sample_kernel_types_;
+    std::vector<SampleRegionDefinition> sample_region_definitions_;
+    std::uint32_t sample_region_proof_block_size_ = 16384;
     // Bumped on every register_custom_node_type; captured into each CompiledGraph
     // so the 2.2b reinit-free-swap predicate can reject a candidate compiled after
     // the custom registry changed (M6 — prevents binding new callbacks to
@@ -1433,6 +1440,14 @@ private:
     // topology's constness is shed, so the mutators do not each hand-roll a
     // const_cast. Caller holds graph_mutation_mutex_ (same contract as node()).
     GraphNode* node_mut_locked_(NodeId id);
+    SampleRegionId sample_region_for_node_locked_(NodeId id) const;
+    SampleRegionCandidate sample_region_candidate_locked_(
+        const SampleRegionDefinition& definition) const;
+    SampleRegionProof sample_region_proof_locked_(SampleRegionId id) const;
+    SampleRegionProof sample_region_metadata_proof_locked_(
+        const SampleRegionDefinition& definition, bool complete = true) const;
+    SampleRegionProof sample_region_exterior_proof_locked_() const;
+    bool has_sample_kernel_nodes_locked_() const;
     void append_connection_locked_(Connection connection);
     void erase_connection_at_locked_(std::size_t index);
 

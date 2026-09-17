@@ -39,6 +39,7 @@ class SignalGraph::PreparedTopologyEdit {
         QuiescedRollbackFailed,
         NotPrepared,
         AlreadyCommitted,
+        RegionRuntimeUnavailable,
     };
 
     ~PreparedTopologyEdit();
@@ -77,6 +78,20 @@ class SignalGraph::PreparedTopologyEdit {
     bool disconnect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
     bool set_node_gain(NodeId id, float linear_gain);
 
+    SampleRegionResult declare_sample_region(SampleRegionDefinition definition);
+    SampleRegionResult remove_sample_region(SampleRegionId id);
+    SampleRegionResult add_sample_region_member(SampleRegionId id, NodeId member,
+                                                SampleKernelConfig config);
+    SampleRegionResult remove_sample_region_member(SampleRegionId id, NodeId member);
+    SampleRegionResult set_sample_kernel_config(SampleRegionId id, NodeId member,
+                                                SampleKernelConfig config);
+    SampleRegionResult connect_in_sample_region(SampleRegionId id, NodeId source,
+                                                PortIndex source_port, NodeId destination,
+                                                PortIndex destination_port);
+    SampleRegionProof prove_sample_region(SampleRegionId id) const;
+    std::optional<SampleRegionDescriptor> sample_region(SampleRegionId id) const;
+    std::vector<SampleRegionDescriptor> sample_regions() const;
+
     void set_canonical_executor_routing_enabled(bool enabled) noexcept;
     void set_parallel_routing_enabled(bool enabled) noexcept;
     void set_anticipation_enabled(bool enabled) noexcept;
@@ -110,6 +125,13 @@ class SignalGraph::PreparedTopologyEdit {
     std::optional<Result> baseline_removal_rejection_locked_() const;
     bool rollback_quiesced_lifecycles_locked_() noexcept;
     void release_new_custom_instances_() noexcept;
+    SampleRegionResult replace_sample_region_(SampleRegionDefinition definition,
+                                              bool declaration);
+    SampleRegionResult reject_sample_region_(SampleRegionId id,
+                                             SampleRegionRefusalReason reason,
+                                             std::string message, NodeId node = 0);
+    std::optional<Result> sample_region_preparation_result_(double sample_rate,
+                                                           int max_block_size);
 
     struct QuiescedPluginLifecycle {
         std::shared_ptr<PluginSlot> plugin;
