@@ -741,6 +741,29 @@ TEST_CASE("Sample region state banks retain exact keys without reading active by
     CHECK(g_state_probe.constructs.load() == constructs_before_adopt + 1);
 }
 
+TEST_CASE("Sample region state retention rejects changed prepared kernel configuration",
+          "[sample-region][runtime][continuity][state-bank]") {
+    reset_state_probe();
+    auto first_plan = probe_plan();
+    auto& first_delay = first_plan.kernels[1];
+    first_delay.descriptor.authored_config_kind = SampleKernelConfigKind::FiniteConstant;
+    first_delay.config = {PreparedSampleKernelConfigKind::FiniteConstant, 0, 0.25f};
+    const std::array first_plans{first_plan};
+    auto first = SampleRegionStateBank::create_fresh(first_plans, kSampleRate, 64, 1);
+    REQUIRE(first);
+    REQUIRE(g_state_probe.constructs.load() == 1);
+
+    auto changed_plan = first_plan;
+    changed_plan.kernels[1].config.constant = 0.75f;
+    const std::array changed_plans{changed_plan};
+    auto changed = SampleRegionStateBank::adopt(changed_plans, *first, kSampleRate, 64, 2);
+    REQUIRE(changed);
+    const SampleRegionStateKey key{77, 12, "pulp.test.sample-region.probe-delay", 1};
+    CHECK_FALSE(changed->was_retained(key));
+    CHECK(changed->cell(key) != first->cell(key));
+    CHECK(g_state_probe.constructs.load() == 2);
+}
+
 TEST_CASE("Sample region execution domain excludes overlap and rejects old reentry",
           "[sample-region][runtime][concurrency]") {
     reset_state_probe();
@@ -1101,6 +1124,42 @@ TEST_CASE("Sample region state survives adopted edits and resets on full prepare
     CHECK(render(fixture.graph, silence, 1)[0] == Approx(0.75f));
 }
 
+TEST_CASE("Clearing a committed sample region removes its authoring and prepared runtime state",
+          "[sample-region][runtime][clear]") {
+    AllpassFixture fixture;
+    REQUIRE(fixture.graph.sample_region_parameter_binding() == &fixture.parameters->binding());
+    REQUIRE(fixture.graph.sample_region_runtime_receipts().size() == 1);
+
+    fixture.graph.clear();
+    CHECK(fixture.graph.nodes().empty());
+    CHECK(fixture.graph.connections().empty());
+    CHECK(fixture.graph.sample_region_parameter_binding() == nullptr);
+    CHECK(fixture.graph.sample_region_runtime_receipts().empty());
+    CHECK(fixture.graph.sample_region_binding_generation() == 0);
+
+    const auto input = fixture.graph.add_input_node(1);
+    const auto output = fixture.graph.add_output_node(1);
+    REQUIRE(fixture.graph.connect(input, 0, output, 0));
+    REQUIRE(fixture.graph.prepare(kSampleRate, kPreparedMaximum));
+}
+
+TEST_CASE("Sample region quotient permits unrelated reinit-free live swaps",
+          "[sample-region][runtime][continuity][prepared-swap]") {
+    const std::array impulse{1.0f};
+    const std::array silence{0.0f};
+    AllpassFixture fixture;
+    CHECK(render(fixture.graph, impulse, 1)[0] == Approx(0.5f));
+
+    fixture.graph.begin_swap_edit();
+    REQUIRE(fixture.graph.set_node_gain(fixture.outer_gain, 0.75f));
+    REQUIRE(fixture.graph.prepare_swap(kSampleRate, kPreparedMaximum) ==
+            SignalGraph::SwapResult::Swapped);
+
+    // The allpass delay identities survive the outer gain edit, so the exact
+    // next retained sample is unchanged rather than resetting to silence.
+    CHECK(render(fixture.graph, silence, 1)[0] == Approx(0.75f));
+}
+
 TEST_CASE("Stale sample region edits preserve snapshot binding generation and state",
           "[sample-region][runtime][comp][continuity]") {
     const std::array impulse{1.0f};
@@ -1160,7 +1219,7 @@ TEST_CASE("Old sample region execution snapshots fail closed after newer generat
 
     CHECK(render(fixture.graph, silence, 1)[0] == Approx(0.75f));
 
-    std::array<float, 1> old_output{123.0f};
+    std::array<float, 4> old_output{123.0f, 456.0f, 789.0f, 321.0f};
     const float* input_channels[] = {silence.data()};
     float* output_channels[] = {old_output.data()};
     audio::BufferView<const float> in(input_channels, 1, silence.size());
@@ -1168,6 +1227,9 @@ TEST_CASE("Old sample region execution snapshots fail closed after newer generat
     const auto failures_before = fixture.graph.routed_only_execution_failures();
     old_snapshot.process(out, in, 1);
     CHECK(old_output[0] == 0.0f);
+    CHECK(old_output[1] == 456.0f);
+    CHECK(old_output[2] == 789.0f);
+    CHECK(old_output[3] == 321.0f);
     CHECK(fixture.graph.routed_only_execution_failures() == failures_before + 1);
 }
 

@@ -18,8 +18,10 @@ bool operator<(const SampleRegionStateKey& lhs, const SampleRegionStateKey& rhs)
 
 SampleRegionStateCell::SampleRegionStateCell(SampleRegionStateKey key,
                                              SampleKernelDescriptor descriptor,
+                                             PreparedSampleKernelConfig config,
                                              void* storage) noexcept
-    : key_(std::move(key)), descriptor_(std::move(descriptor)), storage_(storage) {}
+    : key_(std::move(key)), descriptor_(std::move(descriptor)), config_(config), storage_(storage) {
+}
 
 SampleRegionStateCell::~SampleRegionStateCell() {
     if (constructed_ && descriptor_.destroy != nullptr)
@@ -45,7 +47,7 @@ SampleRegionStateCell::create(SampleRegionStateKey key, const SampleKernelDescri
         storage =
             ::operator new(descriptor.state_size, std::align_val_t(descriptor.state_alignment));
         auto cell = std::unique_ptr<SampleRegionStateCell>(
-            new SampleRegionStateCell(std::move(key), descriptor, storage));
+            new SampleRegionStateCell(std::move(key), descriptor, config, storage));
         storage = nullptr;
         auto result = std::shared_ptr<SampleRegionStateCell>(std::move(cell));
         const SampleKernelPrepareContext context{sample_rate, max_block_size, config};
@@ -165,6 +167,13 @@ bool descriptors_match_for_retention(const SampleKernelDescriptor& lhs,
            lhs.delay_commit == rhs.delay_commit && lhs.latency_samples == rhs.latency_samples;
 }
 
+bool configs_match_for_retention(const PreparedSampleKernelConfig& lhs,
+                                 const PreparedSampleKernelConfig& rhs) noexcept {
+    return lhs.kind == rhs.kind &&
+           lhs.boundary_or_parameter_index == rhs.boundary_or_parameter_index &&
+           lhs.constant == rhs.constant;
+}
+
 bool add_allocation_bytes(std::uint64_t& total, std::size_t count,
                           std::size_t element_size) noexcept {
     constexpr auto maximum = std::numeric_limits<std::uint64_t>::max();
@@ -197,7 +206,8 @@ bool SampleRegionStateBank::populate(SampleRegionStateBank& bank,
                     const auto found = live->cells_.find(key);
                     if (found != live->cells_.end() &&
                         descriptors_match_for_retention(found->second->descriptor(),
-                                                        kernel.descriptor)) {
+                                                        kernel.descriptor) &&
+                        configs_match_for_retention(found->second->config(), kernel.config)) {
                         cell = found->second;
                     }
                 }

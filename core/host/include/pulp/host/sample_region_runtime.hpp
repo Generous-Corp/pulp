@@ -46,6 +46,9 @@ class SampleRegionStateCell final {
     const SampleKernelDescriptor& descriptor() const noexcept {
         return descriptor_;
     }
+    const PreparedSampleKernelConfig& config() const noexcept {
+        return config_;
+    }
     void* data() noexcept {
         return storage_;
     }
@@ -62,10 +65,11 @@ class SampleRegionStateCell final {
 
   private:
     SampleRegionStateCell(SampleRegionStateKey key, SampleKernelDescriptor descriptor,
-                          void* storage) noexcept;
+                          PreparedSampleKernelConfig config, void* storage) noexcept;
 
     SampleRegionStateKey key_;
     SampleKernelDescriptor descriptor_;
+    PreparedSampleKernelConfig config_;
     void* storage_ = nullptr;
     bool constructed_ = false;
 };
