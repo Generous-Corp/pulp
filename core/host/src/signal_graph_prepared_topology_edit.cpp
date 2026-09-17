@@ -118,6 +118,8 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     candidate_->custom_node_types_ = owner.custom_node_types_;
     candidate_->sample_kernel_types_ = owner.sample_kernel_types_;
     candidate_->sample_region_definitions_ = owner.sample_region_definitions_;
+    candidate_->sample_region_parameter_binding_ = owner.sample_region_parameter_binding_;
+    sample_region_parameter_binding_ = owner.sample_region_parameter_binding_;
     candidate_->sample_region_proof_block_size_ = owner.sample_region_proof_block_size_;
     candidate_->custom_registry_generation_ = owner.custom_registry_generation_;
     candidate_->next_id_ = owner.next_id_;
@@ -700,6 +702,30 @@ std::vector<SampleRegionDescriptor> SignalGraph::PreparedTopologyEdit::sample_re
     return candidate_->sample_regions();
 }
 
+SampleRegionParameterContract
+SignalGraph::PreparedTopologyEdit::sample_region_parameter_contract() const {
+    return SampleRegionParameterContract::from_regions(candidate_->sample_region_definitions_);
+}
+
+SampleRegionResult SignalGraph::PreparedTopologyEdit::bind_sample_region_parameters(
+    const SampleRegionParameterBinding& binding) {
+    SampleRegionResult result;
+    if (mutation_failed_ || committed_ || prepare_attempted_) {
+        return reject_sample_region_(0, SampleRegionRefusalReason::PrepareFailed,
+                                     "the topology edit no longer accepts parameter binding");
+    }
+    const auto candidate_contract = sample_region_parameter_contract();
+    if (!candidate_contract.matches_promoted(binding.contract())) {
+        return reject_sample_region_(0, SampleRegionRefusalReason::ParameterContractMismatch,
+                                     "the bound parameter contract does not match the candidate");
+    }
+    sample_region_parameter_binding_ = &binding;
+    candidate_->sample_region_parameter_binding_ = &binding;
+    result.accepted = true;
+    result.reason = SampleRegionRefusalReason::None;
+    return result;
+}
+
 std::optional<SignalGraph::PreparedTopologyEdit::Result>
 SignalGraph::PreparedTopologyEdit::sample_region_preparation_result_(double sample_rate,
                                                                      int max_block_size) {
@@ -707,6 +733,10 @@ SignalGraph::PreparedTopologyEdit::sample_region_preparation_result_(double samp
     if (candidate_->sample_region_definitions_.empty()) {
         if (candidate_->has_sample_kernel_nodes_locked_())
             return Result::PreflightFailed;
+        const auto contract = sample_region_parameter_contract();
+        if (sample_region_parameter_binding_ != nullptr &&
+            !contract.matches_promoted(sample_region_parameter_binding_->contract()))
+            return Result::ParameterContractMismatch;
         return std::nullopt;
     }
     candidate_->sample_region_proof_block_size_ =
@@ -735,6 +765,10 @@ SignalGraph::PreparedTopologyEdit::sample_region_preparation_result_(double samp
         if (!build_sample_region_plan(region).proof.accepted)
             return Result::PreflightFailed;
     }
+    const auto contract = sample_region_parameter_contract();
+    if (!contract.valid() || sample_region_parameter_binding_ == nullptr ||
+        !contract.matches_promoted(sample_region_parameter_binding_->contract()))
+        return Result::ParameterContractMismatch;
     // Proof cannot authorize publication without a scalar executor and state bank.
     return Result::RegionRuntimeUnavailable;
 }
@@ -1342,6 +1376,7 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     owner_->custom_node_types_ = std::move(candidate_->custom_node_types_);
     owner_->sample_kernel_types_ = std::move(candidate_->sample_kernel_types_);
     owner_->sample_region_definitions_ = std::move(candidate_->sample_region_definitions_);
+    owner_->sample_region_parameter_binding_ = candidate_->sample_region_parameter_binding_;
     owner_->sample_region_proof_block_size_ = candidate_->sample_region_proof_block_size_;
     owner_->custom_registry_generation_ = candidate_->custom_registry_generation_;
     owner_->next_id_ = candidate_->next_id_;

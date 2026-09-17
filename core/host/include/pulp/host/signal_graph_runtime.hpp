@@ -52,6 +52,7 @@ std::shared_ptr<ExactParameterIngressOwner> make_exact_parameter_ingress_owner()
 }
 
 class TimelineGraphPlaybackBinding;
+class SampleRegionParameterBinding;
 
 // ── Signal Graph ────────────────────────────────────────────────────────
 
@@ -166,6 +167,9 @@ public:
     SampleRegionProof prove_sample_region(SampleRegionId id) const;
     std::optional<SampleRegionDescriptor> sample_region(SampleRegionId id) const;
     std::vector<SampleRegionDescriptor> sample_regions() const;
+    const SampleRegionParameterBinding* sample_region_parameter_binding() const noexcept {
+        return sample_region_parameter_binding_;
+    }
     NodeId add_custom_node(std::string_view type_id,
                            const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id,
@@ -1156,6 +1160,7 @@ private:
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     std::unordered_map<std::string, SampleKernelDescriptor> sample_kernel_types_;
     std::vector<SampleRegionDefinition> sample_region_definitions_;
+    const SampleRegionParameterBinding* sample_region_parameter_binding_ = nullptr;
     std::uint32_t sample_region_proof_block_size_ = 16384;
     // Bumped on every register_custom_node_type; captured into each CompiledGraph
     // so the 2.2b reinit-free-swap predicate can reject a candidate compiled after

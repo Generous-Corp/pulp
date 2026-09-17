@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
 
 #include <optional>
@@ -40,6 +41,7 @@ class SignalGraph::PreparedTopologyEdit {
         NotPrepared,
         AlreadyCommitted,
         RegionRuntimeUnavailable,
+        ParameterContractMismatch,
     };
 
     ~PreparedTopologyEdit();
@@ -91,6 +93,11 @@ class SignalGraph::PreparedTopologyEdit {
     SampleRegionProof prove_sample_region(SampleRegionId id) const;
     std::optional<SampleRegionDescriptor> sample_region(SampleRegionId id) const;
     std::vector<SampleRegionDescriptor> sample_regions() const;
+    SampleRegionParameterContract sample_region_parameter_contract() const;
+    SampleRegionResult bind_sample_region_parameters(const SampleRegionParameterBinding& binding);
+    const SampleRegionParameterBinding* sample_region_parameter_binding() const noexcept {
+        return sample_region_parameter_binding_;
+    }
 
     void set_canonical_executor_routing_enabled(bool enabled) noexcept;
     void set_parallel_routing_enabled(bool enabled) noexcept;
@@ -187,6 +194,7 @@ class SignalGraph::PreparedTopologyEdit {
     bool prepare_attempted_ = false;
     bool quiesced_lifecycles_dirty_ = false;
     bool committed_ = false;
+    const SampleRegionParameterBinding* sample_region_parameter_binding_ = nullptr;
     Result last_result_ = Result::NotPrepared;
 };
 
