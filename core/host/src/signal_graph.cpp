@@ -4077,6 +4077,10 @@ void SignalGraph::clear() {
     connection_identities_.clear();
     nodes_.clear();
     processor_nodes_.clear();
+    sample_region_definitions_.clear();
+    sample_region_parameter_binding_ = nullptr;
+    prepared_sample_region_bank_.reset();
+    prepared_sample_regions_.clear();
     next_id_ = 1;
     invalidate_live_locked_();
 }
