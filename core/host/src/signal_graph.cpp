@@ -1837,10 +1837,13 @@ bool SignalGraph::would_create_cycle(NodeId source, NodeId dest) const {
     return has_path_locked_(dest, source);
 }
 
-std::vector<NodeId> SignalGraph::processing_order() const {
+namespace {
+std::vector<NodeId> processing_order_for(const std::vector<GraphNode>& nodes,
+                                         const std::vector<Connection>& connections) {
     std::unordered_map<NodeId, int> in_degree;
-    for (auto& n : nodes_) in_degree[n.id] = 0;
-    for (auto& c : connections_) {
+    for (const auto& n : nodes)
+        in_degree[n.id] = 0;
+    for (const auto& c : connections) {
         if (c.feedback) continue;
         in_degree[c.dest_node]++;
     }
@@ -1851,7 +1854,7 @@ std::vector<NodeId> SignalGraph::processing_order() const {
         auto current = queue.front();
         queue.pop();
         order.push_back(current);
-        for (auto& c : connections_) {
+        for (const auto& c : connections) {
             if (c.feedback) continue;
             // Automation edges DO contribute to topological order — the
             // source must be processed before the dest so its output
@@ -1862,6 +1865,11 @@ std::vector<NodeId> SignalGraph::processing_order() const {
         }
     }
     return order;
+}
+} // namespace
+
+std::vector<NodeId> SignalGraph::processing_order() const {
+    return processing_order_for(nodes_, connections_);
 }
 
 bool SignalGraph::set_node_parameter(NodeId id, uint32_t param_id, float value) {
@@ -1913,6 +1921,27 @@ SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
         .total_prepared_buffer_bytes =
             prepared_total_buffer_bytes_.load(std::memory_order_relaxed),
     };
+}
+
+std::uint64_t SignalGraph::sample_region_binding_generation() const noexcept {
+    auto read_guard = live_slot_.read();
+    const auto* cg = read_guard.get();
+    return cg != nullptr && cg->sample_region_bank ? cg->sample_region_bank->binding_generation()
+                                                   : 0;
+}
+
+std::vector<SampleRegionRuntimeReceipt> SignalGraph::sample_region_runtime_receipts() const {
+    auto read_guard = live_slot_.read();
+    const auto* cg = read_guard.get();
+    std::vector<SampleRegionRuntimeReceipt> receipts;
+    if (cg == nullptr)
+        return receipts;
+    receipts.reserve(cg->sample_regions.size());
+    for (const auto& region : cg->sample_regions) {
+        if (region)
+            receipts.push_back(region->receipt());
+    }
+    return receipts;
 }
 
 int SignalGraph::prepared_max_block_size() const noexcept {
@@ -2348,7 +2377,7 @@ bool SignalGraph::build_routing_snapshot_locked_(
                 };
             },
     };
-    if (!build_executor_snapshot(nodes_, connections_, binders, plugin_ctx,
+    if (!build_executor_snapshot(cg.executable_nodes, cg.connections, binders, plugin_ctx,
                                  cg.routed.plugin_scratch, out, parallel_safe, &custom_ctx)) {
         return false;
     }
@@ -2393,9 +2422,89 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     auto cg = std::make_shared<CompiledGraph>();
     cg->max_block_size = max_block_size;
     cg->sample_rate = sample_rate;
-    cg->connections = connections_;
-    cg->connection_identities = connection_identities_;
+    cg->sample_region_bank = prepared_sample_region_bank_;
+    cg->sample_regions = prepared_sample_regions_;
     cg->custom_registry_generation = custom_registry_generation_;  // 2.2b predicate (M6)
+
+    std::unordered_map<NodeId, const SampleRegionDefinition*> region_by_member;
+    std::unordered_map<NodeId, std::shared_ptr<PreparedSampleRegion>> region_by_anchor;
+    for (const auto& definition : sample_region_definitions_) {
+        if (definition.input_boundaries.empty())
+            return nullptr;
+        const NodeId anchor = definition.input_boundaries.front();
+        const auto prepared = std::find_if(
+            cg->sample_regions.begin(), cg->sample_regions.end(), [&](const auto& region) {
+                return region && region->region_id() == definition.region_id;
+            });
+        if (prepared == cg->sample_regions.end())
+            return nullptr;
+        region_by_anchor.emplace(anchor, *prepared);
+        for (const auto& member : definition.members)
+            region_by_member.emplace(member.node, &definition);
+    }
+
+    // Prepared-edit identity checks describe the authored graph, including
+    // members hidden by the private quotient.  Record those identities before
+    // replacing each region with its synthetic executable anchor.
+    for (const auto& authored : nodes_) {
+        if (authored.type == NodeType::Custom)
+            cg->custom_instances[authored.id] = authored.custom_instance.get();
+    }
+
+    cg->executable_nodes.reserve(nodes_.size());
+    for (const auto& authored : nodes_) {
+        const auto member = region_by_member.find(authored.id);
+        if (member == region_by_member.end()) {
+            cg->executable_nodes.push_back(authored);
+            continue;
+        }
+        const auto& definition = *member->second;
+        if (authored.id != definition.input_boundaries.front())
+            continue;
+        auto anchor = authored;
+        anchor.num_input_ports = static_cast<int>(definition.input_boundaries.size());
+        anchor.num_output_ports = static_cast<int>(definition.output_boundaries.size());
+        anchor.custom_instance.reset();
+        anchor.transport_sensitive = true;
+        cg->executable_nodes.push_back(std::move(anchor));
+    }
+
+    const auto boundary_index = [](const SampleRegionDefinition& definition,
+                                   NodeId id) -> std::optional<std::uint32_t> {
+        const auto found = std::find_if(definition.members.begin(), definition.members.end(),
+                                        [&](const auto& member) { return member.node == id; });
+        if (found == definition.members.end() ||
+            found->config.kind != SampleKernelConfigKind::BoundaryIndex)
+            return std::nullopt;
+        return found->config.boundary_index_or_parameter_id;
+    };
+    cg->connections.reserve(connections_.size());
+    cg->connection_identities.reserve(connection_identities_.size());
+    for (std::size_t i = 0; i < connections_.size(); ++i) {
+        auto connection = connections_[i];
+        const auto source_region = region_by_member.find(connection.source_node);
+        const auto dest_region = region_by_member.find(connection.dest_node);
+        if (source_region != region_by_member.end() && dest_region != region_by_member.end() &&
+            source_region->second == dest_region->second) {
+            continue;
+        }
+        if (source_region != region_by_member.end()) {
+            const auto index = boundary_index(*source_region->second, connection.source_node);
+            if (!index)
+                return nullptr;
+            connection.source_node = source_region->second->input_boundaries.front();
+            connection.source_port = *index;
+        }
+        if (dest_region != region_by_member.end()) {
+            const auto index = boundary_index(*dest_region->second, connection.dest_node);
+            if (!index)
+                return nullptr;
+            connection.dest_node = dest_region->second->input_boundaries.front();
+            connection.dest_port = *index;
+        }
+        cg->connections.push_back(std::move(connection));
+        cg->connection_identities.push_back(connection_identities_[i]);
+    }
 
 #ifndef NDEBUG
     // 2.2b (H2): every plugin node MUST have captured metadata. A cache miss
@@ -2404,15 +2513,17 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     // exactly what this cache prevents. Impossible in prepare()->compile_(), but
     // a future off-thread swap-recompile that added a plugin without re-capturing
     // would fail SILENTLY; assert loudly instead.
-    for (const auto& dbg_n : nodes_) {
+    for (const auto& dbg_n : cg->executable_nodes) {
         assert((!dbg_n.plugin || prepared_plugin_meta_.count(dbg_n.id) == 1) &&
                "compile_: plugin node missing from prepared_plugin_meta_ — a swap "
                "recompiled without re-capturing plugin metadata (2.2b H2)");
     }
 #endif
-    cg->order = processing_order();
+    cg->order = processing_order_for(cg->executable_nodes, cg->connections);
+    if (cg->order.size() != cg->executable_nodes.size())
+        return nullptr;
 
-    for (auto& n : nodes_) {
+    for (auto& n : cg->executable_nodes) {
         NodeRuntime rt;
         // Resolve (or lazily create) this node's persistent load measurer.
         // node_load_ only grows here, so the raw measurer pointer handed to the
@@ -2539,7 +2650,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // CustomBindingContext::process_transport), so the two can never disagree.
         // Prepare-stable: a slot/type whose capability changes later needs a
         // re-prepare to be observed.
-        n.transport_sensitive = false;
+        n.transport_sensitive = region_by_anchor.contains(n.id);
         if (n.type == NodeType::Plugin) {
             // 2.2b (H2): read cached transport-sensitivity, not the live slot.
             auto mit = prepared_plugin_meta_.find(n.id);
@@ -2547,9 +2658,6 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 (mit != prepared_plugin_meta_.end()) && mit->second.wants_transport;
         }
         if (n.type == NodeType::Custom) {
-            // 2.2b: record this Custom node's instance identity for the reinit-
-            // free-swap predicate (set-equality vs a prepare_swap candidate).
-            cg->custom_instances[n.id] = n.custom_instance.get();
             if (const auto* type = custom_node_type(n.custom_type_id,
                                                     n.custom_type_version);
                 type && custom_type_matches_node_shape(*type, n)) {
@@ -2620,6 +2728,19 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 }
             }
         }
+        if (const auto region = region_by_anchor.find(n.id); region != region_by_anchor.end()) {
+            auto prepared = region->second;
+            cg->custom_processors[n.id] =
+                [prepared](audio::BufferView<float>& out, const audio::BufferView<const float>& in,
+                           int frames) noexcept { prepared->process(out, in, frames); };
+            cg->custom_latency_samples[n.id] = 0;
+            n.transport_sensitive = true;
+        }
+        // Before sample-region quotienting, compile_ resolved this flag directly
+        // on nodes_. Keep that public authoring readback stable now that the
+        // executable topology is a private copy with region members removed.
+        if (auto* authored = node_mut_locked_(n.id))
+            authored->transport_sensitive = n.transport_sensitive;
     }
 
     for (size_t ci = 0; ci < cg->connections.size(); ++ci) {
@@ -2714,7 +2835,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         }
     }
 
-    compute_latencies_for_(*cg, connections_, prepared_plugin_meta_);
+    compute_latencies_for_(*cg, cg->connections, prepared_plugin_meta_);
 
     // Build the canonical-executor routing for this snapshot when the topology
     // is eligible. The Gain bindings resolve to THIS snapshot's own gain atomics
@@ -2863,7 +2984,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 if (!owner.expired()) exact_parameter_input_nodes.push_back(id);
             }
             const auto eligibility = analyze_anticipation_eligibility(
-                nodes_, connections_, exact_parameter_input_nodes);
+                cg->executable_nodes, cg->connections, exact_parameter_input_nodes);
             // Record how many transport-sensitive nodes anticipation forced
             // exterior: each such node was seeded TransportSensitive above and so
             // is excluded from the interior, running live to observe the host
@@ -2872,15 +2993,15 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             // dropped per block" (transport now stays live; the masked interior
             // is transport-insensitive by construction).
             std::uint64_t transport_forced_exterior = 0;
-            for (const auto& n : nodes_) {
+            for (const auto& n : cg->executable_nodes) {
                 if (n.transport_sensitive) ++transport_forced_exterior;
             }
             transport_suppressed_for_anticipation_.store(transport_forced_exterior,
                                                          std::memory_order_relaxed);
             const auto partition =
-                build_anticipation_partition(nodes_, connections_, eligibility);
+                build_anticipation_partition(cg->executable_nodes, cg->connections, eligibility);
             const auto subgraph =
-                build_anticipation_subgraph(nodes_, connections_, partition);
+                build_anticipation_subgraph(cg->executable_nodes, cg->connections, partition);
             if (subgraph.renders_anything()) {
                 CompiledGraph& cgr = *cg;
                 constexpr int kLeadBlocks = 4;
@@ -2926,7 +3047,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                     cg->anticipation.skip_mask.assign(rplan.nodes.size(), 0);
                     bool map_ok = true;
                     for (const auto idx : partition.interior_nodes) {
-                        const std::uint32_t ri = routed_index(nodes_[idx].id);
+                        const std::uint32_t ri = routed_index(cg->executable_nodes[idx].id);
                         if (ri == 0xFFFFFFFFu) { map_ok = false; break; }
                         cg->anticipation.skip_mask[ri] = 1;
                     }
@@ -3034,7 +3155,7 @@ SignalGraph::cached_or_live_params_locked_(const GraphNode& n) const {
 bool SignalGraph::preflight_locked_(int max_block_size) {
     assert_graph_mutation_locked_();
     // Scalar-only kernels have no block execution fallback.
-    if (!sample_region_definitions_.empty() || has_sample_kernel_nodes_locked_())
+    if (sample_region_definitions_.empty() && has_sample_kernel_nodes_locked_())
         return false;
     const auto generated_validation = validate_generated_graph(max_block_size);
     switch (generated_validation.reason) {
@@ -3157,8 +3278,6 @@ bool SignalGraph::prepare_impl_(
     // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
     // never invert order with the reader-drain handshake.
     GraphMutationLock mutation_lock(*this);
-    if (!sample_region_definitions_.empty() || has_sample_kernel_nodes_locked_())
-        return false;
     ++authoring_generation_;
     last_prepare_custom_failure_node_ = 0;
 
@@ -3173,6 +3292,74 @@ bool SignalGraph::prepare_impl_(
     // above, so a preflight failure here leaves the graph silent (existing
     // behavior); prepare_swap() runs the same preflight BEFORE any mutation.
     if (!preflight_locked_(max_block_size)) return false;
+
+    const bool has_prebuilt_edit_regions =
+        prepared_edit_origin_ != nullptr && prepared_sample_region_bank_ != nullptr &&
+        prepared_sample_regions_.size() == sample_region_definitions_.size();
+    if (!has_prebuilt_edit_regions) {
+        prepared_sample_region_bank_.reset();
+        prepared_sample_regions_.clear();
+    }
+    if (sample_region_definitions_.empty()) {
+        if (has_sample_kernel_nodes_locked_())
+            return false;
+    } else if (!has_prebuilt_edit_regions) {
+        sample_region_proof_block_size_ =
+            max_block_size > 0 ? static_cast<std::uint32_t>(max_block_size) : 0;
+        if (!std::isfinite(sample_rate) || sample_rate <= 0.0)
+            return false;
+        try {
+            std::vector<SampleRegionCandidate> candidates;
+            std::vector<PreparedSampleRegionPlan> plans;
+            candidates.reserve(sample_region_definitions_.size());
+            plans.reserve(sample_region_definitions_.size());
+            for (const auto& definition : sample_region_definitions_) {
+                if (!sample_region_metadata_proof_locked_(definition).accepted)
+                    return false;
+                candidates.push_back(sample_region_candidate_locked_(definition));
+            }
+            if (!pulp::host::prove_sample_regions(candidates).accepted ||
+                !sample_region_exterior_proof_locked_().accepted)
+                return false;
+            for (const auto& node : nodes_) {
+                if (node.type == NodeType::Custom &&
+                    sample_kernel_type(node.custom_type_id, node.custom_type_version) != nullptr &&
+                    sample_region_for_node_locked_(node.id) == 0)
+                    return false;
+            }
+            for (const auto& candidate : candidates) {
+                auto result = build_sample_region_plan(candidate);
+                if (!result.proof.accepted || !result.plan)
+                    return false;
+                plans.push_back(std::move(*result.plan));
+            }
+            const auto contract =
+                SampleRegionParameterContract::from_regions(sample_region_definitions_);
+            if (!contract.valid() || sample_region_parameter_binding_ == nullptr ||
+                !contract.matches_promoted(sample_region_parameter_binding_->contract()))
+                return false;
+            const auto generation = std::max<std::uint64_t>(1, authoring_generation_);
+            auto bank = SampleRegionStateBank::create_fresh(
+                plans, sample_rate, static_cast<std::uint32_t>(max_block_size), generation);
+            if (!bank)
+                return false;
+            std::vector<std::shared_ptr<PreparedSampleRegion>> prepared;
+            prepared.reserve(plans.size());
+            for (auto& plan : plans) {
+                auto region = PreparedSampleRegion::create(std::move(plan), bank,
+                                                           sample_region_parameter_binding_);
+                if (!region)
+                    return false;
+                prepared.push_back(std::move(region));
+            }
+            prepared_sample_region_bank_ = std::move(bank);
+            prepared_sample_regions_ = std::move(prepared);
+        } catch (...) {
+            prepared_sample_region_bank_.reset();
+            prepared_sample_regions_.clear();
+            return false;
+        }
+    }
 
     // Prepare each plugin slot first (pre-compile step). Immediately capture
     // each slot's metadata (params/latency/transport) into prepared_plugin_meta_
@@ -3259,6 +3446,8 @@ bool SignalGraph::prepare_impl_(
     }
 
     auto cg = compile_(sample_rate, max_block_size);
+    if (!cg)
+        return false;
     total_latency_samples_.store(cg->total_latency_samples, std::memory_order_relaxed);
     publish_prepared_stats_locked_(*cg);
     live_slot_.publish(std::move(cg));
@@ -3483,6 +3672,21 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
         if (routed_only_execution_owners_.load(std::memory_order_relaxed) != 0)
             routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
         return;
+    }
+
+    SampleRegionExecutionDomain::Admission sample_region_admission;
+    if (cg->sample_region_bank) {
+        sample_region_admission = cg->sample_region_bank->domain().try_admit(
+            cg->sample_region_bank->binding_generation());
+        // Contention and stale-snapshot re-entry fail without touching retained
+        // state cells. The caller still receives a deterministic silent block.
+        if (!sample_region_admission) {
+            output.clear();
+            routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        if (transport != nullptr && transport->reset_requested)
+            cg->sample_region_bank->reset();
     }
 
     // Bracket the whole block with the graph-level load measurer (RT-safe: begin()/
@@ -3806,6 +4010,25 @@ bool SignalGraph::ExecutionSnapshot::inject_midi(
     NodeId midi_input_node, const midi::MidiBuffer& events) const noexcept {
     return snapshot_ != nullptr &&
            SignalGraph::inject_midi_into_snapshot_(*snapshot_, midi_input_node, events);
+}
+
+std::uint64_t SignalGraph::ExecutionSnapshot::sample_region_binding_generation() const noexcept {
+    return snapshot_ != nullptr && snapshot_->sample_region_bank
+               ? snapshot_->sample_region_bank->binding_generation()
+               : 0;
+}
+
+std::vector<SampleRegionRuntimeReceipt>
+SignalGraph::ExecutionSnapshot::sample_region_runtime_receipts() const {
+    std::vector<SampleRegionRuntimeReceipt> receipts;
+    if (snapshot_ == nullptr)
+        return receipts;
+    receipts.reserve(snapshot_->sample_regions.size());
+    for (const auto& region : snapshot_->sample_regions) {
+        if (region)
+            receipts.push_back(region->receipt());
+    }
+    return receipts;
 }
 
 bool SignalGraph::ExecutionSnapshot::inject_parameter_events(

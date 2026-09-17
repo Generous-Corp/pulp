@@ -111,7 +111,7 @@ struct Fixture {
 
 } // namespace
 
-TEST_CASE("Sample region authoring proves delayed cycles without publishing a runtime",
+TEST_CASE("Sample region authoring prepares delayed cycles without publishing before commit",
           "[host][sample-region][authoring][transaction]") {
     Fixture fixture;
     auto sentinel = fixture.graph.begin_prepared_topology_edit();
@@ -131,12 +131,11 @@ TEST_CASE("Sample region authoring proves delayed cycles without publishing a ru
     snapshot->members.front().type_id = "mutated copy";
     snapshot->members.clear();
     CHECK(fixture.edit->sample_region(9)->members.size() == 4);
-    REQUIRE(fixture.edit->prepare(48000.0, 64) == Result::RegionRuntimeUnavailable);
-    CHECK_FALSE(fixture.edit->routed_execution_ready(64));
+    REQUIRE(fixture.edit->prepare(48000.0, 64) == Result::Prepared);
+    CHECK(fixture.edit->routed_execution_ready(64));
     CHECK_FALSE(fixture.edit->committed_execution_snapshot());
     CHECK(fixture.edit->prove_sample_region(9).accepted);
     CHECK(fixture.edit->prove_sample_region(9).resources.logical_boundary_bytes == 512);
-    CHECK(fixture.edit->commit() == Result::NotPrepared);
     fixture.check_owner();
     fixture.edit.reset();
     fixture.check_owner();
@@ -146,15 +145,17 @@ TEST_CASE("Sample region authoring proves delayed cycles without publishing a ru
     CHECK(fixture.graph.add_gain_node() == fixture.region_input);
 }
 
-TEST_CASE("Sample region quiesced preparation refuses before shared lifecycles change",
+TEST_CASE("Sample region quiesced preparation remains private before commit",
           "[host][sample-region][authoring][transaction]") {
     Fixture fixture;
     fixture.declare();
     auto sentinel = fixture.graph.begin_prepared_topology_edit();
     REQUIRE(sentinel->prepare(48000.0, 64) == Result::Prepared);
-    CHECK(fixture.edit->prepare_quiesced(96000.0, 32) == Result::RegionRuntimeUnavailable);
-    CHECK(fixture.edit->commit() == Result::NotPrepared);
+    CHECK(fixture.edit->prepare_quiesced(96000.0, 32) == Result::Prepared);
+    CHECK(fixture.edit->routed_execution_ready(32));
+    CHECK_FALSE(fixture.edit->committed_execution_snapshot());
     fixture.check_owner();
+    fixture.edit.reset();
     CHECK(sentinel->commit() == Result::Committed);
 }
 
@@ -494,10 +495,17 @@ TEST_CASE("Sample region promoted metadata is canonical and checked against its 
     const auto expected_prepare = !valid ? Result::PreflightFailed
                                   : (!bind || change_after_binding)
                                       ? Result::ParameterContractMismatch
-                                      : Result::RegionRuntimeUnavailable;
+                                      : Result::Prepared;
     CHECK(fixture.edit->prepare(48000.0, 64) == expected_prepare);
-    CHECK(fixture.edit->commit() == Result::NotPrepared);
-    fixture.check_owner();
+    if (expected_prepare == Result::Prepared) {
+        CHECK(fixture.edit->routed_execution_ready(64));
+        CHECK_FALSE(fixture.edit->committed_execution_snapshot());
+        fixture.check_owner();
+        fixture.edit.reset();
+    } else {
+        CHECK(fixture.edit->commit() == Result::NotPrepared);
+        fixture.check_owner();
+    }
 }
 
 TEST_CASE("Incomplete sample region declarations can be assembled and explicitly removed",
@@ -566,14 +574,14 @@ TEST_CASE("Rejected region preparation never enters a retained custom lifecycle"
         {region_output, "pulp.core.sample-region.output", 1, boundary()},
     };
     definition.input_boundaries = {region_input};
-    definition.output_boundaries = {region_output};
+    definition.output_boundaries = {};
     REQUIRE(edit->declare_sample_region(definition).accepted);
-    REQUIRE(edit->prove_sample_region(1).accepted);
+    CHECK(edit->prove_sample_region(1).reason == Reason::InvalidBoundary);
     auto parameter_owner =
         SampleRegionParameterOwner::create({}, edit->sample_region_parameter_contract());
     REQUIRE(parameter_owner);
     REQUIRE(edit->bind_sample_region_parameters(parameter_owner->binding()).accepted);
-    CHECK(edit->prepare_quiesced(96000.0, 128) == Result::RegionRuntimeUnavailable);
+    CHECK(edit->prepare_quiesced(96000.0, 128) == Result::PreflightFailed);
     CHECK(prepare_calls == 1);
     CHECK(release_calls == 0);
     edit.reset();

@@ -9,6 +9,7 @@
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <pulp/host/sample_region_plan.hpp>
 #include <thread>
 #include <utility>
@@ -745,6 +746,7 @@ SignalGraph::PreparedTopologyEdit::sample_region_preparation_result_(double samp
         !candidate_->validate_generated_graph(max_block_size).accepted)
         return Result::PreflightFailed;
     std::vector<SampleRegionCandidate> regions;
+    std::vector<PreparedSampleRegionPlan> plans;
     for (const auto& definition : candidate_->sample_region_definitions_) {
         if (!candidate_->sample_region_metadata_proof_locked_(definition).accepted)
             return Result::PreflightFailed;
@@ -761,16 +763,57 @@ SignalGraph::PreparedTopologyEdit::sample_region_preparation_result_(double samp
     }
     if (!candidate_->sample_region_exterior_proof_locked_().accepted)
         return Result::PreflightFailed;
+    plans.reserve(regions.size());
     for (const auto& region : regions) {
-        if (!build_sample_region_plan(region).proof.accepted)
+        auto planned = build_sample_region_plan(region);
+        if (!planned.proof.accepted || !planned.plan)
             return Result::PreflightFailed;
+        plans.push_back(std::move(*planned.plan));
     }
     const auto contract = sample_region_parameter_contract();
     if (!contract.valid() || sample_region_parameter_binding_ == nullptr ||
         !contract.matches_promoted(sample_region_parameter_binding_->contract()))
         return Result::ParameterContractMismatch;
-    // Proof cannot authorize publication without a scalar executor and state bank.
-    return Result::RegionRuntimeUnavailable;
+
+    const auto live_bank = base_live_ != nullptr ? base_live_->sample_region_bank : nullptr;
+    std::uint64_t binding_generation = 1;
+    if (live_bank != nullptr) {
+        if (live_bank->binding_generation() == std::numeric_limits<std::uint64_t>::max())
+            return Result::RuntimeAdoptionFailed;
+        binding_generation = live_bank->binding_generation() + 1;
+    } else if (base_authoring_generation_ != std::numeric_limits<std::uint64_t>::max()) {
+        binding_generation = std::max<std::uint64_t>(1, base_authoring_generation_ + 1);
+    } else {
+        return Result::RuntimeAdoptionFailed;
+    }
+
+    const bool can_adopt = live_bank != nullptr && base_live_->sample_rate == sample_rate &&
+                           base_live_->max_block_size == max_block_size;
+    auto bank = can_adopt ? SampleRegionStateBank::adopt(plans, *live_bank, sample_rate,
+                                                         static_cast<std::uint32_t>(max_block_size),
+                                                         binding_generation)
+                          : SampleRegionStateBank::create_fresh(
+                                plans, sample_rate, static_cast<std::uint32_t>(max_block_size),
+                                binding_generation);
+    if (!bank)
+        return Result::RuntimeAdoptionFailed;
+
+    std::vector<std::shared_ptr<PreparedSampleRegion>> prepared;
+    try {
+        prepared.reserve(plans.size());
+        for (auto& plan : plans) {
+            auto region = PreparedSampleRegion::create(std::move(plan), bank,
+                                                       sample_region_parameter_binding_);
+            if (!region)
+                return Result::RuntimeAdoptionFailed;
+            prepared.push_back(std::move(region));
+        }
+    } catch (...) {
+        return Result::RuntimeAdoptionFailed;
+    }
+    candidate_->prepared_sample_region_bank_ = std::move(bank);
+    candidate_->prepared_sample_regions_ = std::move(prepared);
+    return std::nullopt;
 }
 
 void SignalGraph::PreparedTopologyEdit::set_canonical_executor_routing_enabled(
@@ -908,7 +951,8 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
     if (const auto rejection = baseline_removal_rejection_locked_())
         return last_result_ = *rejection;
     if (!candidate_->preflight_locked_(max_block_size) ||
-        candidate_->processing_order().size() != candidate_->nodes_.size()) {
+        (candidate_->sample_region_definitions_.empty() &&
+         candidate_->processing_order().size() != candidate_->nodes_.size())) {
         return last_result_ = Result::PreflightFailed;
     }
     const bool dimensions_changed = old != nullptr && (old->sample_rate != sample_rate ||
@@ -1378,6 +1422,8 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     owner_->sample_region_definitions_ = std::move(candidate_->sample_region_definitions_);
     owner_->sample_region_parameter_binding_ = candidate_->sample_region_parameter_binding_;
     owner_->sample_region_proof_block_size_ = candidate_->sample_region_proof_block_size_;
+    owner_->prepared_sample_region_bank_ = candidate_->prepared_sample_region_bank_;
+    owner_->prepared_sample_regions_ = candidate_->prepared_sample_regions_;
     owner_->custom_registry_generation_ = candidate_->custom_registry_generation_;
     owner_->next_id_ = candidate_->next_id_;
     owner_->limits_ = candidate_->limits_;
