@@ -32,6 +32,8 @@ endif()
 
 set(_pulp_runtime_staging_verify_script
     "${CMAKE_CURRENT_LIST_DIR}/PulpVerifyRuntimeStaging.cmake")
+set(_pulp_macho_linked_runtime_staging_script
+    "${CMAKE_CURRENT_LIST_DIR}/PulpStageMachOLinkedRuntime.cmake")
 
 function(_pulp_runtime_staging_append_unique target property value)
     get_target_property(_existing ${target} ${property})
@@ -42,6 +44,68 @@ function(_pulp_runtime_staging_append_unique target property value)
     if(_index EQUAL -1)
         set_property(TARGET ${target} APPEND PROPERTY ${property} "${value}")
     endif()
+endfunction()
+
+# Register an imported or in-tree shared-library target that must travel beside
+# every Pulp plug-in/app module. Keeping targets rather than resolved paths lets
+# multi-config generators select the matching artifact via TARGET_FILE while
+# the staging and verification paths share one registry.
+function(pulp_register_runtime_dependency_target runtime_target)
+    if(NOT TARGET ${runtime_target})
+        message(FATAL_ERROR
+            "pulp_register_runtime_dependency_target(${runtime_target}): not a target")
+    endif()
+    get_property(_registered GLOBAL PROPERTY PULP_RUNTIME_DEPENDENCY_TARGETS)
+    if(NOT _registered)
+        set(_registered "")
+    endif()
+    list(FIND _registered "${runtime_target}" _index)
+    if(_index EQUAL -1)
+        set_property(GLOBAL APPEND PROPERTY
+            PULP_RUNTIME_DEPENDENCY_TARGETS "${runtime_target}")
+    endif()
+endfunction()
+
+function(_pulp_registered_runtime_dependency_targets out_var)
+    get_property(_registered GLOBAL PROPERTY PULP_RUNTIME_DEPENDENCY_TARGETS)
+    if(NOT _registered)
+        set(_registered "")
+    endif()
+    set(${out_var} "${_registered}" PARENT_SCOPE)
+endfunction()
+
+# Register a Mach-O runtime that should be copied only when the final target
+# actually has a load command for it. This keeps a large optional provider out
+# of unrelated plug-ins while following static-library dead stripping exactly:
+# a target pays for the sidecar if and only if its linked image needs it.
+function(pulp_register_macho_linked_runtime_dependency_target runtime_target)
+    if(NOT APPLE)
+        message(FATAL_ERROR
+            "Mach-O linked runtime registration is available only on Apple")
+    endif()
+    if(NOT TARGET ${runtime_target})
+        message(FATAL_ERROR
+            "pulp_register_macho_linked_runtime_dependency_target(${runtime_target}): not a target")
+    endif()
+    get_property(_registered GLOBAL PROPERTY
+        PULP_MACHO_LINKED_RUNTIME_DEPENDENCY_TARGETS)
+    if(NOT _registered)
+        set(_registered "")
+    endif()
+    list(FIND _registered "${runtime_target}" _index)
+    if(_index EQUAL -1)
+        set_property(GLOBAL APPEND PROPERTY
+            PULP_MACHO_LINKED_RUNTIME_DEPENDENCY_TARGETS "${runtime_target}")
+    endif()
+endfunction()
+
+function(_pulp_macho_linked_runtime_dependency_targets out_var)
+    get_property(_registered GLOBAL PROPERTY
+        PULP_MACHO_LINKED_RUNTIME_DEPENDENCY_TARGETS)
+    if(NOT _registered)
+        set(_registered "")
+    endif()
+    set(${out_var} "${_registered}" PARENT_SCOPE)
 endfunction()
 
 # Resolve Skia's ICU data file from ONE canonical Pulp-side variable.
@@ -72,6 +136,11 @@ function(pulp_expected_runtime_dependencies out_var)
     if(WIN32 AND SKIA_FOUND)
         list(APPEND _expected "icudtl.dat")
     endif()
+    _pulp_registered_runtime_dependency_targets(_registered)
+    foreach(_runtime_target IN LISTS _registered)
+        list(APPEND _expected "$<TARGET_FILE_NAME:${_runtime_target}>")
+    endforeach()
+
     set(${out_var} "${_expected}" PARENT_SCOPE)
 endfunction()
 
@@ -93,6 +162,51 @@ function(pulp_stage_runtime_dependencies target)
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target})
     endif()
+
+    _pulp_registered_runtime_dependency_targets(_registered)
+    foreach(_runtime_target IN LISTS _registered)
+        add_custom_command(
+            TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:${_runtime_target}>" $<TARGET_FILE_DIR:${target}>
+            VERBATIM
+            COMMENT "Staging $<TARGET_FILE_NAME:${_runtime_target}> beside ${target}")
+    endforeach()
+
+    _pulp_macho_linked_runtime_dependency_targets(_macho_linked)
+    foreach(_runtime_target IN LISTS _macho_linked)
+        get_target_property(_runtime_attribution_dir ${_runtime_target}
+            PULP_RUNTIME_ATTRIBUTION_DIR)
+        if(NOT _runtime_attribution_dir
+           OR _runtime_attribution_dir MATCHES "-NOTFOUND$")
+            set(_runtime_attribution_dir "")
+        endif()
+        get_target_property(_runtime_attribution_name ${_runtime_target}
+            PULP_RUNTIME_ATTRIBUTION_NAME)
+        if(NOT _runtime_attribution_name
+           OR _runtime_attribution_name MATCHES "-NOTFOUND$")
+            set(_runtime_attribution_name "")
+        endif()
+        if(_runtime_attribution_dir AND NOT _runtime_attribution_name)
+            message(FATAL_ERROR
+                "${_runtime_target} has PULP_RUNTIME_ATTRIBUTION_DIR but no "
+                "PULP_RUNTIME_ATTRIBUTION_NAME")
+        endif()
+        add_custom_command(
+            TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                "-DPULP_LINKED_IMAGE=$<TARGET_FILE:${target}>"
+                "-DPULP_LINKED_RUNTIME=$<TARGET_FILE:${_runtime_target}>"
+                "-DPULP_LINKED_RUNTIME_NAME=$<TARGET_FILE_NAME:${_runtime_target}>"
+                "-DPULP_LINKED_ATTRIBUTION_DIR=${_runtime_attribution_dir}"
+                "-DPULP_LINKED_ATTRIBUTION_NAME=${_runtime_attribution_name}"
+                "-DPULP_STAGING_DIR=$<TARGET_FILE_DIR:${target}>"
+                "-DPULP_STAGING_OWNERSHIP_DIR=${CMAKE_BINARY_DIR}/CMakeFiles/pulp-runtime-staging"
+                "-DPULP_STAGING_LABEL=${target}"
+                -P "${_pulp_macho_linked_runtime_staging_script}"
+            VERBATIM
+            COMMENT "Checking whether ${target} needs $<TARGET_FILE_NAME:${_runtime_target}>")
+    endforeach()
 
     if(APPLE)
         # Upstream copies the dylib next to the binary but does NOT touch the

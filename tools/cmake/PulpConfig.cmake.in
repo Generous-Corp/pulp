@@ -122,6 +122,42 @@ include("${CMAKE_CURRENT_LIST_DIR}/PulpWebGpuImportedTarget.cmake")
 # consumers that do not have the upstream FetchContent package in scope.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpRuntimeStaging.cmake")
 
+# A Pulp SDK built with the coordinated Vellum D15 provider carries the
+# provider dylib in its own lib directory. Recreate only the narrow runtime
+# target needed by Pulp::gpu-audio's installed link interface, then register it
+# with the same sidecar staging path used by source builds. No build-tree Vellum
+# prefix or separately installed Vellum package is part of the consumer
+# contract.
+set(PULP_GPU_AUDIO_HAS_VELLUM_D15 "@PULP_GPU_AUDIO_HAS_VELLUM_D15@")
+set(PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME
+    "@PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME@")
+set(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE
+    "@PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE@")
+if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+    set(_pulp_gpu_audio_vellum_runtime
+        "${PULP_SDK_LIBRARY_DIR}/${PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME}")
+    set_and_check(_pulp_gpu_audio_vellum_runtime
+        "${_pulp_gpu_audio_vellum_runtime}")
+    if(NOT TARGET Pulp::gpu-audio-vellum-provider)
+        add_library(Pulp::gpu-audio-vellum-provider SHARED IMPORTED)
+        set_target_properties(Pulp::gpu-audio-vellum-provider PROPERTIES
+            IMPORTED_CONFIGURATIONS RELEASE
+            IMPORTED_LOCATION "${_pulp_gpu_audio_vellum_runtime}"
+            IMPORTED_LOCATION_RELEASE "${_pulp_gpu_audio_vellum_runtime}"
+            PULP_RUNTIME_ATTRIBUTION_DIR
+                "${PULP_SDK_DIR}/share/doc/Pulp/third-party/Vellum"
+            PULP_RUNTIME_ATTRIBUTION_NAME "Vellum")
+        if(APPLE)
+            set_target_properties(Pulp::gpu-audio-vellum-provider PROPERTIES
+                IMPORTED_SONAME_RELEASE
+                    "@rpath/${PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME}")
+        endif()
+    endif()
+    pulp_register_macho_linked_runtime_dependency_target(
+        Pulp::gpu-audio-vellum-provider)
+    unset(_pulp_gpu_audio_vellum_runtime)
+endif()
+
 # pulp_make_bundle_relocatable() / pulp_validate_bundle_relocatable() — a GPU
 # plugin built against the installed SDK bakes an @loader_path rpath and guards
 # against the libwgpu_native.dylib "false pass on the build machine" footgun.

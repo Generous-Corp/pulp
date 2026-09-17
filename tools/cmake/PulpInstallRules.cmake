@@ -167,6 +167,21 @@ install(TARGETS ${PULP_SDK_TARGETS}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+# A D15-enabled pulp-gpu-audio archive retains Dawn references which resolve
+# through Vellum's shared provider. Ship that provider inside the Pulp SDK so a
+# find_package(Pulp) consumer never depends on the build machine's Vellum
+# prefix. PulpConfig recreates a Pulp-owned imported target for this artifact.
+if(PULP_GPU_AUDIO_HAS_VELLUM_D15 AND TARGET Vellum::Gpu)
+    install(IMPORTED_RUNTIME_ARTIFACTS Vellum::Gpu
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES
+        "${PULP_GPU_AUDIO_VELLUM_NOTICE_DIR}/LICENSE.md"
+        "${PULP_GPU_AUDIO_VELLUM_NOTICE_DIR}/NOTICE.md"
+        "${PULP_GPU_AUDIO_VELLUM_NOTICE_DIR}/DEPENDENCIES.md"
+        DESTINATION "share/doc/Pulp/third-party/Vellum")
+endif()
+
 # Also install third-party targets that our exported targets depend on
 if(PULP_HAS_VST3)
     install(TARGETS vst3-sdk
@@ -741,6 +756,7 @@ install(FILES
     # so it must land beside it in the installed SDK too — a consumer that can
     # stage sidecars but cannot verify them is exactly the gap WAH-3 closes.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpStageMachOLinkedRuntime.cmake"
     # Resolved by PulpRuntimeStaging.cmake relative to its own directory, so it
     # must land beside it — a consumer that can stage sidecars but not verify
     # them is exactly the gap WAH-3 closes.

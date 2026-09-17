@@ -1520,6 +1520,19 @@ https://www.apache.org/licenses/LICENSE-2.0
 
 ---
 
+## Vellum D15 GPU provider
+
+Copyright (c) 2026 Daniel Raffel
+
+MIT License. The opt-in macOS D15 development SDK redistributes Vellum's
+`libvellum-gpu.dylib`. Its exact MIT license, current renderer third-party
+notices, dependency identities, and current release-provenance limitation ship
+with that SDK under `share/doc/Pulp/third-party/Vellum/`. The provider remains
+ineligible for a production Pulp release until the upstream builder supplies an
+exhaustive attested transitive source and license manifest.
+
+---
+
 ## VST3 SDK
 
 Copyright (c) 2025, Steinberg Media Technologies GmbH

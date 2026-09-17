@@ -194,6 +194,21 @@ static int enforce_no_tracing(const std::vector<fs::path>& roots,
     return 0;
 }
 
+static int enforce_no_vellum_d15(const std::vector<fs::path>& artifacts) {
+    for (const auto& artifact : artifacts) {
+        const auto offender = pulp::cli::vellum_d15_artifact_offender(artifact);
+        if (offender.empty())
+            continue;
+        std::cerr << "Error: refusing to ship a development-only Vellum D15 "
+                     "GPU-audio artifact.\n"
+                  << "  Offending artifact: " << offender.string() << "\n"
+                  << "  Rebuild the selected product without D15 before signing, "
+                     "packaging, sharing, notarizing, or releasing it.\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Load (or, on first use, create + store) the plugin's Ed25519 signing key from the
 // macOS keychain. The key material is kept as a single-line base64 blob under a
 // stable, discoverable service name so it is easy to find / rotate / revoke. A freshly
@@ -392,6 +407,8 @@ static int ship_sign(const std::vector<std::string>& args,
                              "  `pulp ship package` / `create_pkg`, not `sign --path`.\n";
                 return 1;
             }
+            if (int rc = enforce_no_vellum_d15({fs::path(sign_path)}); rc != 0)
+                return rc;
 #ifdef __APPLE__
             if (!run_signing_preflight(root)) return 1;
 #endif
@@ -425,6 +442,8 @@ static int ship_sign(const std::vector<std::string>& args,
             std::cerr << "No plugin bundles found to sign. Run `pulp build` first.\n";
             return 1;
         }
+        if (int rc = enforce_no_vellum_d15(bundles); rc != 0)
+            return rc;
 
 #ifdef __APPLE__
         if (!run_signing_preflight(root)) return 1;
@@ -602,6 +621,26 @@ static int ship_package_impl(const std::vector<std::string>& args,
 #endif
 #if defined(__APPLE__)
         const auto standalone_apps = find_standalone_apps(build_dir, product_filter);
+        std::vector<fs::path> selected_macos_artifacts = standalone_apps;
+        for (auto dir_name : {"VST3", "CLAP", "AU"}) {
+            const auto dir = build_dir / dir_name;
+            if (!fs::exists(dir))
+                continue;
+            for (const auto& entry : fs::directory_iterator(dir)) {
+                const auto ext = entry.path().extension().string();
+                if (ext != ".vst3" && ext != ".clap" && ext != ".component")
+                    continue;
+                if (!product_filter.empty() && entry.path().stem().string() != product_filter)
+                    continue;
+                selected_macos_artifacts.push_back(entry.path());
+            }
+        }
+        // Inspect exactly the inputs this invocation selected, after product
+        // filtering and before creating a DMG/pkg or invoking a packager.
+        if (target != "android") {
+            if (int rc = enforce_no_vellum_d15(selected_macos_artifacts); rc != 0)
+                return rc;
+        }
         if (target != "android") {
             const auto validator_env =
                 pulp::cli::mac_runtime::make_default_env();
@@ -1205,6 +1244,15 @@ static int ship_notarize(const std::vector<std::string>& args,
                               : "No --path artifacts to notarize.\n");
             return 1;
         }
+        std::vector<fs::path> notarize_artifacts;
+        notarize_artifacts.reserve(bundles.size());
+        for (const auto& bundle : bundles)
+            notarize_artifacts.emplace_back(bundle);
+        // Directory-backed bundles and loose dylibs are directly inspectable.
+        // Opaque pkg/dmg/zip inputs are not extracted here; Pulp-produced
+        // containers were already guarded at their selected package inputs.
+        if (int rc = enforce_no_vellum_d15(notarize_artifacts); rc != 0)
+            return rc;
 
         if (staple_only) {
             int stapled = 0;
@@ -1986,6 +2034,8 @@ static int ship_share(const std::vector<std::string>& args,
                       << "' — expected .app, .dmg, or .pkg.\n";
             return 2;
         }
+        if (int rc = enforce_no_vellum_d15({fs::path(input)}); rc != 0)
+            return rc;
         auto inspector_report =
             pulp::cli::inspector_shipping::empty_report();
         if (ext == ".app") {
