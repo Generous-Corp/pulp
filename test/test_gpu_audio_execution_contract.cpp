@@ -6,7 +6,7 @@
 using namespace pulp::gpu_audio;
 using namespace pulp::gpu_audio::detail;
 
-TEST_CASE("shared IO contract keeps algorithmic lead distinct from slot depth",
+TEST_CASE("shared IO contract requires enough slots to sustain algorithmic lead",
           "[gpu_audio][shared_io]") {
     SharedIoExecutionContract contract{
         .channels = 2,
@@ -20,7 +20,8 @@ TEST_CASE("shared IO contract keeps algorithmic lead distinct from slot depth",
         .shared_host_pointer_capable = true,
         .cpu_fallback_prepared = true,
     };
-    REQUIRE(validate_shared_io_contract(contract).accepted());
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::InsufficientPipelineDepth);
     contract.pipeline_depth = contract.algorithmic_lead_blocks;
     REQUIRE(validate_shared_io_contract(contract).accepted());
     contract.algorithmic_lead_blocks = 0;

@@ -54,6 +54,8 @@ class SharedIoExecutionController {
 #if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
     using BeforePublishTestHook = void (*)(SharedIoExecutionController&, std::uint64_t,
                                            void*) noexcept;
+    using BeforeReuseTestHook = void (*)(SharedIoExecutionController&, std::uint32_t,
+                                         void*) noexcept;
 #endif
 
     SharedIoExecutionController() = default;
@@ -63,8 +65,7 @@ class SharedIoExecutionController {
 
     // Host/quiescent only. The contract is copied by value so callback code
     // never consults a mutable node descriptor. The physical pipeline depth
-    // is the only completion-table capacity; it is deliberately independent
-    // from algorithmic lead.
+    // is the only completion-table capacity and must cover the declared lead.
     bool prepare(const SharedIoExecutionContract& contract,
                  SharedIoTelemetry* telemetry = nullptr) {
         if (prepared_ || !validate_shared_io_contract(contract).accepted() ||
@@ -109,6 +110,10 @@ class SharedIoExecutionController {
     void set_before_publish_test_hook(BeforePublishTestHook hook, void* context) noexcept {
         before_publish_test_hook_ = hook;
         before_publish_test_context_ = context;
+    }
+    void set_before_reuse_test_hook(BeforeReuseTestHook hook, void* context) noexcept {
+        before_reuse_test_hook_ = hook;
+        before_reuse_test_context_ = context;
     }
     std::uint32_t in_flight_for_testing() const noexcept {
         return in_flight_.load(std::memory_order_relaxed);
@@ -228,7 +233,11 @@ class SharedIoExecutionController {
                 telemetry_->record_delivery(true, false);
             if (forward_gap) {
                 resync_admission(callback_sequence);
-                discard_ready_entries_before(callback_sequence);
+                const auto first_future_sequence =
+                    callback_sequence >= contract_.algorithmic_lead_blocks
+                        ? callback_sequence - contract_.algorithmic_lead_blocks + 1
+                        : 0;
+                discard_ready_entries_before(first_future_sequence);
                 next_callback_sequence_ = callback_sequence + 1;
             }
             return result;
@@ -254,9 +263,7 @@ class SharedIoExecutionController {
                 if (entry.state.compare_exchange_strong(
                         expected, static_cast<std::uint8_t>(EntryState::Claimed),
                         std::memory_order_acq_rel, std::memory_order_acquire)) {
-                    entry.state.store(static_cast<std::uint8_t>(EntryState::Empty),
-                                      std::memory_order_release);
-                    in_flight_.fetch_sub(1, std::memory_order_relaxed);
+                    retire_claimed_entry(entry);
                     late = true;
                     if (telemetry_) {
                         telemetry_->record_resync_drop();
@@ -278,9 +285,7 @@ class SharedIoExecutionController {
                               : fallback_path();
             result.fallback_reason = entry.failure_reason;
             result.resynced = late;
-            entry.state.store(static_cast<std::uint8_t>(EntryState::Empty),
-                              std::memory_order_release);
-            in_flight_.fetch_sub(1, std::memory_order_relaxed);
+            retire_claimed_entry(entry);
             if (telemetry_)
                 telemetry_->record_delivery(result.uses_fallback(), false);
             return result;
@@ -338,14 +343,21 @@ class SharedIoExecutionController {
                     state, static_cast<std::uint8_t>(EntryState::Claimed),
                     std::memory_order_acq_rel, std::memory_order_acquire))
                 continue;
-            entry.state.store(static_cast<std::uint8_t>(EntryState::Empty),
-                              std::memory_order_release);
-            in_flight_.fetch_sub(1, std::memory_order_relaxed);
+            retire_claimed_entry(entry);
             if (telemetry_) {
                 telemetry_->record_resync_drop();
                 telemetry_->record_late_completion();
             }
         }
+    }
+
+    void retire_claimed_entry(Entry& entry) noexcept {
+        const auto remaining = in_flight_.fetch_sub(1, std::memory_order_relaxed) - 1;
+#if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
+        if (before_reuse_test_hook_)
+            before_reuse_test_hook_(*this, remaining, before_reuse_test_context_);
+#endif
+        entry.state.store(static_cast<std::uint8_t>(EntryState::Empty), std::memory_order_release);
     }
 
     std::unique_ptr<Entry[]> entries_;
@@ -360,6 +372,8 @@ class SharedIoExecutionController {
 #if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
     BeforePublishTestHook before_publish_test_hook_ = nullptr;
     void* before_publish_test_context_ = nullptr;
+    BeforeReuseTestHook before_reuse_test_hook_ = nullptr;
+    void* before_reuse_test_context_ = nullptr;
 #endif
 };
 

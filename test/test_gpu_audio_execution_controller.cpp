@@ -30,6 +30,12 @@ struct PublicationProbe {
     std::uint32_t observed_in_flight = 0;
 };
 
+struct ReuseProbe {
+    bool called = false;
+    SharedIoAdmission admission_before_reuse = SharedIoAdmission::Accepted;
+    std::uint32_t observed_in_flight = 1;
+};
+
 void observe_before_publish(SharedIoExecutionController& controller, std::uint64_t sequence,
                             void* context) noexcept {
     auto& probe = *static_cast<PublicationProbe*>(context);
@@ -37,6 +43,14 @@ void observe_before_publish(SharedIoExecutionController& controller, std::uint64
     probe.observed_in_flight = controller.in_flight_for_testing();
     probe.completion_rejected =
         !controller.record_completion(sequence, SharedIoCompletion::Success);
+}
+
+void observe_before_reuse(SharedIoExecutionController& controller, std::uint32_t remaining,
+                          void* context) noexcept {
+    auto& probe = *static_cast<ReuseProbe*>(context);
+    probe.called = true;
+    probe.observed_in_flight = remaining;
+    probe.admission_before_reuse = controller.admit_submission(1);
 }
 } // namespace
 
@@ -58,7 +72,30 @@ TEST_CASE("execution controller reserves occupancy before publishing admission",
     REQUIRE(controller.in_flight_for_testing() == 0);
 }
 
-TEST_CASE("execution controller admits lead independently of pipeline depth",
+TEST_CASE("execution controller retires occupancy before publishing slot reuse",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    auto single_slot = contract();
+    single_slot.algorithmic_lead_blocks = 1;
+    single_slot.pipeline_depth = 1;
+
+    SharedIoTelemetry telemetry;
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(single_slot, &telemetry));
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+
+    ReuseProbe probe;
+    controller.set_before_reuse_test_hook(observe_before_reuse, &probe);
+    REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Gpu);
+    REQUIRE(probe.called);
+    REQUIRE(probe.observed_in_flight == 0);
+    REQUIRE(probe.admission_before_reuse == SharedIoAdmission::CapacityFull);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(telemetry.snapshot().in_flight_high_water == controller.capacity());
+}
+
+TEST_CASE("execution controller tracks lead separately from pipeline depth",
           "[gpu_audio][shared_io][controller]") {
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
@@ -77,26 +114,35 @@ TEST_CASE("execution controller admits lead independently of pipeline depth",
     REQUIRE(wet.expected_sequence == 0);
 }
 
-TEST_CASE("execution controller sustains a lead larger than physical depth",
+TEST_CASE("execution controller rejects a lead larger than physical depth",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto delayed_contract = contract();
     delayed_contract.algorithmic_lead_blocks = 5;
     delayed_contract.pipeline_depth = 2;
 
     SharedIoExecutionController controller;
-    REQUIRE(controller.prepare(delayed_contract));
-    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
-    REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
+    REQUIRE_FALSE(controller.prepare(delayed_contract));
+}
 
-    for (std::uint64_t sequence = 0; sequence < 5; ++sequence)
-        REQUIRE(controller.deliver(sequence).path == SharedIoDeliveryPath::Priming);
-    REQUIRE(controller.deliver(5).path == SharedIoDeliveryPath::Gpu);
+TEST_CASE("execution controller sustains one submission per callback when depth covers lead",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    auto exact_depth = contract();
+    exact_depth.pipeline_depth = exact_depth.algorithmic_lead_blocks;
 
-    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.record_completion(2, SharedIoCompletion::Success));
-    REQUIRE(controller.deliver(6).path == SharedIoDeliveryPath::Gpu);
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(exact_depth));
+    for (std::uint64_t callback_sequence = 0; callback_sequence < 8; ++callback_sequence) {
+        const auto delivery = controller.deliver(callback_sequence);
+        if (callback_sequence < exact_depth.algorithmic_lead_blocks) {
+            REQUIRE(delivery.path == SharedIoDeliveryPath::Priming);
+        } else {
+            REQUIRE(delivery.path == SharedIoDeliveryPath::Gpu);
+            REQUIRE(delivery.expected_sequence ==
+                    callback_sequence - exact_depth.algorithmic_lead_blocks);
+        }
+        REQUIRE(controller.admit_submission(callback_sequence) == SharedIoAdmission::Accepted);
+        REQUIRE(controller.record_completion(callback_sequence, SharedIoCompletion::Success));
+    }
 }
 
 TEST_CASE("execution controller requires exact sequences and reports typed fallback",
@@ -184,6 +230,28 @@ TEST_CASE("execution controller resynchronizes admission after a callback gap",
     REQUIRE(controller.admit_submission(6) == SharedIoAdmission::Accepted);
     REQUIRE(telemetry.snapshot().in_flight_high_water <= controller.capacity());
     REQUIRE(telemetry.snapshot().late_completions == 2);
+}
+
+TEST_CASE("callback gap preserves ready results that are still ahead of the lead",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    auto deeper = contract();
+    deeper.pipeline_depth = 4;
+
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(deeper));
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.record_completion(3, SharedIoCompletion::Success));
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+
+    const auto gap = controller.deliver(4);
+    REQUIRE(gap.fallback_reason == SharedIoFallbackReason::SequenceGap);
+    REQUIRE(gap.resynced);
+    const auto future = controller.deliver(5);
+    REQUIRE(future.path == SharedIoDeliveryPath::Gpu);
+    REQUIRE(future.expected_sequence == 3);
 }
 
 TEST_CASE("execution controller counts every late completion removed by one callback",
