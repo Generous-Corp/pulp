@@ -47,6 +47,30 @@
     catch_discover_tests(pulp-test-gpu-compute ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # Native Apple-Silicon capability proof for Dawn's HostMappedPointer path.
+    set(_pulp_gpu_audio_target_archs "${CMAKE_OSX_ARCHITECTURES}")
+    if(APPLE AND NOT _pulp_gpu_audio_target_archs)
+        set(_pulp_gpu_audio_target_archs "${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+    list(LENGTH _pulp_gpu_audio_target_archs _pulp_gpu_audio_target_arch_count)
+    set(_pulp_gpu_audio_target_is_arm64 FALSE)
+    if(_pulp_gpu_audio_target_arch_count EQUAL 1)
+        list(GET _pulp_gpu_audio_target_archs 0 _pulp_gpu_audio_target_arch)
+        if(_pulp_gpu_audio_target_arch MATCHES "^(arm64|aarch64)$")
+            set(_pulp_gpu_audio_target_is_arm64 TRUE)
+        endif()
+    endif()
+    if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND NOT
+            (APPLE AND NOT IOS AND NOT PULP_IOS
+             AND _pulp_gpu_audio_target_is_arm64))
+        message(FATAL_ERROR
+            "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires a thin Apple-Silicon macOS target")
+    endif()
+    if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND
+            (NOT PULP_HAS_SKIA OR NOT EXISTS "${DAWN_LIBRARY}"))
+        message(FATAL_ERROR
+            "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires the pinned Skia/Dawn provider")
+    endif()
+
     # This is a standalone probe rather than a Catch test because CI and field
     # machines need distinct pass / failed / unavailable exit states plus one
     # bounded JSON receipt with the exact provider identity.
@@ -59,6 +83,51 @@
                 _pulp_gpu_audio_asset_sha256)
             string(STRIP "${_pulp_gpu_audio_asset_sha256}"
                 _pulp_gpu_audio_asset_sha256)
+        endif()
+
+        set(_pulp_gpu_audio_expected_dawn_sha "unknown")
+        if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+            list(GET SKIA_INCLUDE_DIRS 0 _pulp_gpu_audio_skia_include_root)
+            set(_pulp_gpu_audio_dawn_header
+                "${_pulp_gpu_audio_skia_include_root}/dawn/dawn_version.h")
+            set(_pulp_gpu_audio_identity_dir
+                "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-provider-identity")
+            set(_pulp_gpu_audio_identity_cmake
+                "${_pulp_gpu_audio_identity_dir}/identity.cmake")
+            set(_pulp_gpu_audio_configure_receipt
+                "${_pulp_gpu_audio_identity_dir}/configure.json")
+            set(_pulp_gpu_audio_prelink_receipt
+                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/pre-link.json")
+            set(_pulp_gpu_audio_bound_receipt
+                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/bound.json")
+            file(MAKE_DIRECTORY "${_pulp_gpu_audio_identity_dir}")
+            execute_process(
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    validate
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --result "${_pulp_gpu_audio_configure_receipt}"
+                    --cmake-output "${_pulp_gpu_audio_identity_cmake}"
+                RESULT_VARIABLE _pulp_gpu_audio_identity_result
+                OUTPUT_VARIABLE _pulp_gpu_audio_identity_output
+                ERROR_VARIABLE _pulp_gpu_audio_identity_error)
+            if(NOT _pulp_gpu_audio_identity_result EQUAL 0)
+                message(FATAL_ERROR
+                    "GPU-audio exact-provider validation failed:\n"
+                    "${_pulp_gpu_audio_identity_output}"
+                    "${_pulp_gpu_audio_identity_error}")
+            endif()
+            include("${_pulp_gpu_audio_identity_cmake}")
+            set(_pulp_gpu_audio_expected_dawn_sha
+                "${PULP_GPU_AUDIO_EXPECTED_DAWN_SHA}")
+            set(_pulp_gpu_audio_asset_sha256
+                "${PULP_GPU_AUDIO_EXPECTED_ASSET_SHA256}")
+            set(_pulp_gpu_audio_dawn_archive_sha256
+                "${PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256}")
         endif()
 
         add_executable(pulp-gpu-host-mapped-pointer-probe
@@ -80,23 +149,212 @@
         target_compile_definitions(pulp-gpu-host-mapped-pointer-probe PRIVATE
             PULP_GPU_AUDIO_PROVIDER_ASSET_SHA256="${_pulp_gpu_audio_asset_sha256}"
             PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256="${_pulp_gpu_audio_dawn_archive_sha256}"
+            PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}"
             PULP_GPU_AUDIO_BUILD_TYPE="$<CONFIG>")
+        if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+            set_property(TARGET pulp-gpu-host-mapped-pointer-probe APPEND PROPERTY
+                LINK_DEPENDS
+                    "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/fetch_skia_for_release.py"
+                    "${_pulp_gpu_audio_configure_receipt}"
+                    "${_pulp_gpu_audio_dawn_header}"
+                    "${DAWN_LIBRARY}"
+                    "${SKIA_DIR}/.skia-asset-sha256"
+                    "${SKIA_DIR}/.skia-generation-manifest.json"
+                    "${SKIA_DIR}/.skia-source-archive.zip")
+            add_custom_command(TARGET pulp-gpu-host-mapped-pointer-probe PRE_LINK
+                COMMAND "${CMAKE_COMMAND}" -E make_directory
+                    "${_pulp_gpu_audio_identity_dir}/$<CONFIG>"
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    prelink
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --result "${_pulp_gpu_audio_prelink_receipt}"
+                VERBATIM)
+            add_custom_command(TARGET pulp-gpu-host-mapped-pointer-probe POST_BUILD
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    bind
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --prelink-receipt "${_pulp_gpu_audio_prelink_receipt}"
+                    --executable "$<TARGET_FILE:pulp-gpu-host-mapped-pointer-probe>"
+                    --result "${_pulp_gpu_audio_bound_receipt}"
+                VERBATIM)
+            add_test(NAME pulp-gpu-audio-provider-identity
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    verify
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --prelink-receipt "${_pulp_gpu_audio_prelink_receipt}"
+                    --executable "$<TARGET_FILE:pulp-gpu-host-mapped-pointer-probe>"
+                    --receipt "${_pulp_gpu_audio_bound_receipt}")
+            set_tests_properties(pulp-gpu-audio-provider-identity PROPERTIES
+                FIXTURES_SETUP pulp_gpu_audio_provider_identity
+                TIMEOUT 60)
+        endif()
         add_test(NAME pulp-gpu-host-mapped-pointer-probe
             COMMAND pulp-gpu-host-mapped-pointer-probe)
         add_test(NAME pulp-gpu-host-mapped-pointer-oracle-negative-control
             COMMAND pulp-gpu-host-mapped-pointer-probe
                 --verify-oracle-negative-control)
+        add_test(NAME pulp-gpu-host-mapped-pointer-feature-gate-negative-control
+            COMMAND pulp-gpu-host-mapped-pointer-probe
+                --verify-feature-gate-negative-control)
+        add_test(NAME pulp-gpu-host-mapped-pointer-write-buffer-counter-negative-control
+            COMMAND pulp-gpu-host-mapped-pointer-probe
+                --verify-write-buffer-counter-negative-control)
+        add_test(NAME pulp-gpu-host-mapped-pointer-copy-buffer-counter-negative-control
+            COMMAND pulp-gpu-host-mapped-pointer-probe
+                --verify-copy-buffer-counter-negative-control)
+        add_test(NAME pulp-gpu-host-mapped-pointer-map-async-counter-negative-control
+            COMMAND pulp-gpu-host-mapped-pointer-probe
+                --verify-map-async-counter-negative-control)
+        if(_pulp_gpu_audio_target_is_arm64)
+            add_test(NAME pulp-gpu-host-mapped-pointer-provider-negative-control
+                COMMAND "${CMAKE_COMMAND}"
+                    "-DPROBE=$<TARGET_FILE:pulp-gpu-host-mapped-pointer-probe>"
+                    -P "${CMAKE_SOURCE_DIR}/test/cmake/verify_gpu_audio_provider_mismatch.cmake")
+            set_tests_properties(
+                pulp-gpu-host-mapped-pointer-provider-negative-control
+                PROPERTIES
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 20)
+        endif()
         set_tests_properties(
             pulp-gpu-host-mapped-pointer-probe
             pulp-gpu-host-mapped-pointer-oracle-negative-control
+            pulp-gpu-host-mapped-pointer-feature-gate-negative-control
+            pulp-gpu-host-mapped-pointer-write-buffer-counter-negative-control
+            pulp-gpu-host-mapped-pointer-copy-buffer-counter-negative-control
+            pulp-gpu-host-mapped-pointer-map-async-counter-negative-control
             PROPERTIES
                 RESOURCE_LOCK pulp_gpu
                 SKIP_RETURN_CODE 77
                 TIMEOUT 20)
+        if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+            set_tests_properties(
+                pulp-gpu-host-mapped-pointer-probe
+                pulp-gpu-host-mapped-pointer-oracle-negative-control
+                pulp-gpu-host-mapped-pointer-feature-gate-negative-control
+                pulp-gpu-host-mapped-pointer-write-buffer-counter-negative-control
+                pulp-gpu-host-mapped-pointer-copy-buffer-counter-negative-control
+                pulp-gpu-host-mapped-pointer-map-async-counter-negative-control
+                PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
+            if(_pulp_gpu_audio_target_is_arm64)
+                set_tests_properties(
+                    pulp-gpu-host-mapped-pointer-provider-negative-control
+                    PROPERTIES FIXTURES_REQUIRED pulp_gpu_audio_provider_identity)
+            endif()
+
+            add_executable(pulp-gpu-dawn-shared-io-provider-probe
+                test_gpu_dawn_shared_io_provider_probe.cpp)
+            target_link_libraries(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
+                "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+            target_compile_definitions(pulp-gpu-dawn-shared-io-provider-probe PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            set(_pulp_gpu_audio_shared_prelink_receipt
+                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/shared-io-pre-link.json")
+            set(_pulp_gpu_audio_shared_bound_receipt
+                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/shared-io-bound.json")
+            set_property(TARGET pulp-gpu-dawn-shared-io-provider-probe APPEND PROPERTY
+                LINK_DEPENDS
+                    "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/fetch_skia_for_release.py"
+                    "${_pulp_gpu_audio_configure_receipt}"
+                    "${_pulp_gpu_audio_dawn_header}"
+                    "${DAWN_LIBRARY}"
+                    "${SKIA_DIR}/.skia-asset-sha256"
+                    "${SKIA_DIR}/.skia-generation-manifest.json"
+                    "${SKIA_DIR}/.skia-source-archive.zip")
+            add_custom_command(TARGET pulp-gpu-dawn-shared-io-provider-probe PRE_LINK
+                COMMAND "${CMAKE_COMMAND}" -E make_directory
+                    "${_pulp_gpu_audio_identity_dir}/$<CONFIG>"
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    prelink
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --result "${_pulp_gpu_audio_shared_prelink_receipt}"
+                VERBATIM)
+            add_custom_command(TARGET pulp-gpu-dawn-shared-io-provider-probe POST_BUILD
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    bind
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --prelink-receipt "${_pulp_gpu_audio_shared_prelink_receipt}"
+                    --executable "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"
+                    --result "${_pulp_gpu_audio_shared_bound_receipt}"
+                VERBATIM)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-identity
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
+                    verify
+                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
+                    --platform darwin-arm64
+                    --skia-dir "${SKIA_DIR}"
+                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
+                    --dawn-library "${DAWN_LIBRARY}"
+                    --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
+                    --prelink-receipt "${_pulp_gpu_audio_shared_prelink_receipt}"
+                    --executable "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>"
+                    --receipt "${_pulp_gpu_audio_shared_bound_receipt}")
+            set_tests_properties(pulp-gpu-dawn-shared-io-provider-identity PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_audio_provider_identity
+                FIXTURES_SETUP pulp_gpu_dawn_shared_io_provider_identity
+                TIMEOUT 60)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-probe
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict)
+            set_tests_properties(pulp-gpu-dawn-shared-io-provider-probe PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                TIMEOUT 20)
+
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-lifecycle
+                COMMAND "${Python3_EXECUTABLE}"
+                    "${PROJECT_SOURCE_DIR}/test/verify_gpu_dawn_shared_io_provider.py"
+                    --probe "$<TARGET_FILE:pulp-gpu-dawn-shared-io-provider-probe>")
+            set_tests_properties(pulp-gpu-dawn-shared-io-provider-lifecycle PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                TIMEOUT 60)
+        endif()
 
         unset(_pulp_gpu_audio_asset_sha256)
         unset(_pulp_gpu_audio_dawn_archive_sha256)
+        unset(_pulp_gpu_audio_expected_dawn_sha)
     endif()
+    unset(_pulp_gpu_audio_target_arch)
+    unset(_pulp_gpu_audio_target_arch_count)
+    unset(_pulp_gpu_audio_target_archs)
+    unset(_pulp_gpu_audio_target_is_arm64)
 
     # GPU roofline / occupancy harness (tooling, not a test): drives every
     # MAC-dense compute pass and prints a ranked GMAC/s-vs-roofline + occupancy

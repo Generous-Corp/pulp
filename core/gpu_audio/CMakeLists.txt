@@ -18,9 +18,19 @@ target_include_directories(pulp-gpu-audio
 target_sources(pulp-gpu-audio
     PRIVATE
         src/gpu_audio_transport.cpp
+        src/detail/shared_io_arena.cpp
+        src/detail/dawn_submission_tracker.cpp
 )
 
 target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
+
+if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
+   AND EXISTS "${DAWN_LIBRARY}")
+    target_sources(pulp-gpu-audio PRIVATE
+        src/detail/dawn_shared_io_provider.cpp)
+    target_link_libraries(pulp-gpu-audio PRIVATE skia::skia)
+    target_include_directories(pulp-gpu-audio PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
 
 # GPU-agnostic real-time transport: depends only on the audio buffer/ring
 # primitives and the lock-free runtime. The public convolver classes are also
