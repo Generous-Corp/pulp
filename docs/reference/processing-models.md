@@ -10,7 +10,7 @@ interchangeable. This page is the canonical answer to "should I write a
 | Layer | What it is | You use it to… |
 |-------|------------|----------------|
 | **`Processor`** (`pulp::format::Processor`) | The single authoring unit for a plugin/effect/instrument. One `process()` callback per block; internal DSP is composed from `pulp::signal::*` helpers inside that callback. | Write a plugin, effect, instrument, or MIDI effect. **The default for essentially all DSP authoring.** |
-| **`SignalGraph`** (`pulp::host::SignalGraph`) | A host-side, runtime-editable routing engine that connects *already-built* units — loaded plugins (`PluginSlot`), I/O, gain, and custom nodes — into a DAG. | Host other plugins, build a rack/mixer, drive a node editor, or load/save a routed topology (`.pulpgraph`). |
+| **`SignalGraph`** (`pulp::host::SignalGraph`) | A host-side, runtime-editable routing engine that connects *already-built* units — loaded plugins (`PluginSlot`), owned in-process `ProcessorNode` instances, I/O, gain, and custom nodes — into a DAG. | Host other plugins, compose native processors, build a rack/mixer, or drive a node editor. |
 
 A `SignalGraph` **node** wraps a unit (a hosted plugin, or a `CustomNodeType`); it
 is not a new way to *write* DSP. Authoring still happens in a `Processor`.
@@ -61,6 +61,7 @@ interchangeable.
 |--------------|---------------------|------------|
 | **Built-ins** — `Input`, `Output`, `Gain`, `MidiInput`, `MidiOutput` | The graph itself; no code to write | Plumbing — host I/O, a gain stage, MIDI in and out. |
 | **`Plugin` node**, wrapping a `PluginSlot` | A VST3 / AU / CLAP / LV2 binary on disk, discovered by `PluginScanner` and opened by `PluginSlot::load()` | **Third-party components** — units you did not write and cannot recompile. |
+| **`Processor` node**, retaining a `ProcessorNodeInstance` | A native `Processor` created in the same process and added with `SignalGraph::add_processor_node()` | **Owned first-party components** that need dense `AudioRateModulationView` delivery. This runtime node is intentionally not serialized by `.pulpgraph` or `.pulpbake` v1. |
 | **`Custom` node**, from a registered `CustomNodeType` | Your own C++, registered per graph with a `type_id`, version, and port shape | **Your own graph-native components** — utility and extension nodes. |
 
 The line between the last two rows is the one worth internalizing: a

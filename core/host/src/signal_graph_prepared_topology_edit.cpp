@@ -110,6 +110,7 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     GraphMutationLock owner_lock(owner);
 
     candidate_->nodes_ = owner.nodes_;
+    candidate_->processor_nodes_ = owner.processor_nodes_;
     candidate_->connections_ = owner.connections_;
     candidate_->connection_identities_ = owner.connection_identities_;
     candidate_->next_connection_identity_ = owner.next_connection_identity_;
@@ -202,6 +203,15 @@ bool SignalGraph::PreparedTopologyEdit::rollback_quiesced_lifecycles_locked_() n
 
     bool restored = true;
     if (base_live_ != nullptr) {
+        for (const auto& retained : quiesced_processors_) {
+            format::PrepareContext context;
+            context.sample_rate = base_live_->sample_rate;
+            context.max_buffer_size = base_live_->max_block_size;
+            context.input_channels = retained.input_channels;
+            context.output_channels = retained.output_channels;
+            if (!retained.processor->prepare(context))
+                restored = false;
+        }
         for (const auto& retained : quiesced_plugins_) {
             if (!retained.touched)
                 continue;
@@ -230,6 +240,10 @@ bool SignalGraph::PreparedTopologyEdit::rollback_quiesced_lifecycles_locked_() n
         // The base graph had no prepared lifecycle. Undo only candidate prepare
         // callbacks that were entered; untouched retained objects were never
         // acquired and must not receive a release callback.
+        for (const auto& retained : quiesced_processors_) {
+            if (!retained.processor->release())
+                restored = false;
+        }
         for (const auto& retained : quiesced_plugins_) {
             if (!retained.touched)
                 continue;
@@ -256,6 +270,7 @@ bool SignalGraph::PreparedTopologyEdit::rollback_quiesced_lifecycles_locked_() n
 
     quiesced_lifecycles_dirty_ = false;
     prepared_snapshot_.reset();
+    quiesced_processors_.clear();
 
     // A different live generation cannot safely keep running after its shared
     // objects were restored to this edit's older base dimensions.
@@ -421,6 +436,17 @@ NodeId SignalGraph::PreparedTopologyEdit::add_owned_builtin_plugin_node(
             std::make_unique<PreparedOwnedBuiltInSlot>(std::move(slot)), num_inputs, num_outputs,
             name);
     });
+}
+
+NodeId SignalGraph::PreparedTopologyEdit::add_processor_node(
+    std::shared_ptr<format::ProcessorNodeInstance> processor, const std::string& name) {
+    return add_node_([&] { return candidate_->add_processor_node(std::move(processor), name); });
+}
+
+NodeId
+SignalGraph::PreparedTopologyEdit::add_processor_node(std::unique_ptr<format::Processor> processor,
+                                                      const std::string& name) {
+    return add_processor_node(format::ProcessorNodeInstance::create(std::move(processor)), name);
 }
 
 NodeId SignalGraph::PreparedTopologyEdit::add_custom_node(std::string_view type_id,
@@ -615,6 +641,31 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
             candidate_->anticipation_enabled_.load(std::memory_order_relaxed)) {
             return last_result_ = Result::ExternalPluginReprepareRequired;
         }
+    }
+
+    for (const auto& [id, processor] : candidate_->processor_nodes_) {
+        if (!processor)
+            return last_result_ = Result::PreflightFailed;
+        if (!is_new_node_(id)) {
+            if (old == nullptr || dimensions_changed) {
+                return last_result_ = Result::ExternalPluginReprepareRequired;
+            }
+            const auto live = old->processors.find(id);
+            if (live == old->processors.end() || live->second.get() != processor.get()) {
+                return last_result_ = Result::ExternalPluginReprepareRequired;
+            }
+            continue;
+        }
+        const auto* node = candidate_->node(id);
+        if (node == nullptr)
+            return last_result_ = Result::PreflightFailed;
+        format::PrepareContext context;
+        context.sample_rate = sample_rate;
+        context.max_buffer_size = max_block_size;
+        context.input_channels = node->num_input_ports;
+        context.output_channels = node->num_output_ports;
+        if (!processor->instance->prepare(context))
+            return last_result_ = Result::ExternalPluginReprepareRequired;
     }
 
     // Existing external instances may be shared with an off-side compile, but
@@ -857,9 +908,16 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
     // lifecycle callbacks before candidate preparation mutates shared state.
     quiesced_plugins_.clear();
     quiesced_customs_.clear();
+    quiesced_processors_.clear();
     for (const auto& node : candidate_->nodes_) {
         if (is_new_node_(node.id))
             continue;
+        if (const auto processor = candidate_->processor_nodes_.find(node.id);
+            processor != candidate_->processor_nodes_.end() && processor->second) {
+            quiesced_processors_.push_back(
+                {processor->second->instance, node.num_input_ports, node.num_output_ports});
+            continue;
+        }
         if (node.plugin) {
             quiesced_plugins_.push_back({node.plugin, false});
             continue;
@@ -888,7 +946,7 @@ SignalGraph::PreparedTopologyEdit::prepare_quiesced(double sample_rate,
         }
     }
     quiesced_lifecycles_dirty_ =
-        !quiesced_plugins_.empty() || !quiesced_customs_.empty();
+        !quiesced_processors_.empty() || !quiesced_plugins_.empty() || !quiesced_customs_.empty();
 
     bool candidate_prepared = false;
     const SignalGraph::PrepareLifecycleObserver lifecycle_observer{
@@ -1025,6 +1083,7 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
 
     owner_->cancel_swap_edit_locked_();
     owner_->nodes_ = std::move(candidate_->nodes_);
+    owner_->processor_nodes_ = std::move(candidate_->processor_nodes_);
     owner_->connections_ = std::move(candidate_->connections_);
     owner_->connection_identities_ = std::move(candidate_->connection_identities_);
     owner_->next_connection_identity_ = candidate_->next_connection_identity_;
@@ -1067,6 +1126,7 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     quiesced_lifecycles_dirty_ = false;
     quiesced_plugins_.clear();
     quiesced_customs_.clear();
+    quiesced_processors_.clear();
     committed_ = true;
     return last_result_ = Result::Committed;
 }

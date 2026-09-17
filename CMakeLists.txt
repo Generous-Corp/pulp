@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.857.0
+    VERSION 0.858.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -83,6 +83,21 @@ option(PULP_CHANGED_SURFACE_INVENTORY_TARGET
        "Validate the exact filtered CTest inventory for Shipyard's declared shadow-selection target"
        OFF)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
+option(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF
+       "Require the GPU-audio probe to use the manifest-pinned Skia/Dawn generation"
+       OFF)
+if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND NOT PULP_BUILD_TESTS)
+    message(FATAL_ERROR
+        "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires PULP_BUILD_TESTS=ON")
+endif()
+if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND NOT PULP_ENABLE_GPU)
+    message(FATAL_ERROR
+        "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires PULP_ENABLE_GPU=ON")
+endif()
+if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND NOT PULP_MACOS)
+    message(FATAL_ERROR
+        "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires a thin Apple-Silicon macOS target")
+endif()
 option(PULP_ENABLE_THREEJS_RUNTIME
        "Stage the pinned Three.js WebGPU runtime for installed-SDK consumers"
        ${PULP_ENABLE_GPU})

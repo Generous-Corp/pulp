@@ -15,7 +15,7 @@ struct FaustTremoloFixture {
         processor = create_faust_tremolo();
         processor->set_state_store(&store);
         processor->define_parameters(store);
-        processor->prepare({48000.0, 512, 2, 2});
+        processor->prepare({48000.0, 48000, 2, 2});
     }
 
     void process(audio::Buffer<float>& in, audio::Buffer<float>& out) {

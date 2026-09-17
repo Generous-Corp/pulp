@@ -978,6 +978,13 @@ public:
         return false;
     }
 
+    /// Process the additive block contract directly. In-process graph nodes use
+    /// this only when the descriptor opts into dense audio-rate modulation.
+    /// Appended to preserve every existing virtual slot.
+    virtual bool process_block(ProcessBlock&) {
+        return false;
+    }
+
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;
     static constexpr std::size_t kF64FallbackMaxBuses = 16;

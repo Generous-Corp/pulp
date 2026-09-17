@@ -17,6 +17,14 @@ recompiled with the Pulp SDK they ship against. The version constant lets code,
 tests, and generated artifacts state the node interface generation they were
 built for.
 
+`Processor::process_block(ProcessBlock&)` is an append-only virtual extension
+for native in-process graph nodes. Existing virtual declarations retain their
+order, `Processor` object size is unchanged, and existing processors rebuild
+without an override. Dense delivery is selected only when the descriptor's
+`consumes_audio_rate_modulations` capability is true; declaring the capability
+without successfully handling `process_block()` fails the node closed. This is
+part of Pulp's source-rebuild contract, not a cross-version C++ binary promise.
+
 This is not a claim of stable C++ binary ABI across arbitrary compilers,
 standard libraries, compiler flags, or struct layouts. A truly stable binary
 node ABI would need a dedicated C shim. Pulp does not expose that shim today.

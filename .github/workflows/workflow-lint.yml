@@ -84,6 +84,12 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/shell_portability_check.py'
+      - 'tools/scripts/test_shell_portability_check.py'
+      - 'tools/scripts/shell_portability_rules.json'
+      - 'docs/guides/agent-efficiency-audits.md'
+      - 'tools/ci/**'
+      - 'scripts/**'
       - 'tools/scripts/ctest_nonruns.py'
       - 'tools/scripts/test_ctest_nonruns.py'
       - 'tools/scripts/test_ios_gate_skip_contract.py'
@@ -189,6 +195,12 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/shell_portability_check.py'
+      - 'tools/scripts/test_shell_portability_check.py'
+      - 'tools/scripts/shell_portability_rules.json'
+      - 'docs/guides/agent-efficiency-audits.md'
+      - 'tools/ci/**'
+      - 'scripts/**'
       - 'tools/scripts/ctest_nonruns.py'
       - 'tools/scripts/test_ctest_nonruns.py'
       - 'tools/scripts/test_ios_gate_skip_contract.py'
@@ -315,6 +327,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_workflow_lint.py
+          python3 tools/scripts/test_shell_portability_check.py
+          python3 tools/scripts/shell_portability_check.py tools/ci scripts tools/scripts
           python3 tools/scripts/test_ios_gate_skip_contract.py
           python3 tools/scripts/test_api_contracts_workflow.py
           python3 tools/scripts/test_queue_age_watchdog.py

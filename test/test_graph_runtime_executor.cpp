@@ -4,8 +4,10 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -120,7 +122,129 @@ GraphRuntimeSnapshot make_snapshot(std::span<const GraphRuntimeNodeSpec> nodes,
     return snapshot;
 }
 
+pulp::graph::GraphRuntimePlanResult dense_plan(std::span<const std::uint32_t> lanes_per_node) {
+    std::vector<GraphRuntimeNodeSpec> nodes;
+    std::vector<GraphRuntimeConnectionSpec> connections;
+    nodes.push_back(node(1, 0, 1, GraphRuntimeNodeKind::AudioInput));
+    NodeId next_id = 2;
+    std::uint32_t next_param = 1;
+    for (const auto lane_count : lanes_per_node) {
+        const NodeId destination = next_id++;
+        nodes.push_back(node(destination, 1, 0));
+        for (std::uint32_t lane = 0; lane < lane_count; ++lane) {
+            auto connection = connect(1, 0, destination, 0);
+            connection.kind = pulp::graph::GraphRuntimeConnectionKind::Automation;
+            connection.automation.param_id = next_param++;
+            connection.automation.audio_rate = true;
+            connections.push_back(connection);
+        }
+    }
+    return pulp::graph::build_graph_runtime_plan(nodes, connections);
+}
+
+pulp::graph::GraphRuntimePlanResult sparse_plan(std::uint32_t lane_count) {
+    const std::array nodes = {
+        node(1, 0, 1, GraphRuntimeNodeKind::AudioInput),
+        node(2, 1, 0),
+    };
+    std::vector<GraphRuntimeConnectionSpec> connections;
+    connections.reserve(lane_count);
+    for (std::uint32_t lane = 0; lane < lane_count; ++lane) {
+        auto connection = connect(1, 0, 2, 0);
+        connection.kind = pulp::graph::GraphRuntimeConnectionKind::Automation;
+        connection.automation.param_id = lane + 1;
+        connections.push_back(connection);
+    }
+    return pulp::graph::build_graph_runtime_plan(nodes, connections);
+}
+
+std::vector<GraphRuntimeNodeBinding> dense_bindings(const pulp::graph::GraphRuntimePlan& plan) {
+    std::vector<GraphRuntimeNodeBinding> bindings;
+    bindings.reserve(plan.nodes.size());
+    for (const auto& planned : plan.nodes) {
+        GraphRuntimeNodeBinding binding{planned.id, nullptr, nullptr, false};
+        binding.audio_rate_modulation_delivery =
+            pulp::format::AudioRateModulationDelivery::DenseViews;
+        bindings.push_back(binding);
+    }
+    return bindings;
+}
+
 } // namespace
+
+TEST_CASE("GraphRuntimeAutomationScratch enforces dense admission limits and reports bytes",
+          "[format][graph-runtime][executor][automation][audio-rate][limits]") {
+    using Scratch = pulp::format::GraphRuntimeAutomationScratch;
+
+    auto per_node_limit = dense_plan(std::array<std::uint32_t, 1>{64});
+    REQUIRE(per_node_limit.ok());
+    const auto per_node_bindings = dense_bindings(per_node_limit.plan);
+    Scratch scratch;
+    REQUIRE(scratch.reset(per_node_limit.plan, per_node_bindings, Scratch::kMaxDenseFrames));
+    const auto stats = scratch.prepared_stats();
+    REQUIRE(stats.dense_lane_count == 64);
+    REQUIRE(stats.dense_sample_bytes == 4'194'304);
+    REQUIRE(stats.dense_descriptor_bytes ==
+            64 * (sizeof(std::uint32_t) * 2 + sizeof(pulp::format::AudioRateModulationView)));
+    REQUIRE(stats.dense_accumulator_bytes ==
+            64 * (sizeof(float) * 2 + sizeof(std::uint8_t) * 2 + sizeof(std::uint32_t)));
+    REQUIRE(stats.total_dense_bytes() == stats.dense_sample_bytes + stats.dense_descriptor_bytes +
+                                             stats.dense_accumulator_bytes +
+                                             stats.dense_node_index_bytes);
+
+    auto per_node_over = dense_plan(std::array<std::uint32_t, 1>{65});
+    REQUIRE(per_node_over.ok());
+    REQUIRE(scratch.reset(per_node_over.plan, 1));
+    REQUIRE(scratch.prepared_stats().dense_lane_count == 65);
+    const auto per_node_over_bindings = dense_bindings(per_node_over.plan);
+    REQUIRE_FALSE(scratch.reset(per_node_over.plan, per_node_over_bindings, 64));
+    REQUIRE(scratch.prepared_stats().dense_lane_count == 0);
+
+    auto graph_limit = dense_plan(std::array<std::uint32_t, 4>{64, 64, 64, 64});
+    REQUIRE(graph_limit.ok());
+    const auto graph_limit_bindings = dense_bindings(graph_limit.plan);
+    REQUIRE(scratch.reset(graph_limit.plan, graph_limit_bindings, Scratch::kMaxDenseFrames));
+    REQUIRE(scratch.prepared_stats().dense_lane_count == 256);
+    REQUIRE(scratch.prepared_stats().dense_sample_bytes == 16'777'216);
+
+    auto graph_over = dense_plan(std::array<std::uint32_t, 5>{64, 64, 64, 64, 1});
+    REQUIRE(graph_over.ok());
+    REQUIRE(scratch.reset(graph_over.plan, 1));
+    REQUIRE(scratch.prepared_stats().dense_lane_count == 257);
+    const auto graph_over_bindings = dense_bindings(graph_over.plan);
+    REQUIRE_FALSE(scratch.reset(graph_over.plan, graph_over_bindings, 64));
+
+    REQUIRE_FALSE(
+        scratch.reset(per_node_limit.plan, per_node_bindings, Scratch::kMaxDenseFrames + 1));
+    REQUIRE_FALSE(scratch.reset(per_node_limit.plan, std::numeric_limits<std::uint32_t>::max()));
+}
+
+TEST_CASE("GraphRuntimeAutomationScratch separates legacy queue admission from dense views",
+          "[format][graph-runtime][executor][automation][audio-rate][limits]") {
+    using Scratch = pulp::format::GraphRuntimeAutomationScratch;
+    auto one_lane = dense_plan(std::array<std::uint32_t, 1>{1});
+    REQUIRE(one_lane.ok());
+
+    Scratch scratch;
+    REQUIRE(scratch.reset(one_lane.plan, 1024));
+    REQUIRE_FALSE(scratch.reset(one_lane.plan, 1025));
+
+    const auto bindings = dense_bindings(one_lane.plan);
+    REQUIRE(scratch.reset(one_lane.plan, bindings, 4096));
+    REQUIRE(scratch.prepared_stats().dense_sample_bytes == 4096 * sizeof(float));
+
+    auto sparse_limit = sparse_plan(512);
+    REQUIRE(sparse_limit.ok());
+    const auto sparse_limit_bindings = dense_bindings(sparse_limit.plan);
+    REQUIRE(scratch.reset(sparse_limit.plan, sparse_limit_bindings, 64));
+    auto sparse_over = sparse_plan(513);
+    REQUIRE(sparse_over.ok());
+    const auto sparse_over_bindings = dense_bindings(sparse_over.plan);
+    REQUIRE_FALSE(scratch.reset(sparse_over.plan, sparse_over_bindings, 64));
+
+    REQUIRE_FALSE(scratch.reset(one_lane.plan,
+                                std::span<const GraphRuntimeNodeBinding>(bindings).first(1), 64));
+}
 
 TEST_CASE("GraphRuntimeExecutor visits snapshot nodes in plan order",
           "[format][graph-runtime][executor]") {

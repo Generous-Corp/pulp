@@ -392,10 +392,31 @@ pulp_add_test_suite(pulp-test-crossfade
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/experimental)
 # DSL processor contract tests (FaustProcessor + PulpFaustUI + PulpFaustMeta)
 add_executable(pulp-test-dsl-processor test_dsl_processor.cpp)
+target_sources(pulp-test-dsl-processor PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
+target_compile_definitions(pulp-test-dsl-processor PRIVATE
+    $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 target_link_libraries(pulp-test-dsl-processor PRIVATE
     pulp::dsl pulp::format pulp::state pulp::audio pulp::midi
-    Catch2::Catch2WithMain)
+    Catch2::Catch2WithMain ${CMAKE_DL_LIBS})
 catch_discover_tests(pulp-test-dsl-processor)
+
+# Build a standalone example strictly through the staged SDK. Its numerical
+# oracle is H1's installed public proof; authored SignalGraph reachability stays
+# owned by H4 and is rechecked with this processor at H4/Z5 integration.
+add_test(NAME cmake-faust-rt-sdk-consumer
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+        "-DPULP_PARENT_SANITIZER=${PULP_SANITIZER}"
+        "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+        "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_faust_rt_sdk_consumer.cmake)
+set_tests_properties(cmake-faust-rt-sdk-consumer PROPERTIES
+    LABELS "cmake;sdk;dsl;faust;slow"
+    TIMEOUT 300)
 
 # Convolution engine tests
 pulp_add_test_suite(pulp-test-convolver LIBRARIES pulp::signal)
@@ -417,6 +438,27 @@ pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-gpu-audio-transport
     SOURCES test_gpu_audio_transport.cpp
     LIBRARIES pulp::gpu-audio pulp::audio)
+
+# Private fixed-slot lifecycle used by the shared-memory GPU-audio dispatcher.
+# Dawn-free and deterministic: compile the exact production source directly so
+# fault/TSan iterations do not pull the 900-object public gpu-audio closure.
+pulp_add_test_suite(pulp-test-gpu-shared-io-slot-ledger
+    SOURCES test_gpu_shared_io_slot_ledger.cpp harness/rt_allocation_probe.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_arena.cpp
+    LIBRARIES Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+pulp_add_test_suite(pulp-test-gpu-dawn-submission-tracker
+    SOURCES test_gpu_dawn_submission_tracker.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_submission_tracker.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# Separate full-library link check keeps the private production TU wired into
+# pulp::gpu-audio without burdening every focused lifecycle rebuild.
+pulp_add_test_suite(pulp-test-gpu-shared-io-arena-link
+    SOURCES test_gpu_shared_io_arena_link.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
 # Flow pans: pure per-room constant-power pan math + GpuMultiConvolver::set_flow
 # (an atomic store). GPU-agnostic, so it runs — and keeps the flow math covered —

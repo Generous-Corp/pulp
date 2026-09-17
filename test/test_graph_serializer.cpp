@@ -1795,3 +1795,49 @@ TEST_CASE("SignalGraph processes missing-plugin node as deterministic pass-throu
         REQUIRE(out_r[i] == 0.0f);
     }
 }
+
+namespace {
+class RuntimeOnlyProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor descriptor;
+        descriptor.name = "RuntimeOnly";
+        descriptor.manufacturer = "Pulp";
+        descriptor.bundle_id = "dev.pulp.test.runtime-only";
+        descriptor.version = "1.0.0";
+        descriptor.category = pulp::format::PluginCategory::Effect;
+        descriptor.input_buses = {{"Main In", 1, false}};
+        descriptor.output_buses = {{"Main Out", 1, false}};
+        return descriptor;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+};
+} // namespace
+
+TEST_CASE("GraphSerializer refuses runtime-owned Processor nodes",
+          "[host][serializer][processor-node]") {
+    SignalGraph graph;
+    REQUIRE(graph.add_processor_node(std::make_unique<RuntimeOnlyProcessor>()) != 0);
+    REQUIRE(GraphSerializer::to_json(graph).empty());
+
+    constexpr auto encoded = R"json({
+      "format_version": 2,
+      "nodes": [{
+        "id": 1,
+        "type": "processor",
+        "name": "runtime-only",
+        "num_input_ports": 1,
+        "num_output_ports": 1
+      }],
+      "connections": []
+    })json";
+    SignalGraph loaded;
+    const auto result = GraphSerializer::from_json(loaded, encoded);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("unsupported by .pulpgraph") != std::string::npos);
+    REQUIRE(loaded.nodes().empty());
+}
