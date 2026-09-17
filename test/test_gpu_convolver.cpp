@@ -31,6 +31,96 @@ std::vector<float> direct_convolution(const std::vector<float>& x,
     return y;
 }
 
+std::vector<double> direct_convolution_full_tail(const std::vector<float>& input,
+                                                 const std::vector<float>& ir) {
+    if (input.empty() || ir.empty())
+        return {};
+
+    std::vector<double> output(input.size() + ir.size() - 1u, 0.0);
+    for (std::size_t n = 0; n < output.size(); ++n) {
+        const std::size_t first_ir = n >= input.size() ? n - input.size() + 1u : 0u;
+        const std::size_t last_ir = std::min(n, ir.size() - 1u);
+        for (std::size_t k = first_ir; k <= last_ir; ++k)
+            output[n] += static_cast<double>(ir[k]) * static_cast<double>(input[n - k]);
+    }
+    return output;
+}
+
+bool full_tail_matches(const std::vector<std::vector<float>>& candidate,
+                       const std::vector<std::vector<double>>& reference) {
+    if (candidate.size() != reference.size())
+        return false;
+    for (std::size_t channel = 0; channel < reference.size(); ++channel) {
+        if (candidate[channel].size() != reference[channel].size())
+            return false;
+        for (std::size_t i = 0; i < reference[channel].size(); ++i) {
+            const double got = candidate[channel][i];
+            const double expected = reference[channel][i];
+            const double tolerance = 2.0e-2 * (1.0 + std::abs(expected));
+            if (!std::isfinite(got) || std::abs(got - expected) >= tolerance)
+                return false;
+        }
+    }
+    return true;
+}
+
+std::vector<std::vector<float>> make_oracle_input(std::uint32_t channels, std::size_t size) {
+    std::vector<std::vector<float>> input(channels, std::vector<float>(size));
+    for (std::uint32_t channel = 0; channel < channels; ++channel) {
+        for (std::size_t i = 0; i < size; ++i) {
+            input[channel][i] = static_cast<float>(0.23 * std::sin(0.019 * i + channel * 0.73) +
+                                                   0.11 * std::cos(0.083 * i + channel * 0.31));
+        }
+        input[channel][0] += channel == 0u ? 0.71f : -0.43f;
+        input[channel][97u + 19u * channel] += channel == 0u ? -0.37f : 0.59f;
+    }
+    return input;
+}
+
+std::vector<float> make_oracle_ir() {
+    constexpr std::size_t ir_size = 257;
+    std::vector<float> ir(ir_size);
+    for (std::size_t i = 0; i < ir.size(); ++i) {
+        ir[i] = static_cast<float>((0.19 * std::cos(0.031 * i) - 0.07 * std::sin(0.113 * i)) *
+                                   std::exp(-0.009 * i));
+    }
+    return ir;
+}
+
+std::vector<std::vector<float>> render_full_tail(std::uint32_t channels, std::uint32_t block,
+                                                 const std::vector<float>& ir,
+                                                 const std::vector<std::vector<float>>& input) {
+    constexpr std::uint32_t sample_rate = 48000;
+    const std::size_t output_size = input.front().size() + ir.size() - 1u;
+    REQUIRE(output_size % block == 0u);
+
+    pulp::gpu_audio::GpuConvolver node(channels, block, sample_rate, ir);
+    REQUIRE(node.prepare());
+    if (!node.gpu_available())
+        SKIP(kNoGpu);
+
+    std::vector<std::vector<float>> output(channels, std::vector<float>(output_size, 0.0f));
+    std::vector<std::vector<float>> input_block(channels, std::vector<float>(block, 0.0f));
+    std::vector<const float*> input_ptrs(channels);
+    std::vector<float*> output_ptrs(channels);
+    for (std::size_t offset = 0; offset < output_size; offset += block) {
+        for (std::uint32_t channel = 0; channel < channels; ++channel) {
+            std::fill(input_block[channel].begin(), input_block[channel].end(), 0.0f);
+            if (offset < input[channel].size()) {
+                const std::size_t remaining = input[channel].size() - offset;
+                std::copy_n(input[channel].data() + offset, std::min<std::size_t>(block, remaining),
+                            input_block[channel].data());
+            }
+            input_ptrs[channel] = input_block[channel].data();
+            output_ptrs[channel] = output[channel].data() + offset;
+        }
+        pulp::audio::BufferView<const float> input_view(input_ptrs.data(), channels, block);
+        pulp::audio::BufferView<float> output_view(output_ptrs.data(), channels, block);
+        node.process_block(input_view, output_view, block);
+    }
+    return output;
+}
+
 }  // namespace
 
 using namespace pulp::gpu_audio;
@@ -467,54 +557,72 @@ TEST_CASE("GpuAudioTransport fallback stream matches reference convolution",
 
 TEST_CASE("GpuConvolver full-tail oracle matrix",
           "[gpu_audio][convolver][p2][gpu]") {
-    for (const auto channels : {1u, 2u}) {
-        for (const auto block : {32u, 64u, 128u}) {
-            constexpr std::uint32_t sample_rate = 48000;
-            constexpr std::size_t ir_size = 257;
-            const std::size_t blocks = 6;
-            std::vector<float> ir(ir_size);
-            for (std::size_t i = 0; i < ir.size(); ++i)
-                ir[i] = static_cast<float>(0.17 * std::sin(0.031 * i) *
-                                            std::exp(-0.004 * i));
-            GpuConvolver node(channels, block, sample_rate, ir);
-            REQUIRE(node.prepare());
-            if (!node.gpu_available())
-                SKIP(kNoGpu);
-            std::vector<std::vector<float>> input(
-                channels, std::vector<float>(blocks * block));
-            std::vector<std::vector<float>> output(
-                channels, std::vector<float>(blocks * block));
-            for (std::uint32_t ch = 0; ch < channels; ++ch)
-                for (std::size_t i = 0; i < blocks * block; ++i)
-                    input[ch][i] = static_cast<float>(
-                        0.4 * std::sin(0.013 * i + ch * 0.7) +
-                        0.2 * std::cos(0.071 * i + ch * 0.2));
-            for (std::size_t b = 0; b < blocks; ++b) {
-                std::vector<const float*> in_ptrs(channels);
-                std::vector<float*> out_ptrs(channels);
-                std::vector<std::vector<float>> in_block(
-                    channels, std::vector<float>(block));
-                std::vector<std::vector<float>> out_block(
-                    channels, std::vector<float>(block));
-                for (std::uint32_t ch = 0; ch < channels; ++ch) {
-                    std::copy_n(input[ch].data() + b * block, block, in_block[ch].data());
-                    in_ptrs[ch] = in_block[ch].data();
-                    out_ptrs[ch] = out_block[ch].data();
+    constexpr std::size_t input_size = 384;
+    const auto ir = make_oracle_ir();
+    for (const std::uint32_t channels : {1u, 2u}) {
+        const auto input = make_oracle_input(channels, input_size);
+        std::vector<std::vector<double>> reference(channels);
+        for (std::uint32_t channel = 0; channel < channels; ++channel)
+            reference[channel] = direct_convolution_full_tail(input[channel], ir);
+
+        std::vector<std::vector<float>> partition_reference;
+        for (const std::uint32_t block : {32u, 64u, 128u}) {
+            CAPTURE(channels, block);
+            const auto output = render_full_tail(channels, block, ir, input);
+            REQUIRE(full_tail_matches(output, reference));
+            if (partition_reference.empty()) {
+                partition_reference = output;
+            } else {
+                for (std::uint32_t channel = 0; channel < channels; ++channel) {
+                    REQUIRE(output[channel].size() == partition_reference[channel].size());
+                    for (std::size_t i = 0; i < output[channel].size(); ++i) {
+                        const float expected = partition_reference[channel][i];
+                        REQUIRE(std::abs(output[channel][i] - expected) <
+                                2.0e-2f * (1.0f + std::abs(expected)));
+                    }
                 }
-                BufferView<const float> in_view(in_ptrs.data(), channels, block);
-                BufferView<float> out_view(out_ptrs.data(), channels, block);
-                node.process_block(in_view, out_view, block);
-                for (std::uint32_t ch = 0; ch < channels; ++ch)
-                    std::copy_n(out_block[ch].data(), block,
-                                output[ch].data() + b * block);
-            }
-            for (std::uint32_t ch = 0; ch < channels; ++ch) {
-                std::vector<float> flat_input = input[ch];
-                const auto reference = direct_convolution(flat_input, ir);
-                for (std::size_t i = 0; i < output[ch].size(); ++i)
-                    REQUIRE(std::abs(output[ch][i] - reference[i]) <
-                            2e-2f * (1.0f + std::abs(reference[i])));
             }
         }
+    }
+}
+
+TEST_CASE("GpuConvolver full-tail oracle rejects planted mutations",
+          "[gpu_audio][convolver][p2][oracle]") {
+    constexpr std::size_t input_size = 384;
+    const auto ir = make_oracle_ir();
+    const auto input = make_oracle_input(2u, input_size);
+    std::vector<std::vector<double>> reference(2u);
+    std::vector<std::vector<float>> candidate(2u);
+    for (std::uint32_t channel = 0; channel < 2u; ++channel) {
+        reference[channel] = direct_convolution_full_tail(input[channel], ir);
+        candidate[channel].assign(reference[channel].begin(), reference[channel].end());
+    }
+    REQUIRE(full_tail_matches(candidate, reference));
+
+    SECTION("finite inverse FFT normalization") {
+        for (auto& channel : candidate)
+            for (float& sample : channel)
+                sample /= 512.0f;
+        REQUIRE_FALSE(full_tail_matches(candidate, reference));
+    }
+    SECTION("channel routing swap") {
+        std::swap(candidate[0], candidate[1]);
+        REQUIRE_FALSE(full_tail_matches(candidate, reference));
+    }
+    SECTION("one sample phase shift") {
+        for (auto& channel : candidate)
+            std::rotate(channel.rbegin(), channel.rbegin() + 1, channel.rend());
+        REQUIRE_FALSE(full_tail_matches(candidate, reference));
+    }
+    SECTION("block order reversal") {
+        constexpr std::size_t block = 64;
+        for (auto& channel : candidate) {
+            for (std::size_t first = 0, last = channel.size() - block; first < last;
+                 first += block, last -= block) {
+                std::swap_ranges(channel.begin() + first, channel.begin() + first + block,
+                                 channel.begin() + last);
+            }
+        }
+        REQUIRE_FALSE(full_tail_matches(candidate, reference));
     }
 }
