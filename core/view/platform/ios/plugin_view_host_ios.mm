@@ -5,13 +5,13 @@
 
 #if TARGET_OS_IOS
 
+#import <QuartzCore/QuartzCore.h>
+#import <UIKit/UIKit.h>
+#include <algorithm>
+#include <atomic>
 #include <pulp/canvas/cg_canvas.hpp>
 #include <pulp/view/drag_drop.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
-#import <UIKit/UIKit.h>
-#import <QuartzCore/QuartzCore.h>
-#include <algorithm>
-#include <atomic>
 #include <string>
 #include <unordered_map>
 #include <vector>
