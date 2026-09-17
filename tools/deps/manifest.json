@@ -1202,6 +1202,26 @@
       }
     },
     {
+      "name": "Vellum D15 GPU provider",
+      "category": "gpu-audio",
+      "license": "MIT plus bundled third-party notices",
+      "version": "0.1.7",
+      "source_kind": "developer-supplied-prebuilt",
+      "repository": "https://github.com/Generous-Corp/vellum",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Opt-in macOS D15 development provider, pinned to Vellum 0.1.7 and SHA-256 1ab0aafdcfce2e682d8ae65386d93250f2c49d0431561f34a3d7705138d103d3. A D15-enabled Pulp SDK redistributes libvellum-gpu.dylib with exact LICENSE.md (35de8f3cebd71bad85e4d9741f3d03cc8deb32349a6568c77c5f4ef11c2911aa), NOTICE.md (6c743360892bf2320833833501e78128860dee8a506f61ea7c944b6bc6ff7493), and DEPENDENCIES.md (411ad08d92bcfffd2ef93987bc0aeb983bea9a7ff952319d14cd50d48e4b85d2). Production release eligibility remains blocked until the renderer builder emits and attests an exhaustive transitive source/license manifest.",
+      "source_files": [
+        "core/gpu_audio/CMakeLists.txt",
+        "tools/cmake/PulpInstallRules.cmake",
+        "tools/cmake/PulpConfig.cmake.in",
+        "DEPENDENCIES.md",
+        "NOTICE.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "Vitest",
       "category": "developer-tooling",
       "license": "MIT",

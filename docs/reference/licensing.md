@@ -191,6 +191,7 @@ setup, the audio-thread gating rule, and the reference plugin.
 | **Dawn** | BSD-3-Clause | WebGPU implementation (Metal, D3D12, Vulkan), pinned via Skia `chrome/m144` DEPS at `6acf6ef3fe23` | [dawn.googlesource.com](https://dawn.googlesource.com/dawn) |
 | **SDL3** | zlib | Cross-platform windowing and input | [github.com/libsdl-org/SDL](https://github.com/libsdl-org/SDL) |
 | **Skia** | BSD-3-Clause | 2D GPU rendering engine (Graphite backend), pinned to `chrome/m144 @ cd0c5f445516` with bundled HarfBuzz and ICU DEPS revisions locked for deterministic text shaping | [skia.org](https://skia.org) |
+| **Vellum D15 GPU provider** | MIT plus bundled third-party notices | Opt-in macOS development provider for coordinated Dawn GPU-audio. D15-enabled SDKs ship the exact provider LICENSE, NOTICE, and dependency inventory; production release remains blocked pending exhaustive renderer-builder provenance | [github.com/Generous-Corp/vellum](https://github.com/Generous-Corp/vellum) |
 | **WebGPU-distribution** | MIT | WebGPU C API wrapper for Dawn | [github.com/eliemichel/WebGPU-distribution](https://github.com/eliemichel/WebGPU-distribution) |
 
 ### Optional Dependencies

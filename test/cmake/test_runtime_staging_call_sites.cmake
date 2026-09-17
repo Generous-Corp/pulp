@@ -21,6 +21,64 @@ if(NOT DEFINED PULP_SOURCE_DIR)
     message(FATAL_ERROR "PULP_SOURCE_DIR is required")
 endif()
 
+set(_failures "")
+file(READ "${PULP_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake" _staging_module)
+foreach(_needle
+        "function(pulp_register_runtime_dependency_target runtime_target)"
+        "function(pulp_register_macho_linked_runtime_dependency_target runtime_target)"
+        "PULP_RUNTIME_DEPENDENCY_TARGETS"
+        "$<TARGET_FILE:\${_runtime_target}>"
+        "$<TARGET_FILE_NAME:\${_runtime_target}>")
+    string(FIND "${_staging_module}" "${_needle}" _found)
+    if(_found EQUAL -1)
+        list(APPEND _failures
+            "PulpRuntimeStaging.cmake: missing registered-runtime contract ${_needle}")
+    endif()
+endforeach()
+
+file(READ "${PULP_SOURCE_DIR}/core/gpu_audio/CMakeLists.txt" _gpu_audio_cmake)
+string(FIND "${_gpu_audio_cmake}"
+    "pulp_register_macho_linked_runtime_dependency_target(Vellum::Gpu)"
+    _vellum_registration)
+if(_vellum_registration EQUAL -1)
+    list(APPEND _failures
+        "core/gpu_audio/CMakeLists.txt: Vellum::Gpu runtime is not registered for linked-image bundle staging")
+endif()
+
+foreach(_needle
+        "$<INSTALL_INTERFACE:Pulp::gpu-audio-vellum-provider>"
+        "PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME"
+        "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE")
+    string(FIND "${_gpu_audio_cmake}" "${_needle}" _found)
+    if(_found EQUAL -1)
+        list(APPEND _failures
+            "core/gpu_audio/CMakeLists.txt: missing installed D15 contract ${_needle}")
+    endif()
+endforeach()
+
+file(READ "${PULP_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake" _install_rules)
+foreach(_needle
+        "install(IMPORTED_RUNTIME_ARTIFACTS Vellum::Gpu"
+        "PulpStageMachOLinkedRuntime.cmake"
+        "share/doc/Pulp/third-party/Vellum")
+    string(FIND "${_install_rules}" "${_needle}" _found)
+    if(_found EQUAL -1)
+        list(APPEND _failures
+            "PulpInstallRules.cmake: missing D15 redistribution contract ${_needle}")
+    endif()
+endforeach()
+
+file(READ "${PULP_SOURCE_DIR}/tools/cmake/PulpConfig.cmake.in" _pulp_config)
+foreach(_needle
+        "add_library(Pulp::gpu-audio-vellum-provider SHARED IMPORTED)"
+        "pulp_register_macho_linked_runtime_dependency_target(\n        Pulp::gpu-audio-vellum-provider)")
+    string(FIND "${_pulp_config}" "${_needle}" _found)
+    if(_found EQUAL -1)
+        list(APPEND _failures
+            "PulpConfig.cmake.in: missing installed D15 contract ${_needle}")
+    endif()
+endforeach()
+
 # Each entry: <helper file>|<target expression the helper creates>
 set(_expected_sites
     "tools/cmake/PulpPluginFormats.cmake|\${target}_VST3"
@@ -32,7 +90,6 @@ set(_expected_sites
     "tools/cmake/PulpAuv3.cmake|\${target}_AUv3"
 )
 
-set(_failures "")
 foreach(_site IN LISTS _expected_sites)
     string(REPLACE "|" ";" _parts "${_site}")
     list(GET _parts 0 _rel_path)

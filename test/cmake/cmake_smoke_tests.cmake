@@ -187,6 +187,29 @@ set_tests_properties(cmake-runtime-staging-call-sites PROPERTIES
     LABELS "cmake;sdk;runtime;lint"
     TIMEOUT 30)
 
+# Behavioral unit proof for non-wgpu runtime sidecars registered by target.
+# A tiny Standalone app and plug-in module each receive and verify the same
+# imported runtime file through PulpRuntimeStaging's shared registry.
+add_test(NAME cmake-registered-runtime-staging
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_registered_runtime_staging.cmake)
+set_tests_properties(cmake-registered-runtime-staging PROPERTIES
+    LABELS "cmake;sdk;runtime;bundle"
+    TIMEOUT 120)
+
+if(APPLE)
+    add_test(NAME cmake-macho-linked-runtime-staging
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_macho_linked_runtime_staging.cmake)
+    set_tests_properties(cmake-macho-linked-runtime-staging PROPERTIES
+        LABELS "cmake;sdk;runtime;bundle;macos"
+        TIMEOUT 120)
+endif()
+
 # SOURCE LINT: every macOS plug-in bundle helper writes Contents/PkgInfo, so a
 # produced bundle is declared a package rather than a browsable folder. Needed
 # because the omission is invisible from inside the build — a bundle missing
@@ -237,6 +260,10 @@ add_test(NAME cmake-installed-sdk-runtime-staging
         "-DPULP_PARENT_SHARED_LINKER_FLAGS=${CMAKE_SHARED_LINKER_FLAGS}"
         "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
         "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+        "-DPULP_PARENT_GPU_AUDIO_HAS_VELLUM_D15=${PULP_GPU_AUDIO_HAS_VELLUM_D15}"
+        "-DPULP_PARENT_GPU_AUDIO_VELLUM_RUNTIME_NAME=${PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME}"
+        "-DPULP_PARENT_GPU_AUDIO_VELLUM_NOTICE_DIR=${PULP_GPU_AUDIO_VELLUM_NOTICE_DIR}"
+        "-DPULP_PARENT_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE=${PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE}"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_sdk_runtime_staging.cmake)
 set_tests_properties(cmake-installed-sdk-runtime-staging PROPERTIES
     LABELS "cmake;sdk;skia;windows;runtime;slow"

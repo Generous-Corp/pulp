@@ -1117,6 +1117,27 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
                     root, "darwin-arm64", VERSION, SOURCE_SHA, native_signatures=False
                 )
 
+    def test_negative_control_rejects_development_vellum_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sdk = set(
+                rac.required_sdk_members(
+                    "darwin-arm64", rac.DEFAULT_MATRIX, VERSION
+                )
+            )
+            sdk.add(rac.VELLUM_D15_DEVELOPMENT_RUNTIME_MEMBER)
+            path = root / rac.sdk_asset_name("darwin-arm64")
+            write_archive(
+                path, sdk, as_zip=False, platform="darwin-arm64"
+            )
+            with self.assertRaisesRegex(
+                rac.ContentError, "development-only Vellum D15 runtime"
+            ):
+                rac.verify_sdk_archive(
+                    path, "darwin-arm64", VERSION, SOURCE_SHA,
+                    rac.DEFAULT_MATRIX,
+                )
+
     def test_negative_control_unexpected_cli_payload_fires(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

@@ -24,6 +24,21 @@ target_sources(pulp-gpu-audio
 
 target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
 
+# These cache values are part of the installed SDK and release-provenance
+# contract on every platform. Reset derived provider state before capability
+# detection so an Apple D15 build reconfigured with GPU/Skia/Dawn disabled (or
+# the same tree configured on another platform) cannot export stale truth.
+set(PULP_GPU_AUDIO_VELLUM_D15_PREFIX "" CACHE PATH
+    "Installed Vellum D15 prefix for the coordinated GPU-audio provider")
+set(PULP_GPU_AUDIO_HAS_VELLUM_D15 FALSE CACHE INTERNAL
+    "Pulp GPU-audio is linked through an installed Vellum D15 provider" FORCE)
+set(PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME "" CACHE INTERNAL
+    "Installed Vellum D15 runtime filename shipped by the Pulp SDK" FORCE)
+set(PULP_GPU_AUDIO_VELLUM_NOTICE_DIR "" CACHE INTERNAL
+    "Validated Vellum attribution directory shipped by the Pulp SDK" FORCE)
+set(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE FALSE CACHE INTERNAL
+    "Whether the Vellum D15 provider has exhaustive builder provenance" FORCE)
+
 if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
    AND EXISTS "${DAWN_LIBRARY}")
     # D15 is deliberately an opt-in installed-prefix integration.  The Vellum
@@ -31,12 +46,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
     # one process bootstrap; this Pulp target only consumes that provider.  An
     # absent or incomplete prefix leaves the established P1 provider (and the
     # CPU fallback available to callers) unchanged.
-    set(PULP_GPU_AUDIO_VELLUM_D15_PREFIX "" CACHE PATH
-        "Installed Vellum D15 prefix for the coordinated GPU-audio provider")
-    set(PULP_GPU_AUDIO_HAS_VELLUM_D15 FALSE CACHE INTERNAL
-        "Pulp GPU-audio is linked through an installed Vellum D15 provider" FORCE)
     if(PULP_GPU_AUDIO_VELLUM_D15_PREFIX)
-        find_package(Vellum 0.1 CONFIG QUIET
+        find_package(Vellum 0.1.7 EXACT CONFIG QUIET
             PATHS "${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}"
             PATH_SUFFIXES lib/cmake/Vellum
             NO_DEFAULT_PATH)
@@ -48,6 +59,71 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
             # remains owned by the imported package.
             set_property(TARGET Vellum::Gpu PROPERTY IMPORTED_GLOBAL TRUE)
             set_property(TARGET Vellum::DawnHeaders PROPERTY IMPORTED_GLOBAL TRUE)
+            get_target_property(_pulp_vellum_gpu_location Vellum::Gpu
+                IMPORTED_LOCATION_RELEASE)
+            if(NOT _pulp_vellum_gpu_location)
+                get_target_property(_pulp_vellum_gpu_location Vellum::Gpu
+                    IMPORTED_LOCATION)
+            endif()
+            if(NOT _pulp_vellum_gpu_location)
+                message(FATAL_ERROR
+                    "Pulp GPU-audio: Vellum::Gpu has no installed runtime location")
+            endif()
+            file(SHA256 "${_pulp_vellum_gpu_location}"
+                _pulp_vellum_gpu_sha256)
+            if(NOT _pulp_vellum_gpu_sha256 STREQUAL
+               "1ab0aafdcfce2e682d8ae65386d93250f2c49d0431561f34a3d7705138d103d3")
+                message(FATAL_ERROR
+                    "Pulp GPU-audio: Vellum 0.1.7 runtime digest mismatch: "
+                    "${_pulp_vellum_gpu_sha256}")
+            endif()
+            get_filename_component(_pulp_vellum_gpu_runtime_name
+                "${_pulp_vellum_gpu_location}" NAME)
+            set(PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME
+                "${_pulp_vellum_gpu_runtime_name}" CACHE INTERNAL
+                "Installed Vellum D15 runtime filename shipped by the Pulp SDK" FORCE)
+            set(_pulp_vellum_notice_dir
+                "${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}/share/doc/Vellum")
+            foreach(_pulp_vellum_notice_file LICENSE.md NOTICE.md DEPENDENCIES.md)
+                if(NOT EXISTS
+                   "${_pulp_vellum_notice_dir}/${_pulp_vellum_notice_file}")
+                    message(FATAL_ERROR
+                        "Pulp GPU-audio: the Vellum D15 provider would be "
+                        "redistributed without ${_pulp_vellum_notice_file}: "
+                        "${_pulp_vellum_notice_dir}")
+                endif()
+            endforeach()
+            set(_pulp_vellum_notice_expected_LICENSE_md
+                "35de8f3cebd71bad85e4d9741f3d03cc8deb32349a6568c77c5f4ef11c2911aa")
+            set(_pulp_vellum_notice_expected_NOTICE_md
+                "6c743360892bf2320833833501e78128860dee8a506f61ea7c944b6bc6ff7493")
+            set(_pulp_vellum_notice_expected_DEPENDENCIES_md
+                "411ad08d92bcfffd2ef93987bc0aeb983bea9a7ff952319d14cd50d48e4b85d2")
+            foreach(_pulp_vellum_notice_file LICENSE.md NOTICE.md DEPENDENCIES.md)
+                string(REPLACE "." "_" _pulp_vellum_notice_key
+                    "${_pulp_vellum_notice_file}")
+                file(SHA256
+                    "${_pulp_vellum_notice_dir}/${_pulp_vellum_notice_file}"
+                    _pulp_vellum_notice_sha256)
+                if(NOT _pulp_vellum_notice_sha256 STREQUAL
+                   _pulp_vellum_notice_expected_${_pulp_vellum_notice_key})
+                    message(FATAL_ERROR
+                        "Pulp GPU-audio: Vellum 0.1.7 "
+                        "${_pulp_vellum_notice_file} digest mismatch: "
+                        "${_pulp_vellum_notice_sha256}")
+                endif()
+            endforeach()
+            set(PULP_GPU_AUDIO_VELLUM_NOTICE_DIR
+                "${_pulp_vellum_notice_dir}" CACHE INTERNAL
+                "Validated Vellum attribution directory shipped by the Pulp SDK" FORCE)
+            set_property(TARGET Vellum::Gpu PROPERTY
+                PULP_RUNTIME_ATTRIBUTION_DIR "${_pulp_vellum_notice_dir}")
+            set_property(TARGET Vellum::Gpu PROPERTY
+                PULP_RUNTIME_ATTRIBUTION_NAME "Vellum")
+            message(STATUS
+                "Pulp GPU-audio: Vellum D15 is development-SDK-only until "
+                "its renderer builder emits exhaustive transitive provenance")
+            pulp_register_macho_linked_runtime_dependency_target(Vellum::Gpu)
             set(PULP_GPU_AUDIO_HAS_VELLUM_D15 TRUE CACHE INTERNAL
                 "Pulp GPU-audio is linked through an installed Vellum D15 provider" FORCE)
         else()
@@ -64,8 +140,9 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
         # keeps undefined Dawn references which resolve through vellum-gpu,
         # avoiding a second process-global proc-table definition.
         target_link_libraries(pulp-gpu-audio PRIVATE
-            Vellum::Gpu
-            Vellum::DawnHeaders)
+            "$<BUILD_INTERFACE:Vellum::Gpu>"
+            "$<BUILD_INTERFACE:Vellum::DawnHeaders>"
+            "$<INSTALL_INTERFACE:Pulp::gpu-audio-vellum-provider>")
         target_compile_definitions(pulp-gpu-audio PRIVATE
             PULP_GPU_AUDIO_HAS_VELLUM_D15=1
             "PULP_GPU_AUDIO_VELLUM_D15_PREFIX=\"${PULP_GPU_AUDIO_VELLUM_D15_PREFIX}\"")

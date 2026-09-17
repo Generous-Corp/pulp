@@ -29,6 +29,8 @@ class CombinedInstallerTest(unittest.TestCase):
         product_titles: list[tuple[str, str]] | None = None,
         scripted_apps: set[str] | None = None,
         architectures: str | None = None,
+        d15_fixture: str | None = None,
+        expect_success: bool = True,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -160,6 +162,24 @@ class CombinedInstallerTest(unittest.TestCase):
                 executable = macos / plugin_name
                 executable.write_text("fixture executable\n")
                 executable.chmod(0o755)
+                if d15_fixture and not plugin_bundles:
+                    if d15_fixture == "file":
+                        (macos / "libvellum-gpu.dylib").write_bytes(
+                            b"D15 fixture\n"
+                        )
+                    elif d15_fixture == "sidecar-symlink":
+                        provider = tmp / "provider-libvellum-gpu.dylib"
+                        provider.write_bytes(b"D15 fixture\n")
+                        (macos / "libvellum-gpu.dylib").symlink_to(provider)
+                    elif d15_fixture == "bundle-symlink":
+                        (macos / "libvellum-gpu.dylib").write_bytes(
+                            b"D15 fixture\n"
+                        )
+                        real_bundle = tmp / f"real-{bundle.name}"
+                        bundle.rename(real_bundle)
+                        bundle.symlink_to(real_bundle, target_is_directory=True)
+                    else:
+                        raise AssertionError(f"unknown D15 fixture: {d15_fixture}")
                 for evidence_name in (
                     f"{plugin_name}.inspector-capabilities.json",
                     f"{plugin_name}.{kind}.control-shipping.json",
@@ -221,6 +241,19 @@ class CombinedInstallerTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 check=False,
             )
+            if not expect_success:
+                self.assertNotEqual(completed.returncode, 0)
+                for forbidden_capture in (
+                    codesign_argv_capture,
+                    pkg_argv_capture,
+                    productbuild_argv_capture,
+                    productsign_argv_capture,
+                ):
+                    self.assertFalse(
+                        forbidden_capture.exists(),
+                        f"release tool ran before D15 rejection: {forbidden_capture}",
+                    )
+                return completed.stdout + completed.stderr, ""
             self.assertEqual(
                 completed.returncode,
                 0,
@@ -264,6 +297,16 @@ class CombinedInstallerTest(unittest.TestCase):
                 for bundle in plugin_bundles
             ]
             return capture.read_text(), relocation
+
+    def test_development_vellum_runtime_is_rejected_before_signing(self) -> None:
+        for fixture in ("file", "sidecar-symlink", "bundle-symlink"):
+            with self.subTest(fixture=fixture):
+                output, _ = self._run_installer(
+                    [("GpuAudio", "clap")],
+                    d15_fixture=fixture,
+                    expect_success=False,
+                )
+                self.assertIn("development-only Vellum D15", output)
 
     def test_the_product_archive_is_signed_by_productsign_not_productbuild(
         self,
