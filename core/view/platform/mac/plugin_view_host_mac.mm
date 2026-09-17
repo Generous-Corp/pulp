@@ -40,8 +40,8 @@
 
 // Reuse the standalone window host's coordinate/event helpers (to_local,
 // view_is_in_tree, modifiers_from_ns_flags) — same pulp-view-core lib.
-#include "window_host_mac_internal.hpp"
 #include "plugin_view_host_mac_script_keys.hpp"
+#include "window_host_mac_internal.hpp"
 
 // The host frame pump drives BOTH the Core Graphics and the Skia paths (the CG
 // host owns a HostFramePump member and calls should_dispatch_host_frame /
@@ -647,120 +647,120 @@ bool pulp_plugin_event_has_private_use_function_character(NSEvent* event) {
 
 bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event,
                           pulp::view::PluginScriptKeys& script_keys) {
-  try {
-    if (!root) return false;
-    // Escape first, before any focus gate. A plugin editor hands the keyboard
-    // back to the DAW whenever nothing in its tree holds focus — which is the
-    // ordinary state while a `<View overlay>` popover is open — so an Escape
-    // path placed after the early-out below can never run, and such a popover
-    // had no keyboard dismissal inside a DAW at all. The ordering (modal, open
-    // ComboBox dropdown, generalized overlay) is the shared policy's, not this
-    // host's.
-    if (pulp::view::mac_geometry::key_code_from_ns(event.keyCode) ==
-        pulp::view::KeyCode::escape) {
-        if (pulp::view::route_escape_to_active_overlay(
-                *root,
-                pulp::view::mac_geometry::modifiers_from_ns_flags(
-                    event.modifierFlags),
-                event.isARepeat) != pulp::view::OverlayEscapeResult::none) {
-            root->request_repaint();
-            return true;
-        }
-    }
-    // Only dispatch to a focused widget that belongs to THIS editor's tree —
-    // never another open plugin editor's focused field (focused_input_ is
-    // process-global).
-    auto* fv = pulp_focus_under_root(root);
-    // Native editing and bounded navigation take priority. With neither
-    // focused, the caller offers document shortcuts, then forwards any key
-    // JavaScript did not consume back to the host.
-    if (!fv) return false;
-    const auto handled_focus = pulp_focus_identity(fv);
-
-    pulp::view::KeyEvent ke;
-    ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
-    ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
-    ke.is_down = true;
-    ke.is_repeat = event.isARepeat;
-
-    // A navigation-capable control borrows the DAW keyboard only for this
-    // narrow allowlist. Everything else returns to the host unchanged.
-    // Text input takes the richer IME/editing path below and always has
-    // priority when it owns this root's focus slot.
-    if (!fv->accepts_text_input() && fv->accepts_navigation_input()) {
-        if (!pulp_is_navigation_key(ke.key, ke.modifiers)) return false;
-        const bool consumed = fv->on_key_event(ke) ||
-            script_keys.dispatch(root, event);
-        if (consumed) root->request_repaint();
-        return consumed;
-    }
-
-    if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
-        if (te->has_marked_text()) {
-            [host interpretKeyEvents:@[ event ]];
-            root->request_repaint();
-            return true;
-        }
-    }
-
-    // Navigation / editing commands first (arrows, backspace, enter, escape, …).
-    // The return value tells us whether the editor already handled this key as a
-    // command — if so it must NOT also be inserted as text.
-    const bool consumed = fv->on_key_event(ke);
-    fv = pulp_focus_under_root(root);
-    if (!handled_focus.matches(fv)) {
-        root->request_repaint();
-        return true;
-    }
-
-    // Text insertion is offered to AppKit's text input manager so dead keys and
-    // IME composition reach insertText:/setMarkedText:. Command/control chords
-    // stay on the key-command path above and must not also insert text.
-    if (!consumed) {
-        const NSEventModifierFlags cmd_ctrl =
-            NSEventModifierFlagCommand | NSEventModifierFlagControl;
-        if ((event.modifierFlags & cmd_ctrl) == 0 &&
-            ke.key != pulp::view::KeyCode::tab &&
-            !pulp_plugin_event_has_private_use_function_character(event)) {
-            [host interpretKeyEvents:@[ event ]];
-            fv = pulp_focus_under_root(root);
-            if (!handled_focus.matches(fv)) {
+    try {
+        if (!root)
+            return false;
+        // Escape first, before any focus gate. A plugin editor hands the keyboard
+        // back to the DAW whenever nothing in its tree holds focus — which is the
+        // ordinary state while a `<View overlay>` popover is open — so an Escape
+        // path placed after the early-out below can never run, and such a popover
+        // had no keyboard dismissal inside a DAW at all. The ordering (modal, open
+        // ComboBox dropdown, generalized overlay) is the shared policy's, not this
+        // host's.
+        if (pulp::view::mac_geometry::key_code_from_ns(event.keyCode) ==
+            pulp::view::KeyCode::escape) {
+            if (pulp::view::route_escape_to_active_overlay(
+                    *root, pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags),
+                    event.isARepeat) != pulp::view::OverlayEscapeResult::none) {
                 root->request_repaint();
                 return true;
             }
         }
-    }
+        // Only dispatch to a focused widget that belongs to THIS editor's tree —
+        // never another open plugin editor's focused field (focused_input_ is
+        // process-global).
+        auto* fv = pulp_focus_under_root(root);
+        // Native editing and bounded navigation take priority. With neither
+        // focused, the caller offers document shortcuts, then forwards any key
+        // JavaScript did not consume back to the host.
+        if (!fv)
+            return false;
+        const auto handled_focus = pulp_focus_identity(fv);
 
-    // Focus-release affordance — hand the keyboard back to the DAW. While a text
-    // field holds focus the editor view is first responder, so transport keys
-    // (Space, R, …) go to the field, not the host. Escape blurs a focused TEXT
-    // EDITOR; Tab/Return blur a single-line one (Return having just committed via
-    // on_return). Once focus clears, syncKeyFocus / the forward path hands the
-    // keyboard back so DAW shortcuts work again until the field is re-focused.
-    // Scoped to TextEditor so a focusable NON-text widget (e.g. a custom view
-    // that uses Escape for its own purpose) is never force-blurred out from
-    // under itself. (pulp: AU hosted-view key routing.)
-    if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
-        const bool blur = (ke.key == pulp::view::KeyCode::escape) ||
-                          (!te->multi_line && (ke.key == pulp::view::KeyCode::tab ||
-                                               ke.key == pulp::view::KeyCode::enter));
-        if (blur) {
-            auto* current = pulp_plugin_cancel_marked_text_and_revalidate(root, host, te);
-            if (current) {
-                current->release_input_focus();
-                current->on_focus_changed(false);
+        pulp::view::KeyEvent ke;
+        ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
+        ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
+        ke.is_down = true;
+        ke.is_repeat = event.isARepeat;
+
+        // A navigation-capable control borrows the DAW keyboard only for this
+        // narrow allowlist. Everything else returns to the host unchanged.
+        // Text input takes the richer IME/editing path below and always has
+        // priority when it owns this root's focus slot.
+        if (!fv->accepts_text_input() && fv->accepts_navigation_input()) {
+            if (!pulp_is_navigation_key(ke.key, ke.modifiers))
+                return false;
+            const bool consumed = fv->on_key_event(ke) || script_keys.dispatch(root, event);
+            if (consumed)
+                root->request_repaint();
+            return consumed;
+        }
+
+        if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
+            if (te->has_marked_text()) {
+                [host interpretKeyEvents:@[ event ]];
+                root->request_repaint();
+                return true;
             }
         }
+
+        // Navigation / editing commands first (arrows, backspace, enter, escape, …).
+        // The return value tells us whether the editor already handled this key as a
+        // command — if so it must NOT also be inserted as text.
+        const bool consumed = fv->on_key_event(ke);
+        fv = pulp_focus_under_root(root);
+        if (!handled_focus.matches(fv)) {
+            root->request_repaint();
+            return true;
+        }
+
+        // Text insertion is offered to AppKit's text input manager so dead keys and
+        // IME composition reach insertText:/setMarkedText:. Command/control chords
+        // stay on the key-command path above and must not also insert text.
+        if (!consumed) {
+            const NSEventModifierFlags cmd_ctrl =
+                NSEventModifierFlagCommand | NSEventModifierFlagControl;
+            if ((event.modifierFlags & cmd_ctrl) == 0 && ke.key != pulp::view::KeyCode::tab &&
+                !pulp_plugin_event_has_private_use_function_character(event)) {
+                [host interpretKeyEvents:@[ event ]];
+                fv = pulp_focus_under_root(root);
+                if (!handled_focus.matches(fv)) {
+                    root->request_repaint();
+                    return true;
+                }
+            }
+        }
+
+        // Focus-release affordance — hand the keyboard back to the DAW. While a text
+        // field holds focus the editor view is first responder, so transport keys
+        // (Space, R, …) go to the field, not the host. Escape blurs a focused TEXT
+        // EDITOR; Tab/Return blur a single-line one (Return having just committed via
+        // on_return). Once focus clears, syncKeyFocus / the forward path hands the
+        // keyboard back so DAW shortcuts work again until the field is re-focused.
+        // Scoped to TextEditor so a focusable NON-text widget (e.g. a custom view
+        // that uses Escape for its own purpose) is never force-blurred out from
+        // under itself. (pulp: AU hosted-view key routing.)
+        if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
+            const bool blur = (ke.key == pulp::view::KeyCode::escape) ||
+                              (!te->multi_line && (ke.key == pulp::view::KeyCode::tab ||
+                                                   ke.key == pulp::view::KeyCode::enter));
+            if (blur) {
+                auto* current = pulp_plugin_cancel_marked_text_and_revalidate(root, host, te);
+                if (current) {
+                    current->release_input_focus();
+                    current->on_focus_changed(false);
+                }
+            }
+        }
+        root->request_repaint();
+        return true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[plugin-view-host] keyDown handler threw: %s\n", e.what());
+        return true; // swallow; don't beep/propagate a half-handled key
+    } catch (...) {
+        std::fprintf(stderr, "[plugin-view-host] keyDown handler threw (unknown)\n");
+        return true;
     }
-    root->request_repaint();
-    return true;
-  } catch (const std::exception& e) {
-    std::fprintf(stderr, "[plugin-view-host] keyDown handler threw: %s\n", e.what());
-    return true;  // swallow; don't beep/propagate a half-handled key
-  } catch (...) {
-    std::fprintf(stderr, "[plugin-view-host] keyDown handler threw (unknown)\n");
-    return true;
-  }
 }
 
 // The host window's previous first responder, restored when a pulp widget
@@ -1068,7 +1068,8 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
         [self setNeedsDisplay:YES];
         return YES;
     }
-    if (_scriptKeys.dispatch(self.rootView, event)) return YES;
+    if (_scriptKeys.dispatch(self.rootView, event))
+        return YES;
     return [super performKeyEquivalent:event];
 }
 // Resolve a window-space event into root-view coords, applying the inverse
@@ -1845,7 +1846,8 @@ private:
         self.rootView ? self.rootView->request_repaint() : (void)0;
         return YES;
     }
-    if (_scriptKeys.dispatch(self.rootView, event)) return YES;
+    if (_scriptKeys.dispatch(self.rootView, event))
+        return YES;
     return [super performKeyEquivalent:event];
 }
 // Resolve a window-space event into root-view coords, applying the inverse

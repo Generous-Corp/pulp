@@ -13,8 +13,12 @@
 @property(nonatomic) NSUInteger keyCount;
 @end
 @implementation PulpScriptKeyTestHost
-- (BOOL)acceptsFirstResponder { return YES; }
-- (void)keyDown:(NSEvent*)event { ++self.keyCount; }
+- (BOOL)acceptsFirstResponder {
+    return YES;
+}
+- (void)keyDown:(NSEvent*)event {
+    ++self.keyCount;
+}
 @end
 
 namespace {
@@ -25,17 +29,24 @@ NSView* plugin_view(NSView* parent) {
         if ([NSStringFromClass(child.class) isEqualToString:@"PulpPluginView"] ||
             [NSStringFromClass(child.class) isEqualToString:@"PulpGpuPluginView"])
             return child;
-        if (NSView* nested = plugin_view(child)) return nested;
+        if (NSView* nested = plugin_view(child))
+            return nested;
     }
     return nil;
 }
 
 NSEvent* key(unsigned short code, NSString* text, NSEventModifierFlags modifiers = 0) {
     static NSTimeInterval timestamp = 1;
-    return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
-                     modifierFlags:modifiers timestamp:timestamp++ windowNumber:0
-                           context:nil characters:text charactersIgnoringModifiers:text
-                         isARepeat:NO keyCode:code];
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown
+                            location:NSZeroPoint
+                       modifierFlags:modifiers
+                           timestamp:timestamp++
+                        windowNumber:0
+                             context:nil
+                          characters:text
+         charactersIgnoringModifiers:text
+                           isARepeat:NO
+                             keyCode:code];
 }
 
 struct Fixture {
@@ -53,7 +64,8 @@ struct Fixture {
         [NSApplication sharedApplication];
         window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
                                              styleMask:NSWindowStyleMaskBorderless
-                                               backing:NSBackingStoreBuffered defer:NO];
+                                               backing:NSBackingStoreBuffered
+                                                 defer:NO];
         REQUIRE(window != nil);
         daw = [[PulpScriptKeyTestHost alloc] initWithFrame:NSMakeRect(0, 0, 400, 200)];
         [window setContentView:daw];
@@ -65,8 +77,8 @@ struct Fixture {
         host->attach_to_parent((__bridge void*)daw);
         editor = plugin_view(daw);
         REQUIRE(editor != nil);
-        REQUIRE([NSStringFromClass(editor.class) isEqualToString:
-                    gpu ? @"PulpGpuPluginView" : @"PulpPluginView"]);
+        REQUIRE([NSStringFromClass(editor.class)
+            isEqualToString:gpu ? @"PulpGpuPluginView" : @"PulpPluginView"]);
         bridge.load_script(R"JS(
             var presses = [];
             document.addEventListener('keydown', function(e) {
@@ -82,7 +94,9 @@ struct Fixture {
         [daw release];
         [window release];
     }
-    int count() { return engine.evaluate("presses.length").getWithDefault<int>(-1); }
+    int count() {
+        return engine.evaluate("presses.length").getWithDefault<int>(-1);
+    }
 };
 } // namespace
 
@@ -90,9 +104,13 @@ TEST_CASE("Plugin document shortcuts consume only keys claimed by the owning Jav
           "[plugin-view-host][script-keys][mac]") {
     @autoreleasepool {
         bool gpu = false;
-        SECTION("CPU editor") { gpu = false; }
+        SECTION("CPU editor") {
+            gpu = false;
+        }
 #ifdef PULP_HAS_SKIA
-        SECTION("GPU editor") { gpu = true; }
+        SECTION("GPU editor") {
+            gpu = true;
+        }
 #endif
         Fixture fixture(gpu);
         REQUIRE(fixture.count() == 0);
@@ -115,7 +133,8 @@ TEST_CASE("Plugin document shortcuts consume only keys claimed by the owning Jav
         CHECK([fixture.editor performKeyEquivalent:key(43, @",", NSEventModifierFlagCommand)]);
         CHECK(settings == 1);
         CHECK(fixture.count() == 2);
-        CHECK_FALSE([fixture.editor performKeyEquivalent:key(12, @"q", NSEventModifierFlagCommand)]);
+        CHECK_FALSE(
+            [fixture.editor performKeyEquivalent:key(12, @"q", NSEventModifierFlagCommand)]);
         CHECK(fixture.count() == 3);
         CHECK(fixture.daw.keyCount == 0);
     }
