@@ -2,14 +2,20 @@
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace pulp::gpu_audio {
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
+    : GpuConvolver(channels, block_size, sample_rate, std::move(impulse_response),
+                   kLatencyBlocks) {}
+
+GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
+                           std::vector<float> impulse_response, uint32_t latency_blocks)
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
-      ir_(std::move(impulse_response)) {}
+      latency_blocks_(latency_blocks), ir_(std::move(impulse_response)) {}
 
 struct GpuConvolver::SharedIoState {};
 
@@ -26,7 +32,7 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
     d.output_channels = channels_;
     d.block_size = block_;
     d.sample_rate = sample_rate_;
-    d.latency_blocks = kLatencyBlocks;
+    d.latency_blocks = latency_blocks_;
     d.miss_policy = MissPolicy::CpuFallback;
     d.supports_cpu_fallback = true;
     return d;
@@ -34,7 +40,8 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
 
 bool GpuConvolver::prepare() {
     prepared_ = false;
-    if (channels_ == 0 || block_ == 0 || ir_.empty())
+    if (channels_ == 0 || block_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
+        latency_blocks_ > kMaxLatencyBlocks)
         return false;
 
     // The fallback is a signal::PartitionedConvolver loaded at `block_`, and

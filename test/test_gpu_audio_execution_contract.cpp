@@ -23,6 +23,9 @@ TEST_CASE("shared IO contract requires enough slots to sustain algorithmic lead"
     REQUIRE(validate_shared_io_contract(contract).error ==
             SharedIoContractError::InsufficientPipelineDepth);
     contract.pipeline_depth = contract.algorithmic_lead_blocks;
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::InsufficientPipelineDepth);
+    contract.pipeline_depth = contract.algorithmic_lead_blocks + 1;
     REQUIRE(validate_shared_io_contract(contract).accepted());
     contract.algorithmic_lead_blocks = 0;
     REQUIRE(validate_shared_io_contract(contract).error ==
@@ -36,7 +39,7 @@ TEST_CASE("shared IO contract fails closed for unavailable paths and fallback",
         .block_size = 128,
         .sample_rate = 48000,
         .algorithmic_lead_blocks = 2,
-        .pipeline_depth = 2,
+        .pipeline_depth = 3,
         .requested_path = SharedIoRequest::RequireSharedHostPointer,
         .active_path = SharedIoPath::StagedAsync,
         .miss_policy = MissPolicy::CpuFallback,

@@ -40,6 +40,10 @@ class SharedIoStampedBridge {
         std::uint32_t capacity = 0;
         std::uint32_t channels = 0;
         std::uint32_t block_size = 0;
+        // Must be at least one and strictly less than capacity. The extra
+        // capacity slot keeps the callback producer from colliding with the
+        // lead window while a result is in flight.
+        std::uint32_t lead_blocks = kLeadBlocks;
     };
     enum class Admission : std::uint8_t { Accepted, Full, CpuOnly, Invalid, SequenceExhausted };
     struct Callback {
@@ -133,6 +137,9 @@ class SharedIoStampedBridge {
     std::size_t samples_per_block() const noexcept {
         return sample_count_;
     }
+    std::uint32_t lead_blocks() const noexcept {
+        return lead_blocks_;
+    }
 
   private:
     static constexpr std::uint64_t kNoLease = std::numeric_limits<std::uint64_t>::max();
@@ -167,6 +174,7 @@ class SharedIoStampedBridge {
     bool callback_open_ = false;
     std::size_t sample_count_ = 0;
     std::uint32_t capacity_ = 0;
+    std::uint32_t lead_blocks_ = kLeadBlocks;
     bool prepared_ = false;
 };
 

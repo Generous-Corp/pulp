@@ -124,10 +124,10 @@ TEST_CASE("execution controller rejects a lead larger than physical depth",
     REQUIRE_FALSE(controller.prepare(delayed_contract));
 }
 
-TEST_CASE("execution controller sustains one submission per callback when depth covers lead",
+TEST_CASE("execution controller sustains one submission per callback with a free slot beyond lead",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto exact_depth = contract();
-    exact_depth.pipeline_depth = exact_depth.algorithmic_lead_blocks;
+    exact_depth.pipeline_depth = exact_depth.algorithmic_lead_blocks + 1;
 
     SharedIoExecutionController controller;
     REQUIRE(controller.prepare(exact_depth));

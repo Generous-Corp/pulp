@@ -52,8 +52,13 @@ bool expected_dawn_revision_available() noexcept {
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
+    : GpuConvolver(channels, block_size, sample_rate, std::move(impulse_response),
+                   kLatencyBlocks) {}
+
+GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
+                           std::vector<float> impulse_response, uint32_t latency_blocks)
     : channels_(channels), block_(block_size), sample_rate_(sample_rate),
-      ir_(std::move(impulse_response)) {}
+      latency_blocks_(latency_blocks), ir_(std::move(impulse_response)) {}
 
 GpuConvolver::~GpuConvolver() = default;
 
@@ -69,7 +74,7 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
     // seamless, never a dry glitch. The node has a real CPU fallback, so this is
     // the right default: the GPU contributes when it keeps up, the CPU covers it
     // transparently otherwise, and the plugin always produces correct audio.
-    d.latency_blocks = kLatencyBlocks;
+    d.latency_blocks = latency_blocks_;
     d.miss_policy = MissPolicy::CpuFallback;
     d.supports_cpu_fallback = true;
     return d;
@@ -82,7 +87,8 @@ bool GpuConvolver::prepare() {
         return false;
 #endif
     shared_io_.reset();
-    if (channels_ == 0 || block_ == 0 || ir_.empty())
+    if (channels_ == 0 || block_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
+        latency_blocks_ > kMaxLatencyBlocks)
         return false;
 
     // The CPU fallback is a signal::PartitionedConvolver loaded at `block_`, and
@@ -116,6 +122,8 @@ bool GpuConvolver::prepare() {
         try {
             constexpr uint32_t kSharedIoCapacity = 8;
             constexpr uint32_t kSharedIoSlots = 2;
+            const uint32_t shared_capacity =
+                std::max(kSharedIoCapacity, latency_blocks_ + 1u);
             if (fft_size_ <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
                 auto state = std::make_unique<SharedIoState>();
                 const auto samples_per_block = static_cast<std::size_t>(channels_) * block_;
@@ -138,11 +146,12 @@ bool GpuConvolver::prepare() {
 
                     auto created = detail::create_dawn_shared_io_convolution_session(
                         {.provider = {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA},
-                         .session = {.pipeline = {.capacity = kSharedIoCapacity,
+                         .session = {.pipeline = {.capacity = shared_capacity,
                                                   .channels = channels_,
                                                   .block_size = block_,
                                                   .fft_size = fft_size_,
-                                                  .ir_length = static_cast<uint32_t>(ir_.size())},
+                                                  .ir_length = static_cast<uint32_t>(ir_.size()),
+                                                  .lead_blocks = latency_blocks_},
                                      .slots = kSharedIoSlots,
                                      .sample_rate = sample_rate_,
                                      .trace = {.enabled = bool(PULP_TRACING_ENABLED)}},
