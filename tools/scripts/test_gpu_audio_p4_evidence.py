@@ -295,16 +295,23 @@ class EvidenceTests(unittest.TestCase):
         MODULE._check_timing("gpu_elapsed", value, "control", errors)
         self.assertTrue(any("requires a correlation method" in error for error in errors))
 
-    def test_inferred_screening_data_remains_recorded_but_cannot_win(self) -> None:
+    def test_inferred_screening_nonverdict_data_remains_recorded(self) -> None:
         records = fixture()
         for record in records:
             if record["record_kind"] == "block":
-                record["timings"]["submit_to_completion"]["relation"] = "inferred"
+                record["timings"]["gpu_elapsed"]["relation"] = "inferred"
         refresh_all(records)
         self.assertEqual(MODULE.validate_records(records), [])
         summary = MODULE.summarize(records)
-        self.assertEqual(summary["row_gate"]["status"], "fail")
-        self.assertEqual(summary["matched_improvement"]["submit_to_completion_p99_percent"]["pairs"], 0)
+        for path in MODULE.PATHS:
+            self.assertEqual(
+                summary["paths"][path]["timings_ns"]["gpu_elapsed"]["available_samples"],
+                0,
+            )
+            self.assertEqual(
+                summary["paths"][path]["timing_provenance"]["gpu_elapsed"][0]["relation"],
+                "inferred",
+            )
 
     def test_service_cpu_cannot_hide_an_apparent_cpu_win(self) -> None:
         records = confirmation_fixture()
@@ -566,6 +573,26 @@ class EvidenceTests(unittest.TestCase):
                 self.assertTrue(any("build_flags must be non-empty strings" in error
                                     for error in errors), errors)
 
+    def test_build_flags_require_effective_ordered_release_state(self) -> None:
+        for overrides in (("-O",), ("-O0",), ("-O2",), ("-Os",), ("-Ofast",),
+                          ("-UNDEBUG",), ("-U", "NDEBUG")):
+            with self.subTest(overrides=overrides):
+                records = fixture()
+                records[0]["build_flags"].extend(overrides)
+                errors = MODULE.validate_records(records)
+                self.assertTrue(any("effective -O3 and NDEBUG" in error
+                                    for error in errors), errors)
+
+        for effective in (
+            ["-O0", "-UNDEBUG", "-O3", "-DNDEBUG"],
+            ["-O0", "-O3", "-U", "NDEBUG", "-D", "NDEBUG"],
+            ["-O3", "-DNDEBUG=1"],
+        ):
+            with self.subTest(effective=effective):
+                records = fixture()
+                records[0]["build_flags"] = effective
+                self.assertEqual(MODULE.validate_records(records), [])
+
     def test_confirmation_and_default_minima_are_enforced(self) -> None:
         records = fixture()
         records[0]["campaign"] = "confirmation"
@@ -612,6 +639,22 @@ class EvidenceTests(unittest.TestCase):
         errors = MODULE.validate_records(records)
         self.assertTrue(any("baseline must be positive" in error for error in errors), errors)
         self.assertTrue(any("completed matched pair count" in error for error in errors), errors)
+
+    def test_screening_requires_eligible_gpu_and_complete_pair_metrics(self) -> None:
+        records = fixture()
+        for record in records:
+            if (record.get("record_kind") == "block"
+                    and record.get("path") in {"staged_async", "shared_async"}):
+                record["delivery"] = "cpu_fallback"
+                record["timings"]["submit_to_completion"]["relation"] = "inferred"
+                for name in MODULE.CPU_TIMINGS:
+                    record["timings"][name]["relation"] = "inferred"
+        refresh_all(records)
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("requires eligible GPU delivery" in error for error in errors), errors)
+        self.assertTrue(any("submit-to-completion metric is incomplete" in error
+                            for error in errors), errors)
+        self.assertTrue(any("total-CPU metric is incomplete" in error for error in errors), errors)
 
     def test_disk_percentiles_and_bootstrap_have_known_answers(self) -> None:
         metrics = MODULE._MetricStore()
@@ -773,6 +816,47 @@ class EvidenceTests(unittest.TestCase):
             error = MODULE._distinct_paths([("summary output", loop)])
             self.assertIsNotNone(error)
             self.assertIn("summary output", error)
+
+    def test_cli_rejects_filesystem_equivalent_absent_outputs(self) -> None:
+        records = fixture()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            binary = root_path / "benchmark"
+            binary.write_bytes(b"benchmark")
+            records[0]["binary_sha256"] = MODULE._sha256_file(binary)
+            raw = root_path / "raw.jsonl"
+            raw.write_text("".join(json.dumps(record) + "\n" for record in records),
+                           encoding="utf-8")
+            raw_bytes = raw.read_bytes()
+            binary_bytes = binary.read_bytes()
+
+            for summary_name, csv_name in (
+                ("Summary.json", "SUMMARY.JSON"),
+                ("\u00e9-summary.json", "e\u0301-summary.json"),
+            ):
+                with self.subTest(summary=summary_name, csv=csv_name):
+                    summary = root_path / summary_name
+                    csv_path = root_path / csv_name
+                    summary.write_text("probe", encoding="utf-8")
+                    aliases_on_filesystem = csv_path.exists()
+                    summary.unlink()
+                    argv = [str(MODULE_PATH), str(raw), "--benchmark-binary", str(binary),
+                            "--summary", str(summary), "--csv", str(csv_path)]
+                    stderr = io.StringIO()
+                    with (mock.patch.object(sys, "argv", argv),
+                          contextlib.redirect_stderr(stderr)):
+                        result = MODULE.main()
+                    if aliases_on_filesystem:
+                        self.assertEqual(result, 1)
+                        self.assertIn("CSV output aliases summary output", stderr.getvalue())
+                        self.assertFalse(summary.exists())
+                        self.assertFalse(csv_path.exists())
+                    else:
+                        self.assertEqual(result, 0)
+                        summary.unlink()
+                        csv_path.unlink()
+                    self.assertEqual(raw.read_bytes(), raw_bytes)
+                    self.assertEqual(binary.read_bytes(), binary_bytes)
 
     def test_cli_atomically_replaces_outputs_and_rolls_back_second_failure(self) -> None:
         records = fixture()
