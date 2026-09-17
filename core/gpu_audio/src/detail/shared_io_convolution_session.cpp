@@ -42,6 +42,7 @@ SharedIoExecutionContract SharedIoConvolutionSession::execution_contract() const
     contract.sample_rate = config_.sample_rate;
     contract.algorithmic_lead_blocks = config_.pipeline.lead_blocks;
     contract.pipeline_depth = config_.pipeline.capacity;
+    contract.provider_slots = config_.slots;
     contract.requested_path = config_.requested_path;
     contract.active_path = config_.active_path;
     contract.miss_policy = config_.miss_policy;

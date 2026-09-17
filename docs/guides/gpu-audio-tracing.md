@@ -64,8 +64,14 @@ this private session. A trace must not infer `cpu_fallback_delivered` from a
 missing GPU output.
 
 `gpu.audio.session` identifies the engine generation (the stream epoch), path,
-block shape, algorithmic lead, physical pipeline depth, sampling policy, and
-clock provenance. Terminal and delivery events carry the exact `(engine_id,
+block shape, algorithmic lead, logical pipeline depth, physical provider-slot
+count, sampling policy, and clock provenance. `pipeline_depth` is the logical
+bridge/completion-record capacity and must exceed `lead_blocks` so the callback
+currently being published has its own record. `provider_slots` is the physical
+provider-arena slot count; completed slots can be reused within that logical
+window, so it is not another spelling of pipeline depth. Earlier schema-2
+captures predate `provider_slots` and expose SQL `NULL`, meaning unavailable,
+never zero. Terminal and delivery events carry the exact `(engine_id,
 generation, sequence)` identity; `sequence` is the block sequence. Terminal
 events carry the worker stage durations:
 

@@ -6,7 +6,7 @@
 using namespace pulp::gpu_audio;
 using namespace pulp::gpu_audio::detail;
 
-TEST_CASE("shared IO contract requires enough slots to sustain algorithmic lead",
+TEST_CASE("shared IO contract separates logical capacity from physical provider slots",
           "[gpu_audio][shared_io]") {
     SharedIoExecutionContract contract{
         .channels = 2,
@@ -14,6 +14,7 @@ TEST_CASE("shared IO contract requires enough slots to sustain algorithmic lead"
         .sample_rate = 48000,
         .algorithmic_lead_blocks = 3,
         .pipeline_depth = 2,
+        .provider_slots = 1,
         .requested_path = SharedIoRequest::RequireSharedHostPointer,
         .active_path = SharedIoPath::SharedHostPointer,
         .miss_policy = MissPolicy::CpuFallback,
@@ -27,6 +28,10 @@ TEST_CASE("shared IO contract requires enough slots to sustain algorithmic lead"
             SharedIoContractError::InsufficientPipelineDepth);
     contract.pipeline_depth = contract.algorithmic_lead_blocks + 1;
     REQUIRE(validate_shared_io_contract(contract).accepted());
+    contract.provider_slots = 0;
+    REQUIRE(validate_shared_io_contract(contract).error ==
+            SharedIoContractError::MissingProviderSlots);
+    contract.provider_slots = 1;
     contract.algorithmic_lead_blocks = 0;
     REQUIRE(validate_shared_io_contract(contract).error ==
             SharedIoContractError::MissingAlgorithmicLead);
@@ -40,6 +45,7 @@ TEST_CASE("shared IO contract fails closed for unavailable paths and fallback",
         .sample_rate = 48000,
         .algorithmic_lead_blocks = 2,
         .pipeline_depth = 3,
+        .provider_slots = 1,
         .requested_path = SharedIoRequest::RequireSharedHostPointer,
         .active_path = SharedIoPath::StagedAsync,
         .miss_policy = MissPolicy::CpuFallback,

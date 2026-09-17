@@ -15,6 +15,9 @@ SELECT s.id AS slice_id, s.ts, s.name, s.dur, t.upid,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.quiescent') AS INT) AS quiescent,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_work_admitted') AS INT) AS gpu_work_admitted,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.output_eligible') AS INT) AS output_eligible,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.lead_blocks') AS INT) AS lead_blocks,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.pipeline_depth') AS INT) AS pipeline_depth,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.provider_slots') AS INT) AS provider_slots,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.success_stride') AS INT) AS success_stride,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.capture_admissions') AS INT) AS capture_admissions,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_clock_mapped') AS INT) AS gpu_clock_mapped,
@@ -148,7 +151,10 @@ WHERE NOT EXISTS (SELECT 1 FROM pulp_gpu_audio_counters c
 GROUP BY s.upid, s.engine_id, s.generation
 UNION ALL
 SELECT 'invalid_session_policy' AS issue, upid, engine_id, generation FROM pulp_gpu_audio_sessions
-WHERE success_stride IS NULL OR success_stride <= 0
+WHERE lead_blocks IS NULL OR lead_blocks <= 0
+   OR pipeline_depth IS NULL OR pipeline_depth <= lead_blocks
+   OR (provider_slots IS NOT NULL AND provider_slots <= 0)
+   OR success_stride IS NULL OR success_stride <= 0
    OR capture_admissions IS NULL OR capture_admissions NOT IN (0, 1)
    OR cpu_clock IS NOT 'worker.monotonic' OR event_time IS NOT 'drain'
    OR gpu_clock_mapped IS NULL OR gpu_clock_mapped NOT IN (0, 1)
