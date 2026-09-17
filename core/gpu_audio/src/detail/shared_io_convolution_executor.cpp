@@ -59,8 +59,8 @@ bool SharedIoConvolutionExecutor::fence_and_reprime(std::uint64_t epoch,
 }
 
 bool SharedIoConvolutionExecutor::record_terminal(std::uint64_t epoch, std::uint64_t sequence,
-                                                  Terminal terminal,
-                                                  std::span<const float> time) noexcept {
+                                                  Terminal terminal, std::span<const float> time,
+                                                  Terminal* accepted_terminal) noexcept {
     if (epoch != epoch_ || fenced_.load(std::memory_order_acquire) || sequence < next_ ||
         sequence >= next_ + c_.capacity)
         return false;
@@ -81,6 +81,8 @@ bool SharedIoConvolutionExecutor::record_terminal(std::uint64_t epoch, std::uint
             std::copy(time.begin(), time.end(),
                       terminal_.begin() + std::size_t(sequence % c_.capacity) * floats);
     }
+    if (accepted_terminal)
+        *accepted_terminal = entry.terminal;
     return true;
 }
 

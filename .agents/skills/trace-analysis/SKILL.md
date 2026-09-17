@@ -6,6 +6,7 @@ requires:
   - .agents/skills/trace-analysis/references/hints_frame.md
   - .agents/skills/trace-analysis/references/hints_js.md
   - .agents/skills/trace-analysis/references/hints_gpu.md
+  - .agents/skills/trace-analysis/references/hints_gpu_audio.md
   - .agents/skills/trace-analysis/references/hints_crossplatform.md
 ---
 
@@ -267,6 +268,7 @@ grounds the analysis in Pulp's real seams and names the specific traps:
 | dropped frames vs vsync budget, layout-vs-paint, `TextShaper::prepare` re-runs, dirty-rect churn, GPU-submit stalls | `references/hints_frame.md` |
 | QuickJS bridge dispatch cost, a JS callback invalidating layout | `references/hints_js.md` |
 | Dawn submit/present stalls, Graphite record cost, per-pass GPU time | `references/hints_gpu.md` |
+| Shared-I/O GPU audio admission, terminal/delivery correlation, and quiescent recovery | `references/hints_gpu_audio.md` |
 | a drag/scroll that feels sluggish while frame medians look fine; huge bridge-call counts over one interaction | `docs/guides/interaction-cost.md` |
 | standalone vs plugin-in-DAW vs iOS/iPadOS AUv3 vs Android/Oboe vs Simulator; sample-position args, thread naming, atrace interleave | `references/hints_crossplatform.md` |
 
@@ -354,6 +356,7 @@ render (`examples/trace-demo`) so the answer reproduces exactly. See
 - `.agents/skills/trace-analysis/references/hints_frame.md`
 - `.agents/skills/trace-analysis/references/hints_js.md`
 - `.agents/skills/trace-analysis/references/hints_gpu.md`
+- `.agents/skills/trace-analysis/references/hints_gpu_audio.md`
 - `.agents/skills/trace-analysis/references/hints_crossplatform.md`
 - `.agents/skills/trace-sql/SKILL.md` — the SQL substrate + trace-stdlib
 - `core/runtime/include/pulp/runtime/trace.hpp` — macro surface + category taxonomy
