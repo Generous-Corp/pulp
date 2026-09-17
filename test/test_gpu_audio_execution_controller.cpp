@@ -16,6 +16,7 @@ SharedIoExecutionContract contract(MissPolicy policy = MissPolicy::CpuFallback) 
         .sample_rate = 48000,
         .algorithmic_lead_blocks = 2,
         .pipeline_depth = 3,
+        .provider_slots = 1,
         .requested_path = SharedIoRequest::Auto,
         .active_path = SharedIoPath::StagedAsync,
         .miss_policy = policy,
@@ -34,6 +35,7 @@ struct ReuseProbe {
     bool called = false;
     SharedIoAdmission admission_before_reuse = SharedIoAdmission::Accepted;
     std::uint32_t observed_in_flight = 1;
+    std::uint64_t next_sequence = 0;
 };
 
 void observe_before_publish(SharedIoExecutionController& controller, std::uint64_t sequence,
@@ -50,7 +52,7 @@ void observe_before_reuse(SharedIoExecutionController& controller, std::uint32_t
     auto& probe = *static_cast<ReuseProbe*>(context);
     probe.called = true;
     probe.observed_in_flight = remaining;
-    probe.admission_before_reuse = controller.admit_submission(1);
+    probe.admission_before_reuse = controller.admit_submission(probe.next_sequence);
 }
 } // namespace
 
@@ -74,28 +76,30 @@ TEST_CASE("execution controller reserves occupancy before publishing admission",
 
 TEST_CASE("execution controller retires occupancy before publishing slot reuse",
           "[gpu_audio][shared_io][controller][adversarial]") {
-    auto single_slot = contract();
-    single_slot.algorithmic_lead_blocks = 1;
-    single_slot.pipeline_depth = 1;
+    auto minimum_capacity = contract();
+    minimum_capacity.algorithmic_lead_blocks = 1;
+    minimum_capacity.pipeline_depth = 2;
 
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
-    REQUIRE(controller.prepare(single_slot, &telemetry));
+    REQUIRE(controller.prepare(minimum_capacity, &telemetry));
     REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
     REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
     REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
 
     ReuseProbe probe;
+    probe.next_sequence = 2;
     controller.set_before_reuse_test_hook(observe_before_reuse, &probe);
     REQUIRE(controller.deliver(1).path == SharedIoDeliveryPath::Gpu);
     REQUIRE(probe.called);
-    REQUIRE(probe.observed_in_flight == 0);
+    REQUIRE(probe.observed_in_flight == 1);
     REQUIRE(probe.admission_before_reuse == SharedIoAdmission::CapacityFull);
-    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
     REQUIRE(telemetry.snapshot().in_flight_high_water == controller.capacity());
 }
 
-TEST_CASE("execution controller tracks lead separately from pipeline depth",
+TEST_CASE("execution controller tracks lead separately from logical pipeline depth",
           "[gpu_audio][shared_io][controller]") {
     SharedIoTelemetry telemetry;
     SharedIoExecutionController controller;
@@ -114,7 +118,7 @@ TEST_CASE("execution controller tracks lead separately from pipeline depth",
     REQUIRE(wet.expected_sequence == 0);
 }
 
-TEST_CASE("execution controller rejects a lead larger than physical depth",
+TEST_CASE("execution controller rejects a lead larger than logical pipeline depth",
           "[gpu_audio][shared_io][controller][adversarial]") {
     auto delayed_contract = contract();
     delayed_contract.algorithmic_lead_blocks = 5;

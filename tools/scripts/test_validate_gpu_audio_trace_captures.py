@@ -169,8 +169,9 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
         """)
         sql = (SCRIPT.parents[2] / ".agents/skills/trace-sql/pulp_gpu_audio_blocks.sql").read_text()
         self.db.executescript(sql.replace("CREATE OR REPLACE PERFETTO VIEW", "CREATE VIEW"))
-        self.add("session", success_stride=1, capture_admissions=1,
-                 cpu_clock="worker.monotonic", event_time="drain", gpu_clock_mapped=0)
+        self.add("session", lead_blocks=2, pipeline_depth=3, provider_slots=1,
+                 success_stride=1, capture_admissions=1, cpu_clock="worker.monotonic",
+                 event_time="drain", gpu_clock_mapped=0)
         for sequence in (0, 1):
             self.add("admission", sequence=sequence)
             self.add("eligible", sequence=sequence)
@@ -240,7 +241,8 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
                 self.db.execute("RELEASE duplicate")
 
     def test_missing_required_annotations_cannot_pass_through_sql_null(self) -> None:
-        for row, field in ((1, "capture_admissions"), (1, "success_stride"),
+        for row, field in ((1, "lead_blocks"), (1, "pipeline_depth"),
+                           (1, "capture_admissions"), (1, "success_stride"),
                            (self.counter, "drained"), (self.counter, "admissions_drained"),
                            (4, "gpu_work_admitted"), (4, "gpu_terminal"),
                            (4, "gpu_elapsed_available"), (4, "gpu_reason"), (5, "output_eligible"),
@@ -250,6 +252,23 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
                 value = self.arguments[row].pop(f"debug.{field}")
                 self.require_unqualified()
                 self.arguments[row][f"debug.{field}"] = value
+
+    def test_session_dimensions_keep_logical_capacity_separate_from_provider_slots(self) -> None:
+        for field, invalid in (("lead_blocks", 0), ("pipeline_depth", 2),
+                               ("provider_slots", 0)):
+            with self.subTest(field=field):
+                key = f"debug.{field}"
+                previous = self.arguments[1][key]
+                self.arguments[1][key] = invalid
+                self.assertIn("invalid_session_policy",
+                              [row[0] for row in self.rows("capture_issues")])
+                self.arguments[1][key] = previous
+
+    def test_legacy_schema_two_session_leaves_provider_slots_unknown(self) -> None:
+        self.arguments[1].pop("debug.provider_slots")
+        self.assertEqual(self.rows("capture_issues"), [])
+        self.assertEqual(self.db.execute("SELECT provider_slots FROM "
+                                        "pulp_gpu_audio_sessions").fetchone(), (None,))
 
     def test_engine_identity_never_joins_across_processes(self) -> None:
         self.db.execute("UPDATE slice SET track_id = 2 WHERE name = 'gpu.audio.terminal'")
@@ -282,7 +301,8 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
                 self.require_unqualified()
 
     def test_empty_generation_does_not_borrow_another_generations_positive_control(self) -> None:
-        session = self.add("session", success_stride=1, capture_admissions=1,
+        session = self.add("session", lead_blocks=2, pipeline_depth=3, provider_slots=1,
+                           success_stride=1, capture_admissions=1,
                            cpu_clock="worker.monotonic", event_time="drain", gpu_clock_mapped=0)
         counter = self.add("counters", admissions_attempted=0, admissions_enqueued=0,
                            admissions_dropped=0, admissions_drained=0, attempted=0,

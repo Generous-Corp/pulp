@@ -31,6 +31,7 @@ SharedIoTraceConfig config(std::uint32_t stride = 4) {
     value.contract.sample_rate = 48000;
     value.contract.algorithmic_lead_blocks = 2;
     value.contract.pipeline_depth = 3;
+    value.contract.provider_slots = 1;
     value.contract.active_path = SharedIoPath::StagedAsync;
     value.contract.miss_policy = pulp::gpu_audio::MissPolicy::CpuFallback;
     value.contract.cpu_fallback_prepared = true;
