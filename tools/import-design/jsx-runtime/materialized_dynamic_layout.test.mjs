@@ -30,7 +30,9 @@ function evaluateEntry({ layoutBindings = [], registryNodes = [], stateAtlas = [
     __pulpReactDomRegistry__: { values: () => registryNodes.values() },
     getLayoutBoxMetrics: () => null,
     setCapturedLineBoxes: () => {},
+    clearCapturedLineBoxes: id => sandbox.cleared.push(id),
   };
+  sandbox.cleared = [];
   sandbox.writes = new Map();
   for (const name of BRIDGE_STUBS) sandbox[name] = (id, ...args) => {
     const key = name === 'setFlex' ? name + ':' + args.shift() : name;
@@ -52,7 +54,7 @@ function evaluateEntry({ layoutBindings = [], registryNodes = [], stateAtlas = [
 }
 
 
-function fixture() {
+function fixture({ withText = false } = {}) {
   const node = (id, tag = 'div') => ({ tagName: tag.toUpperCase(), __pulpId: id,
     id, _children: [], parentElement: null,
     getAttribute: name => name === 'data-menu' && id === 'menu' ? 'open' : null,
@@ -72,9 +74,21 @@ function fixture() {
     binding([...path, { tag: 'button', index: 0 }], 30),
     binding([...path, { tag: 'button', index: 1 }], 30, 30),
     binding([{ tag: 'div', index: 1 }], 40)];
+  const textBindings = [];
+  if (withText) {
+    first.__pulpTextTargetId = 'first-caption';
+    first.textContent = 'First';
+    menu.__pulpAnonymousTextTargets = [{ id: 'menu-text', text: 'Menu' }];
+    const textBinding = (path, text) => ({ path, text,
+      boxes: [{ left: 0, top: 0, width: 20, height: 12 }],
+      basis: { width: 230, requested: { font_size: 12, font_weight: 400 },
+        resolved_face: {} } });
+    textBindings.push(textBinding([...path, { tag: 'button', index: 0 }], 'First'));
+    textBindings.push({ ...textBinding(path, 'Menu'), anonymous_text_index: 0 });
+  }
   const sandbox = evaluateEntry({ registryNodes: registry,
     stateAtlas: [{ id: 'menu', match: { selector: '[data-menu="open"]' },
-      activate: [], metadata: { layout_bindings: bindings } }] });
+      activate: [], metadata: { layout_bindings: bindings, text_bindings: textBindings } }] });
   const extra = node('extra', 'button');
   extra.parentElement = menu;
   return { sandbox, menu, first, last, registry, extra };
@@ -131,4 +145,19 @@ test('restoration preserves imperative style changes made after the capture', ()
   s.__pulpApplyMaterializedImportMetadata__();
   assert.equal(s.writes.get('menu:setFlex:width'), '80%');
   assert.equal(s.writes.get('menu:setTop'), 55);
+});
+
+test('dynamic layout releases anonymous text boxes and button caption line positions', () => {
+  const { sandbox: s, menu, registry, extra } = fixture({ withText: true });
+  assert.equal(s.writes.get('menu-text:setPosition'), 'absolute');
+  assert.equal(s.writes.get('menu-text:setFlex:width'), 230);
+  menu._children.push(extra);
+  registry.push(extra);
+  s.__pulpApplyMaterializedImportMetadata__();
+  assert.equal(s.writes.get('menu-text:setPosition'), 'relative');
+  assert.equal(s.writes.get('menu-text:setLeft'), 'auto');
+  assert.equal(s.writes.get('menu-text:setFlex:width'), 'auto');
+  assert.equal(s.writes.get('menu-text:setFlex:height'), 'auto');
+  assert.ok(s.cleared.includes('menu-text'));
+  assert.ok(s.cleared.includes('first-caption'));
 });

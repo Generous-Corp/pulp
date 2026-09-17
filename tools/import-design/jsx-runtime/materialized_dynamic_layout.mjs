@@ -58,6 +58,17 @@ export function restoreMaterializedLayout(node, bridge) {
   bridge.setTop(id, value('top', 'auto'));
   bridge.setFlex(id, 'width', value('width', 'auto'));
   bridge.setFlex(id, 'height', value('height', 'auto'));
+  // Mixed-content text uses synthetic Labels outside the authored DOM. The
+  // capture gives them an absolute owner-sized box; release that box as well
+  // as the line positions so they contribute intrinsic size to live layout.
+  for (const target of node.__pulpAnonymousTextTargets || []) {
+    const textId = String(target.id);
+    bridge.setPosition(textId, 'relative');
+    bridge.setLeft(textId, 'auto');
+    bridge.setTop(textId, 'auto');
+    bridge.setFlex(textId, 'width', 'auto');
+    bridge.setFlex(textId, 'height', 'auto');
+  }
   if (typeof bridge.clearCapturedLineBoxes === 'function') {
     bridge.clearCapturedLineBoxes(String(node.__pulpTextTargetId || id));
     for (const target of node.__pulpAnonymousTextTargets || [])

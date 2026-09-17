@@ -456,6 +456,7 @@ function applyMaterializedImportMetadata(metadata) {
     }
     g.setCapturedLineBoxes(String(id), targetBoxes, targetBasisWidth,
       binding.basis.resolved_face, false);
+    capturedGeometryNodes.add(node);
     ++applied;
     if (optional) ++diagnostics.text_optional_applied;
     else ++diagnostics.text_applied;
