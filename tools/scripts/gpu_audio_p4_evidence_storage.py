@@ -35,7 +35,7 @@ class RecordStore(Sequence[dict[str, Any]]):
     def append(self, value: dict[str, Any]) -> None:
         self._connection.execute(
             "INSERT INTO records(ordinal, payload) VALUES (?, ?)",
-            (self._count, json.dumps(value, separators=(",", ":"))),
+            (self._count, json.dumps(value, separators=(",", ":"), allow_nan=False)),
         )
         self._count += 1
 
@@ -104,14 +104,14 @@ class MetricStore:
         self._root = tempfile.TemporaryDirectory(prefix="pulp-gpu-audio-p4-metrics-")
         self._connection = sqlite3.connect(Path(self._root.name) / "metrics.sqlite3")
         self._connection.execute(
-            "CREATE TABLE metrics (path TEXT NOT NULL, trial_id INTEGER NOT NULL, "
+            "CREATE TABLE metrics (path TEXT NOT NULL, trial_id TEXT NOT NULL, "
             "name TEXT NOT NULL, value REAL NOT NULL)"
         )
 
     def add(self, path: str, trial_id: int, name: str, value: float) -> None:
         self._connection.execute(
             "INSERT INTO metrics(path, trial_id, name, value) VALUES (?, ?, ?, ?)",
-            (path, trial_id, name, value),
+            (path, str(trial_id), name, value),
         )
 
     def finish(self) -> None:
@@ -125,7 +125,7 @@ class MetricStore:
         arguments: list[Any] = [path, name]
         if trial_id is not None:
             query += " AND trial_id = ?"
-            arguments.append(trial_id)
+            arguments.append(str(trial_id))
         return int(self._connection.execute(query, arguments).fetchone()[0])
 
     def mean(self, path: str, name: str, trial_id: int | None = None) -> float | None:
@@ -133,7 +133,7 @@ class MetricStore:
         arguments: list[Any] = [path, name]
         if trial_id is not None:
             query += " AND trial_id = ?"
-            arguments.append(trial_id)
+            arguments.append(str(trial_id))
         value = self._connection.execute(query, arguments).fetchone()[0]
         return float(value) if value is not None else None
 
@@ -149,7 +149,7 @@ class MetricStore:
         arguments: list[Any] = [path, name]
         if trial_id is not None:
             query += " AND trial_id = ?"
-            arguments.append(trial_id)
+            arguments.append(str(trial_id))
         query += " ORDER BY value LIMIT 1 OFFSET ?"
         low_value = float(self._connection.execute(query, arguments + [low]).fetchone()[0])
         if low == high:

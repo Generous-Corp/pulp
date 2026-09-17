@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -364,6 +365,25 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(any("block identity does not match" in error for error in errors), errors)
         self.assertTrue(any("engine_id and generation must be constant" in error for error in errors), errors)
 
+    def test_trial_and_pair_ids_are_uint64_and_spool_without_narrowing(self) -> None:
+        records = fixture()
+        original_trial_id = records[1]["trial_id"]
+        for record in records:
+            if record.get("trial_id") == original_trial_id:
+                record["trial_id"] = MODULE.UINT64_MAX
+        refresh_all(records)
+        self.assertEqual(MODULE.validate_records(records), [])
+        self.assertEqual(MODULE.summarize(records)["trial_count"], 3)
+
+        records[1]["trial_id"] = MODULE.UINT64_MAX + 1
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("trial_id must be a unique uint64" in error for error in errors), errors)
+
+        records = fixture()
+        records[1]["pair_id"] = MODULE.UINT64_MAX + 1
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("pair_id must be a uint64" in error for error in errors), errors)
+
     def test_truncation_and_digest_are_rejected(self) -> None:
         records = fixture()[:-1]
         errors = MODULE.validate_records(records)
@@ -396,6 +416,53 @@ class EvidenceTests(unittest.TestCase):
         shared_begin["pair_id"] = 1
         errors = MODULE.validate_records(records)
         self.assertTrue(any("matched pair" in error for error in errors), errors)
+
+    def test_sync_reference_cannot_reset_async_trial_alternation(self) -> None:
+        source = fixture()
+        manifest = copy.deepcopy(source[0])
+        manifest.update(expected_trials=5, expected_matched_pairs=2)
+        groups: dict[str, list[dict]] = {}
+        current: list[dict] = []
+        for record in source[1:]:
+            if record["record_kind"] == "trial_begin":
+                current = []
+            current.append(copy.deepcopy(record))
+            if record["record_kind"] == "trial_end":
+                groups[current[0]["path"]] = current
+
+        def clone(path: str, trial_id: int, pair_id: int | None,
+                  engine_delta: int = 0) -> list[dict]:
+            group = copy.deepcopy(groups[path])
+            for record in group:
+                record.update(trial_id=trial_id, pair_id=pair_id)
+                if record["record_kind"] == "block":
+                    record["engine_id"] += engine_delta
+            return group
+
+        records = [manifest]
+        for group in (
+            clone("staged_async", 0, 0),
+            clone("shared_async", 3, 1, 100),
+            clone("staged_sync", 2, None),
+            clone("shared_async", 1, 0),
+            clone("staged_async", 4, 1, 100),
+        ):
+            records.extend(group)
+        refresh_all(records)
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("must alternate async paths" in error for error in errors), errors)
+
+        valid = [copy.deepcopy(manifest)]
+        for group in (
+            clone("staged_async", 0, 0),
+            clone("shared_async", 1, 0),
+            clone("staged_sync", 2, None),
+            clone("staged_async", 3, 1, 100),
+            clone("shared_async", 4, 1, 100),
+        ):
+            valid.extend(group)
+        refresh_all(valid)
+        self.assertEqual(MODULE.validate_records(valid), [])
 
     def test_staged_transfer_control_must_fire(self) -> None:
         records = fixture()
@@ -451,6 +518,53 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(any("expected_trials" in error for error in errors), errors)
         self.assertTrue(any("path is invalid" in error for error in errors), errors)
         self.assertTrue(any("observation object" in error for error in errors), errors)
+
+    def test_raw_json_rejects_duplicate_keys_and_nonfinite_constants(self) -> None:
+        cases = (
+            ('{"record_kind":"manifest","record_kind":"block"}\n', "duplicate object key"),
+            ('{"record_kind":"manifest","nested":{"value":1,"value":2}}\n',
+             "duplicate object key"),
+            ('{"record_kind":"manifest","value":NaN}\n', "non-finite JSON constant"),
+            ('{"record_kind":"manifest","value":Infinity}\n', "non-finite JSON constant"),
+            ('{"record_kind":"manifest","value":1e999}\n', "non-finite JSON number"),
+            ('{"record_kind":"manifest","value":"\\ud800"}\n',
+             "unpaired Unicode surrogate"),
+        )
+        with tempfile.TemporaryDirectory() as root:
+            raw = Path(root) / "raw.jsonl"
+            for payload, expected in cases:
+                with self.subTest(payload=payload):
+                    raw.write_text(payload, encoding="utf-8")
+                    parsed, errors = MODULE.read_jsonl(raw)
+                    try:
+                        self.assertTrue(any(expected in error for error in errors), errors)
+                    finally:
+                        parsed.close()
+
+            raw.write_bytes(b'{"record_kind":"manifest","value":"\xff"}\n')
+            parsed, errors = MODULE.read_jsonl(raw)
+            try:
+                self.assertTrue(any("invalid UTF-8" in error for error in errors), errors)
+            finally:
+                parsed.close()
+
+            raw.write_text('{"value":0}\n', encoding="utf-8")
+            with mock.patch.object(MODULE, "_strict_json_loads",
+                                   side_effect=RecursionError("nested too deeply")):
+                parsed, errors = MODULE.read_jsonl(raw)
+            try:
+                self.assertTrue(any("invalid JSON" in error for error in errors), errors)
+            finally:
+                parsed.close()
+
+    def test_build_flags_require_only_nonempty_strings(self) -> None:
+        for invalid in (float("nan"), 3, True, ""):
+            with self.subTest(invalid=invalid):
+                records = fixture()
+                records[0]["build_flags"].append(invalid)
+                errors = MODULE.validate_records(records)
+                self.assertTrue(any("build_flags must be non-empty strings" in error
+                                    for error in errors), errors)
 
     def test_confirmation_and_default_minima_are_enforced(self) -> None:
         records = fixture()
@@ -567,6 +681,275 @@ class EvidenceTests(unittest.TestCase):
             with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(stderr):
                 self.assertEqual(MODULE.main(), 1)
             self.assertEqual(MODULE._sha256_file(raw), raw_digest)
+
+    def test_cli_rejects_hard_link_aliases_and_preserves_inputs(self) -> None:
+        records = fixture()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            binary = root_path / "benchmark"
+            binary.write_bytes(b"benchmark")
+            records[0]["binary_sha256"] = MODULE._sha256_file(binary)
+            raw = root_path / "raw.jsonl"
+            raw.write_text("".join(json.dumps(record) + "\n" for record in records),
+                           encoding="utf-8")
+            raw_bytes = raw.read_bytes()
+            binary_bytes = binary.read_bytes()
+            summary = root_path / "summary.json"
+            os.link(raw, summary)
+            csv_path = root_path / "blocks.csv"
+            argv = [str(MODULE_PATH), str(raw), "--benchmark-binary", str(binary),
+                    "--summary", str(summary), "--csv", str(csv_path)]
+            stderr = io.StringIO()
+            with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(stderr):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertIn("summary output aliases evidence input", stderr.getvalue())
+            self.assertEqual(raw.read_bytes(), raw_bytes)
+            self.assertEqual(binary.read_bytes(), binary_bytes)
+
+            summary.unlink()
+            summary.write_text("existing summary", encoding="utf-8")
+            os.link(binary, csv_path)
+            stderr = io.StringIO()
+            with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(stderr):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertIn("CSV output aliases benchmark input", stderr.getvalue())
+            self.assertEqual(raw.read_bytes(), raw_bytes)
+            self.assertEqual(binary.read_bytes(), binary_bytes)
+
+            csv_path.unlink()
+            csv_path.write_text("existing csv", encoding="utf-8")
+            summary.unlink()
+            os.link(csv_path, summary)
+            stderr = io.StringIO()
+            with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(stderr):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertIn("CSV output aliases summary output", stderr.getvalue())
+            self.assertEqual(raw.read_bytes(), raw_bytes)
+            self.assertEqual(binary.read_bytes(), binary_bytes)
+
+    def test_cli_rejects_symbolic_link_alias_and_preserves_inputs(self) -> None:
+        records = fixture()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            binary = root_path / "benchmark"
+            binary.write_bytes(b"benchmark")
+            records[0]["binary_sha256"] = MODULE._sha256_file(binary)
+            raw = root_path / "raw.jsonl"
+            raw.write_text("".join(json.dumps(record) + "\n" for record in records),
+                           encoding="utf-8")
+            raw_bytes = raw.read_bytes()
+            binary_bytes = binary.read_bytes()
+            summary = root_path / "summary.json"
+            summary.symlink_to(raw)
+            argv = [str(MODULE_PATH), str(raw), "--benchmark-binary", str(binary),
+                    "--summary", str(summary)]
+            stderr = io.StringIO()
+            with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(stderr):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertIn("summary output aliases evidence input", stderr.getvalue())
+            self.assertTrue(summary.is_symlink())
+            self.assertEqual(raw.read_bytes(), raw_bytes)
+            self.assertEqual(binary.read_bytes(), binary_bytes)
+
+    def test_path_identity_guard_rejects_every_existing_alias_pair(self) -> None:
+        labels = ("evidence input", "benchmark input", "summary output", "CSV output")
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            for first in range(len(labels)):
+                for second in range(first + 1, len(labels)):
+                    with self.subTest(first=labels[first], second=labels[second]):
+                        paths = [root_path / f"path-{index}" for index in range(len(labels))]
+                        for index, path in enumerate(paths):
+                            path.write_bytes(f"content-{index}".encode())
+                        paths[second].unlink()
+                        os.link(paths[first], paths[second])
+                        error = MODULE._distinct_paths(list(zip(labels, paths)))
+                        self.assertEqual(error, f"{labels[second]} aliases {labels[first]}")
+                        for path in paths:
+                            path.unlink()
+
+            loop = root_path / "loop"
+            loop.symlink_to(loop.name)
+            error = MODULE._distinct_paths([("summary output", loop)])
+            self.assertIsNotNone(error)
+            self.assertIn("summary output", error)
+
+    def test_cli_atomically_replaces_outputs_and_rolls_back_second_failure(self) -> None:
+        records = fixture()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            binary = root_path / "benchmark"
+            binary.write_bytes(b"benchmark")
+            records[0]["binary_sha256"] = MODULE._sha256_file(binary)
+            raw = root_path / "raw.jsonl"
+            raw.write_text("".join(json.dumps(record) + "\n" for record in records),
+                           encoding="utf-8")
+            raw_digest = MODULE._sha256_file(raw)
+            summary = root_path / "summary.json"
+            csv_path = root_path / "blocks.csv"
+            summary.write_text("old summary", encoding="utf-8")
+            csv_path.write_text("old csv", encoding="utf-8")
+            old_inodes = (summary.stat().st_ino, csv_path.stat().st_ino)
+            argv = [str(MODULE_PATH), str(raw), "--benchmark-binary", str(binary),
+                    "--summary", str(summary), "--csv", str(csv_path)]
+            with mock.patch.object(sys, "argv", argv):
+                self.assertEqual(MODULE.main(), 0)
+            for actual, old in zip((summary.stat().st_ino, csv_path.stat().st_ino), old_inodes):
+                self.assertNotEqual(actual, old)
+            self.assertEqual(json.loads(summary.read_text(encoding="utf-8"))["evidence_sha256"],
+                             raw_digest)
+            self.assertIn("evidence_sha256", csv_path.read_text(encoding="utf-8"))
+            self.assertEqual(MODULE._sha256_file(raw), raw_digest)
+
+            summary.write_text("preserve summary", encoding="utf-8")
+            csv_path.write_text("preserve csv", encoding="utf-8")
+            preserved = {path: (path.read_bytes(), path.stat().st_ino)
+                         for path in (summary, csv_path)}
+            real_replace = os.replace
+            publication_count = 0
+
+            def fail_second_publication(source: Path, destination: Path) -> None:
+                nonlocal publication_count
+                if Path(source).suffix == ".tmp" and Path(destination) in preserved:
+                    publication_count += 1
+                    if publication_count == 2:
+                        raise OSError("planted second replace failure")
+                real_replace(source, destination)
+
+            stderr = io.StringIO()
+            with (mock.patch.object(sys, "argv", argv),
+                  mock.patch.object(MODULE.os, "replace", side_effect=fail_second_publication),
+                  contextlib.redirect_stderr(stderr)):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertIn("planted second replace failure", stderr.getvalue())
+            self.assertEqual(publication_count, 2)
+            for path, (content, inode) in preserved.items():
+                self.assertEqual(path.read_bytes(), content)
+                self.assertEqual(path.stat().st_ino, inode)
+            self.assertEqual(MODULE._sha256_file(raw), raw_digest)
+            self.assertEqual(list(root_path.glob(".*.tmp")), [])
+            self.assertEqual(list(root_path.glob(".*.rollback")), [])
+
+            summary.unlink()
+            csv_path.unlink()
+            publication_count = 0
+            stderr = io.StringIO()
+            with (mock.patch.object(sys, "argv", argv),
+                  mock.patch.object(MODULE.os, "replace", side_effect=fail_second_publication),
+                  contextlib.redirect_stderr(stderr)):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertIn("planted second replace failure", stderr.getvalue())
+            self.assertFalse(summary.exists())
+            self.assertFalse(csv_path.exists())
+            self.assertEqual(list(root_path.glob(".*.tmp")), [])
+            self.assertEqual(list(root_path.glob(".*.rollback")), [])
+
+    def test_cli_rechecks_path_identity_immediately_before_publication(self) -> None:
+        records = fixture()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            binary = root_path / "benchmark"
+            binary.write_bytes(b"benchmark")
+            records[0]["binary_sha256"] = MODULE._sha256_file(binary)
+            raw = root_path / "raw.jsonl"
+            raw.write_text("".join(json.dumps(record) + "\n" for record in records),
+                           encoding="utf-8")
+            raw_bytes = raw.read_bytes()
+            summary = root_path / "summary.json"
+            summary.write_text("preserve summary", encoding="utf-8")
+            argv = [str(MODULE_PATH), str(raw), "--benchmark-binary", str(binary),
+                    "--summary", str(summary)]
+            original_hash = MODULE._sha256_file
+            binary_hashes = 0
+
+            def relink_before_publication(path: Path) -> str:
+                nonlocal binary_hashes
+                digest = original_hash(path)
+                if path == binary:
+                    binary_hashes += 1
+                    if binary_hashes == 2:
+                        summary.unlink()
+                        os.link(raw, summary)
+                return digest
+
+            stderr = io.StringIO()
+            with (mock.patch.object(sys, "argv", argv),
+                  mock.patch.object(MODULE, "_sha256_file", relink_before_publication),
+                  contextlib.redirect_stderr(stderr)):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertIn("path identity changed during analysis", stderr.getvalue())
+            self.assertIn("summary output aliases evidence input", stderr.getvalue())
+            self.assertEqual(raw.read_bytes(), raw_bytes)
+            self.assertEqual(list(root_path.glob(".*.tmp")), [])
+
+    def test_summary_serialization_failure_preserves_all_files(self) -> None:
+        records = fixture()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            binary = root_path / "benchmark"
+            binary.write_bytes(b"benchmark")
+            records[0]["binary_sha256"] = MODULE._sha256_file(binary)
+            raw = root_path / "raw.jsonl"
+            raw.write_text("".join(json.dumps(record) + "\n" for record in records),
+                           encoding="utf-8")
+            summary = root_path / "summary.json"
+            csv_path = root_path / "blocks.csv"
+            summary.write_text("preserve summary", encoding="utf-8")
+            csv_path.write_text("preserve csv", encoding="utf-8")
+            before = {path: path.read_bytes() for path in (raw, binary, summary, csv_path)}
+            argv = [str(MODULE_PATH), str(raw), "--benchmark-binary", str(binary),
+                    "--summary", str(summary), "--csv", str(csv_path)]
+            stderr = io.StringIO()
+            with (mock.patch.object(sys, "argv", argv),
+                  mock.patch.object(MODULE, "summarize", return_value={"bad": float("nan")}),
+                  contextlib.redirect_stderr(stderr)):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertIn("cannot serialize summary", stderr.getvalue())
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
+            self.assertEqual(list(root_path.glob(".*.tmp")), [])
+
+    def test_cli_rejects_inputs_changed_during_output_staging(self) -> None:
+        records = fixture()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            binary = root_path / "benchmark"
+            binary.write_bytes(b"benchmark")
+            records[0]["binary_sha256"] = MODULE._sha256_file(binary)
+            raw = root_path / "raw.jsonl"
+            raw.write_text("".join(json.dumps(record) + "\n" for record in records),
+                           encoding="utf-8")
+            summary = root_path / "summary.json"
+            csv_path = root_path / "blocks.csv"
+            argv = [str(MODULE_PATH), str(raw), "--benchmark-binary", str(binary),
+                    "--summary", str(summary), "--csv", str(csv_path)]
+            original_hash = MODULE._sha256_file
+            for changed, expected, changed_call in (
+                (raw, "evidence file changed during analysis", 3),
+                (binary, "benchmark binary changed during analysis", 2),
+            ):
+                with self.subTest(changed=changed.name):
+                    summary.write_text("preserve summary", encoding="utf-8")
+                    csv_path.write_text("preserve csv", encoding="utf-8")
+                    before = {path: path.read_bytes()
+                              for path in (raw, binary, summary, csv_path)}
+                    calls = 0
+
+                    def changed_hash(path: Path) -> str:
+                        nonlocal calls
+                        if path == changed:
+                            calls += 1
+                            if calls == changed_call:
+                                return "0" * 64
+                        return original_hash(path)
+
+                    stderr = io.StringIO()
+                    with (mock.patch.object(sys, "argv", argv),
+                          mock.patch.object(MODULE, "_sha256_file", changed_hash),
+                          contextlib.redirect_stderr(stderr)):
+                        self.assertEqual(MODULE.main(), 1)
+                    self.assertIn(expected, stderr.getvalue())
+                    self.assertEqual({path: path.read_bytes() for path in before}, before)
+                    self.assertEqual(list(root_path.glob(".*.tmp")), [])
 
     def test_binary_identity_is_verified(self) -> None:
         records = fixture()

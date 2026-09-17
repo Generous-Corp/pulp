@@ -1,8 +1,9 @@
 # GPU-audio P4 evidence files
 
-P4 performance campaigns write `pulp.gpu-audio.p4.raw.v1` JSONL. The format
-keeps every measured block and makes incomplete trials invalid. It is an
-evidence format, not a public SDK API.
+P4 performance campaigns write strict `pulp.gpu-audio.p4.raw.v1` JSONL. Duplicate
+object keys and non-finite JSON constants are invalid. The format keeps every
+measured block and makes incomplete trials invalid. It is an evidence format,
+not a public SDK API.
 
 The first record identifies the exact source and benchmark binary, Release
 flags, machine, macOS version, adapter backend/registry/vendor/device identity,
@@ -23,6 +24,9 @@ that must exactly equal its blocks. A `device_lost` block requires the trial's
 watchdog expiry, or resync drop. Each normal-load async trial must contain eligible
 GPU delivery; all-priming or all-fallback trials cannot qualify. Engine and
 generation stay constant within a trial, and identity integers cannot be booleans.
+Trial, pair, engine, generation, and sequence identities are uint64 values; the
+disk-backed analysis spool preserves their canonical decimal form without signed
+64-bit narrowing.
 
 Timing observations never encode an unavailable boundary as zero. Each field
 records `value_ns`, availability, clock domain, observer, API source, and
@@ -74,8 +78,16 @@ matched pair's shared UI p99 to stay within 10% of its staged value; one slow
 staged trial cannot conceal regressions in the other pairs. Raw trial UI p99
 values remain available in the CSV for plots.
 Both detached outputs carry the SHA-256 of the exact raw JSONL bytes. The CLI
-hashes the file before and after loading and refuses a capture that changes
-during analysis. A default long-tail manifest also names the confirmation
+hashes the raw file around loading, then rehashes both raw and benchmark inputs
+immediately before publication and refuses an input that changes during analysis.
+Raw evidence, benchmark, summary, and CSV paths must identify
+distinct files, including across symbolic and hard links. Outputs are staged in
+their destination directories and atomically replace their individual paths only
+after every requested output has been generated successfully and path identity
+has been rechecked. If any requested replacement fails, the CLI restores every
+pre-existing output entry and removes any output that did not exist before the
+command. A default
+long-tail manifest also names the confirmation
 campaign and exact confirmation-summary SHA-256 it extends; the later matrix
 aggregator must verify that binding before assigning a program verdict.
 

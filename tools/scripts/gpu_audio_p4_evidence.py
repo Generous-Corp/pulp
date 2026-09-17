@@ -13,12 +13,14 @@ import csv
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import random
 import sys
+import tempfile
 from collections.abc import Sequence
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, TextIO
 
 from gpu_audio_p4_evidence_timing import (
     Diagnostics, OBSERVATION_FIELDS, ProvenanceTracker,
@@ -87,8 +89,152 @@ def _integer_at_least(value: Any, minimum: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
 
 
+def _uint64_integer(value: Any) -> bool:
+    return _integer_at_least(value, 0) and value <= UINT64_MAX
+
+
 def _canonical(record: dict[str, Any]) -> bytes:
-    return json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return json.dumps(
+        record, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        allow_nan=False,
+    ).encode()
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate object key {key!r}")
+        value[key] = item
+    return value
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant {value!r}")
+
+
+def _strict_json_loads(line: str) -> Any:
+    value = json.loads(
+        line,
+        object_pairs_hook=_unique_json_object,
+        parse_constant=_reject_json_constant,
+    )
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            if any(0xD800 <= ord(character) <= 0xDFFF for character in item):
+                raise ValueError("unpaired Unicode surrogate in JSON string")
+        elif isinstance(item, float) and not math.isfinite(item):
+            raise ValueError("non-finite JSON number")
+        elif isinstance(item, dict):
+            stack.extend(item.keys())
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return value
+
+
+def _distinct_paths(paths: list[tuple[str, Path]]) -> str | None:
+    """Reject textual, symlink, and hard-link aliases across inputs and outputs."""
+    resolved: dict[Path, str] = {}
+    identities: dict[tuple[int, int], str] = {}
+    for label, path in paths:
+        try:
+            canonical = path.resolve()
+        except (OSError, RuntimeError) as exc:
+            return f"cannot resolve {label} {path}: {exc}"
+        if canonical in resolved:
+            return f"{label} aliases {resolved[canonical]}"
+        resolved[canonical] = label
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            return f"cannot inspect {label} {path}: {exc}"
+        identity = (stat.st_dev, stat.st_ino)
+        if identity in identities:
+            return f"{label} aliases {identities[identity]}"
+        identities[identity] = label
+    return None
+
+
+def _stage_output(path: Path, writer: Callable[[TextIO], None], *,
+                  newline: str | None = None) -> Path:
+    """Write and sync a sibling temporary file without touching the destination."""
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp",
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline=newline) as handle:
+            writer(handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        temporary.unlink(missing_ok=True)
+        raise
+    return temporary
+
+
+def _publish_staged_outputs(staged: list[tuple[Path, Path]]) -> None:
+    """Publish every staged output, restoring the complete old set on failure."""
+    backups: list[tuple[Path, Path | None]] = []
+    published: set[Path] = set()
+    try:
+        for _, destination in staged:
+            backup: Path | None = None
+            if os.path.lexists(destination):
+                descriptor, backup_name = tempfile.mkstemp(
+                    dir=destination.parent,
+                    prefix=f".{destination.name}.",
+                    suffix=".rollback",
+                )
+                os.close(descriptor)
+                backup = Path(backup_name)
+                try:
+                    os.replace(destination, backup)
+                except BaseException:
+                    backup.unlink(missing_ok=True)
+                    raise
+            backups.append((destination, backup))
+
+        for temporary, destination in staged:
+            os.replace(temporary, destination)
+            published.add(destination)
+    except BaseException as publish_error:
+        rollback_errors: list[str] = []
+        for destination, backup in reversed(backups):
+            try:
+                if destination in published:
+                    destination.unlink(missing_ok=True)
+                if backup is not None:
+                    os.replace(backup, destination)
+            except OSError as exc:
+                rollback_errors.append(f"{destination}: {exc}")
+        if rollback_errors:
+            raise OSError(
+                f"{publish_error}; output rollback also failed: "
+                + "; ".join(rollback_errors)
+            ) from publish_error
+        raise
+    else:
+        # Publication has committed. A stale backup is safer than reporting a
+        # failure after the requested outputs have already changed.
+        for _, backup in backups:
+            if backup is not None:
+                try:
+                    backup.unlink(missing_ok=True)
+                except OSError:
+                    pass
+    finally:
+        for temporary, _ in staged:
+            temporary.unlink(missing_ok=True)
 
 
 def _percentile(values: list[float], pct: float) -> float | None:
@@ -241,21 +387,29 @@ def read_jsonl(path: Path) -> tuple[Sequence[dict[str, Any]], list[str]]:
     records = _RecordStore()
     errors: list[str] = Diagnostics()
     try:
-        handle = path.open("r", encoding="utf-8")
+        handle = path.open("rb")
     except OSError as exc:
         records.close()
         return [], [f"cannot read {path}: {exc}"]
     line_count = 0
     with handle:
-        for line_number, line in enumerate(handle, 1):
+        for line_number, encoded_line in enumerate(handle, 1):
             line_count = line_number
+            try:
+                line = encoded_line.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                errors.append(
+                    f"line {line_number}: invalid UTF-8 at byte {exc.start}: {exc.reason}"
+                )
+                continue
             if not line.strip():
                 errors.append(f"line {line_number}: blank lines are not allowed")
                 continue
             try:
-                value = json.loads(line)
-            except json.JSONDecodeError as exc:
-                errors.append(f"line {line_number}: invalid JSON: {exc.msg}")
+                value = _strict_json_loads(line)
+            except (json.JSONDecodeError, ValueError, RecursionError) as exc:
+                detail = exc.msg if isinstance(exc, json.JSONDecodeError) else str(exc)
+                errors.append(f"line {line_number}: invalid JSON: {detail}")
                 continue
             if not isinstance(value, dict):
                 errors.append(f"line {line_number}: record must be an object")
@@ -316,8 +470,9 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
     if manifest.get("build_type") != "Release":
         errors.append("line 1: build_type must be Release")
     flags = manifest.get("build_flags")
-    if not isinstance(flags, list) or "-O3" not in flags or "-DNDEBUG" not in flags:
-        errors.append("line 1: build_flags must contain -O3 and -DNDEBUG")
+    if (not isinstance(flags, list) or not all(_nonempty(flag) for flag in flags)
+            or "-O3" not in flags or "-DNDEBUG" not in flags):
+        errors.append("line 1: build_flags must be non-empty strings containing -O3 and -DNDEBUG")
     if manifest.get("paced") is not True:
         errors.append("line 1: paced must be true")
     if not _integer_at_least(manifest.get("warmup_blocks"), 1):
@@ -389,7 +544,7 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
     seen_trial_ids: set[int] = set()
     identities = _IdentityStore()
     pair_paths: dict[int, list[str]] = {}
-    previous_path: str | None = None
+    previous_async_path: str | None = None
     overload_failure_observed = False
     timing_provenance = ProvenanceTracker()
     for record_index, record in enumerate(records):
@@ -406,21 +561,22 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
             trial_id = record.get("trial_id")
             path = record.get("path")
             pair_id = record.get("pair_id")
-            trial_id_valid = _integer_at_least(trial_id, 0)
+            trial_id_valid = _uint64_integer(trial_id)
             if not trial_id_valid or trial_id in seen_trial_ids:
-                errors.append(f"line {line}: trial_id must be a unique non-negative integer")
+                errors.append(f"line {line}: trial_id must be a unique uint64 integer")
             path_valid = isinstance(path, str) and path in PATHS
             if not path_valid:
                 errors.append(f"line {line}: path is invalid")
             if path_valid and path in {"staged_async", "shared_async"}:
-                if not _integer_at_least(pair_id, 0):
-                    errors.append(f"line {line}: async trial pair_id must be a non-negative integer")
+                if not _uint64_integer(pair_id):
+                    errors.append(f"line {line}: async trial pair_id must be a uint64 integer")
                 else:
                     pair_paths.setdefault(pair_id, []).append(path)
+                if previous_async_path == path:
+                    errors.append(f"line {line}: matched trials must alternate async paths")
+                previous_async_path = path
             elif path_valid and pair_id is not None:
                 errors.append(f"line {line}: staged_sync pair_id must be null")
-            if previous_path == path:
-                errors.append(f"line {line}: matched trials must alternate paths")
             current = {"id": trial_id, "path": path, "pair_id": pair_id,
                        "block_count": 0, "digest": hashlib.sha256(),
                        "first_sequence": None, "submit_samples": 0,
@@ -430,7 +586,6 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
                        "deliveries": {name: 0 for name in DELIVERIES}}
             if trial_id_valid:
                 seen_trial_ids.add(trial_id)
-            previous_path = path
         elif kind == "block":
             if current is None:
                 errors.append(f"line {line}: block outside a trial")
@@ -790,8 +945,8 @@ def summarize(records: Sequence[dict[str, Any]], *,
     return result
 
 
-def write_csv(records: Iterable[dict[str, Any]], path: Path, *,
-              evidence_sha256: str | None = None) -> None:
+def _write_csv_handle(records: Iterable[dict[str, Any]], handle: TextIO, *,
+                      evidence_sha256: str | None = None) -> None:
     manifest: dict[str, Any] | None = None
     identity_columns = ["campaign_id", "campaign", "source_revision", "binary_sha256",
                         "machine_id", "machine_model", "os_version", "adapter_name",
@@ -811,44 +966,55 @@ def write_csv(records: Iterable[dict[str, Any]], path: Path, *,
     columns.extend(("device_loss", "audio_xrun", "driver_stall"))
     columns.extend(f"gpu_terminal_count_{name}" for name in sorted(GPU_TERMINALS))
     columns.extend(f"delivery_count_{name}" for name in sorted(DELIVERIES))
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        for record in records:
-            if record.get("record_kind") == "manifest":
-                manifest = record
-                continue
-            if record.get("record_kind") not in {"block", "trial_end"}:
-                continue
-            if manifest is None:
-                raise ValueError("manifest must precede block records")
-            row = {key: manifest[key] for key in identity_columns}
-            row["evidence_sha256"] = evidence_sha256 or ""
-            row["record_kind"] = record["record_kind"]
-            for key in ("trial_id", "pair_id", "path", "block_ordinal", "engine_id",
-                        "generation", "sequence", "gpu_terminal", "delivery", "deadline_miss",
-                        "watchdog_expiry", "late_completion", "resync_drop"):
-                row[key] = record.get(key, "")
-            if record["record_kind"] == "block":
-                for name in TIMINGS:
-                    observation = record["timings"][name]
-                    for suffix in OBSERVATION_FIELDS:
-                        value = observation[suffix]
-                        row[f"{name}_{suffix}"] = "" if value is None else value
-                row.update(record["transfers"])
-            else:
-                for name in ("ui_frame_p99", "duration"):
-                    observation = record[name]
-                    for suffix in OBSERVATION_FIELDS:
-                        value = observation[suffix]
-                        row[f"{name}_{suffix}"] = "" if value is None else value
-                for name in ("device_loss", "audio_xrun", "driver_stall"):
-                    row[name] = record[name]
-                for name, count in record["gpu_terminal_counts"].items():
-                    row[f"gpu_terminal_count_{name}"] = count
-                for name, count in record["delivery_counts"].items():
-                    row[f"delivery_count_{name}"] = count
-            writer.writerow(row)
+    writer = csv.DictWriter(handle, fieldnames=columns)
+    writer.writeheader()
+    for record in records:
+        if record.get("record_kind") == "manifest":
+            manifest = record
+            continue
+        if record.get("record_kind") not in {"block", "trial_end"}:
+            continue
+        if manifest is None:
+            raise ValueError("manifest must precede block records")
+        row = {key: manifest[key] for key in identity_columns}
+        row["evidence_sha256"] = evidence_sha256 or ""
+        row["record_kind"] = record["record_kind"]
+        for key in ("trial_id", "pair_id", "path", "block_ordinal", "engine_id",
+                    "generation", "sequence", "gpu_terminal", "delivery", "deadline_miss",
+                    "watchdog_expiry", "late_completion", "resync_drop"):
+            row[key] = record.get(key, "")
+        if record["record_kind"] == "block":
+            for name in TIMINGS:
+                observation = record["timings"][name]
+                for suffix in OBSERVATION_FIELDS:
+                    value = observation[suffix]
+                    row[f"{name}_{suffix}"] = "" if value is None else value
+            row.update(record["transfers"])
+        else:
+            for name in ("ui_frame_p99", "duration"):
+                observation = record[name]
+                for suffix in OBSERVATION_FIELDS:
+                    value = observation[suffix]
+                    row[f"{name}_{suffix}"] = "" if value is None else value
+            for name in ("device_loss", "audio_xrun", "driver_stall"):
+                row[name] = record[name]
+            for name, count in record["gpu_terminal_counts"].items():
+                row[f"gpu_terminal_count_{name}"] = count
+            for name, count in record["delivery_counts"].items():
+                row[f"delivery_count_{name}"] = count
+        writer.writerow(row)
+
+
+def write_csv(records: Iterable[dict[str, Any]], path: Path, *,
+              evidence_sha256: str | None = None) -> None:
+    temporary = _stage_output(
+        path,
+        lambda handle: _write_csv_handle(
+            records, handle, evidence_sha256=evidence_sha256,
+        ),
+        newline="",
+    )
+    _publish_staged_outputs([(temporary, path)])
 
 
 def main() -> int:
@@ -858,10 +1024,14 @@ def main() -> int:
     parser.add_argument("--summary", type=Path)
     parser.add_argument("--csv", type=Path)
     args = parser.parse_args()
-    inputs = {args.evidence.resolve(), args.benchmark_binary.resolve()}
-    outputs = [path.resolve() for path in (args.summary, args.csv) if path is not None]
-    if any(path in inputs for path in outputs) or len(outputs) != len(set(outputs)):
-        print("gpu-audio-p4-evidence: outputs must be distinct from each other and inputs",
+    paths = [("evidence input", args.evidence),
+             ("benchmark input", args.benchmark_binary)]
+    paths.extend((label, path) for label, path in (
+        ("summary output", args.summary), ("CSV output", args.csv),
+    ) if path is not None)
+    alias_error = _distinct_paths(paths)
+    if alias_error:
+        print(f"gpu-audio-p4-evidence: paths must refer to distinct files: {alias_error}",
               file=sys.stderr)
         return 1
     try:
@@ -884,13 +1054,39 @@ def main() -> int:
                 print(f"gpu-audio-p4-evidence: {error}", file=sys.stderr)
             return 1
         result = summarize(records, evidence_sha256=evidence_sha256)
-        encoded = json.dumps(result, indent=2, sort_keys=True) + "\n"
-        if args.summary:
-            args.summary.write_text(encoded, encoding="utf-8")
-        else:
+        try:
+            encoded = json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        except (TypeError, ValueError) as exc:
+            print(f"gpu-audio-p4-evidence: cannot serialize summary: {exc}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            if args.summary:
+                staged.append((_stage_output(args.summary, lambda handle: handle.write(encoded)),
+                               args.summary))
+            if args.csv:
+                staged.append((_stage_output(
+                    args.csv,
+                    lambda handle: _write_csv_handle(
+                        records, handle, evidence_sha256=evidence_sha256,
+                    ),
+                    newline="",
+                ), args.csv))
+            if _sha256_file(args.evidence) != evidence_sha256:
+                raise ValueError("evidence file changed during analysis")
+            if _sha256_file(args.benchmark_binary) != records[0]["binary_sha256"]:
+                raise ValueError("benchmark binary changed during analysis")
+            alias_error = _distinct_paths(paths)
+            if alias_error:
+                raise ValueError(f"path identity changed during analysis: {alias_error}")
+            _publish_staged_outputs(staged)
+        except (OSError, ValueError) as exc:
+            for temporary, _ in staged:
+                temporary.unlink(missing_ok=True)
+            print(f"gpu-audio-p4-evidence: cannot publish outputs: {exc}", file=sys.stderr)
+            return 1
+        if not args.summary:
             print(encoded, end="")
-        if args.csv:
-            write_csv(records, args.csv, evidence_sha256=evidence_sha256)
         return 0
     finally:
         if isinstance(records, _RecordStore):
