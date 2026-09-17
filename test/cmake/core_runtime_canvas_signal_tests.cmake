@@ -453,6 +453,8 @@ pulp_add_test_suite(pulp-test-gpu-audio-execution-controller
     SOURCES test_gpu_audio_execution_controller.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+target_compile_definitions(pulp-test-gpu-audio-execution-controller
+    PRIVATE PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS=1)
 
 # Private fixed-slot lifecycle used by the shared-memory GPU-audio dispatcher.
 # Dawn-free and deterministic: compile the exact production source directly so

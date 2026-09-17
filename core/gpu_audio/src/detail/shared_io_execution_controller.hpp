@@ -51,6 +51,11 @@ struct SharedIoDelivery {
 
 class SharedIoExecutionController {
   public:
+#if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
+    using BeforePublishTestHook = void (*)(SharedIoExecutionController&, std::uint64_t,
+                                           void*) noexcept;
+#endif
+
     SharedIoExecutionController() = default;
     ~SharedIoExecutionController() = default;
     SharedIoExecutionController(const SharedIoExecutionController&) = delete;
@@ -73,7 +78,7 @@ class SharedIoExecutionController {
         contract_ = contract;
         capacity_ = contract.pipeline_depth;
         telemetry_ = telemetry;
-        next_admission_sequence_ = 0;
+        next_admission_sequence_.store(0, std::memory_order_relaxed);
         next_callback_sequence_ = 0;
         callback_started_ = false;
         in_flight_.store(0, std::memory_order_relaxed);
@@ -100,12 +105,22 @@ class SharedIoExecutionController {
         return contract_.algorithmic_lead_blocks;
     }
 
+#if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
+    void set_before_publish_test_hook(BeforePublishTestHook hook, void* context) noexcept {
+        before_publish_test_hook_ = hook;
+        before_publish_test_context_ = context;
+    }
+    std::uint32_t in_flight_for_testing() const noexcept {
+        return in_flight_.load(std::memory_order_relaxed);
+    }
+#endif
+
     // Non-RT dispatcher operation. Admission is strictly ordered so a missing
     // input cannot silently move the logical stream onto another sequence.
     SharedIoAdmission admit_submission(std::uint64_t sequence) noexcept {
         if (!prepared_)
             return SharedIoAdmission::NotPrepared;
-        if (sequence != next_admission_sequence_) {
+        if (sequence != next_admission_sequence_.load(std::memory_order_acquire)) {
             if (telemetry_)
                 telemetry_->record_resync_drop();
             return SharedIoAdmission::SequenceGap;
@@ -121,18 +136,33 @@ class SharedIoExecutionController {
             entry.sequence = sequence;
             entry.completion = SharedIoCompletion::Failed;
             entry.failure_reason = SharedIoFallbackReason::SubmissionRejected;
+            auto expected_sequence = sequence;
+            if (!next_admission_sequence_.compare_exchange_strong(expected_sequence, sequence + 1,
+                                                                  std::memory_order_acq_rel,
+                                                                  std::memory_order_acquire)) {
+                entry.state.store(static_cast<std::uint8_t>(EntryState::Empty),
+                                  std::memory_order_release);
+                if (telemetry_)
+                    telemetry_->record_resync_drop();
+                return SharedIoAdmission::SequenceGap;
+            }
+            // Occupancy must be reserved before the release-store publishes
+            // the entry to provider and callback consumers.
+            const auto count = in_flight_.fetch_add(1, std::memory_order_relaxed) + 1;
+#if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
+            if (before_publish_test_hook_)
+                before_publish_test_hook_(*this, sequence, before_publish_test_context_);
+#endif
             entry.state.store(static_cast<std::uint8_t>(EntryState::Admitted),
                               std::memory_order_release);
-            ++next_admission_sequence_;
-            const auto count = in_flight_.fetch_add(1, std::memory_order_relaxed) + 1;
             if (telemetry_) {
                 telemetry_->record_submit();
                 telemetry_->observe_in_flight(count);
             }
             return SharedIoAdmission::Accepted;
         }
-        if (telemetry_)
-            telemetry_->record_input_drop();
+        // Saturation is retryable backpressure. The owner records an input
+        // drop only if it abandons this sequence.
         return SharedIoAdmission::CapacityFull;
     }
 
@@ -185,17 +215,22 @@ class SharedIoExecutionController {
         if (telemetry_)
             telemetry_->record_callback_block(false);
         if (callback_started_ && callback_sequence != next_callback_sequence_) {
+            const bool forward_gap = callback_sequence > next_callback_sequence_;
             // A timeline discontinuity is itself a miss. Keep the declared
             // miss policy (CPU fallback, silence, or dry passthrough) rather
             // than relying on SharedIoDelivery's default Silence value.
             result.path = fallback_path();
             result.fallback_reason = SharedIoFallbackReason::SequenceGap;
-            result.resynced = true;
+            result.resynced = forward_gap;
             if (telemetry_)
                 telemetry_->record_resync_drop();
             if (telemetry_)
                 telemetry_->record_delivery(true, false);
-            next_callback_sequence_ = callback_sequence + 1;
+            if (forward_gap) {
+                resync_admission(callback_sequence);
+                discard_ready_entries_before(callback_sequence);
+                next_callback_sequence_ = callback_sequence + 1;
+            }
             return result;
         }
         callback_started_ = true;
@@ -223,8 +258,10 @@ class SharedIoExecutionController {
                                       std::memory_order_release);
                     in_flight_.fetch_sub(1, std::memory_order_relaxed);
                     late = true;
-                    if (telemetry_)
+                    if (telemetry_) {
                         telemetry_->record_resync_drop();
+                        telemetry_->record_late_completion();
+                    }
                 }
                 continue;
             }
@@ -245,7 +282,7 @@ class SharedIoExecutionController {
                               std::memory_order_release);
             in_flight_.fetch_sub(1, std::memory_order_relaxed);
             if (telemetry_)
-                telemetry_->record_delivery(result.uses_fallback(), late);
+                telemetry_->record_delivery(result.uses_fallback(), false);
             return result;
         }
 
@@ -254,7 +291,7 @@ class SharedIoExecutionController {
         if (telemetry_)
             telemetry_->record_deadline_miss();
         if (telemetry_)
-            telemetry_->record_delivery(result.uses_fallback(), late);
+            telemetry_->record_delivery(result.uses_fallback(), false);
         result.resynced = late;
         return result;
     }
@@ -281,19 +318,54 @@ class SharedIoExecutionController {
         return SharedIoDeliveryPath::Silence;
     }
 
+    void resync_admission(std::uint64_t sequence) noexcept {
+        auto current = next_admission_sequence_.load(std::memory_order_acquire);
+        while (current < sequence &&
+               !next_admission_sequence_.compare_exchange_weak(
+                   current, sequence, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        }
+    }
+
+    void discard_ready_entries_before(std::uint64_t sequence) noexcept {
+        for (std::uint32_t index = 0; index < capacity_; ++index) {
+            Entry& entry = entries_[index];
+            auto state = entry.state.load(std::memory_order_acquire);
+            if (state != static_cast<std::uint8_t>(EntryState::Ready))
+                continue;
+            if (entry.sequence >= sequence)
+                continue;
+            if (!entry.state.compare_exchange_strong(
+                    state, static_cast<std::uint8_t>(EntryState::Claimed),
+                    std::memory_order_acq_rel, std::memory_order_acquire))
+                continue;
+            entry.state.store(static_cast<std::uint8_t>(EntryState::Empty),
+                              std::memory_order_release);
+            in_flight_.fetch_sub(1, std::memory_order_relaxed);
+            if (telemetry_) {
+                telemetry_->record_resync_drop();
+                telemetry_->record_late_completion();
+            }
+        }
+    }
+
     std::unique_ptr<Entry[]> entries_;
     SharedIoExecutionContract contract_;
     SharedIoTelemetry* telemetry_ = nullptr;
     std::atomic<std::uint32_t> in_flight_{0};
     std::uint32_t capacity_ = 0;
-    std::uint64_t next_admission_sequence_ = 0;
+    std::atomic<std::uint64_t> next_admission_sequence_{0};
     std::uint64_t next_callback_sequence_ = 0;
     bool callback_started_ = false;
     bool prepared_ = false;
+#if defined(PULP_GPU_AUDIO_CONTROLLER_TEST_HOOKS)
+    BeforePublishTestHook before_publish_test_hook_ = nullptr;
+    void* before_publish_test_context_ = nullptr;
+#endif
 };
 
 static_assert(noexcept(std::declval<SharedIoExecutionController&>().deliver(0)));
 static_assert(std::atomic<std::uint8_t>::is_always_lock_free);
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
+static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
 
 } // namespace pulp::gpu_audio::detail

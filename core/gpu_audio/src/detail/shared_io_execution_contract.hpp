@@ -177,6 +177,9 @@ class SharedIoTelemetry {
         if (late)
             late_completions_.fetch_add(1, std::memory_order_relaxed);
     }
+    void record_late_completion() noexcept {
+        late_completions_.fetch_add(1, std::memory_order_relaxed);
+    }
     void record_resync_drop() noexcept {
         resync_drops_.fetch_add(1, std::memory_order_relaxed);
     }
