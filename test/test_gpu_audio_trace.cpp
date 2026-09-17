@@ -758,6 +758,68 @@ TEST_CASE("transport final disposition replaces bridge silence exactly once",
     REQUIRE(fixture.session.release());
 }
 
+TEST_CASE("stamped bridge applies configurable lead to delivery and trace identity",
+          "[gpu_audio][shared_io][trace][delivery][lead]") {
+    const std::array<float, 2> input{1.f, 2.f};
+    const std::array<float, 2> expected{3.f, 4.f};
+    for (const std::uint32_t lead : {1u, 2u, 4u, 8u}) {
+        for (const bool defer_delivery : {false, true}) {
+            auto trace_config = config(1);
+            trace_config.contract.algorithmic_lead_blocks = lead;
+            trace_config.contract.pipeline_depth = lead + 1u;
+            SharedIoTraceRecorder recorder(trace_config);
+            REQUIRE(recorder.enabled());
+
+            SharedIoStampedBridge bridge;
+            REQUIRE(bridge.prepare({.capacity = lead + 1u,
+                                    .channels = 1,
+                                    .block_size = 2,
+                                    .lead_blocks = lead},
+                                   1));
+            bridge.set_trace(&recorder);
+            CHECK(bridge.lead_blocks() == lead);
+
+            std::array<float, 2> output{};
+            for (std::uint64_t sequence = 0; sequence < lead; ++sequence) {
+                const auto callback = bridge.begin_callback(input, sequence);
+                REQUIRE(callback.valid());
+                CHECK(bridge.consume_output(callback, output) ==
+                      SharedIoStampedBridge::Delivery::Priming);
+                const auto ingress = bridge.acquire_input();
+                REQUIRE(ingress);
+                CHECK(ingress->stamp() == SharedIoStampedBridge::Stamp{1, sequence});
+                REQUIRE(bridge.release_input(*ingress));
+            }
+
+            REQUIRE(bridge.publish_output({1, 0}, expected) ==
+                    SharedIoStampedBridge::Publication::Published);
+            const auto callback = bridge.begin_callback(input, lead);
+            REQUIRE(callback.valid());
+            CHECK(bridge.consume_output(callback, output, nullptr, defer_delivery) ==
+                  SharedIoStampedBridge::Delivery::Ready);
+            CHECK(output == expected);
+            const auto ingress = bridge.acquire_input();
+            REQUIRE(ingress);
+            CHECK(ingress->stamp() == SharedIoStampedBridge::Stamp{1, lead});
+            REQUIRE(bridge.release_input(*ingress));
+            if (defer_delivery) {
+                REQUIRE(bridge.complete_callback_delivery(
+                    callback, SharedIoDeliveryDisposition::GpuDelivered));
+            }
+
+            std::vector<SharedIoTraceRecord> records;
+            REQUIRE(recorder.drain_worker_records(
+                        256, [&](const auto& record) { records.push_back(record); }) == 2);
+            REQUIRE(records.size() == 2);
+            CHECK(records[0].kind == SharedIoTraceKind::Eligible);
+            CHECK(records[1].kind == SharedIoTraceKind::Delivery);
+            CHECK(records[0].sequence == 0);
+            CHECK(records[1].sequence == 0);
+            CHECK(records[1].delivery == SharedIoDeliveryDisposition::GpuDelivered);
+        }
+    }
+}
+
 TEST_CASE("deferred callback delivery prevents epoch replacement and forged GPU success",
           "[gpu_audio][trace][delivery]") {
     SharedIoStampedBridge bridge;
