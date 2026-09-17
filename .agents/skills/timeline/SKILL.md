@@ -1950,11 +1950,14 @@ at the model layer, and keep a separate standalone-shape assertion for the host
 refusal so narrowing the model's reach does not silently retire it.
 
 The device catalog (`tools/timeline/src/device_catalog.cpp`) publishes what a
-chain may name — binding key, domain, reported latency, and the two bounds
-admission enforces. It lives in `tools/timeline` rather than in either
-boundary because `pulp-cli` and `pulp-mcp-core` link `pulp::tool-timeline`
-publicly but not `pulp::host`; putting the encoder anywhere else widens a
-target's link surface to pull the host in.
+chain may name — binding key, domain, reported latency, stable parameter IDs,
+plain ranges, defaults, units and behavior flags, and the two bounds admission
+enforces. Built-in humaniser controls are direct runtime controls; the catalog
+marks them non-automatable, non-rampable and non-modulatable, and Timeline
+placement state does not persist them. The catalog lives in `tools/timeline`
+rather than in either boundary because `pulp-cli` and `pulp-mcp-core` link
+`pulp::tool-timeline` publicly but not `pulp::host`; putting the encoder anywhere
+else widens a target's link surface to pull the host in.
 
 ### `Track::create` moves its input partway through, so late validation reads an empty collection
 

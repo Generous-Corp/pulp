@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -176,14 +177,44 @@ class EventHumaniserSlot final : public PluginSlot {
             position_ += frame_count;
             return;
         }
+        humanise_.update_spec_for_future_attacks(spec());
         humanise_.process(midi_in, midi_out, timebase::SamplePosition{position_}, frame_count);
         position_ += frame_count;
     }
-    std::vector<HostParamInfo> parameters() const override { return {}; }
-    float get_parameter(std::uint32_t) const override { return 0.0f; }
-    void set_parameter(std::uint32_t, float) override {}
+    std::vector<HostParamInfo> parameters() const override {
+        ParamFlags continuous;
+        continuous.automatable = false;
+        continuous.rampable = false;
+        continuous.modulatable = false;
+        auto stepped = continuous;
+        stepped.stepped = true;
+        return {
+            {kEventHumaniserTimingDepthParamId, "Timing Depth", "", 0.0f, 1.0f, 1.0f, continuous},
+            {kEventHumaniserVelocityDepthParamId, "Velocity Depth", "MIDI velocity", 0.0f, 127.0f,
+             static_cast<float>(kDefaultVelocityDepth), stepped},
+        };
+    }
+    float get_parameter(std::uint32_t id) const override {
+        if (id == kEventHumaniserTimingDepthParamId)
+            return timing_depth_.load(std::memory_order_relaxed);
+        if (id == kEventHumaniserVelocityDepthParamId)
+            return velocity_depth_.load(std::memory_order_relaxed);
+        return 0.0f;
+    }
+    void set_parameter(std::uint32_t id, float value) override {
+        if (!std::isfinite(value))
+            return;
+        if (id == kEventHumaniserTimingDepthParamId)
+            timing_depth_.store(std::clamp(value, 0.0f, 1.0f), std::memory_order_relaxed);
+        else if (id == kEventHumaniserVelocityDepthParamId)
+            velocity_depth_.store(static_cast<float>(std::clamp(std::lround(value), 0l, 127l)),
+                                  std::memory_order_relaxed);
+    }
     void set_bypass(bool bypassed) override { bypassed_ = bypassed; }
     bool is_bypassed() const override { return bypassed_; }
+    // Built-in Timeline placements reject opaque state_ref payloads at admission.
+    // These values therefore live on the shared runtime parameter surface
+    // rather than pretending to be restorable device state.
     std::vector<std::uint8_t> save_state() const override { return {}; }
     bool restore_state(const std::vector<std::uint8_t>& data) override { return data.empty(); }
     bool has_editor() const override { return false; }
@@ -197,10 +228,21 @@ class EventHumaniserSlot final : public PluginSlot {
     // render. A payoff test that cannot predict the schedule cannot prove the
     // compensation moved it.
     static constexpr std::uint64_t kSeed = 0x5ee'd10'ddull;
-    static constexpr std::uint8_t kVelocitySpread = 12;
+    static constexpr std::uint8_t kDefaultVelocityDepth = 12;
 
-    static constexpr midi::HumanizeSpec spec() noexcept {
-        return {static_cast<std::int64_t>(kEventHumaniserWindowSamples), kVelocitySpread, kSeed};
+    midi::HumanizeSpec spec() const noexcept {
+        const auto timing_depth =
+            std::clamp(timing_depth_.load(std::memory_order_relaxed), 0.0f, 1.0f);
+        const auto velocity_depth =
+            static_cast<std::uint8_t>(velocity_depth_.load(std::memory_order_relaxed));
+        const auto variable_samples = static_cast<std::int64_t>(
+            std::llround(timing_depth * static_cast<float>(kEventHumaniserWindowSamples)));
+        return {
+            static_cast<std::int64_t>(kEventHumaniserWindowSamples),
+            velocity_depth,
+            kSeed,
+            static_cast<std::int64_t>(kEventHumaniserWindowSamples) - variable_samples,
+        };
     }
     void reset() noexcept {
         humanise_ = midi::Humanize<>(spec());
@@ -208,6 +250,8 @@ class EventHumaniserSlot final : public PluginSlot {
     }
 
     PluginInfo info_;
+    std::atomic<float> timing_depth_{1.0f};
+    std::atomic<float> velocity_depth_{static_cast<float>(kDefaultVelocityDepth)};
     midi::Humanize<> humanise_{spec()};
     std::int64_t position_ = 0;
     bool prepared_ = false;
