@@ -26,10 +26,10 @@ SharedIoConvolutionPipeline::begin_callback(std::span<const float> samples) noex
 }
 
 SharedIoConvolutionPipeline::Delivery
-SharedIoConvolutionPipeline::consume_output(const Callback& callback,
-                                            std::span<float> output) noexcept {
+SharedIoConvolutionPipeline::consume_output(const Callback& callback, std::span<float> output,
+                                            bool defer_delivery) noexcept {
     bool finalized = false;
-    const auto result = bridge_.consume_output(callback, output, &finalized);
+    const auto result = bridge_.consume_output(callback, output, &finalized, defer_delivery);
     // This is the callback's sole interaction with the executor: publishing its
     // atomic watermark. Callback code never reads or mutates terminal, OLA, or
     // ready storage. Sequence q consumes wet q - lead; once that callback has
@@ -75,7 +75,7 @@ std::size_t SharedIoConvolutionPipeline::drain_terminals() noexcept {
         executor_.release_ready(sequence);
     }
     if (executor_.fenced())
-        bridge_.suspend_delivery();
+        bridge_.request_recovery(SharedIoRecoveryReason::ProviderFailure);
     return count;
 }
 

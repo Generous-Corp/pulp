@@ -12,6 +12,16 @@
 
 namespace pulp::gpu_audio::detail {
 
+enum class SharedIoRecoveryReason : std::uint8_t {
+    None,
+    SequenceGap,
+    InputSaturated,
+    ProviderFailure,
+    ProviderLost,
+    OfflineFence,
+    InvalidCallback
+};
+
 // Fixed audio records between one callback producer/consumer and one serialized
 // worker. The worker owns epoch changes, ingress consumption, and egress
 // publication. Neither epoch changes nor output drops reclaim a consumer lease.
@@ -78,15 +88,27 @@ class SharedIoStampedBridge {
     // Callback only. Valid blocks advance absolute sequence even on a full
     // ingress or while GPU delivery is disabled. Finish each callback's output
     // before beginning another callback; fallback priming belongs to the owner.
-    Callback begin_callback(std::span<const float> samples) noexcept;
+    Callback begin_callback(std::span<const float> samples) noexcept {
+        return begin_callback(samples, next_sequence_);
+    }
+    Callback begin_callback(std::span<const float> samples, std::uint64_t sequence) noexcept;
+    void request_recovery(SharedIoRecoveryReason reason) noexcept;
+    SharedIoRecoveryReason recovery_reason() const noexcept {
+        return recovery_reason_.load(std::memory_order_acquire);
+    }
+    bool complete_callback_delivery(const Callback&, SharedIoDeliveryDisposition) noexcept;
     Claim claim_output(const Callback&) noexcept;
     Delivery finish_output(const Lease&, std::span<float> output) noexcept;
-    Delivery consume_output(const Callback&, std::span<float> output,
-                            bool* finalized = nullptr) noexcept;
+    Delivery consume_output(const Callback&, std::span<float> output, bool* finalized = nullptr,
+                            bool defer_delivery = false) noexcept;
 
     // Worker only. Input and output samples stay immutable until the consumer
     // returns its lease. Output publication may skip sequences but never reorder
     // them; a future front record therefore cannot fill an earlier hole.
+    // An admission reserved before a recovery request may finish. Closing the
+    // gate prevents every later reservation without waiting on the callback.
+    bool begin_worker_admission() noexcept;
+    void end_worker_admission() noexcept;
     std::optional<Lease> acquire_input() noexcept;
     bool release_input(const Lease&) noexcept;
     Publication publish_output(Stamp, std::span<const float> samples) noexcept;
@@ -131,7 +153,12 @@ class SharedIoStampedBridge {
     SharedIoTraceRecorder* trace_ = nullptr;
     SharedIoTelemetry* trace_telemetry_ = nullptr;
     std::uint64_t epoch_first_sequence_ = 0; // changes only while callback is quiescent
-    bool trace_output_eligible_ = false;     // callback only
+    bool defer_delivery_ = false;
+    bool delivery_pending_ = false;
+    Delivery observed_delivery_ = Delivery::Invalid;
+    std::atomic<unsigned> admission_gate_{0}; // open bit 1, worker reservation bit 2
+    std::atomic<SharedIoRecoveryReason> recovery_reason_{SharedIoRecoveryReason::None};
+    bool trace_output_eligible_ = false; // callback only
     std::atomic<std::uint64_t> delivery_epoch_{0};
     std::uint64_t last_epoch_ = 0;    // worker only
     std::optional<Stamp> finalized_;  // worker/offline pump only
@@ -144,5 +171,7 @@ class SharedIoStampedBridge {
 };
 
 static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
+static_assert(std::atomic<unsigned>::is_always_lock_free);
+static_assert(std::atomic<SharedIoRecoveryReason>::is_always_lock_free);
 
 } // namespace pulp::gpu_audio::detail

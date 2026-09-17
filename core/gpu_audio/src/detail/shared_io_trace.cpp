@@ -10,11 +10,12 @@ bool SharedIoTraceRecord::valid() const noexcept {
     if (static_cast<unsigned>(kind) > static_cast<unsigned>(SharedIoTraceKind::Recovery) ||
         generation == 0 || valid_stages >> kSharedIoTraceStageCount != 0 ||
         static_cast<unsigned>(outcome) > static_cast<unsigned>(SharedIoTraceOutcome::Cancelled) ||
-        static_cast<unsigned>(reason) > static_cast<unsigned>(SharedIoFallbackReason::Teardown) ||
+        static_cast<unsigned>(reason) >
+            static_cast<unsigned>(SharedIoFallbackReason::CompletionFailed) ||
         static_cast<unsigned>(gpu_reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::Teardown) ||
+            static_cast<unsigned>(SharedIoFallbackReason::CompletionFailed) ||
         static_cast<unsigned>(delivery_reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::Teardown) ||
+            static_cast<unsigned>(SharedIoFallbackReason::CompletionFailed) ||
         static_cast<unsigned>(gpu_terminal) >
             static_cast<unsigned>(SharedIoGpuTerminalDisposition::CancelledTeardown) ||
         static_cast<unsigned>(delivery) >
@@ -157,6 +158,8 @@ const char* shared_io_fallback_reason_name(SharedIoFallbackReason value) noexcep
         return "input_saturated";
     case SharedIoFallbackReason::SequenceGap:
         return "sequence_gap";
+    case SharedIoFallbackReason::CompletionFailed:
+        return "completion_failed";
     case SharedIoFallbackReason::Teardown:
         return "teardown";
     }

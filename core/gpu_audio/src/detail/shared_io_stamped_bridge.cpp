@@ -68,13 +68,26 @@ bool SharedIoStampedBridge::release(Queue& queue, const Lease& lease) noexcept {
 }
 
 SharedIoStampedBridge::Callback
-SharedIoStampedBridge::begin_callback(std::span<const float> samples) noexcept {
-    if (!prepared_ || callback_open_ || samples.size() != sample_count_)
+SharedIoStampedBridge::begin_callback(std::span<const float> samples,
+                                      std::uint64_t sequence) noexcept {
+    if (!prepared_)
         return {};
+    if (callback_open_ || delivery_pending_ || samples.size() != sample_count_) {
+        request_recovery(SharedIoRecoveryReason::InvalidCallback);
+        return {};
+    }
+    if (sequence < next_sequence_) {
+        request_recovery(SharedIoRecoveryReason::InvalidCallback);
+        return {};
+    }
+    if (sequence > next_sequence_)
+        request_recovery(SharedIoRecoveryReason::SequenceGap);
+    next_sequence_ = sequence;
     if (next_sequence_ >= kSequenceLimit)
         return {{}, Admission::SequenceExhausted};
     current_ = {delivery_epoch(), next_sequence_++};
     callback_open_ = true;
+    observed_delivery_ = Delivery::Invalid;
     if (trace_telemetry_)
         trace_telemetry_->record_callback_block(false);
     trace_output_eligible_ = current_.sequence - epoch_first_sequence_ >= kLeadBlocks;
@@ -88,6 +101,8 @@ SharedIoStampedBridge::begin_callback(std::span<const float> samples) noexcept {
     if (current_.epoch == 0)
         return {current_, Admission::CpuOnly};
     const auto result = publish(ingress_, current_, samples);
+    if (result != Publication::Published)
+        request_recovery(SharedIoRecoveryReason::InputSaturated);
     return {current_, result == Publication::Published ? Admission::Accepted : Admission::Full};
 }
 
@@ -102,7 +117,7 @@ SharedIoStampedBridge::claim_output(const Callback& callback) noexcept {
     Claim result;
     callback_open_ = false;
     if (callback.stamp.sequence - epoch_first_sequence_ < kLeadBlocks) {
-        result.delivery = Delivery::Priming;
+        result.delivery = observed_delivery_ = Delivery::Priming;
         return result;
     }
     if (callback.stamp.epoch == 0 || delivery_epoch() != callback.stamp.epoch) {
@@ -163,12 +178,16 @@ SharedIoStampedBridge::finish_output(const Lease& lease, std::span<float> output
     return result;
 }
 
-SharedIoStampedBridge::Delivery SharedIoStampedBridge::consume_output(const Callback& callback,
-                                                                      std::span<float> output,
-                                                                      bool* finalized) noexcept {
+SharedIoStampedBridge::Delivery
+SharedIoStampedBridge::consume_output(const Callback& callback, std::span<float> output,
+                                      bool* finalized, bool defer_delivery) noexcept {
     const bool owns_callback = current_callback(callback) && egress_.claimed == kNoLease;
     if (finalized)
         *finalized = owns_callback;
+    if (owns_callback) {
+        defer_delivery_ = defer_delivery;
+        delivery_pending_ = defer_delivery;
+    }
     if (output.size() != sample_count_) {
         if (current_callback(callback) && egress_.claimed == kNoLease) {
             callback_open_ = false;
@@ -181,6 +200,15 @@ SharedIoStampedBridge::Delivery SharedIoStampedBridge::consume_output(const Call
         return finish_output(*claim.lease, output);
     std::fill(output.begin(), output.end(), 0.f);
     return claim.delivery;
+}
+
+bool SharedIoStampedBridge::begin_worker_admission() noexcept {
+    unsigned expected = 1u;
+    return admission_gate_.compare_exchange_strong(expected, 3u, std::memory_order_acq_rel);
+}
+
+void SharedIoStampedBridge::end_worker_admission() noexcept {
+    admission_gate_.fetch_and(~2u, std::memory_order_acq_rel);
 }
 
 std::optional<SharedIoStampedBridge::Lease> SharedIoStampedBridge::acquire_input() noexcept {
@@ -206,6 +234,9 @@ SharedIoStampedBridge::publish_output(Stamp stamp, std::span<const float> sample
 }
 
 void SharedIoStampedBridge::trace_delivery(Delivery delivery) noexcept {
+    observed_delivery_ = delivery;
+    if (defer_delivery_)
+        return;
     if (!trace_output_eligible_)
         return;
     trace_output_eligible_ = false;
@@ -235,12 +266,78 @@ void SharedIoStampedBridge::trace_delivery(Delivery delivery) noexcept {
     (void)trace_->publish_callback(record);
 }
 
+bool SharedIoStampedBridge::complete_callback_delivery(
+    const Callback& callback, SharedIoDeliveryDisposition actual) noexcept {
+    if (!delivery_pending_ || callback_open_ || !callback.valid() || callback.stamp != current_ ||
+        actual == SharedIoDeliveryDisposition::None ||
+        (actual == SharedIoDeliveryDisposition::Priming && trace_output_eligible_) ||
+        (actual == SharedIoDeliveryDisposition::GpuDelivered &&
+         observed_delivery_ != Delivery::Ready))
+        return false;
+    delivery_pending_ = defer_delivery_ = false;
+    if (!trace_output_eligible_)
+        return true;
+    trace_output_eligible_ = false;
+    if (trace_telemetry_) {
+        if (actual != SharedIoDeliveryDisposition::GpuDelivered)
+            trace_telemetry_->record_deadline_miss();
+        trace_telemetry_->record_delivery(
+            actual == SharedIoDeliveryDisposition::CpuFallbackDelivered, false);
+    }
+    if (!trace_)
+        return true;
+    SharedIoTraceRecord record;
+    record.kind = SharedIoTraceKind::Delivery;
+    record.generation = trace_->config().generation;
+    record.sequence = current_.sequence - kLeadBlocks;
+    record.output_eligible = true;
+    record.delivery = actual;
+    if (actual != SharedIoDeliveryDisposition::GpuDelivered) {
+        switch (recovery_reason()) {
+        case SharedIoRecoveryReason::SequenceGap:
+            record.delivery_reason = SharedIoFallbackReason::SequenceGap;
+            break;
+        case SharedIoRecoveryReason::InputSaturated:
+            record.delivery_reason = SharedIoFallbackReason::InputSaturated;
+            break;
+        case SharedIoRecoveryReason::ProviderLost:
+            record.delivery_reason = SharedIoFallbackReason::DeviceLost;
+            break;
+        case SharedIoRecoveryReason::ProviderFailure:
+            record.delivery_reason = SharedIoFallbackReason::CompletionFailed;
+            break;
+        case SharedIoRecoveryReason::InvalidCallback:
+            record.delivery_reason = SharedIoFallbackReason::SequenceGap;
+            break;
+        case SharedIoRecoveryReason::OfflineFence:
+            record.delivery_reason = SharedIoFallbackReason::Teardown;
+            break;
+        default:
+            record.delivery_reason = SharedIoFallbackReason::DeadlineExceeded;
+            break;
+        }
+    }
+    record.reason = record.delivery_reason;
+    (void)trace_->publish_callback(record);
+    return true;
+}
+
+void SharedIoStampedBridge::request_recovery(SharedIoRecoveryReason reason) noexcept {
+    if (reason == SharedIoRecoveryReason::None)
+        return;
+    suspend_delivery();
+    auto expected = SharedIoRecoveryReason::None;
+    (void)recovery_reason_.compare_exchange_strong(expected, reason, std::memory_order_acq_rel);
+}
+
 void SharedIoStampedBridge::suspend_delivery() noexcept {
+    admission_gate_.fetch_and(~1u, std::memory_order_acq_rel);
     delivery_epoch_.store(0, std::memory_order_release);
 }
 
 bool SharedIoStampedBridge::activate_epoch(std::uint64_t epoch) noexcept {
     if (!prepared_ || !epoch || epoch <= last_epoch_ || delivery_epoch() != 0 || callback_open_ ||
+        delivery_pending_ || (admission_gate_.load(std::memory_order_acquire) & 2u) ||
         ingress_.claimed != kNoLease || egress_.claimed != kNoLease)
         return false;
     // Both callers are quiescent and no lease is held. Retire the old queued
@@ -248,9 +345,11 @@ bool SharedIoStampedBridge::activate_epoch(std::uint64_t epoch) noexcept {
     // the first sequence required by the new epoch's chronological collector.
     ingress_.read.store(ingress_.write.load(std::memory_order_relaxed), std::memory_order_relaxed);
     egress_.read.store(egress_.write.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    recovery_reason_.store(SharedIoRecoveryReason::None, std::memory_order_release);
     last_epoch_ = epoch;
     epoch_first_sequence_ = next_sequence_;
     finalized_.reset();
+    admission_gate_.store(1u, std::memory_order_release);
     delivery_epoch_.store(epoch, std::memory_order_release);
     return true;
 }

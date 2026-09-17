@@ -1,26 +1,32 @@
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 
+#include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/shared_io_trace.hpp"
+
 #include <algorithm>
 
 namespace pulp::gpu_audio {
 
 bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     release();
-    if (node == nullptr) return false;
+    if (node == nullptr)
+        return false;
 
     // The descriptor is the single source of truth for channels/block/latency.
-    const GpuAudioNodeDescriptor desc = node->descriptor();  // host thread — may allocate
+    const GpuAudioNodeDescriptor desc = node->descriptor(); // host thread — may allocate
     if (desc.input_channels == 0 || desc.output_channels == 0 ||
         desc.input_channels != desc.output_channels) {
-        return false;  // 3a: symmetric channel count only
+        return false; // 3a: symmetric channel count only
     }
-    if (desc.block_size == 0 || desc.latency_blocks == 0) return false;
+    if (desc.block_size == 0 || desc.latency_blocks == 0)
+        return false;
     // CpuFallback miss policy requires a real fallback.
     if (desc.miss_policy == MissPolicy::CpuFallback && !desc.supports_cpu_fallback) {
         return false;
     }
     // Need the primed latency plus one in-flight block and one free slot.
-    if (config.ring_blocks < desc.latency_blocks + 2) return false;
+    if (config.ring_blocks < desc.latency_blocks + 2)
+        return false;
 
     node_ = node;
     channels_ = desc.output_channels;
@@ -28,6 +34,14 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     latency_blocks_ = desc.latency_blocks;
     ring_blocks_ = config.ring_blocks;
     miss_policy_ = desc.miss_policy;
+    const auto realtime_path = detail::realtime_gpu_node_path(node);
+    if (realtime_path.active()) {
+        realtime_gpu_context_ = realtime_path.context;
+        realtime_gpu_process_ = realtime_path.process;
+        realtime_gpu_service_ = realtime_path.service;
+        realtime_gpu_fence_ = realtime_path.fence;
+        realtime_gpu_delivered_ = realtime_path.delivered;
+    }
 
     const std::uint64_t cap = static_cast<std::uint64_t>(ring_blocks_) * block_size_;
     if (!input_ring_.prepare(channels_, cap) || !output_ring_.prepare(channels_, cap)) {
@@ -51,12 +65,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         out_fptrs_[ch] = ov.channel_ptr(ch);
     }
 
-    // Prime the output ring with `latency_blocks` of silence (worker_out_ is
-    // zeroed) to establish the fixed output delay.
-    audio::BufferView<float> silence(out_fptrs_.data(), channels_, block_size_);
-    for (uint32_t b = 0; b < latency_blocks_; ++b) {
-        output_ring_.write(silence, block_size_);
-    }
+    reset_staged_transport_state();
 
     produced_blocks_.store(0, std::memory_order_relaxed);
     miss_blocks_.store(0, std::memory_order_relaxed);
@@ -74,11 +83,13 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         // Poll a few times per block so the worker reliably keeps the output
         // ring filled within the latency budget; clamp to a sane range.
         const double block_us = (desc.sample_rate > 0)
-            ? (1.0e6 * static_cast<double>(block_size_) / desc.sample_rate)
-            : 800.0;
+                                    ? (1.0e6 * static_cast<double>(block_size_) / desc.sample_rate)
+                                    : 800.0;
         long iv = static_cast<long>(block_us / 4.0);
-        if (iv < 50) iv = 50;
-        if (iv > 2000) iv = 2000;
+        if (iv < 50)
+            iv = 50;
+        if (iv > 2000)
+            iv = 2000;
         poll_interval_ = std::chrono::microseconds(iv);
         worker_running_.store(true, std::memory_order_release);
         worker_ = std::thread([this] { worker_loop(); });
@@ -99,19 +110,36 @@ void GpuAudioTransport::worker_loop() noexcept {
         // missed/coalesced post (or offline mode, which posts nothing) still
         // makes progress. Falls back to a plain sleep when wake-on-write is off.
         if (wake_on_write_) {
-            wake_sem_.try_acquire_for(poll_interval_);
+            (void)wake_sem_.try_acquire_for(poll_interval_);
         } else {
             std::this_thread::sleep_for(poll_interval_);
         }
     }
     std::lock_guard<std::mutex> lock(pump_mutex_);
-    pump();  // final drain of any input left at stop
+    pump(); // final drain of any input left at stop
+}
+
+void GpuAudioTransport::reset_staged_transport_state() noexcept {
+    input_ring_.reset();
+    output_ring_.reset();
+    worker_in_.clear();
+    worker_out_.clear();
+    blocks_owed_ = 0;
+
+    if (channels_ == 0 || block_size_ == 0 || latency_blocks_ == 0 || out_fptrs_.empty())
+        return;
+
+    audio::BufferView<float> silence(out_fptrs_.data(), channels_, block_size_);
+    for (uint32_t b = 0; b < latency_blocks_; ++b) {
+        (void)output_ring_.write(silence, block_size_);
+    }
 }
 
 void GpuAudioTransport::release() noexcept {
     // Stop the worker before tearing down the rings/buffers it touches.
     worker_running_.store(false, std::memory_order_release);
-    if (worker_.joinable()) worker_.join();
+    if (worker_.joinable())
+        worker_.join();
 
     input_ring_.release();
     output_ring_.release();
@@ -119,12 +147,20 @@ void GpuAudioTransport::release() noexcept {
     in_cptrs_.clear();
     out_fptrs_.clear();
     node_ = nullptr;
+    realtime_gpu_context_ = nullptr;
+    realtime_gpu_process_ = nullptr;
+    realtime_gpu_service_ = nullptr;
+    realtime_gpu_fence_ = nullptr;
+    realtime_gpu_delivered_ = nullptr;
+    callback_sequence_ = 0;
+    realtime_gpu_fenced_for_offline_ = false;
     channels_ = block_size_ = latency_blocks_ = ring_blocks_ = 0;
     prepared_ = false;
 }
 
 void GpuAudioTransport::process(const audio::BufferView<const float>& input,
                                 audio::BufferView<float>& output, uint32_t n) noexcept {
+    const auto sequence = callback_sequence_++;
     // Realtime path: ensure the background worker is driving pump() (clears any
     // synchronous/offline mode left by a prior offline bounce). Relaxed store of
     // an atomic bool — RT-safe, no lock.
@@ -133,10 +169,14 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
     // Cheap RT-path validation: shape must match what the node was prepared
     // for, and the views must actually hold n frames / channels_ channels.
     // Anything off → silence (never read/write past a view).
-    if (!prepared_ || n != block_size_ ||
-        input.num_channels() < channels_ || output.num_channels() < channels_ ||
-        input.num_samples() < n || output.num_samples() < n) {
+    if (!prepared_ || n != block_size_ || input.num_channels() < channels_ ||
+        output.num_channels() < channels_ || input.num_samples() < n || output.num_samples() < n) {
         output.clear();
+        return;
+    }
+
+    if (realtime_gpu_process_ != nullptr) {
+        process_shared(input, output, n, sequence);
         return;
     }
 
@@ -150,7 +190,8 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
         // Nudge the worker awake (opt-in) so it reacts within the block instead
         // of at the next poll tick. RT-safe: a counting-semaphore post neither
         // allocates nor blocks. No-op when wake-on-write is off.
-        if (wake_on_write_) wake_sem_.release();
+        if (wake_on_write_)
+            wake_sem_.release();
     } else {
         input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -174,8 +215,7 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
     if (blocks_owed_ > 0) {
         const std::uint64_t avail_blocks = output_ring_.available_frames() / n;
         if (avail_blocks > 1) {
-            const std::uint64_t drop =
-                std::min<std::uint64_t>(blocks_owed_, avail_blocks - 1);
+            const std::uint64_t drop = std::min<std::uint64_t>(blocks_owed_, avail_blocks - 1);
             output_ring_.drain(drop * n);
             blocks_owed_ -= drop;
             resynced_blocks_.fetch_add(drop, std::memory_order_relaxed);
@@ -187,38 +227,75 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
     // below misses, the substitute is a correct continuation of the stream rather
     // than a stale block with gaps in its overlap-add tail. Cheap (one partitioned
     // block); only for CpuFallback nodes.
-    if (miss_policy_ == MissPolicy::CpuFallback) node_->prime_fallback(input, n);
+    if (miss_policy_ == MissPolicy::CpuFallback)
+        node_->prime_fallback(input, n);
 
     // Read the latency-delayed output produced earlier by the worker.
-    if (output_ring_.read(output, n)) return;
+    if (output_ring_.read(output, n))
+        return;
 
     // Miss: the worker has not produced this block in time. Substitute per the
     // policy and record the debt so the late wet block is dropped once it lands.
     miss_blocks_.fetch_add(1, std::memory_order_relaxed);
     ++blocks_owed_;
     switch (miss_policy_) {
+    case MissPolicy::Silence:
+        output.clear();
+        break;
+    case MissPolicy::PassthroughDry:
+        for (uint32_t c = 0; c < channels_; ++c) {
+            const float* src = input.channel_ptr(c);
+            float* dst = output.channel_ptr(c);
+            for (uint32_t i = 0; i < n; ++i)
+                dst[i] = src[i];
+        }
+        break;
+    case MissPolicy::CpuFallback:
+        node_->process_cpu_fallback(input, output, n);
+        break;
+    }
+}
+
+void GpuAudioTransport::process_shared(const audio::BufferView<const float>& input,
+                                       audio::BufferView<float>& output, std::uint32_t n,
+                                       std::uint64_t sequence) noexcept {
+    using detail::SharedIoDeliveryDisposition;
+    if (miss_policy_ == MissPolicy::CpuFallback)
+        node_->prime_fallback(input, n);
+    const auto status = realtime_gpu_process_(realtime_gpu_context_, input, output, n, sequence);
+    auto delivered = SharedIoDeliveryDisposition::GpuDelivered;
+    if (status == detail::kRealtimeGpuPriming) {
+        output.clear();
+        delivered = SharedIoDeliveryDisposition::Priming;
+    } else if (status != detail::kRealtimeGpuReady) {
+        miss_blocks_.fetch_add(1, std::memory_order_relaxed);
+        switch (miss_policy_) {
         case MissPolicy::Silence:
             output.clear();
+            delivered = SharedIoDeliveryDisposition::SilenceDelivered;
             break;
         case MissPolicy::PassthroughDry:
-            for (uint32_t c = 0; c < channels_; ++c) {
-                const float* src = input.channel_ptr(c);
-                float* dst = output.channel_ptr(c);
-                for (uint32_t i = 0; i < n; ++i) dst[i] = src[i];
-            }
+            for (std::uint32_t c = 0; c < channels_; ++c)
+                std::copy_n(input.channel_ptr(c), n, output.channel_ptr(c));
+            delivered = SharedIoDeliveryDisposition::PassthroughDelivered;
             break;
         case MissPolicy::CpuFallback:
             node_->process_cpu_fallback(input, output, n);
+            delivered = SharedIoDeliveryDisposition::CpuFallbackDelivered;
             break;
+        }
     }
+    realtime_gpu_delivered_(realtime_gpu_context_, sequence, static_cast<std::uint8_t>(delivered));
+    if (wake_on_write_)
+        wake_sem_.release();
 }
 
 void GpuAudioTransport::process_offline(const audio::BufferView<const float>& input,
                                         audio::BufferView<float>& output, uint32_t n) noexcept {
+    const auto sequence = callback_sequence_++;
     // Same shape validation as the RT path.
-    if (!prepared_ || n != block_size_ ||
-        input.num_channels() < channels_ || output.num_channels() < channels_ ||
-        input.num_samples() < n || output.num_samples() < n) {
+    if (!prepared_ || n != block_size_ || input.num_channels() < channels_ ||
+        output.num_channels() < channels_ || input.num_samples() < n || output.num_samples() < n) {
         output.clear();
         return;
     }
@@ -227,6 +304,15 @@ void GpuAudioTransport::process_offline(const audio::BufferView<const float>& in
     // access against any pump it is already inside. No real-time deadline here.
     synchronous_.store(true, std::memory_order_release);
     std::lock_guard<std::mutex> lock(pump_mutex_);
+
+    if (realtime_gpu_fence_ != nullptr) {
+        if (!realtime_gpu_fenced_for_offline_)
+            realtime_gpu_fenced_for_offline_ = realtime_gpu_fence_(realtime_gpu_context_);
+        // A failed barrier retains its owner and stays CPU-only. The same
+        // continuously primed fallback carries the RT/offline timeline.
+        process_shared(input, output, n, sequence);
+        return;
+    }
 
     // Write this block, then pump SYNCHRONOUSLY so the node actually produces it
     // now (instead of the async worker maybe-producing it later). The output ring
@@ -238,53 +324,92 @@ void GpuAudioTransport::process_offline(const audio::BufferView<const float>& in
     } else {
         input_dropped_blocks_.fetch_add(1, std::memory_order_relaxed);
     }
-    pump();  // drains all ready input → node → output ring (blocking GPU readback)
+    pump(); // drains all ready input → node → output ring (blocking GPU readback)
 
     // Keep the fallback fed on the offline timeline too, so a backstop miss below
     // substitutes a correctly-continued, latency-aligned block.
-    if (miss_policy_ == MissPolicy::CpuFallback) node_->prime_fallback(input, n);
+    if (miss_policy_ == MissPolicy::CpuFallback)
+        node_->prime_fallback(input, n);
 
-    if (output_ring_.read(output, n)) return;
+    if (output_ring_.read(output, n))
+        return;
 
     // Should not happen after a synchronous pump (the block was just produced),
     // but honor the miss policy as a backstop rather than emit a stale read.
     miss_blocks_.fetch_add(1, std::memory_order_relaxed);
     switch (miss_policy_) {
-        case MissPolicy::Silence:
-            output.clear();
-            break;
-        case MissPolicy::PassthroughDry:
-            for (uint32_t c = 0; c < channels_; ++c) {
-                const float* src = input.channel_ptr(c);
-                float* dst = output.channel_ptr(c);
-                for (uint32_t i = 0; i < n; ++i) dst[i] = src[i];
-            }
-            break;
-        case MissPolicy::CpuFallback:
-            node_->process_cpu_fallback(input, output, n);
-            break;
+    case MissPolicy::Silence:
+        output.clear();
+        break;
+    case MissPolicy::PassthroughDry:
+        for (uint32_t c = 0; c < channels_; ++c) {
+            const float* src = input.channel_ptr(c);
+            float* dst = output.channel_ptr(c);
+            for (uint32_t i = 0; i < n; ++i)
+                dst[i] = src[i];
+        }
+        break;
+    case MissPolicy::CpuFallback:
+        node_->process_cpu_fallback(input, output, n);
+        break;
     }
 }
 
 void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
-    if (!prepared_) return;
+    if (!prepared_)
+        return;
     const uint32_t bs = block_size_;
+
+    if (!synchronous_.load(std::memory_order_acquire) && realtime_gpu_service_ != nullptr) {
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto produced = realtime_gpu_service_(
+            realtime_gpu_context_,
+            static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch())
+                    .count()));
+        if (produced != detail::kRealtimeGpuServiceInactive) {
+            const auto block_ns =
+                static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now() - t0)
+                                               .count());
+            if (produced > 0) {
+                last_block_ns_.store(block_ns, std::memory_order_relaxed);
+                const std::uint64_t prev = avg_block_ns_.load(std::memory_order_relaxed);
+                std::uint64_t next;
+                if (prev == 0)
+                    next = block_ns;
+                else if (block_ns >= prev)
+                    next = prev + (block_ns - prev) / 16;
+                else
+                    next = prev - (prev - block_ns) / 16;
+                avg_block_ns_.store(next, std::memory_order_relaxed);
+                produced_blocks_.fetch_add(produced, std::memory_order_relaxed);
+            }
+            (void)max_blocks;
+            return;
+        }
+        // Losing a previously active provider does not authorize another GPU
+        // path. The callback continues its already-prepared CPU fallback.
+        return;
+    }
 
     audio::BufferView<float> in_w(in_fptrs_.data(), channels_, bs);
     audio::BufferView<const float> in_c(in_cptrs_.data(), channels_, bs);
     audio::BufferView<float> out_w(out_fptrs_.data(), channels_, bs);
 
     uint32_t done = 0;
-    while ((max_blocks == 0 || done < max_blocks) &&
-           input_ring_.available_frames() >= bs &&
+    while ((max_blocks == 0 || done < max_blocks) && input_ring_.available_frames() >= bs &&
            output_ring_.free_frames() >= bs) {
-        if (!input_ring_.read(in_w, bs)) break;
+        if (!input_ring_.read(in_w, bs))
+            break;
         const auto t0 = std::chrono::steady_clock::now();
         node_->process_block(in_c, out_w, bs);
-        const auto block_ns = static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - t0).count());
-        if (output_ring_.write(out_w, bs) < bs) break;
+        const auto block_ns =
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now() - t0)
+                                           .count());
+        if (output_ring_.write(out_w, bs) < bs)
+            break;
         // Publish per-block timing: last value + an EWMA (alpha = 1/16) so the
         // UI sees a smooth, current figure without storing a history.
         last_block_ns_.store(block_ns, std::memory_order_relaxed);
@@ -292,9 +417,12 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
         // EWMA toward block_ns with alpha = 1/16. Branch on direction so the
         // unsigned difference never underflows (block_ns can be below prev).
         std::uint64_t next;
-        if (prev == 0) next = block_ns;
-        else if (block_ns >= prev) next = prev + (block_ns - prev) / 16;
-        else next = prev - (prev - block_ns) / 16;
+        if (prev == 0)
+            next = block_ns;
+        else if (block_ns >= prev)
+            next = prev + (block_ns - prev) / 16;
+        else
+            next = prev - (prev - block_ns) / 16;
         avg_block_ns_.store(next, std::memory_order_relaxed);
         produced_blocks_.fetch_add(1, std::memory_order_relaxed);
         ++done;
@@ -305,8 +433,7 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     Stats s;
     s.produced_blocks = produced_blocks_.load(std::memory_order_relaxed);
     s.miss_blocks = miss_blocks_.load(std::memory_order_relaxed);
-    s.input_dropped_frames =
-        input_dropped_blocks_.load(std::memory_order_relaxed) * block_size_;
+    s.input_dropped_frames = input_dropped_blocks_.load(std::memory_order_relaxed) * block_size_;
     s.resynced_blocks = resynced_blocks_.load(std::memory_order_relaxed);
     s.last_block_us = last_block_ns_.load(std::memory_order_relaxed) / 1000.0;
     s.avg_block_us = avg_block_ns_.load(std::memory_order_relaxed) / 1000.0;

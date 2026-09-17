@@ -1,13 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <pulp/gpu_audio/gpu_convolver.hpp>
-#include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
+#include <pulp/gpu_audio/gpu_audio_transport.hpp>
+#include <pulp/gpu_audio/gpu_convolver.hpp>
+
+#include "detail/realtime_gpu_audio_path.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <initializer_list>
 #include <limits>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -19,8 +23,7 @@ constexpr const char* kNoGpu =
     "no GPU compute device available (Skia/Dawn not built, or no adapter)";
 
 // Direct linear convolution reference: y[n] = sum_k ir[k] * x[n-k].
-std::vector<float> direct_convolution(const std::vector<float>& x,
-                                      const std::vector<float>& ir) {
+std::vector<float> direct_convolution(const std::vector<float>& x, const std::vector<float>& ir) {
     std::vector<float> y(x.size(), 0.0f);
     for (std::size_t n = 0; n < x.size(); ++n) {
         double acc = 0.0;
@@ -121,7 +124,7 @@ std::vector<std::vector<float>> render_full_tail(std::uint32_t channels, std::ui
     return output;
 }
 
-}  // namespace
+} // namespace
 
 using namespace pulp::gpu_audio;
 using pulp::audio::BufferView;
@@ -130,7 +133,7 @@ using pulp::audio::BufferView;
 // convolution of the input stream with the IR, within f32 tolerance.
 TEST_CASE("GpuConvolver matches direct convolution", "[gpu_audio][convolver][gpu]") {
     constexpr uint32_t CH = 1, BS = 64, SR = 48000;
-    constexpr int M = 300;  // IR length (spans several blocks)
+    constexpr int M = 300; // IR length (spans several blocks)
 
     std::vector<float> ir(M);
     for (int i = 0; i < M; ++i) {
@@ -139,7 +142,8 @@ TEST_CASE("GpuConvolver matches direct convolution", "[gpu_audio][convolver][gpu
 
     GpuConvolver node(CH, BS, SR, ir);
     REQUIRE(node.prepare());
-    if (!node.gpu_available()) SKIP(kNoGpu);
+    if (!node.gpu_available())
+        SKIP(kNoGpu);
     REQUIRE(node.fft_size() >= BS + M);
 
     constexpr int NBLK = 8;
@@ -153,19 +157,22 @@ TEST_CASE("GpuConvolver matches direct convolution", "[gpu_audio][convolver][gpu
     std::vector<float> gpu_out(total, 0.0f);
     std::vector<float> in_block(BS), out_block(BS);
     for (int b = 0; b < NBLK; ++b) {
-        for (int i = 0; i < static_cast<int>(BS); ++i) in_block[i] = x[b * BS + i];
+        for (int i = 0; i < static_cast<int>(BS); ++i)
+            in_block[i] = x[b * BS + i];
         const float* in_ptr[1] = {in_block.data()};
         float* out_ptr[1] = {out_block.data()};
         BufferView<const float> iv(in_ptr, 1, BS);
         BufferView<float> ov(out_ptr, 1, BS);
         node.process_block(iv, ov, BS);
-        for (int i = 0; i < static_cast<int>(BS); ++i) gpu_out[b * BS + i] = out_block[i];
+        for (int i = 0; i < static_cast<int>(BS); ++i)
+            gpu_out[b * BS + i] = out_block[i];
     }
 
     // Reference: y[n] = sum_k ir[k] * x[n-k].
     for (int n = 0; n < total; ++n) {
         double acc = 0.0;
-        for (int k = 0; k < M && k <= n; ++k) acc += static_cast<double>(ir[k]) * x[n - k];
+        for (int k = 0; k < M && k <= n; ++k)
+            acc += static_cast<double>(ir[k]) * x[n - k];
         const float ref = static_cast<float>(acc);
         REQUIRE(std::abs(gpu_out[n] - ref) < 1e-2f * (1.0f + std::abs(ref)));
     }
@@ -178,13 +185,68 @@ TEST_CASE("GpuConvolver rejects empty IR", "[gpu_audio][convolver][gpu]") {
     REQUIRE_FALSE(node.prepare());
 }
 
+TEST_CASE("GpuConvolver shared realtime path follows the private opt-in",
+          "[gpu_audio][convolver][realtime-path]") {
+#if PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER
+    constexpr uint32_t BS = 32;
+    GpuConvolver node(1, BS, 48000, {1.0f});
+    REQUIRE(node.prepare());
+    REQUIRE(detail::realtime_gpu_node_path(&node).active());
+
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.ring_blocks = 8, .run_worker_thread = false}));
+
+    std::vector<float> input(BS), output(BS);
+    const float* input_channels[1] = {input.data()};
+    float* output_channels[1] = {output.data()};
+    BufferView<const float> input_view(input_channels, 1, BS);
+    BufferView<float> output_view(output_channels, 1, BS);
+
+    for (uint32_t sequence = 0; sequence < 8; ++sequence) {
+        std::fill(input.begin(), input.end(), static_cast<float>(sequence + 1));
+        transport.process(input_view, output_view, BS);
+        const float expected =
+            sequence < GpuConvolver::kLatencyBlocks ? 0.0f : static_cast<float>(sequence - 1);
+        for (float sample : output)
+            REQUIRE(std::abs(sample - expected) < 1.0e-4f);
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (transport.stats().produced_blocks < sequence + 1 &&
+               std::chrono::steady_clock::now() < deadline) {
+            transport.pump(1);
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+        }
+        REQUIRE(transport.stats().produced_blocks >= sequence + 1);
+    }
+    REQUIRE(transport.stats().miss_blocks == 0);
+    const auto admitted_before_offline = transport.stats().produced_blocks;
+    // Offline fences the shared provider but retains every continuously primed
+    // CPU delay/history sample. Returning to RT remains CPU-only.
+    for (uint32_t sequence = 8; sequence < 16; ++sequence) {
+        std::fill(input.begin(), input.end(), static_cast<float>(sequence + 1));
+        if (sequence < 12)
+            transport.process_offline(input_view, output_view, BS);
+        else
+            transport.process(input_view, output_view, BS);
+        for (float sample : output)
+            REQUIRE(std::abs(sample - static_cast<float>(sequence - 1)) < 1.0e-4f);
+        transport.pump(1);
+    }
+    REQUIRE(transport.stats().produced_blocks == admitted_before_offline);
+#else
+    const std::vector<float> ir(64, 0.1f);
+    GpuConvolver node(1, 64, 48000, ir);
+    REQUIRE(node.prepare());
+    REQUIRE_FALSE(detail::realtime_gpu_node_path(&node).active());
+#endif
+}
+
 // The CPU fallback is a signal::PartitionedConvolver loaded at the node's block
 // size, and load_ir() rounds a non-power-of-two block UP to the next power of two.
 // The fallback would then be partitioned for a size the transport never delivers,
 // so every fallback block would be a block-size violation (silence). Refuse to
 // prepare instead of running a convolver whose fallback can only fail closed.
-TEST_CASE("GpuConvolver rejects a non-power-of-two block size",
-          "[gpu_audio][convolver]") {
+TEST_CASE("GpuConvolver rejects a non-power-of-two block size", "[gpu_audio][convolver]") {
     const std::vector<float> ir(128, 0.1f);
     for (uint32_t block : {3u, 100u, 192u, 500u}) {
         GpuConvolver node(1, block, 48000, ir);
@@ -202,16 +264,17 @@ TEST_CASE("GpuConvolver rejects a non-power-of-two block size",
 // The no-GPU worker path is a zero-latency partitioned convolution: process_block
 // (which drives worker_fallback_ when there is no device) must reproduce direct
 // linear convolution of the stream, block-aligned (no one-block streaming lag).
-TEST_CASE("GpuConvolver process_block uses CPU fallback without a GPU",
-          "[gpu_audio][convolver]") {
+TEST_CASE("GpuConvolver process_block uses CPU fallback without a GPU", "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 1, BS = 64, SR = 48000;
     constexpr int M = 100;
     std::vector<float> ir(M);
-    for (int i = 0; i < M; ++i) ir[i] = std::cos(0.05f * i) * std::exp(-0.02f * i);
+    for (int i = 0; i < M; ++i)
+        ir[i] = std::cos(0.05f * i) * std::exp(-0.02f * i);
 
     GpuConvolver node(CH, BS, SR, ir);
     REQUIRE(node.prepare());
-    if (node.gpu_available()) return;  // this case covers the no-device build only
+    if (node.gpu_available())
+        return; // this case covers the no-device build only
 
     constexpr uint32_t NBLK = 8;
     std::vector<float> input(BS * NBLK);
@@ -229,7 +292,8 @@ TEST_CASE("GpuConvolver process_block uses CPU fallback without a GPU",
         node.process_block(iv, ov, BS);
     }
     for (uint32_t i = 0; i < out.size(); ++i) {
-        if (std::abs(out[i]) > 1.0e-6f) produced_audio = true;
+        if (std::abs(out[i]) > 1.0e-6f)
+            produced_audio = true;
         REQUIRE(std::abs(out[i] - ref[i]) < 1.0e-3f * (1.0f + std::abs(ref[i])));
     }
     REQUIRE(produced_audio);
@@ -251,7 +315,8 @@ TEST_CASE("GpuConvolver worker fallback does not advance realtime fallback state
     REQUIRE(expected.prepare());
 
     std::vector<float> input(BS);
-    for (uint32_t i = 0; i < BS; ++i) input[i] = static_cast<float>((i % 7) + 1);
+    for (uint32_t i = 0; i < BS; ++i)
+        input[i] = static_cast<float>((i % 7) + 1);
     std::vector<float> scratch(BS, 0.0f), miss_out(BS, -1.0f), expected_miss_out(BS, -2.0f);
 
     const float* in_ptr[1] = {input.data()};
@@ -265,7 +330,8 @@ TEST_CASE("GpuConvolver worker fallback does not advance realtime fallback state
 
     // Hammer the worker path on `node` many times; its RT miss fallback must be
     // byte-identical to a pristine node's, since only prime_fallback() feeds it.
-    for (int k = 0; k < 5; ++k) node.process_block(iv, scratch_view, BS);
+    for (int k = 0; k < 5; ++k)
+        node.process_block(iv, scratch_view, BS);
     node.process_cpu_fallback(iv, miss_view, BS);
     expected.process_cpu_fallback(iv, expected_miss_view, BS);
 
@@ -277,12 +343,12 @@ TEST_CASE("GpuConvolver worker fallback does not advance realtime fallback state
 // takes over after a run of GPU hits — its overlap-add tail must carry the IR
 // energy of the preceding (primed) blocks. A fallback fed only on the miss block
 // (the old behavior) starts cold and is missing that tail.
-TEST_CASE("GpuConvolver fallback is a correct continuation after hits",
-          "[gpu_audio][convolver]") {
+TEST_CASE("GpuConvolver fallback is a correct continuation after hits", "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 1, BS = 64, SR = 48000;
-    constexpr int M = 200;  // IR spans several blocks so the tail is significant
+    constexpr int M = 200; // IR spans several blocks so the tail is significant
     std::vector<float> ir(M);
-    for (int i = 0; i < M; ++i) ir[i] = std::cos(0.07f * i) * std::exp(-0.01f * i);
+    for (int i = 0; i < M; ++i)
+        ir[i] = std::cos(0.07f * i) * std::exp(-0.01f * i);
 
     GpuConvolver node(CH, BS, SR, ir);
     REQUIRE(node.prepare());
@@ -325,19 +391,19 @@ TEST_CASE("GpuConvolver fallback is a correct continuation after hits",
     float max_diff = 0.0f;
     for (uint32_t i = 0; i < BS; ++i)
         max_diff = std::max(max_diff, std::abs(cold_out[i] - sub[i]));
-    REQUIRE(max_diff > 1.0e-3f);  // continuation != cold start
+    REQUIRE(max_diff > 1.0e-3f); // continuation != cold start
 }
 
 // BUG 2 (latency off-by-one): the fallback substitute for wall-clock block t must
 // equal the wet block for input block t-kLatencyBlocks — sample-aligned with the
 // PDC the transport reports, neither a block early nor late. An all-miss run must
 // reproduce the reference convolution delayed by exactly kLatencyBlocks blocks.
-TEST_CASE("GpuConvolver fallback latency matches reported PDC",
-          "[gpu_audio][convolver]") {
+TEST_CASE("GpuConvolver fallback latency matches reported PDC", "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 2, BS = 64, SR = 48000;
     constexpr int M = 150;
     std::vector<float> ir(M);
-    for (int i = 0; i < M; ++i) ir[i] = std::sin(0.04f * i + 0.3f) * std::exp(-0.015f * i);
+    for (int i = 0; i < M; ++i)
+        ir[i] = std::sin(0.04f * i + 0.3f) * std::exp(-0.015f * i);
 
     GpuConvolver node(CH, BS, SR, ir);
     REQUIRE(node.prepare());
@@ -351,7 +417,8 @@ TEST_CASE("GpuConvolver fallback latency matches reported PDC",
         in_ch[1][i] = 0.7f * std::sin(0.05f * i + 1.0f);
     }
     std::vector<std::vector<float>> ref(CH);
-    for (uint32_t c = 0; c < CH; ++c) ref[c] = direct_convolution(in_ch[c], ir);
+    for (uint32_t c = 0; c < CH; ++c)
+        ref[c] = direct_convolution(in_ch[c], ir);
 
     std::vector<std::vector<float>> out(CH, std::vector<float>(BS * NBLK, 0.0f));
     for (uint32_t b = 0; b < NBLK; ++b) {
@@ -359,8 +426,8 @@ TEST_CASE("GpuConvolver fallback latency matches reported PDC",
         float* out_ptr[CH] = {out[0].data() + b * BS, out[1].data() + b * BS};
         BufferView<const float> iv(in_ptr, CH, BS);
         BufferView<float> ov(out_ptr, CH, BS);
-        node.prime_fallback(iv, BS);        // every block
-        node.process_cpu_fallback(iv, ov, BS);  // every block is a "miss"
+        node.prime_fallback(iv, BS);           // every block
+        node.process_cpu_fallback(iv, ov, BS); // every block is a "miss"
     }
 
     for (uint32_t c = 0; c < CH; ++c) {
@@ -368,7 +435,7 @@ TEST_CASE("GpuConvolver fallback latency matches reported PDC",
             for (uint32_t i = 0; i < BS; ++i) {
                 const float got = out[c][b * BS + i];
                 const float expected =
-                    (b < L) ? 0.0f : ref[c][(b - L) * BS + i];  // delayed by L, silence before
+                    (b < L) ? 0.0f : ref[c][(b - L) * BS + i]; // delayed by L, silence before
                 REQUIRE(std::abs(got - expected) < 1.0e-3f * (1.0f + std::abs(expected)));
             }
         }
@@ -389,7 +456,8 @@ TEST_CASE("Guarded overlap-add contains a NaN instead of poisoning the carry",
     auto make_src = [](std::initializer_list<float> reals) {
         std::vector<float> s(reals.size() * 2, 0.0f);
         uint32_t i = 0;
-        for (float r : reals) s[2u * i++] = r;
+        for (float r : reals)
+            s[2u * i++] = r;
         return s;
     };
 
@@ -403,24 +471,27 @@ TEST_CASE("Guarded overlap-add contains a NaN instead of poisoning the carry",
     // A NaN anywhere in the readback -> carry reset, silence out, returns false.
     auto poison = make_src({0, 0, nan, 0, 0, 0, 0, 0});
     REQUIRE_FALSE(overlap_add_block(carry.data(), poison.data(), 2, out.data(), FFT, N));
-    for (uint32_t i = 0; i < N; ++i) REQUIRE(out[i] == 0.0f);
-    for (uint32_t i = 0; i < FFT; ++i) REQUIRE(carry[i] == 0.0f);  // no NaN retained
+    for (uint32_t i = 0; i < N; ++i)
+        REQUIRE(out[i] == 0.0f);
+    for (uint32_t i = 0; i < FFT; ++i)
+        REQUIRE(carry[i] == 0.0f); // no NaN retained
 
     // An Inf is caught the same way.
     auto poison2 = make_src({1, 1, 1, 1, inf, 1, 1, 1});
     REQUIRE_FALSE(overlap_add_block(carry.data(), poison2.data(), 2, out.data(), FFT, N));
-    for (uint32_t i = 0; i < FFT; ++i) REQUIRE(std::isfinite(carry[i]));
+    for (uint32_t i = 0; i < FFT; ++i)
+        REQUIRE(std::isfinite(carry[i]));
 
     // Recovery: a subsequent finite block produces correct, finite output.
     REQUIRE(overlap_add_block(carry.data(), good.data(), 2, out.data(), FFT, N));
-    for (uint32_t i = 0; i < N; ++i) REQUIRE(std::isfinite(out[i]));
-    REQUIRE(out[0] == 1.0f);  // clean carry, no lingering poison
+    for (uint32_t i = 0; i < N; ++i)
+        REQUIRE(std::isfinite(out[i]));
+    REQUIRE(out[0] == 1.0f); // clean carry, no lingering poison
 }
 
 // BUG 3 at the node level: a single NaN in a primed input block must not poison
 // the fallback for the rest of the session — it recovers on the next clean block.
-TEST_CASE("GpuConvolver fallback recovers from a NaN input block",
-          "[gpu_audio][convolver]") {
+TEST_CASE("GpuConvolver fallback recovers from a NaN input block", "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 1, BS = 64, SR = 48000;
     std::vector<float> ir = {0.5f, 0.3f, 0.15f, 0.05f};
     GpuConvolver node(CH, BS, SR, ir);
@@ -429,7 +500,10 @@ TEST_CASE("GpuConvolver fallback recovers from a NaN input block",
 
     const float nan = std::numeric_limits<float>::quiet_NaN();
     std::vector<float> good(BS), bad(BS);
-    for (uint32_t i = 0; i < BS; ++i) { good[i] = std::sin(0.2f * i); bad[i] = good[i]; }
+    for (uint32_t i = 0; i < BS; ++i) {
+        good[i] = std::sin(0.2f * i);
+        bad[i] = good[i];
+    }
     bad[BS / 2] = nan;
 
     auto prime = [&](const std::vector<float>& blk) {
@@ -447,13 +521,15 @@ TEST_CASE("GpuConvolver fallback recovers from a NaN input block",
         return o;
     };
 
-    prime(bad);                       // poison attempt
-    for (uint32_t k = 0; k < L; ++k) prime(good);  // flush the delay ring
+    prime(bad); // poison attempt
+    for (uint32_t k = 0; k < L; ++k)
+        prime(good); // flush the delay ring
     // Feed several more clean blocks; output must be finite (self-healed).
     for (uint32_t k = 0; k < 6; ++k) {
         prime(good);
         auto o = miss();
-        for (uint32_t i = 0; i < BS; ++i) REQUIRE(std::isfinite(o[i]));
+        for (uint32_t i = 0; i < BS; ++i)
+            REQUIRE(std::isfinite(o[i]));
     }
 }
 
@@ -465,17 +541,22 @@ TEST_CASE("GpuConvolver fallback recovers from a NaN input block",
 TEST_CASE("GpuConvolver worker fallback recovers from a NaN input block",
           "[gpu_audio][convolver]") {
     constexpr uint32_t CH = 1, BS = 64, SR = 48000;
-    constexpr int M = 200;  // IR spans several blocks: a smear would last many blocks
+    constexpr int M = 200; // IR spans several blocks: a smear would last many blocks
     std::vector<float> ir(M);
-    for (int i = 0; i < M; ++i) ir[i] = std::cos(0.05f * i) * std::exp(-0.01f * i);
+    for (int i = 0; i < M; ++i)
+        ir[i] = std::cos(0.05f * i) * std::exp(-0.01f * i);
 
     GpuConvolver node(CH, BS, SR, ir);
     REQUIRE(node.prepare());
-    if (node.gpu_available()) return;  // exercises the no-device worker path only
+    if (node.gpu_available())
+        return; // exercises the no-device worker path only
 
     const float nan = std::numeric_limits<float>::quiet_NaN();
     std::vector<float> good(BS), bad(BS);
-    for (uint32_t i = 0; i < BS; ++i) { good[i] = std::sin(0.2f * i); bad[i] = good[i]; }
+    for (uint32_t i = 0; i < BS; ++i) {
+        good[i] = std::sin(0.2f * i);
+        bad[i] = good[i];
+    }
     bad[BS / 2] = nan;
 
     auto run = [&](const std::vector<float>& blk) {
@@ -484,13 +565,14 @@ TEST_CASE("GpuConvolver worker fallback recovers from a NaN input block",
         float* op[1] = {o.data()};
         BufferView<const float> iv(ip, 1, BS);
         BufferView<float> ov(op, 1, BS);
-        node.process_block(iv, ov, BS);  // no GPU -> render_worker_fallback
+        node.process_block(iv, ov, BS); // no GPU -> render_worker_fallback
         return o;
     };
 
-    run(good);                 // prime some history
-    auto poisoned = run(bad);  // the NaN block
-    for (uint32_t i = 0; i < BS; ++i) REQUIRE(poisoned[i] == 0.0f);  // silence, not NaN
+    run(good);                // prime some history
+    auto poisoned = run(bad); // the NaN block
+    for (uint32_t i = 0; i < BS; ++i)
+        REQUIRE(poisoned[i] == 0.0f); // silence, not NaN
 
     // Every subsequent block must be finite (no tail smear) and, once history
     // rebuilds, actually produce audio.
@@ -499,7 +581,8 @@ TEST_CASE("GpuConvolver worker fallback recovers from a NaN input block",
         auto o = run(good);
         for (uint32_t i = 0; i < BS; ++i) {
             REQUIRE(std::isfinite(o[i]));
-            if (std::abs(o[i]) > 1.0e-6f) produced_audio = true;
+            if (std::abs(o[i]) > 1.0e-6f)
+                produced_audio = true;
         }
     }
     REQUIRE(produced_audio);
@@ -515,7 +598,8 @@ TEST_CASE("GpuAudioTransport fallback stream matches reference convolution",
     constexpr uint32_t CH = 1, BS = 64, SR = 48000;
     constexpr int M = 180;
     std::vector<float> ir(M);
-    for (int i = 0; i < M; ++i) ir[i] = std::cos(0.06f * i) * std::exp(-0.012f * i);
+    for (int i = 0; i < M; ++i)
+        ir[i] = std::cos(0.06f * i) * std::exp(-0.012f * i);
 
     GpuConvolver node(CH, BS, SR, ir);
     REQUIRE(node.prepare());
@@ -539,7 +623,7 @@ TEST_CASE("GpuAudioTransport fallback stream matches reference convolution",
         float* out_ptr[1] = {out.data() + b * BS};
         BufferView<const float> iv(in_ptr, 1, BS);
         BufferView<float> ov(out_ptr, 1, BS);
-        transport.process(iv, ov, BS);  // never pumped -> misses -> fallback substitute
+        transport.process(iv, ov, BS); // never pumped -> misses -> fallback substitute
     }
 
     // First L blocks are the primed silence; the rest are ref delayed by L blocks.
@@ -552,11 +636,10 @@ TEST_CASE("GpuAudioTransport fallback stream matches reference convolution",
     }
 
     const auto s = transport.stats();
-    REQUIRE(s.miss_blocks > 0);  // we really exercised the miss path
+    REQUIRE(s.miss_blocks > 0); // we really exercised the miss path
 }
 
-TEST_CASE("GpuConvolver full-tail oracle matrix",
-          "[gpu_audio][convolver][p2][gpu]") {
+TEST_CASE("GpuConvolver full-tail oracle matrix", "[gpu_audio][convolver][p2][gpu]") {
     constexpr std::size_t input_size = 384;
     const auto ir = make_oracle_ir();
     for (const std::uint32_t channels : {1u, 2u}) {

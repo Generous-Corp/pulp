@@ -217,13 +217,13 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
 
 SharedIoConvolutionSession::Callback
 SharedIoConvolutionSession::begin_callback(std::span<const float> samples) noexcept {
-    return pipeline_.begin_callback(samples);
+    return prepared_ ? pipeline_.begin_callback(samples) : Callback{};
 }
 
 SharedIoConvolutionSession::Delivery
-SharedIoConvolutionSession::consume_output(const Callback& callback,
-                                           std::span<float> output) noexcept {
-    return pipeline_.consume_output(callback, output);
+SharedIoConvolutionSession::consume_output(const Callback& callback, std::span<float> output,
+                                           bool defer_delivery) noexcept {
+    return pipeline_.consume_output(callback, output, defer_delivery);
 }
 
 void SharedIoConvolutionSession::fail_closed() noexcept {
@@ -231,7 +231,7 @@ void SharedIoConvolutionSession::fail_closed() noexcept {
     // This atomic bridge gate keeps subsequent callbacks CPU-only. The service
     // thread may still drain an already-held ingress lease, but no new GPU
     // ingress is admitted after an unprovable completion disposition.
-    pipeline_.suspend_delivery();
+    pipeline_.request_recovery(SharedIoRecoveryReason::ProviderFailure);
 }
 
 bool SharedIoConvolutionSession::pack_input(const SharedIoConvolutionPipeline::Lease& ingress,
@@ -260,6 +260,8 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
     if (!prepared_)
         return false;
     plan_.drain(now_ns); // plan drain polls the one owned provider first.
+    if (provider_->device_lost())
+        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost);
     while (const auto completion = plan_.pop_completion()) {
         ++result.completions;
         const auto& token = completion->token.slot;
@@ -267,8 +269,12 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
         const SharedIoConvolutionPipeline::Stamp stamp{token.preparation_epoch,
                                                        token.stream_sequence};
         if (completion->status != SharedIoArena::CompletionStatus::RetiredSuccess) {
-            trace_terminal(token, SharedIoGpuTerminalDisposition::ProviderFailed,
-                           SharedIoFallbackReason::None);
+            trace_terminal(token,
+                           provider_->device_lost()
+                               ? SharedIoGpuTerminalDisposition::DeviceLost
+                               : SharedIoGpuTerminalDisposition::ProviderFailed,
+                           provider_->device_lost() ? SharedIoFallbackReason::DeviceLost
+                                                    : SharedIoFallbackReason::CompletionFailed);
             const bool discarded = plan_.discard_completion(*completion);
             const bool recorded =
                 pipeline_.record_terminal(stamp, SharedIoConvolutionPipeline::Terminal::Failed, {});
@@ -342,6 +348,14 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
             ++result.dropped_ingress;
             continue;
         }
+        if (!pipeline_.begin_worker_admission())
+            return true;
+        struct AdmissionReservation {
+            SharedIoConvolutionPipeline& pipeline;
+            ~AdmissionReservation() {
+                pipeline.end_worker_admission();
+            }
+        } admission{pipeline_};
         auto input = plan_.acquire_input(pending_ingress_->stamp().sequence, 0);
         if (!input)
             return true; // retain the bridge lease until a physical slot retires.
@@ -442,17 +456,40 @@ bool SharedIoConvolutionSession::discard_all_completions() noexcept {
     return true;
 }
 
-bool SharedIoConvolutionSession::fence_and_reprime() noexcept {
-    if (!prepared_ || pending_ingress_)
+bool SharedIoConvolutionSession::drain_quiescent() noexcept {
+    if (!prepared_)
         return false;
-    // Provider drain closes its old callback/submission phase; plan drain then
-    // turns every accepted terminal into a fixed ledger disposition.
+    pipeline_.suspend_delivery();
+    if (pending_ingress_) {
+        if (!pipeline_.release_input(*pending_ingress_))
+            return false;
+        pending_ingress_.reset();
+    }
     if (!provider_->drain()) {
         fail_closed();
         return false;
     }
     ServiceResult drained;
     if (!drain_completions(0, drained) || !discard_all_completions()) {
+        fail_closed();
+        return false;
+    }
+    return true;
+}
+
+bool SharedIoConvolutionSession::fence_for_offline() noexcept {
+    request_recovery(SharedIoRecoveryReason::OfflineFence);
+    return drain_quiescent();
+}
+
+bool SharedIoConvolutionSession::fence_and_reprime() noexcept {
+    if (!drain_quiescent())
+        return false;
+    if (provider_->device_lost()) {
+        pipeline_.request_recovery(SharedIoRecoveryReason::ProviderLost);
+        return false;
+    }
+    if (!provider_->can_resume_after_drain()) {
         fail_closed();
         return false;
     }
@@ -483,13 +520,11 @@ bool SharedIoConvolutionSession::fence_and_reprime() noexcept {
 }
 
 bool SharedIoConvolutionSession::release() noexcept {
-    if (pending_ingress_)
-        return false;
     if (!prepared_)
         return plan_.release();
     // Stop callbacks before this boundary. Harvest physical terminal results
     // before arena release consumes its terminal inbox internally.
-    if (!provider_->drain())
+    if (!drain_quiescent())
         return false;
     ServiceResult drained;
     (void)drain_completions(0, drained);

@@ -104,6 +104,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     bool submit(const SlotResources& resources, SlotToken token,
                 std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept override;
     void poll() noexcept override;
+    bool device_lost() const noexcept override;
     bool drain() noexcept override;
 
     std::uint32_t alignment() const noexcept;
