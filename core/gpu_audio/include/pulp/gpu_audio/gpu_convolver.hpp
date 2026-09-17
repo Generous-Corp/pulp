@@ -48,14 +48,16 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
 /// round-trip for a single stereo pair.
 class GpuConvolver : public GpuAudioNode {
   public:
-    /// Fixed worker/round-trip latency, in host blocks, reported to the host as
-    /// PDC. The continuously-fed CPU fallback delays its output by this many
-    /// blocks so a miss substitute lands on the exact timeline slot the GPU ring
-    /// would have filled.
+    /// Default worker/round-trip latency, in host blocks. A constructed node may
+    /// select another positive lead for a controlled campaign; the selected value
+    /// is reported as PDC and shared by the bridge and CPU fallback.
     static constexpr uint32_t kLatencyBlocks = 2;
+    static constexpr uint32_t kMaxLatencyBlocks = 64;
 
     GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                  std::vector<float> impulse_response);
+    GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
+                 std::vector<float> impulse_response, uint32_t latency_blocks);
     ~GpuConvolver() override;
 
     GpuAudioNodeDescriptor descriptor() const override;
@@ -145,7 +147,7 @@ class GpuConvolver : public GpuAudioNode {
             fallback_[ch].load_ir(ir_.data(), ir_.size(), block_);
             worker_fallback_[ch].load_ir(ir_.data(), ir_.size(), block_);
         }
-        fallback_delay_blocks_ = kLatencyBlocks;
+        fallback_delay_blocks_ = latency_blocks_;
         fb_delay_idx_ = 0;
         fb_delay_.assign(static_cast<std::size_t>(fallback_delay_blocks_) * block_ * channels_,
                          0.0f);
@@ -208,6 +210,9 @@ class GpuConvolver : public GpuAudioNode {
     uint32_t channels_;
     uint32_t block_;
     uint32_t sample_rate_;
+    // Fixed before prepare(); this value is shared by descriptor PDC, the
+    // shared-I/O bridge lead, and the CPU fallback delay.
+    uint32_t latency_blocks_ = kLatencyBlocks;
     std::vector<float> ir_;
     uint32_t fft_size_ = 0;
 

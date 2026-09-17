@@ -6,7 +6,8 @@ namespace pulp::gpu_audio::detail {
 
 bool SharedIoStampedBridge::prepare(Config config, std::uint64_t epoch,
                                     std::uint64_t first_sequence) {
-    if (prepared_ || !config.capacity || !config.channels || !config.block_size || !epoch ||
+    if (prepared_ || !config.capacity || !config.channels || !config.block_size ||
+        !config.lead_blocks || config.capacity <= config.lead_blocks || !epoch ||
         first_sequence >= kSequenceLimit)
         return false;
     const auto maximum = std::numeric_limits<std::size_t>::max() / sizeof(float);
@@ -25,6 +26,7 @@ bool SharedIoStampedBridge::prepare(Config config, std::uint64_t epoch,
     }
     sample_count_ = count;
     capacity_ = config.capacity;
+    lead_blocks_ = config.lead_blocks;
     next_sequence_ = first_sequence;
     prepared_ = true;
     return activate_epoch(epoch);

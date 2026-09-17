@@ -10,8 +10,9 @@ namespace pulp::gpu_audio::detail {
 // This is deliberately private until the installed SDK contract is settled.
 // `algorithmic_lead_blocks` is the number of complete blocks by which a result
 // may trail the callback timeline; `pipeline_depth` is only the number of
-// physical shared slots. They are distinct knobs, but a GPU path needs at
-// least one physical slot for every block of declared lead.
+// physical shared slots. They are distinct knobs, but a GPU path needs the
+// declared lead plus one free physical slot for the callback currently being
+// published.
 enum class SharedIoPath : std::uint8_t { Cpu, StagedAsync, SharedHostPointer };
 enum class SharedIoRequest : std::uint8_t {
     Auto,
@@ -79,7 +80,7 @@ validate_shared_io_contract(const SharedIoExecutionContract& contract) noexcept 
         return {SharedIoContractError::MissingAlgorithmicLead};
     if (gpu_path && contract.pipeline_depth == 0)
         return {SharedIoContractError::MissingPipelineDepth};
-    if (gpu_path && contract.pipeline_depth < contract.algorithmic_lead_blocks)
+    if (gpu_path && contract.pipeline_depth <= contract.algorithmic_lead_blocks)
         return {SharedIoContractError::InsufficientPipelineDepth};
     if (contract.active_path == SharedIoPath::SharedHostPointer &&
         !contract.shared_host_pointer_capable)

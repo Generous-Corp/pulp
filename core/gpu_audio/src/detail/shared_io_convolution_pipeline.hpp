@@ -33,6 +33,7 @@ class SharedIoConvolutionPipeline {
         std::uint32_t block_size = 0;
         std::uint32_t fft_size = 0;
         std::uint32_t ir_length = 0;
+        std::uint32_t lead_blocks = SharedIoStampedBridge::kLeadBlocks;
     };
 
     // Host/quiescent only. The two components receive one geometry and epoch
@@ -102,6 +103,9 @@ class SharedIoConvolutionPipeline {
     }
     std::uint64_t valid_from_sequence() const noexcept {
         return executor_.valid_from_sequence();
+    }
+    std::uint32_t lead_blocks() const noexcept {
+        return bridge_.lead_blocks();
     }
 
   private:

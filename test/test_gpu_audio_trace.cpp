@@ -221,7 +221,7 @@ struct ProductTraceFixture {
         REQUIRE(session.prepare(
             {std::move(owner), std::move(program)},
             {.pipeline =
-                 {.capacity = 2, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+                 {.capacity = 3, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
              .slots = 1,
              .sample_rate = 48000,
              .requested_path = SharedIoRequest::RequireSharedHostPointer,
@@ -761,7 +761,7 @@ TEST_CASE("transport final disposition replaces bridge silence exactly once",
 TEST_CASE("deferred callback delivery prevents epoch replacement and forged GPU success",
           "[gpu_audio][trace][delivery]") {
     SharedIoStampedBridge bridge;
-    REQUIRE(bridge.prepare({.capacity = 2, .channels = 1, .block_size = 2}, 1));
+    REQUIRE(bridge.prepare({.capacity = 3, .channels = 1, .block_size = 2}, 1));
     const std::array<float, 2> input{1.f, 2.f};
     std::array<float, 2> output;
     auto callback = bridge.begin_callback(input);
@@ -778,7 +778,7 @@ TEST_CASE("deferred callback delivery prevents epoch replacement and forged GPU 
 TEST_CASE("recovery atomically closes future worker reservations without reclaiming the active one",
           "[gpu_audio][trace][concurrency][recovery]") {
     SharedIoStampedBridge bridge;
-    REQUIRE(bridge.prepare({.capacity = 2, .channels = 1, .block_size = 2}, 1));
+    REQUIRE(bridge.prepare({.capacity = 3, .channels = 1, .block_size = 2}, 1));
     REQUIRE(bridge.begin_worker_admission());
     std::thread callback([&] { bridge.request_recovery(SharedIoRecoveryReason::SequenceGap); });
     callback.join();

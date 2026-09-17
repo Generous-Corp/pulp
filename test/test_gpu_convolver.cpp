@@ -450,6 +450,50 @@ TEST_CASE("GpuConvolver fallback latency matches reported PDC", "[gpu_audio][con
     }
 }
 
+TEST_CASE("GpuConvolver configurable lead keeps PDC and fallback timeline aligned",
+          "[gpu_audio][convolver][lead]") {
+    constexpr uint32_t CH = 1, BS = 16, SR = 48000;
+    const std::vector<float> ir{0.5f, -0.25f, 0.125f};
+    constexpr uint32_t kBlocks = 14;
+    std::vector<float> input(BS * kBlocks);
+    for (uint32_t i = 0; i < input.size(); ++i)
+        input[i] = std::sin(0.11f * static_cast<float>(i));
+    const auto reference = direct_convolution(input, ir);
+
+    for (const uint32_t lead : {1u, 2u, 4u, 8u}) {
+        GpuConvolver node(CH, BS, SR, ir, lead);
+        REQUIRE(node.prepare());
+        REQUIRE(node.descriptor().latency_blocks == lead);
+
+        for (uint32_t block = 0; block < kBlocks; ++block) {
+            const float* in_ptr[CH] = {input.data() + block * BS};
+            float* out_storage[CH];
+            std::vector<float> output(BS, 0.0f);
+            out_storage[0] = output.data();
+            BufferView<const float> in_view(in_ptr, CH, BS);
+            BufferView<float> out_view(out_storage, CH, BS);
+            node.prime_fallback(in_view, BS);
+            node.process_cpu_fallback(in_view, out_view, BS);
+            for (uint32_t frame = 0; frame < BS; ++frame) {
+                const float expected = block < lead ? 0.0f : reference[(block - lead) * BS + frame];
+                REQUIRE(std::abs(output[frame] - expected) < 1.0e-3f * (1.0f + std::abs(expected)));
+            }
+        }
+    }
+}
+
+TEST_CASE("GpuConvolver rejects unusable lead values and preserves the default",
+          "[gpu_audio][convolver][lead][adversarial]") {
+    const std::vector<float> ir{1.0f};
+    GpuConvolver default_node(1, 16, 48000, ir);
+    REQUIRE(default_node.descriptor().latency_blocks == GpuConvolver::kLatencyBlocks);
+
+    GpuConvolver zero_node(1, 16, 48000, ir, 0);
+    CHECK_FALSE(zero_node.prepare());
+    GpuConvolver oversized_node(1, 16, 48000, ir, GpuConvolver::kMaxLatencyBlocks + 1u);
+    CHECK_FALSE(oversized_node.prepare());
+}
+
 // BUG 3 (NaN poison): the guarded overlap-add must never let a single non-finite
 // readback sample persist in the carry. A poisoned block resets the carry and
 // emits silence; the next finite block convolves correctly from a clean state.

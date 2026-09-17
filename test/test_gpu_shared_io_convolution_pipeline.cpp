@@ -152,6 +152,52 @@ TEST_CASE("shared convolution pipeline callback path allocates nothing after pre
     CHECK(allocations == 0);
 }
 
+TEST_CASE("shared convolution pipeline carries configurable lead through eligibility and delivery",
+          "[gpu_audio][shared_io][pipeline][lead]") {
+    for (const std::uint32_t lead : {1u, 2u, 4u, 8u}) {
+        P pipeline;
+        REQUIRE(pipeline.prepare({.capacity = lead + 1u,
+                                  .channels = 1,
+                                  .block_size = 2,
+                                  .fft_size = 8,
+                                  .ir_length = 1,
+                                  .lead_blocks = lead},
+                                 7));
+        CHECK(pipeline.lead_blocks() == lead);
+
+        std::array<float, 2> output{};
+        for (std::uint32_t sequence = 0; sequence < lead; ++sequence) {
+            const auto callback = pipeline.begin_callback(input, sequence);
+            REQUIRE(callback.valid());
+            CHECK(pipeline.consume_output(callback, output) == P::Delivery::Priming);
+        }
+
+        // One terminal is enough to prove that callback q consumes q-lead,
+        // while capacity=lead+1 leaves one slot for the callback currently
+        // being published.
+        REQUIRE(pipeline.record_terminal({7, 0}, P::Terminal::Success, terminal(3, 4)));
+        REQUIRE(pipeline.drain_terminals() == 1);
+        const auto callback = pipeline.begin_callback(input, lead);
+        REQUIRE(callback.valid());
+        CHECK(pipeline.consume_output(callback, output) == P::Delivery::Ready);
+        CHECK(output == std::array<float, 2>{3.f, 4.f});
+    }
+}
+
+TEST_CASE("shared convolution pipeline rejects capacity without a free lead slot",
+          "[gpu_audio][shared_io][pipeline][lead][adversarial]") {
+    for (const std::uint32_t lead : {1u, 2u, 4u, 8u}) {
+        P pipeline;
+        CHECK_FALSE(pipeline.prepare({.capacity = lead,
+                                      .channels = 1,
+                                      .block_size = 2,
+                                      .fft_size = 8,
+                                      .ir_length = 1,
+                                      .lead_blocks = lead},
+                                     7));
+    }
+}
+
 TEST_CASE("shared convolution pipeline separates callback watermark from worker OLA",
           "[gpu_audio][shared_io][pipeline][thread]") {
     P pipeline;

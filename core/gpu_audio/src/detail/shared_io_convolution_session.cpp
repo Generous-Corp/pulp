@@ -40,7 +40,7 @@ SharedIoExecutionContract SharedIoConvolutionSession::execution_contract() const
     contract.channels = config_.pipeline.channels;
     contract.block_size = config_.pipeline.block_size;
     contract.sample_rate = config_.sample_rate;
-    contract.algorithmic_lead_blocks = SharedIoStampedBridge::kLeadBlocks;
+    contract.algorithmic_lead_blocks = config_.pipeline.lead_blocks;
     contract.pipeline_depth = config_.pipeline.capacity;
     contract.requested_path = config_.requested_path;
     contract.active_path = config_.active_path;

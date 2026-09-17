@@ -5,10 +5,11 @@ namespace pulp::gpu_audio::detail {
 bool SharedIoConvolutionPipeline::prepare(Config config, std::uint64_t epoch,
                                           std::uint64_t first_sequence) {
     if (prepared_ || config.capacity == 0 || config.channels == 0 || config.block_size == 0 ||
-        config.ir_length == 0 ||
+        config.ir_length == 0 || config.lead_blocks == 0 || config.capacity <= config.lead_blocks ||
         std::uint64_t(config.block_size) + config.ir_length - 1u > config.fft_size)
         return false;
-    if (!bridge_.prepare({config.capacity, config.channels, config.block_size}, epoch,
+    if (!bridge_.prepare({config.capacity, config.channels, config.block_size,
+                          config.lead_blocks}, epoch,
                          first_sequence))
         return false;
     if (!executor_.prepare({config.capacity, config.channels, config.block_size, config.fft_size,
@@ -35,9 +36,8 @@ SharedIoConvolutionPipeline::consume_output(const Callback& callback, std::span<
     // ready storage. Sequence q consumes wet q - lead; once that callback has
     // completed, a later terminal for the same record may advance worker-owned
     // OLA but must never become an audible late wet block.
-    if (finalized && callback.stamp.sequence >= SharedIoStampedBridge::kLeadBlocks)
-        executor_.advance_callback_watermark(callback.stamp.sequence -
-                                             SharedIoStampedBridge::kLeadBlocks);
+    if (finalized && callback.stamp.sequence >= bridge_.lead_blocks())
+        executor_.advance_callback_watermark(callback.stamp.sequence - bridge_.lead_blocks());
     return result;
 }
 

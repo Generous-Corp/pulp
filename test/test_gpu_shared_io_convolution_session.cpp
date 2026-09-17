@@ -421,7 +421,7 @@ TEST_CASE("shared convolution session retains a failed preparation until its dra
     provider_control->allow_drain = false;
     CHECK_FALSE(session.prepare(
         {std::move(provider), std::move(program)},
-        {.pipeline = {.capacity = 2, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+        {.pipeline = {.capacity = 3, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
          .slots = 1}));
     CHECK_FALSE(session.prepared());
     CHECK_FALSE(session.release());
