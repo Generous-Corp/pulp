@@ -390,3 +390,49 @@ TEST_CASE("a negative document tick is carried rather than refused as out of ran
     fixture.run_block(256);
     CHECK(fixture.transport.playhead().loop.start.value == start);
 }
+
+TEST_CASE("set-enabled resolves the current transport loop instead of an earlier target",
+          "[inspect][control][sequencer][transport][write]") {
+    PreparedTransport first;
+    PreparedTransport second;
+    const auto first_start = first.tick_at_sample(0);
+    const auto first_end = first.tick_at_sample(96'000);
+    const auto second_start = second.tick_at_sample(48'000);
+    const auto second_end = second.tick_at_sample(144'000);
+    REQUIRE(first.transport.set_loop(
+                {true, timebase::TickPosition{first_start}, timebase::TickPosition{first_end}}) ==
+            playback::TransportError::None);
+    REQUIRE(second.transport.set_loop(
+                {true, timebase::TickPosition{second_start}, timebase::TickPosition{second_end}}) ==
+            playback::TransportError::None);
+
+    playback::MasterTransport* active = &first.transport;
+    auto resolver = [&active](const ControlAdmissionPlan& admitted)
+        -> std::optional<ControlSequencerTransportTarget> {
+        return ControlSequencerTransportTarget{.registration_id = admitted.registration_id,
+                                               .host_tier = ControlHostTier::Standalone,
+                                               .transport = active};
+    };
+    auto reader = make_control_sequencer_transport_read_executor(resolver);
+    auto writer = make_control_sequencer_transport_write_executor(resolver);
+    const auto first_sequence =
+        detail_of(reader(plan(), read_request(), context()))["sequence"].getInt64();
+
+    // The external host updates an idle replacement before the control write.
+    active = &second.transport;
+    const auto second_sequence =
+        detail_of(reader(plan(), read_request(), context()))["sequence"].getInt64();
+    REQUIRE(second_sequence == first_sequence);
+    const auto outcome =
+        writer(plan(),
+               write_request(R"({"action":"set-enabled","enabled":false,"expected_sequence":)" +
+                             std::to_string(second_sequence) + R"(,"idempotency_key":"once"})"),
+               context());
+    REQUIRE(outcome.terminal_state == ControlReceiptState::Completed);
+    const auto state = second.transport.loop_state();
+    CHECK_FALSE(state.loop.enabled);
+    CHECK(state.loop.start.value == second_start);
+    CHECK(state.loop.end.value == second_end);
+    CHECK(first.transport.loop_state().loop.start.value == first_start);
+    CHECK(first.transport.loop_state().loop.end.value == first_end);
+}
