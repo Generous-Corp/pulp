@@ -416,6 +416,25 @@
                     RESOURCE_LOCK pulp_gpu
                     TIMEOUT 60)
 
+            if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
+                add_executable(pulp-gpu-shared-io-paced-convolution-probe
+                    test_gpu_shared_io_paced_convolution_probe.cpp)
+                target_link_libraries(pulp-gpu-shared-io-paced-convolution-probe PRIVATE
+                    pulp::gpu-audio)
+                target_include_directories(pulp-gpu-shared-io-paced-convolution-probe PRIVATE
+                    ../core/gpu_audio/src)
+                add_dependencies(pulp-gpu-shared-io-paced-convolution-probe
+                    pulp-gpu-dawn-shared-io-provider-probe)
+                add_test(NAME pulp-gpu-shared-io-paced-convolution-probe
+                    COMMAND "${Python3_EXECUTABLE}"
+                        "${PROJECT_SOURCE_DIR}/test/verify_gpu_shared_io_paced_convolution.py"
+                        --probe "$<TARGET_FILE:pulp-gpu-shared-io-paced-convolution-probe>")
+                set_tests_properties(pulp-gpu-shared-io-paced-convolution-probe PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 150)
+            endif()
+
             # This goes through the private session factory rather than
             # driving the plan and executor separately: one real provider
             # creates its paired program, the session owns both, and callback
