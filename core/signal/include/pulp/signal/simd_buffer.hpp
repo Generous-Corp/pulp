@@ -20,7 +20,9 @@ inline void* pulp_aligned_alloc(size_t alignment, size_t size) {
     void* allocation = nullptr;
     return posix_memalign(&allocation, alignment, size) == 0 ? allocation : nullptr;
 }
-inline void pulp_aligned_free(void* p) { std::free(p); }
+inline void pulp_aligned_free(void* p) {
+    std::free(p);
+}
 #else
 inline void* pulp_aligned_alloc(size_t alignment, size_t size) { return std::aligned_alloc(alignment, size); }
 inline void pulp_aligned_free(void* p) { std::free(p); }
