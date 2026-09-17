@@ -13,6 +13,8 @@ alternate the staged-async and shared-async paths after warmup, and `pair_id`
 binds the two independent trials used for confidence estimation. A trial end
 records the block count and SHA-256 of its canonical block records, so a killed
 or partially copied run cannot be interpreted as a shorter successful run.
+The ordered Clang/GCC flags must resolve to `-O3` with `NDEBUG` defined; a later
+optimization flag or `-UNDEBUG`/`-U NDEBUG` override makes the capture invalid.
 
 Each block carries `(engine_id, generation, sequence)`, the GPU terminal and
 delivery dispositions, deadline/fallback state, and the named payload-transfer
@@ -43,6 +45,8 @@ values are null. Provenance, including declared uncertainty/overhead bounds, mus
 remain constant for each metric within each path. Inferred observations remain in
 raw/CSV screening data but cannot supply verdict statistics. Confirmation,
 default, and overload campaigns require direct or correlated verdict timings.
+Screening still requires complete direct/correlated submit-to-completion and
+total-CPU metrics plus eligible GPU delivery in every normal-load async trial.
 This validates the declaration, not the correctness of the physical calibration
 or instrumentation control, which must accompany physical results.
 
@@ -80,8 +84,9 @@ values remain available in the CSV for plots.
 Both detached outputs carry the SHA-256 of the exact raw JSONL bytes. The CLI
 hashes the raw file around loading, then rehashes both raw and benchmark inputs
 immediately before publication and refuses an input that changes during analysis.
-Raw evidence, benchmark, summary, and CSV paths must identify
-distinct files, including across symbolic and hard links. Outputs are staged in
+Raw evidence, benchmark, summary, and CSV paths must identify distinct files,
+including across symbolic links, hard links, and filesystem case-folding or
+Unicode-normalization equivalence for absent outputs. Outputs are staged in
 their destination directories and atomically replace their individual paths only
 after every requested output has been generated successfully and path identity
 has been rechecked. If any requested replacement fails, the CLI restores every

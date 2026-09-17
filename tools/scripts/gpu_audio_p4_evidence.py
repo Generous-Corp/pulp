@@ -39,6 +39,7 @@ from gpu_audio_p4_evidence_storage import (
 SCHEMA = "pulp.gpu-audio.p4.raw.v1"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+OPTIMIZATION_FLAG_RE = re.compile(r"^-O(?:[0-9]+|fast|g|s|z)?$")
 PATHS = {"staged_sync", "staged_async", "shared_async"}
 CAMPAIGNS = {"screening", "confirmation", "default", "overload"}
 GPU_TERMINALS = {
@@ -93,6 +94,32 @@ def _uint64_integer(value: Any) -> bool:
     return _integer_at_least(value, 0) and value <= UINT64_MAX
 
 
+def _effective_release_flags(flags: Any) -> bool:
+    """Interpret ordered Clang/GCC optimization and NDEBUG flag overrides."""
+    if not isinstance(flags, list) or not flags or not all(_nonempty(flag) for flag in flags):
+        return False
+    optimization: str | None = None
+    ndebug_defined: bool | None = None
+    for index, flag in enumerate(flags):
+        if OPTIMIZATION_FLAG_RE.fullmatch(flag):
+            optimization = flag
+
+        action: bool | None = None
+        macro = ""
+        if flag in {"-D", "-U"} and index + 1 < len(flags):
+            action = flag == "-D"
+            macro = flags[index + 1]
+        elif flag.startswith("-D") and len(flag) > 2:
+            action = True
+            macro = flag[2:]
+        elif flag.startswith("-U") and len(flag) > 2:
+            action = False
+            macro = flag[2:]
+        if action is not None and macro.split("=", 1)[0] == "NDEBUG":
+            ndebug_defined = action
+    return optimization == "-O3" and ndebug_defined is True
+
+
 def _canonical(record: dict[str, Any]) -> bytes:
     return json.dumps(
         record, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
@@ -135,8 +162,7 @@ def _strict_json_loads(line: str) -> Any:
     return value
 
 
-def _distinct_paths(paths: list[tuple[str, Path]]) -> str | None:
-    """Reject textual, symlink, and hard-link aliases across inputs and outputs."""
+def _inspect_distinct_paths(paths: list[tuple[str, Path]]) -> str | None:
     resolved: dict[Path, str] = {}
     identities: dict[tuple[int, int], str] = {}
     for label, path in paths:
@@ -158,6 +184,54 @@ def _distinct_paths(paths: list[tuple[str, Path]]) -> str | None:
             return f"{label} aliases {identities[identity]}"
         identities[identity] = label
     return None
+
+
+def _distinct_paths(paths: list[tuple[str, Path]], *,
+                    probe_absent: Iterable[Path] = ()) -> str | None:
+    """Reject aliases, probing absent outputs through the destination filesystem."""
+    labels = {path: label for label, path in paths}
+    created: list[tuple[Path, tuple[int, int]]] = []
+    error: str | None = None
+    for path in probe_absent:
+        if os.path.lexists(path):
+            continue
+        try:
+            descriptor = os.open(
+                path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+            )
+        except FileExistsError:
+            # An earlier probe may have created this same filesystem entry under
+            # a case-folded or normalization-equivalent spelling.
+            continue
+        except OSError as exc:
+            error = f"cannot probe {labels.get(path, 'output')} {path}: {exc}"
+            break
+        try:
+            stat = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        created.append((path, (stat.st_dev, stat.st_ino)))
+
+    if error is None:
+        error = _inspect_distinct_paths(paths)
+
+    cleanup_errors: list[str] = []
+    for path, identity in reversed(created):
+        try:
+            stat = path.lstat()
+            if (stat.st_dev, stat.st_ino) != identity:
+                cleanup_errors.append(f"probe path changed while checking {path}")
+                continue
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            cleanup_errors.append(f"cannot remove path probe {path}: {exc}")
+    if cleanup_errors:
+        return "; ".join(cleanup_errors)
+    return error
 
 
 def _stage_output(path: Path, writer: Callable[[TextIO], None], *,
@@ -470,9 +544,10 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
     if manifest.get("build_type") != "Release":
         errors.append("line 1: build_type must be Release")
     flags = manifest.get("build_flags")
-    if (not isinstance(flags, list) or not all(_nonempty(flag) for flag in flags)
-            or "-O3" not in flags or "-DNDEBUG" not in flags):
-        errors.append("line 1: build_flags must be non-empty strings containing -O3 and -DNDEBUG")
+    if not _effective_release_flags(flags):
+        errors.append(
+            "line 1: build_flags must be non-empty strings with effective -O3 and NDEBUG defined"
+        )
     if manifest.get("paced") is not True:
         errors.append("line 1: paced must be true")
     if not _integer_at_least(manifest.get("warmup_blocks"), 1):
@@ -752,7 +827,7 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
             for field in ("device_loss", "audio_xrun", "driver_stall"):
                 if not isinstance(record.get(field), bool):
                     errors.append(f"line {line}: {field} must be boolean")
-            if (campaign in ("confirmation", "default")
+            if (campaign in ("screening", "confirmation", "default")
                     and current["path"] in ("staged_async", "shared_async")):
                 if current["deliveries"]["gpu"] == 0:
                     errors.append(f"line {line}: normal-load async trial requires eligible GPU delivery")
@@ -1026,10 +1101,11 @@ def main() -> int:
     args = parser.parse_args()
     paths = [("evidence input", args.evidence),
              ("benchmark input", args.benchmark_binary)]
-    paths.extend((label, path) for label, path in (
+    output_paths = [(label, path) for label, path in (
         ("summary output", args.summary), ("CSV output", args.csv),
-    ) if path is not None)
-    alias_error = _distinct_paths(paths)
+    ) if path is not None]
+    paths.extend(output_paths)
+    alias_error = _distinct_paths(paths, probe_absent=(path for _, path in output_paths))
     if alias_error:
         print(f"gpu-audio-p4-evidence: paths must refer to distinct files: {alias_error}",
               file=sys.stderr)
@@ -1076,7 +1152,7 @@ def main() -> int:
                 raise ValueError("evidence file changed during analysis")
             if _sha256_file(args.benchmark_binary) != records[0]["binary_sha256"]:
                 raise ValueError("benchmark binary changed during analysis")
-            alias_error = _distinct_paths(paths)
+            alias_error = _distinct_paths(paths, probe_absent=(path for _, path in output_paths))
             if alias_error:
                 raise ValueError(f"path identity changed during analysis: {alias_error}")
             _publish_staged_outputs(staged)
