@@ -191,8 +191,8 @@ bool GpuConvolver::prepare() {
 std::uint8_t GpuConvolver::process_realtime_shared_io(void* self,
                                                       const audio::BufferView<const float>& input,
                                                       audio::BufferView<float>& output,
-                                                      std::uint32_t n,
-                                                      std::uint64_t sequence) noexcept {
+                                                      std::uint32_t n, std::uint64_t sequence,
+                                                      bool input_valid) noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     auto* convolver = static_cast<GpuConvolver*>(self);
     if (convolver == nullptr || !convolver->prepared_ || !convolver->shared_io_ ||
@@ -203,6 +203,10 @@ std::uint8_t GpuConvolver::process_realtime_shared_io(void* self,
         return detail::kRealtimeGpuInactive;
 
     auto& state = *convolver->shared_io_;
+    // Invalid external views consume a zero-input timeline position, but may
+    // never admit fresh GPU work. The transport owns their silent disposition.
+    if (!input_valid)
+        state.session->request_recovery(detail::SharedIoRecoveryReason::InvalidCallback);
     for (uint32_t ch = 0; ch < convolver->channels_; ++ch) {
         const float* src = input.channel_ptr(ch);
         auto* dst = state.callback_input.data() + static_cast<std::size_t>(ch) * convolver->block_;
@@ -279,6 +283,15 @@ void GpuConvolver::complete_realtime_shared_io(void* self, std::uint64_t sequenc
         (void)state.session->complete_callback_delivery(
             state.callback, static_cast<detail::SharedIoDeliveryDisposition>(disposition));
 #endif
+}
+
+std::uint64_t GpuConvolver::next_realtime_shared_io_sequence(void* self) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    auto* convolver = static_cast<GpuConvolver*>(self);
+    if (convolver && convolver->shared_io_ && convolver->shared_io_->session)
+        return convolver->shared_io_->session->next_sequence();
+#endif
+    return 0;
 }
 
 bool GpuConvolver::has_realtime_shared_io() const noexcept {

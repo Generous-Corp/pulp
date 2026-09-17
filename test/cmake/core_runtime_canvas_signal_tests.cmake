@@ -436,7 +436,7 @@ pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
 # pump + lock-free rings + miss policy). GPU-agnostic scheduling logic, so it
 # runs on no-GPU CI too.
 pulp_add_test_suite(pulp-test-gpu-audio-transport
-    SOURCES test_gpu_audio_transport.cpp
+    SOURCES test_gpu_audio_transport.cpp harness/rt_allocation_probe.cpp
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/gpu_audio_transport.cpp
     LIBRARIES pulp::audio pulp::runtime Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include

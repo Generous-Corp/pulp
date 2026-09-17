@@ -193,11 +193,12 @@ class GpuConvolver : public GpuAudioNode {
     static std::uint8_t process_realtime_shared_io(void* self,
                                                    const audio::BufferView<const float>& input,
                                                    audio::BufferView<float>& output,
-                                                   std::uint32_t n,
-                                                   std::uint64_t sequence) noexcept;
+                                                   std::uint32_t n, std::uint64_t sequence,
+                                                   bool input_valid) noexcept;
     static std::uint32_t service_realtime_shared_io(void* self, std::uint64_t now_ns) noexcept;
     static bool fence_realtime_shared_io(void* self) noexcept;
     static void complete_realtime_shared_io(void*, std::uint64_t, std::uint8_t) noexcept;
+    static std::uint64_t next_realtime_shared_io_sequence(void*) noexcept;
     bool has_realtime_shared_io() const noexcept;
 
     friend detail::RealtimeGpuNodePath detail::realtime_gpu_node_path(GpuAudioNode*) noexcept;

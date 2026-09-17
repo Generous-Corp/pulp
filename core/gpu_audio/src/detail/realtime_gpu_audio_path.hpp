@@ -17,9 +17,10 @@ inline constexpr std::uint32_t kRealtimeGpuServiceInactive =
 
 using RealtimeGpuProcessFn = std::uint8_t (*)(void*, const audio::BufferView<const float>&,
                                               audio::BufferView<float>&, std::uint32_t,
-                                              std::uint64_t) noexcept;
+                                              std::uint64_t, bool) noexcept;
 using RealtimeGpuServiceFn = std::uint32_t (*)(void*, std::uint64_t) noexcept;
 using RealtimeGpuDeliveryFn = void (*)(void*, std::uint64_t, std::uint8_t) noexcept;
+using RealtimeGpuSequenceFn = std::uint64_t (*)(void*) noexcept;
 using RealtimeGpuFenceFn = bool (*)(void*) noexcept;
 
 struct RealtimeGpuNodePath {
@@ -28,10 +29,13 @@ struct RealtimeGpuNodePath {
     RealtimeGpuServiceFn service = nullptr;
     RealtimeGpuFenceFn fence = nullptr;
     RealtimeGpuDeliveryFn delivered = nullptr;
+    // Host/quiescent only: the prepared node retains the callback timeline
+    // across transport release, reconstruction and reprepare.
+    RealtimeGpuSequenceFn next_sequence = nullptr;
 
     bool active() const noexcept {
         return context != nullptr && process != nullptr && service != nullptr && fence != nullptr &&
-               delivered != nullptr;
+               delivered != nullptr && next_sequence != nullptr;
     }
 };
 

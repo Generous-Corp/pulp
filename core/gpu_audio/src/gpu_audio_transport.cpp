@@ -41,6 +41,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
         realtime_gpu_service_ = realtime_path.service;
         realtime_gpu_fence_ = realtime_path.fence;
         realtime_gpu_delivered_ = realtime_path.delivered;
+        callback_sequence_ = realtime_path.next_sequence(realtime_path.context);
     }
 
     const std::uint64_t cap = static_cast<std::uint64_t>(ring_blocks_) * block_size_;
@@ -53,6 +54,18 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     worker_out_.resize(channels_, block_size_);
     worker_in_.clear();
     worker_out_.clear();
+    rejected_input_.resize(channels_, block_size_);
+    rejected_output_.resize(channels_, block_size_);
+    rejected_input_.clear();
+    rejected_output_.clear();
+    rejected_input_ptrs_.resize(channels_);
+    rejected_output_ptrs_.resize(channels_);
+    auto rejected_in = rejected_input_.view();
+    auto rejected_out = rejected_output_.view();
+    for (uint32_t ch = 0; ch < channels_; ++ch) {
+        rejected_input_ptrs_[ch] = rejected_in.channel_ptr(ch);
+        rejected_output_ptrs_[ch] = rejected_out.channel_ptr(ch);
+    }
 
     in_fptrs_.resize(channels_);
     in_cptrs_.resize(channels_);
@@ -146,6 +159,8 @@ void GpuAudioTransport::release() noexcept {
     in_fptrs_.clear();
     in_cptrs_.clear();
     out_fptrs_.clear();
+    rejected_input_ptrs_.clear();
+    rejected_output_ptrs_.clear();
     node_ = nullptr;
     realtime_gpu_context_ = nullptr;
     realtime_gpu_process_ = nullptr;
@@ -160,23 +175,26 @@ void GpuAudioTransport::release() noexcept {
 
 void GpuAudioTransport::process(const audio::BufferView<const float>& input,
                                 audio::BufferView<float>& output, uint32_t n) noexcept {
-    const auto sequence = callback_sequence_++;
-    // Realtime path: ensure the background worker is driving pump() (clears any
-    // synchronous/offline mode left by a prior offline bounce). Relaxed store of
-    // an atomic bool — RT-safe, no lock.
-    synchronous_.store(false, std::memory_order_release);
-
-    // Cheap RT-path validation: shape must match what the node was prepared
-    // for, and the views must actually hold n frames / channels_ channels.
-    // Anything off → silence (never read/write past a view).
-    if (!prepared_ || n != block_size_ || input.num_channels() < channels_ ||
-        output.num_channels() < channels_ || input.num_samples() < n || output.num_samples() < n) {
+    if (!prepared_) {
         output.clear();
         return;
     }
+    const auto sequence = callback_sequence_++;
+    synchronous_.store(false, std::memory_order_release);
+    if (n != block_size_ || input.num_channels() < channels_ || output.num_channels() < channels_ ||
+        input.num_samples() < n || output.num_samples() < n) {
+        process_invalid_position(output, sequence, false);
+        return;
+    }
+    process_realtime_position(input, output, n, sequence, true);
+}
 
+void GpuAudioTransport::process_realtime_position(const audio::BufferView<const float>& input,
+                                                  audio::BufferView<float>& output, uint32_t n,
+                                                  std::uint64_t sequence,
+                                                  bool input_valid) noexcept {
     if (realtime_gpu_process_ != nullptr) {
-        process_shared(input, output, n, sequence);
+        process_shared(input, output, n, sequence, input_valid);
         return;
     }
 
@@ -258,11 +276,12 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
 
 void GpuAudioTransport::process_shared(const audio::BufferView<const float>& input,
                                        audio::BufferView<float>& output, std::uint32_t n,
-                                       std::uint64_t sequence) noexcept {
+                                       std::uint64_t sequence, bool input_valid) noexcept {
     using detail::SharedIoDeliveryDisposition;
     if (miss_policy_ == MissPolicy::CpuFallback)
         node_->prime_fallback(input, n);
-    const auto status = realtime_gpu_process_(realtime_gpu_context_, input, output, n, sequence);
+    const auto status =
+        realtime_gpu_process_(realtime_gpu_context_, input, output, n, sequence, input_valid);
     auto delivered = SharedIoDeliveryDisposition::GpuDelivered;
     if (status == detail::kRealtimeGpuPriming) {
         output.clear();
@@ -285,6 +304,10 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
             break;
         }
     }
+    if (!input_valid) {
+        output.clear();
+        delivered = SharedIoDeliveryDisposition::InvalidRejected;
+    }
     realtime_gpu_delivered_(realtime_gpu_context_, sequence, static_cast<std::uint8_t>(delivered));
     if (wake_on_write_)
         wake_sem_.release();
@@ -292,14 +315,36 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
 
 void GpuAudioTransport::process_offline(const audio::BufferView<const float>& input,
                                         audio::BufferView<float>& output, uint32_t n) noexcept {
-    const auto sequence = callback_sequence_++;
-    // Same shape validation as the RT path.
-    if (!prepared_ || n != block_size_ || input.num_channels() < channels_ ||
-        output.num_channels() < channels_ || input.num_samples() < n || output.num_samples() < n) {
+    if (!prepared_) {
         output.clear();
         return;
     }
+    const auto sequence = callback_sequence_++;
+    if (n != block_size_ || input.num_channels() < channels_ || output.num_channels() < channels_ ||
+        input.num_samples() < n || output.num_samples() < n) {
+        process_invalid_position(output, sequence, true);
+        return;
+    }
+    process_offline_position(input, output, n, sequence, true);
+}
 
+void GpuAudioTransport::process_invalid_position(audio::BufferView<float>& output,
+                                                 std::uint64_t sequence, bool offline) noexcept {
+    // The shared final-disposition hook runs inside the sanitized position.
+    // Commit the externally visible silence before that hook can report it.
+    output.clear();
+    audio::BufferView<const float> zero_input(rejected_input_ptrs_.data(), channels_, block_size_);
+    audio::BufferView<float> discarded_output(rejected_output_ptrs_.data(), channels_, block_size_);
+    if (offline)
+        process_offline_position(zero_input, discarded_output, block_size_, sequence, false);
+    else
+        process_realtime_position(zero_input, discarded_output, block_size_, sequence, false);
+}
+
+void GpuAudioTransport::process_offline_position(const audio::BufferView<const float>& input,
+                                                 audio::BufferView<float>& output, uint32_t n,
+                                                 std::uint64_t sequence,
+                                                 bool input_valid) noexcept {
     // Take ownership of pumping: tell the worker to yield, then serialize node
     // access against any pump it is already inside. No real-time deadline here.
     synchronous_.store(true, std::memory_order_release);
@@ -310,7 +355,7 @@ void GpuAudioTransport::process_offline(const audio::BufferView<const float>& in
             realtime_gpu_fenced_for_offline_ = realtime_gpu_fence_(realtime_gpu_context_);
         // A failed barrier retains its owner and stays CPU-only. The same
         // continuously primed fallback carries the RT/offline timeline.
-        process_shared(input, output, n, sequence);
+        process_shared(input, output, n, sequence, input_valid);
         return;
     }
 
