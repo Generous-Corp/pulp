@@ -191,26 +191,24 @@ TEST_CASE("TraceInspector bounds the capture ring",
 
 TEST_CASE("TraceInspector round-trips a real session when tracing is ON", "[tracing][inspect]") {
     TraceInspector insp;
-    auto lease = bind_trace(insp);
+    auto lease = insp.bind_control_registration("registration-round-trip");
     REQUIRE(lease);
 
-    auto started = result_of(insp.handle(request(
-        methods::kTraceStartSession,
-        R"({"categories":["render","state"],"ring_mb":8})")));
+    auto started = result_of(lease->handle(
+        request(methods::kTraceStartSession, R"({"categories":["render","state"],"ring_mb":8})")));
     REQUIRE(started.isObject());
     CHECK(started["compiled_in"].getBool());
     CHECK(started["ok"].getBool());
     CHECK(started["active"].getBool());
 
-    const auto duplicate_start =
-        insp.handle(request(methods::kTraceStartSession));
+    const auto duplicate_start = lease->handle(request(methods::kTraceStartSession));
     CHECK(duplicate_start.is_error);
     CHECK(duplicate_start.error_code == "trace_already_active");
 
     // Emit a little so the trace is non-trivial.
     { PULP_TRACE_SCOPE_NAMED("render", "inspector_probe_frame"); }
 
-    auto stopped = result_of(insp.handle(request(methods::kTraceStopSession)));
+    auto stopped = result_of(lease->handle(request(methods::kTraceStopSession)));
     REQUIRE(stopped.isObject());
     CHECK(stopped["ok"].getBool());
     CHECK_FALSE(std::string(stopped["out_path"].getString()).empty());
@@ -221,32 +219,29 @@ TEST_CASE("TraceInspector round-trips a real session when tracing is ON", "[trac
     CHECK(snap.hasObjectMember("last_trace_path"));
     CHECK_FALSE(insp.owns_method("Trace.nope"));
 
-    const auto duplicate_stop =
-        insp.handle(request(methods::kTraceStopSession));
+    const auto duplicate_stop = lease->handle(request(methods::kTraceStopSession));
     CHECK(duplicate_stop.is_error);
     CHECK(duplicate_stop.error_code == "no_active_trace");
 }
 
-TEST_CASE("TraceInspector enforces process-global publication ownership",
+TEST_CASE("TraceInspector enforces process-global control registration ownership",
           "[tracing][inspect][security]") {
     TraceInspector first;
-    auto first_lease = bind_trace(first, owner("publication-first"));
+    auto first_lease = first.bind_control_registration("registration-first");
     REQUIRE(first_lease);
     TraceInspector second;
-    auto second_lease = bind_trace(second, owner("publication-second"));
+    auto second_lease = second.bind_control_registration("registration-second");
     REQUIRE(second_lease);
 
     const auto started =
-        first.handle(request(methods::kTraceStartSession, R"({"ring_mb":8})"));
+        first_lease->handle(request(methods::kTraceStartSession, R"({"ring_mb":8})"));
     REQUIRE_FALSE(started.is_error);
 
-    const auto other_stop =
-        second.handle(request(methods::kTraceStopSession));
+    const auto other_stop = second_lease->handle(request(methods::kTraceStopSession));
     CHECK(other_stop.is_error);
     CHECK(other_stop.error_code == "trace_owned_by_another_controller");
 
-    const auto other_start =
-        second.handle(request(methods::kTraceStartSession));
+    const auto other_start = second_lease->handle(request(methods::kTraceStartSession));
     CHECK(other_start.is_error);
     CHECK(other_start.error_code == "trace_owned_by_another_controller");
 
@@ -257,7 +252,7 @@ TEST_CASE("TraceInspector enforces process-global publication ownership",
     CHECK(owner_snapshot["trace_control_available"].getBool());
     CHECK_FALSE(other_snapshot["trace_control_available"].getBool());
 
-    const auto stopped = first.handle(request(methods::kTraceStopSession));
+    const auto stopped = first_lease->handle(request(methods::kTraceStopSession));
     CHECK_FALSE(stopped.is_error);
     const auto available_snapshot =
         result_of(second.handle(request(methods::kTraceSnapshot)));
@@ -268,10 +263,10 @@ TEST_CASE("TraceInspector does not claim externally started captures",
           "[tracing][inspect][security]") {
     REQUIRE(pulp::runtime::Tracing::start());
     TraceInspector insp;
-    auto lease = bind_trace(insp);
+    auto lease = insp.bind_control_registration("registration-external-capture");
     REQUIRE(lease);
 
-    const auto stop = insp.handle(request(methods::kTraceStopSession));
+    const auto stop = lease->handle(request(methods::kTraceStopSession));
     CHECK(stop.is_error);
     CHECK(stop.error_code == "trace_owned_by_another_controller");
 
@@ -282,10 +277,10 @@ TEST_CASE("TraceInspector teardown stops an abandoned owned capture",
           "[tracing][inspect]") {
     {
         TraceInspector insp;
-        auto lease = bind_trace(insp);
+        auto lease = insp.bind_control_registration("registration-abandoned-capture");
         REQUIRE(lease);
         const auto started =
-            insp.handle(request(methods::kTraceStartSession, R"({"ring_mb":8})"));
+            lease->handle(request(methods::kTraceStartSession, R"({"ring_mb":8})"));
         REQUIRE_FALSE(started.is_error);
         REQUIRE(pulp::runtime::Tracing::active());
     }
@@ -296,15 +291,13 @@ TEST_CASE("TraceInspector stale ownership cannot stop a replacement capture",
           "[tracing][inspect][security]") {
     {
         TraceInspector insp;
-        auto lease = bind_trace(insp);
+        auto lease = insp.bind_control_registration("registration-stale-owner");
         REQUIRE(lease);
-        REQUIRE_FALSE(
-            insp.handle(request(methods::kTraceStartSession)).is_error);
+        REQUIRE_FALSE(lease->handle(request(methods::kTraceStartSession)).is_error);
         REQUIRE(pulp::runtime::Tracing::stop().ok);
         REQUIRE(pulp::runtime::Tracing::start());
 
-        const auto stale_stop =
-            insp.handle(request(methods::kTraceStopSession));
+        const auto stale_stop = lease->handle(request(methods::kTraceStopSession));
         CHECK(stale_stop.is_error);
         CHECK(stale_stop.error_code == "trace_owned_by_another_controller");
         CHECK(pulp::runtime::Tracing::active());
