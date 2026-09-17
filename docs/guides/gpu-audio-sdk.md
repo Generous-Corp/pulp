@@ -391,7 +391,11 @@ isolation — its dylib and framework live in the container app's
 `Contents/Frameworks` and resolve by `@rpath` only inside that container, so the
 container app (not the standalone appex) is the relocatability unit.
 
-> In one line: **Pulp lets plugin developers selectively accelerate
-> computationally expensive DSP on the GPU while preserving real-time audio
-> guarantees and seamless CPU compatibility** — rather than "plugins run on the
-> GPU." That's the accurate, and more valuable, framing.
+GPU work runs outside the audio callback, with CPU fallback when its result is
+unavailable. This bounds the callback's interaction with the GPU; it does not
+provide a hard scheduling guarantee from the operating system or driver.
+
+For the experimental shared-memory route, the [paced convolution
+probe](gpu-audio-paced-probe.md) records callback timing, missed deliveries,
+and numerical correctness through the public transport and its own worker.
+Use the [tracing guide](gpu-audio-tracing.md) for per-block lifecycle analysis.
