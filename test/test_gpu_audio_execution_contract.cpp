@@ -1,12 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <pulp/gpu_audio/gpu_audio_node.hpp>
 #include "detail/shared_io_execution_contract.hpp"
+#include <pulp/gpu_audio/gpu_audio_node.hpp>
 
 using namespace pulp::gpu_audio;
 using namespace pulp::gpu_audio::detail;
 
-TEST_CASE("shared IO contract keeps algorithmic lead distinct from slot depth", "[gpu_audio][shared_io]") {
+TEST_CASE("shared IO contract keeps algorithmic lead distinct from slot depth",
+          "[gpu_audio][shared_io]") {
     SharedIoExecutionContract contract{
         .channels = 2,
         .block_size = 32,
@@ -27,7 +28,8 @@ TEST_CASE("shared IO contract keeps algorithmic lead distinct from slot depth", 
             SharedIoContractError::MissingAlgorithmicLead);
 }
 
-TEST_CASE("shared IO contract fails closed for unavailable paths and fallback", "[gpu_audio][shared_io]") {
+TEST_CASE("shared IO contract fails closed for unavailable paths and fallback",
+          "[gpu_audio][shared_io]") {
     SharedIoExecutionContract contract{
         .channels = 2,
         .block_size = 128,
@@ -55,7 +57,8 @@ TEST_CASE("shared IO contract fails closed for unavailable paths and fallback", 
     REQUIRE(validate_shared_io_contract(contract).accepted());
 }
 
-TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing explicitly", "[gpu_audio][shared_io]") {
+TEST_CASE("shared IO telemetry reports zero copy and unavailable GPU timing explicitly",
+          "[gpu_audio][shared_io]") {
     SharedIoTelemetry telemetry;
     telemetry.record_callback_block(true);
     telemetry.record_submit();

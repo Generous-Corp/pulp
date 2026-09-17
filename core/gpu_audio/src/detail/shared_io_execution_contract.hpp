@@ -61,11 +61,13 @@ struct SharedIoExecutionContract {
 struct SharedIoContractValidation {
     SharedIoContractError error = SharedIoContractError::None;
 
-    constexpr bool accepted() const noexcept { return error == SharedIoContractError::None; }
+    constexpr bool accepted() const noexcept {
+        return error == SharedIoContractError::None;
+    }
 };
 
-constexpr SharedIoContractValidation validate_shared_io_contract(
-    const SharedIoExecutionContract& contract) noexcept {
+constexpr SharedIoContractValidation
+validate_shared_io_contract(const SharedIoExecutionContract& contract) noexcept {
     if (contract.channels == 0 || contract.block_size == 0 || contract.sample_rate == 0)
         return {SharedIoContractError::InvalidShape};
 
@@ -81,20 +83,20 @@ constexpr SharedIoContractValidation validate_shared_io_contract(
         return {SharedIoContractError::CpuFallbackNotPrepared};
 
     switch (contract.requested_path) {
-        case SharedIoRequest::Auto:
-            break;
-        case SharedIoRequest::RequireSharedHostPointer:
-            if (contract.active_path != SharedIoPath::SharedHostPointer)
-                return {SharedIoContractError::RequestedPathUnavailable};
-            break;
-        case SharedIoRequest::RequireStaged:
-            if (contract.active_path != SharedIoPath::StagedAsync)
-                return {SharedIoContractError::RequestedPathUnavailable};
-            break;
-        case SharedIoRequest::RequireCpu:
-            if (contract.active_path != SharedIoPath::Cpu)
-                return {SharedIoContractError::RequestedPathUnavailable};
-            break;
+    case SharedIoRequest::Auto:
+        break;
+    case SharedIoRequest::RequireSharedHostPointer:
+        if (contract.active_path != SharedIoPath::SharedHostPointer)
+            return {SharedIoContractError::RequestedPathUnavailable};
+        break;
+    case SharedIoRequest::RequireStaged:
+        if (contract.active_path != SharedIoPath::StagedAsync)
+            return {SharedIoContractError::RequestedPathUnavailable};
+        break;
+    case SharedIoRequest::RequireCpu:
+        if (contract.active_path != SharedIoPath::Cpu)
+            return {SharedIoContractError::RequestedPathUnavailable};
+        break;
     }
     return {};
 }
@@ -129,7 +131,7 @@ struct SharedIoTelemetrySnapshot {
 // distributions. GPU elapsed time is explicitly unavailable until an
 // authentic provider timestamp is supplied.
 class SharedIoTelemetry {
-public:
+  public:
     void reset() noexcept {
         callback_blocks_.store(0, std::memory_order_relaxed);
         submitted_blocks_.store(0, std::memory_order_relaxed);
@@ -156,22 +158,31 @@ public:
 
     void record_callback_block(bool deadline_miss) noexcept {
         callback_blocks_.fetch_add(1, std::memory_order_relaxed);
-        if (deadline_miss) deadline_misses_.fetch_add(1, std::memory_order_relaxed);
+        if (deadline_miss)
+            deadline_misses_.fetch_add(1, std::memory_order_relaxed);
     }
     void record_deadline_miss() noexcept {
         deadline_misses_.fetch_add(1, std::memory_order_relaxed);
     }
-    void record_submit() noexcept { submitted_blocks_.fetch_add(1, std::memory_order_relaxed); }
+    void record_submit() noexcept {
+        submitted_blocks_.fetch_add(1, std::memory_order_relaxed);
+    }
     void record_retired(bool success) noexcept {
         (success ? retired_success_ : retired_failure_).fetch_add(1, std::memory_order_relaxed);
     }
     void record_delivery(bool fallback, bool late) noexcept {
         delivered_blocks_.fetch_add(1, std::memory_order_relaxed);
-        if (fallback) fallback_blocks_.fetch_add(1, std::memory_order_relaxed);
-        if (late) late_completions_.fetch_add(1, std::memory_order_relaxed);
+        if (fallback)
+            fallback_blocks_.fetch_add(1, std::memory_order_relaxed);
+        if (late)
+            late_completions_.fetch_add(1, std::memory_order_relaxed);
     }
-    void record_resync_drop() noexcept { resync_drops_.fetch_add(1, std::memory_order_relaxed); }
-    void record_input_drop() noexcept { input_drops_.fetch_add(1, std::memory_order_relaxed); }
+    void record_resync_drop() noexcept {
+        resync_drops_.fetch_add(1, std::memory_order_relaxed);
+    }
+    void record_input_drop() noexcept {
+        input_drops_.fetch_add(1, std::memory_order_relaxed);
+    }
     void record_payload_copy(std::uint64_t bytes) noexcept {
         payload_bytes_copied_.fetch_add(bytes, std::memory_order_relaxed);
     }
@@ -179,7 +190,8 @@ public:
         auto current = in_flight_high_water_.load(std::memory_order_relaxed);
         while (current < count &&
                !in_flight_high_water_.compare_exchange_weak(
-                   current, count, std::memory_order_relaxed, std::memory_order_relaxed)) {}
+                   current, count, std::memory_order_relaxed, std::memory_order_relaxed)) {
+        }
     }
     void record_callback_duration_ns(std::uint64_t value) noexcept {
         callback_duration_ns_.store(value, std::memory_order_relaxed);
@@ -194,14 +206,16 @@ public:
                                   std::uint64_t submit_to_completion_ns) noexcept {
         pre_submit_delay_ns_.store(pre_submit_delay_ns, std::memory_order_relaxed);
         submit_to_completion_ns_.store(submit_to_completion_ns, std::memory_order_relaxed);
-        scheduled_to_completion_ns_.store(
-            pre_submit_delay_ns + submit_to_completion_ns, std::memory_order_relaxed);
+        scheduled_to_completion_ns_.store(pre_submit_delay_ns + submit_to_completion_ns,
+                                          std::memory_order_relaxed);
     }
     void record_gpu_elapsed_ns(std::uint64_t value) noexcept {
         gpu_elapsed_ns_.store(value, std::memory_order_relaxed);
         gpu_elapsed_available_.store(true, std::memory_order_release);
     }
-    void record_gpu_busy_counter(std::uint64_t value) noexcept { gpu_busy_counter_.store(value, std::memory_order_relaxed); }
+    void record_gpu_busy_counter(std::uint64_t value) noexcept {
+        gpu_busy_counter_.store(value, std::memory_order_relaxed);
+    }
 
     SharedIoTelemetrySnapshot snapshot() const noexcept {
         SharedIoTelemetrySnapshot out;
@@ -220,11 +234,9 @@ public:
         out.callback_duration_ns = callback_duration_ns_.load(std::memory_order_relaxed);
         out.worker_pack_copy_duration_ns =
             worker_pack_copy_duration_ns_.load(std::memory_order_relaxed);
-        out.encode_submit_duration_ns =
-            encode_submit_duration_ns_.load(std::memory_order_relaxed);
+        out.encode_submit_duration_ns = encode_submit_duration_ns_.load(std::memory_order_relaxed);
         out.pre_submit_delay_ns = pre_submit_delay_ns_.load(std::memory_order_relaxed);
-        out.submit_to_completion_ns =
-            submit_to_completion_ns_.load(std::memory_order_relaxed);
+        out.submit_to_completion_ns = submit_to_completion_ns_.load(std::memory_order_relaxed);
         out.scheduled_to_completion_ns =
             scheduled_to_completion_ns_.load(std::memory_order_relaxed);
         out.gpu_elapsed_available = gpu_elapsed_available_.load(std::memory_order_acquire);
@@ -233,7 +245,7 @@ public:
         return out;
     }
 
-private:
+  private:
     std::atomic<std::uint64_t> callback_blocks_{0}, submitted_blocks_{0};
     std::atomic<std::uint64_t> retired_success_{0}, retired_failure_{0};
     std::atomic<std::uint64_t> delivered_blocks_{0}, deadline_misses_{0};

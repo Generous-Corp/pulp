@@ -187,10 +187,8 @@ TEST_CASE("controller callback delivery performs no allocation",
     {
         pulp::test::RtAllocationProbe probe;
         callback_ok = controller.deliver(0).path == SharedIoDeliveryPath::Priming;
-        callback_ok = callback_ok &&
-                      controller.deliver(1).path == SharedIoDeliveryPath::Priming;
-        callback_ok = callback_ok &&
-                      controller.deliver(2).path == SharedIoDeliveryPath::Gpu;
+        callback_ok = callback_ok && controller.deliver(1).path == SharedIoDeliveryPath::Priming;
+        callback_ok = callback_ok && controller.deliver(2).path == SharedIoDeliveryPath::Gpu;
         allocations = probe.allocation_count();
     }
     REQUIRE(callback_ok);

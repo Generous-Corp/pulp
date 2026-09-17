@@ -44,8 +44,7 @@ struct SharedIoDelivery {
         return path == SharedIoDeliveryPath::CpuFallback;
     }
     constexpr bool uses_fallback() const noexcept {
-        return path == SharedIoDeliveryPath::CpuFallback ||
-               path == SharedIoDeliveryPath::Silence ||
+        return path == SharedIoDeliveryPath::CpuFallback || path == SharedIoDeliveryPath::Silence ||
                path == SharedIoDeliveryPath::PassthroughDry;
     }
 };
@@ -91,8 +90,12 @@ class SharedIoExecutionController {
         in_flight_.store(0, std::memory_order_relaxed);
     }
 
-    bool prepared() const noexcept { return prepared_; }
-    std::uint32_t capacity() const noexcept { return capacity_; }
+    bool prepared() const noexcept {
+        return prepared_;
+    }
+    std::uint32_t capacity() const noexcept {
+        return capacity_;
+    }
     std::uint32_t algorithmic_lead_blocks() const noexcept {
         return contract_.algorithmic_lead_blocks;
     }
@@ -135,9 +138,9 @@ class SharedIoExecutionController {
 
     // Provider completion operation. A completion for an unadmitted, stale, or
     // duplicate sequence is rejected without mutating another sequence.
-    bool record_completion(std::uint64_t sequence, SharedIoCompletion completion,
-                           SharedIoFallbackReason failure_reason =
-                               SharedIoFallbackReason::None) noexcept {
+    bool record_completion(
+        std::uint64_t sequence, SharedIoCompletion completion,
+        SharedIoFallbackReason failure_reason = SharedIoFallbackReason::None) noexcept {
         if (!prepared_)
             return false;
         for (std::uint32_t index = 0; index < capacity_; ++index) {
@@ -269,7 +272,7 @@ class SharedIoExecutionController {
         switch (contract_.miss_policy) {
         case MissPolicy::CpuFallback:
             return contract_.cpu_fallback_prepared ? SharedIoDeliveryPath::CpuFallback
-                                                    : SharedIoDeliveryPath::Silence;
+                                                   : SharedIoDeliveryPath::Silence;
         case MissPolicy::PassthroughDry:
             return SharedIoDeliveryPath::PassthroughDry;
         case MissPolicy::Silence:
