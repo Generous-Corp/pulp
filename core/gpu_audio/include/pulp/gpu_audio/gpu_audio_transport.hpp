@@ -79,7 +79,9 @@ class GpuAudioTransport {
     /// carries transport knobs. Returns false if the descriptor is invalid
     /// (zero channels/block, input!=output channels), ring_blocks is too small
     /// for the latency, or the miss policy is CpuFallback without
-    /// supports_cpu_fallback.
+    /// supports_cpu_fallback. Callback and external pump callers must be stopped
+    /// before preparation; an already-prepared shared node retains its sequence
+    /// and fallback history across transport preparation.
     bool prepare(GpuAudioNode* node, const Config& config);
     void release() noexcept;
 
@@ -94,7 +96,9 @@ class GpuAudioTransport {
     /// `latency_blocks`-delayed output. `n` must equal block_size. On a miss
     /// (worker not ready) the node's MissPolicy fills `output`. No allocation,
     /// locking, or blocking. Calls to process() and process_offline() share one
-    /// callback timeline and must never overlap.
+    /// callback timeline and must never overlap. A rejected view emits silence
+    /// and advances one zero-input position through the prepared fallback and
+    /// delay state, preserving the due position of subsequent valid audio.
     void process(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
                  uint32_t n) noexcept;
 
@@ -135,13 +139,24 @@ class GpuAudioTransport {
 
     void reset_staged_transport_state() noexcept;
     void process_shared(const audio::BufferView<const float>&, audio::BufferView<float>&,
-                        std::uint32_t, std::uint64_t) noexcept;
+                        std::uint32_t, std::uint64_t, bool input_valid) noexcept;
+    void process_realtime_position(const audio::BufferView<const float>&, audio::BufferView<float>&,
+                                   std::uint32_t, std::uint64_t, bool input_valid) noexcept;
+    void process_offline_position(const audio::BufferView<const float>&, audio::BufferView<float>&,
+                                  std::uint32_t, std::uint64_t, bool input_valid) noexcept;
+    void process_invalid_position(audio::BufferView<float>&, std::uint64_t, bool offline) noexcept;
 
     audio::PlanarAudioRingBuffer input_ring_;
     audio::PlanarAudioRingBuffer output_ring_;
 
     audio::Buffer<float> worker_in_;
     audio::Buffer<float> worker_out_;
+    // Callback-owned scratch for rejected views. Zero input advances every
+    // stateful delay/history position without reading the malformed input.
+    audio::Buffer<float> rejected_input_;
+    audio::Buffer<float> rejected_output_;
+    std::vector<const float*> rejected_input_ptrs_;
+    std::vector<float*> rejected_output_ptrs_;
     // Stable channel-pointer arrays for the worker views (BufferView holds the
     // array by reference, so it must outlive the views).
     std::vector<float*> in_fptrs_;
@@ -186,8 +201,8 @@ class GpuAudioTransport {
     // allocate, lock, or touch a public base-class extension.
     void* realtime_gpu_context_ = nullptr;
     std::uint8_t (*realtime_gpu_process_)(void*, const audio::BufferView<const float>&,
-                                          audio::BufferView<float>&, std::uint32_t,
-                                          std::uint64_t) noexcept = nullptr;
+                                          audio::BufferView<float>&, std::uint32_t, std::uint64_t,
+                                          bool) noexcept = nullptr;
     std::uint32_t (*realtime_gpu_service_)(void*, std::uint64_t) noexcept = nullptr;
     bool (*realtime_gpu_fence_)(void*) noexcept = nullptr;
     void (*realtime_gpu_delivered_)(void*, std::uint64_t, std::uint8_t) noexcept = nullptr;

@@ -5,6 +5,7 @@
 
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "harness/rt_allocation_probe.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -35,6 +36,10 @@ class RealtimeHookNode : public GpuAudioNode {
     }
 
     bool prepare() override {
+        next_sequence = 0;
+        fallback_delay_index_ = 0;
+        fallback_delay_.assign(static_cast<std::size_t>(latency_) * channels_ * block_, 0.0f);
+        fallback_due_.assign(static_cast<std::size_t>(channels_) * block_, 0.0f);
         return true;
     }
 
@@ -55,15 +60,25 @@ class RealtimeHookNode : public GpuAudioNode {
         ++cpu_fallback_calls;
         output.clear();
         for (uint32_t c = 0; c < channels_ && c < output.num_channels(); ++c) {
-            const float* src = input.channel_ptr(c);
+            const float* src = stateful_fallback
+                                   ? fallback_due_.data() + static_cast<std::size_t>(c) * block_
+                                   : input.channel_ptr(c);
             float* dst = output.channel_ptr(c);
             for (uint32_t i = 0; i < n; ++i)
-                dst[i] = src[i] * -1.0f;
+                dst[i] = stateful_fallback ? src[i] : src[i] * -1.0f;
         }
     }
 
-    void prime_fallback(const BufferView<const float>&, uint32_t) noexcept override {
+    void prime_fallback(const BufferView<const float>& input, uint32_t n) noexcept override {
         ++prime_fallback_calls;
+        if (!stateful_fallback || n != block_)
+            return;
+        auto* slot = fallback_delay_.data() +
+                     static_cast<std::size_t>(fallback_delay_index_) * channels_ * block_;
+        std::copy_n(slot, fallback_due_.size(), fallback_due_.data());
+        for (uint32_t c = 0; c < channels_; ++c)
+            std::copy_n(input.channel_ptr(c), block_, slot + static_cast<std::size_t>(c) * block_);
+        fallback_delay_index_ = (fallback_delay_index_ + 1) % latency_;
     }
 
     detail::RealtimeGpuNodePath path() noexcept {
@@ -71,7 +86,8 @@ class RealtimeHookNode : public GpuAudioNode {
                 .process = &RealtimeHookNode::process_realtime,
                 .service = &RealtimeHookNode::service_realtime,
                 .fence = &RealtimeHookNode::fence_realtime,
-                .delivered = &RealtimeHookNode::delivered_realtime};
+                .delivered = &RealtimeHookNode::delivered_realtime,
+                .next_sequence = &RealtimeHookNode::get_next_sequence};
     }
 
     std::uint64_t last_sequence = 0;
@@ -87,14 +103,50 @@ class RealtimeHookNode : public GpuAudioNode {
     std::uint32_t process_block_calls = 0;
     std::uint32_t prime_fallback_calls = 0;
     std::uint32_t cpu_fallback_calls = 0;
+    bool stateful_fallback = false;
+    bool enforce_sequence = false;
+    bool sequence_fenced = false;
+    std::uint64_t next_sequence = 0;
+    std::uint32_t stale_callback_calls = 0;
+    std::uint32_t sequence_gap_calls = 0;
+    std::uint32_t next_sequence_queries = 0;
+    std::uint32_t invalid_callback_calls = 0;
+    bool invalid_input_zero_filled = true;
+    bool callback_shape_valid = true;
+    const float* external_output_sample = nullptr;
+    bool external_output_silent_on_rejection = true;
 
   private:
     static std::uint8_t process_realtime(void* self, const BufferView<const float>& input,
                                          BufferView<float>& output, std::uint32_t n,
-                                         std::uint64_t sequence) noexcept {
+                                         std::uint64_t sequence, bool input_valid) noexcept {
         auto* node = static_cast<RealtimeHookNode*>(self);
         node->last_sequence = sequence;
         ++node->realtime_calls;
+        if (node->enforce_sequence && sequence != node->next_sequence) {
+            if (sequence < node->next_sequence)
+                ++node->stale_callback_calls;
+            else
+                ++node->sequence_gap_calls;
+            node->sequence_fenced = true;
+        }
+        node->next_sequence = std::max(node->next_sequence, sequence + 1);
+        const bool shape_valid = n == node->block_ && input.num_channels() == node->channels_ &&
+                                 output.num_channels() == node->channels_ &&
+                                 input.num_samples() >= n && output.num_samples() >= n;
+        node->callback_shape_valid &= shape_valid;
+        if (!input_valid) {
+            ++node->invalid_callback_calls;
+            node->sequence_fenced = true;
+            node->invalid_input_zero_filled &= shape_valid;
+            if (shape_valid) {
+                for (uint32_t c = 0; c < node->channels_; ++c)
+                    for (uint32_t i = 0; i < n; ++i)
+                        node->invalid_input_zero_filled &= input.channel_ptr(c)[i] == 0.0f;
+            }
+        }
+        if (node->sequence_fenced)
+            return detail::kRealtimeGpuMissed;
         if (node->realtime_status == detail::kRealtimeGpuReady) {
             output.clear();
             for (uint32_t c = 0; c < node->channels_ && c < output.num_channels(); ++c) {
@@ -107,12 +159,21 @@ class RealtimeHookNode : public GpuAudioNode {
         return node->realtime_status;
     }
 
+    static std::uint64_t get_next_sequence(void* self) noexcept {
+        auto* node = static_cast<RealtimeHookNode*>(self);
+        ++node->next_sequence_queries;
+        return node->next_sequence;
+    }
+
     static void delivered_realtime(void* self, std::uint64_t sequence,
                                    std::uint8_t disposition) noexcept {
         auto* node = static_cast<RealtimeHookNode*>(self);
         ++node->delivery_calls;
         node->delivered_sequence = sequence;
         node->delivery = static_cast<detail::SharedIoDeliveryDisposition>(disposition);
+        if (node->delivery == detail::SharedIoDeliveryDisposition::InvalidRejected &&
+            node->external_output_sample)
+            node->external_output_silent_on_rejection &= *node->external_output_sample == 0.0f;
     }
 
     static std::uint32_t service_realtime(void* self, std::uint64_t) noexcept {
@@ -132,6 +193,9 @@ class RealtimeHookNode : public GpuAudioNode {
     uint32_t block_;
     MissPolicy policy_;
     uint32_t latency_;
+    uint32_t fallback_delay_index_ = 0;
+    std::vector<float> fallback_delay_;
+    std::vector<float> fallback_due_;
 };
 
 } // namespace pulp::gpu_audio::test_detail
@@ -565,6 +629,148 @@ TEST_CASE("GpuAudioTransport starves to silence when the node declares no policy
     REQUIRE(t.stats().miss_blocks >= 1);
 }
 
+TEST_CASE("GpuAudioTransport rejected callbacks preserve the fallback impulse position",
+          "[gpu_audio][transport][realtime-path][callback-timeline]") {
+    constexpr uint32_t BS = 32;
+    RealtimeHookNode node(1, BS, MissPolicy::CpuFallback);
+    node.stateful_fallback = true;
+    node.enforce_sequence = true;
+    node.realtime_status = detail::kRealtimeGpuMissed;
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {8}));
+    Block input(1, BS), output(1, BS);
+    auto in = input.cview();
+    auto out = output.view();
+
+    bool invalid = false;
+    bool offline = false;
+    SECTION("valid silent callback") {}
+    SECTION("invalid realtime callback") {
+        invalid = true;
+    }
+    SECTION("invalid offline callback") {
+        invalid = true;
+        offline = true;
+    }
+
+    input.storage[0][0] = 1.0f;
+    transport.process(in, out, BS);
+    for (float sample : output.storage[0])
+        CHECK(sample == 0.0f);
+    input.fill(invalid ? 9.0f : 0.0f);
+    output.fill(7.0f);
+    node.external_output_sample = output.storage[0].data();
+    if (offline)
+        transport.process_offline(in, out, invalid ? BS / 2 : BS);
+    else
+        transport.process(in, out, invalid ? BS / 2 : BS);
+    for (float sample : output.storage[0])
+        CHECK(sample == 0.0f);
+    CHECK(node.prime_fallback_calls == 2);
+    CHECK(node.next_sequence == 2);
+    CHECK(node.invalid_callback_calls == (invalid ? 1u : 0u));
+    CHECK(node.invalid_input_zero_filled);
+    CHECK(node.callback_shape_valid);
+    CHECK(node.external_output_silent_on_rejection);
+    if (invalid)
+        CHECK(node.delivery == detail::SharedIoDeliveryDisposition::InvalidRejected);
+
+    input.fill(0.0f);
+    transport.process(in, out, BS);
+    for (uint32_t sample = 0; sample < BS; ++sample)
+        CHECK(output.storage[0][sample] == (sample == 0 ? 1.0f : 0.0f));
+    transport.process(in, out, BS);
+    for (float sample : output.storage[0])
+        CHECK(sample == 0.0f);
+    CHECK(node.prime_fallback_calls == 4);
+    CHECK(node.next_sequence == 4);
+    CHECK(node.stale_callback_calls == 0);
+    CHECK(node.sequence_gap_calls == 0);
+}
+
+TEST_CASE("GpuAudioTransport rejected realtime views use prepared allocation-free storage",
+          "[gpu_audio][transport][realtime-path][rt-safety]") {
+    constexpr uint32_t BS = 32;
+    RealtimeHookNode node(1, BS, MissPolicy::CpuFallback);
+    node.stateful_fallback = true;
+    node.enforce_sequence = true;
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {8}));
+    Block input(1, BS), output(1, BS), short_input(1, BS / 2), short_output(1, BS / 2);
+    input.fill(9.0f);
+    short_input.fill(9.0f);
+    output.fill(9.0f);
+    short_output.fill(9.0f);
+    auto in = input.cview();
+    auto out = output.view();
+    auto short_in = short_input.cview();
+    auto short_out = short_output.view();
+    BufferView<const float> no_input_channels(input.cptrs.data(), 0, BS);
+    BufferView<float> no_output_channels(output.ptrs.data(), 0, BS);
+    std::size_t allocations = 1;
+    {
+        pulp::test::RtAllocationProbe probe;
+        transport.process(in, out, BS / 2);
+        transport.process(short_in, out, BS);
+        transport.process(in, short_out, BS);
+        transport.process(no_input_channels, out, BS);
+        transport.process(in, no_output_channels, BS);
+        allocations = probe.allocation_count();
+    }
+    CHECK(allocations == 0);
+    CHECK(node.invalid_callback_calls == 5);
+    CHECK(node.prime_fallback_calls == 5);
+    CHECK(node.next_sequence == 5);
+    CHECK(node.invalid_input_zero_filled);
+    CHECK(node.callback_shape_valid);
+    CHECK(node.delivery == detail::SharedIoDeliveryDisposition::InvalidRejected);
+    CHECK(node.stale_callback_calls == 0);
+    CHECK(node.sequence_gap_calls == 0);
+    for (float sample : output.storage[0])
+        CHECK(sample == 0.0f);
+    for (float sample : short_output.storage[0])
+        CHECK(sample == 0.0f);
+}
+
+TEST_CASE("GpuAudioTransport retains the prepared node timeline across transport lifetimes",
+          "[gpu_audio][transport][realtime-path][callback-timeline]") {
+    constexpr uint32_t BS = 32;
+    RealtimeHookNode node(1, BS, MissPolicy::CpuFallback);
+    node.enforce_sequence = true;
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {8}));
+    Block input(1, BS), output(1, BS);
+    auto in = input.cview();
+    auto out = output.view();
+    transport.process(in, out, BS);
+    transport.process(in, out, BS);
+    REQUIRE(node.next_sequence == 2);
+
+    SECTION("reprepare the same transport") {
+        REQUIRE(transport.prepare(&node, {8}));
+        transport.process(in, out, BS);
+    }
+    SECTION("attach a replacement transport after release") {
+        transport.release();
+        GpuAudioTransport replacement;
+        REQUIRE(replacement.prepare(&node, {8}));
+        replacement.process(in, out, BS);
+    }
+
+    CHECK(node.last_sequence == 2);
+    CHECK(node.next_sequence == 3);
+    CHECK(node.next_sequence_queries == 2);
+    CHECK(node.delivered_sequence == 2);
+    CHECK(node.stale_callback_calls == 0);
+    CHECK(node.sequence_gap_calls == 0);
+    CHECK_FALSE(node.sequence_fenced);
+    CHECK(node.delivery == detail::SharedIoDeliveryDisposition::GpuDelivered);
+    CHECK(output.storage[0][0] == 1000.0f);
+}
+
 TEST_CASE("GpuAudioTransport offline fence retains fallback and the monotonic timeline",
           "[gpu_audio][transport][realtime-path]") {
     constexpr uint32_t CH = 1, BS = 32;
@@ -581,8 +787,9 @@ TEST_CASE("GpuAudioTransport offline fence retains fallback and the monotonic ti
     CHECK(output.storage[0][0] == 1005.0f);
     CHECK(node.delivery == detail::SharedIoDeliveryDisposition::GpuDelivered);
     transport.process(in, out, BS / 2); // invalid calls still consume absolute sequence
-    CHECK(node.realtime_calls == 1);
+    CHECK(node.realtime_calls == 2);
     CHECK(output.storage[0][0] == 0.0f);
+    CHECK(node.delivery == detail::SharedIoDeliveryDisposition::InvalidRejected);
     transport.process_offline(in, out, BS);
     CHECK(node.last_sequence == 2);
     CHECK(node.delivered_sequence == 2);
@@ -595,8 +802,8 @@ TEST_CASE("GpuAudioTransport offline fence retains fallback and the monotonic ti
     transport.process_offline(in, out, BS);
     CHECK(node.last_sequence == 4);
     CHECK(node.fence_calls == 1);
-    CHECK(node.prime_fallback_calls == 4);
-    CHECK(node.delivery_calls == 4);
+    CHECK(node.prime_fallback_calls == 5);
+    CHECK(node.delivery_calls == 5);
     CHECK(node.process_block_calls == 0);
 }
 

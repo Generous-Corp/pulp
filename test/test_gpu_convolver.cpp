@@ -202,7 +202,14 @@ TEST_CASE("GpuConvolver shared realtime path follows the private opt-in",
     BufferView<const float> input_view(input_channels, 1, BS);
     BufferView<float> output_view(output_channels, 1, BS);
 
+    std::uint64_t expected_produced = 0;
     for (uint32_t sequence = 0; sequence < 8; ++sequence) {
+        if (sequence == 4) {
+            // Reattach to the same prepared node; its shared session and CPU
+            // history retain the absolute timeline across transport lifetimes.
+            REQUIRE(transport.prepare(&node, {.ring_blocks = 8, .run_worker_thread = false}));
+            expected_produced = 0;
+        }
         std::fill(input.begin(), input.end(), static_cast<float>(sequence + 1));
         transport.process(input_view, output_view, BS);
         const float expected =
@@ -211,12 +218,13 @@ TEST_CASE("GpuConvolver shared realtime path follows the private opt-in",
             REQUIRE(std::abs(sample - expected) < 1.0e-4f);
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (transport.stats().produced_blocks < sequence + 1 &&
+        ++expected_produced;
+        while (transport.stats().produced_blocks < expected_produced &&
                std::chrono::steady_clock::now() < deadline) {
             transport.pump(1);
             std::this_thread::sleep_for(std::chrono::microseconds(50));
         }
-        REQUIRE(transport.stats().produced_blocks >= sequence + 1);
+        REQUIRE(transport.stats().produced_blocks >= expected_produced);
     }
     REQUIRE(transport.stats().miss_blocks == 0);
     const auto admitted_before_offline = transport.stats().produced_blocks;
@@ -707,5 +715,44 @@ TEST_CASE("GpuConvolver full-tail oracle rejects planted mutations",
             }
         }
         REQUIRE_FALSE(full_tail_matches(candidate, reference));
+    }
+}
+
+TEST_CASE("GpuConvolver delta fallback preserves the due block after a rejected callback",
+          "[gpu_audio][convolver][transport][lifecycle]") {
+    constexpr std::uint32_t BS = 32;
+    for (const bool invalid_offline : {false, true}) {
+        for (const bool short_output : {false, true}) {
+            CAPTURE(invalid_offline, short_output);
+            GpuConvolver node(1, BS, 48000, {1.0f});
+            REQUIRE(node.prepare());
+            GpuAudioTransport transport;
+            REQUIRE(transport.prepare(&node, {.ring_blocks = 8}));
+            std::vector<float> samples(BS, 0.0f), rendered(BS, 0.0f);
+            const float* inputs[] = {samples.data()};
+            float* outputs[] = {rendered.data()};
+            BufferView<const float> input(inputs, 1, BS);
+            BufferView<float> output(outputs, 1, BS);
+            samples[0] = 1.0f;
+            transport.process(input, output, BS); // absolute position zero
+            std::fill(samples.begin(), samples.end(), 0.0f);
+            std::fill(rendered.begin(), rendered.end(), 7.0f);
+            BufferView<float> rejected_output(outputs, 1, short_output ? BS / 2 : BS);
+            if (invalid_offline)
+                transport.process_offline(input, rejected_output, short_output ? BS : BS / 2);
+            else
+                transport.process(input, rejected_output, short_output ? BS : BS / 2);
+            for (std::uint32_t frame = 0; frame < rejected_output.num_samples(); ++frame)
+                CHECK(rendered[frame] == 0.0f);
+            if (short_output)
+                CHECK(rendered.back() == 7.0f);   // never writes past a malformed view
+            transport.process(input, output, BS); // position two: the impulse is due now
+            CHECK(std::abs(rendered[0] - 1.0f) < 1.0e-5f);
+            for (std::uint32_t frame = 1; frame < BS; ++frame)
+                CHECK(std::abs(rendered[frame]) < 1.0e-5f);
+            transport.process(input, output, BS); // no shifted impulse at position three
+            for (float sample : rendered)
+                CHECK(std::abs(sample) < 1.0e-5f);
+        }
     }
 }
