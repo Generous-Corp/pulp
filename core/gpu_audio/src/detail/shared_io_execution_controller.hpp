@@ -232,11 +232,11 @@ class SharedIoExecutionController {
             if (telemetry_)
                 telemetry_->record_delivery(true, false);
             if (forward_gap) {
-                resync_admission(callback_sequence);
                 const auto first_future_sequence =
                     callback_sequence >= contract_.algorithmic_lead_blocks
                         ? callback_sequence - contract_.algorithmic_lead_blocks + 1
                         : 0;
+                resync_admission(first_future_sequence);
                 discard_ready_entries_before(first_future_sequence);
                 next_callback_sequence_ = callback_sequence + 1;
             }

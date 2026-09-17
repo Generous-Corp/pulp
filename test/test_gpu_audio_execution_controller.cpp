@@ -222,12 +222,12 @@ TEST_CASE("execution controller resynchronizes admission after a callback gap",
     REQUIRE(gap.resynced);
     REQUIRE_FALSE(controller.record_completion(0, SharedIoCompletion::Success));
     REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
     REQUIRE(controller.admit_submission(4) == SharedIoAdmission::Accepted);
-    REQUIRE(controller.admit_submission(5) == SharedIoAdmission::Accepted);
     const auto resumed = controller.deliver(5);
     REQUIRE(resumed.path == SharedIoDeliveryPath::CpuFallback);
     REQUIRE(resumed.resynced);
-    REQUIRE(controller.admit_submission(6) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(5) == SharedIoAdmission::Accepted);
     REQUIRE(telemetry.snapshot().in_flight_high_water <= controller.capacity());
     REQUIRE(telemetry.snapshot().late_completions == 2);
 }
@@ -252,6 +252,27 @@ TEST_CASE("callback gap preserves ready results that are still ahead of the lead
     const auto future = controller.deliver(5);
     REQUIRE(future.path == SharedIoDeliveryPath::Gpu);
     REQUIRE(future.expected_sequence == 3);
+}
+
+TEST_CASE("callback gap preserves a retryable admission that is still due",
+          "[gpu_audio][shared_io][controller][adversarial]") {
+    SharedIoExecutionController controller;
+    REQUIRE(controller.prepare(contract()));
+    REQUIRE(controller.admit_submission(0) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(1) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(2) == SharedIoAdmission::Accepted);
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::CapacityFull);
+    REQUIRE(controller.deliver(0).path == SharedIoDeliveryPath::Priming);
+
+    const auto gap = controller.deliver(4);
+    REQUIRE(gap.fallback_reason == SharedIoFallbackReason::SequenceGap);
+    REQUIRE(gap.resynced);
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::CapacityFull);
+    REQUIRE(controller.record_completion(0, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(1, SharedIoCompletion::Success));
+    REQUIRE(controller.record_completion(2, SharedIoCompletion::Success));
+    REQUIRE(controller.deliver(5).path == SharedIoDeliveryPath::CpuFallback);
+    REQUIRE(controller.admit_submission(3) == SharedIoAdmission::Accepted);
 }
 
 TEST_CASE("execution controller counts every late completion removed by one callback",
