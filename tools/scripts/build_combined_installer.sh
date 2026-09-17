@@ -396,10 +396,10 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
   component_plist="$STAGE/$id-components.plist"
   pkgbuild --analyze --root "$r" "$component_plist" >/dev/null
   component_index=0
-  while /usr/libexec/PlistBuddy -c "Print :$component_index" \
+  while /usr/libexec/PlistBuddy -c "Print :${component_index}" \
       "$component_plist" >/dev/null 2>&1; do
     /usr/libexec/PlistBuddy -c \
-      "Set :$component_index:BundleIsRelocatable false" "$component_plist"
+      "Set :${component_index}:BundleIsRelocatable false" "$component_plist"
     component_index=$((component_index + 1))
   done
   [[ "$component_index" -gt 0 ]] || {

@@ -81,7 +81,7 @@ add_shipping_artifact(SupportStandalone support-diagnostics
 add_shipping_artifact(SupportGpuStandalone support-diagnostics
     "dev.pulp.gpu/health.read@1" Standalone)
 add_shipping_artifact(ResearchStandalone research-unsafe
-    "dev.pulp.session/control@1;dev.pulp.ui/input@1;dev.pulp.trace/control@1;dev.pulp.trace/session-control@1;dev.pulp.runtime/reload@1;dev.pulp.runtime/evaluate@1;dev.pulp.artifact/read@1;dev.pulp.unavailable/operation@1" Standalone)
+    "dev.pulp.session/control@1;dev.pulp.ui/input@1;dev.pulp.trace/control@1;dev.pulp.trace/session-control@1;dev.pulp.runtime/reload@1;dev.pulp.runtime/evaluate@1;dev.pulp.artifact/read@1;dev.pulp.timeline/document-session@1;dev.pulp.unavailable/operation@1" Standalone)
 ]=])
 file(READ "${_matrix_source}/CMakeLists.txt" _matrix_cmake)
 string(REPLACE "@HELPER@" "${_installed_helper_dir}" _matrix_cmake "${_matrix_cmake}")

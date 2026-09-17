@@ -2243,6 +2243,13 @@ Plugin format adapters — write your plugin once, deploy to 9 formats.
 
 **Link:** `pulp::format` · **Include prefix:** `<pulp/format/...>`
 
+The same module exposes `ProcessorNodeInstance` and
+`Processor::process_block(ProcessBlock&)` for retained native processors inside
+a `SignalGraph`. A processor that declares
+`consumes_audio_rate_modulations` receives borrowed, preallocated
+`AudioRateModulationView` lanes through that hook. This in-process path does not
+change the hosted format adapters' sparse parameter-event contracts.
+
 ### Writing a plugin
 
 ```cpp
@@ -2329,7 +2336,7 @@ plug-ins, wire them into a DAG, and process audio through the chain.
 |---------|--------|-------------|
 | Scanner | `pulp/host/scanner.hpp` | Walk system plug-in paths; return `PluginInfo` |
 | PluginSlot | `pulp/host/plugin_slot.hpp` | Uniform load/prepare/process interface over every format |
-| SignalGraph | `pulp/host/signal_graph.hpp` | DAG topology + topological sort |
+| SignalGraph | `pulp/host/signal_graph.hpp` | DAG topology, retained in-process `ProcessorNodeInstance` insertion, and topological sort |
 | Bake | `pulp/host/baked_graph_processor.hpp` | Freeze a lowerable `SignalGraph` into an optimized `BakedGraphProcessor` (bit-identical to the live graph). `bake()` is the in-process (trusted) path |
 | Baked codec | `pulp/host/baked_codec.hpp` | Signed on-disk `.pulpbake` artifact: `write_baked_signed` + verify-before-parse `load_baked` (Ed25519 trust-set, bounded parse). See [signal-graph](signal-graph.md#baking-a-graph-to-a-shippable-artifact) |
 

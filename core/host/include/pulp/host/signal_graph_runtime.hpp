@@ -17,6 +17,7 @@
 #include <pulp/audio/load_measurer.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
+#include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/host/anticipation_lane.hpp>
 #include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/graph_types.hpp>
@@ -135,6 +136,14 @@ public:
     NodeId add_plugin_node(std::unique_ptr<PluginSlot> slot,
                            int num_inputs, int num_outputs,
                            const std::string& name = "Plugin");
+    /// Add an owned in-process Processor. The main-bus channel counts and default
+    /// name come from its frozen descriptor. Processor nodes are runtime-only:
+    /// graph serialization and baking refuse them explicitly.
+    NodeId add_processor_node(std::shared_ptr<format::ProcessorNodeInstance> processor,
+                              const std::string& name = {});
+    NodeId add_processor_node(std::unique_ptr<format::Processor> processor,
+                              const std::string& name = {});
+    bool is_processor_node(NodeId id) const;
     NodeId add_gain_node(const std::string& name = "Gain");
     NodeId add_midi_input_node(const std::string& name = "MIDI In");
     NodeId add_midi_output_node(const std::string& name = "MIDI Out");
@@ -941,6 +950,23 @@ private:
         RoutedParallel,
     };
 
+    // Private graph-ownership token. Public shared ProcessorNodeInstance handles
+    // may outlive node removal, but they do not extend its prepared lifecycle.
+    // Authoring state and every executable snapshot share this token, so its
+    // final destruction releases only after both ownership domains are gone.
+    struct ProcessorNodeLifetime {
+        explicit ProcessorNodeLifetime(
+            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept
+            : instance(std::move(value)) {}
+
+        ~ProcessorNodeLifetime() {
+            if (instance)
+                (void)instance->release();
+        }
+
+        std::shared_ptr<format::ProcessorNodeInstance> instance;
+    };
+
     struct CompiledGraph {
         std::vector<NodeId> order;
         std::vector<Connection> connections;
@@ -951,6 +977,10 @@ private:
         // pointers into an outer container.
         std::unordered_map<NodeId, NodeRuntime> runtime;
         std::unordered_map<NodeId, std::shared_ptr<PluginSlot>> plugins;
+        // Runtime-only authored processors. The shared ownership is part of the
+        // compiled snapshot so a retired graph keeps every binding alive until
+        // its last audio-thread reader leaves.
+        std::unordered_map<NodeId, std::shared_ptr<ProcessorNodeLifetime>> processors;
         std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
         // Prepare-stable intrinsic latency for each resolved, shape-matched
         // Custom node, resolved once from the registered type at THIS snapshot's
@@ -1108,6 +1138,10 @@ private:
     };
 
     std::vector<GraphNode> nodes_;
+    // Processor nodes deliberately reuse the existing Plugin node topology kind
+    // so the graph/runtime plan ABI does not grow. Presence in this map is the
+    // unambiguous runtime-only discriminator used by routing and serialization.
+    std::unordered_map<NodeId, std::shared_ptr<ProcessorNodeLifetime>> processor_nodes_;
     std::vector<Connection> connections_;
     // Private authoring identity parallel to connections_. Public Connection
     // stays a value-only routing description; disconnect+reconnect mints a new

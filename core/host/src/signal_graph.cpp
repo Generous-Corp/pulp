@@ -612,6 +612,55 @@ NodeId SignalGraph::add_plugin_node(std::unique_ptr<PluginSlot> slot,
     return nodes_.back().id;
 }
 
+NodeId SignalGraph::add_processor_node(std::shared_ptr<format::ProcessorNodeInstance> instance,
+                                       const std::string& name) {
+    if (!instance)
+        return 0;
+    const auto& descriptor = instance->descriptor();
+    const int inputs = descriptor.default_input_channels();
+    const int outputs = descriptor.default_output_channels();
+    if (inputs < 0 || outputs < 0)
+        return 0;
+
+    GraphMutationLock mutation_lock(*this);
+    if (std::any_of(processor_nodes_.begin(), processor_nodes_.end(), [&](const auto& entry) {
+            return entry.second && entry.second->instance == instance;
+        })) {
+        return 0;
+    }
+    GraphNode node;
+    node.id = next_id_++;
+    node.type = NodeType::Plugin;
+    node.name = name.empty() ? descriptor.name : name;
+    node.num_input_ports = inputs;
+    node.num_output_ports = outputs;
+    node.plugin_info.name = node.name;
+    node.plugin_info.manufacturer = descriptor.manufacturer;
+    node.plugin_info.version = descriptor.version;
+    node.plugin_info.num_inputs = inputs;
+    node.plugin_info.num_outputs = outputs;
+    const NodeId id = node.id;
+    try {
+        processor_nodes_.emplace(id, std::make_shared<ProcessorNodeLifetime>(std::move(instance)));
+        nodes_.push_back(std::move(node));
+    } catch (...) {
+        processor_nodes_.erase(id);
+        return 0;
+    }
+    invalidate_live_locked_();
+    return id;
+}
+
+NodeId SignalGraph::add_processor_node(std::unique_ptr<format::Processor> processor,
+                                       const std::string& name) {
+    return add_processor_node(format::ProcessorNodeInstance::create(std::move(processor)), name);
+}
+
+bool SignalGraph::is_processor_node(NodeId id) const {
+    GraphMutationLock mutation_lock(*this);
+    return processor_nodes_.contains(id);
+}
+
 NodeId SignalGraph::add_gain_node(const std::string& name) {
     GraphMutationLock mutation_lock(*this);
     GraphNode node;
@@ -905,6 +954,7 @@ bool SignalGraph::remove_node(NodeId id) {
         }
     }
     nodes_.erase(it);
+    processor_nodes_.erase(id);
     invalidate_live_locked_();
     return true;
 }
@@ -972,7 +1022,8 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port,
     const GraphNode* src_n = node(src);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
-    if (dst_n->type != NodeType::Plugin || !dst_n->plugin) return false;
+    if (dst_n->type != NodeType::Plugin || (!dst_n->plugin && !processor_nodes_.contains(dest)))
+        return false;
     if (!has_output_port(*src_n, src_audio_port)) return false;
 
     // Reject automation edges that would introduce a cycle. Automation
@@ -1029,7 +1080,8 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     const GraphNode* src_n = node(src);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
-    if (dst_n->type != NodeType::Plugin || !dst_n->plugin) return false;
+    if (dst_n->type != NodeType::Plugin || (!dst_n->plugin && !processor_nodes_.contains(dest)))
+        return false;
     if (!has_output_port(*src_n, src_audio_port)) return false;
     if (would_create_cycle(src, dest)) return false;
 
@@ -1091,7 +1143,8 @@ bool SignalGraph::audio_rate_modulation_lane_locked_(const Connection& connectio
 
     const GraphNode* src_n = node(connection.source_node);
     const GraphNode* dst_n = node(connection.dest_node);
-    if (!src_n || !dst_n || dst_n->type != NodeType::Plugin || !dst_n->plugin) {
+    if (!src_n || !dst_n || dst_n->type != NodeType::Plugin ||
+        (!dst_n->plugin && !processor_nodes_.contains(connection.dest_node))) {
         return false;
     }
     if (!has_output_port(*src_n, connection.source_port)) {
@@ -1927,9 +1980,39 @@ bool SignalGraph::build_routing_snapshot_locked_(
                 };
             },
     };
-    return build_executor_snapshot(nodes_, connections_, binders, plugin_ctx,
-                                   cg.routed.plugin_scratch, out, parallel_safe,
-                                   &custom_ctx);
+    if (!build_executor_snapshot(nodes_, connections_, binders, plugin_ctx,
+                                 cg.routed.plugin_scratch, out, parallel_safe, &custom_ctx)) {
+        return false;
+    }
+    if (cg.processors.empty())
+        return true;
+
+    auto plan = out.plan();
+    for (auto& connection : plan.connections) {
+        if (connection.dest_index >= plan.nodes.size())
+            return false;
+        const auto processor = cg.processors.find(plan.nodes[connection.dest_index].id);
+        if (processor == cg.processors.end() ||
+            connection.kind != graph::GraphRuntimeConnectionKind::Automation) {
+            continue;
+        }
+        const auto* param = processor->second->instance->parameter(connection.automation.param_id);
+        if (param != nullptr) {
+            connection.automation.bounds_lo = param->range.min;
+            connection.automation.bounds_hi = param->range.max;
+        }
+    }
+    std::vector<format::GraphRuntimeNodeBinding> bindings(out.bindings().begin(),
+                                                          out.bindings().end());
+    for (auto& binding : bindings) {
+        const auto processor = cg.processors.find(binding.node_id);
+        if (processor == cg.processors.end() || !processor->second)
+            continue;
+        auto replacement = processor->second->instance->binding(binding.node_id);
+        replacement.load = binding.load;
+        binding = replacement;
+    }
+    return out.reset(std::move(plan), bindings, parallel_safe);
 }
 
 std::shared_ptr<SignalGraph::CompiledGraph>
@@ -2076,6 +2159,10 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         cg->shapes[n.id] = shape;
 
         if (n.plugin) cg->plugins[n.id] = n.plugin;
+        if (const auto processor = processor_nodes_.find(n.id);
+            processor != processor_nodes_.end() && processor->second) {
+            cg->processors[n.id] = processor->second;
+        }
         // Resolve the node's transport-sensitivity ONCE here (before the
         // anticipation eligibility analysis and the routed-snapshot build, both
         // later in compile_). The SAME GraphNode::transport_sensitive value feeds
@@ -2313,8 +2400,9 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 if (graph::is_automation_conn(conn)) { plan_has_automation = true; break; }
             }
             if (cg->routed.serial.valid && plan_has_automation && max_block_size > 0) {
-                cg->routed.serial.valid = cg->routed.automation.reset(
-                    plan, static_cast<std::uint32_t>(max_block_size));
+                cg->routed.serial.valid =
+                    cg->routed.automation.reset(plan, cg->routed.serial.snapshot.bindings(),
+                                                static_cast<std::uint32_t>(max_block_size));
             }
         }
 
@@ -2398,10 +2486,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // Recomputed every compile: with no active anticipation no node is forced
         // exterior, so the counter must read 0 rather than keep a prior value.
         transport_suppressed_for_anticipation_.store(0, std::memory_order_relaxed);
-        if (mode == CompileMode::Normal &&
-            cg->routed.serial.valid &&
-            anticipation_enabled_.load(std::memory_order_relaxed) &&
-            max_block_size > 0) {
+        if (mode == CompileMode::Normal && cg->routed.serial.valid && cg->processors.empty() &&
+            anticipation_enabled_.load(std::memory_order_relaxed) && max_block_size > 0) {
             std::vector<NodeId> exact_parameter_input_nodes;
             exact_parameter_input_nodes.reserve(
                 exact_parameter_event_claims_.size());
@@ -2545,6 +2631,26 @@ int SignalGraph::pump_anticipation(int max_blocks) {
 std::vector<HostParamInfo>
 SignalGraph::cached_or_live_params_locked_(const GraphNode& n) const {
     assert_graph_mutation_locked_();
+    if (const auto processor = processor_nodes_.find(n.id);
+        processor != processor_nodes_.end() && processor->second) {
+        std::vector<HostParamInfo> params;
+        params.reserve(processor->second->instance->parameter_catalog().size());
+        for (const auto& source : processor->second->instance->parameter_catalog()) {
+            HostParamInfo param;
+            param.id = source.id;
+            param.name = source.name;
+            param.unit = source.unit;
+            param.min_value = source.range.min;
+            param.max_value = source.range.max;
+            param.default_value = source.range.default_value;
+            param.rate = source.rate;
+            param.flags.stepped = state::is_discrete_param(source);
+            param.flags.rampable = !param.flags.stepped;
+            param.flags.modulatable = !param.flags.stepped;
+            params.push_back(std::move(param));
+        }
+        return params;
+    }
     const auto it = prepared_plugin_meta_.find(n.id);
     if (it != prepared_plugin_meta_.end()) return it->second.parameters;
     return n.plugin ? n.plugin->parameters() : std::vector<HostParamInfo>{};
@@ -2612,11 +2718,30 @@ bool SignalGraph::preflight_locked_(int max_block_size) {
             add_unique_param(audio_rate_params_by_node[c.dest_node], c.automation_param_id);
         }
     }
+    std::size_t dense_lane_count = 0;
     for (const auto& [node_id, audio_rate_params] : audio_rate_params_by_node) {
         const auto sparse_it = sparse_params_by_node.find(node_id);
         const size_t sparse_count = sparse_it == sparse_params_by_node.end()
             ? 0
             : sparse_it->second.size();
+        const auto processor = processor_nodes_.find(node_id);
+        const bool consumes_dense = processor != processor_nodes_.end() && processor->second &&
+                                    processor->second->instance->descriptor()
+                                        .effective_capabilities()
+                                        .consumes_audio_rate_modulations;
+        if (consumes_dense) {
+            if (max_block_size >
+                    static_cast<int>(format::GraphRuntimeAutomationScratch::kMaxDenseFrames) ||
+                audio_rate_params.size() >
+                    format::GraphRuntimeAutomationScratch::kMaxDenseLanesPerNode) {
+                return false;
+            }
+            dense_lane_count = saturating_add(dense_lane_count, audio_rate_params.size());
+            if (dense_lane_count > format::GraphRuntimeAutomationScratch::kMaxDenseLanesPerGraph) {
+                return false;
+            }
+            continue;
+        }
         const size_t required_events =
             audio_rate_params.size() * static_cast<size_t>(max_block_size)
             + sparse_count * 2;
@@ -2698,6 +2823,21 @@ bool SignalGraph::prepare_impl_(
                 n.plugin->parameters(),
                 std::max(0, n.plugin->latency_samples()),
                 n.plugin->wants_transport()};
+        }
+    }
+
+    for (const auto& n : nodes_) {
+        const auto processor = processor_nodes_.find(n.id);
+        if (processor == processor_nodes_.end() || !processor->second)
+            continue;
+        format::PrepareContext context;
+        context.sample_rate = sample_rate;
+        context.max_buffer_size = max_block_size;
+        context.input_channels = n.num_input_ports;
+        context.output_channels = n.num_output_ports;
+        if (!processor->second->instance->prepare(context)) {
+            runtime::log_error("SignalGraph: failed to prepare Processor node '{}'", n.name);
+            return false;
         }
     }
 
@@ -2868,6 +3008,10 @@ void SignalGraph::release() {
     live_slot_.wait_and_clear();
 
     for (auto& n : nodes_) if (n.plugin) n.plugin->release();
+    for (auto& [_, processor] : processor_nodes_) {
+        if (processor && processor->instance)
+            (void)processor->instance->release();
+    }
     // Release stateful custom instances on the UI thread, mirroring the plugin
     // release above. The instance object stays alive until its snapshots also
     // drop; release() just lets the type free scratch.
@@ -3209,6 +3353,7 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                 (cg->pdc_execution_domain == PdcExecutionDomain::Dynamic &&
                  parallel_routing_enabled_.load(std::memory_order_relaxed));
             const bool use_serial =
+                !cg->processors.empty() ||
                 cg->pdc_execution_domain == PdcExecutionDomain::RoutedSerial ||
                 (cg->pdc_execution_domain == PdcExecutionDomain::Dynamic &&
                  canonical_executor_routing_enabled_.load(std::memory_order_relaxed));
@@ -3259,6 +3404,15 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
             }
         }
         // Any setup failure / disabled path falls through to the legacy walk.
+    }
+
+    // Authored Processor nodes have only the routed ProcessBlock binding. Never
+    // reinterpret one as the unresolved-plugin pass-through used by the legacy
+    // reference walk; a routed failure is a fail-closed silent block.
+    if (!cg->processors.empty()) {
+        output.clear();
+        routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
+        return;
     }
 
     if (routed_only_execution_owners_.load(std::memory_order_relaxed) != 0) {
@@ -3324,6 +3478,7 @@ void SignalGraph::clear() {
     connections_.clear();
     connection_identities_.clear();
     nodes_.clear();
+    processor_nodes_.clear();
     next_id_ = 1;
     invalidate_live_locked_();
 }

@@ -388,6 +388,11 @@ bool GraphSerializer::register_migration(int from_version,
 std::string GraphSerializer::to_json(
     const SignalGraph& graph,
     const std::unordered_map<NodeId, std::pair<float,float>>& editor_layout) {
+    for (const auto& node : graph.nodes()) {
+        if (graph.is_processor_node(node.id)) {
+            return {};
+        }
+    }
     auto root = choc::value::createObject("PulpGraph");
     root.addMember("format_version", (int64_t)kFormatVersion);
 
@@ -508,6 +513,11 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             const NodeId old_id = (NodeId)nv["id"].getInt64();
             const std::string name(nv["name"].getString());
             const std::string type_s(nv["type"].getString());
+            if (type_s == "processor") {
+                graph.clear();
+                result.error = "Processor nodes are runtime-owned and unsupported by .pulpgraph v1";
+                return result;
+            }
             NodeType t = NodeType::Custom;
             const bool known_type = parse_type(type_s, t);
             const int in_ch  = (int)nv["num_input_ports"].getInt64();

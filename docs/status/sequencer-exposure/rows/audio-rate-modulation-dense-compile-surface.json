@@ -1,0 +1,42 @@
+{
+  "id": "audio-rate-modulation-dense-compile-surface",
+  "title": "The generated capability compile surface references dense audio-rate Processor nodes",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "02a94c3f-fde9-4ef1-85c8-277b882e1179",
+  "owned_paths": [
+    "test/test_agent_capability_compile.cpp",
+    "docs/status/sequencer-exposure/rows/audio-rate-modulation-dense-compile-surface.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/test_agent_capability_compile.cpp",
+      "needles": [
+        "audio.audio-rate-modulation-dense",
+        "ProcessorNodeInstance::create"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This row records a repository compile gate generated from the capability manifest. It adds no installed header, target, or exported symbol beyond the H4 capability that the gate compiles."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The generated compile gate is repository-only. It adds no Timeline CLI verb, flag, handler, or accepted document shape."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The generated compile gate is repository-only. It adds no MCP tool definition, schema entry, handler, or reachable operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The generated compile gate is repository-only. It adds no live capability, operation, executor binding, grant, or profile policy."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "This row records the repository compile proof generated from the separately published H4 agent-capability entry; the row itself publishes no additional design-time capability."
+    }
+  }
+}

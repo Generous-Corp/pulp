@@ -80,9 +80,9 @@ if [ -n "$DISK" ]; then tart set "$VM" --disk-size "$DISK"; note "disk → ${DIS
 
 note "booting with host mounts (src/fetchcontent ro, ccache rw); Skia is baked into the golden"
 tart run --no-graphics \
-  --dir="src:$SRC:ro" \
+  --dir="src:${SRC}:ro" \
   --dir="ccache:$CACHE_ROOT/ccache" \
-  --dir="fetchcontent:$FETCHCONTENT_SOURCE_ROOT:ro" \
+  --dir="fetchcontent:${FETCHCONTENT_SOURCE_ROOT}:ro" \
   "$VM" >/dev/null 2>&1 & RPID=$!
 
 # Wait for IP + ssh.
@@ -129,7 +129,8 @@ cmake -S "$HOME/src" -B "$BUILD" \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
   -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-cmake --build "$BUILD" --parallel "$(sysctl -n hw.ncpu)"
+# Keep each disposable VM bounded; Tart can run several jobs on one host.
+cmake --build "$BUILD" --parallel 4
 echo "=== ccache stats (warmth) ==="
 ccache --show-stats | grep -iE 'cacheable|hit|miss|cache size' || ccache -s
 ctest --test-dir "$BUILD" $CTEST_ARGS

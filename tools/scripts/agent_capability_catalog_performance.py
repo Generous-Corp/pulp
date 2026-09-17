@@ -3,6 +3,90 @@ from agent_capability_registry_types import binding, capability
 
 EXPORTS = [
     capability(
+        key="audio.audio-rate-modulation-dense",
+        domain="audio",
+        summary=(
+            "Graph-owned Processor nodes receive bounded borrowed dense modulation lanes "
+            "through ProcessBlock on the routed audio path."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control; transfers one Processor into graph-owned storage",
+            "prepare": "control; validates topology and allocates bounded routing scratch",
+            "process": "audio; allocation-free borrowed dense views",
+            "reset": "processor-defined",
+            "release": "control after graph snapshots quiesce",
+        },
+        state_model=(
+            "SignalGraph owns the Processor instance and compiled snapshots retain it; "
+            "dense lanes are borrowed for one routed block and do not mutate StateStore."
+        ),
+        seed_model="processor-defined",
+        determinism={
+            "repeatability": "tolerance_bounded",
+            "block_partition": "invariant",
+            "platform_scope": "same_build",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "acyclic SignalGraph audio edges plus at most 64 dense parameter lanes per node, "
+            "256 per graph, and 16384 frames per prepared block"
+        ),
+        output_domain="routed Processor audio output or fail-closed silence",
+        units=["samples", "frames", "parameter units"],
+        latency="processor-defined and graph-compensated",
+        tail="processor-defined",
+        scheduling="topological routed execution once per audio block",
+        bindings=[
+            binding(
+                role="processor-hook",
+                kind="cpp_function",
+                include="pulp/format/processor.hpp",
+                qualified_name="pulp::format::Processor::process_block",
+                target="Pulp::format",
+                header_fingerprint="sha256:5d37c7ee1a6d7bdb634067330a2e8bde7200c08be07b4c1e384b3638385997a2",
+                address_expression=(
+                    "static_cast<bool (pulp::format::Processor::*)("
+                    "pulp::format::ProcessBlock&)>(&pulp::format::Processor::process_block)"
+                ),
+            ),
+            binding(
+                role="node-factory",
+                kind="cpp_function",
+                include="pulp/format/processor_node_adapter.hpp",
+                qualified_name="pulp::format::ProcessorNodeInstance::create",
+                target="Pulp::format",
+                header_fingerprint="sha256:e266a167709c809049f5895f13934d0b069667a72f35ef1081f8dc99c0700ba5",
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "processor-hook",
+                "binding": "pulp::format::Processor::process_block",
+                "operation": "member_function_call",
+                "object": (
+                    "*[]() -> pulp::format::Processor* { class Probe final : public "
+                    "pulp::format::Processor { public: pulp::format::PluginDescriptor "
+                    "descriptor() const override { return {}; } void define_parameters("
+                    "pulp::state::StateStore&) override {} void prepare(const pulp::format::"
+                    "PrepareContext&) override {} void process(pulp::audio::BufferView<float>&, "
+                    "const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&, "
+                    "pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {} "
+                    "}; static Probe value; return &value; }()"
+                ),
+                "arguments": (
+                    "*[]() { static pulp::format::ProcessBlock value; return &value; }()"
+                ),
+            },
+            {
+                "role": "node-factory",
+                "binding": "pulp::format::ProcessorNodeInstance::create",
+                "operation": "function_call",
+                "arguments": "std::unique_ptr<pulp::format::Processor>{}",
+            },
+        ],
+    ),
+    capability(
         key="audio.wavetable-authoring",
         domain="audio",
         summary=(
