@@ -26,6 +26,10 @@ namespace pulp::format {
 class ViewBridge;
 }
 
+namespace pulp::playback {
+class MasterTransport;
+}
+
 namespace pulp::inspect {
 
 /// Creates the canonical broker-enrolled host bridge for an explicitly
@@ -42,6 +46,11 @@ struct StandaloneControlAuthorHooks {
     std::function<std::vector<ControlDiagnosticItem>()> diagnostics;
     std::function<ControlAuthoringApplyResult(const ControlAuthoringChanges&)>
         apply_authoring;
+    /// The live master transport the sequencer loop capabilities observe and
+    /// edit. An absent hook leaves both operations refusing with an unavailable
+    /// host rather than answering from a tick-domain helper the transport never
+    /// saw.
+    std::function<playback::MasterTransport*()> sequencer_transport;
 };
 
 using StandaloneControlAuthorHooksFactory =

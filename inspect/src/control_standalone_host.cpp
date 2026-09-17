@@ -1,30 +1,31 @@
 #include <pulp/inspect/control_standalone_host.hpp>
 
-#include <pulp/inspect/control_host_preflight.hpp>
+#include <pulp/format/processor.hpp>
+#include <pulp/format/standalone.hpp>
+#include <pulp/format/view_bridge.hpp>
+#include <pulp/inspect/console_capture.hpp>
 #include <pulp/inspect/control_gpu_health_provider.hpp>
 #include <pulp/inspect/control_gpu_health_read_executor.hpp>
 #include <pulp/inspect/control_gpu_health_view_adapter.hpp>
-#include <pulp/inspect/console_capture.hpp>
+#include <pulp/inspect/control_host_preflight.hpp>
 #include <pulp/inspect/control_installed_host.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_manifest.hpp>
 #include <pulp/inspect/control_sequencer_state_executor.hpp>
+#include <pulp/inspect/control_sequencer_transport_executor.hpp>
+#include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/control_state_read_executor.hpp>
 #include <pulp/inspect/control_state_write_executor.hpp>
-#include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/motion_inspector.hpp>
 #include <pulp/inspect/motion_scrubber.hpp>
 #include <pulp/inspect/runtime_eval_component.hpp>
-#include <pulp/format/processor.hpp>
-#include <pulp/format/standalone.hpp>
-#include <pulp/format/view_bridge.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/motion.hpp>
-#include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/view/window_host.hpp>
 
@@ -82,6 +83,8 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
         "PULP_INSPECT_CAPABILITY_TEST_INPUT_V1\0"
         "PULP_INSPECT_CAPABILITY_AUTHORING_TWEAKS_V1\0"
         "PULP_INSPECT_CAPABILITY_TELEMETRY_STREAM_V1\0"
+        "PULP_INSPECT_CAPABILITY_SEQUENCER_TRANSPORT_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_SEQUENCER_TRANSPORT_WRITE_V1\0"
         "PULP_INSPECT_CAPABILITY_TIMELINE_DOCUMENT_SESSION_V1";
 
 #undef PULP_CONTROL_COMPONENT_MARKER
@@ -407,17 +410,36 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         ControlMainThreadExecutor main_sequencer_edit(
             rpc_, make_control_sequencer_state_edit_executor(sequencer_target));
         auto fenced_sequencer_edit = main_sequencer_edit.executor();
+        ControlSequencerTransportTargetResolver sequencer_transport_target =
+            [this](const ControlAdmissionPlan& plan)
+            -> std::optional<ControlSequencerTransportTarget> {
+            if (!author_hooks_.sequencer_transport)
+                return std::nullopt;
+            auto* transport = author_hooks_.sequencer_transport();
+            if (!transport)
+                return std::nullopt;
+            return ControlSequencerTransportTarget{.registration_id = plan.registration_id,
+                                                   .host_tier = ControlHostTier::Standalone,
+                                                   .transport = transport};
+        };
+        ControlMainThreadExecutor main_transport_read(
+            rpc_, make_control_sequencer_transport_read_executor(sequencer_transport_target));
+        auto fenced_transport_read = main_transport_read.executor();
+        ControlMainThreadExecutor main_transport_write(
+            rpc_, make_control_sequencer_transport_write_executor(sequencer_transport_target));
+        auto fenced_transport_write = main_transport_write.executor();
         auto timeline_document_session = make_control_timeline_document_session_executor(
             [](const ControlAdmissionPlan& plan)
                 -> std::optional<ControlTimelineDocumentSessionSource> {
                 return detail::create_standalone_timeline_document_session_source(plan);
             });
         ControlOperationExecutor state_executor =
-            [state_read = std::move(state_read),
-             state_write = std::move(fenced_state_write),
+            [state_read = std::move(state_read), state_write = std::move(fenced_state_write),
              sequencer_read = std::move(fenced_sequencer_read),
              sequencer_edit = std::move(fenced_sequencer_edit),
              gpu_health_read = std::move(gpu_health_read),
+             transport_read = std::move(fenced_transport_read),
+             transport_write = std::move(fenced_transport_write),
              timeline_document_session = std::move(timeline_document_session)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                 const ControlExecutionContext& context) {
@@ -431,6 +453,10 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return sequencer_edit(plan, request, context);
                 if (request.operation_id == "dev.pulp.gpu/health.read@1")
                     return gpu_health_read(plan, request, context);
+                if (request.operation_id == "dev.pulp.sequencer/transport.loop.read@1")
+                    return transport_read(plan, request, context);
+                if (request.operation_id == "dev.pulp.sequencer/transport.loop.write@1")
+                    return transport_write(plan, request, context);
                 if (request.operation_id == "dev.pulp.timeline/document-session@1")
                     return timeline_document_session(plan, request, context);
                 return unavailable_operation();
