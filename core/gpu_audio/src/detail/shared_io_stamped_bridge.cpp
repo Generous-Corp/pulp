@@ -92,12 +92,12 @@ SharedIoStampedBridge::begin_callback(std::span<const float> samples,
     observed_delivery_ = Delivery::Invalid;
     if (trace_telemetry_)
         trace_telemetry_->record_callback_block(false);
-    trace_output_eligible_ = current_.sequence - epoch_first_sequence_ >= kLeadBlocks;
+    trace_output_eligible_ = current_.sequence - epoch_first_sequence_ >= lead_blocks_;
     if (trace_ && trace_output_eligible_) {
         SharedIoTraceRecord record;
         record.kind = SharedIoTraceKind::Eligible;
         record.generation = trace_->config().generation;
-        record.sequence = current_.sequence - kLeadBlocks;
+        record.sequence = current_.sequence - lead_blocks_;
         (void)trace_->publish_callback(record);
     }
     if (current_.epoch == 0)
@@ -118,7 +118,7 @@ SharedIoStampedBridge::claim_output(const Callback& callback) noexcept {
         return {};
     Claim result;
     callback_open_ = false;
-    if (callback.stamp.sequence - epoch_first_sequence_ < kLeadBlocks) {
+    if (callback.stamp.sequence - epoch_first_sequence_ < lead_blocks_) {
         result.delivery = observed_delivery_ = Delivery::Priming;
         return result;
     }
@@ -127,7 +127,7 @@ SharedIoStampedBridge::claim_output(const Callback& callback) noexcept {
         trace_delivery(result.delivery);
         return result;
     }
-    const auto expected = callback.stamp.sequence - kLeadBlocks;
+    const auto expected = callback.stamp.sequence - lead_blocks_;
     result.delivery = Delivery::Missing;
     for (std::uint32_t examined = 0; examined < capacity_; ++examined) {
         auto lease = acquire(egress_);
@@ -252,7 +252,7 @@ void SharedIoStampedBridge::trace_delivery(Delivery delivery) noexcept {
     SharedIoTraceRecord record;
     record.kind = SharedIoTraceKind::Delivery;
     record.generation = trace_->config().generation;
-    record.sequence = current_.sequence - kLeadBlocks;
+    record.sequence = current_.sequence - lead_blocks_;
     record.output_eligible = true;
     // This bridge returns zeros on a miss. A higher-level transport may later
     // replace those samples with CPU fallback; this event cannot attest that.
@@ -291,7 +291,7 @@ bool SharedIoStampedBridge::complete_callback_delivery(
     SharedIoTraceRecord record;
     record.kind = SharedIoTraceKind::Delivery;
     record.generation = trace_->config().generation;
-    record.sequence = current_.sequence - kLeadBlocks;
+    record.sequence = current_.sequence - lead_blocks_;
     record.output_eligible = true;
     record.delivery = actual;
     if (actual != SharedIoDeliveryDisposition::GpuDelivered) {
