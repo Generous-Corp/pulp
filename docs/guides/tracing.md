@@ -291,6 +291,133 @@ it compiles to nothing when `PULP_TRACING` is off.
 
 ---
 
+<!-- Self-contained subsection; keep edits here local to minimize merge churn. -->
+## Instant events: `PULP_TRACE_INSTANT*` — a thing happened, with no span to close
+
+A scope wraps a duration. An **instant** records a point in time — a device
+error, a lost device, a dropped frame — where a duration would misrepresent the
+fact. Three variants in `core/runtime/include/pulp/runtime/trace.hpp`:
+
+| Macro | Name | Payload |
+|---|---|---|
+| `PULP_TRACE_INSTANT(category, name)` | compile-time literal | none |
+| `PULP_TRACE_INSTANT_ARGS(category, name, "key", value, ...)` | compile-time literal | typed debug-annotation pairs |
+| `PULP_TRACE_INSTANT_DYNAMIC(category, name_expr)` | runtime `std::string` / `const char*` | none |
+
+- The literal-name variants take a `perfetto::StaticString` — a dynamic
+  `std::string` name does not compile.
+- `PULP_TRACE_INSTANT_ARGS` is the answer when the runtime text is a payload to
+  **read**, not a key to **group by**: the name stays interned and the variable
+  part rides along as arg `debug.<key>`, readable via
+  `EXTRACT_ARG(arg_set_id, 'debug.<key>')`. Prefer it over
+  `PULP_TRACE_INSTANT_DYNAMIC` whenever that describes your data.
+- Reach for `PULP_TRACE_INSTANT_DYNAMIC` only when the runtime value is the
+  thing you need to group or filter on. Same cost as
+  `PULP_TRACE_SCOPE_DYNAMIC`: the bytes are copied per event and the name
+  multiplies `slice.name` cardinality, which degrades the `GROUP BY name`
+  presets.
+- Same RT rule as every macro here: these wrap `TRACE_EVENT_INSTANT`, which
+  locks a mutex on chunk rollover — **never on the audio thread's `process()`
+  path**. Live DSP observability stays with the fixed-slot telemetry above.
+- All three compile to nothing when `PULP_TRACING` is off.
+
+---
+
+<!-- Self-contained subsection; keep edits here local to minimize merge churn. -->
+## GPU diagnostics on the timeline (`gpu_diagnostics`)
+
+Dawn hands errors to a callback; Skia hands log records to a process-global
+`SkLogHandler`. Both funnel through one sink —
+`core/render/include/pulp/render/gpu_diagnostics.hpp` and
+`core/render/src/gpu_diagnostics.cpp` — so a device error lands on the same
+timeline as the frame that provoked it instead of living only in the log.
+
+`emit_gpu_diagnostic(severity, source, message)` publishes one instant event:
+
+- **Event shape:** a zero-duration slice named `gpu.diagnostic` on category
+  `gpu`. Severity, source, and message ride along as debug annotations
+  (`debug.severity`, `debug.source`, `debug.message`) — one interned name, so
+  `GROUP BY name` still works and the variable text never inflates
+  `slice.name` cardinality.
+- **Sources** are stable, low-cardinality tags naming the producer:
+  `dawn.uncaptured_error` (`gpu_surface_dawn.cpp`, `gpu_compute.cpp`),
+  `dawn.device_lost` (`gpu_compute.cpp`), and `skia.log` (the Skia bridge).
+- **Severity** is `GpuDiagnosticSeverity::{info, warning, error, fatal}`;
+  `to_string()` gives the stable lowercase label the annotation carries.
+
+**The log stays.** Every call site keeps its `runtime::log_*` call — a log is
+what a user reads, a trace is what a timeline query joins against. A diagnostic
+in the log but not the trace means the build had tracing compiled out or the
+bridge was off, not that the event did not happen.
+
+**The message is bounded, never allocated.** The Dawn uncaptured-error callback
+fires on the render thread, so the sink copies the message into a 512-byte
+stack buffer (`kGpuDiagnosticMessageLimit`) and truncates rather than touching
+the heap. The full text still reaches the log; only the trace annotation is
+cut. Render-thread-safe is not audio-thread-safe — it is still a
+`TRACE_EVENT`, so it stays off the `process()` path like everything else here.
+
+### Reading the events back
+
+```bash
+pulp trace query \
+  "SELECT ts, \
+          EXTRACT_ARG(arg_set_id, 'debug.severity') AS severity, \
+          EXTRACT_ARG(arg_set_id, 'debug.source')   AS source, \
+          EXTRACT_ARG(arg_set_id, 'debug.message')  AS message \
+   FROM slice WHERE name = 'gpu.diagnostic' ORDER BY ts" \
+  --trace /tmp/open.pftrace
+```
+
+Two gotchas the `trace-sql` skill covers in depth: the args are keyed
+`debug.<name>`, not bare, and instant events genuinely have `dur = 0` — key
+them off the name, never the duration (`dur = -1` means *incomplete*, a
+different thing). The `trace-analysis` skill's GPU hints know these events and
+treat a log/trace disagreement as a bridge-state question, not a missing event.
+
+### Honest absence: stats and bridge state
+
+A bridge that quietly emits nothing forever is indistinguishable from a quiet
+GPU, so the sink reports its own state:
+
+- `gpu_diagnostics_stats()` → `{emitted, traced, truncated}`. `emitted` counts
+  every record handed to the sink **even in a `PULP_TRACING=OFF` build**, so
+  the counter proves the call site ran where no Perfetto event can exist.
+  `traced` counts what Perfetto actually got — always 0 in an OFF build. Read
+  `emitted > 0, traced == 0` as "the sink ran; this build compiled the trace
+  out", not "nothing went wrong". `truncated` counts messages cut at the
+  512-byte limit.
+- `skia_log_bridge_state()` → `{status, records_forwarded}`. Skia's log handler
+  is process-global and **first-install-wins**, and Pulp loads into hosts that
+  may use Skia themselves, so the bridge is polite: it never displaces an
+  existing handler, and every outcome other than `installed` is a normal,
+  reportable state, not an error:
+
+  | Status | Meaning |
+  |---|---|
+  | `not_attempted` | nobody called an install entry point |
+  | `installed` | this process owns Skia's handler; records flow |
+  | `declined_handler_present` | the host installed its own handler first; theirs stands |
+  | `declined_not_enabled` | the opt-in was absent; Skia untouched |
+  | `unavailable_no_skia` | this build has no Skia; nothing to install |
+
+  `installed` with `records_forwarded == 0` means Skia logged nothing — a
+  different fact from `declined_handler_present`, where nothing could ever
+  arrive. `skia_log_bridge_available()` separates "no Skia in this build" from
+  "declined to".
+
+Nothing installs the Skia bridge implicitly: a host or app calls
+`install_skia_log_bridge_if_enabled()` (or `install_skia_log_bridge()`, which
+is itself the explicit opt-in), and a plugin build ships with the opt-in off.
+The opt-in is satisfied by a `PULP_TRACING=ON` build or
+`PULP_GPU_LOG_BRIDGE` set to `1`/`true`/`yes`/`on`; an explicit
+`0`/`false`/`no`/`off` wins over the tracing build, so a tracing run can still
+leave a host's Skia logging alone. A capture with Dawn diagnostics but no Skia
+ones is therefore an ordinary outcome — check `skia_log_bridge_state()` before
+suspecting a dropped event.
+
+---
+
 ## Gotchas
 
 > **Ring-buffer overflow → a silently empty or truncated trace.** The trace is a
