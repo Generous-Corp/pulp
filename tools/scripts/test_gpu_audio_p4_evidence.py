@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
+import copy
 import hashlib
 import importlib.util
 import json
+import io
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("gpu_audio_p4_evidence.py")
@@ -26,6 +30,18 @@ def observation(value: int | None, *, available: bool = True) -> dict:
         "observer": "p4_fixture",
         "api_source": "fixture_clock",
         "relation": "direct" if available else "unavailable",
+        "start_clock_domain": "mach_continuous_time",
+        "end_clock_domain": "mach_continuous_time",
+        "start_observer": "p4_fixture",
+        "end_observer": "p4_fixture",
+        "callback_mode": "AllowProcessEvents",
+        "event_pump_strategy": "bounded_worker_poll",
+        "timestamp_scope": "nonoverlapping_named_span",
+        "correlation_method": "not_required" if available else "unavailable",
+        "uncertainty_ns": 0 if available else None,
+        "instrumentation_overhead_ns": 0 if available else None,
+        "instrumentation_control": "synthetic_clock_control",
+
     }
 
 
@@ -86,6 +102,10 @@ def fixture() -> list[dict]:
                         "trial_id": trial_id, "pair_id": pair_id, "path": path, "block_count": 2,
                         "blocks_sha256": digest.hexdigest(),
                         "ui_frame_p99": observation(1000), "duration": observation(2000),
+                        "gpu_terminal_counts": {name: 2 if name == "completed" else 0
+                                                for name in MODULE.GPU_TERMINALS},
+                        "delivery_counts": {name: 2 if name == "gpu" else 0
+                                            for name in MODULE.DELIVERIES},
                         "device_loss": False,
                         "audio_xrun": False, "driver_stall": False})
     for staged in (record for record in records if record.get("record_kind") == "block"
@@ -122,6 +142,44 @@ def refresh_digest(records: list[dict], path: str) -> None:
     end["blocks_sha256"] = digest.hexdigest()
 
 
+def refresh_all(records: list[dict]) -> None:
+    for record in records[1:]:
+        if record["record_kind"] == "trial_begin":
+            digest = hashlib.sha256()
+            terminals = {name: 0 for name in MODULE.GPU_TERMINALS}
+            deliveries = {name: 0 for name in MODULE.DELIVERIES}
+        elif record["record_kind"] == "block":
+            digest.update(MODULE._canonical(record) + b"\n")
+            terminals[record["gpu_terminal"]] += 1
+            deliveries[record["delivery"]] += 1
+        elif record["record_kind"] == "trial_end":
+            record.update(blocks_sha256=digest.hexdigest(), gpu_terminal_counts=terminals,
+                          delivery_counts=deliveries)
+
+
+def confirmation_fixture() -> list[dict]:
+    source = fixture()
+    manifest = copy.deepcopy(source[0])
+    manifest.update(campaign="confirmation", expected_trials=61, expected_matched_pairs=30,
+                    bootstrap_resamples=10_000)
+    records = [manifest]
+    for trial_id in range(61):
+        path = ("staged_async" if trial_id % 2 == 0 else "shared_async") if trial_id < 60 else "staged_sync"
+        for original in source[1:]:
+            if original["path"] != path:
+                continue
+            record = copy.deepcopy(original)
+            record.update(trial_id=trial_id, pair_id=trial_id // 2 if trial_id < 60 else None)
+            if record["record_kind"] == "block":
+                record["engine_id"] = trial_id + 1
+                if path == "shared_async":
+                    for name in MODULE.CPU_TIMINGS:
+                        record["timings"][name]["value_ns"] = 40
+            records.append(record)
+    refresh_all(records)
+    return records
+
+
 class EvidenceTests(unittest.TestCase):
     def test_valid_fixture_and_summary(self) -> None:
         records = fixture()
@@ -154,13 +212,157 @@ class EvidenceTests(unittest.TestCase):
         records = fixture()
         for record in records:
             if record.get("record_kind") == "block" and record.get("path") == "shared_async":
-                for name in ("callback_cpu", "worker_pack_copy", "encode_cpu", "submit_cpu"):
+                for name in MODULE.CPU_TIMINGS:
                     record["timings"][name]["value_ns"] = 40
         refresh_digest(records, "shared_async")
         self.assertEqual(MODULE.validate_records(records), [])
         gate = MODULE.summarize(records)["row_gate"]
         self.assertEqual(gate["status"], "pass")
         self.assertEqual(gate["program_verdict"], "unassigned")
+
+    def test_complete_confirmation_positive_control(self) -> None:
+        records = confirmation_fixture()
+        self.assertEqual(MODULE.validate_records(records), [])
+        summary = MODULE.summarize(records)
+        self.assertEqual(summary["row_gate"]["status"], "pass")
+        self.assertEqual(summary["verdict"], "unassigned")
+        self.assertEqual(summary["matched_improvement"]["total_cpu_per_block_percent"]["pairs"], 30)
+
+    def test_device_loss_cannot_hide_in_block_dispositions(self) -> None:
+        records = confirmation_fixture()
+        self.assertEqual(MODULE.validate_records(records), [])
+        for record in records:
+            if record["record_kind"] == "block":
+                record.update(gpu_terminal="device_lost", delivery="cpu_fallback")
+        refresh_all(records)
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("requires trial_end device_loss" in error for error in errors), errors)
+        for record in records:
+            if record["record_kind"] == "trial_end":
+                record["device_loss"] = True
+        self.assertTrue(any("terminal health failure" in error for error in MODULE.validate_records(records)))
+
+    def test_disposition_counters_must_match_blocks(self) -> None:
+        records = fixture()
+        self.assertEqual(MODULE.validate_records(records), [])
+        end = next(record for record in records if record["record_kind"] == "trial_end")
+        end["gpu_terminal_counts"]["provider_failure"] = 1
+        end["delivery_counts"]["gpu"] = True
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("gpu_terminal_counts must exactly match" in error for error in errors), errors)
+        self.assertTrue(any("delivery_counts must exactly match" in error for error in errors), errors)
+
+    def test_confirmation_cannot_measure_only_priming_or_fallback(self) -> None:
+        for delivery in ("priming", "cpu_fallback", "silence", "passthrough"):
+            with self.subTest(delivery=delivery):
+                records = confirmation_fixture()
+                self.assertEqual(MODULE.validate_records(records), [])
+                for record in records:
+                    if record["record_kind"] == "block" and record["path"] == "shared_async":
+                        record["delivery"] = delivery
+                refresh_all(records)
+                errors = MODULE.validate_records(records)
+                self.assertTrue(any("requires eligible GPU delivery" in error for error in errors), errors)
+
+    def test_timing_provenance_and_verdict_eligibility(self) -> None:
+        changes = (
+            ("relation", "inferred", "verdict timing unavailable or inferred"),
+            ("end_clock_domain", "uncorrelated_gpu_clock", "matching endpoint clock_domains"),
+            ("end_observer", "different_observer", "matching endpoint observers"),
+            ("instrumentation_control", "", "instrumentation_control must be non-empty"),
+            ("uncertainty_ns", None, "uncertainty_ns must be finite"),
+            ("value_ns", 10 ** 400, "value_ns must be finite"),
+        )
+        for field, value, expected in changes:
+            with self.subTest(field=field, value=str(value)[:40]):
+                records = confirmation_fixture()
+                self.assertEqual(MODULE.validate_records(records), [])
+                block = next(record for record in records if record["record_kind"] == "block")
+                block["timings"]["submit_to_completion"][field] = value
+                refresh_all(records)
+                errors = MODULE.validate_records(records)
+                self.assertTrue(any(expected in error for error in errors), errors)
+
+    def test_correlated_observation_requires_explicit_method(self) -> None:
+        value = observation(100)
+        value.update(relation="correlated", end_clock_domain="gpu_ticks", end_observer="gpu_query",
+                     correlation_method="calibrated_affine_clock_map", uncertainty_ns=2)
+        errors = []
+        MODULE._check_timing("gpu_elapsed", value, "control", errors)
+        self.assertEqual(errors, [])
+        value["correlation_method"] = "uncorrelated"
+        MODULE._check_timing("gpu_elapsed", value, "control", errors)
+        self.assertTrue(any("requires a correlation method" in error for error in errors))
+
+    def test_inferred_screening_data_remains_recorded_but_cannot_win(self) -> None:
+        records = fixture()
+        for record in records:
+            if record["record_kind"] == "block":
+                record["timings"]["submit_to_completion"]["relation"] = "inferred"
+        refresh_all(records)
+        self.assertEqual(MODULE.validate_records(records), [])
+        summary = MODULE.summarize(records)
+        self.assertEqual(summary["row_gate"]["status"], "fail")
+        self.assertEqual(summary["matched_improvement"]["submit_to_completion_p99_percent"]["pairs"], 0)
+
+    def test_service_cpu_cannot_hide_an_apparent_cpu_win(self) -> None:
+        records = confirmation_fixture()
+        self.assertEqual(MODULE.summarize(records)["row_gate"]["status"], "pass")
+        for record in records:
+            if record["record_kind"] == "block" and record["path"] == "shared_async":
+                record["timings"]["event_processing_cpu"]["value_ns"] = 500
+                record["timings"]["retirement_cpu"]["value_ns"] = 500
+        refresh_all(records)
+        self.assertEqual(MODULE.validate_records(records), [])
+        self.assertEqual(MODULE.summarize(records)["row_gate"]["status"], "fail")
+        records[2]["timings"].pop("worker_other_cpu")
+        refresh_all(records)
+        self.assertTrue(any("worker_other_cpu" in error for error in MODULE.validate_records(records)))
+
+    def test_ui_outlier_cannot_hide_matched_trial_regressions(self) -> None:
+        records = confirmation_fixture()
+        self.assertEqual(MODULE.validate_records(records), [])
+        self.assertTrue(MODULE.summarize(records)["row_gate"]["checks"]["ui_frame_p99"]["passed"])
+        for record in records:
+            if record["record_kind"] == "trial_end":
+                if record["path"] == "staged_async" and record["pair_id"] == 0:
+                    record["ui_frame_p99"]["value_ns"] = 2000
+                if record["path"] == "shared_async":
+                    record["ui_frame_p99"]["value_ns"] = 1800
+        self.assertEqual(MODULE.validate_records(records), [])
+        summary = MODULE.summarize(records)
+        self.assertFalse(summary["row_gate"]["checks"]["ui_frame_p99"]["passed"])
+        self.assertEqual(summary["matched_ui_frame_p99"], {"pairs": 30, "max_regression_percent": 80})
+
+    def test_provenance_state_is_bounded_and_drift_is_rejected(self) -> None:
+        tracker = MODULE.ProvenanceTracker()
+        errors = MODULE.Diagnostics()
+        value = observation(100)
+        tracker.check("shared_async", "submit_to_completion", value, "control", errors)
+        self.assertEqual(errors, [])
+        for index in range(10_000):
+            value["api_source"] = f"changing_source_{index}"
+            tracker.check("shared_async", "submit_to_completion", value, "control", errors)
+        self.assertEqual(len(tracker.first), 1)
+        self.assertEqual(len(tracker.mismatches), 1)
+        self.assertEqual(len(errors), 1)
+        records = confirmation_fixture()
+        records[2]["timings"]["submit_to_completion"]["api_source"] = "changed_source"
+        refresh_all(records)
+        self.assertTrue(any("provenance must be constant" in error for error in MODULE.validate_records(records)))
+        for index in range(10_000):
+            errors.append(f"bad block {index}")
+        self.assertEqual(len(errors), 101)
+
+    def test_exact_identity_types_and_stable_trial_engine(self) -> None:
+        records = fixture()
+        self.assertEqual(MODULE.validate_records(records), [])
+        records[2]["trial_id"] = False
+        records[3]["engine_id"] += 100
+        refresh_all(records)
+        errors = MODULE.validate_records(records)
+        self.assertTrue(any("block identity does not match" in error for error in errors), errors)
+        self.assertTrue(any("engine_id and generation must be constant" in error for error in errors), errors)
 
     def test_truncation_and_digest_are_rejected(self) -> None:
         records = fixture()[:-1]
@@ -296,6 +498,75 @@ class EvidenceTests(unittest.TestCase):
         errors = MODULE.validate_records(records)
         self.assertTrue(any("baseline must be positive" in error for error in errors), errors)
         self.assertTrue(any("completed matched pair count" in error for error in errors), errors)
+
+    def test_disk_percentiles_and_bootstrap_have_known_answers(self) -> None:
+        metrics = MODULE._MetricStore()
+        try:
+            for value in (0, 10, 30, 100):
+                metrics.add("shared_async", 0, "latency", value)
+            metrics.add("staged_async", 0, "latency", 999)
+            metrics.add("shared_async", 1, "latency", 999)
+            metrics.finish()
+            for percentile, expected in ((50, 20), (95, 89.5), (99, 97.9), (99.9, 99.79)):
+                self.assertAlmostEqual(metrics.percentile("shared_async", "latency", percentile, 0), expected)
+            self.assertEqual(metrics.mean("shared_async", "latency", 0), 35)
+            self.assertEqual(metrics.count("shared_async", "latency", 0), 4)
+        finally:
+            metrics.close()
+        confidence = MODULE._bootstrap_mean_ci([0, 10], 91, 10_000)
+        self.assertEqual(confidence, {"pairs": 2, "mean": 5, "ci95_low": 0, "ci95_high": 10})
+        self.assertEqual(confidence, MODULE._bootstrap_mean_ci([0, 10], 91, 10_000))
+        constant = MODULE._bootstrap_mean_ci([7, 7, 7], 12, 100)
+        self.assertEqual((constant["mean"], constant["ci95_low"], constant["ci95_high"]), (7, 7, 7))
+
+    def test_priming_alone_is_not_an_overload_exercise(self) -> None:
+        records = fixture()
+        records[0].update(campaign="overload")
+        records[0]["row"]["load"] = "overload"
+        for record in records:
+            if record["record_kind"] == "block":
+                record["delivery"] = "priming"
+        refresh_all(records)
+        self.assertTrue(any("did not exercise" in error for error in MODULE.validate_records(records)))
+        records[2]["delivery"] = "cpu_fallback"
+        refresh_all(records)
+        self.assertEqual(MODULE.validate_records(records), [])
+
+    def test_cli_rejects_changed_raw_and_output_input_aliases(self) -> None:
+        records = fixture()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            binary = root_path / "benchmark"
+            binary.write_bytes(b"benchmark")
+            records[0]["binary_sha256"] = MODULE._sha256_file(binary)
+            raw = root_path / "raw.jsonl"
+            raw.write_text("".join(json.dumps(record) + "\n" for record in records))
+            raw_digest = MODULE._sha256_file(raw)
+            summary = root_path / "summary.json"
+            argv = [str(MODULE_PATH), str(raw), "--benchmark-binary", str(binary),
+                    "--summary", str(summary)]
+            with mock.patch.object(sys, "argv", argv):
+                self.assertEqual(MODULE.main(), 0)
+            summary.unlink()
+            original_hash = MODULE._sha256_file
+            calls = 0
+
+            def changed_hash(path: Path) -> str:
+                nonlocal calls
+                if path == raw:
+                    calls += 1
+                    return raw_digest if calls == 1 else "0" * 64
+                return original_hash(path)
+
+            stderr = io.StringIO()
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(MODULE, "_sha256_file", changed_hash), contextlib.redirect_stderr(stderr):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertIn("evidence file changed", stderr.getvalue())
+            self.assertFalse(summary.exists())
+            argv[-1] = str(raw)
+            with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(stderr):
+                self.assertEqual(MODULE.main(), 1)
+            self.assertEqual(MODULE._sha256_file(raw), raw_digest)
 
     def test_binary_identity_is_verified(self) -> None:
         records = fixture()
