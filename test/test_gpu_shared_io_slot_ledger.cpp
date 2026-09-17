@@ -1185,7 +1185,7 @@ TEST_CASE("terminal publication makes completed payload visible before output cl
     const auto token = publish_and_submit(arena, 750);
     std::barrier gate(2);
     auto terminal = SharedIoTerminalInbox::PushResult::Busy;
-    std::jthread callback([&] {
+    std::thread callback([&] {
         gate.arrive_and_wait();
         terminal = provider.complete(0, SharedIoTerminalStatus::RetiredSuccess);
     });
