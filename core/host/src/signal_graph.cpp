@@ -1923,6 +1923,27 @@ SignalGraph::PreparedStats SignalGraph::prepared_stats() const {
     };
 }
 
+std::uint64_t SignalGraph::sample_region_binding_generation() const noexcept {
+    auto read_guard = live_slot_.read();
+    const auto* cg = read_guard.get();
+    return cg != nullptr && cg->sample_region_bank ? cg->sample_region_bank->binding_generation()
+                                                   : 0;
+}
+
+std::vector<SampleRegionRuntimeReceipt> SignalGraph::sample_region_runtime_receipts() const {
+    auto read_guard = live_slot_.read();
+    const auto* cg = read_guard.get();
+    std::vector<SampleRegionRuntimeReceipt> receipts;
+    if (cg == nullptr)
+        return receipts;
+    receipts.reserve(cg->sample_regions.size());
+    for (const auto& region : cg->sample_regions) {
+        if (region)
+            receipts.push_back(region->receipt());
+    }
+    return receipts;
+}
+
 int SignalGraph::prepared_max_block_size() const noexcept {
     return live_slot_.live() ? live_slot_.live()->max_block_size : 0;
 }
@@ -3652,10 +3673,13 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
     if (cg->sample_region_bank) {
         sample_region_admission = cg->sample_region_bank->domain().try_admit(
             cg->sample_region_bank->binding_generation());
-        // Contention and stale-snapshot re-entry fail without touching either
-        // the retained state cells or the caller's output buffers.
-        if (!sample_region_admission)
+        // Contention and stale-snapshot re-entry fail without touching retained
+        // state cells. The caller still receives a deterministic silent block.
+        if (!sample_region_admission) {
+            output.clear();
+            routed_only_execution_failures_.fetch_add(1, std::memory_order_relaxed);
             return;
+        }
         if (transport != nullptr && transport->reset_requested)
             cg->sample_region_bank->reset();
     }
@@ -3981,6 +4005,25 @@ bool SignalGraph::ExecutionSnapshot::inject_midi(
     NodeId midi_input_node, const midi::MidiBuffer& events) const noexcept {
     return snapshot_ != nullptr &&
            SignalGraph::inject_midi_into_snapshot_(*snapshot_, midi_input_node, events);
+}
+
+std::uint64_t SignalGraph::ExecutionSnapshot::sample_region_binding_generation() const noexcept {
+    return snapshot_ != nullptr && snapshot_->sample_region_bank
+               ? snapshot_->sample_region_bank->binding_generation()
+               : 0;
+}
+
+std::vector<SampleRegionRuntimeReceipt>
+SignalGraph::ExecutionSnapshot::sample_region_runtime_receipts() const {
+    std::vector<SampleRegionRuntimeReceipt> receipts;
+    if (snapshot_ == nullptr)
+        return receipts;
+    receipts.reserve(snapshot_->sample_regions.size());
+    for (const auto& region : snapshot_->sample_regions) {
+        if (region)
+            receipts.push_back(region->receipt());
+    }
+    return receipts;
 }
 
 bool SignalGraph::ExecutionSnapshot::inject_parameter_events(

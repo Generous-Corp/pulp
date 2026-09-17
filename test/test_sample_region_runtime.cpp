@@ -1,6 +1,8 @@
 #include "harness/scoped_rt_process_probe.hpp"
 #include "support/audio_signal_generators.hpp"
+#include "support/render_scenario.hpp"
 
+#include <pulp/audio/analysis/audio_assertions.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -423,6 +425,67 @@ SampleKernelDescriptor probe_delay_descriptor() {
     return descriptor;
 }
 
+CustomNodeType scalar_node_type(std::string type_id, int inputs = 1, int outputs = 1) {
+    CustomNodeType type;
+    type.type_id = std::move(type_id);
+    type.version = 1;
+    type.num_input_ports = inputs;
+    type.num_output_ports = outputs;
+    type.default_name = type.type_id;
+    return type;
+}
+
+bool float_probe_construct(void* state, const SampleKernelPrepareContext&) noexcept {
+    if (state == nullptr)
+        return false;
+    *static_cast<float*>(state) = 0.0f;
+    g_state_probe.constructs.fetch_add(1);
+    return true;
+}
+
+void float_probe_reset(void* state) noexcept {
+    if (state != nullptr)
+        *static_cast<float*>(state) = 0.0f;
+    g_state_probe.resets.fetch_add(1);
+}
+
+void float_probe_destroy(void*) noexcept {
+    if (g_state_probe.expected_destroy_thread == std::this_thread::get_id())
+        g_state_probe.destroyed_on_expected_thread.store(true);
+    g_state_probe.destroys.fetch_add(1);
+}
+
+void float_probe_publish(const void* state, const PreparedSampleKernelConfig&,
+                         float* outputs) noexcept {
+    outputs[0] = state != nullptr ? *static_cast<const float*>(state) : 0.0f;
+    g_state_probe.publishes.fetch_add(1);
+}
+
+void float_probe_commit(void* state, const PreparedSampleKernelConfig&,
+                        const float* inputs) noexcept {
+    if (state != nullptr)
+        *static_cast<float*>(state) = inputs[0];
+    g_state_probe.commits.fetch_add(1);
+}
+
+SampleKernelDescriptor instrumented_unit_delay_descriptor() {
+    SampleKernelDescriptor descriptor;
+    descriptor.type_id = "pulp.core.unit-delay";
+    descriptor.num_input_ports = 1;
+    descriptor.num_output_ports = 1;
+    descriptor.causality = SampleKernelCausality::OneSampleDelay;
+    descriptor.authored_config_kind = SampleKernelConfigKind::None;
+    descriptor.state_size = sizeof(float);
+    descriptor.state_alignment = alignof(float);
+    descriptor.construct = float_probe_construct;
+    descriptor.reset = float_probe_reset;
+    descriptor.destroy = float_probe_destroy;
+    descriptor.delay_publish = float_probe_publish;
+    descriptor.delay_commit = float_probe_commit;
+    descriptor.metadata.category = "test";
+    return descriptor;
+}
+
 PreparedSampleRegionPlan probe_plan(NodeId delay_node = 12) {
     const PreparedSampleKernelConfig boundary_config{PreparedSampleKernelConfigKind::BoundaryIndex,
                                                      0, 0.0f};
@@ -431,8 +494,14 @@ PreparedSampleRegionPlan probe_plan(NodeId delay_node = 12) {
     plan.region_id = 77;
     plan.scalar_slot_count = 6;
     plan.resources.member_nodes = 3;
+    plan.resources.internal_connections = 2;
+    plan.resources.input_boundaries = 1;
+    plan.resources.output_boundaries = 1;
     plan.resources.delay_nodes = 1;
     plan.resources.state_bytes = sizeof(StateProbe);
+    plan.resources.state_alignment = alignof(StateProbe);
+    plan.resources.logical_boundary_bytes = 2 * sizeof(float);
+    plan.resources.work_per_frame = 8;
     plan.kernels = {
         {11, boundary_descriptor("pulp.core.sample-region.input"), boundary_config, 0, 1},
         {delay_node, probe_delay_descriptor(), none_config, 2, 3},
@@ -466,6 +535,146 @@ float process_probe_region(PreparedSampleRegion& region, float input) {
     return output;
 }
 
+class SampleRegionAllpassProcessor final : public format::Processor {
+  public:
+    format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "SampleRegionAllpassFixture",
+            .manufacturer = "Pulp",
+            .bundle_id = "com.pulp.test.sample-region-allpass",
+            .version = "1.0.0",
+            .category = format::PluginCategory::Effect,
+            .input_buses = {{"Audio In", 1}},
+            .output_buses = {{"Audio Out", 1}},
+        };
+    }
+
+    void define_parameters(state::StateStore&) override {}
+
+    void prepare(const format::PrepareContext& context) override {
+        parameters_.reset();
+        prepared_ = build_graph_(context.sample_rate, context.max_buffer_size);
+    }
+
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
+                 midi::MidiBuffer&, midi::MidiBuffer&,
+                 const format::ProcessContext& context) override {
+        const auto frames = context.num_samples > 0
+                                ? context.num_samples
+                                : static_cast<int>(std::min(output.num_samples(),
+                                                            input.num_samples()));
+        if (!prepared_) {
+            output.clear();
+            return;
+        }
+        graph_.process(output, input, frames, context);
+    }
+
+  private:
+    bool build_graph_(double sample_rate, int maximum) {
+        const auto graph_input = graph_.add_input_node(1, "Input");
+        const auto outer_gain = graph_.add_gain_node("Unrelated outer gain");
+        const auto graph_output = graph_.add_output_node(1, "Output");
+        if (!graph_.connect(graph_input, 0, outer_gain, 0) ||
+            !graph_.connect(outer_gain, 0, graph_output, 0) ||
+            !graph_.set_node_gain(outer_gain, 1.0f) ||
+            !graph_.prepare(sample_rate, maximum)) {
+            return false;
+        }
+
+        auto edit = graph_.begin_prepared_topology_edit();
+        if (!edit || !edit->disconnect(outer_gain, 0, graph_output, 0) ||
+            !register_builtin_sample_region_types(*edit)) {
+            return false;
+        }
+
+        const auto region_input = edit->add_custom_node("pulp.core.sample-region.input");
+        const auto coefficient_node = edit->add_custom_node("pulp.core.sample-region.parameter");
+        const auto minus_one = edit->add_custom_node("pulp.core.sample-region.constant");
+        const auto ax = edit->add_custom_node("pulp.core.sample-region.multiply");
+        const auto x_delay = edit->add_custom_node("pulp.core.unit-delay");
+        const auto y_delay = edit->add_custom_node("pulp.core.unit-delay");
+        const auto a_times_y_delay = edit->add_custom_node("pulp.core.sample-region.multiply");
+        const auto negative_a_times_y_delay =
+            edit->add_custom_node("pulp.core.sample-region.multiply");
+        const auto sum_one = edit->add_custom_node("pulp.core.sample-region.add");
+        const auto y = edit->add_custom_node("pulp.core.sample-region.add");
+        const auto region_output = edit->add_custom_node("pulp.core.sample-region.output");
+
+        if (!edit->connect(outer_gain, 0, region_input, 0) ||
+            !edit->connect(region_input, 0, ax, 0) ||
+            !edit->connect(coefficient_node, 0, ax, 1) ||
+            !edit->connect(region_input, 0, x_delay, 0) ||
+            !edit->connect(y_delay, 0, a_times_y_delay, 0) ||
+            !edit->connect(coefficient_node, 0, a_times_y_delay, 1) ||
+            !edit->connect(minus_one, 0, negative_a_times_y_delay, 0) ||
+            !edit->connect(a_times_y_delay, 0, negative_a_times_y_delay, 1) ||
+            !edit->connect(ax, 0, sum_one, 0) ||
+            !edit->connect(x_delay, 0, sum_one, 1) ||
+            !edit->connect(sum_one, 0, y, 0) ||
+            !edit->connect(negative_a_times_y_delay, 0, y, 1) ||
+            !edit->connect(y, 0, region_output, 0) ||
+            !edit->connect(region_output, 0, graph_output, 0)) {
+            return false;
+        }
+
+        SampleRegionDefinition definition;
+        definition.region_id = kRegionId;
+        definition.members = {
+            {region_input, "pulp.core.sample-region.input", 1, boundary()},
+            {coefficient_node, "pulp.core.sample-region.parameter", 1, parameter(kCoefficientId)},
+            {minus_one, "pulp.core.sample-region.constant", 1, constant(-1.0f)},
+            {ax, "pulp.core.sample-region.multiply", 1, none()},
+            {x_delay, "pulp.core.unit-delay", 1, none()},
+            {y_delay, "pulp.core.unit-delay", 1, none()},
+            {a_times_y_delay, "pulp.core.sample-region.multiply", 1, none()},
+            {negative_a_times_y_delay, "pulp.core.sample-region.multiply", 1, none()},
+            {sum_one, "pulp.core.sample-region.add", 1, none()},
+            {y, "pulp.core.sample-region.add", 1, none()},
+            {region_output, "pulp.core.sample-region.output", 1, boundary()},
+        };
+        definition.input_boundaries = {region_input};
+        definition.output_boundaries = {region_output};
+        SampleRegionPromotedParameter promoted;
+        promoted.param_id = kCoefficientId;
+        promoted.key = "coefficient";
+        promoted.name = "Allpass Coefficient";
+        promoted.range = state::ParamRange::linear(-0.99f, 0.99f, 0.5f);
+        promoted.bound_node_id = coefficient_node;
+        definition.promoted_parameters = {promoted};
+
+        if (!edit->declare_sample_region(definition).accepted ||
+            !edit->connect_in_sample_region(kRegionId, y, 0, y_delay, 0).accepted ||
+            !edit->prove_sample_region(kRegionId).accepted) {
+            return false;
+        }
+
+        parameters_ =
+            SampleRegionParameterOwner::create({}, edit->sample_region_parameter_contract());
+        if (!parameters_)
+            return false;
+        parameters_->store().set_value(kCoefficientId, 0.5f);
+        if (!edit->bind_sample_region_parameters(parameters_->binding()).accepted)
+            return false;
+        edit->set_canonical_executor_routing_enabled(true);
+        if (edit->prepare(sample_rate, maximum) !=
+                SignalGraph::PreparedTopologyEdit::Result::Prepared ||
+            !edit->routed_execution_ready(maximum) ||
+            edit->commit() != SignalGraph::PreparedTopologyEdit::Result::Committed) {
+            return false;
+        }
+        return true;
+    }
+
+    std::unique_ptr<SampleRegionParameterOwner> parameters_;
+    SignalGraph graph_;
+    bool prepared_ = false;
+};
+
+std::unique_ptr<format::Processor> create_sample_region_allpass_processor() {
+    return std::make_unique<SampleRegionAllpassProcessor>();
+}
+
 } // namespace
 
 TEST_CASE("Sample region state banks retain exact keys without reading active bytes",
@@ -483,9 +692,17 @@ TEST_CASE("Sample region state banks retain exact keys without reading active by
     REQUIRE(first);
     CHECK(first->receipt().fresh_state_cells == 1);
     CHECK(first->receipt().retained_state_cells == 0);
+    CHECK(first->receipt().region_id == plan.region_id);
+    CHECK(first->receipt().resources.member_nodes == 3);
+    CHECK(first->receipt().resources.delay_nodes == 1);
     CHECK(first->receipt().resources.state_bytes == sizeof(StateProbe));
+    CHECK(first->receipt().resources.state_alignment == alignof(StateProbe));
+    CHECK(first->receipt().resources.logical_boundary_bytes == 2 * sizeof(float));
+    CHECK(first->receipt().resources.work_per_frame == 8);
+    CHECK(first->receipt().resources.work_per_block == 0);
     CHECK(first->receipt().scalar_slots == 6);
     CHECK(first->receipt().physical_executor_bytes > 0);
+    CHECK(first->receipt().private_boundary_copy_bytes == 0);
 
     CHECK(process_probe_region(*first, 0.75f) == 0.0f);
     const int publishes_before_adopt = g_state_probe.publishes.load();
@@ -502,6 +719,20 @@ TEST_CASE("Sample region state banks retain exact keys without reading active by
     CHECK(adopted->cell(key) == fresh->cell(key));
     auto second = PreparedSampleRegion::create(plan, adopted, nullptr);
     REQUIRE(second);
+    CHECK(second->receipt().region_id == plan.region_id);
+    CHECK(second->receipt().resources.member_nodes == first->receipt().resources.member_nodes);
+    CHECK(second->receipt().resources.internal_connections ==
+          first->receipt().resources.internal_connections);
+    CHECK(second->receipt().resources.delay_nodes == first->receipt().resources.delay_nodes);
+    CHECK(second->receipt().resources.state_bytes == first->receipt().resources.state_bytes);
+    CHECK(second->receipt().resources.state_alignment ==
+          first->receipt().resources.state_alignment);
+    CHECK(second->receipt().resources.logical_boundary_bytes ==
+          first->receipt().resources.logical_boundary_bytes);
+    CHECK(second->receipt().resources.work_per_frame == first->receipt().resources.work_per_frame);
+    CHECK(second->receipt().resources.work_per_block == first->receipt().resources.work_per_block);
+    CHECK(second->receipt().physical_executor_bytes == first->receipt().physical_executor_bytes);
+    CHECK(second->receipt().private_boundary_copy_bytes == 0);
     CHECK(second->receipt().retained_state_cells == 1);
     CHECK(second->receipt().fresh_state_cells == 0);
     CHECK(process_probe_region(*second, 0.0f) == 0.75f);
@@ -594,6 +825,86 @@ TEST_CASE("Prepared sample region process and reset hooks are realtime safe",
     CHECK(g_state_probe.destroys.load() == 0);
 }
 
+TEST_CASE("Pinned sample region snapshots reset state exactly once without reinitializing",
+          "[sample-region][runtime][rt-safety][reset][snapshot]") {
+    reset_state_probe();
+    SignalGraph graph;
+    const auto graph_input = graph.add_input_node(1, "Input");
+    const auto graph_output = graph.add_output_node(1, "Output");
+    REQUIRE(graph.connect(graph_input, 0, graph_output, 0));
+    REQUIRE(graph.prepare(kSampleRate, 64));
+
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    REQUIRE(edit->disconnect(graph_input, 0, graph_output, 0));
+    REQUIRE(edit->register_custom_node_type(
+        scalar_node_type("pulp.core.sample-region.input"),
+        boundary_descriptor("pulp.core.sample-region.input")));
+    REQUIRE(edit->register_custom_node_type(
+        scalar_node_type("pulp.core.sample-region.output"),
+        boundary_descriptor("pulp.core.sample-region.output")));
+    REQUIRE(edit->register_custom_node_type(
+        scalar_node_type("pulp.core.unit-delay"), instrumented_unit_delay_descriptor()));
+    const auto region_input = edit->add_custom_node("pulp.core.sample-region.input");
+    const auto delay = edit->add_custom_node("pulp.core.unit-delay");
+    const auto region_output = edit->add_custom_node("pulp.core.sample-region.output");
+    REQUIRE(edit->connect(graph_input, 0, region_input, 0));
+    REQUIRE(edit->connect(region_input, 0, delay, 0));
+    REQUIRE(edit->connect(delay, 0, region_output, 0));
+    REQUIRE(edit->connect(region_output, 0, graph_output, 0));
+
+    SampleRegionDefinition definition;
+    definition.region_id = kRegionId + 2;
+    definition.members = {
+        {region_input, "pulp.core.sample-region.input", 1, boundary()},
+        {delay, "pulp.core.unit-delay", 1, none()},
+        {region_output, "pulp.core.sample-region.output", 1, boundary()},
+    };
+    definition.input_boundaries = {region_input};
+    definition.output_boundaries = {region_output};
+    REQUIRE(edit->declare_sample_region(definition).accepted);
+    REQUIRE(edit->prove_sample_region(definition.region_id).accepted);
+    auto parameters =
+        SampleRegionParameterOwner::create({}, edit->sample_region_parameter_contract());
+    REQUIRE(parameters);
+    REQUIRE(edit->bind_sample_region_parameters(parameters->binding()).accepted);
+    edit->set_canonical_executor_routing_enabled(true);
+    REQUIRE(edit->prepare(kSampleRate, 64) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    const auto snapshot = edit->committed_execution_snapshot();
+    REQUIRE(snapshot);
+
+    std::array<float, 1> input{1.0f};
+    std::array<float, 1> output{-1.0f};
+    const float* input_channels[] = {input.data()};
+    float* output_channels[] = {output.data()};
+    audio::BufferView<const float> in(input_channels, 1, input.size());
+    audio::BufferView<float> out(output_channels, 1, output.size());
+    snapshot.process(out, in, 1);
+    CHECK(output[0] == 0.0f);
+
+    input[0] = 0.0f;
+    output[0] = -1.0f;
+    format::ProcessContext reset;
+    reset.reset_requested = true;
+    reset.num_samples = 1;
+    reset.sample_rate = kSampleRate;
+    std::size_t reset_allocations = 0;
+    std::size_t reset_bytes = 0;
+    {
+        test::ScopedRtProcessProbe probe;
+        snapshot.process(out, in, 1, reset);
+        reset_allocations = probe.allocation_count();
+        reset_bytes = probe.allocated_bytes();
+    }
+    CHECK(output[0] == 0.0f);
+    CHECK(reset_allocations == 0);
+    CHECK(reset_bytes == 0);
+    CHECK(g_state_probe.resets.load() == 1);
+    CHECK(g_state_probe.constructs.load() == 1);
+    CHECK(g_state_probe.destroys.load() == 0);
+}
+
 TEST_CASE("Sample region quotient prepares commits and preserves authored readback",
           "[sample-region][runtime][quotient]") {
     AllpassFixture fixture;
@@ -611,6 +922,22 @@ TEST_CASE("Sample region quotient prepares commits and preserves authored readba
     CHECK(fixture.graph.prepared_stats().node_count == 4);
     CHECK(fixture.graph.prepared_stats().ordered_node_count == 4);
     CHECK(fixture.graph.prepared_stats().connection_count == 3);
+    CHECK(fixture.graph.sample_region_binding_generation() > 0);
+    const auto receipts = fixture.graph.sample_region_runtime_receipts();
+    REQUIRE(receipts.size() == 1);
+    CHECK(receipts[0].region_id == kRegionId);
+    CHECK(receipts[0].resources.member_nodes == 11);
+    CHECK(receipts[0].resources.delay_nodes == 2);
+    CHECK(receipts[0].resources.state_bytes == 2 * sizeof(float));
+    CHECK(receipts[0].resources.state_alignment == alignof(float));
+    CHECK(receipts[0].resources.logical_boundary_bytes == 2 * kPreparedMaximum * sizeof(float));
+    CHECK(receipts[0].resources.work_per_frame == 28);
+    CHECK(receipts[0].resources.work_per_block == 28 * kPreparedMaximum);
+    CHECK(receipts[0].physical_executor_bytes > 0);
+    CHECK(receipts[0].private_boundary_copy_bytes == 0);
+    CHECK(receipts[0].scalar_slots > 0);
+    CHECK(receipts[0].fresh_state_cells == 2);
+    CHECK(receipts[0].retained_state_cells == 0);
 
     const std::array<float, 4> impulse{1.0f, 0.0f, 0.0f, 0.0f};
     const auto output = render(fixture.graph, impulse, 4);
@@ -643,6 +970,27 @@ TEST_CASE("Sample region allpass matches its independent oracle and every partit
     const auto irregular_output = render(fixture.graph, input, irregular);
     require_near(irregular_output, expected);
     require_exact(irregular_output, one_sample_partition);
+    std::array<const float*, 1> reference_channels{};
+    std::array<const float*, 1> actual_channels{};
+    const auto reference_view = mono_view(one_sample_partition, reference_channels);
+    const auto actual_view = mono_view(irregular_output, actual_channels);
+    const auto null_check = test::audio::assert_null_near(reference_view, actual_view, -180.0);
+    INFO(null_check.message);
+    CHECK(null_check.passed);
+
+    audio::Buffer<float> scenario_input(1, input.size());
+    std::copy(input.begin(), input.end(), scenario_input.channel(0).begin());
+    const auto scenario = test::audio::RenderScenario(create_sample_region_allpass_processor)
+                              .name("sample-region.allpass.partition")
+                              .sample_rate(kSampleRate)
+                              .block_size(128)
+                              .channels(1, 1)
+                              .input(std::move(scenario_input));
+    const std::array partition_blocks{1, 7, 16, 63, 64, 127, 128, 257, 1024};
+    const auto partition_check = test::audio::assert_block_partition_invariant(
+        scenario, partition_blocks, test::audio::kExactPartitionToleranceDb);
+    INFO(partition_check.message);
+    CHECK(partition_check.passed);
 }
 
 TEST_CASE("Sample region allpass response phase and group delay match analysis oracles",
@@ -775,11 +1123,58 @@ TEST_CASE("Stale sample region edits preserve snapshot binding generation and st
     REQUIRE(stale->prepare(kSampleRate, kPreparedMaximum) ==
             SignalGraph::PreparedTopologyEdit::Result::Prepared);
     REQUIRE(winner->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    const auto winner_snapshot = winner->committed_execution_snapshot();
+    REQUIRE(winner_snapshot);
+    CHECK(winner_snapshot.sample_region_binding_generation() > 0);
+    REQUIRE(winner_snapshot.sample_region_runtime_receipts().size() == 1);
     REQUIRE(stale->commit() == SignalGraph::PreparedTopologyEdit::Result::StaleBase);
+    CHECK_FALSE(stale->committed_execution_snapshot());
 
     CHECK(fixture.graph.node_gain(fixture.outer_gain) == 1.0f);
     CHECK(fixture.graph.sample_region_parameter_binding() == &fixture.parameters->binding());
+    CHECK(fixture.graph.sample_region_binding_generation() ==
+          winner_snapshot.sample_region_binding_generation());
     CHECK(render(fixture.graph, silence, 1)[0] == Approx(0.75f));
+}
+
+TEST_CASE("Old sample region execution snapshots fail closed after newer generation admission",
+          "[sample-region][runtime][comp][continuity][negative]") {
+    const std::array impulse{1.0f};
+    const std::array silence{0.0f};
+    AllpassFixture fixture;
+    CHECK(render(fixture.graph, impulse, 1)[0] == Approx(0.5f));
+
+    auto old_edit = fixture.graph.begin_prepared_topology_edit();
+    REQUIRE(old_edit->set_node_gain(fixture.outer_gain, 1.0f));
+    REQUIRE(old_edit->prepare(kSampleRate, kPreparedMaximum) ==
+            SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(old_edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    const auto old_snapshot = old_edit->committed_execution_snapshot();
+    REQUIRE(old_snapshot);
+    const auto old_generation = old_snapshot.sample_region_binding_generation();
+    REQUIRE(old_generation > 0);
+
+    auto new_edit = fixture.graph.begin_prepared_topology_edit();
+    REQUIRE(new_edit->set_node_gain(fixture.outer_gain, 1.0f));
+    REQUIRE(new_edit->prepare(kSampleRate, kPreparedMaximum) ==
+            SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(new_edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    const auto new_snapshot = new_edit->committed_execution_snapshot();
+    REQUIRE(new_snapshot);
+    const auto new_generation = new_snapshot.sample_region_binding_generation();
+    REQUIRE(new_generation > old_generation);
+
+    CHECK(render(fixture.graph, silence, 1)[0] == Approx(0.75f));
+
+    std::array<float, 1> old_output{123.0f};
+    const float* input_channels[] = {silence.data()};
+    float* output_channels[] = {old_output.data()};
+    audio::BufferView<const float> in(input_channels, 1, silence.size());
+    audio::BufferView<float> out(output_channels, 1, old_output.size());
+    const auto failures_before = fixture.graph.routed_only_execution_failures();
+    old_snapshot.process(out, in, 1);
+    CHECK(old_output[0] == 0.0f);
+    CHECK(fixture.graph.routed_only_execution_failures() == failures_before + 1);
 }
 
 TEST_CASE("Sample region remains exterior while global anticipation is enabled",

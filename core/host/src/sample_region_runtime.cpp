@@ -468,6 +468,7 @@ bool PreparedSampleRegion::finish_prepare() noexcept {
         }
         receipt_.region_id = plan_.region_id;
         receipt_.resources = plan_.resources;
+        receipt_.private_boundary_copy_bytes = 0;
         receipt_.scalar_slots = plan_.scalar_slot_count;
         if (!add_allocation_bytes(receipt_.physical_executor_bytes, scalar_slots_.capacity(),
                                   sizeof(float)) ||

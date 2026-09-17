@@ -392,6 +392,8 @@ public:
     std::size_t estimate_generated_graph_work_units(int max_block_size) const;
     GeneratedGraphValidation validate_generated_graph(int max_block_size) const;
     PreparedStats prepared_stats() const;
+    std::uint64_t sample_region_binding_generation() const noexcept;
+    std::vector<SampleRegionRuntimeReceipt> sample_region_runtime_receipts() const;
 
     // Per-node CPU-load telemetry, accumulated by process() and read from the
     // control/UI thread. process() wraps each node's work in an

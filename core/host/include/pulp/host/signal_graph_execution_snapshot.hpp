@@ -24,6 +24,8 @@ class SignalGraph::ExecutionSnapshot {
   public:
     ExecutionSnapshot() = default;
     explicit operator bool() const noexcept { return snapshot_ != nullptr; }
+    std::uint64_t sample_region_binding_generation() const noexcept;
+    std::vector<SampleRegionRuntimeReceipt> sample_region_runtime_receipts() const;
 
     bool inject_midi(NodeId midi_input_node,
                      const midi::MidiBuffer& events) const noexcept;

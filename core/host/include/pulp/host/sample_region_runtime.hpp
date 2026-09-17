@@ -168,6 +168,7 @@ struct SampleRegionRuntimeReceipt {
     SampleRegionId region_id = 0;
     SampleRegionResourceStats resources;
     std::uint64_t physical_executor_bytes = 0;
+    std::uint64_t private_boundary_copy_bytes = 0;
     std::uint32_t scalar_slots = 0;
     std::uint32_t retained_state_cells = 0;
     std::uint32_t fresh_state_cells = 0;

@@ -5,6 +5,7 @@ pulp_add_test_suite(pulp-test-sample-region-runtime
     SOURCES
         test_sample_region_runtime.cpp
         harness/rt_allocation_probe.cpp
+        support/render_scenario.cpp
         support/audio_signal_generators.cpp
     LIBRARIES
         pulp::host
