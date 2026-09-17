@@ -596,6 +596,13 @@ target_link_libraries(pulp-test-sample-kernel-registry
     PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-sample-kernel-registry)
 
+add_executable(pulp-test-sample-region-planner
+    test_sample_region_plan.cpp
+    test_sample_region_proof.cpp)
+target_link_libraries(pulp-test-sample-region-planner
+    PRIVATE pulp::host Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sample-region-planner)
+
 # Exercise the same public API from an installed SDK, outside the source tree.
 add_test(NAME cmake-custom-node-enumeration-sdk-consumer
     COMMAND ${CMAKE_COMMAND}
