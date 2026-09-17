@@ -161,6 +161,16 @@ summary/watch commands.
 > now an anti-pattern (cancels queued runs but registers `failure` on
 > required checks).
 
+## Android minimum-API allocation check
+
+The Android workflow compiles and links the public aligned DSP buffer for both
+shipping ABIs at API 26 and 28 immediately after NDK installation. Keep the
+API-floor case: compiling only the newer API hides unavailable libc functions
+such as `aligned_alloc`. The probe accepts the NDK host's `clang++` or
+`clang++.exe`; its workflow step uses Bash explicitly so the SDK environment
+path expands on both macOS and Windows. A passing probe is not APK or emulator
+acceptance; the following Gradle build and artifact checks remain required.
+
 ## Compiler coverage is asymmetric — GCC sees only `core/**`
 
 Before you read a green PR as "this compiles everywhere": every Linux lane in PR
