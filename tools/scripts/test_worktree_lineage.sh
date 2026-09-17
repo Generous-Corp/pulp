@@ -80,6 +80,17 @@ git -C "${tmp}/landed" add landed.txt
 git -C "${tmp}/landed" commit -qm "landed work"
 landed_head="$(git -C "${tmp}/landed" rev-parse HEAD)"
 git -C "${tmp}/repo" merge -q --no-ff -m "Merge pull request #12 from example/feature/landed" feature/landed
+# A second mergeable worktree after the requested branch proves `--branch`
+# remains active for the whole reconciliation loop. The implementation uses the
+# same variable temporarily for config lookups; clearing that temporary value
+# must not clear the caller's filter.
+git -C "${tmp}/repo" branch feature/later-landed
+git -C "${tmp}/repo" worktree add -q "${tmp}/later-landed" feature/later-landed
+printf 'later\n' > "${tmp}/later-landed/later.txt"
+git -C "${tmp}/later-landed" add later.txt
+git -C "${tmp}/later-landed" commit -qm "later landed work"
+git -C "${tmp}/repo" merge -q --no-ff \
+    -m "Merge pull request #13 from example/feature/later-landed" feature/later-landed
 # A fast-forward landing leaves no merge commit naming the head: ancestry alone
 # is not a PR, and reconcile must say so rather than guess.
 git -C "${tmp}/repo" branch feature/fastforward
@@ -98,6 +109,14 @@ fi
 dry_output="$(cd "${tmp}/repo" && "${TOOL}" reconcile --repo example/pulp --dry-run)"
 grep -q $'^would-mark\tfeature/landed\t' <<<"${dry_output}"
 test -z "$(cfgval feature/landed Status)"
+filtered_output="$(cd "${tmp}/repo" && "${TOOL}" reconcile \
+    --branch feature/landed --repo example/pulp --dry-run)"
+test "$(grep -c $'^would-mark\t' <<<"${filtered_output}")" = 1
+grep -q $'^would-mark\tfeature/landed\t' <<<"${filtered_output}"
+if grep -q 'feature/later-landed' <<<"${filtered_output}"; then
+    echo "reconcile --branch leaked into a later worktree" >&2
+    exit 1
+fi
 reconcile_output="$(cd "${tmp}/repo" && "${TOOL}" reconcile --repo example/pulp)"
 grep -q $'^merged\tfeature/landed\t' <<<"${reconcile_output}"
 grep -q $'^unresolved\tfeature/fastforward\t' <<<"${reconcile_output}"
