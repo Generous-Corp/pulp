@@ -2,9 +2,9 @@
 #include "support/audio_signal_generators.hpp"
 #include "support/render_scenario.hpp"
 
-#include <pulp/audio/analysis/audio_assertions.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/audio/analysis/audio_assertions.hpp>
 
 #include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/audio/buffer.hpp>
@@ -559,10 +559,10 @@ class SampleRegionAllpassProcessor final : public format::Processor {
     void process(audio::BufferView<float>& output, const audio::BufferView<const float>& input,
                  midi::MidiBuffer&, midi::MidiBuffer&,
                  const format::ProcessContext& context) override {
-        const auto frames = context.num_samples > 0
-                                ? context.num_samples
-                                : static_cast<int>(std::min(output.num_samples(),
-                                                            input.num_samples()));
+        const auto frames =
+            context.num_samples > 0
+                ? context.num_samples
+                : static_cast<int>(std::min(output.num_samples(), input.num_samples()));
         if (!prepared_) {
             output.clear();
             return;
@@ -577,8 +577,7 @@ class SampleRegionAllpassProcessor final : public format::Processor {
         const auto graph_output = graph_.add_output_node(1, "Output");
         if (!graph_.connect(graph_input, 0, outer_gain, 0) ||
             !graph_.connect(outer_gain, 0, graph_output, 0) ||
-            !graph_.set_node_gain(outer_gain, 1.0f) ||
-            !graph_.prepare(sample_rate, maximum)) {
+            !graph_.set_node_gain(outer_gain, 1.0f) || !graph_.prepare(sample_rate, maximum)) {
             return false;
         }
 
@@ -602,17 +601,14 @@ class SampleRegionAllpassProcessor final : public format::Processor {
         const auto region_output = edit->add_custom_node("pulp.core.sample-region.output");
 
         if (!edit->connect(outer_gain, 0, region_input, 0) ||
-            !edit->connect(region_input, 0, ax, 0) ||
-            !edit->connect(coefficient_node, 0, ax, 1) ||
+            !edit->connect(region_input, 0, ax, 0) || !edit->connect(coefficient_node, 0, ax, 1) ||
             !edit->connect(region_input, 0, x_delay, 0) ||
             !edit->connect(y_delay, 0, a_times_y_delay, 0) ||
             !edit->connect(coefficient_node, 0, a_times_y_delay, 1) ||
             !edit->connect(minus_one, 0, negative_a_times_y_delay, 0) ||
             !edit->connect(a_times_y_delay, 0, negative_a_times_y_delay, 1) ||
-            !edit->connect(ax, 0, sum_one, 0) ||
-            !edit->connect(x_delay, 0, sum_one, 1) ||
-            !edit->connect(sum_one, 0, y, 0) ||
-            !edit->connect(negative_a_times_y_delay, 0, y, 1) ||
+            !edit->connect(ax, 0, sum_one, 0) || !edit->connect(x_delay, 0, sum_one, 1) ||
+            !edit->connect(sum_one, 0, y, 0) || !edit->connect(negative_a_times_y_delay, 0, y, 1) ||
             !edit->connect(y, 0, region_output, 0) ||
             !edit->connect(region_output, 0, graph_output, 0)) {
             return false;
@@ -837,14 +833,12 @@ TEST_CASE("Pinned sample region snapshots reset state exactly once without reini
     auto edit = graph.begin_prepared_topology_edit();
     REQUIRE(edit);
     REQUIRE(edit->disconnect(graph_input, 0, graph_output, 0));
-    REQUIRE(edit->register_custom_node_type(
-        scalar_node_type("pulp.core.sample-region.input"),
-        boundary_descriptor("pulp.core.sample-region.input")));
-    REQUIRE(edit->register_custom_node_type(
-        scalar_node_type("pulp.core.sample-region.output"),
-        boundary_descriptor("pulp.core.sample-region.output")));
-    REQUIRE(edit->register_custom_node_type(
-        scalar_node_type("pulp.core.unit-delay"), instrumented_unit_delay_descriptor()));
+    REQUIRE(edit->register_custom_node_type(scalar_node_type("pulp.core.sample-region.input"),
+                                            boundary_descriptor("pulp.core.sample-region.input")));
+    REQUIRE(edit->register_custom_node_type(scalar_node_type("pulp.core.sample-region.output"),
+                                            boundary_descriptor("pulp.core.sample-region.output")));
+    REQUIRE(edit->register_custom_node_type(scalar_node_type("pulp.core.unit-delay"),
+                                            instrumented_unit_delay_descriptor()));
     const auto region_input = edit->add_custom_node("pulp.core.sample-region.input");
     const auto delay = edit->add_custom_node("pulp.core.unit-delay");
     const auto region_output = edit->add_custom_node("pulp.core.sample-region.output");

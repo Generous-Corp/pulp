@@ -2650,8 +2650,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // CustomBindingContext::process_transport), so the two can never disagree.
         // Prepare-stable: a slot/type whose capability changes later needs a
         // re-prepare to be observed.
-        n.transport_sensitive =
-            n.transport_sensitive || region_by_anchor.contains(n.id);
+        n.transport_sensitive = n.transport_sensitive || region_by_anchor.contains(n.id);
         if (n.type == NodeType::Plugin) {
             // 2.2b (H2): read cached transport-sensitivity, not the live slot.
             auto mit = prepared_plugin_meta_.find(n.id);
