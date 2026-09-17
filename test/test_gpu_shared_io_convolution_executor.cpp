@@ -4,6 +4,7 @@
 
 #include <array>
 #include <atomic>
+#include <limits>
 #include <thread>
 
 using pulp::gpu_audio::detail::SharedIoConvolutionExecutor;
@@ -84,6 +85,37 @@ TEST_CASE("failure loss gaps and stale epoch fence then reprime exactly",
     CHECK(executor.take_ready(10).empty());
     CHECK(executor.take_ready(11).size() == 2);
     CHECK(executor.release_ready(11));
+}
+
+TEST_CASE("nonfinite terminal history fails closed before OLA carry mutation",
+          "[gpu_audio][shared_io][executor]") {
+    for (const float nonfinite :
+         {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
+        E executor;
+        prepare(executor);
+        auto first = frame(1, 2, 3);
+        REQUIRE(executor.record_terminal(7, 0, E::Terminal::Success, first));
+        REQUIRE(executor.collect() == 1);
+
+        auto poisoned = frame(4, 5);
+        poisoned[0] = nonfinite;
+        REQUIRE(executor.record_terminal(7, 1, E::Terminal::Success, poisoned));
+        CHECK(executor.collect() == 1);
+        CHECK(executor.fenced());
+        CHECK(executor.next_sequence() == 2);
+        CHECK(executor.take_ready(1).empty());
+
+        REQUIRE(executor.fence_and_reprime(8, 10));
+        auto clean = frame(4, 5);
+        REQUIRE(executor.record_terminal(8, 10, E::Terminal::Success, first));
+        REQUIRE(executor.record_terminal(8, 11, E::Terminal::Success, clean));
+        REQUIRE(executor.collect() == 2);
+        const auto ready = executor.take_ready(11);
+        REQUIRE(ready.size() == 2);
+        CHECK(ready[0] == 7);
+        CHECK(ready[1] == 5);
+        CHECK(executor.release_ready(11));
+    }
 }
 
 TEST_CASE("ready output ownership publishes safely to callback",

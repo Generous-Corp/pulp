@@ -1,6 +1,7 @@
 #include "shared_io_convolution_executor.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace pulp::gpu_audio::detail {
 
@@ -69,7 +70,12 @@ bool SharedIoConvolutionExecutor::record_terminal(std::uint64_t epoch, std::uint
     entry = {epoch, sequence, terminal, true};
     if (terminal == Terminal::Success) {
         const auto floats = std::size_t(c_.channels) * c_.fft_size * 2;
-        if (time.size() != floats)
+        // Provider completion runs off the realtime callback. Validate the
+        // bounded prepared extent before copying so nonfinite FFT history is a
+        // typed terminal failure and can never poison the persistent OLA carry.
+        if (time.size() != floats || !std::all_of(time.begin(), time.end(), [](float sample) {
+                return std::isfinite(sample);
+            }))
             entry.terminal = Terminal::Failed;
         else
             std::copy(time.begin(), time.end(),
