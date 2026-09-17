@@ -704,6 +704,12 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     // prepare()/mutator. custom_node_type() reads custom_node_types_ lock-free and
     // assumes the caller holds this mutex (true for every internal caller below).
     GraphMutationLock mutation_lock(*this);
+    for (const auto& definition : sample_region_definitions_) {
+        for (const auto& member : definition.members) {
+            if (member.type_id == type.type_id && member.version == type.version)
+                return false;
+        }
+    }
     cancel_swap_edit_locked_();
     const bool affects_existing_nodes = std::any_of(
         nodes_.begin(), nodes_.end(), [&](const GraphNode& node) {
@@ -829,6 +835,343 @@ const SampleKernelDescriptor* SignalGraph::sample_kernel_type(std::string_view t
     return found == sample_kernel_types_.end() ? nullptr : &found->second;
 }
 
+namespace {
+
+SampleRegionProof authoring_refusal(SampleRegionId id, SampleRegionRefusalReason reason,
+                                    std::string message, NodeId node = 0) {
+    SampleRegionProof result;
+    result.region_id = id;
+    result.reason = reason;
+    result.offending_node = node;
+    result.message = std::move(message);
+    return result;
+}
+
+SampleRegionConnection region_connection(const Connection& connection) {
+    SampleRegionConnection result{connection.source_node, connection.source_port,
+                                  connection.dest_node, connection.dest_port};
+    result.legacy_feedback = connection.feedback;
+    if (connection.midi)
+        result.lane = SampleRegionConnectionLane::Midi;
+    else if (connection.automation)
+        result.lane = SampleRegionConnectionLane::Automation;
+    else if (connection.audio_rate_modulation)
+        result.lane = SampleRegionConnectionLane::AudioRateModulation;
+    else if (connection.sidechain)
+        result.lane = SampleRegionConnectionLane::Sidechain;
+    return result;
+}
+
+bool valid_authored_config(const SampleKernelConfig& config) {
+    switch (config.kind) {
+    case SampleKernelConfigKind::None:
+        return config.boundary_index_or_parameter_id == 0 && config.constant == 0.0f;
+    case SampleKernelConfigKind::BoundaryIndex:
+        return config.constant == 0.0f;
+    case SampleKernelConfigKind::FiniteConstant:
+        return config.boundary_index_or_parameter_id == 0 && std::isfinite(config.constant);
+    case SampleKernelConfigKind::PromotedParameterId:
+        return config.boundary_index_or_parameter_id != 0 && config.constant == 0.0f;
+    case SampleKernelConfigKind::Invalid:
+        return false;
+    }
+    return false;
+}
+
+} // namespace
+
+SampleRegionId SignalGraph::sample_region_for_node_locked_(NodeId id) const {
+    assert_graph_mutation_locked_();
+    for (const auto& definition : sample_region_definitions_) {
+        for (const auto& member : definition.members) {
+            if (member.node == id)
+                return definition.region_id;
+        }
+    }
+    return 0;
+}
+
+bool SignalGraph::has_sample_kernel_nodes_locked_() const {
+    assert_graph_mutation_locked_();
+    return std::any_of(nodes_.begin(), nodes_.end(), [&](const GraphNode& node) {
+        return node.type == NodeType::Custom &&
+               sample_kernel_type(node.custom_type_id, node.custom_type_version) != nullptr;
+    });
+}
+
+SampleRegionProof
+SignalGraph::sample_region_metadata_proof_locked_(const SampleRegionDefinition& definition,
+                                                  bool complete) const {
+    assert_graph_mutation_locked_();
+    const auto fail = [&](SampleRegionRefusalReason reason, std::string message, NodeId node = 0) {
+        return authoring_refusal(definition.region_id, reason, std::move(message), node);
+    };
+    if (definition.region_id == 0)
+        return fail(SampleRegionRefusalReason::UnknownRegion, "region ID must be nonzero");
+    std::unordered_map<NodeId, const SampleRegionKernelNode*> members;
+    for (const auto& member : definition.members) {
+        if (!members.emplace(member.node, &member).second)
+            return fail(SampleRegionRefusalReason::UnknownMember, "duplicate member ID",
+                        member.node);
+        const auto* current = node(member.node);
+        if (current == nullptr)
+            return fail(SampleRegionRefusalReason::UnknownMember, "member node does not exist",
+                        member.node);
+        if (current->type != NodeType::Custom)
+            return fail(SampleRegionRefusalReason::UnsupportedNodeKind,
+                        "region members must be exact custom kernel nodes", member.node);
+        if (current->custom_type_id != member.type_id ||
+            current->custom_type_version != member.version)
+            return fail(SampleRegionRefusalReason::UnresolvedSampleKernel,
+                        "member identity differs from its candidate node", member.node);
+        const auto owner = sample_region_for_node_locked_(member.node);
+        if (owner != 0 && owner != definition.region_id)
+            return fail(SampleRegionRefusalReason::MemberInMultipleRegions,
+                        "member already belongs to another region", member.node);
+        const auto* kernel = sample_kernel_type(member.type_id, member.version);
+        if (kernel == nullptr)
+            return fail(SampleRegionRefusalReason::UnresolvedSampleKernel,
+                        "member requires an exact registered scalar descriptor", member.node);
+        if (kernel != nullptr &&
+            (kernel->num_input_ports != static_cast<std::uint32_t>(current->num_input_ports) ||
+             kernel->num_output_ports != static_cast<std::uint32_t>(current->num_output_ports)))
+            return fail(SampleRegionRefusalReason::UnresolvedSampleKernel,
+                        "member ports differ from its exact kernel descriptor", member.node);
+        if (!valid_authored_config(member.config) ||
+            (kernel != nullptr && member.config.kind != kernel->authored_config_kind))
+            return fail(SampleRegionRefusalReason::InvalidKernelConfig,
+                        "authored config does not match the exact kernel contract", member.node);
+    }
+    for (const bool input : {true, false}) {
+        const auto& boundaries = input ? definition.input_boundaries : definition.output_boundaries;
+        const std::string_view type =
+            input ? "pulp.core.sample-region.input" : "pulp.core.sample-region.output";
+        std::unordered_set<NodeId> unique;
+        for (const auto id : boundaries) {
+            const auto found = members.find(id);
+            if (!unique.insert(id).second || found == members.end() ||
+                found->second->type_id != type ||
+                found->second->config.kind != SampleKernelConfigKind::BoundaryIndex)
+                return fail(SampleRegionRefusalReason::InvalidBoundary,
+                            "boundary identity must name a unique matching member", id);
+        }
+        if (complete) {
+            for (const auto& member : definition.members) {
+                if (member.type_id == type && !unique.contains(member.node))
+                    return fail(SampleRegionRefusalReason::InvalidBoundary,
+                                "boundary member is absent from explicit boundary metadata",
+                                member.node);
+            }
+        }
+    }
+    std::unordered_set<state::ParamID> ids;
+    std::unordered_set<std::string> keys;
+    for (const auto& parameter : definition.promoted_parameters) {
+        if (parameter.param_id == 0 || !ids.insert(parameter.param_id).second)
+            return fail(SampleRegionRefusalReason::DuplicatePromotedParameter,
+                        "promoted parameter IDs must be unique and nonzero",
+                        parameter.bound_node_id);
+        if (!keys.insert(parameter.key).second)
+            return fail(SampleRegionRefusalReason::ParameterContractMismatch,
+                        "promoted parameter keys must be unique in each region",
+                        parameter.bound_node_id);
+        for (const auto& other : sample_region_definitions_) {
+            if (other.region_id == definition.region_id)
+                continue;
+            for (const auto& existing : other.promoted_parameters) {
+                if (existing.param_id == parameter.param_id)
+                    return fail(SampleRegionRefusalReason::DuplicatePromotedParameter,
+                                "promoted parameter ID is already used by another region",
+                                parameter.bound_node_id);
+            }
+        }
+        if (!complete)
+            continue;
+        const auto& range = parameter.range;
+        const auto member = members.find(parameter.bound_node_id);
+        if (parameter.key.empty() || parameter.name.empty() || !std::isfinite(range.min) ||
+            !std::isfinite(range.max) || !std::isfinite(range.default_value) ||
+            !std::isfinite(range.step) || !std::isfinite(range.skew) || range.min > range.max ||
+            range.default_value < range.min || range.default_value > range.max ||
+            range.step < 0.0f || range.skew <= 0.0f ||
+            parameter.rate != state::ParamRate::ControlRate ||
+            parameter.smoothing_ramp_seconds != 0.0f || parameter.bound_port != 0 ||
+            member == members.end() ||
+            member->second->type_id != "pulp.core.sample-region.parameter" ||
+            member->second->config.kind != SampleKernelConfigKind::PromotedParameterId ||
+            member->second->config.boundary_index_or_parameter_id != parameter.param_id)
+            return fail(SampleRegionRefusalReason::ParameterContractMismatch,
+                        "promoted metadata and parameter-source binding must match exactly",
+                        parameter.bound_node_id);
+    }
+    SampleRegionProof result;
+    result.accepted = true;
+    result.reason = SampleRegionRefusalReason::None;
+    result.region_id = definition.region_id;
+    return result;
+}
+
+SampleRegionCandidate
+SignalGraph::sample_region_candidate_locked_(const SampleRegionDefinition& definition) const {
+    assert_graph_mutation_locked_();
+    SampleRegionCandidate candidate;
+    candidate.region_id = definition.region_id;
+    candidate.registry = {
+        this, [](const void* context, std::string_view type_id, int version) noexcept {
+            return static_cast<const SignalGraph*>(context)->sample_kernel_type(type_id, version);
+        }};
+    candidate.members = definition.members;
+    candidate.limits = definition.limits;
+    candidate.max_block_size = sample_region_proof_block_size_;
+    for (const auto& parameter : definition.promoted_parameters)
+        candidate.promoted_parameters.push_back(parameter.param_id);
+    for (const auto& connection : connections_) {
+        const auto touches = [&](NodeId id) {
+            return std::any_of(definition.members.begin(), definition.members.end(),
+                               [&](const auto& member) { return member.node == id; });
+        };
+        if (touches(connection.source_node) || touches(connection.dest_node))
+            candidate.connections.push_back(region_connection(connection));
+    }
+    return candidate;
+}
+
+SampleRegionProof SignalGraph::sample_region_exterior_proof_locked_() const {
+    assert_graph_mutation_locked_();
+    std::unordered_map<NodeId, NodeId> representative;
+    std::unordered_map<NodeId, SampleRegionId> region_ids;
+    for (const auto& node : nodes_)
+        representative.emplace(node.id, node.id);
+    for (const auto& definition : sample_region_definitions_) {
+        if (definition.members.empty())
+            continue;
+        const auto first = definition.members.front().node;
+        region_ids[first] = definition.region_id;
+        for (const auto& member : definition.members)
+            representative[member.node] = first;
+    }
+    std::unordered_map<NodeId, std::size_t> indegree;
+    std::unordered_map<NodeId, std::vector<NodeId>> outgoing;
+    for (const auto& [id, rep] : representative)
+        indegree.try_emplace(rep, 0);
+    for (const auto& connection : connections_) {
+        if (connection.feedback)
+            continue;
+        const auto source = representative.at(connection.source_node);
+        const auto destination = representative.at(connection.dest_node);
+        if (source == destination && region_ids.contains(source))
+            continue;
+        outgoing[source].push_back(destination);
+        ++indegree[destination];
+    }
+    std::queue<NodeId> ready;
+    for (const auto& [id, degree] : indegree) {
+        if (degree == 0)
+            ready.push(id);
+    }
+    while (!ready.empty()) {
+        const auto id = ready.front();
+        ready.pop();
+        for (const auto next : outgoing[id]) {
+            if (--indegree[next] == 0)
+                ready.push(next);
+        }
+    }
+    for (const auto& definition : sample_region_definitions_) {
+        if (!definition.members.empty() && indegree.at(definition.members.front().node) != 0)
+            return authoring_refusal(definition.region_id,
+                                     SampleRegionRefusalReason::CycleCrossesRegionBoundary,
+                                     "the exterior graph must remain acyclic around each region");
+    }
+    for (const auto& current : nodes_) {
+        if (indegree.at(representative.at(current.id)) != 0)
+            return authoring_refusal(0, SampleRegionRefusalReason::InstantaneousCycle,
+                                     "the exterior graph contains an ordinary cycle", current.id);
+    }
+    SampleRegionProof result;
+    result.accepted = true;
+    result.reason = SampleRegionRefusalReason::None;
+    return result;
+}
+
+SampleRegionProof SignalGraph::sample_region_proof_locked_(SampleRegionId id) const {
+    assert_graph_mutation_locked_();
+    const auto found =
+        std::find_if(sample_region_definitions_.begin(), sample_region_definitions_.end(),
+                     [&](const auto& definition) { return definition.region_id == id; });
+    if (found == sample_region_definitions_.end())
+        return authoring_refusal(id, SampleRegionRefusalReason::UnknownRegion,
+                                 "region does not exist");
+    auto proof = sample_region_metadata_proof_locked_(*found);
+    if (!proof.accepted)
+        return proof;
+    std::vector<SampleRegionCandidate> candidates;
+    for (const auto& definition : sample_region_definitions_) {
+        if (definition.region_id != id) {
+            const auto metadata = sample_region_metadata_proof_locked_(definition);
+            if (!metadata.accepted)
+                return authoring_refusal(id, metadata.reason,
+                                         "another candidate region has invalid metadata: " +
+                                             metadata.message,
+                                         metadata.offending_node);
+        }
+        candidates.push_back(sample_region_candidate_locked_(definition));
+    }
+    const auto graph_proof = pulp::host::prove_sample_regions(candidates);
+    if (!graph_proof.accepted) {
+        if (graph_proof.region_proof.region_id == id)
+            return graph_proof.region_proof;
+        auto refusal = authoring_refusal(id, graph_proof.reason,
+                                         "the complete candidate graph failed sample-region proof");
+        refusal.actual = graph_proof.actual;
+        refusal.limit = graph_proof.limit;
+        return refusal;
+    }
+    for (const auto& current : nodes_) {
+        if (current.type == NodeType::Custom &&
+            sample_kernel_type(current.custom_type_id, current.custom_type_version) != nullptr &&
+            sample_region_for_node_locked_(current.id) == 0)
+            return authoring_refusal(id, SampleRegionRefusalReason::SampleKernelOutsideRegion,
+                                     "a scalar kernel is outside every declared region",
+                                     current.id);
+    }
+    proof = pulp::host::prove_sample_region(sample_region_candidate_locked_(*found));
+    auto exterior = sample_region_exterior_proof_locked_();
+    if (!exterior.accepted && exterior.region_id == 0)
+        exterior.region_id = id;
+    return exterior.accepted ? proof : exterior;
+}
+
+SampleRegionProof SignalGraph::prove_sample_region(SampleRegionId id) const {
+    GraphMutationLock mutation_lock(*this);
+    return sample_region_proof_locked_(id);
+}
+
+std::optional<SampleRegionDescriptor> SignalGraph::sample_region(SampleRegionId id) const {
+    GraphMutationLock mutation_lock(*this);
+    for (const auto& definition : sample_region_definitions_) {
+        if (definition.region_id != id)
+            continue;
+        SampleRegionDescriptor descriptor;
+        static_cast<SampleRegionDefinition&>(descriptor) = definition;
+        descriptor.resources = sample_region_proof_locked_(id).resources;
+        return descriptor;
+    }
+    return std::nullopt;
+}
+
+std::vector<SampleRegionDescriptor> SignalGraph::sample_regions() const {
+    GraphMutationLock mutation_lock(*this);
+    std::vector<SampleRegionDescriptor> result;
+    for (const auto& definition : sample_region_definitions_) {
+        SampleRegionDescriptor descriptor;
+        static_cast<SampleRegionDefinition&>(descriptor) = definition;
+        descriptor.resources = sample_region_proof_locked_(definition.region_id).resources;
+        result.push_back(std::move(descriptor));
+    }
+    return result;
+}
+
 bool register_builtin_sample_region_types(SignalGraph& graph) {
     auto cohort = builtin_sample_kernels();
     for (const auto& registration : cohort) {
@@ -944,6 +1287,8 @@ bool SignalGraph::remove_node(NodeId id) {
     // Serialize the nodes_ erase against a concurrent compile_()/node() scan on a
     // host thread (see add_gain_node for the lock-ordering rationale).
     GraphMutationLock mutation_lock(*this);
+    if (sample_region_for_node_locked_(id) != 0)
+        return false;
     auto it = std::find_if(nodes_.begin(), nodes_.end(),
         [id](const GraphNode& n) { return n.id == id; });
     if (it == nodes_.end()) return false;
@@ -962,6 +1307,9 @@ bool SignalGraph::remove_node(NodeId id) {
 bool SignalGraph::connect(NodeId source, PortIndex source_port,
                           NodeId dest, PortIndex dest_port) {
     GraphMutationLock mutation_lock(*this);
+    if (prepared_edit_origin_ == nullptr &&
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
+        return false;
     const GraphNode* src_n = node(source);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -977,6 +1325,9 @@ bool SignalGraph::connect(NodeId source, PortIndex source_port,
 
 bool SignalGraph::connect_midi(NodeId source, NodeId dest) {
     GraphMutationLock mutation_lock(*this);
+    if (prepared_edit_origin_ == nullptr &&
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
+        return false;
     if (!node(source) || !node(dest)) return false;
     if (would_create_cycle(source, dest)) return false;
     Connection conn{source, 0, dest, 0, false, true};
@@ -993,6 +1344,9 @@ bool SignalGraph::connect_sidechain(NodeId source, PortIndex source_port,
     // bus. We reject other destinations early so callers fail loudly
     // instead of silently routing into a regular audio port.
     GraphMutationLock mutation_lock(*this);
+    if (prepared_edit_origin_ == nullptr &&
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
+        return false;
     const GraphNode* src_n = node(source);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -1019,6 +1373,9 @@ bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port,
                                      float smoothing_ms,
                                      AutomationMix mix) {
     GraphMutationLock mutation_lock(*this);
+    if (prepared_edit_origin_ == nullptr &&
+        (sample_region_for_node_locked_(src) != 0 || sample_region_for_node_locked_(dest) != 0))
+        return false;
     const GraphNode* src_n = node(src);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -1077,6 +1434,9 @@ bool SignalGraph::connect_audio_rate_modulation(NodeId src, PortIndex src_audio_
     // Holds graph_mutation_mutex_ across audio_rate_modulation_lane() below, which
     // is a lock-free helper that assumes the caller holds it (it scans nodes_).
     GraphMutationLock mutation_lock(*this);
+    if (prepared_edit_origin_ == nullptr &&
+        (sample_region_for_node_locked_(src) != 0 || sample_region_for_node_locked_(dest) != 0))
+        return false;
     const GraphNode* src_n = node(src);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -1389,6 +1749,9 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
 bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
                                    NodeId dest, PortIndex dest_port) {
     GraphMutationLock mutation_lock(*this);
+    if (prepared_edit_origin_ == nullptr &&
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
+        return false;
     const GraphNode* src_n = node(source);
     const GraphNode* dst_n = node(dest);
     if (!src_n || !dst_n) return false;
@@ -1404,6 +1767,9 @@ bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
 bool SignalGraph::disconnect(NodeId source, PortIndex source_port,
                              NodeId dest, PortIndex dest_port) {
     GraphMutationLock mutation_lock(*this);
+    if (prepared_edit_origin_ == nullptr &&
+        (sample_region_for_node_locked_(source) != 0 || sample_region_for_node_locked_(dest) != 0))
+        return false;
     Connection target{source, source_port, dest, dest_port};
     auto it = std::find(connections_.begin(), connections_.end(), target);
     if (it == connections_.end()) return false;
@@ -1503,6 +1869,8 @@ bool SignalGraph::set_node_parameter(NodeId id, uint32_t param_id, float value) 
     // Forwards to the plugin slot's own (independently synchronized) parameter
     // store — no GraphNode plain field is written here.
     GraphMutationLock mutation_lock(*this);
+    if (sample_region_for_node_locked_(id) != 0)
+        return false;
     auto* n = node_mut_locked_(id);
     if (!n || n->type != NodeType::Plugin || !n->plugin) return false;
     n->plugin->set_parameter(param_id, value);
@@ -2665,6 +3033,9 @@ SignalGraph::cached_or_live_params_locked_(const GraphNode& n) const {
 // reason) on any rejection; true if the graph passes every gate.
 bool SignalGraph::preflight_locked_(int max_block_size) {
     assert_graph_mutation_locked_();
+    // Scalar-only kernels have no block execution fallback.
+    if (!sample_region_definitions_.empty() || has_sample_kernel_nodes_locked_())
+        return false;
     const auto generated_validation = validate_generated_graph(max_block_size);
     switch (generated_validation.reason) {
     case GeneratedGraphValidationRejectReason::None:
@@ -2786,6 +3157,8 @@ bool SignalGraph::prepare_impl_(
     // mutex — set_node_gain() — releases the mutex before pinning, so this lock can
     // never invert order with the reader-drain handshake.
     GraphMutationLock mutation_lock(*this);
+    if (!sample_region_definitions_.empty() || has_sample_kernel_nodes_locked_())
+        return false;
     ++authoring_generation_;
     last_prepare_custom_failure_node_ = 0;
 
@@ -3053,6 +3426,8 @@ bool SignalGraph::set_custom_node_state(NodeId id,
     // Writes GraphNode custom fields + invalidate_live_locked_(); serialize against a
     // concurrent mutator/prepare.
     GraphMutationLock mutation_lock(*this);
+    if (sample_region_for_node_locked_(id) != 0)
+        return false;
     cancel_swap_edit_locked_();
     for (auto& n : nodes_) {
         if (n.id != id) continue;
@@ -3496,6 +3871,8 @@ bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
     // drain mechanism and cannot invert lock order with release()'s reader wait.
     {
         GraphMutationLock mutation_lock(*this);
+        if (sample_region_for_node_locked_(id) != 0)
+            return false;
         auto* n = node_mut_locked_(id);
         if (!n) return false;
         n->gain = linear_gain;
