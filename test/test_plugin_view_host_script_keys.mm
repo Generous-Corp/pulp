@@ -176,6 +176,28 @@ TEST_CASE("Plugin document shortcut dispatch cannot reach another editor",
     }
 }
 
+TEST_CASE("Plugin nested document keys preserve each event's consumption result",
+          "[plugin-view-host][script-keys][mac][host-forward]") {
+    @autoreleasepool {
+        Fixture fixture(false);
+        NSEvent* space = key(49, @" ");
+        fixture.engine.register_function("__nestedKey", [&](const choc::value::Value*, size_t) {
+            CHECK_FALSE([fixture.editor performKeyEquivalent:space]);
+            return choc::value::createInt32(0);
+        });
+        fixture.bridge.load_script(R"JS(
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 's') __nestedKey();
+            });
+        )JS");
+        CHECK([fixture.editor performKeyEquivalent:key(1, @"s")]);
+        REQUIRE(fixture.count() == 2);
+        [fixture.editor keyDown:space];
+        CHECK(fixture.count() == 2);
+        CHECK(fixture.daw.keyCount == 1);
+    }
+}
+
 TEST_CASE("Plugin focused text input wins over document shortcuts",
           "[plugin-view-host][script-keys][mac][text-priority]") {
     @autoreleasepool {

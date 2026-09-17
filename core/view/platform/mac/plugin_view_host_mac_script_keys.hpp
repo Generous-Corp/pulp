@@ -28,17 +28,22 @@ class PluginScriptKeys {
         [event_ release];
         event_ = [event retain];
         handled_ = false;
+        bool handled = false;
         try {
-            handled_ = script_events::dispatch_key_for_root(
+            handled = script_events::dispatch_key_for_root(
                 *root, static_cast<int>(mac_geometry::key_code_from_ns(event.keyCode)),
                 mac_geometry::modifiers_from_ns_flags(event.modifierFlags), true);
-            if (handled_)
+            if (handled)
                 root->request_repaint();
         } catch (...) {
             // A failed script must not leave the host's keyboard captured.
-            handled_ = false;
+            handled = false;
         }
-        return handled_;
+        // A listener can run a nested native event loop. Its newer cached
+        // event must keep its own consumption result when this call returns.
+        if (event_ == event)
+            handled_ = handled;
+        return handled;
     }
 
   private:
