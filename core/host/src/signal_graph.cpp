@@ -2650,7 +2650,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // CustomBindingContext::process_transport), so the two can never disagree.
         // Prepare-stable: a slot/type whose capability changes later needs a
         // re-prepare to be observed.
-        n.transport_sensitive = region_by_anchor.contains(n.id);
+        n.transport_sensitive =
+            n.transport_sensitive || region_by_anchor.contains(n.id);
         if (n.type == NodeType::Plugin) {
             // 2.2b (H2): read cached transport-sensitivity, not the live slot.
             auto mit = prepared_plugin_meta_.find(n.id);
@@ -2736,6 +2737,11 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             cg->custom_latency_samples[n.id] = 0;
             n.transport_sensitive = true;
         }
+        // Before sample-region quotienting, compile_ resolved this flag directly
+        // on nodes_. Keep that public authoring readback stable now that the
+        // executable topology is a private copy with region members removed.
+        if (auto* authored = node_mut_locked_(n.id))
+            authored->transport_sensitive = n.transport_sensitive;
     }
 
     for (size_t ci = 0; ci < cg->connections.size(); ++ci) {
