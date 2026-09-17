@@ -1188,6 +1188,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install macOS CMake generator deps
         if: runner.os == 'macOS'

@@ -2191,6 +2191,12 @@ bisectable.
   (`CMakeLists.txt`, `tools/cmake/PulpAndroid.cmake`,
   `tools/cmake/PulpDependencies.cmake`, `tools/deps/manifest.json`, plus Android
   Gradle files), and do not give `.cxx` a restore key that ignores those inputs.
+- **Pin the package list on every `android-actions/setup-android@v3` step.** Its
+  default is `tools platform-tools`, but Google removed the legacy `tools`
+  package from current repositories. An omitted `with.packages` therefore fails
+  inside setup before repository code runs. Use `packages: platform-tools` and
+  install the exact NDK, emulator, platform, and system image later with the
+  workflow's explicit `sdkmanager` step.
 - **`version-at-land.yml` + `version_at_land.py` are the single-writer,
   post-merge half of the version-bump intent-trailer model, and the workflow
   runs LIVE (`--push`).** They exist to kill the version-bump merge treadmill

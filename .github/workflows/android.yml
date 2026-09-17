@@ -77,6 +77,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install macOS CMake generator deps
         if: runner.os == 'macOS'
@@ -195,6 +197,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install macOS CMake generator deps
         if: runner.os == 'macOS'
@@ -306,6 +310,8 @@ jobs:
       - name: Setup Android SDK
         if: steps.fixture-scope.outputs.affected == 'true'
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install NDK and x86_64 emulator
         if: steps.fixture-scope.outputs.affected == 'true'
