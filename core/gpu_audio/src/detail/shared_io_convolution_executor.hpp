@@ -27,7 +27,8 @@ class SharedIoConvolutionExecutor {
     // prepare can never invalidate a callback-held span by reallocating it.
     bool prepare(const Config&, std::uint64_t epoch, std::uint64_t first_sequence);
     bool record_terminal(std::uint64_t epoch, std::uint64_t sequence, Terminal,
-                         std::span<const float> interleaved_time) noexcept;
+                         std::span<const float> interleaved_time,
+                         Terminal* accepted_terminal = nullptr) noexcept;
     std::size_t collect() noexcept;
     void advance_callback_watermark(std::uint64_t sequence) noexcept;
     // A claimed span remains stable until release_ready(). Callers copy it

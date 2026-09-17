@@ -23,6 +23,10 @@ target_sources(pulp-gpu-audio
         src/detail/shared_io_compute_plan.cpp
         src/detail/shared_io_convolution_executor.cpp
         src/detail/shared_io_transport_bridge.cpp
+        src/detail/shared_io_stamped_bridge.cpp
+        src/detail/shared_io_convolution_pipeline.cpp
+        src/detail/shared_io_convolution_session.cpp
+        src/detail/shared_io_trace.cpp
 )
 
 target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
