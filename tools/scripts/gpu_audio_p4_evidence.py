@@ -20,6 +20,12 @@ import sys
 from collections.abc import Sequence
 from typing import Any, Iterable
 
+from gpu_audio_p4_evidence_timing import (
+    Diagnostics, OBSERVATION_FIELDS, ProvenanceTracker,
+    check_timing as _check_timing, finite_number as _finite_number,
+    provenance as _provenance, verdict_observation as _verdict_observation,
+)
+
 from gpu_audio_p4_evidence_storage import (
     IdentityStore as _IdentityStore,
     MetricStore as _MetricStore,
@@ -33,8 +39,6 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 PATHS = {"staged_sync", "staged_async", "shared_async"}
 CAMPAIGNS = {"screening", "confirmation", "default", "overload"}
-AVAILABILITY = {"available", "unavailable"}
-RELATIONS = {"direct", "correlated", "inferred", "unavailable"}
 GPU_TERMINALS = {
     "completed",
     "stale_rejected",
@@ -49,6 +53,9 @@ TIMINGS = (
     "worker_pack_copy",
     "encode_cpu",
     "submit_cpu",
+    "event_processing_cpu",
+    "retirement_cpu",
+    "worker_other_cpu",
     "worker_end_to_end",
     "submit_to_completion",
     "gpu_elapsed",
@@ -56,6 +63,10 @@ TIMINGS = (
     "retirement_to_result_visible",
     "publish_to_consumable",
 )
+CPU_TIMINGS = ("callback_cpu", "worker_pack_copy", "encode_cpu", "submit_cpu",
+               "event_processing_cpu", "retirement_cpu", "worker_other_cpu")
+VERDICT_TIMINGS = CPU_TIMINGS + ("worker_end_to_end", "submit_to_completion",
+                                "publish_to_consumable")
 TRANSFER_COUNTERS = (
     "write_buffer_calls",
     "write_buffer_bytes",
@@ -66,10 +77,6 @@ TRANSFER_COUNTERS = (
     "mapped_readback_memcpy_bytes",
 )
 UINT64_MAX = (1 << 64) - 1
-
-
-def _finite_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _nonempty(value: Any) -> bool:
@@ -206,13 +213,13 @@ def _row_gate(summary: dict[str, Any], expected_pairs: int) -> dict[str, Any]:
         {"staged_ns": staged_callback, "shared_ns": shared_callback,
          "allowance_ns": callback_allowance})
 
-    staged_ui = staged["ui_frame_p99_ns"]["p99"]
-    shared_ui = shared["ui_frame_p99_ns"]["p99"]
-    ui_ok = (staged_ui is not None and shared_ui is not None
-             and shared_ui <= staged_ui * 1.10)
+    ui_pairs = summary["matched_ui_frame_p99"]
+    ui_ok = (ui_pairs["pairs"] == expected_pairs
+             and ui_pairs["max_regression_percent"] is not None
+             and ui_pairs["max_regression_percent"] <= 10.0)
     add("ui_frame_p99", ui_ok,
-        {"staged_ns": staged_ui, "shared_ns": shared_ui,
-         "maximum_regression_percent": 10.0})
+        {"matched_trials": ui_pairs, "expected_pairs": expected_pairs,
+         "maximum_regression_percent_per_pair": 10.0})
 
     default_gate = None
     if summary["campaign"] == "default":
@@ -232,7 +239,7 @@ def _row_gate(summary: dict[str, Any], expected_pairs: int) -> dict[str, Any]:
 
 def read_jsonl(path: Path) -> tuple[Sequence[dict[str, Any]], list[str]]:
     records = _RecordStore()
-    errors: list[str] = []
+    errors: list[str] = Diagnostics()
     try:
         handle = path.open("r", encoding="utf-8")
     except OSError as exc:
@@ -271,34 +278,8 @@ def validate_binary(manifest: dict[str, Any], binary: Path) -> list[str]:
     return []
 
 
-def _check_timing(name: str, timing: Any, where: str, errors: list[str]) -> None:
-    if not isinstance(timing, dict):
-        errors.append(f"{where}.{name} must be an observation object")
-        return
-    availability = timing.get("availability")
-    if not isinstance(availability, str) or availability not in AVAILABILITY:
-        errors.append(f"{where}.{name}.availability is invalid")
-    relation = timing.get("relation")
-    if not isinstance(relation, str) or relation not in RELATIONS:
-        errors.append(f"{where}.{name}.relation is invalid")
-    for field in ("clock_domain", "observer", "api_source"):
-        if not _nonempty(timing.get(field)):
-            errors.append(f"{where}.{name}.{field} must be non-empty")
-    value = timing.get("value_ns")
-    if availability == "available":
-        if not _finite_number(value) or value < 0:
-            errors.append(f"{where}.{name}.value_ns must be finite and non-negative")
-        if relation == "unavailable":
-            errors.append(f"{where}.{name} is available but relation is unavailable")
-    elif availability == "unavailable":
-        if value is not None:
-            errors.append(f"{where}.{name}.value_ns must be null when unavailable")
-        if relation != "unavailable":
-            errors.append(f"{where}.{name}.relation must be unavailable")
-
-
 def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
-    errors: list[str] = []
+    errors: list[str] = Diagnostics()
     if not records:
         return ["no records"]
     manifest = records[0]
@@ -410,6 +391,7 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
     pair_paths: dict[int, list[str]] = {}
     previous_path: str | None = None
     overload_failure_observed = False
+    timing_provenance = ProvenanceTracker()
     for record_index, record in enumerate(records):
         if record_index == 0:
             continue
@@ -443,7 +425,9 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
                        "block_count": 0, "digest": hashlib.sha256(),
                        "first_sequence": None, "submit_samples": 0,
                        "cpu_samples": 0, "submit_positive": False,
-                       "cpu_positive": False}
+                       "cpu_positive": False, "engine_generation": None,
+                       "terminals": {name: 0 for name in GPU_TERMINALS},
+                       "deliveries": {name: 0 for name in DELIVERIES}}
             if trial_id_valid:
                 seen_trial_ids.add(trial_id)
             previous_path = path
@@ -451,7 +435,10 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
             if current is None:
                 errors.append(f"line {line}: block outside a trial")
                 continue
-            if (record.get("trial_id") != current["id"] or record.get("path") != current["path"]
+            if (type(record.get("trial_id")) is not type(current["id"])
+                    or type(record.get("pair_id")) is not type(current["pair_id"])
+                    or record.get("trial_id") != current["id"]
+                    or record.get("path") != current["path"]
                     or record.get("pair_id") != current["pair_id"]):
                 errors.append(f"line {line}: block identity does not match trial")
             ordinal = record.get("block_ordinal")
@@ -465,6 +452,10 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
                    and not isinstance(record.get(field), bool) and record[field] <= UINT64_MAX
                    for field in ("engine_id", "generation", "sequence")):
                 identity = (record["engine_id"], record["generation"], record["sequence"])
+                if current["engine_generation"] is None:
+                    current["engine_generation"] = identity[:2]
+                elif current["engine_generation"] != identity[:2]:
+                    errors.append(f"line {line}: engine_id and generation must be constant within a trial")
                 if not identities.add(identity):
                     errors.append(f"line {line}: duplicate block identity {identity}")
                 if current["first_sequence"] is None:
@@ -479,6 +470,8 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
             else:
                 for name in TIMINGS:
                     _check_timing(name, timings.get(name), where, errors)
+                    if isinstance(current["path"], str) and current["path"] in PATHS:
+                        timing_provenance.check(current["path"], name, timings.get(name), where, errors)
             transfers = record.get("transfers")
             if not isinstance(transfers, dict):
                 errors.append(f"line {line}: transfers must be an object")
@@ -499,13 +492,19 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
             if (not isinstance(record.get("delivery"), str)
                     or record.get("delivery") not in DELIVERIES):
                 errors.append(f"line {line}: delivery is invalid")
+            for field, bucket in (("gpu_terminal", "terminals"), ("delivery", "deliveries")):
+                value = record.get(field)
+                if isinstance(value, str) and value in current[bucket]:
+                    current[bucket][value] += 1
             for field in ("deadline_miss", "watchdog_expiry", "late_completion", "resync_drop"):
                 if not isinstance(record.get(field), bool):
                     errors.append(f"line {line}: {field} must be boolean")
             if record.get("delivery") == "gpu" and record.get("gpu_terminal") != "completed":
                 errors.append(f"line {line}: GPU delivery requires a completed GPU terminal")
-            if record.get("delivery") == "gpu" and record.get("deadline_miss") is True:
-                errors.append(f"line {line}: a deadline-missed block cannot be delivered by GPU")
+            if record.get("delivery") == "gpu" and any(
+                record.get(name) is True for name in ("deadline_miss", "watchdog_expiry", "resync_drop")
+            ):
+                errors.append(f"line {line}: missed, expired, or resync-dropped block cannot be delivered by GPU")
             if ((record.get("gpu_terminal") == "late_rejected")
                     != (record.get("late_completion") is True)):
                 errors.append(f"line {line}: late_completion must agree with late_rejected terminal")
@@ -526,13 +525,12 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
                         errors.append(f"line {line}: watchdog_expiry disagrees with worker_end_to_end")
             if isinstance(timings, dict):
                 submit = timings.get("submit_to_completion", {})
-                if (isinstance(submit, dict) and submit.get("availability") == "available"
+                if (_verdict_observation(submit)
                         and _finite_number(submit.get("value_ns"))):
                     current["submit_samples"] += 1
                     current["submit_positive"] |= submit["value_ns"] > 0
-                cpu = [timings.get(name, {}) for name in
-                       ("callback_cpu", "worker_pack_copy", "encode_cpu", "submit_cpu")]
-                if all(isinstance(item, dict) and item.get("availability") == "available"
+                cpu = [timings.get(name, {}) for name in CPU_TIMINGS]
+                if all(_verdict_observation(item)
                        and _finite_number(item.get("value_ns")) for item in cpu):
                     current["cpu_samples"] += 1
                     current["cpu_positive"] |= sum(item["value_ns"] for item in cpu) > 0
@@ -544,14 +542,11 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
                            and record["transfers"][name] > 0 for name in TRANSFER_COUNTERS):
                     errors.append(f"line {line}: completed staged_async block has no named payload transfer")
             if campaign in ("confirmation", "default", "overload"):
-                required = {"callback_cpu", "worker_pack_copy", "encode_cpu", "submit_cpu",
-                            "worker_end_to_end", "submit_to_completion", "publish_to_consumable"}
-                unavailable = sorted(name for name in required
+                unavailable = sorted(name for name in VERDICT_TIMINGS
                                      if not isinstance(timings, dict)
-                                     or not isinstance(timings.get(name), dict)
-                                     or timings[name].get("availability") != "available")
+                                     or not _verdict_observation(timings.get(name)))
                 if unavailable:
-                    errors.append(f"line {line}: verdict timing unavailable: {','.join(unavailable)}")
+                    errors.append(f"line {line}: verdict timing unavailable or inferred: {','.join(unavailable)}")
             if (campaign in ("confirmation", "default") and isinstance(row, dict)
                     and row.get("load") != "overload"
                     and (record.get("deadline_miss") is True
@@ -563,7 +558,7 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
                 or record.get("late_completion") is True
                 or record.get("resync_drop") is True
                 or record.get("gpu_terminal") != "completed"
-                or record.get("delivery") != "gpu"
+                or record.get("delivery") in ("cpu_fallback", "silence", "passthrough")
             ):
                 overload_failure_observed = True
             current["block_count"] += 1
@@ -571,7 +566,10 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
             if current is None:
                 errors.append(f"line {line}: trial_end outside a trial")
                 continue
-            if (record.get("trial_id") != current["id"] or record.get("path") != current["path"]
+            if (type(record.get("trial_id")) is not type(current["id"])
+                    or type(record.get("pair_id")) is not type(current["pair_id"])
+                    or record.get("trial_id") != current["id"]
+                    or record.get("path") != current["path"]
                     or record.get("pair_id") != current["pair_id"]):
                 errors.append(f"line {line}: trial_end identity does not match trial")
             if (not _integer_at_least(record.get("block_count"), 0)
@@ -584,13 +582,25 @@ def validate_records(records: Sequence[dict[str, Any]]) -> list[str]:
             _check_timing("ui_frame_p99", record.get("ui_frame_p99"), f"line {line}", errors)
             _check_timing("duration", record.get("duration"), f"line {line}", errors)
             for field in ("ui_frame_p99", "duration"):
-                if not isinstance(record.get(field), dict) or record[field].get("availability") != "available":
-                    errors.append(f"line {line}: trial_end {field} must be available")
+                if not _verdict_observation(record.get(field)):
+                    errors.append(f"line {line}: trial_end {field} must be available and direct/correlated")
+                if isinstance(current["path"], str) and current["path"] in PATHS:
+                    timing_provenance.check(current["path"], field, record.get(field), f"line {line}", errors)
+            for field, bucket in (("gpu_terminal_counts", "terminals"), ("delivery_counts", "deliveries")):
+                counts = record.get(field)
+                if (not isinstance(counts, dict) or set(counts) != set(current[bucket])
+                        or any(not _integer_at_least(value, 0) for value in counts.values())
+                        or counts != current[bucket]):
+                    errors.append(f"line {line}: trial_end {field} must exactly match block dispositions")
+            if current["terminals"]["device_lost"] and record.get("device_loss") is not True:
+                errors.append(f"line {line}: device_lost block requires trial_end device_loss")
             for field in ("device_loss", "audio_xrun", "driver_stall"):
                 if not isinstance(record.get(field), bool):
                     errors.append(f"line {line}: {field} must be boolean")
             if (campaign in ("confirmation", "default")
                     and current["path"] in ("staged_async", "shared_async")):
+                if current["deliveries"]["gpu"] == 0:
+                    errors.append(f"line {line}: normal-load async trial requires eligible GPU delivery")
                 if current["submit_samples"] != current["block_count"]:
                     errors.append(f"line {line}: submit-to-completion metric is incomplete")
                 if current["cpu_samples"] != current["block_count"]:
@@ -652,7 +662,7 @@ def summarize(records: Sequence[dict[str, Any]], *,
             "gpu_terminals": {name: 0 for name in sorted(GPU_TERMINALS)},
             "deliveries": {name: 0 for name in sorted(DELIVERIES)},
             "transfers": {name: 0 for name in TRANSFER_COUNTERS},
-            "timing_provenance": {name: set() for name in TIMINGS},
+            "timing_provenance": {},
         })
         bucket["blocks"] += 1
         bucket["deadline_misses"] += int(record["deadline_miss"])
@@ -665,16 +675,12 @@ def summarize(records: Sequence[dict[str, Any]], *,
             bucket["transfers"][name] += record["transfers"][name]
         for name in TIMINGS:
             observation = record["timings"][name]
-            bucket["timing_provenance"][name].add((
-                observation["availability"], observation["clock_domain"],
-                observation["observer"], observation["api_source"],
-                observation["relation"],
-            ))
-            if observation["availability"] == "available":
+            bucket["timing_provenance"].setdefault(name, [_provenance(observation)])
+            if _verdict_observation(observation):
                 metrics.add(path, record["trial_id"], name, float(observation["value_ns"]))
         cpu_observations = [record["timings"][name]
-                            for name in ("callback_cpu", "worker_pack_copy", "encode_cpu", "submit_cpu")]
-        if all(item["availability"] == "available" for item in cpu_observations):
+                            for name in CPU_TIMINGS]
+        if all(_verdict_observation(item) for item in cpu_observations):
             metrics.add(path, record["trial_id"], "total_cpu_per_block",
                         sum(float(item["value_ns"]) for item in cpu_observations))
     metrics.finish()
@@ -703,18 +709,8 @@ def summarize(records: Sequence[dict[str, Any]], *,
         }
         bucket["duration_ns"] = sum(float(end["duration"]["value_ns"]) for end in ends)
         bucket["trial_observation_provenance"] = {
-            field: [dict(zip(
-                ("availability", "clock_domain", "observer", "api_source", "relation"), values
-            )) for values in sorted({
-                (end[field]["availability"], end[field]["clock_domain"], end[field]["observer"],
-                 end[field]["api_source"], end[field]["relation"]) for end in ends
-            })]
+            field: [_provenance(ends[0][field])] if ends else []
             for field in ("ui_frame_p99", "duration")
-        }
-        bucket["timing_provenance"] = {
-            name: [dict(zip(("availability", "clock_domain", "observer", "api_source", "relation"),
-                            values)) for values in sorted(entries)]
-            for name, entries in bucket["timing_provenance"].items()
         }
     paired_metrics: dict[int, dict[str, float]] = {}
     for trial_id, path in trial_paths.items():
@@ -725,11 +721,21 @@ def summarize(records: Sequence[dict[str, Any]], *,
             path, "submit_to_completion", 99, trial_id)
         paired_metrics[pair_id][f"{path}_cpu_mean"] = metrics.mean(
             path, "total_cpu_per_block", trial_id)
+        paired_metrics[pair_id][f"{path}_ui_p99"] = float(
+            trial_ends[trial_id]["ui_frame_p99"]["value_ns"])
 
+    ui_regressions: list[float] = []
     improvements: dict[str, list[float]] = {"submit_to_completion_p99_percent": [],
                                            "submit_to_completion_p99_ns": [],
                                            "total_cpu_per_block_percent": []}
     for pair in paired_metrics.values():
+        staged_ui = pair.get("staged_async_ui_p99")
+        shared_ui = pair.get("shared_async_ui_p99")
+        if staged_ui is not None and shared_ui is not None:
+            if staged_ui > 0:
+                ui_regressions.append((shared_ui - staged_ui) * 100.0 / staged_ui)
+            elif shared_ui == 0:
+                ui_regressions.append(0.0)
         for output, stem in (("submit_to_completion_p99_percent", "submit_p99"),
                              ("total_cpu_per_block_percent", "cpu_mean")):
             staged = pair.get(f"staged_async_{stem}")
@@ -763,7 +769,13 @@ def summarize(records: Sequence[dict[str, Any]], *,
         "trial_count": len(trial_ends),
         "duration_ns": sum(float(item["duration"]["value_ns"]) for item in trial_ends.values()),
         "matched_improvement": confidence,
+        "matched_ui_frame_p99": {
+            "pairs": len(ui_regressions),
+            "max_regression_percent": max(ui_regressions, default=None),
+        },
+        "bootstrap_seed": seed,
         "bootstrap_resamples": resamples,
+        "cpu_total_components": list(CPU_TIMINGS),
         "verdict": "unassigned",
     }
     if evidence_sha256 is not None:
@@ -791,12 +803,14 @@ def write_csv(records: Iterable[dict[str, Any]], path: Path, *,
                "late_completion", "resync_drop"]
     for name in TIMINGS:
         columns.extend(f"{name}_{suffix}" for suffix in
-                       ("value_ns", "availability", "clock_domain", "observer", "api_source", "relation"))
+                       OBSERVATION_FIELDS)
     columns.extend(TRANSFER_COUNTERS)
     for name in ("ui_frame_p99", "duration"):
         columns.extend(f"{name}_{suffix}" for suffix in
-                       ("value_ns", "availability", "clock_domain", "observer", "api_source", "relation"))
+                       OBSERVATION_FIELDS)
     columns.extend(("device_loss", "audio_xrun", "driver_stall"))
+    columns.extend(f"gpu_terminal_count_{name}" for name in sorted(GPU_TERMINALS))
+    columns.extend(f"delivery_count_{name}" for name in sorted(DELIVERIES))
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
@@ -818,18 +832,22 @@ def write_csv(records: Iterable[dict[str, Any]], path: Path, *,
             if record["record_kind"] == "block":
                 for name in TIMINGS:
                     observation = record["timings"][name]
-                    for suffix in ("value_ns", "availability", "clock_domain", "observer", "api_source", "relation"):
+                    for suffix in OBSERVATION_FIELDS:
                         value = observation[suffix]
                         row[f"{name}_{suffix}"] = "" if value is None else value
                 row.update(record["transfers"])
             else:
                 for name in ("ui_frame_p99", "duration"):
                     observation = record[name]
-                    for suffix in ("value_ns", "availability", "clock_domain", "observer", "api_source", "relation"):
+                    for suffix in OBSERVATION_FIELDS:
                         value = observation[suffix]
                         row[f"{name}_{suffix}"] = "" if value is None else value
                 for name in ("device_loss", "audio_xrun", "driver_stall"):
                     row[name] = record[name]
+                for name, count in record["gpu_terminal_counts"].items():
+                    row[f"gpu_terminal_count_{name}"] = count
+                for name, count in record["delivery_counts"].items():
+                    row[f"delivery_count_{name}"] = count
             writer.writerow(row)
 
 
@@ -840,6 +858,12 @@ def main() -> int:
     parser.add_argument("--summary", type=Path)
     parser.add_argument("--csv", type=Path)
     args = parser.parse_args()
+    inputs = {args.evidence.resolve(), args.benchmark_binary.resolve()}
+    outputs = [path.resolve() for path in (args.summary, args.csv) if path is not None]
+    if any(path in inputs for path in outputs) or len(outputs) != len(set(outputs)):
+        print("gpu-audio-p4-evidence: outputs must be distinct from each other and inputs",
+              file=sys.stderr)
+        return 1
     try:
         evidence_sha256 = _sha256_file(args.evidence)
     except OSError as exc:
