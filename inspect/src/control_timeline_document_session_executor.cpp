@@ -24,8 +24,8 @@ struct ActionName {
 };
 
 constexpr std::array<ActionName, 5> kActionNames{
-    ActionName{Action::Open, "open"},   ActionName{Action::Apply, "apply"},
-    ActionName{Action::Diff, "diff"},   ActionName{Action::Undo, "undo"},
+    ActionName{Action::Open, "open"}, ActionName{Action::Apply, "apply"},
+    ActionName{Action::Diff, "diff"}, ActionName{Action::Undo, "undo"},
     ActionName{Action::Redo, "redo"},
 };
 
@@ -43,15 +43,15 @@ failure(ControlResultCode code, std::string explanation,
 ControlExecutionOutcome checkpoint_failure(ControlExecutionCheckpoint checkpoint) {
     if (checkpoint == ControlExecutionCheckpoint::Cancelled ||
         checkpoint == ControlExecutionCheckpoint::AuthorityRevoked) {
-        return {.terminal_state = ControlReceiptState::Cancelled,
-                .result = {.result_code = ControlResultCode::Cancelled,
-                           .explanation = checkpoint == ControlExecutionCheckpoint::Cancelled
-                                              ? "timeline document session cancelled"
-                                              : "timeline document session authority revoked",
-                           .cancellation_reason =
-                               checkpoint == ControlExecutionCheckpoint::Cancelled
-                                   ? "client-cancelled"
-                                   : "authority-revoked"}};
+        return {
+            .terminal_state = ControlReceiptState::Cancelled,
+            .result = {.result_code = ControlResultCode::Cancelled,
+                       .explanation = checkpoint == ControlExecutionCheckpoint::Cancelled
+                                          ? "timeline document session cancelled"
+                                          : "timeline document session authority revoked",
+                       .cancellation_reason = checkpoint == ControlExecutionCheckpoint::Cancelled
+                                                  ? "client-cancelled"
+                                                  : "authority-revoked"}};
     }
     return failure(ControlResultCode::DeadlineExceeded,
                    "timeline document session deadline exceeded");
@@ -69,8 +69,7 @@ std::optional<std::string> object_string(const choc::value::ValueView& object,
 
 } // namespace
 
-std::string_view
-control_timeline_document_session_action_name(Action action) noexcept {
+std::string_view control_timeline_document_session_action_name(Action action) noexcept {
     for (const auto& entry : kActionNames) {
         if (entry.action == action)
             return entry.name;
@@ -277,8 +276,8 @@ ControlOperationExecutor make_control_timeline_document_session_executor(
 
         auto detail = choc::value::createObject("ControlTimelineDocumentSessionResult");
         detail.setMember("receipt_id", plan.receipt_id.value);
-        detail.setMember("action", std::string(
-                                       control_timeline_document_session_action_name(decoded.action)));
+        detail.setMember(
+            "action", std::string(control_timeline_document_session_action_name(decoded.action)));
         detail.setMember("session_id", outcome.session_id);
         detail.setMember("revision", static_cast<std::int64_t>(outcome.revision));
         detail.setMember("applied", outcome.applied);
@@ -290,9 +289,8 @@ ControlOperationExecutor make_control_timeline_document_session_executor(
         auto result_json = choc::json::toString(detail, true);
         const auto* operation = resolve_control_operation(kOperationId, 1);
         ControlJsonSchemaDiagnostics diagnostics;
-        if (operation == nullptr ||
-            !validate_control_output_json_schema(result_json, operation->output_schema_json,
-                                                 &diagnostics)) {
+        if (operation == nullptr || !validate_control_output_json_schema(
+                                        result_json, operation->output_schema_json, &diagnostics)) {
             return failure(ControlResultCode::InternalError,
                            "timeline document session produced an invalid v1 result");
         }
