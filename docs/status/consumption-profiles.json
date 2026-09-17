@@ -48,7 +48,7 @@
           {
             "exported_as": "Pulp::host",
             "closure_node_count": 86,
-            "public_header_count": 209
+            "public_header_count": 211
           },
           {
             "exported_as": "Pulp::inspect-offline-runtime",
@@ -1854,7 +1854,7 @@
             ]
           },
           "public_headers": {
-            "count": 209,
+            "count": 211,
             "roots": [
               "core/format/include",
               "core/host/include"
