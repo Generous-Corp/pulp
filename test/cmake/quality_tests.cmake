@@ -27,6 +27,13 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME gpu-audio-p4-evidence-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")
+    set_tests_properties(gpu-audio-p4-evidence-selftest PROPERTIES
+        LABELS "audio;gpu;bench;evidence"
+        TIMEOUT 120)
+
     add_test(NAME dsp-provenance-audit
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/dsp_provenance_audit.py")
