@@ -1344,6 +1344,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
 
         if (connection_error.empty()) {
             SignalGraph::GraphMutationLock lock(graph);
+            std::vector<SampleRegionCandidate> resolved_candidates;
             for (const auto& definition : definitions) {
                 const bool fully_resolved = std::all_of(
                     definition.members.begin(), definition.members.end(), [&](const auto& member) {
@@ -1356,11 +1357,32 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     connection_error = "sample region metadata proof failed: " + metadata.message;
                     break;
                 }
-                const auto proof = pulp::host::prove_sample_region(
-                    graph.sample_region_candidate_locked_(definition));
+                auto candidate = graph.sample_region_candidate_locked_(definition);
+                // Persistence has no runtime block size. One frame is the smallest
+                // preparable block and preserves every structural and aggregate
+                // admission check without inventing a later host block size.
+                candidate.max_block_size = 1;
+                resolved_candidates.push_back(std::move(candidate));
+            }
+            if (connection_error.empty() && !resolved_candidates.empty()) {
+                const auto proof = pulp::host::prove_sample_regions(resolved_candidates);
                 if (!proof.accepted) {
-                    connection_error = "sample region proof failed: " + proof.message;
-                    break;
+                    connection_error =
+                        "sample region proof failed: complete graph admission rejected";
+                    if (!proof.region_proof.message.empty())
+                        connection_error += ": " + proof.region_proof.message;
+                }
+            }
+            if (connection_error.empty()) {
+                for (const auto& node : graph.nodes_) {
+                    if (node.type == NodeType::Custom &&
+                        graph.sample_kernel_type(node.custom_type_id, node.custom_type_version) !=
+                            nullptr &&
+                        !region_members.contains(node.id)) {
+                        connection_error = "sample region proof failed: scalar kernel is outside "
+                                           "every declared region";
+                        break;
+                    }
                 }
             }
         }

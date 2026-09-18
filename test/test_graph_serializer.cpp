@@ -444,6 +444,13 @@ TEST_CASE("GraphSerializer rejects fully resolved region proof failures",
                      "\"max_internal_connections\": 1");
         require_proof_rejected(json);
     }
+
+    SECTION("registered scalar kernel outside every region") {
+        REQUIRE(fixture.graph.add_custom_node("pulp.core.sample-region.add") != 0);
+        const auto json = GraphSerializer::to_json(fixture.graph);
+        REQUIRE_FALSE(json.empty());
+        require_proof_rejected(json);
+    }
 }
 
 TEST_CASE("GraphSerializer rejects non-boolean optional connection flags in a region graph",
