@@ -511,6 +511,7 @@ if(TARGET Pulp::gpu-audio)
         unset(_pulp_gpu_audio_linked_runtimes)
     endif()
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp"
+"#include <pulp/gpu_audio/gpu_audio_capability.hpp>\n"
 "#include <pulp/gpu_audio/gpu_audio_transport.hpp>\n"
 "\n"
 "// Reference a header type and an archive-defined symbol (stats()) so the\n"
@@ -524,7 +525,11 @@ if(TARGET Pulp::gpu-audio)
 "        (stats.miss_blocks == 0 &&\n"
 "         report.path == pulp::gpu_audio::GpuAudioExecutionPath::Unavailable &&\n"
 "         report.provider == pulp::gpu_audio::GpuAudioProvider::Unknown &&\n"
-"         !report.prepared ? 0 : 2);\n"
+"         report.eligibility == pulp::gpu_audio::GpuAudioEligibility::Unavailable &&\n"
+"         report.fallback_policy == pulp::gpu_audio::MissPolicy::Silence &&\n"
+"         report.prepared_lead_blocks == 0 &&\n"
+"         !report.prepared && !report.fallback_available &&\n"
+"         !report.diagnostics_available ? 0 : 2);\n"
 "}\n")
     add_executable(PulpSDKSmokeGpuAudioProbe
         "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp")
