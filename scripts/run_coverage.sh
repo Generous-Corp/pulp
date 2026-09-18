@@ -188,7 +188,14 @@ cd "${BUILD_DIR}"
 # (so reviewers can see what did exercise), but the script must exit non-zero so
 # CI flags the failure; silently swallowing test failures hid real regressions.
 CTEST_RC=0
-# Run the suite in parallel with a per-test wall-clock cap. Serial ctest over
+# Run the suite in parallel with a per-test wall-clock cap. Keep successful
+# test progress quiet: a 22k-test instrumented run otherwise writes one
+# progress line per test into GitHub Actions' runner diagnostic pages, which
+# can exhaust the hosted runner disk before the report/upload steps run.
+# `--output-on-failure` still preserves the failing test's output, so this
+# changes log volume without hiding a test failure.
+#
+# Serial ctest over
 # the full ~13.5k-case suite is the dominant cost of a coverage run and pushed
 # even the macOS leg past the workflow's internal budget (a killed run drops the
 # Cobertura report and reddens main). `-j` matches the parallelism the primary
@@ -209,9 +216,9 @@ if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 if [[ -n "${TESTS_REGEX}" ]]; then
-    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
+    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
 else
-    ctest "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
+    ctest "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
 fi
 if [[ "${CTEST_RC}" -ne 0 ]]; then
     echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="
@@ -247,6 +254,24 @@ if [[ "${INVALID_PROFILE_SHARDS}" -gt 25 \
     exit 1
 fi
 echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
+
+# The merged profdata is now the complete coverage input. Raw shards are no
+# longer needed, and retaining thousands of them leaves too little room for
+# llvm-cov's HTML drilldown (the hosted macOS runner previously filled its
+# filesystem while writing that output). Delete only after a successful merge;
+# if cleanup cannot complete, fail closed instead of generating a report from
+# an unbounded disk state.
+echo "=== Reclaiming merged raw profile shards ==="
+if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete; then
+    echo "run_coverage.sh: could not delete merged raw profile shards" >&2
+    exit 1
+fi
+REMAINING_PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -name '*.profraw' -type f -print -quit)
+if [[ -n "${REMAINING_PROFILE_SHARDS}" ]]; then
+    echo "run_coverage.sh: raw profile shards remain after cleanup: ${REMAINING_PROFILE_SHARDS}" >&2
+    exit 1
+fi
+echo "=== Raw profile shards reclaimed; retaining ${PROFDATA} ==="
 
 # Gather binaries for llvm-cov's -object multi-arg form.
 #
