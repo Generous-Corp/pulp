@@ -730,7 +730,29 @@ jobs:
         if: matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
         continue-on-error: true
         shell: bash
-        run: python3 tools/scripts/run_swift_coverage.py
+        run: |
+          # Swift coverage is advisory and must never strand the native
+          # Cobertura producer behind an unbounded iOS toolchain/test run.
+          # Keep enough time for a normal run, but let the later native
+          # verification and Codecov upload steps execute when Swift stalls.
+          python3 - <<'PY'
+          import subprocess
+          import sys
+
+          timeout_seconds = 20 * 60
+          try:
+              raise SystemExit(subprocess.run(
+                  [sys.executable, "tools/scripts/run_swift_coverage.py"],
+                  check=False,
+                  timeout=timeout_seconds,
+              ).returncode)
+          except subprocess.TimeoutExpired:
+              print(
+                  f"::warning::Swift Apple coverage exceeded {timeout_seconds}s; "
+                  "continuing so native coverage can upload."
+              )
+              raise SystemExit(124)
+          PY
 
       - name: Upload HTML report
         if: always()
