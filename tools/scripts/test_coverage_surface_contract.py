@@ -83,12 +83,12 @@ class CoverageSurfaceContract(unittest.TestCase):
     def producers(self) -> list[dict[str, Any]]:
         return self.manifest["producers"]
 
-    def test_policy_is_advisory_and_non_carryforward(self):
+    def test_policy_is_advisory_and_carries_forward_last_known_data(self):
         self.assertEqual(self.manifest["schema_version"], 1)
         policy = self.manifest["policy"]
         self.assertEqual(policy["merge_behavior"], "advisory")
         self.assertEqual(policy["required_status_contexts"], [])
-        self.assertIs(policy["carryforward"], False)
+        self.assertIs(policy["carryforward"], True)
         self.assertEqual(policy["canonical_refresh_cron"], "17 */8 * * *")
 
     def test_exactly_seven_real_upload_flags_are_configured(self):
@@ -103,7 +103,7 @@ class CoverageSurfaceContract(unittest.TestCase):
         self.assertEqual(set(configured), EXPECTED_FLAGS)
         for flag, rules in configured.items():
             with self.subTest(flag=flag):
-                self.assertEqual(rules, {"carryforward": False})
+                self.assertEqual(rules, {"carryforward": True})
 
     def test_every_component_is_measured_or_explicitly_not_applicable(self):
         component_ids = {
