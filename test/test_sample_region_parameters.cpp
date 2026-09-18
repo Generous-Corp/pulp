@@ -201,6 +201,9 @@ TEST_CASE("Prepared edit publishes and later edits inherit the borrowed binding"
     REQUIRE(edit->prepare(48000.0, 64) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
     REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
     CHECK(graph.sample_region_parameter_binding() == &owner->binding());
+    const auto graph_generation = graph.sample_region_binding_generation();
+    owner->store().set_value(7, 0.5f);
+    CHECK(graph.sample_region_binding_generation() == graph_generation);
     auto later = graph.begin_prepared_topology_edit();
     CHECK(later->sample_region_parameter_binding() == &owner->binding());
 }
@@ -314,12 +317,62 @@ TEST_CASE("Baked graph rejects an invalid promoted contract before publication",
     CHECK(store.state_generation() == 0);
 }
 
+TEST_CASE("Baked graph rejects a conflicting adapter manifest without publication",
+          "[host][sample-region][parameters][baked][negative]") {
+    BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked", {},
+                                  {region(9, {promoted(90)})});
+    state::StateStore store;
+    store.add_parameter(ordinary(7));
+    processor.define_parameters(store);
+    CHECK(processor.sample_region_parameter_binding() == nullptr);
+    REQUIRE(store.param_count() == 1);
+    CHECK(store.all_params()[0].id == 7);
+    CHECK(store.state_generation() == 0);
+}
+
 TEST_CASE("Baked region contract metadata survives plan reload in canonical order",
           "[host][sample-region][parameters][baked][reload]") {
-    const auto definition = region(9, {promoted(90), promoted(40, "feedback")});
+    auto definition = region(9, {promoted(40, "feedback")});
+    definition.region_id = 17;
+    definition.promoted_parameters[0].range = state::ParamRange::linear(0.0f, 1.0f, 0.5f);
+    definition.promoted_parameters[0].bound_node_id = 5;
     BakedPlan plan;
     plan.format_version = kBakedMaxSupportedFormatVersion;
-    plan.sample_regions.push_back(definition);
+    plan.input_channels = 1;
+    plan.output_channels = 1;
+    plan.nodes = {{1, NodeType::AudioInput, 0, 1},
+                  {2, NodeType::AudioOutput, 1, 0},
+                  {3, NodeType::Custom, 1, 1, 1.0f, "pulp.core.sample-region.input", 1},
+                  {4, NodeType::Custom, 1, 1, 1.0f, "pulp.core.sample-region.output", 1},
+                  {5, NodeType::Custom, 0, 1, 1.0f, "pulp.core.sample-region.parameter", 1},
+                  {6, NodeType::Custom, 0, 1, 1.0f, "pulp.core.sample-region.constant", 1},
+                  {7, NodeType::Custom, 2, 1, 1.0f, "pulp.core.sample-region.add", 1},
+                  {8, NodeType::Custom, 1, 1, 1.0f, "pulp.core.unit-delay", 1},
+                  {9, NodeType::Custom, 2, 1, 1.0f, "pulp.core.sample-region.multiply", 1}};
+    plan.connections = {{1, 0, 3, 0, false}, {3, 0, 7, 0, false}, {8, 0, 7, 1, false},
+                        {7, 0, 8, 0, false}, {7, 0, 9, 0, false}, {5, 0, 9, 1, false},
+                        {9, 0, 4, 0, false}, {4, 0, 2, 0, false}};
+    auto reload_definition = definition;
+    for (auto& parameter : reload_definition.promoted_parameters)
+        parameter.range.skew = 1.0f;
+    reload_definition.members = {
+        {3, "pulp.core.sample-region.input", 1,
+         {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {4, "pulp.core.sample-region.output", 1,
+         {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {5, "pulp.core.sample-region.parameter", 1,
+         {SampleKernelConfigKind::PromotedParameterId, 40, 0.0f}},
+        {6, "pulp.core.sample-region.constant", 1,
+         {SampleKernelConfigKind::FiniteConstant, 0, 0.5f}},
+        {7, "pulp.core.sample-region.add", 1,
+         {SampleKernelConfigKind::None, 0, 0.0f}},
+        {8, "pulp.core.unit-delay", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
+        {9, "pulp.core.sample-region.multiply", 1,
+         {SampleKernelConfigKind::None, 0, 0.0f}},
+    };
+    reload_definition.input_boundaries = {3};
+    reload_definition.output_boundaries = {4};
+    plan.sample_regions.push_back(reload_definition);
     const auto bytes = detail::serialize_plan(plan);
     const auto reloaded = detail::parse_plan_bounded(bytes);
     REQUIRE(reloaded);
@@ -328,9 +381,8 @@ TEST_CASE("Baked region contract metadata survives plan reload in canonical orde
     REQUIRE(authored.valid());
     REQUIRE(restored.valid());
     CHECK(authored.matches_promoted(restored));
-    REQUIRE(restored.entries().size() == 2);
+    REQUIRE(restored.entries().size() == 1);
     CHECK(restored.entries()[0].info.id == 40);
-    CHECK(restored.entries()[1].info.id == 90);
 }
 
 TEST_CASE("Baked parameter binding does not outlive its adapter store",

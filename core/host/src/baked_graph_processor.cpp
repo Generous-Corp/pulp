@@ -1015,8 +1015,17 @@ fmt::PluginDescriptor BakedGraphProcessor::descriptor() const {
 
 void BakedGraphProcessor::define_parameters(pulp::state::StateStore& store) {
     if (!sample_region_parameter_contract_.valid() ||
-        sample_region_parameter_binding_ != nullptr)
+        sample_region_parameter_binding_ != nullptr ||
+        sample_region_parameter_contract_.parameters().empty())
         return;
+    // Validate an already-populated adapter store before attempting any
+    // registration. StateStore has no rollback/remove operation, so adding
+    // first would leave a conflicting publication behind when the exact
+    // manifest check fails.
+    if (store.param_count() != 0) {
+        sample_region_parameter_binding_ = sample_region_parameter_contract_.bind(store);
+        return;
+    }
     for (const auto& parameter : sample_region_parameter_contract_.parameters())
         store.add_parameter(parameter);
     sample_region_parameter_binding_ = sample_region_parameter_contract_.bind(store);
