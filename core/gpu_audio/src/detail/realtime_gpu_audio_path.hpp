@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
 #include <cstdint>
@@ -40,5 +41,9 @@ struct RealtimeGpuNodePath {
 };
 
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
+
+// Returns a provider only when the concrete private path can establish its
+// identity. Generic/test hooks deliberately return Unknown.
+GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept;
 
 } // namespace pulp::gpu_audio::detail

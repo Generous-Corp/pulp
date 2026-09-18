@@ -208,6 +208,11 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
     return {};
 }
 
+GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept {
+    // The test hook deliberately has no authenticated provider identity.
+    return GpuAudioProvider::Unknown;
+}
+
 TEST_CASE("GpuAudioTransport capability report is an honest staged snapshot",
           "[gpu_audio][transport][capability]") {
     constexpr uint32_t BS = 32;
@@ -227,6 +232,8 @@ TEST_CASE("GpuAudioTransport capability report is an honest staged snapshot",
     REQUIRE(transport.prepare(&node, {.ring_blocks = 8}));
 
     const auto report = transport.capability_report();
+    // The test hook exercises the private seam but has no authenticated
+    // provider identity, so the report must classify it as staged.
     CHECK(report.path == GpuAudioExecutionPath::Staged);
     CHECK(report.provider == GpuAudioProvider::Unknown);
     CHECK(report.eligibility == GpuAudioEligibility::Eligible);
