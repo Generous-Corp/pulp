@@ -30,6 +30,7 @@ inline double get_double(const V& v) {
 }
 
 constexpr int kFormatVersion = 3;
+constexpr std::size_t kMaxSerializedSampleRegionConnections = 2'048;
 
 struct GraphMigrationEntry {
     int from_version = 0;
@@ -445,6 +446,9 @@ std::string GraphSerializer::to_json(
     }
     auto root = choc::value::createObject("PulpGraph");
     const auto regions = graph.sample_regions();
+    if (!regions.empty() && graph.connections().size() > kMaxSerializedSampleRegionConnections) {
+        return {};
+    }
     const int version = regions.empty() ? 2 : kFormatVersion;
     root.addMember("format_version", (int64_t)version);
 
@@ -625,7 +629,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     try {
         if (root.hasObjectMember("connections")) {
             const auto& conns = root["connections"];
-            if (has_region_records && conns.size() > 2'048) {
+            if (has_region_records && conns.size() > kMaxSerializedSampleRegionConnections) {
                 result.error = "too many connections";
                 return result;
             }
@@ -875,6 +879,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     // Pass 1: instantiate every node, build old-id → new-id map.
     std::unordered_map<NodeId, NodeId> id_map;
     std::unordered_map<NodeId, std::pair<NodeId, std::vector<uint8_t>>> deferred_state;
+    std::unordered_set<NodeId> unresolved_plugin_nodes;
 
     if (root.hasObjectMember("nodes")) {
         const auto& nodes = root["nodes"];
@@ -972,6 +977,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                         // Still create a placeholder Plugin node with no slot so
                         // connection IDs remain stable.
                         new_id = graph.add_unresolved_plugin_node(info, in_ch, out_ch, name);
+                        if (new_id != 0)
+                            unresolved_plugin_nodes.insert(new_id);
                     } else {
                         if (pv.hasObjectMember("state_b64")) {
                             auto blob = b64_decode(pv["state_b64"].getString());
@@ -1142,7 +1149,9 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             }
         }
 
-        for (const auto& connection : parsed_connections) {
+        std::vector<bool> drop_connection(parsed_connections.size(), false);
+        for (std::size_t i = 0; i < parsed_connections.size(); ++i) {
+            const auto& connection = parsed_connections[i];
             if (!connection_error.empty() || region_internal(connection))
                 continue;
             bool accepted = false;
@@ -1170,6 +1179,14 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 accepted = graph.connect(connection.source_node, connection.source_port,
                                          connection.dest_node, connection.dest_port);
             }
+            if (!accepted && (connection.automation || connection.audio_rate_modulation) &&
+                unresolved_plugin_nodes.contains(connection.dest_node)) {
+                // Match the legacy partial-load contract: an unavailable plugin
+                // cannot accept parameter routing, so omit only that edge while
+                // preserving its placeholder and the rest of the graph.
+                drop_connection[i] = true;
+                continue;
+            }
             if (!accepted)
                 connection_error = "connection failed validation";
         }
@@ -1178,8 +1195,10 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             SignalGraph::GraphMutationLock lock(graph);
             graph.connections_.clear();
             graph.connection_identities_.clear();
-            for (const auto& connection : parsed_connections)
-                graph.append_connection_locked_(connection);
+            for (std::size_t i = 0; i < parsed_connections.size(); ++i) {
+                if (!drop_connection[i])
+                    graph.append_connection_locked_(parsed_connections[i]);
+            }
             graph.sample_region_definitions_ = std::move(definitions);
             graph.invalidate_live_locked_();
         }

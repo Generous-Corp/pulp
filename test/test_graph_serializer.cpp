@@ -335,6 +335,56 @@ TEST_CASE("GraphSerializer rejects invalid unrelated connections in a region gra
     REQUIRE(loaded.connections().empty());
 }
 
+TEST_CASE("GraphSerializer drops unresolved plugin automation from a region graph",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+    const auto source = fixture.graph.add_input_node(1, "Automation Source");
+    auto info = make_fake_plugin_info("Missing Automation", "pulp.test.region.missing-auto",
+                                      PluginFormat::CLAP, 1, 1);
+    const auto plugin = fixture.graph.add_plugin_node(std::make_unique<SerializerSlot>(info), 1, 1,
+                                                      "Missing Automation");
+    REQUIRE(
+        fixture.graph.connect_automation(source, 0, plugin, SerializerSlot::kParamId, -1.0f, 1.0f));
+
+    SignalGraph loaded;
+    REQUIRE(register_builtin_sample_region_types(loaded));
+    const auto result = GraphSerializer::from_json(loaded, GraphSerializer::to_json(fixture.graph));
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(missing_plugins_contain(result, "clap:pulp.test.region.missing-auto"));
+    REQUIRE(loaded.sample_regions().size() == 1);
+    REQUIRE(std::none_of(loaded.connections().begin(), loaded.connections().end(),
+                         [](const auto& connection) {
+                             return connection.automation || connection.audio_rate_modulation;
+                         }));
+}
+
+TEST_CASE("GraphSerializer refuses region graphs above its persisted connection ceiling",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+
+    constexpr std::size_t kPersistedConnectionLimit = 2'048;
+    REQUIRE(fixture.graph.connections().size() < kPersistedConnectionLimit);
+    const auto remaining = kPersistedConnectionLimit - fixture.graph.connections().size();
+    const auto source =
+        fixture.graph.add_input_node(static_cast<int>(remaining + 1), "Ceiling Source");
+    const auto destination =
+        fixture.graph.add_output_node(static_cast<int>(remaining + 1), "Ceiling Destination");
+    for (std::size_t port = 0; port < remaining; ++port) {
+        REQUIRE(fixture.graph.connect(source, static_cast<PortIndex>(port), destination,
+                                      static_cast<PortIndex>(port)));
+    }
+
+    REQUIRE(fixture.graph.connections().size() == kPersistedConnectionLimit);
+    REQUIRE_FALSE(GraphSerializer::to_json(fixture.graph).empty());
+    REQUIRE(fixture.graph.connect(source, static_cast<PortIndex>(remaining), destination,
+                                  static_cast<PortIndex>(remaining)));
+    REQUIRE(fixture.graph.connections().size() == kPersistedConnectionLimit + 1);
+    REQUIRE(GraphSerializer::to_json(fixture.graph).empty());
+}
+
 TEST_CASE("GraphSerializer round-trips topology with gain and I/O nodes", "[host][serializer]") {
     SignalGraph src;
     auto input = src.add_input_node(2, "Input");
