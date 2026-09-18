@@ -282,13 +282,28 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "output/retry flags.",
         )
 
-    def test_ctest_success_progress_is_quiet_to_protect_runner_disk(self) -> None:
+    def test_ctest_progress_is_suppressed_and_failures_are_replayed(self) -> None:
         text = SCRIPT.read_text()
         self.assertEqual(
             text.count('--quiet --output-on-failure'),
             2,
             "both filtered and full coverage runs must suppress successful "
             "CTest progress while retaining failure output",
+        )
+        self.assertIn(
+            "run_ctest()",
+            text,
+            "the full coverage suite must run through the bounded-output helper",
+        )
+        self.assertIn(
+            ">/dev/null",
+            text,
+            "per-test CTest progress must not fill the hosted runner log pager",
+        )
+        self.assertIn(
+            "ctest --rerun-failed --output-on-failure",
+            text,
+            "failed tests must still be replayed with diagnostics",
         )
 
     def test_profraw_cleanup_uses_find_delete(self) -> None:
