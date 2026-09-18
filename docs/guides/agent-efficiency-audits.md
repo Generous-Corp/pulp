@@ -19,6 +19,17 @@ supported owner of the fix, a synthetic regression case, and a review date in
 `tools/scripts/shell_portability_rules.json`. Keep the check narrow enough that
 an agent can explain one actionable fix for every finding.
 
+The local diff-coverage gate also protects its evidence lifecycle. A
+`build-cov/` directory is reusable only when it carries the identity of the
+current worktree and a previous run reached a successful diff-coverage result.
+`tools/scripts/local_diff_cover.sh` removes an unproven or changed directory
+before configuring. This addresses a measured failure mode in recent M3
+sessions where stale objects and `.profraw` files made true coverage near 89%
+appear as 22–36%. The identity file is written only after success, so an
+interrupted run self-invalidates on the next attempt. Revisit or retire this
+guard if the coverage toolchain begins providing an authoritative build/profile
+identity of its own.
+
 The recommended audit prompt is:
 
 > Review a deduplicated, bounded sample of your recent development history.

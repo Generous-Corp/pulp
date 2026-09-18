@@ -53,6 +53,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CONFIG_JSON="${REPO_ROOT}/tools/scripts/coverage_config.json"
 BUILD_DIR="${REPO_ROOT}/build-cov"
 BUILD_COV_LOCK="${BUILD_DIR}.lock"
+BUILD_ID_FILE="${BUILD_DIR}/.pulp-diff-cover-build-id"
 GOVERNED_BUILD="${REPO_ROOT}/tools/ci/governed-build.sh"
 
 # shellcheck source=../../scripts/coverage_ctest_policy.sh
@@ -189,6 +190,37 @@ acquire_build_cov_lock() {
     # lock instead of stranding a pid-less one no later run could reclaim.
     trap release_build_cov_lock EXIT
     echo "$$" > "${BUILD_COV_LOCK}/pid"
+}
+
+# A coverage build is only reusable when it was produced by this worktree's
+# current source state. Reusing a prior branch's objects/profiles can make
+# llvm-cov silently discard mismatched data and report a false low percentage.
+# The identity is deliberately written only after a successful diff-cover run;
+# an interrupted or failed run is therefore rebuilt from a clean directory on
+# the next attempt.
+coverage_build_identity() {
+    {
+        printf 'head=%s\n' "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+        printf 'status=%s\n' "$(git -C "${REPO_ROOT}" status --porcelain=v1)"
+    }
+}
+
+prepare_coverage_build_identity() {
+    local expected actual
+    expected="$(coverage_build_identity)"
+    if [ ! -d "${BUILD_DIR}" ]; then
+        return 0
+    fi
+    if [ ! -f "${BUILD_ID_FILE}" ]; then
+        echo "[local_diff_cover] build-cov has no successful-run identity; removing it before rebuild" >&2
+        rm -rf "${BUILD_DIR}"
+        return 0
+    fi
+    actual="$(cat "${BUILD_ID_FILE}")"
+    if [ "${actual}" != "${expected}" ]; then
+        echo "[local_diff_cover] build-cov identity differs from the current worktree; removing stale coverage state" >&2
+        rm -rf "${BUILD_DIR}"
+    fi
 }
 
 # ── Free-disk precondition ─────────────────────────────────────────────────
@@ -733,6 +765,7 @@ fi
 # Taken after the dependency preflight so a missing-dep exit 2 never makes a
 # concurrent run wait on a lock this one was never going to use.
 acquire_build_cov_lock
+prepare_coverage_build_identity
 
 echo "=== Configuring coverage build in ${BUILD_DIR} ==="
 
@@ -1109,6 +1142,9 @@ rc=$?
 set -e
 
 if [ "${rc}" -eq 0 ]; then
+    identity_tmp="${BUILD_ID_FILE}.tmp.$$"
+    coverage_build_identity > "${identity_tmp}"
+    mv -f "${identity_tmp}" "${BUILD_ID_FILE}"
     echo ""
     echo "[local_diff_cover] OK — diff coverage at or above ${THRESHOLD}%."
     echo "[local_diff_cover] HTML report: ${HTML_REPORT}"
