@@ -463,6 +463,69 @@ bool validate_persisted_region_metadata(const SignalGraph& graph,
     return true;
 }
 
+void accumulate_parser_region_shape(const SignalGraph& graph,
+                                    const SampleRegionDefinition& definition,
+                                    SampleRegionParserShape& shape) {
+    const auto add = [&](std::uint64_t value, std::uint64_t& total) {
+        if (value > std::numeric_limits<std::uint64_t>::max() - total) {
+            shape.arithmetic_overflow = true;
+            return;
+        }
+        total += value;
+    };
+
+    shape.members_per_region =
+        std::max(shape.members_per_region, (std::uint64_t)definition.members.size());
+    add(definition.members.size(), shape.members_total);
+    shape.input_boundaries_per_region = std::max(shape.input_boundaries_per_region,
+                                                 (std::uint64_t)definition.input_boundaries.size());
+    shape.output_boundaries_per_region = std::max(
+        shape.output_boundaries_per_region, (std::uint64_t)definition.output_boundaries.size());
+    add(definition.input_boundaries.size(), shape.input_boundaries_total);
+    add(definition.output_boundaries.size(), shape.output_boundaries_total);
+    shape.parameters_per_region =
+        std::max(shape.parameters_per_region, (std::uint64_t)definition.promoted_parameters.size());
+    add(definition.promoted_parameters.size(), shape.parameters_total);
+
+    std::uint64_t delays = 0;
+    for (const auto& member : definition.members) {
+        const auto* descriptor = graph.sample_kernel_type(member.type_id, member.version);
+        const bool canonical_delay =
+            member.type_id == "pulp.core.unit-delay" && member.version == 1;
+        if ((descriptor != nullptr &&
+             descriptor->causality == SampleKernelCausality::OneSampleDelay) ||
+            (descriptor == nullptr && canonical_delay)) {
+            ++delays;
+        }
+        if (descriptor != nullptr) {
+            shape.kernel_state_bytes =
+                std::max(shape.kernel_state_bytes, (std::uint64_t)descriptor->state_size);
+            shape.kernel_state_alignment =
+                std::max(shape.kernel_state_alignment, (std::uint64_t)descriptor->state_alignment);
+        } else if (canonical_delay) {
+            shape.kernel_state_bytes =
+                std::max(shape.kernel_state_bytes, (std::uint64_t)sizeof(float));
+            shape.kernel_state_alignment =
+                std::max(shape.kernel_state_alignment, (std::uint64_t)alignof(float));
+        }
+    }
+    shape.delays_per_region = std::max(shape.delays_per_region, delays);
+    add(delays, shape.delays_total);
+
+    shape.state_bytes_per_region =
+        std::max(shape.state_bytes_per_region, (std::uint64_t)definition.limits.max_state_bytes);
+    shape.logical_boundary_bytes_per_region = std::max(
+        shape.logical_boundary_bytes_per_region, definition.limits.max_logical_boundary_bytes);
+    shape.work_per_frame_per_region = std::max(shape.work_per_frame_per_region,
+                                               (std::uint64_t)definition.limits.max_work_per_frame);
+    shape.work_per_block_per_region =
+        std::max(shape.work_per_block_per_region, definition.limits.max_work_per_block);
+    add(definition.limits.max_state_bytes, shape.state_bytes_total);
+    add(definition.limits.max_logical_boundary_bytes, shape.logical_boundary_bytes_total);
+    add(definition.limits.max_work_per_frame, shape.work_per_frame_total);
+    add(definition.limits.max_work_per_block, shape.work_per_block_total);
+}
+
 bool validate_persisted_region_topology(const SignalGraph& graph,
                                         std::span<const SampleRegionDefinition> definitions,
                                         std::span<const Connection> connections,
@@ -706,15 +769,23 @@ std::string GraphSerializer::to_json(
     if (!regions.empty() && graph.connections().size() > kMaxSerializedSampleRegionConnections) {
         return {};
     }
-    for (const auto& region : regions) {
+    if (!regions.empty()) {
         SampleRegionParserShape shape{};
-        for (const auto& connection : graph.connections()) {
-            const auto touches = [&](NodeId id) {
-                return std::any_of(region.members.begin(), region.members.end(),
-                                   [&](const auto& member) { return member.node == id; });
-            };
-            if (touches(connection.source_node) || touches(connection.dest_node))
-                ++shape.connections_per_region;
+        shape.regions = regions.size();
+        shape.connections_total = graph.connections().size();
+        for (const auto& region : regions) {
+            accumulate_parser_region_shape(graph, region, shape);
+            std::uint64_t region_connections = 0;
+            for (const auto& connection : graph.connections()) {
+                const auto touches = [&](NodeId id) {
+                    return std::any_of(region.members.begin(), region.members.end(),
+                                       [&](const auto& member) { return member.node == id; });
+                };
+                if (touches(connection.source_node) || touches(connection.dest_node))
+                    ++region_connections;
+            }
+            shape.connections_per_region =
+                std::max(shape.connections_per_region, region_connections);
         }
         if (!prove_sample_region_parser_shape(shape).accepted)
             return {};
@@ -995,9 +1066,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     result.error = "invalid sample region members";
                     return result;
                 }
-                shape.members_total += rv["members"].size();
-                shape.members_per_region =
-                    std::max(shape.members_per_region, (std::uint64_t)rv["members"].size());
                 for (uint32_t j = 0; j < rv["members"].size(); ++j) {
                     const auto& mv = rv["members"][j];
                     SampleRegionKernelNode m;
@@ -1045,18 +1113,11 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     result.error = "invalid sample region boundaries";
                     return result;
                 }
-                shape.input_boundaries_total += d.input_boundaries.size();
-                shape.output_boundaries_total += d.output_boundaries.size();
-                shape.input_boundaries_per_region = std::max(
-                    shape.input_boundaries_per_region, (std::uint64_t)d.input_boundaries.size());
-                shape.output_boundaries_per_region = std::max(
-                    shape.output_boundaries_per_region, (std::uint64_t)d.output_boundaries.size());
                 const auto& ps = rv["promoted_parameters"];
                 if (!ps.isArray() || ps.size() > 16) {
                     result.error = "invalid promoted parameters";
                     return result;
                 }
-                shape.parameters_total += ps.size();
                 for (uint32_t j = 0; j < ps.size(); ++j) {
                     const auto& pv = ps[j];
                     SampleRegionPromotedParameter p;
@@ -1092,8 +1153,6 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     p.bound_port = (PortIndex)n;
                     d.promoted_parameters.push_back(std::move(p));
                 }
-                shape.parameters_per_region =
-                    std::max(shape.parameters_per_region, (std::uint64_t)ps.size());
                 const auto& lv = rv["limits"];
                 if (!lv.isObject()) {
                     result.error = "invalid sample region limits";
@@ -1121,26 +1180,30 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     result.error = "invalid sample region limits";
                     return result;
                 }
+                accumulate_parser_region_shape(graph, d, shape);
                 parsed_regions.push_back(std::move(parsed));
             }
-            shape.connections_total = parsed_connections.size();
-            shape.available_bytes = json.size();
-            for (const auto& r : parsed_regions) {
-                std::uint64_t region_connections = 0;
-                for (const auto& c : parsed_connections) {
-                    const auto touches = [&](NodeId id) {
-                        return std::any_of(r.definition.members.begin(), r.definition.members.end(),
-                                           [&](const auto& m) { return m.node == id; });
-                    };
-                    if (touches(c.source_node) || touches(c.dest_node))
-                        ++region_connections;
+            if (has_region_records) {
+                shape.connections_total = parsed_connections.size();
+                shape.available_bytes = json.size();
+                for (const auto& r : parsed_regions) {
+                    std::uint64_t region_connections = 0;
+                    for (const auto& c : parsed_connections) {
+                        const auto touches = [&](NodeId id) {
+                            return std::any_of(r.definition.members.begin(),
+                                               r.definition.members.end(),
+                                               [&](const auto& m) { return m.node == id; });
+                        };
+                        if (touches(c.source_node) || touches(c.dest_node))
+                            ++region_connections;
+                    }
+                    shape.connections_per_region =
+                        std::max(shape.connections_per_region, region_connections);
                 }
-                shape.connections_per_region =
-                    std::max(shape.connections_per_region, region_connections);
-            }
-            if (!prove_sample_region_parser_shape(shape).accepted) {
-                result.error = "sample region parser shape exceeds limits";
-                return result;
+                if (!prove_sample_region_parser_shape(shape).accepted) {
+                    result.error = "sample region parser shape exceeds limits";
+                    return result;
+                }
             }
         }
     } catch (const std::exception& e) {
@@ -1155,6 +1218,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
 
     // Pass 1: instantiate every node, build old-id → new-id map.
     std::unordered_map<NodeId, NodeId> id_map;
+    std::unordered_set<NodeId> seen_persisted_node_ids;
     std::unordered_map<NodeId, std::pair<NodeId, std::vector<uint8_t>>> deferred_state;
     std::unordered_set<NodeId> unresolved_plugin_nodes;
 
@@ -1167,7 +1231,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             if (has_region_records &&
                 (old_id_value <= 0 ||
                  static_cast<std::uint64_t>(old_id_value) > std::numeric_limits<NodeId>::max() ||
-                 id_map.contains(old_id))) {
+                 !seen_persisted_node_ids.insert(old_id).second)) {
                 graph.clear();
                 result.error = "invalid or duplicate node id in sample region graph";
                 return result;

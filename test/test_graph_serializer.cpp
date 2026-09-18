@@ -493,6 +493,28 @@ TEST_CASE("GraphSerializer rejects invalid persisted region metadata",
             "\"id\": 0");
         require_rejected(json);
     }
+    SECTION("duplicate serialized node identity after an unmaterialized node") {
+        auto json = original;
+        const auto nodes = json.find("\"nodes\"");
+        const auto first_id = json.find("\"id\": ", nodes);
+        const auto first_id_value = json.find(':', first_id);
+        const auto first_id_end = json.find(',', first_id_value);
+        REQUIRE((first_id != std::string::npos && first_id_value != std::string::npos &&
+                 first_id_end != std::string::npos));
+        const auto persisted_id =
+            json.substr(first_id_value + 2, first_id_end - first_id_value - 2);
+        const auto first_type = json.find("\"type\": \"audio_in\"", first_id_end);
+        REQUIRE(first_type != std::string::npos);
+        json.replace(first_type, std::string("\"type\": \"audio_in\"").size(),
+                     "\"type\": \"plugin\"");
+        const auto second_id = json.find("\"id\": ", first_id_end);
+        const auto second_id_value = json.find(':', second_id);
+        const auto second_id_end = json.find(',', second_id_value);
+        REQUIRE((second_id != std::string::npos && second_id_value != std::string::npos &&
+                 second_id_end != std::string::npos));
+        json.replace(second_id_value + 2, second_id_end - second_id_value - 2, persisted_id);
+        require_rejected(json);
+    }
     SECTION("zero connection endpoint") {
         auto json = original;
         const auto source = json.find("\"source_node\": ");
@@ -537,6 +559,19 @@ TEST_CASE("GraphSerializer rejects invalid persisted region metadata",
         const auto parameter = json.substr(object_begin, object_end - object_begin + 1);
         json.insert(object_end + 1, "," + parameter);
         require_rejected(json);
+    }
+    SECTION("declared parser budget exceeds its ceiling") {
+        auto json = original;
+        const auto limit = json.find("\"max_state_bytes\": 127");
+        REQUIRE(limit != std::string::npos);
+        json.replace(limit, std::string("\"max_state_bytes\": 127").size(),
+                     "\"max_state_bytes\": 4097");
+        SignalGraph loaded;
+        REQUIRE(register_builtin_sample_region_types(loaded));
+        const auto result = GraphSerializer::from_json(loaded, json);
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "sample region parser shape exceeds limits");
+        REQUIRE(loaded.nodes().empty());
     }
     SECTION("authored limits exceed v1") {
         auto json = original;
@@ -687,6 +722,31 @@ TEST_CASE("GraphSerializer refuses region graphs above its persisted connection 
                                   static_cast<PortIndex>(remaining)));
     REQUIRE(fixture.graph.connections().size() == kPersistedConnectionLimit + 1);
     REQUIRE(GraphSerializer::to_json(fixture.graph).empty());
+}
+
+TEST_CASE("GraphSerializer keeps the legacy v2 connection capacity",
+          "[host][serializer][sample-region][p2]") {
+    constexpr std::size_t kConnections = 2'049;
+    SignalGraph graph;
+    const auto source = graph.add_input_node(static_cast<int>(kConnections), "Legacy Source");
+    const auto destination =
+        graph.add_output_node(static_cast<int>(kConnections), "Legacy Destination");
+    bool connected = true;
+    for (std::size_t port = 0; port < kConnections; ++port) {
+        connected = graph.connect(source, static_cast<PortIndex>(port), destination,
+                                  static_cast<PortIndex>(port)) &&
+                    connected;
+    }
+    REQUIRE(connected);
+
+    const auto json = GraphSerializer::to_json(graph);
+    REQUIRE_FALSE(json.empty());
+    REQUIRE(json.find("\"format_version\": 2") != std::string::npos);
+    SignalGraph loaded;
+    const auto result = GraphSerializer::from_json(loaded, json);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(loaded.connections().size() == kConnections);
 }
 
 TEST_CASE("GraphSerializer refuses region graphs above the per-region parser ceiling",
