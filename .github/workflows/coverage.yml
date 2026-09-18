@@ -931,6 +931,7 @@ jobs:
           files: build-coverage/coverage.cobertura.xml
           flags: ${{ matrix.flag }}
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: ${{ matrix.os != 'windows' }}
           receipt-name: codecov-upload-${{ matrix.os }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
       - name: Upload Apple Swift coverage to Codecov
@@ -943,6 +944,7 @@ jobs:
           files: build-coverage/apple/coverage.apple.lcov
           flags: apple-swift
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: true
           receipt-name: codecov-upload-apple-swift-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
       - name: Upload Python tools coverage to Codecov
@@ -956,6 +958,7 @@ jobs:
           files: build-coverage/python/coverage.python.xml
           flags: python-tools
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: true
           receipt-name: codecov-upload-python-tools-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   # ── Queued-leg watchdog ────────────────────────────────────────────────
@@ -1168,12 +1171,12 @@ jobs:
     # This lane measures Kotlin unit-testable source only; APK build and
     # emulator/device smoke remain in android.yml.
     name: Coverage report (Android, Kotlin)
-    needs: [resolve-runners, classify]
+    needs: [resolve-runners, classify, coverage]
     # PR coverage is macOS-only; Linux / Windows / Android coverage is
     # supplied by the nightly cross-platform lane. Keep this Kotlin upload
     # for canonical main/manual runs only so PRs do not allocate an Android
     # coverage runner after the native matrix has already been narrowed.
-    if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true' && needs.coverage.result == 'success'
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.android_kotlin_runs_on) }}
     timeout-minutes: 30
     steps:
@@ -1276,6 +1279,7 @@ jobs:
           files: android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml
           flags: android-kotlin
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: true
           receipt-name: codecov-upload-android-kotlin-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   pulp-react-coverage:
@@ -1284,7 +1288,8 @@ jobs:
     # validates PRs, but it must not be the only main upload for a SHA whose
     # native Coverage run was superseded before any OS legs uploaded.
     name: Coverage report (@pulp/react, Vitest)
-    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && (github.event_name != 'pull_request')
+    needs: [classify, coverage]
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && (github.event_name != 'pull_request') && needs.classify.outputs.native_build_required == 'true' && needs.coverage.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1345,6 +1350,7 @@ jobs:
           files: packages/pulp-react/coverage/cobertura-coverage.xml
           flags: pulp-react
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: true
           receipt-name: codecov-upload-pulp-react-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   coverage-diff-gate:
