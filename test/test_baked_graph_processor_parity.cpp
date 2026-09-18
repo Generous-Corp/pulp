@@ -11,12 +11,15 @@
 // mis-baked.
 
 #include "harness/rt_allocation_probe.hpp"
+#include "support/audio_test_signals.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/host/baked_graph_processor.hpp>
+#include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
@@ -28,7 +31,10 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <vector>
 
@@ -55,9 +61,10 @@ void scalar_pair_block_callback(pulp::audio::BufferView<float>&,
 }
 
 void scalar_pair_sample_callback(void*, const pulp::host::PreparedSampleKernelConfig&,
-                                 const pulp::host::SampleFrameContext&, const float*,
-                                 float*) noexcept {
+                                 const pulp::host::SampleFrameContext&, const float* input,
+                                 float* output) noexcept {
     ++g_scalar_pair_sample_calls;
+    output[0] = input[0];
 }
 
 std::vector<float> ramp(int n, float seed) {
@@ -1222,8 +1229,7 @@ TEST_CASE("signed v2 bake preflight remaps and re-proves sample regions",
 
     pulp::host::BakedTrust trust;
     trust.trusted_public_keys.push_back(kp->public_key);
-    const auto loaded =
-        pulp::host::load_baked(bytes, trust, pulp::host::BakedTypeRegistry::from(builtins));
+    const auto loaded = pulp::host::load_baked_plan(bytes, trust, builtins);
     REQUIRE(loaded.accepted);
     REQUIRE(loaded.plan.has_value());
     CHECK(*loaded.plan == plan);
@@ -1253,6 +1259,32 @@ TEST_CASE("signed v2 bake preflight remaps and re-proves sample regions",
     const auto legacy = pulp::host::load_baked(bytes, trust, {});
     CHECK_FALSE(legacy.accepted);
     CHECK(legacy.reason == pulp::host::LowerRejectReason::CodecRejected);
+
+    SECTION("executable regions require the exact built-in scalar registration") {
+        auto pairs = builtins;
+        const auto signed_custom = pulp::host::write_baked_signed(plan, kp->private_key);
+        REQUIRE_FALSE(signed_custom.empty());
+        pulp::state::StateStore store;
+        auto executable = pulp::host::load_baked(signed_custom, trust,
+                                                 pulp::host::BakedTypeRegistry::from(pairs));
+        INFO(executable.message);
+        REQUIRE(executable.accepted);
+        REQUIRE(executable.processor);
+        REQUIRE(g_scalar_pair_sample_calls.load() == 0);
+        REQUIRE(g_scalar_pair_block_calls.load() == 0);
+        executable.processor->define_parameters(store);
+        executable.processor->prepare(make_prepare_ctx(1));
+        const std::vector<std::vector<float>> input{ramp(kFrames, 0.5f)};
+        REQUIRE(run_baked(*executable.processor, kFrames, input, 1) == input);
+        REQUIRE(g_scalar_pair_sample_calls.load() == 0);
+        REQUIRE(g_scalar_pair_block_calls.load() == 0);
+        pairs.front().sample.process = scalar_pair_sample_callback;
+        const auto substituted = pulp::host::load_baked(signed_custom, trust,
+                                                        pulp::host::BakedTypeRegistry::from(pairs));
+        REQUIRE_FALSE(substituted.accepted);
+        REQUIRE_FALSE(substituted.processor);
+        REQUIRE(g_scalar_pair_sample_calls.load() == 0);
+    }
 
     SECTION("mismatched, duplicate, and zero-callback pairs fail before reconstruction") {
         auto mismatched = registration();
@@ -1284,8 +1316,24 @@ TEST_CASE("signed v2 bake preflight remaps and re-proves sample regions",
         const auto rejected = pulp::host::load_baked_plan(late_failure_bytes, trust, builtins);
         CHECK_FALSE(rejected.accepted);
         CHECK(rejected.reason == pulp::host::LowerRejectReason::CodecRejected);
+        const auto executable = pulp::host::load_baked(
+            late_failure_bytes, trust, pulp::host::BakedTypeRegistry::from(builtins));
+        CHECK_FALSE(executable.accepted);
+        CHECK_FALSE(executable.processor);
         CHECK(g_scalar_pair_sample_calls.load() == 0);
         CHECK(g_scalar_pair_block_calls.load() == 0);
+    }
+    SECTION("authenticated exterior cycles are refused before processor publication") {
+        auto cyclic = plan;
+        cyclic.nodes.push_back({5, pulp::host::NodeType::Gain, 2, 2, 1.0f, {}, 0, {}});
+        cyclic.connections.push_back({4, 0, 5, 0, false});
+        cyclic.connections.push_back({5, 0, 3, 0, false});
+        const auto cyclic_bytes = pulp::host::write_baked_signed(cyclic, kp->private_key);
+        REQUIRE_FALSE(cyclic_bytes.empty());
+        const auto executable = pulp::host::load_baked(
+            cyclic_bytes, trust, pulp::host::BakedTypeRegistry::from(builtins));
+        CHECK_FALSE(executable.accepted);
+        CHECK_FALSE(executable.processor);
     }
     SECTION("authenticated topology shape and bus mismatches are refused") {
         auto bad_shape = plan;
@@ -1622,4 +1670,135 @@ TEST_CASE("Baked parameterless sample regions bind an empty adapter store",
     baked.processor->prepare(context);
     REQUIRE(render_baked_region(*baked.processor, {1.0f, 0.0f}, {1}) ==
             std::vector<float>{0.5f, 0.75f});
+}
+
+TEST_CASE("Graph and signed bake sample-region manifests and allpass renders agree",
+          "[host][baked][sample-region][parity][GEN-03]") {
+    using namespace pulp::host;
+    bool promoted = true;
+    SECTION("promoted coefficient") {}
+    SECTION("parameterless coefficient") {
+        promoted = false;
+    }
+    BakedAllpassSource source(promoted);
+    const auto graph_manifest = GraphSerializer::to_json(source.graph);
+    REQUIRE_FALSE(graph_manifest.empty());
+    std::unique_ptr<SampleRegionParameterOwner> reloaded_parameters;
+    SignalGraph reloaded;
+    REQUIRE(register_builtin_sample_region_types(reloaded));
+    const auto reload = GraphSerializer::from_json(reloaded, graph_manifest);
+    INFO(reload.error);
+    REQUIRE(reload.ok);
+    REQUIRE(GraphSerializer::to_json(reloaded) == graph_manifest);
+    auto edit = reloaded.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    reloaded_parameters =
+        SampleRegionParameterOwner::create({}, edit->sample_region_parameter_contract());
+    REQUIRE(reloaded_parameters);
+    REQUIRE(edit->bind_sample_region_parameters(reloaded_parameters->binding()).accepted);
+    REQUIRE(edit->prepare(kSr, kBakedRegionMaximum) ==
+            SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    const auto source_plan = bake_to_plan(source.graph);
+    const auto reloaded_plan = bake_to_plan(reloaded);
+    REQUIRE(source_plan.accepted);
+    REQUIRE(reloaded_plan.accepted);
+    REQUIRE(*source_plan.plan == *reloaded_plan.plan);
+
+    std::array<std::uint8_t, 32> seed{};
+    seed.fill(37);
+    const auto keys = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+    REQUIRE(keys);
+    const auto bytes = write_baked_signed(*reloaded_plan.plan, keys->private_key);
+    REQUIRE_FALSE(bytes.empty());
+    BakedTrust trust;
+    trust.trusted_public_keys.push_back(keys->public_key);
+    const auto manifest = verify_and_extract_plan(bytes, trust);
+    REQUIRE(manifest);
+    REQUIRE(*manifest == *source_plan.plan);
+    const auto registry = BakedTypeRegistry::from({});
+    pulp::state::StateStore first_store, second_store;
+    auto first = load_baked(bytes, trust, registry);
+    auto second = load_baked(bytes, trust, registry);
+    INFO(first.message);
+    REQUIRE(first.accepted);
+    REQUIRE(second.accepted);
+    REQUIRE(first.processor);
+    REQUIRE(second.processor);
+    first.processor->define_parameters(first_store);
+    second.processor->define_parameters(second_store);
+    const auto* baked = dynamic_cast<const BakedGraphProcessor*>(first.processor.get());
+    REQUIRE(baked);
+    REQUIRE(baked->sample_region_parameter_contract().frozen());
+    REQUIRE(
+        baked->sample_region_parameter_contract().matches_promoted(source.parameters->contract()));
+    REQUIRE(baked->sample_region_parameter_binding());
+    REQUIRE(first_store.param_count() == source.parameters->store().param_count());
+    auto context = make_prepare_ctx(1);
+    context.max_buffer_size = kBakedRegionMaximum;
+    first.processor->prepare(context);
+    second.processor->prepare(context);
+    REQUIRE(first.processor->latency_samples() == 0);
+    const auto tonal = pulp::test::audio::make_sine(1, 96000, 440.0f, kSr, 0.4f);
+    const std::vector<float> input(tonal.channel(0).begin(), tonal.channel(0).end());
+    const std::vector<int> irregular{1, 127, 3, 64, 17, 257, 5, 31};
+    const auto render_graph = [&](SignalGraph& graph, const std::vector<int>& schedule) {
+        std::vector<float> result;
+        std::size_t offset = 0, block = 0;
+        while (offset < input.size()) {
+            const auto frames =
+                std::min<std::size_t>(schedule[block++ % schedule.size()], input.size() - offset);
+            const std::vector<float> chunk(input.begin() + offset, input.begin() + offset + frames);
+            const auto output = run_graph(graph, static_cast<int>(frames), {chunk}, 1);
+            result.insert(result.end(), output[0].begin(), output[0].end());
+            offset += frames;
+        }
+        return result;
+    };
+    const auto live = render_graph(source.graph, {64});
+    const auto reload_render = render_graph(reloaded, irregular);
+    const auto bake_render = render_baked_region(*first.processor, input, {64});
+    const auto irregular_render =
+        render_baked_region(*second.processor, input, irregular, false, true);
+    REQUIRE(reload_render == live);
+    REQUIRE(bake_render == live);
+    REQUIRE(irregular_render == live);
+    if (const char* directory = std::getenv("PULP_SAMPLE_REGION_ARTIFACT_DIR")) {
+        const auto path =
+            std::filesystem::path(directory) / (promoted ? "promoted" : "parameterless");
+        std::filesystem::create_directories(path);
+        const auto write = [&](const char* name, const char* data, std::size_t size) {
+            std::ofstream file(path / name, std::ios::binary);
+            REQUIRE(file.good());
+            file.write(data, static_cast<std::streamsize>(size));
+            file.close();
+            REQUIRE(file.good());
+        };
+        write("allpass.pulpgraph", graph_manifest.data(), graph_manifest.size());
+        write("allpass.pulpbake", reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const auto audio = [&](const char* name, const std::vector<float>& samples) {
+            pulp::audio::AudioFileData data;
+            data.sample_rate = static_cast<std::uint32_t>(kSr);
+            data.channels = {samples};
+            REQUIRE(pulp::audio::write_wav_file((path / name).string(), data,
+                                                pulp::audio::WavBitDepth::Float32));
+        };
+        audio("source.wav", live);
+        audio("reload.wav", reload_render);
+        audio("bake.wav", bake_render);
+        audio("bake-irregular.wav", irregular_render);
+    }
+    if (promoted)
+        first_store.set_value(kBakedCoefficient, 0.25f);
+    REQUIRE(render_baked_region(*first.processor, {1.0f}, {1}, true)[0] ==
+            (promoted ? 0.25f : 0.5f));
+    REQUIRE(render_baked_region(*second.processor, {1.0f}, {1}, true)[0] == 0.5f);
+
+    auto tampered = bytes;
+    tampered.back() ^= 1;
+    REQUIRE_FALSE(load_baked(tampered, trust, registry).accepted);
+    REQUIRE_FALSE(load_baked(bytes, BakedTrust{}, registry).accepted);
+    REQUIRE_FALSE(load_baked(bytes, trust, {}).accepted);
+    // Rejected replacement artifacts never acquire the accepted processor's bank.
+    REQUIRE(render_baked_region(*second.processor, {0.0f}, {1})[0] == 0.75f);
 }

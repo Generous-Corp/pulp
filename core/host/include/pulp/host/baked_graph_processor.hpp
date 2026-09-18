@@ -394,10 +394,9 @@ class BakedTypeRegistry {
     std::vector<BakedTypeRegistration> registrations_;
 };
 
-// B3's loader/proof boundary. It verifies a signed v2 artifact, reconstructs
-// its authored topology and region metadata in an isolated PreparedTopologyEdit,
-// and re-runs exact sample-region + ordinary graph proofs. It returns the
-// callback-free verified plan for the later I3 BakedGraphProcessor integration;
+// Verify a signed v2 artifact, reconstruct its authored topology and region
+// metadata in an isolated PreparedTopologyEdit, and re-run exact region and
+// ordinary graph proofs. Inspection returns the callback-free verified plan;
 // it does not publish or execute a runtime snapshot.
 struct BakedPlanLoadResult {
     std::optional<BakedPlan> plan;
@@ -411,11 +410,21 @@ struct BakedPlanLoadResult {
 BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
                                     const std::vector<BakedTypeRegistration>& registrations);
 
+namespace detail {
+LowerResult load_baked_registered(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                                  const BakedTypeRegistry& registry);
+}
+
+// Paired registrations admit executable signed sample regions with private
+// scalar state. Built-in kernels need no extra registrations. Call
+// define_parameters(store) before prepare(), including for an empty manifest;
+// the adapter store must outlive the processor. An empty brace argument still
+// selects the legacy v1-only vector overload.
 template <typename Registry>
     requires std::is_same_v<std::remove_cvref_t<Registry>, BakedTypeRegistry>
-BakedPlanLoadResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
-                               Registry&& registry) {
-    return load_baked_plan(bytes, trust, registry.registrations());
+LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                       Registry&& registry) {
+    return detail::load_baked_registered(bytes, trust, registry);
 }
 
 // Result of bake_to_plan(): `plan` is set iff `accepted`; on refusal the reason /

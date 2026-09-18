@@ -583,10 +583,9 @@ BakePlanResult bake_to_plan(const SignalGraph& graph) {
         return result;
     }
     BakedPlan plan;
-    // Region-free artifacts retain the v1 wire contract. Region-bearing bake
-    // output is admitted by the v2 codec only after the runtime integration
-    // owns the sample-region lowering; this slice still emits v1 for the
-    // existing block-graph path.
+    // Region-free artifacts preserve the v1 wire representation. Sample-region
+    // graphs carry bounded authored definitions in v2; runtime state and
+    // callbacks are never serialized.
     plan.format_version =
         authored_regions.empty() ? kBakedPlanV1FormatVersion : kBakedMaxSupportedFormatVersion;
     for (const auto& descriptor : authored_regions) {
@@ -790,8 +789,10 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
     return bake_impl(graph, &restore_states);
 }
 
-BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
-                                    const std::vector<BakedTypeRegistration>& registrations) {
+static BakedPlanLoadResult
+load_baked_registered_impl(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                           const std::vector<BakedTypeRegistration>& registrations,
+                           LowerResult* executable) {
     BakedPlanLoadResult result;
     const auto plan = verify_and_extract_plan(bytes, trust);
     if (!plan) {
@@ -809,13 +810,15 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
         legacy_types.reserve(registrations.size());
         for (const auto& registration : registrations)
             legacy_types.push_back(registration.block);
-        const auto legacy = load_baked(bytes, trust, legacy_types);
+        auto legacy = load_baked(bytes, trust, legacy_types);
         if (!legacy.accepted) {
             result.reason = legacy.reason;
             result.offending_node = legacy.offending_node;
             result.message = legacy.message;
             return result;
         }
+        if (executable)
+            *executable = std::move(legacy);
         result.plan = *plan;
         result.accepted = true;
         result.reason = LowerRejectReason::None;
@@ -1135,9 +1138,85 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
         return result;
     }
 
+    if (executable) {
+        // Only authenticated, fully re-proved topology reaches lifecycle code.
+        // Region kernels own fresh scalar state independently of this
+        // temporary graph; no block lifecycle executes for a scalar member.
+        SignalGraph builtin_registry;
+        if (!register_builtin_sample_region_types(builtin_registry)) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "could not resolve built-in scalar descriptors";
+            return result;
+        }
+        std::vector<SampleKernelDescriptor> kernels;
+        for (const auto& region : remapped_regions) {
+            for (const auto& member : region.members) {
+                const SampleKernelDescriptor* sample = nullptr;
+                for (const auto& registration : registrations)
+                    if (registration.sample.type_id == member.type_id &&
+                        registration.sample.version == member.version)
+                        sample = &registration.sample;
+                if (!sample)
+                    sample = builtin_registry.sample_kernel_type(member.type_id, member.version);
+                if (!sample) {
+                    result.reason = LowerRejectReason::CodecRejected;
+                    result.message = "verified region lost its exact scalar registration";
+                    return result;
+                }
+                if (std::none_of(kernels.begin(), kernels.end(), [&](const auto& value) {
+                        return value.type_id == sample->type_id && value.version == sample->version;
+                    }))
+                    kernels.push_back(*sample);
+            }
+        }
+        // The paired proof requires every registered scalar node to belong to
+        // a region. Preserve that closed surface instead of creating block
+        // instances for scalar records or silently discarding opaque state.
+        for (const auto& node : plan->nodes) {
+            if (node.type != NodeType::Custom)
+                continue;
+            if (!region_for_node.contains(id_map.at(node.id)) || !node.custom_state.empty()) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_node = node.id;
+                result.message =
+                    "sample-region kernels require region membership and no opaque block state";
+                return result;
+            }
+        }
+        *executable = BakedGraphProcessor::create_with_sample_regions(
+            edit->nodes(), edit->connections(), plan->input_channels, plan->output_channels,
+            "Baked Graph", "com.pulp.baked-graph", {}, std::move(remapped_regions),
+            std::move(kernels));
+        if (!executable->accepted) {
+            result.reason = executable->reason;
+            result.offending_node = executable->offending_node;
+            result.message = executable->message;
+            return result;
+        }
+    }
     result.plan = *plan;
     result.accepted = true;
     result.reason = LowerRejectReason::None;
+    return result;
+}
+
+BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                                    const std::vector<BakedTypeRegistration>& registrations) {
+    return load_baked_registered_impl(bytes, trust, registrations, nullptr);
+}
+
+LowerResult detail::load_baked_registered(std::span<const std::uint8_t> bytes,
+                                          const BakedTrust& trust,
+                                          const BakedTypeRegistry& registry) {
+    LowerResult result;
+    const auto proof = load_baked_registered_impl(bytes, trust, registry.registrations(), &result);
+    if (!proof.accepted) {
+        result.processor.reset();
+        result.accepted = false;
+        result.reason = proof.reason;
+        result.offending_node = proof.offending_node;
+        result.message = proof.message;
+    }
     return result;
 }
 
