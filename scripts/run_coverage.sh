@@ -171,7 +171,11 @@ if ! grep -q '^PULP_ENABLE_COVERAGE:BOOL=ON$' "${CACHE_FILE}" 2>/dev/null; then
 fi
 
 echo "=== Building ==="
-cmake --build "${BUILD_DIR}" -j"${JOBS}"
+# Compiler warnings from the large example-driven graph can fill the hosted
+# runner's Actions log pager and exhaust the root disk before report upload.
+# Keep the build output on the runner only; a build failure still returns the
+# original non-zero status and the surrounding step reports it clearly.
+cmake --build "${BUILD_DIR}" -j"${JOBS}" >/dev/null
 
 echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"
