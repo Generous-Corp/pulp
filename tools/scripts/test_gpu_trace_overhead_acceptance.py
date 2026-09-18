@@ -1087,6 +1087,73 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.a2t_scope_inventory(Path("/repo"), "HEAD")
 
+    def test_scope_history_base_rejects_nonancestor(self):
+        with self.assertRaisesRegex(ValueError, "not an ancestor of source"):
+            MODULE._validate_a2t_scope_history_base(ROOT, MODULE.A2T_SCOPE_BASE)
+
+    def test_scope_history_base_rejects_second_parent_only_commit(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        with mock.patch.object(
+            MODULE, "A2T_SCOPE_HISTORY_BASE", MODULE.A2T_SCOPE_BASE
+        ):
+            with self.assertRaisesRegex(ValueError, "first-parent chain"):
+                MODULE._validate_a2t_scope_history_base(ROOT, head)
+
+    def test_scope_history_window_rejects_empty_walk(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        manifest = MODULE._load_a2t_scope_manifest(ROOT, head)
+        with mock.patch.object(MODULE, "A2T_SCOPE_HISTORY_BASE", head):
+            with self.assertRaisesRegex(ValueError, "window is empty"):
+                MODULE._a2t_scope_touching_revision_ids(
+                    ROOT, head, manifest["scope_paths"]
+                )
+
+    def test_scope_history_limit_names_repin_cause(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        manifest = MODULE._load_a2t_scope_manifest(ROOT, head)
+        with mock.patch.object(MODULE, "A2T_SCOPE_HISTORY_LIMIT", 1):
+            with self.assertRaisesRegex(
+                ValueError, "pinned A2T scope history base is .*re-pin"
+            ):
+                MODULE._a2t_scope_touching_revision_ids(
+                    ROOT, head, manifest["scope_paths"]
+                )
+
+    def test_rolling_history_pin_cannot_change_authority_results(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        first = MODULE.a2t_scope_inventory(ROOT, head)
+        with mock.patch.object(
+            MODULE,
+            "A2T_SCOPE_HISTORY_BASE",
+            "e5a5217f3ebe0a2ee47b778fd2c393d4b1194cf3",
+        ):
+            second = MODULE.a2t_scope_inventory(ROOT, head)
+        authority_fields = (
+            "base_revision",
+            "path_deltas",
+            "producer_prefixes_checked",
+            "a2t_scoped_producer_paths",
+            "no_a2t_scoped_producer_delta",
+            "non_a2t_product_producers",
+        )
+        for field in authority_fields:
+            self.assertEqual(first[field], second[field])
+        first_authority_bytes = json.dumps(
+            {field: first[field] for field in authority_fields},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        second_authority_bytes = json.dumps(
+            {field: second[field] for field in authority_fields},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        self.assertEqual(first_authority_bytes, second_authority_bytes)
+        self.assertNotEqual(
+            first["scope_touching_revision_window"],
+            second["scope_touching_revision_window"],
+        )
+
     def test_scope_touching_history_keeps_headroom_under_its_limit(self):
         """The bounded-history limit must be raised before traffic reaches it.
 
@@ -1111,10 +1178,10 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
             headroom["count"], headroom["budget"],
             f"A2T scope-touching history is at {headroom['count']} revisions of "
             f"a {headroom['limit']} limit, past the "
-            f"{MODULE.A2T_SCOPE_HEADROOM_RATIO:.0%} mark. Raise "
-            "A2T_SCOPE_HISTORY_LIMIT in gpu_trace_overhead_acceptance.py, and "
-            "re-measure the verifier's row in test_ctest_measured_budgets.py "
-            "first: the walk costs about 49ms a revision and the suite runs four.",
+            f"{MODULE.A2T_SCOPE_HEADROOM_RATIO:.0%} mark. Re-pin "
+            "A2T_SCOPE_HISTORY_BASE to a protected-main first-parent commit, "
+            "retaining roughly 25% of the window. Do not move A2T_SCOPE_BASE "
+            "or raise A2T_SCOPE_HISTORY_LIMIT to re-arm this timer.",
         )
 
     def test_scope_path_count_keeps_headroom_under_its_limit(self):

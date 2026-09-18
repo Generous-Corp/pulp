@@ -45,6 +45,8 @@ config_paths = [
     "tools/shipyard.toml",
     "tools/local-ci/**",
     "tools/ci/**",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_scope.json",
     ".agents/contract.toml",
 ]
 
@@ -195,6 +197,15 @@ title = "Warm build dirs on self-hosted; ODR-prone lanes stay on GitHub-hosted U
 why = "Warm-dir ODR is a known class (SEGFAULT/exit-8 false reds AND false greens masking a real main break); fresh builds are ~25 min."
 do_not = "'Clean every run' WITHOUT first fixing shared ccache (doubles gate time), or moving heavy lanes onto warm dirs (reintroduces ODR on the gate)."
 guards = [".github/workflows/**", ".shipyard/config.toml", "tools/ci/**"]
+
+[[decision]]
+id = 22
+layer = "pulp"
+tags = ["a2t-scope-history", "history-base", "re-pin", "gpu-trace-overhead"]
+title = "A2T keeps immutable authority separate from a rolling, bounded revision-history window."
+why = "The immutable authority delta must remain auditable, while a forever-growing revision walk eventually makes every PR fail for elapsed repository history rather than a product defect."
+do_not = "Raise A2T_SCOPE_HISTORY_LIMIT or move A2T_SCOPE_BASE to re-arm the timer; re-pin only A2T_SCOPE_HISTORY_BASE on protected main at 75%, retaining roughly 25% of the window."
+guards = ["tools/scripts/gpu_trace_overhead_acceptance.py", "tools/scripts/gpu_trace_overhead_scope.json"]
 
 [[decision]]
 id = 9
