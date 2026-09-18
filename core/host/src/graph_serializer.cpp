@@ -666,13 +666,16 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 c.feedback = cv["feedback"].getBool();
                 c.midi = cv["midi"].getBool();
                 c.automation = cv["automation"].getBool();
-                c.audio_rate_modulation = cv.hasObjectMember("audio_rate_modulation") &&
-                                                  cv["audio_rate_modulation"].isBool()
+                if ((cv.hasObjectMember("audio_rate_modulation") &&
+                     !cv["audio_rate_modulation"].isBool()) ||
+                    (cv.hasObjectMember("sidechain") && !cv["sidechain"].isBool())) {
+                    result.error = "invalid connection flags";
+                    return result;
+                }
+                c.audio_rate_modulation = cv.hasObjectMember("audio_rate_modulation")
                                               ? cv["audio_rate_modulation"].getBool()
                                               : false;
-                c.sidechain = cv.hasObjectMember("sidechain") && cv["sidechain"].isBool()
-                                  ? cv["sidechain"].getBool()
-                                  : false;
+                c.sidechain = cv.hasObjectMember("sidechain") ? cv["sidechain"].getBool() : false;
                 if (c.automation || c.audio_rate_modulation) {
                     if (!json_u64(cv["auto_param_id"], std::numeric_limits<std::uint32_t>::max(),
                                   n)) {
@@ -1179,7 +1182,13 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 accepted = graph.connect(connection.source_node, connection.source_port,
                                          connection.dest_node, connection.dest_port);
             }
-            if (!accepted && (connection.automation || connection.audio_rate_modulation) &&
+            const auto* unresolved_source = graph.node(connection.source_node);
+            const bool valid_unresolved_source =
+                unresolved_source != nullptr && unresolved_source->num_output_ports > 0 &&
+                connection.source_port <
+                    static_cast<PortIndex>(unresolved_source->num_output_ports);
+            if (!accepted && valid_unresolved_source &&
+                (connection.automation || connection.audio_rate_modulation) &&
                 unresolved_plugin_nodes.contains(connection.dest_node)) {
                 // Match the legacy partial-load contract: an unavailable plugin
                 // cannot accept parameter routing, so omit only that edge while

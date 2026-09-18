@@ -335,6 +335,30 @@ TEST_CASE("GraphSerializer rejects invalid unrelated connections in a region gra
     REQUIRE(loaded.connections().empty());
 }
 
+TEST_CASE("GraphSerializer rejects non-boolean optional connection flags in a region graph",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+    const auto original = GraphSerializer::to_json(fixture.graph);
+
+    for (const std::string field : {"audio_rate_modulation", "sidechain"}) {
+        DYNAMIC_SECTION(field) {
+            auto json = original;
+            const auto flag = json.find("\"" + field + "\": false");
+            REQUIRE(flag != std::string::npos);
+            json.replace(flag, std::string("\"" + field + "\": false").size(),
+                         "\"" + field + "\": 1");
+
+            SignalGraph loaded;
+            REQUIRE(register_builtin_sample_region_types(loaded));
+            const auto result = GraphSerializer::from_json(loaded, json);
+            REQUIRE_FALSE(result.ok);
+            REQUIRE(result.error == "invalid connection flags");
+            REQUIRE(loaded.nodes().empty());
+        }
+    }
+}
+
 TEST_CASE("GraphSerializer drops unresolved plugin automation from a region graph",
           "[host][serializer][sample-region][p2]") {
     PersistedRegionFixture fixture;
@@ -346,18 +370,37 @@ TEST_CASE("GraphSerializer drops unresolved plugin automation from a region grap
                                                       "Missing Automation");
     REQUIRE(
         fixture.graph.connect_automation(source, 0, plugin, SerializerSlot::kParamId, -1.0f, 1.0f));
+    const auto json = GraphSerializer::to_json(fixture.graph);
 
-    SignalGraph loaded;
-    REQUIRE(register_builtin_sample_region_types(loaded));
-    const auto result = GraphSerializer::from_json(loaded, GraphSerializer::to_json(fixture.graph));
-    INFO(result.error);
-    REQUIRE(result.ok);
-    REQUIRE(missing_plugins_contain(result, "clap:pulp.test.region.missing-auto"));
-    REQUIRE(loaded.sample_regions().size() == 1);
-    REQUIRE(std::none_of(loaded.connections().begin(), loaded.connections().end(),
-                         [](const auto& connection) {
-                             return connection.automation || connection.audio_rate_modulation;
-                         }));
+    SECTION("valid source preserves partial load") {
+        SignalGraph loaded;
+        REQUIRE(register_builtin_sample_region_types(loaded));
+        const auto result = GraphSerializer::from_json(loaded, json);
+        INFO(result.error);
+        REQUIRE(result.ok);
+        REQUIRE(missing_plugins_contain(result, "clap:pulp.test.region.missing-auto"));
+        REQUIRE(loaded.sample_regions().size() == 1);
+        REQUIRE(std::none_of(loaded.connections().begin(), loaded.connections().end(),
+                             [](const auto& connection) {
+                                 return connection.automation || connection.audio_rate_modulation;
+                             }));
+    }
+
+    SECTION("invalid source port remains fatal") {
+        auto malformed = json;
+        const auto edge = malformed.find("\"source_node\": " + std::to_string(source));
+        REQUIRE(edge != std::string::npos);
+        const auto port = malformed.find("\"source_port\": 0", edge);
+        REQUIRE(port != std::string::npos);
+        malformed.replace(port, std::string("\"source_port\": 0").size(), "\"source_port\": 99");
+
+        SignalGraph loaded;
+        REQUIRE(register_builtin_sample_region_types(loaded));
+        const auto result = GraphSerializer::from_json(loaded, malformed);
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "connection failed validation");
+        REQUIRE(loaded.nodes().empty());
+    }
 }
 
 TEST_CASE("GraphSerializer refuses region graphs above its persisted connection ceiling",
