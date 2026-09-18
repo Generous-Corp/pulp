@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/host/baked_graph_processor.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <bit>
@@ -200,6 +201,9 @@ TEST_CASE("Prepared edit publishes and later edits inherit the borrowed binding"
     REQUIRE(edit->prepare(48000.0, 64) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
     REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
     CHECK(graph.sample_region_parameter_binding() == &owner->binding());
+    const auto graph_generation = graph.sample_region_binding_generation();
+    owner->store().set_value(7, 0.5f);
+    CHECK(graph.sample_region_binding_generation() == graph_generation);
     auto later = graph.begin_prepared_topology_edit();
     CHECK(later->sample_region_parameter_binding() == &owner->binding());
 }
@@ -237,4 +241,165 @@ TEST_CASE("Prepared edit rejects a borrowed contract with different authored ide
     CHECK(graph.is_prepared());
     CHECK(graph.nodes().size() == nodes_before.size());
     CHECK(graph.sample_region_parameter_binding() == nullptr);
+}
+
+TEST_CASE("Baked graph publishes the frozen promoted parameter manifest",
+          "[host][sample-region][parameters][baked]") {
+    auto coefficient = promoted(90);
+    coefficient.name = "Allpass Coefficient";
+    coefficient.range = {-0.99f, 0.99f, 0.5f, 0.0f};
+    auto feedback = promoted(40, "feedback");
+    feedback.name = "Feedback";
+    feedback.range = {0.0f, 1.0f, 0.25f, 0.0f};
+    const auto definition = region(9, {coefficient, feedback});
+
+    state::StateStore store;
+    auto result = BakedGraphProcessor::create_with_sample_regions(
+        {}, {}, 1, 1, "Baked", "com.test.baked", {}, {definition});
+    REQUIRE(result.accepted);
+    REQUIRE(result.processor);
+    auto& processor = static_cast<BakedGraphProcessor&>(*result.processor);
+    processor.define_parameters(store);
+    processor.define_parameters(store);
+
+    REQUIRE(processor.sample_region_parameter_contract().frozen());
+    REQUIRE(processor.sample_region_parameter_binding() != nullptr);
+    CHECK(&processor.sample_region_parameter_binding()->store() == &store);
+    CHECK(processor.sample_region_parameter_binding()->value(90) == 0.5f);
+    REQUIRE(store.param_count() == 2);
+    const auto manifest = store.all_params();
+    CHECK(manifest[0].id == 40);
+    CHECK(manifest[0].name == "Feedback");
+    CHECK(manifest[0].range.default_value == 0.25f);
+    CHECK(manifest[0].rate == state::ParamRate::ControlRate);
+    CHECK(manifest[0].smoothing_ramp_seconds == 0.0f);
+    CHECK(manifest[1].id == 90);
+    CHECK(manifest[1].name == "Allpass Coefficient");
+    CHECK(manifest[1].range.default_value == 0.5f);
+    CHECK(store.get_value(40) == 0.25f);
+    CHECK(store.get_value(90) == 0.5f);
+
+    std::vector<state::ParamID> begins;
+    std::vector<state::ParamID> ends;
+    store.set_gesture_callbacks([&](state::ParamID id) { begins.push_back(id); },
+                                [&](state::ParamID id) { ends.push_back(id); });
+    const auto generation = store.state_generation();
+    store.begin_gesture(90);
+    store.set_value(90, 0.75f);
+    store.end_gesture(90);
+    CHECK(store.get_value(90) == 0.75f);
+    CHECK(store.state_generation() > generation);
+    CHECK(begins == std::vector<state::ParamID>{90});
+    CHECK(ends == std::vector<state::ParamID>{90});
+    CHECK(store.open_gesture_count() == 0);
+}
+
+TEST_CASE("Baked graph without regions preserves the empty legacy manifest",
+          "[host][sample-region][parameters][baked][compatibility]") {
+    BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked");
+    state::StateStore store;
+    processor.define_parameters(store);
+    CHECK(store.param_count() == 0);
+    CHECK(store.state_generation() == 0);
+    CHECK(processor.sample_region_parameter_binding() == nullptr);
+}
+
+TEST_CASE("Baked graph factory rejects an invalid promoted contract before publication",
+          "[host][sample-region][parameters][baked][negative]") {
+    auto invalid = promoted(90);
+    invalid.bound_node_id = 0;
+    const auto result = BakedGraphProcessor::create_with_sample_regions(
+        {}, {}, 1, 1, "Baked", "com.test.baked", {}, {region(9, {invalid})});
+    CHECK_FALSE(result.accepted);
+    CHECK(result.processor == nullptr);
+    CHECK(result.reason == LowerRejectReason::ParameterContractMismatch);
+    CHECK_FALSE(result.message.empty());
+}
+
+TEST_CASE("Baked graph rejects an unexpected prepopulated adapter manifest",
+          "[host][sample-region][parameters][baked][negative]") {
+    auto result = BakedGraphProcessor::create_with_sample_regions(
+        {}, {}, 1, 1, "Baked", "com.test.baked", {}, {region(9, {promoted(90)})});
+    REQUIRE(result.accepted);
+    REQUIRE(result.processor);
+    auto& processor = static_cast<BakedGraphProcessor&>(*result.processor);
+    state::StateStore store;
+    store.add_parameter(ordinary(7));
+    processor.define_parameters(store);
+    CHECK(processor.sample_region_parameter_binding() == nullptr);
+    REQUIRE(store.param_count() == 1);
+    CHECK(store.all_params()[0].id == 7);
+    CHECK(store.state_generation() == 0);
+}
+
+TEST_CASE("Baked region contract metadata survives plan reload in canonical order",
+          "[host][sample-region][parameters][baked][reload]") {
+    auto definition = region(9, {promoted(40, "feedback")});
+    definition.region_id = 17;
+    definition.promoted_parameters[0].range = state::ParamRange::linear(0.0f, 1.0f, 0.5f);
+    definition.promoted_parameters[0].bound_node_id = 5;
+    BakedPlan plan;
+    plan.format_version = kBakedMaxSupportedFormatVersion;
+    plan.input_channels = 1;
+    plan.output_channels = 1;
+    plan.nodes = {{1, NodeType::AudioInput, 0, 1},
+                  {2, NodeType::AudioOutput, 1, 0},
+                  {3, NodeType::Custom, 1, 1, 1.0f, "pulp.core.sample-region.input", 1},
+                  {4, NodeType::Custom, 1, 1, 1.0f, "pulp.core.sample-region.output", 1},
+                  {5, NodeType::Custom, 0, 1, 1.0f, "pulp.core.sample-region.parameter", 1},
+                  {6, NodeType::Custom, 0, 1, 1.0f, "pulp.core.sample-region.constant", 1},
+                  {7, NodeType::Custom, 2, 1, 1.0f, "pulp.core.sample-region.add", 1},
+                  {8, NodeType::Custom, 1, 1, 1.0f, "pulp.core.unit-delay", 1},
+                  {9, NodeType::Custom, 2, 1, 1.0f, "pulp.core.sample-region.multiply", 1}};
+    plan.connections = {{1, 0, 3, 0, false}, {3, 0, 7, 0, false}, {8, 0, 7, 1, false},
+                        {7, 0, 8, 0, false}, {7, 0, 9, 0, false}, {5, 0, 9, 1, false},
+                        {9, 0, 4, 0, false}, {4, 0, 2, 0, false}};
+    auto reload_definition = definition;
+    for (auto& parameter : reload_definition.promoted_parameters)
+        parameter.range.skew = 1.0f;
+    reload_definition.members = {
+        {3, "pulp.core.sample-region.input", 1, {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {4, "pulp.core.sample-region.output", 1, {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {5,
+         "pulp.core.sample-region.parameter",
+         1,
+         {SampleKernelConfigKind::PromotedParameterId, 40, 0.0f}},
+        {6,
+         "pulp.core.sample-region.constant",
+         1,
+         {SampleKernelConfigKind::FiniteConstant, 0, 0.5f}},
+        {7, "pulp.core.sample-region.add", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
+        {8, "pulp.core.unit-delay", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
+        {9, "pulp.core.sample-region.multiply", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
+    };
+    reload_definition.input_boundaries = {3};
+    reload_definition.output_boundaries = {4};
+    plan.sample_regions.push_back(reload_definition);
+    const auto bytes = detail::serialize_plan(plan);
+    const auto reloaded = detail::parse_plan_bounded(bytes);
+    REQUIRE(reloaded);
+    const auto authored = SampleRegionParameterContract::from_regions(plan.sample_regions);
+    const auto restored = SampleRegionParameterContract::from_regions(reloaded->sample_regions);
+    REQUIRE(authored.valid());
+    REQUIRE(restored.valid());
+    CHECK(authored.matches_promoted(restored));
+    REQUIRE(restored.entries().size() == 1);
+    CHECK(restored.entries()[0].info.id == 40);
+}
+
+TEST_CASE("Baked parameter binding does not outlive its adapter store",
+          "[host][sample-region][parameters][baked][lifetime]") {
+    auto store = std::make_unique<state::StateStore>();
+    const auto definition = region(9, {promoted(90)});
+    {
+        auto result = BakedGraphProcessor::create_with_sample_regions(
+            {}, {}, 1, 1, "Baked", "com.test.baked", {}, {definition});
+        REQUIRE(result.accepted);
+        REQUIRE(result.processor);
+        auto& processor = static_cast<BakedGraphProcessor&>(*result.processor);
+        processor.define_parameters(*store);
+        REQUIRE(processor.sample_region_parameter_binding() != nullptr);
+        CHECK(&processor.sample_region_parameter_binding()->store() == store.get());
+    }
+    CHECK(store->param_count() == 1);
 }
