@@ -534,6 +534,15 @@ if(TARGET Pulp::gpu-audio)
     add_executable(PulpSDKSmokeGpuAudioProbe
         "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp")
     target_link_libraries(PulpSDKSmokeGpuAudioProbe PRIVATE Pulp::gpu-audio)
+
+    # Public installed-SDK lifecycle proof. This deliberately exercises only
+    # the backend-neutral transport contract: prepare/release/reprepare,
+    # worker-serviced delivery, and a bounded CpuFallback result when the
+    # worker is late or absent. Provider-side device-loss injection is private
+    # to the Dawn shared-I/O probes; the public SDK has no loss-injection hook.
+    add_executable(PulpSDKSmokeGpuAudioLifecycleProbe
+        gpu_audio_lifecycle_probe.cpp)
+    target_link_libraries(PulpSDKSmokeGpuAudioLifecycleProbe PRIVATE Pulp::gpu-audio)
     if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
         set_target_properties(PulpSDKSmokeGpuAudioProbe PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY
