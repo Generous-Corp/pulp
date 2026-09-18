@@ -335,6 +335,67 @@ TEST_CASE("GraphSerializer rejects invalid unrelated connections in a region gra
     REQUIRE(loaded.connections().empty());
 }
 
+TEST_CASE("GraphSerializer rejects invalid persisted region metadata",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+    const auto definitions = fixture.graph.sample_regions();
+    const auto& definition = definitions.front();
+    const auto input = definition.input_boundaries.front();
+    const auto non_input =
+        std::find_if(definition.members.begin(), definition.members.end(), [&](const auto& member) {
+            return member.node != input && member.type_id != "pulp.core.sample-region.input";
+        })->node;
+    const auto original = GraphSerializer::to_json(fixture.graph);
+
+    const auto replace_boundary_list = [&](std::string& json, const std::string& replacement) {
+        const auto key = json.find("\"input_boundaries\"");
+        REQUIRE(key != std::string::npos);
+        const auto begin = json.find('[', key);
+        const auto end = json.find(']', begin);
+        REQUIRE((begin != std::string::npos && end != std::string::npos));
+        json.replace(begin + 1, end - begin - 1, replacement);
+    };
+    const auto require_rejected = [&](const std::string& json) {
+        SignalGraph loaded;
+        REQUIRE(register_builtin_sample_region_types(loaded));
+        const auto result = GraphSerializer::from_json(loaded, json);
+        REQUIRE_FALSE(result.ok);
+        REQUIRE_FALSE(result.error.empty());
+        REQUIRE(loaded.nodes().empty());
+    };
+
+    SECTION("duplicate boundary") {
+        auto json = original;
+        replace_boundary_list(json, std::to_string(input) + "," + std::to_string(input));
+        require_rejected(json);
+    }
+    SECTION("boundary names the wrong member type") {
+        auto json = original;
+        replace_boundary_list(json, std::to_string(non_input));
+        require_rejected(json);
+    }
+    SECTION("duplicate promoted parameter id") {
+        auto json = original;
+        const auto key = json.find("\"promoted_parameters\"");
+        REQUIRE(key != std::string::npos);
+        const auto object_begin = json.find('{', key);
+        const auto object_end = json.find('}', object_begin);
+        REQUIRE((object_begin != std::string::npos && object_end != std::string::npos));
+        const auto parameter = json.substr(object_begin, object_end - object_begin + 1);
+        json.insert(object_end + 1, "," + parameter);
+        require_rejected(json);
+    }
+    SECTION("authored limits exceed v1") {
+        auto json = original;
+        const auto limit = json.find("\"max_member_nodes\": 63");
+        REQUIRE(limit != std::string::npos);
+        json.replace(limit, std::string("\"max_member_nodes\": 63").size(),
+                     "\"max_member_nodes\": 65");
+        require_rejected(json);
+    }
+}
+
 TEST_CASE("GraphSerializer rejects non-boolean optional connection flags in a region graph",
           "[host][serializer][sample-region][p2]") {
     PersistedRegionFixture fixture;

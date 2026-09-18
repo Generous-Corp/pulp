@@ -1,6 +1,7 @@
 // GraphSerializer implementation: SignalGraph <-> .pulpgraph JSON.
 
 #include <pulp/host/graph_serializer.hpp>
+#include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/runtime/log.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -333,6 +334,130 @@ template <typename V> bool json_float(const V& value, float& out) {
         d > std::numeric_limits<float>::max())
         return false;
     out = static_cast<float>(d);
+    return true;
+}
+
+bool persisted_region_limits_within_v1(const SampleRegionLimits& value) noexcept {
+    const auto cap = SampleRegionLimits::v1();
+    return value.max_member_nodes <= cap.max_member_nodes &&
+           value.max_internal_connections <= cap.max_internal_connections &&
+           value.max_input_boundaries <= cap.max_input_boundaries &&
+           value.max_output_boundaries <= cap.max_output_boundaries &&
+           value.max_delay_nodes <= cap.max_delay_nodes &&
+           value.max_promoted_parameters <= cap.max_promoted_parameters &&
+           value.max_state_bytes <= cap.max_state_bytes &&
+           value.max_logical_boundary_bytes <= cap.max_logical_boundary_bytes &&
+           value.max_work_per_frame <= cap.max_work_per_frame &&
+           value.max_work_per_block <= cap.max_work_per_block;
+}
+
+bool valid_persisted_kernel_config(const SampleKernelConfig& config) noexcept {
+    switch (config.kind) {
+    case SampleKernelConfigKind::None:
+        return config.boundary_index_or_parameter_id == 0 && config.constant == 0.0f;
+    case SampleKernelConfigKind::BoundaryIndex:
+        return config.constant == 0.0f;
+    case SampleKernelConfigKind::FiniteConstant:
+        return config.boundary_index_or_parameter_id == 0 && std::isfinite(config.constant);
+    case SampleKernelConfigKind::PromotedParameterId:
+        return config.boundary_index_or_parameter_id != 0 && config.constant == 0.0f;
+    case SampleKernelConfigKind::Invalid:
+        return false;
+    }
+    return false;
+}
+
+bool validate_persisted_region_metadata(const SignalGraph& graph,
+                                        std::span<const SampleRegionDefinition> definitions,
+                                        std::string& error) {
+    const auto parameters = SampleRegionParameterContract::from_regions(definitions);
+    if (!parameters.valid()) {
+        error = "invalid promoted parameter metadata";
+        return false;
+    }
+
+    for (const auto& definition : definitions) {
+        if (!persisted_region_limits_within_v1(definition.limits) ||
+            definition.members.size() > definition.limits.max_member_nodes ||
+            definition.input_boundaries.size() > definition.limits.max_input_boundaries ||
+            definition.output_boundaries.size() > definition.limits.max_output_boundaries ||
+            definition.promoted_parameters.size() > definition.limits.max_promoted_parameters) {
+            error = "sample region metadata exceeds authored limits";
+            return false;
+        }
+
+        std::unordered_map<NodeId, const SampleRegionKernelNode*> members;
+        std::size_t delay_nodes = 0;
+        for (const auto& member : definition.members) {
+            const auto* current = graph.node(member.node);
+            if (member.node == 0 || !members.emplace(member.node, &member).second ||
+                current == nullptr || current->type != NodeType::Custom ||
+                current->custom_type_id != member.type_id ||
+                current->custom_type_version != member.version ||
+                !valid_persisted_kernel_config(member.config)) {
+                error = "invalid or duplicate sample region member";
+                return false;
+            }
+            if (member.type_id == "pulp.core.unit-delay")
+                ++delay_nodes;
+        }
+        if (delay_nodes > definition.limits.max_delay_nodes) {
+            error = "sample region metadata exceeds authored limits";
+            return false;
+        }
+
+        const auto validate_boundaries = [&](std::span<const NodeId> boundaries,
+                                             std::string_view type) {
+            if (boundaries.empty())
+                return false;
+            std::unordered_set<NodeId> unique;
+            std::unordered_set<std::uint32_t> indexes;
+            for (const auto id : boundaries) {
+                const auto found = members.find(id);
+                if (!unique.insert(id).second || found == members.end() ||
+                    found->second->type_id != type ||
+                    found->second->config.kind != SampleKernelConfigKind::BoundaryIndex ||
+                    found->second->config.constant != 0.0f ||
+                    !indexes.insert(found->second->config.boundary_index_or_parameter_id).second) {
+                    return false;
+                }
+            }
+            for (std::uint32_t expected = 0; expected < indexes.size(); ++expected)
+                if (!indexes.contains(expected))
+                    return false;
+            for (const auto& member : definition.members) {
+                if (member.type_id == type && !unique.contains(member.node))
+                    return false;
+            }
+            return true;
+        };
+        if (!validate_boundaries(definition.input_boundaries, "pulp.core.sample-region.input") ||
+            !validate_boundaries(definition.output_boundaries, "pulp.core.sample-region.output")) {
+            error = "invalid sample region boundary metadata";
+            return false;
+        }
+
+        std::unordered_set<state::ParamID> bound_parameters;
+        for (const auto& parameter : definition.promoted_parameters) {
+            const auto found = members.find(parameter.bound_node_id);
+            if (found == members.end() ||
+                found->second->type_id != "pulp.core.sample-region.parameter" ||
+                found->second->config.kind != SampleKernelConfigKind::PromotedParameterId ||
+                found->second->config.boundary_index_or_parameter_id != parameter.param_id ||
+                found->second->config.constant != 0.0f ||
+                !bound_parameters.insert(parameter.param_id).second) {
+                error = "invalid promoted parameter binding";
+                return false;
+            }
+        }
+        for (const auto& member : definition.members) {
+            if (member.type_id == "pulp.core.sample-region.parameter" &&
+                !bound_parameters.contains(member.config.boundary_index_or_parameter_id)) {
+                error = "invalid promoted parameter binding";
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -1054,6 +1179,10 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 }
             }
             definitions.push_back(std::move(definition));
+        }
+        if (!validate_persisted_region_metadata(graph, definitions, result.error)) {
+            graph.clear();
+            return result;
         }
         std::sort(definitions.begin(), definitions.end(),
                   [](const auto& a, const auto& b) { return a.region_id < b.region_id; });
