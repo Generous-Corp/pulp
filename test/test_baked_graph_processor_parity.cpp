@@ -1387,3 +1387,239 @@ TEST_CASE("bake_to_plan emits authored v2 sample-region metadata",
     REQUIRE(loaded.plan.has_value());
     CHECK(*loaded.plan == *baked.plan);
 }
+
+namespace {
+
+constexpr pulp::state::ParamID kBakedCoefficient = 2901;
+constexpr int kBakedRegionMaximum = 257;
+constexpr double kBakedAllpassOracleTolerance = 1.0e-6;
+
+struct BakedAllpassSource {
+    std::unique_ptr<pulp::host::SampleRegionParameterOwner> parameters;
+    SignalGraph graph;
+
+    explicit BakedAllpassSource(bool promoted = true) {
+        using namespace pulp::host;
+        const auto input = graph.add_input_node(1, "Input");
+        const auto output = graph.add_output_node(1, "Output");
+        REQUIRE(graph.connect(input, 0, output, 0));
+        REQUIRE(graph.prepare(kSr, kBakedRegionMaximum));
+        auto edit = graph.begin_prepared_topology_edit();
+        REQUIRE(edit);
+        REQUIRE(edit->disconnect(input, 0, output, 0));
+        REQUIRE(register_builtin_sample_region_types(*edit));
+        const auto x = edit->add_custom_node("pulp.core.sample-region.input");
+        const auto a = edit->add_custom_node(promoted ? "pulp.core.sample-region.parameter"
+                                                      : "pulp.core.sample-region.constant");
+        const auto negative = edit->add_custom_node("pulp.core.sample-region.constant");
+        const auto ax = edit->add_custom_node("pulp.core.sample-region.multiply");
+        const auto xd = edit->add_custom_node("pulp.core.unit-delay");
+        const auto yd = edit->add_custom_node("pulp.core.unit-delay");
+        const auto ayd = edit->add_custom_node("pulp.core.sample-region.multiply");
+        const auto nayd = edit->add_custom_node("pulp.core.sample-region.multiply");
+        const auto sum = edit->add_custom_node("pulp.core.sample-region.add");
+        const auto y = edit->add_custom_node("pulp.core.sample-region.add");
+        const auto out = edit->add_custom_node("pulp.core.sample-region.output");
+        REQUIRE(edit->connect(input, 0, x, 0));
+        REQUIRE(edit->connect(x, 0, ax, 0));
+        REQUIRE(edit->connect(a, 0, ax, 1));
+        REQUIRE(edit->connect(x, 0, xd, 0));
+        REQUIRE(edit->connect(yd, 0, ayd, 0));
+        REQUIRE(edit->connect(a, 0, ayd, 1));
+        REQUIRE(edit->connect(negative, 0, nayd, 0));
+        REQUIRE(edit->connect(ayd, 0, nayd, 1));
+        REQUIRE(edit->connect(ax, 0, sum, 0));
+        REQUIRE(edit->connect(xd, 0, sum, 1));
+        REQUIRE(edit->connect(sum, 0, y, 0));
+        REQUIRE(edit->connect(nayd, 0, y, 1));
+        REQUIRE(edit->connect(y, 0, out, 0));
+        REQUIRE(edit->connect(out, 0, output, 0));
+        SampleRegionDefinition region;
+        region.region_id = 901;
+        const SampleKernelConfig none{SampleKernelConfigKind::None, 0, 0.0f};
+        const SampleKernelConfig boundary{SampleKernelConfigKind::BoundaryIndex, 0, 0.0f};
+        region.members = {
+            {x, "pulp.core.sample-region.input", 1, boundary},
+            {a,
+             "pulp.core.sample-region.parameter",
+             1,
+             {SampleKernelConfigKind::PromotedParameterId, kBakedCoefficient, 0.0f}},
+            {negative,
+             "pulp.core.sample-region.constant",
+             1,
+             {SampleKernelConfigKind::FiniteConstant, 0, -1.0f}},
+            {ax, "pulp.core.sample-region.multiply", 1, none},
+            {xd, "pulp.core.unit-delay", 1, none},
+            {yd, "pulp.core.unit-delay", 1, none},
+            {ayd, "pulp.core.sample-region.multiply", 1, none},
+            {nayd, "pulp.core.sample-region.multiply", 1, none},
+            {sum, "pulp.core.sample-region.add", 1, none},
+            {y, "pulp.core.sample-region.add", 1, none},
+            {out, "pulp.core.sample-region.output", 1, boundary},
+        };
+        region.input_boundaries = {x};
+        region.output_boundaries = {out};
+        SampleRegionPromotedParameter parameter;
+        parameter.param_id = kBakedCoefficient;
+        parameter.key = "coefficient";
+        parameter.name = "Allpass coefficient";
+        parameter.range = pulp::state::ParamRange::linear(-0.99f, 0.99f, 0.5f);
+        parameter.bound_node_id = a;
+        if (promoted) {
+            region.promoted_parameters = {parameter};
+        } else {
+            region.members[1].type_id = "pulp.core.sample-region.constant";
+            region.members[1].config = {SampleKernelConfigKind::FiniteConstant, 0, 0.5f};
+        }
+        REQUIRE(edit->declare_sample_region(region).accepted);
+        REQUIRE(edit->connect_in_sample_region(901, y, 0, yd, 0).accepted);
+        parameters =
+            SampleRegionParameterOwner::create({}, edit->sample_region_parameter_contract());
+        REQUIRE(parameters);
+        if (promoted)
+            parameters->store().set_value(kBakedCoefficient, 0.5f);
+        REQUIRE(edit->bind_sample_region_parameters(parameters->binding()).accepted);
+        REQUIRE(edit->prepare(kSr, kBakedRegionMaximum) ==
+                SignalGraph::PreparedTopologyEdit::Result::Prepared);
+        REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    }
+};
+
+struct BakedAllpassInstance {
+    pulp::state::StateStore store;
+    std::unique_ptr<pulp::format::Processor> processor;
+
+    explicit BakedAllpassInstance(const SignalGraph& source) {
+        auto result = pulp::host::bake(source);
+        INFO(result.message);
+        REQUIRE(result.accepted);
+        REQUIRE(result.processor);
+        processor = std::move(result.processor);
+        processor->define_parameters(store);
+        REQUIRE(store.param_count() == 1);
+        prepare();
+    }
+
+    void prepare() {
+        auto context = make_prepare_ctx(1);
+        context.max_buffer_size = kBakedRegionMaximum;
+        processor->prepare(context);
+        REQUIRE(processor->latency_samples() == 0);
+    }
+};
+
+std::vector<float> render_baked_region(pulp::format::Processor& processor,
+                                       const std::vector<float>& input,
+                                       const std::vector<int>& schedule, bool reset = false,
+                                       bool in_place = false) {
+    std::vector<float> output(input.size());
+    std::vector<float> aliased = input;
+    pulp::midi::MidiBuffer midi_in, midi_out;
+    std::size_t offset = 0;
+    std::size_t block = 0;
+    while (offset < input.size()) {
+        const auto frames = static_cast<int>(
+            std::min<std::size_t>(schedule[block % schedule.size()], input.size() - offset));
+        const float* source = in_place ? aliased.data() + offset : input.data() + offset;
+        float* destination = in_place ? aliased.data() + offset : output.data() + offset;
+        pulp::audio::BufferView<const float> in(&source, 1, frames);
+        pulp::audio::BufferView<float> out(&destination, 1, frames);
+        pulp::format::ProcessContext context;
+        context.sample_rate = kSr;
+        context.num_samples = frames;
+        context.reset_requested = reset && block == 0;
+        {
+            pulp::test::RtAllocationProbe probe;
+            processor.process(out, in, midi_in, midi_out, context);
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
+        offset += frames;
+        ++block;
+    }
+    return in_place ? aliased : output;
+}
+
+} // namespace
+
+TEST_CASE("Baked sample regions preserve allpass schedules and private parameter values",
+          "[host][baked][sample-region][parity]") {
+    BakedAllpassSource source;
+    BakedAllpassInstance regular(source.graph);
+    BakedAllpassInstance irregular(source.graph);
+    const auto input = ramp(4096, 0.4f);
+    const std::vector<int> schedule{1, 127, 3, 64, 17, 257, 5, 31};
+    std::vector<float> reference;
+    std::size_t offset = 0;
+    std::size_t block = 0;
+    while (offset < input.size()) {
+        const auto frames =
+            std::min<std::size_t>(schedule[block++ % schedule.size()], input.size() - offset);
+        const std::vector<float> chunk(input.begin() + offset, input.begin() + offset + frames);
+        const auto rendered = run_graph(source.graph, static_cast<int>(frames), {chunk}, 1);
+        reference.insert(reference.end(), rendered[0].begin(), rendered[0].end());
+        offset += frames;
+    }
+    const auto fixed = render_baked_region(*regular.processor, input, {64});
+    const auto varying = render_baked_region(*irregular.processor, input, schedule, false, true);
+    REQUIRE(fixed == reference);
+    REQUIRE(varying == reference);
+    double previous_input = 0.0;
+    double previous_output = 0.0;
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        const double expected = 0.5 * input[i] + previous_input - 0.5 * previous_output;
+        REQUIRE(std::abs(fixed[i] - expected) <= kBakedAllpassOracleTolerance);
+        previous_input = input[i];
+        previous_output = expected;
+    }
+    source.parameters->store().set_value(kBakedCoefficient, -0.7f);
+    regular.store.set_value(kBakedCoefficient, 0.25f);
+    const auto changed = render_baked_region(*regular.processor, {1.0f}, {1}, true);
+    REQUIRE(changed[0] == 0.25f);
+    const auto independent = render_baked_region(*irregular.processor, {1.0f}, {1}, true);
+    REQUIRE(independent[0] == 0.5f);
+}
+
+TEST_CASE("Baked sample regions own fresh state after source destruction and reset",
+          "[host][baked][sample-region][reset][rt-safety]") {
+    auto source = std::make_unique<BakedAllpassSource>();
+    run_graph(source->graph, 1, {{1.0f}}, 1);
+    BakedAllpassInstance first(source->graph);
+    BakedAllpassInstance second(source->graph);
+    source.reset();
+    const auto impulse = render_baked_region(*first.processor, {1.0f}, {1});
+    REQUIRE(impulse[0] == 0.5f);
+    auto invalid = make_prepare_ctx(1);
+    invalid.max_buffer_size = 0;
+    first.processor->prepare(invalid);
+    const auto tail = render_baked_region(*first.processor, {0.0f}, {1});
+    REQUIRE(tail[0] == 0.75f);
+    invalid.max_buffer_size = kBakedRegionMaximum;
+    invalid.sample_rate = 0.0;
+    first.processor->prepare(invalid);
+    REQUIRE(render_baked_region(*first.processor, {0.0f}, {1})[0] == -0.375f);
+    REQUIRE(render_baked_region(*second.processor, {1.0f}, {1}) == impulse);
+    REQUIRE(render_baked_region(*first.processor, std::vector<float>(257), {1, 17, 64}, true) ==
+            std::vector<float>(257));
+    REQUIRE(render_baked_region(*first.processor, {1.0f}, {1}) == impulse);
+    first.prepare();
+    REQUIRE(render_baked_region(*first.processor, {1.0f}, {1}) == impulse);
+}
+
+TEST_CASE("Baked parameterless sample regions bind an empty adapter store",
+          "[host][baked][sample-region][parity]") {
+    BakedAllpassSource source(false);
+    pulp::state::StateStore store;
+    auto baked = pulp::host::bake(source.graph);
+    REQUIRE(baked.accepted);
+    REQUIRE(baked.processor);
+    auto context = make_prepare_ctx(1);
+    context.max_buffer_size = kBakedRegionMaximum;
+    baked.processor->prepare(context);
+    REQUIRE(render_baked_region(*baked.processor, {1.0f, 0.0f}, {1}) ==
+            std::vector<float>{0.0f, 0.0f});
+    baked.processor->define_parameters(store);
+    REQUIRE(store.param_count() == 0);
+    baked.processor->prepare(context);
+    REQUIRE(render_baked_region(*baked.processor, {1.0f, 0.0f}, {1}) ==
+            std::vector<float>{0.5f, 0.75f});
+}

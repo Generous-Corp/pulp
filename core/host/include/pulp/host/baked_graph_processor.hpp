@@ -52,6 +52,7 @@ namespace detail {
 struct BakedParamMailbox;
 struct BakedParamNodeState;
 struct BakedCustomNodeRuntime;
+struct BakedSampleRegionRuntime;
 }  // namespace detail
 
 // Bake-layer parameter-injection binding captured at bake() for one param-
@@ -248,6 +249,15 @@ public:
                                std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
                                std::vector<SampleRegionDefinition> sample_regions);
 
+    // Own exact scalar descriptors independently of the source graph registry.
+    static LowerResult
+    create_with_sample_regions(std::vector<GraphNode> nodes, std::vector<Connection> connections,
+                               int input_channels, int output_channels, std::string name,
+                               std::string bundle_id,
+                               std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
+                               std::vector<SampleRegionDefinition> sample_regions,
+                               std::vector<SampleKernelDescriptor> sample_kernels);
+
     ~BakedGraphProcessor() override;
 
     pulp::format::PluginDescriptor descriptor() const override;
@@ -325,6 +335,7 @@ private:
   std::string bundle_id_;
   SampleRegionParameterContract sample_region_parameter_contract_;
   std::unique_ptr<SampleRegionParameterBinding> sample_region_parameter_binding_;
+  std::unique_ptr<detail::BakedSampleRegionRuntime> sample_region_runtime_;
   int input_channels_ = 2;
   int output_channels_ = 2;
   int prepared_max_block_ = 0;
