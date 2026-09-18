@@ -1379,7 +1379,7 @@ required job: path-filtering the workflow or job would prevent the stable
 required context from reporting.
 
 CTest display names are not identities: the authoritative target currently has
-21,654 registrations but only 21,594 unique names. The inventory validator
+21,960 registrations but only 21,900 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned
