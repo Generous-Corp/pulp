@@ -800,7 +800,7 @@ load_baked_registered_impl(std::span<const std::uint8_t> bytes, const BakedTrust
         result.message = "signed .pulpbake envelope or bounded plan parse failed";
         return result;
     }
-    if (plan->format_version == kBakedPlanV1FormatVersion) {
+    if (plan->format_version == kBakedPlanV1FormatVersion && executable) {
         if (!plan->sample_regions.empty()) {
             result.reason = LowerRejectReason::CodecRejected;
             result.message = "v1 baked plan unexpectedly contains sample-region metadata";
@@ -824,7 +824,8 @@ load_baked_registered_impl(std::span<const std::uint8_t> bytes, const BakedTrust
         result.reason = LowerRejectReason::None;
         return result;
     }
-    if (plan->format_version != kBakedMaxSupportedFormatVersion || plan->sample_regions.empty()) {
+    if (plan->format_version != kBakedPlanV1FormatVersion &&
+        (plan->format_version != kBakedMaxSupportedFormatVersion || plan->sample_regions.empty())) {
         result.reason = LowerRejectReason::CodecRejected;
         result.message = "paired sample-kernel loading requires a non-empty v2 region table";
         return result;
@@ -918,6 +919,29 @@ load_baked_registered_impl(std::span<const std::uint8_t> bytes, const BakedTrust
         }
     }
 
+    // Validate exact scalar callbacks even for pairs whose block side alone is
+    // used below. In particular, a substituted built-in descriptor is invalid
+    // regardless of whether that identity appears in this artifact's regions.
+    SignalGraph registration_validation;
+    if (!register_builtin_sample_region_types(registration_validation)) {
+        result.reason = LowerRejectReason::CodecRejected;
+        result.message = "built-in registration validation failed";
+        return result;
+    }
+    for (const auto& registration : registrations) {
+        if (!registration_validation.register_custom_node_type(registration.block,
+                                                               registration.sample)) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "exact paired registration validation failed";
+            return result;
+        }
+    }
+
+    std::unordered_set<std::string> scalar_identities;
+    for (const auto& region : plan->sample_regions)
+        for (const auto& member : region.members)
+            scalar_identities.insert(member.type_id + "\x1f" + std::to_string(member.version));
+
     SignalGraph owner;
     auto edit = owner.begin_prepared_topology_edit();
     if (!edit || !register_builtin_sample_region_types(*edit)) {
@@ -926,7 +950,11 @@ load_baked_registered_impl(std::span<const std::uint8_t> bytes, const BakedTrust
         return result;
     }
     for (const auto& registration : registrations) {
-        if (!edit->register_custom_node_type(registration.block, registration.sample)) {
+        const auto key =
+            registration.block.type_id + "\x1f" + std::to_string(registration.block.version);
+        if (!(scalar_identities.contains(key)
+                  ? edit->register_custom_node_type(registration.block, registration.sample)
+                  : edit->register_custom_node_type(registration.block))) {
             result.reason = LowerRejectReason::CodecRejected;
             result.message = "paired sample-kernel registration was refused";
             return result;
@@ -967,23 +995,6 @@ load_baked_registered_impl(std::span<const std::uint8_t> bytes, const BakedTrust
             result.offending_node = node.id;
             result.message = "could not reconstruct a unique v2 plan node";
             return result;
-        }
-        if (node.type == NodeType::Custom && !node.custom_state.empty()) {
-            const CustomNodeType* block_type = nullptr;
-            for (const auto& registration : registrations) {
-                if (registration.block.type_id == node.custom_type_id &&
-                    registration.block.version == node.custom_version) {
-                    block_type = &registration.block;
-                    break;
-                }
-            }
-            if (block_type == nullptr || !block_type->create || !block_type->load_state) {
-                result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
-                result.offending_node = node.id;
-                result.message =
-                    "stateful v2 Custom node requires paired create + load_state callbacks";
-                return result;
-            }
         }
     }
 
@@ -1050,6 +1061,35 @@ load_baked_registered_impl(std::span<const std::uint8_t> bytes, const BakedTrust
             return result;
         }
         remapped_regions.push_back(std::move(region));
+    }
+
+    for (const auto& node : plan->nodes) {
+        if (region_for_node.contains(id_map.at(node.id)) && !node.custom_state.empty()) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_node = node.id;
+            result.message = "sample-region members cannot carry opaque block state";
+            return result;
+        }
+    }
+
+    for (const auto& node : plan->nodes) {
+        if (node.type == NodeType::Custom && !node.custom_state.empty()) {
+            const CustomNodeType* block_type = nullptr;
+            for (const auto& registration : registrations) {
+                if (registration.block.type_id == node.custom_type_id &&
+                    registration.block.version == node.custom_version) {
+                    block_type = &registration.block;
+                    break;
+                }
+            }
+            if (block_type == nullptr || !block_type->create || !block_type->load_state) {
+                result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
+                result.offending_node = node.id;
+                result.message =
+                    "stateful v2 Custom node requires paired create + load_state callbacks";
+                return result;
+            }
+        }
     }
 
     // Region-internal edges use the region-aware insertion path because a legal
@@ -1169,24 +1209,86 @@ load_baked_registered_impl(std::span<const std::uint8_t> bytes, const BakedTrust
                     kernels.push_back(*sample);
             }
         }
-        // The paired proof requires every registered scalar node to belong to
-        // a region. Preserve that closed surface instead of creating block
-        // instances for scalar records or silently discarding opaque state.
+        std::unordered_map<NodeId, BakedCustomNodeBinding> custom_bindings;
         for (const auto& node : plan->nodes) {
-            if (node.type != NodeType::Custom)
+            if (node.type != NodeType::Custom || region_for_node.contains(id_map.at(node.id)))
                 continue;
-            if (!region_for_node.contains(id_map.at(node.id)) || !node.custom_state.empty()) {
-                result.reason = LowerRejectReason::CodecRejected;
+            const auto registration =
+                std::find_if(registrations.begin(), registrations.end(), [&](const auto& value) {
+                    return value.block.type_id == node.custom_type_id &&
+                           value.block.version == node.custom_version;
+                });
+            if (registration == registrations.end()) {
+                result.reason = LowerRejectReason::CustomNotYetLowerable;
                 result.offending_node = node.id;
-                result.message =
-                    "sample-region kernels require region membership and no opaque block state";
+                result.message = "residual Custom registration is missing";
                 return result;
             }
+            const auto& type = registration->block;
+            BakedCustomNodeBinding binding;
+            binding.process = type.process;
+            if (type.create) {
+                auto instance = std::shared_ptr<void>(
+                    type.create(), [release = type.release, destroy = type.destroy](void* value) {
+                        if (!value)
+                            return;
+                        if (release)
+                            release(value);
+                        if (destroy)
+                            destroy(value);
+                    });
+                if (!instance) {
+                    result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
+                    result.offending_node = node.id;
+                    result.message = "residual Custom instance creation failed";
+                    return result;
+                }
+                if (type.process_instance)
+                    binding.process = [instance, fn = type.process_instance](
+                                          auto& out, const auto& in, int frames) {
+                        fn(instance.get(), out, in, frames);
+                    };
+                if (type.process_instance_baked_param) {
+                    binding.params.params = type.baked_params;
+                    binding.params.process = [instance, fn = type.process_instance_baked_param](
+                                                 auto& out, const auto& in, int frames,
+                                                 const BakedParamView& parameters) {
+                        fn(instance.get(), out, in, frames, parameters);
+                    };
+                }
+                if (type.prepare)
+                    binding.lifecycle.prepare = [instance, fn = type.prepare](double rate,
+                                                                              int block) {
+                        fn(instance.get(), rate, block);
+                    };
+                if (type.reset)
+                    binding.lifecycle.reset = [instance, fn = type.reset] { fn(instance.get()); };
+                if (type.load_state)
+                    binding.lifecycle.restore_state = [instance, fn = type.load_state,
+                                                       state = node.custom_state] {
+                        return fn(instance.get(), state);
+                    };
+                // Admit authenticated state before publishing a processor, as in
+                // the legacy loader. Host prepare repeats this after reset.
+                if (binding.lifecycle.prepare)
+                    binding.lifecycle.prepare(48000.0, 512);
+                if (binding.lifecycle.reset)
+                    binding.lifecycle.reset();
+                if (binding.lifecycle.restore_state && !binding.lifecycle.restore_state()) {
+                    result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
+                    result.offending_node = node.id;
+                    result.message = "residual Custom rejected authenticated state";
+                    return result;
+                }
+            }
+            if (binding.process || binding.params.process)
+                binding.latency_samples = type.latency_samples;
+            custom_bindings.emplace(id_map.at(node.id), std::move(binding));
         }
         *executable = BakedGraphProcessor::create_with_sample_regions(
             edit->nodes(), edit->connections(), plan->input_channels, plan->output_channels,
-            "Baked Graph", "com.pulp.baked-graph", {}, std::move(remapped_regions),
-            std::move(kernels));
+            "Baked Graph", "com.pulp.baked-graph", std::move(custom_bindings),
+            std::move(remapped_regions), std::move(kernels));
         if (!executable->accepted) {
             result.reason = executable->reason;
             result.offending_node = executable->offending_node;
@@ -1391,7 +1493,8 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
                 auto it = custom_nodes_.find(id);
                 return it == custom_nodes_.end() || !it->second->latency_samples
                            ? 0
-                           : std::max(0, it->second->latency_samples(sample_rate));
+                           : std::clamp(it->second->latency_samples(sample_rate), 0,
+                                        CustomNodeType::kMaxLatencySamples);
             },
     };
     const auto& executable_nodes = candidate_runtime ? candidate_runtime->nodes : nodes_;

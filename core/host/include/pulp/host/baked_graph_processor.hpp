@@ -367,7 +367,8 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
 // Exact block/scalar registration pair used by the bake-v2 preflight. This is
 // deliberately separate from CustomNodeType so v1 callers retain the original
 // source surface and a v2 artifact can never resolve sample code by block type
-// identity alone.
+// identity alone. Every supplied pair must be valid; an identity used only
+// by residual Custom nodes resolves through its block registration internally.
 struct BakedTypeRegistration {
     CustomNodeType block;
     SampleKernelDescriptor sample;
@@ -419,7 +420,9 @@ LowerResult load_baked_registered(std::span<const std::uint8_t> bytes, const Bak
 // scalar state. Built-in kernels need no extra registrations. Call
 // define_parameters(store) before prepare(), including for an empty manifest;
 // the adapter store must outlive the processor. An empty brace argument still
-// selects the legacy v1-only vector overload.
+// selects the legacy v1-only vector overload. Residual Custom callbacks own
+// their block instances and authenticated state; a failed opaque state restore
+// on reprepare retains the legacy fail-silent behavior, not region-bank rollback.
 template <typename Registry>
     requires std::is_same_v<std::remove_cvref_t<Registry>, BakedTypeRegistry>
 LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,

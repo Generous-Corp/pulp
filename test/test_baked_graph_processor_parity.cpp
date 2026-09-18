@@ -1145,6 +1145,30 @@ TEST_CASE("signed bake restores meaningful zero-byte Custom state",
     CHECK(restored[0][0] == 0.4f);
 }
 
+TEST_CASE("Baked custom latency uses the live upper bound", "[host][baked][latency][parity]") {
+    SignalGraph graph;
+    CustomNodeType type;
+    type.type_id = "pulp.test.clamped-latency";
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.lowerable = true;
+    type.process = [](auto& out, const auto& in, int frames) {
+        std::copy_n(in.channel(0).begin(), frames, out.channel(0).begin());
+    };
+    type.latency_samples = [](double) { return 100000; };
+    REQUIRE(graph.register_custom_node_type(type));
+    const auto input = graph.add_input_node(1);
+    const auto custom = graph.add_custom_node(type.type_id);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+    REQUIRE(graph.prepare(kSr, kFrames));
+    auto baked = bake(graph);
+    REQUIRE(baked.accepted);
+    baked.processor->prepare(make_prepare_ctx(1));
+    REQUIRE(baked.processor->latency_samples() == CustomNodeType::kMaxLatencySamples);
+}
+
 TEST_CASE("signed v2 bake preflight remaps and re-proves sample regions",
           "[host][graph][bake][codec][sample-region]") {
     g_scalar_pair_sample_calls.store(0);
@@ -1260,6 +1284,185 @@ TEST_CASE("signed v2 bake preflight remaps and re-proves sample regions",
     CHECK_FALSE(legacy.accepted);
     CHECK(legacy.reason == pulp::host::LowerRejectReason::CodecRejected);
 
+    SECTION("v1 plan preflight never invokes custom lifecycle callbacks") {
+        auto pair = registration();
+        pair.block.lowerable = true;
+        int calls = 0;
+        pair.block.create = [&]() -> void* {
+            ++calls;
+            return new float(0.0f);
+        };
+        pair.block.destroy = [&](void* value) {
+            ++calls;
+            delete static_cast<float*>(value);
+        };
+        pair.block.prepare = [&](void*, double, int) { ++calls; };
+        pair.block.reset = [&](void*) { ++calls; };
+        pair.block.load_state = [&](void*, const auto&) {
+            ++calls;
+            return true;
+        };
+        pair.block.process_instance = [&](void*, auto&, const auto&, int) { ++calls; };
+        v1_plan.nodes.push_back(
+            {3, pulp::host::NodeType::Custom, 1, 1, 1.0f, pair.block.type_id, 1, {7}});
+        v1_plan.connections = {{1, 0, 3, 0, false}, {3, 0, 2, 0, false}};
+        const auto signed_v1 = pulp::host::write_baked_signed(v1_plan, kp->private_key);
+        REQUIRE_FALSE(signed_v1.empty());
+        const auto preflight = pulp::host::load_baked_plan(signed_v1, trust, {pair});
+        INFO(preflight.message);
+        REQUIRE(preflight.accepted);
+        REQUIRE(*preflight.plan == v1_plan);
+        REQUIRE(calls == 0);
+        v1_plan.connections.push_back({3, 0, 99, 0, false});
+        const auto malformed = pulp::host::write_baked_signed(v1_plan, kp->private_key);
+        REQUIRE_FALSE(malformed.empty());
+        REQUIRE_FALSE(pulp::host::load_baked_plan(malformed, trust, {pair}).accepted);
+        REQUIRE(calls == 0);
+    }
+    SECTION("region opaque state is refused by callback-free preflight") {
+        auto stateful = plan;
+        stateful.nodes[2].custom_state = {7};
+        const auto signed_state = pulp::host::write_baked_signed(stateful, kp->private_key);
+        REQUIRE_FALSE(signed_state.empty());
+        const auto refused = pulp::host::load_baked_plan(signed_state, trust, builtins);
+        REQUIRE_FALSE(refused.accepted);
+        REQUIRE(refused.offending_node == 3);
+        REQUIRE(refused.message == "sample-region members cannot carry opaque block state");
+        REQUIRE_FALSE(pulp::host::load_baked(signed_state, trust,
+                                             pulp::host::BakedTypeRegistry::from(builtins))
+                          .accepted);
+        REQUIRE(g_scalar_pair_sample_calls.load() == 0);
+        REQUIRE(g_scalar_pair_block_calls.load() == 0);
+    }
+    SECTION("residual stateless block callback executes outside the scalar region") {
+        auto pair = registration();
+        pair.block.lowerable = true;
+        pair.block.process = [](auto& out, const auto& in, int frames) {
+            ++g_scalar_pair_block_calls;
+            for (int i = 0; i < frames; ++i)
+                out.channel(0)[i] = 0.25f * in.channel(0)[i];
+        };
+        auto residual = plan;
+        residual.nodes.push_back(
+            {5, pulp::host::NodeType::Custom, 1, 1, 1.0f, pair.block.type_id, 1, {}});
+        residual.connections.back() = {4, 0, 5, 0, false};
+        residual.connections.push_back({5, 0, 2, 0, false});
+        const auto signed_residual = pulp::host::write_baked_signed(residual, kp->private_key);
+        REQUIRE_FALSE(signed_residual.empty());
+        REQUIRE(pulp::host::load_baked_plan(signed_residual, trust, {pair}).accepted);
+        REQUIRE(g_scalar_pair_block_calls.load() == 0);
+        REQUIRE_FALSE(pulp::host::load_baked_plan(signed_residual, trust, {}).accepted);
+        auto executable = pulp::host::load_baked(signed_residual, trust,
+                                                 pulp::host::BakedTypeRegistry::from({pair}));
+        INFO(executable.message);
+        REQUIRE(executable.accepted);
+        pulp::state::StateStore store;
+        executable.processor->define_parameters(store);
+        executable.processor->prepare(make_prepare_ctx(1));
+        const std::vector<std::vector<float>> ones{std::vector<float>(kFrames, 1.0f)};
+        REQUIRE(run_baked(*executable.processor, kFrames, ones, 1)[0][0] == 0.25f);
+        REQUIRE(g_scalar_pair_block_calls.load() > 0);
+        REQUIRE(g_scalar_pair_sample_calls.load() == 0);
+        pair.sample = {};
+        REQUIRE_FALSE(pulp::host::load_baked_plan(signed_residual, trust, {pair}).accepted);
+    }
+    SECTION("residual Custom owns authenticated lifecycle parameters and bounded latency") {
+        auto pair = registration();
+        auto& type = pair.block;
+        type.lowerable = true;
+        int creates = 0, destroys = 0, releases = 0, prepares = 0, resets = 0, restores = 0;
+        bool reject_state = false, reject_create = false;
+        type.create = [&]() -> void* {
+            ++creates;
+            return reject_create ? nullptr : new float(0.0f);
+        };
+        type.destroy = [&](void* value) {
+            ++destroys;
+            delete static_cast<float*>(value);
+        };
+        type.release = [&](void*) { ++releases; };
+        type.prepare = [&](void* value, double, int) {
+            ++prepares;
+            *static_cast<float*>(value) = 0;
+        };
+        type.reset = [&](void* value) {
+            ++resets;
+            *static_cast<float*>(value) = 0;
+        };
+        type.load_state = [&](void* value, const std::vector<std::uint8_t>& state) {
+            ++restores;
+            if (reject_state || state.size() != 1)
+                return false;
+            *static_cast<float*>(value) = static_cast<float>(state[0]) / 10.0f;
+            return true;
+        };
+        type.process_instance = [](void* value, auto& out, const auto& in, int frames) {
+            for (int i = 0; i < frames; ++i)
+                out.channel(0)[i] = in.channel(0)[i] * *static_cast<float*>(value);
+        };
+        type.baked_params = {{17, 0.0f, 1.0f, 0.5f}};
+        type.process_instance_baked_param = [](void* value, auto& out, const auto& in, int frames,
+                                               const pulp::host::BakedParamView& params) {
+            for (int i = 0; i < frames; ++i)
+                out.channel(0)[i] =
+                    in.channel(0)[i] * *static_cast<float*>(value) * params.value_at(17, i);
+        };
+        type.latency_samples = [](double rate) { return rate == kSr ? 100000 : -20; };
+        auto residual = plan;
+        residual.nodes.push_back(
+            {5, pulp::host::NodeType::Custom, 1, 1, 1.0f, type.type_id, 1, {8}});
+        residual.connections.back() = {4, 0, 5, 0, false};
+        residual.connections.push_back({5, 0, 2, 0, false});
+        const auto signed_residual = pulp::host::write_baked_signed(residual, kp->private_key);
+        REQUIRE_FALSE(signed_residual.empty());
+        const auto preflight = pulp::host::load_baked_plan(signed_residual, trust, {pair});
+        INFO(preflight.message);
+        REQUIRE(preflight.accepted);
+        REQUIRE(creates + prepares + resets + restores == 0);
+        auto executable = pulp::host::load_baked(signed_residual, trust,
+                                                 pulp::host::BakedTypeRegistry::from({pair}));
+        INFO(executable.message);
+        REQUIRE(executable.accepted);
+        REQUIRE(creates == 1);
+        REQUIRE(prepares == 1);
+        REQUIRE(resets == 1);
+        REQUIRE(restores == 1);
+        pulp::state::StateStore store;
+        executable.processor->define_parameters(store);
+        executable.processor->prepare(make_prepare_ctx(1));
+        REQUIRE(executable.processor->latency_samples() == CustomNodeType::kMaxLatencySamples);
+        const std::vector<std::vector<float>> ones{std::vector<float>(kFrames, 1.0f)};
+        REQUIRE(run_baked(*executable.processor, kFrames, ones, 1)[0][0] == 0.4f);
+        auto* processor = dynamic_cast<BakedGraphProcessor*>(executable.processor.get());
+        REQUIRE(processor);
+        auto injector = processor->claim_param_injection(5);
+        REQUIRE(injector.valid());
+        REQUIRE(injector.inject(pulp::state::ParameterEvent{17, 0, 0.25f, 0}) ==
+                pulp::host::InjectStatus::Ok);
+        REQUIRE(run_baked(*processor, kFrames, ones, 1)[0][0] == 0.2f);
+        auto context = make_prepare_ctx(1);
+        context.sample_rate = 44100;
+        processor->prepare(context);
+        REQUIRE(processor->latency_samples() == 0);
+        REQUIRE(injector.valid());
+        reject_state = true;
+        processor->prepare(context);
+        REQUIRE(run_baked(*processor, kFrames, ones, 1)[0][0] == 0.0f);
+        executable.processor.reset();
+        REQUIRE(destroys == 1);
+        REQUIRE(releases == 1);
+        const auto rejected_state = pulp::host::load_baked(
+            signed_residual, trust, pulp::host::BakedTypeRegistry::from({pair}));
+        REQUIRE_FALSE(rejected_state.accepted);
+        REQUIRE_FALSE(rejected_state.processor);
+        REQUIRE(destroys == 2);
+        reject_create = true;
+        REQUIRE_FALSE(pulp::host::load_baked(signed_residual, trust,
+                                             pulp::host::BakedTypeRegistry::from({pair}))
+                          .accepted);
+        REQUIRE(destroys == 2);
+        REQUIRE(g_scalar_pair_sample_calls.load() == 0);
+    }
     SECTION("executable regions require the exact built-in scalar registration") {
         auto pairs = builtins;
         const auto signed_custom = pulp::host::write_baked_signed(plan, kp->private_key);
@@ -1328,12 +1531,19 @@ TEST_CASE("signed v2 bake preflight remaps and re-proves sample regions",
         cyclic.nodes.push_back({5, pulp::host::NodeType::Gain, 2, 2, 1.0f, {}, 0, {}});
         cyclic.connections.push_back({4, 0, 5, 0, false});
         cyclic.connections.push_back({5, 0, 3, 0, false});
+        // Complete the scalar interior last: incremental exterior insertion
+        // cannot substitute for the post-edge quotient-cycle proof.
+        const auto interior = cyclic.connections[1];
+        cyclic.connections.erase(cyclic.connections.begin() + 1);
+        cyclic.connections.push_back(interior);
         const auto cyclic_bytes = pulp::host::write_baked_signed(cyclic, kp->private_key);
         REQUIRE_FALSE(cyclic_bytes.empty());
         const auto executable = pulp::host::load_baked(
             cyclic_bytes, trust, pulp::host::BakedTypeRegistry::from(builtins));
         CHECK_FALSE(executable.accepted);
         CHECK_FALSE(executable.processor);
+        CHECK(executable.message != "could not reconstruct a v2 connection");
+        CHECK_FALSE(pulp::host::load_baked_plan(cyclic_bytes, trust, builtins).accepted);
     }
     SECTION("authenticated topology shape and bus mismatches are refused") {
         auto bad_shape = plan;
@@ -1716,6 +1926,10 @@ TEST_CASE("Graph and signed bake sample-region manifests and allpass renders agr
     const auto manifest = verify_and_extract_plan(bytes, trust);
     REQUIRE(manifest);
     REQUIRE(*manifest == *source_plan.plan);
+    const auto preflight = load_baked_plan(bytes, trust, {});
+    REQUIRE(preflight.accepted);
+    REQUIRE(preflight.plan);
+    REQUIRE(*preflight.plan == *source_plan.plan);
     const auto registry = BakedTypeRegistry::from({});
     pulp::state::StateStore first_store, second_store;
     auto first = load_baked(bytes, trust, registry);
@@ -1755,11 +1969,42 @@ TEST_CASE("Graph and signed bake sample-region manifests and allpass renders agr
         }
         return result;
     };
+    BakedAllpassSource irregular_source(promoted);
+    std::unique_ptr<SampleRegionParameterOwner> irregular_reload_parameters;
+    SignalGraph irregular_reload;
+    REQUIRE(register_builtin_sample_region_types(irregular_reload));
+    REQUIRE(GraphSerializer::from_json(irregular_reload, graph_manifest).ok);
+    auto irregular_edit = irregular_reload.begin_prepared_topology_edit();
+    REQUIRE(irregular_edit);
+    irregular_reload_parameters =
+        SampleRegionParameterOwner::create({}, irregular_edit->sample_region_parameter_contract());
+    REQUIRE(irregular_reload_parameters);
+    REQUIRE(irregular_edit->bind_sample_region_parameters(irregular_reload_parameters->binding())
+                .accepted);
+    REQUIRE(irregular_edit->prepare(kSr, kBakedRegionMaximum) ==
+            SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(irregular_edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
     const auto live = render_graph(source.graph, {64});
-    const auto reload_render = render_graph(reloaded, irregular);
+    const auto live_irregular = render_graph(irregular_source.graph, irregular);
+    const auto reload_render = render_graph(reloaded, {64});
+    const auto reload_irregular = render_graph(irregular_reload, irregular);
     const auto bake_render = render_baked_region(*first.processor, input, {64});
     const auto irregular_render =
         render_baked_region(*second.processor, input, irregular, false, true);
+    const std::array<const std::vector<float>*, 6> renders{
+        &live, &live_irregular, &reload_render, &reload_irregular, &bake_render, &irregular_render};
+    for (const auto* render : renders) {
+        REQUIRE(render->size() == input.size());
+        double previous_input = 0.0, previous_output = 0.0, maximum_error = 0.0;
+        for (std::size_t i = 0; i < input.size(); ++i) {
+            const double expected = 0.5 * input[i] + previous_input - 0.5 * previous_output;
+            maximum_error = std::max(maximum_error, std::abs((*render)[i] - expected));
+            previous_input = input[i];
+            previous_output = expected;
+        }
+        REQUIRE(maximum_error <= kBakedAllpassOracleTolerance);
+        REQUIRE(*render == live);
+    }
     REQUIRE(reload_render == live);
     REQUIRE(bake_render == live);
     REQUIRE(irregular_render == live);
@@ -1783,9 +2028,11 @@ TEST_CASE("Graph and signed bake sample-region manifests and allpass renders agr
             REQUIRE(pulp::audio::write_wav_file((path / name).string(), data,
                                                 pulp::audio::WavBitDepth::Float32));
         };
-        audio("source.wav", live);
-        audio("reload.wav", reload_render);
-        audio("bake.wav", bake_render);
+        audio("source-regular.wav", live);
+        audio("source-irregular.wav", live_irregular);
+        audio("reload-regular.wav", reload_render);
+        audio("reload-irregular.wav", reload_irregular);
+        audio("bake-regular.wav", bake_render);
         audio("bake-irregular.wav", irregular_render);
     }
     if (promoted)
