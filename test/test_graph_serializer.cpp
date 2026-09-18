@@ -127,7 +127,8 @@ struct PersistedRegionFixture {
     std::unique_ptr<SampleRegionParameterOwner> parameters;
 };
 
-void make_persisted_region(PersistedRegionFixture& fixture) {
+void make_persisted_region(PersistedRegionFixture& fixture,
+                           std::size_t extra_region_output_connections = 0) {
     const auto input = fixture.graph.add_input_node(1, "Input");
     const auto output = fixture.graph.add_output_node(1, "Output");
     REQUIRE(fixture.graph.connect(input, 0, output, 0));
@@ -146,6 +147,14 @@ void make_persisted_region(PersistedRegionFixture& fixture) {
     REQUIRE((region_input && add && multiply && delay && region_output && parameter));
     REQUIRE(edit->connect(input, 0, region_input, 0));
     REQUIRE(edit->connect(region_output, 0, output, 0));
+    if (extra_region_output_connections != 0) {
+        const auto extra_output = edit->add_output_node(
+            static_cast<int>(extra_region_output_connections), "Extra Region Outputs");
+        REQUIRE(extra_output != 0);
+        for (std::size_t port = 0; port < extra_region_output_connections; ++port) {
+            REQUIRE(edit->connect(region_output, 0, extra_output, static_cast<PortIndex>(port)));
+        }
+    }
 
     constexpr pulp::state::ParamID kParam = 771;
     SampleRegionDefinition definition;
@@ -396,6 +405,47 @@ TEST_CASE("GraphSerializer rejects invalid persisted region metadata",
     }
 }
 
+TEST_CASE("GraphSerializer rejects fully resolved region proof failures",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+    const auto original = GraphSerializer::to_json(fixture.graph);
+    const auto require_proof_rejected = [&](const std::string& json) {
+        SignalGraph loaded;
+        REQUIRE(register_builtin_sample_region_types(loaded));
+        const auto result = GraphSerializer::from_json(loaded, json);
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error.find("sample region proof failed") != std::string::npos);
+        REQUIRE(loaded.nodes().empty());
+    };
+
+    SECTION("instantaneous cycle") {
+        auto json = original;
+        const auto first_type = json.find("pulp.core.unit-delay");
+        REQUIRE(first_type != std::string::npos);
+        const auto input_count = json.rfind("\"num_input_ports\": 1", first_type);
+        REQUIRE(input_count != std::string::npos);
+        json.replace(input_count, std::string("\"num_input_ports\": 1").size(),
+                     "\"num_input_ports\": 2");
+        std::size_t type = 0;
+        while ((type = json.find("pulp.core.unit-delay", type)) != std::string::npos) {
+            json.replace(type, std::string("pulp.core.unit-delay").size(),
+                         "pulp.core.sample-region.add");
+            type += std::string("pulp.core.sample-region.add").size();
+        }
+        require_proof_rejected(json);
+    }
+
+    SECTION("authored internal connection limit") {
+        auto json = original;
+        const auto limit = json.find("\"max_internal_connections\": 124");
+        REQUIRE(limit != std::string::npos);
+        json.replace(limit, std::string("\"max_internal_connections\": 124").size(),
+                     "\"max_internal_connections\": 1");
+        require_proof_rejected(json);
+    }
+}
+
 TEST_CASE("GraphSerializer rejects non-boolean optional connection flags in a region graph",
           "[host][serializer][sample-region][p2]") {
     PersistedRegionFixture fixture;
@@ -487,6 +537,40 @@ TEST_CASE("GraphSerializer refuses region graphs above its persisted connection 
                                   static_cast<PortIndex>(remaining)));
     REQUIRE(fixture.graph.connections().size() == kPersistedConnectionLimit + 1);
     REQUIRE(GraphSerializer::to_json(fixture.graph).empty());
+}
+
+TEST_CASE("GraphSerializer refuses region graphs above the per-region parser ceiling",
+          "[host][serializer][sample-region][p2]") {
+    const auto touching_connections = [](const PersistedRegionFixture& fixture) {
+        const auto definitions = fixture.graph.sample_regions();
+        const auto& region = definitions.front();
+        const auto touches_region = [&](const auto& connection) {
+            const auto touches = [&](NodeId id) {
+                return std::any_of(region.members.begin(), region.members.end(),
+                                   [&](const auto& member) { return member.node == id; });
+            };
+            return touches(connection.source_node) || touches(connection.dest_node);
+        };
+        return static_cast<std::size_t>(std::count_if(fixture.graph.connections().begin(),
+                                                      fixture.graph.connections().end(),
+                                                      touches_region));
+    };
+
+    PersistedRegionFixture baseline;
+    make_persisted_region(baseline);
+    const auto touching = touching_connections(baseline);
+    constexpr std::size_t kPerRegionConnectionLimit = 128;
+    REQUIRE(touching < kPerRegionConnectionLimit);
+
+    PersistedRegionFixture at_limit;
+    make_persisted_region(at_limit, kPerRegionConnectionLimit - touching);
+    REQUIRE(touching_connections(at_limit) == kPerRegionConnectionLimit);
+    REQUIRE_FALSE(GraphSerializer::to_json(at_limit.graph).empty());
+
+    PersistedRegionFixture above_limit;
+    make_persisted_region(above_limit, kPerRegionConnectionLimit - touching + 1);
+    REQUIRE(touching_connections(above_limit) == kPerRegionConnectionLimit + 1);
+    REQUIRE(GraphSerializer::to_json(above_limit.graph).empty());
 }
 
 TEST_CASE("GraphSerializer round-trips topology with gain and I/O nodes", "[host][serializer]") {

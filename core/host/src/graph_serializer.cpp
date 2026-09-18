@@ -574,6 +574,19 @@ std::string GraphSerializer::to_json(
     if (!regions.empty() && graph.connections().size() > kMaxSerializedSampleRegionConnections) {
         return {};
     }
+    for (const auto& region : regions) {
+        SampleRegionParserShape shape{};
+        for (const auto& connection : graph.connections()) {
+            const auto touches = [&](NodeId id) {
+                return std::any_of(region.members.begin(), region.members.end(),
+                                   [&](const auto& member) { return member.node == id; });
+            };
+            if (touches(connection.source_node) || touches(connection.dest_node))
+                ++shape.connections_per_region;
+        }
+        if (!prove_sample_region_parser_shape(shape).accepted)
+            return {};
+    }
     const int version = regions.empty() ? 2 : kFormatVersion;
     root.addMember("format_version", (int64_t)version);
 
@@ -1327,6 +1340,29 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             }
             if (!accepted)
                 connection_error = "connection failed validation";
+        }
+
+        if (connection_error.empty()) {
+            SignalGraph::GraphMutationLock lock(graph);
+            for (const auto& definition : definitions) {
+                const bool fully_resolved = std::all_of(
+                    definition.members.begin(), definition.members.end(), [&](const auto& member) {
+                        return graph.sample_kernel_type(member.type_id, member.version) != nullptr;
+                    });
+                if (!fully_resolved)
+                    continue;
+                const auto metadata = graph.sample_region_metadata_proof_locked_(definition, true);
+                if (!metadata.accepted) {
+                    connection_error = "sample region metadata proof failed: " + metadata.message;
+                    break;
+                }
+                const auto proof = pulp::host::prove_sample_region(
+                    graph.sample_region_candidate_locked_(definition));
+                if (!proof.accepted) {
+                    connection_error = "sample region proof failed: " + proof.message;
+                    break;
+                }
+            }
         }
 
         if (connection_error.empty()) {
