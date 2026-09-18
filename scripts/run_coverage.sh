@@ -255,6 +255,24 @@ if [[ "${INVALID_PROFILE_SHARDS}" -gt 25 \
 fi
 echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
 
+# The merged profdata is now the complete coverage input. Raw shards are no
+# longer needed, and retaining thousands of them leaves too little room for
+# llvm-cov's HTML drilldown (the hosted macOS runner previously filled its
+# filesystem while writing that output). Delete only after a successful merge;
+# if cleanup cannot complete, fail closed instead of generating a report from
+# an unbounded disk state.
+echo "=== Reclaiming merged raw profile shards ==="
+if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete; then
+    echo "run_coverage.sh: could not delete merged raw profile shards" >&2
+    exit 1
+fi
+REMAINING_PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -name '*.profraw' -type f -print -quit)
+if [[ -n "${REMAINING_PROFILE_SHARDS}" ]]; then
+    echo "run_coverage.sh: raw profile shards remain after cleanup: ${REMAINING_PROFILE_SHARDS}" >&2
+    exit 1
+fi
+echo "=== Raw profile shards reclaimed; retaining ${PROFDATA} ==="
+
 # Gather binaries for llvm-cov's -object multi-arg form.
 #
 # #566 follow-up: historically we only passed test executables, which meant

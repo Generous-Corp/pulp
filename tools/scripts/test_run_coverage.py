@@ -306,6 +306,22 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "profile files.",
         )
 
+    def test_merged_profraw_shards_are_reclaimed_before_html_report(self) -> None:
+        text = SCRIPT.read_text()
+        merge = text.index('llvm-profdata merge -sparse')
+        cleanup = text.index('=== Reclaiming merged raw profile shards ===')
+        html = text.index('echo "=== llvm-cov show (HTML drilldown) ==="')
+        self.assertLess(merge, cleanup)
+        self.assertLess(cleanup, html)
+        self.assertIn(
+            'find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete',
+            text[cleanup:html],
+        )
+        self.assertIn(
+            'REMAINING_PROFILE_SHARDS=$(find "${PROFRAW_DIR}"',
+            text[cleanup:html],
+        )
+
     def test_profraw_pattern_is_per_process(self) -> None:
         """One profile per process, with a merge pool inside it.
 
