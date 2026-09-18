@@ -226,14 +226,14 @@ TEST_CASE("Sample-region proof resolves exact registry identities and versions",
 }
 
 TEST_CASE("Sample-region proof rejects the planted instantaneous bypass cycle",
-          "[host][sample-region][proof][negative]") {
+          "[host][sample-region][proof][negative][i2][NEG-04]") {
     const auto proof = prove_sample_region(instantaneous_cycle());
     REQUIRE_FALSE(proof.accepted);
     REQUIRE(proof.reason == SampleRegionRefusalReason::InstantaneousCycle);
 }
 
 TEST_CASE("Sample-region boundary and producer controls fail closed",
-          "[host][sample-region][proof][negative]") {
+          "[host][sample-region][proof][negative][i2][NEG-08]") {
     auto candidate = delayed_cycle();
     candidate.connections.erase(candidate.connections.begin());
     auto proof = prove_sample_region(candidate);
@@ -382,7 +382,7 @@ TEST_CASE("Sample-region graph checks region block work after graph frame admiss
 }
 
 TEST_CASE("Sample-region parser ceilings accept exact and reject one-over and truncation",
-          "[host][sample-region][parser][negative]") {
+          "[host][sample-region][parser][negative][i2][NEG-07][RT-04]") {
     SampleRegionParserShape exact;
     exact.regions = 16;
     exact.members_per_region = 64;
