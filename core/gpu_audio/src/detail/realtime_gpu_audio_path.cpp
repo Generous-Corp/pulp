@@ -22,14 +22,10 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
 }
 
 GpuAudioProvider realtime_gpu_provider(GpuAudioNode* node) noexcept {
-#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    auto* convolver = dynamic_cast<GpuConvolver*>(node);
-    if (convolver != nullptr && convolver->has_realtime_shared_io())
-        return GpuAudioProvider::Dawn;
-#else
-    (void)node;
-#endif
-    return GpuAudioProvider::Unknown;
+    // The existing friend builds this path only for the concrete, prepared
+    // Dawn convolver. Reuse that decision without exposing node internals.
+    return realtime_gpu_node_path(node).context != nullptr ? GpuAudioProvider::Dawn
+                                                          : GpuAudioProvider::Unknown;
 }
 
 } // namespace pulp::gpu_audio::detail
