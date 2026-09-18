@@ -208,6 +208,40 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
     return {};
 }
 
+TEST_CASE("GpuAudioTransport capability report is an honest staged snapshot",
+          "[gpu_audio][transport][capability]") {
+    constexpr uint32_t BS = 32;
+    GpuAudioTransport transport;
+
+    const auto inactive = transport.capability_report();
+    CHECK(inactive.path == GpuAudioExecutionPath::Unavailable);
+    CHECK(inactive.provider == GpuAudioProvider::Unknown);
+    CHECK(inactive.eligibility == GpuAudioEligibility::Unavailable);
+    CHECK_FALSE(inactive.prepared);
+    CHECK(inactive.prepared_lead_blocks == 0);
+    CHECK_FALSE(inactive.fallback_available);
+    CHECK_FALSE(inactive.diagnostics_available);
+
+    test_detail::RealtimeHookNode node(1, BS, MissPolicy::CpuFallback, 3);
+    REQUIRE(node.prepare());
+    REQUIRE(transport.prepare(&node, {.ring_blocks = 8}));
+
+    const auto report = transport.capability_report();
+    CHECK(report.path == GpuAudioExecutionPath::Staged);
+    CHECK(report.provider == GpuAudioProvider::Unknown);
+    CHECK(report.eligibility == GpuAudioEligibility::Eligible);
+    CHECK(report.prepared);
+    CHECK(report.prepared_lead_blocks == 3);
+    CHECK(report.fallback_policy == MissPolicy::CpuFallback);
+    CHECK(report.fallback_available);
+    CHECK(report.diagnostics_available);
+
+    transport.release();
+    const auto released = transport.capability_report();
+    CHECK(released.path == GpuAudioExecutionPath::Unavailable);
+    CHECK_FALSE(released.prepared);
+}
+
 } // namespace pulp::gpu_audio::detail
 
 namespace {
