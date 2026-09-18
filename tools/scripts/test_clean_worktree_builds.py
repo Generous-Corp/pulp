@@ -73,7 +73,13 @@ class Fixture:
             check=True, capture_output=True,
         )
         (self.main / "README").write_text("seed\n")
-        git(self.main, "add", "README")
+        # The gate takes git's ignore rules as the per-item evidence that a
+        # build directory is regenerable, so the fixture has to carry the same
+        # ignore rule the real repository does. Without it every fixture build
+        # dir is unignored, the gate keeps all of them, and every deletion test
+        # fails while asserting nothing about deletion.
+        (self.main / ".gitignore").write_text("build/\nbuild-*/\n")
+        git(self.main, "add", "README", ".gitignore")
         git(self.main, "commit", "-m", "seed")
         git(self.main, "push", "-u", "origin", "main")
 
