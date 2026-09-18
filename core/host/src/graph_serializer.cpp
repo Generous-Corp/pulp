@@ -369,6 +369,32 @@ bool valid_persisted_kernel_config(const SampleKernelConfig& config) noexcept {
     return false;
 }
 
+struct PersistedV1KernelContract {
+    std::uint32_t inputs;
+    std::uint32_t outputs;
+    SampleKernelConfigKind config_kind;
+    SampleKernelCausality causality;
+};
+
+std::optional<PersistedV1KernelContract> persisted_v1_kernel_contract(std::string_view type_id,
+                                                                      int version) {
+    if (version != 1)
+        return std::nullopt;
+    using Kind = SampleKernelConfigKind;
+    using Causality = SampleKernelCausality;
+    if (type_id == "pulp.core.sample-region.input" || type_id == "pulp.core.sample-region.output")
+        return PersistedV1KernelContract{1, 1, Kind::BoundaryIndex, Causality::Combinational};
+    if (type_id == "pulp.core.sample-region.constant")
+        return PersistedV1KernelContract{0, 1, Kind::FiniteConstant, Causality::Combinational};
+    if (type_id == "pulp.core.sample-region.parameter")
+        return PersistedV1KernelContract{0, 1, Kind::PromotedParameterId, Causality::Combinational};
+    if (type_id == "pulp.core.sample-region.add" || type_id == "pulp.core.sample-region.multiply")
+        return PersistedV1KernelContract{2, 1, Kind::None, Causality::Combinational};
+    if (type_id == "pulp.core.unit-delay")
+        return PersistedV1KernelContract{1, 1, Kind::None, Causality::OneSampleDelay};
+    return std::nullopt;
+}
+
 bool validate_persisted_region_metadata(const SignalGraph& graph,
                                         std::span<const SampleRegionDefinition> definitions,
                                         std::string& error) {
@@ -393,6 +419,7 @@ bool validate_persisted_region_metadata(const SignalGraph& graph,
         for (const auto& member : definition.members) {
             const auto* current = graph.node(member.node);
             const auto* descriptor = graph.sample_kernel_type(member.type_id, member.version);
+            const auto contract = persisted_v1_kernel_contract(member.type_id, member.version);
             if (member.node == 0 || !members.emplace(member.node, &member).second ||
                 current == nullptr || current->type != NodeType::Custom ||
                 current->custom_type_id != member.type_id ||
@@ -402,7 +429,11 @@ bool validate_persisted_region_metadata(const SignalGraph& graph,
                  (!is_sample_region_v1_descriptor(*descriptor) ||
                   current->num_input_ports != static_cast<int>(descriptor->num_input_ports) ||
                   current->num_output_ports != static_cast<int>(descriptor->num_output_ports) ||
-                  !sample_region_config_matches(member.config, *descriptor)))) {
+                  !sample_region_config_matches(member.config, *descriptor))) ||
+                (descriptor == nullptr && contract.has_value() &&
+                 (current->num_input_ports != static_cast<int>(contract->inputs) ||
+                  current->num_output_ports != static_cast<int>(contract->outputs) ||
+                  member.config.kind != contract->config_kind))) {
                 error = "invalid or duplicate sample region member";
                 return false;
             }
@@ -659,26 +690,29 @@ bool validate_persisted_region_topology(const SignalGraph& graph,
                 return reject();
         }
 
-        std::vector<const SampleKernelDescriptor*> descriptors(definition.members.size());
+        std::vector<std::optional<SampleKernelCausality>> causalities(definition.members.size());
         std::size_t known_combinational = 0;
         for (std::size_t i = 0; i < definition.members.size(); ++i) {
             const auto& member = definition.members[i];
-            descriptors[i] = graph.sample_kernel_type(member.type_id, member.version);
-            if (descriptors[i] != nullptr &&
-                descriptors[i]->causality == SampleKernelCausality::Combinational) {
+            if (const auto* descriptor = graph.sample_kernel_type(member.type_id, member.version))
+                causalities[i] = descriptor->causality;
+            else if (const auto contract =
+                         persisted_v1_kernel_contract(member.type_id, member.version))
+                causalities[i] = contract->causality;
+            if (causalities[i] == SampleKernelCausality::Combinational) {
                 ++known_combinational;
             }
         }
         std::vector<std::size_t> indegree(definition.members.size());
         std::vector<std::vector<std::size_t>> instantaneous(definition.members.size());
         for (std::size_t source = 0; source < forward.size(); ++source) {
-            if (descriptors[source] == nullptr ||
-                descriptors[source]->causality == SampleKernelCausality::OneSampleDelay) {
+            if (!causalities[source].has_value() ||
+                causalities[source] == SampleKernelCausality::OneSampleDelay) {
                 continue;
             }
             for (const auto destination : forward[source]) {
-                if (descriptors[destination] == nullptr ||
-                    descriptors[destination]->causality == SampleKernelCausality::OneSampleDelay) {
+                if (!causalities[destination].has_value() ||
+                    causalities[destination] == SampleKernelCausality::OneSampleDelay) {
                     continue;
                 }
                 instantaneous[source].push_back(destination);
@@ -686,10 +720,8 @@ bool validate_persisted_region_topology(const SignalGraph& graph,
             }
         }
         std::queue<std::size_t> acyclic;
-        for (std::size_t i = 0; i < descriptors.size(); ++i) {
-            if (descriptors[i] != nullptr &&
-                descriptors[i]->causality == SampleKernelCausality::Combinational &&
-                indegree[i] == 0) {
+        for (std::size_t i = 0; i < causalities.size(); ++i) {
+            if (causalities[i] == SampleKernelCausality::Combinational && indegree[i] == 0) {
                 acyclic.push(i);
             }
         }

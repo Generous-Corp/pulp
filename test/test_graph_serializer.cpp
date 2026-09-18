@@ -345,9 +345,10 @@ TEST_CASE("GraphSerializer validates unresolved region topology",
         unresolved_json.replace(version, std::string("\"version\": 1").size(), "\"version\": 77");
         type = version + 1;
     }
-    const auto require_topology_rejected = [](const std::string& json) {
+    const auto require_topology_rejected = [](const std::string& json, bool register_types = true) {
         SignalGraph loaded;
-        REQUIRE(register_builtin_sample_region_types(loaded));
+        if (register_types)
+            REQUIRE(register_builtin_sample_region_types(loaded));
         const auto result = GraphSerializer::from_json(loaded, json);
         REQUIRE_FALSE(result.ok);
         REQUIRE(result.error == "invalid persisted sample region topology");
@@ -360,7 +361,7 @@ TEST_CASE("GraphSerializer validates unresolved region topology",
         const auto pos = json.find(boundary);
         REQUIRE(pos != std::string::npos);
         json.replace(pos, boundary.size(), "\"dest_node\": " + std::to_string(ordinary));
-        require_topology_rejected(json);
+        require_topology_rejected(json, false);
     }
 
     SECTION("internal connection count exceeds the authored limit") {
@@ -397,7 +398,7 @@ TEST_CASE("GraphSerializer validates unresolved region topology",
         REQUIRE((source != std::string::npos && value != std::string::npos &&
                  end != std::string::npos));
         json.replace(value + 1, end - value - 1, " " + std::to_string(ordinary));
-        require_topology_rejected(json);
+        require_topology_rejected(json, false);
     }
 
     SECTION("known member config violates its descriptor") {
@@ -409,7 +410,6 @@ TEST_CASE("GraphSerializer validates unresolved region topology",
                  config != std::string::npos));
         json.replace(config, std::string("\"config_kind\": 1").size(), "\"config_kind\": 3");
         SignalGraph loaded;
-        REQUIRE(register_builtin_sample_region_types(loaded));
         const auto result = GraphSerializer::from_json(loaded, json);
         REQUIRE_FALSE(result.ok);
         REQUIRE(result.error == "invalid or duplicate sample region member");
@@ -424,7 +424,6 @@ TEST_CASE("GraphSerializer validates unresolved region topology",
         json.replace(inputs, std::string("\"num_input_ports\": 2").size(),
                      "\"num_input_ports\": 3");
         SignalGraph loaded;
-        REQUIRE(register_builtin_sample_region_types(loaded));
         const auto result = GraphSerializer::from_json(loaded, json);
         REQUIRE_FALSE(result.ok);
         REQUIRE(result.error == "invalid or duplicate sample region member");
