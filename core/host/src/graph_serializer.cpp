@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -455,6 +456,90 @@ bool validate_persisted_region_metadata(const SignalGraph& graph,
                 !bound_parameters.contains(member.config.boundary_index_or_parameter_id)) {
                 error = "invalid promoted parameter binding";
                 return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool validate_persisted_region_topology(const SignalGraph& graph,
+                                        std::span<const SampleRegionDefinition> definitions,
+                                        std::span<const Connection> connections,
+                                        std::string& error) {
+    const auto reject = [&] {
+        error = "invalid persisted sample region topology";
+        return false;
+    };
+    for (const auto& definition : definitions) {
+        std::unordered_map<NodeId, std::size_t> member_index;
+        for (std::size_t i = 0; i < definition.members.size(); ++i)
+            member_index.emplace(definition.members[i].node, i);
+        const std::unordered_set<NodeId> input_boundaries(definition.input_boundaries.begin(),
+                                                          definition.input_boundaries.end());
+        const std::unordered_set<NodeId> output_boundaries(definition.output_boundaries.begin(),
+                                                           definition.output_boundaries.end());
+        std::vector<std::vector<std::size_t>> internal_producers;
+        std::vector<std::size_t> internal_consumers(definition.members.size());
+        std::vector<std::size_t> external_producers(definition.members.size());
+        internal_producers.reserve(definition.members.size());
+        for (const auto& member : definition.members) {
+            const auto* node = graph.node(member.node);
+            if (node == nullptr || node->num_input_ports < 0)
+                return reject();
+            internal_producers.emplace_back(static_cast<std::size_t>(node->num_input_ports));
+        }
+
+        std::size_t internal_connections = 0;
+        for (const auto& connection : connections) {
+            const auto source = member_index.find(connection.source_node);
+            const auto destination = member_index.find(connection.dest_node);
+            const bool source_inside = source != member_index.end();
+            const bool destination_inside = destination != member_index.end();
+            if (!source_inside && !destination_inside)
+                continue;
+            if (connection.midi || connection.automation || connection.audio_rate_modulation ||
+                connection.sidechain || connection.feedback)
+                return reject();
+            if (source_inside) {
+                const auto* node = graph.node(connection.source_node);
+                if (node == nullptr || node->num_output_ports <= 0 ||
+                    connection.source_port >= static_cast<PortIndex>(node->num_output_ports))
+                    return reject();
+            }
+            if (destination_inside) {
+                const auto* node = graph.node(connection.dest_node);
+                if (node == nullptr || node->num_input_ports <= 0 ||
+                    connection.dest_port >= static_cast<PortIndex>(node->num_input_ports))
+                    return reject();
+            }
+            if (source_inside && destination_inside) {
+                ++internal_connections;
+                ++internal_consumers[source->second];
+                ++internal_producers[destination->second][connection.dest_port];
+            } else if (destination_inside) {
+                if (!input_boundaries.contains(connection.dest_node))
+                    return reject();
+                ++external_producers[destination->second];
+            } else if (!output_boundaries.contains(connection.source_node)) {
+                return reject();
+            }
+        }
+        if (internal_connections > definition.limits.max_internal_connections)
+            return reject();
+
+        for (std::size_t i = 0; i < definition.members.size(); ++i) {
+            const auto& member = definition.members[i];
+            const auto producer_count = std::accumulate(internal_producers[i].begin(),
+                                                        internal_producers[i].end(), std::size_t{});
+            if (input_boundaries.contains(member.node)) {
+                if (external_producers[i] != 1 || producer_count != 0)
+                    return reject();
+            } else if (output_boundaries.contains(member.node)) {
+                if (producer_count != 1 || internal_consumers[i] != 0)
+                    return reject();
+            } else if (std::any_of(internal_producers[i].begin(), internal_producers[i].end(),
+                                   [](const auto count) { return count != 1; })) {
+                return reject();
             }
         }
     }
@@ -1233,6 +1318,13 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
             }
             if (!connection_error.empty())
                 break;
+        }
+        if (connection_error.empty() &&
+            !validate_persisted_region_topology(graph, definitions, parsed_connections,
+                                                connection_error)) {
+            graph.clear();
+            result.error = std::move(connection_error);
+            return result;
         }
         const auto node_region = [&](NodeId id) {
             const auto found = region_members.find(id);

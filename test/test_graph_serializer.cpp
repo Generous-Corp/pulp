@@ -320,6 +320,55 @@ TEST_CASE("GraphSerializer preserves unresolved region type versions and refuses
     REQUIRE(rejected.nodes().empty());
 }
 
+TEST_CASE("GraphSerializer validates unresolved region topology",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+    const auto definition = fixture.graph.sample_regions().front();
+    const auto input_boundary = definition.input_boundaries.front();
+    const auto ordinary =
+        std::find_if(definition.members.begin(), definition.members.end(), [](const auto& member) {
+            return member.type_id == "pulp.core.sample-region.add";
+        })->node;
+
+    auto unresolved_json = GraphSerializer::to_json(fixture.graph);
+    std::size_t type = 0;
+    while ((type = unresolved_json.find("pulp.core.unit-delay", type)) != std::string::npos) {
+        unresolved_json.replace(type, std::string("pulp.core.unit-delay").size(),
+                                "pulp.future.unit-delay");
+        const auto version = unresolved_json.find("\"version\": 1", type);
+        REQUIRE(version != std::string::npos);
+        unresolved_json.replace(version, std::string("\"version\": 1").size(), "\"version\": 77");
+        type = version + 1;
+    }
+    const auto require_topology_rejected = [](const std::string& json) {
+        SignalGraph loaded;
+        REQUIRE(register_builtin_sample_region_types(loaded));
+        const auto result = GraphSerializer::from_json(loaded, json);
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "invalid persisted sample region topology");
+        REQUIRE(loaded.nodes().empty());
+    };
+
+    SECTION("exterior edge enters an ordinary member") {
+        auto json = unresolved_json;
+        const auto boundary = "\"dest_node\": " + std::to_string(input_boundary);
+        const auto pos = json.find(boundary);
+        REQUIRE(pos != std::string::npos);
+        json.replace(pos, boundary.size(), "\"dest_node\": " + std::to_string(ordinary));
+        require_topology_rejected(json);
+    }
+
+    SECTION("internal connection count exceeds the authored limit") {
+        auto json = unresolved_json;
+        const auto limit = json.find("\"max_internal_connections\": 124");
+        REQUIRE(limit != std::string::npos);
+        json.replace(limit, std::string("\"max_internal_connections\": 124").size(),
+                     "\"max_internal_connections\": 1");
+        require_topology_rejected(json);
+    }
+}
+
 TEST_CASE("GraphSerializer rejects invalid unrelated connections in a region graph",
           "[host][serializer][sample-region][p2]") {
     PersistedRegionFixture fixture;
@@ -410,12 +459,12 @@ TEST_CASE("GraphSerializer rejects fully resolved region proof failures",
     PersistedRegionFixture fixture;
     make_persisted_region(fixture);
     const auto original = GraphSerializer::to_json(fixture.graph);
-    const auto require_proof_rejected = [&](const std::string& json) {
+    const auto require_region_rejected = [&](const std::string& json) {
         SignalGraph loaded;
         REQUIRE(register_builtin_sample_region_types(loaded));
         const auto result = GraphSerializer::from_json(loaded, json);
         REQUIRE_FALSE(result.ok);
-        REQUIRE(result.error.find("sample region proof failed") != std::string::npos);
+        REQUIRE(result.error.find("sample region") != std::string::npos);
         REQUIRE(loaded.nodes().empty());
     };
 
@@ -433,7 +482,7 @@ TEST_CASE("GraphSerializer rejects fully resolved region proof failures",
                          "pulp.core.sample-region.add");
             type += std::string("pulp.core.sample-region.add").size();
         }
-        require_proof_rejected(json);
+        require_region_rejected(json);
     }
 
     SECTION("authored internal connection limit") {
@@ -442,14 +491,14 @@ TEST_CASE("GraphSerializer rejects fully resolved region proof failures",
         REQUIRE(limit != std::string::npos);
         json.replace(limit, std::string("\"max_internal_connections\": 124").size(),
                      "\"max_internal_connections\": 1");
-        require_proof_rejected(json);
+        require_region_rejected(json);
     }
 
     SECTION("registered scalar kernel outside every region") {
         REQUIRE(fixture.graph.add_custom_node("pulp.core.sample-region.add") != 0);
         const auto json = GraphSerializer::to_json(fixture.graph);
         REQUIRE_FALSE(json.empty());
-        require_proof_rejected(json);
+        require_region_rejected(json);
     }
 }
 
