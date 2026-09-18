@@ -188,7 +188,14 @@ cd "${BUILD_DIR}"
 # (so reviewers can see what did exercise), but the script must exit non-zero so
 # CI flags the failure; silently swallowing test failures hid real regressions.
 CTEST_RC=0
-# Run the suite in parallel with a per-test wall-clock cap. Serial ctest over
+# Run the suite in parallel with a per-test wall-clock cap. Keep successful
+# test progress quiet: a 22k-test instrumented run otherwise writes one
+# progress line per test into GitHub Actions' runner diagnostic pages, which
+# can exhaust the hosted runner disk before the report/upload steps run.
+# `--output-on-failure` still preserves the failing test's output, so this
+# changes log volume without hiding a test failure.
+#
+# Serial ctest over
 # the full ~13.5k-case suite is the dominant cost of a coverage run and pushed
 # even the macOS leg past the workflow's internal budget (a killed run drops the
 # Cobertura report and reddens main). `-j` matches the parallelism the primary
@@ -209,9 +216,9 @@ if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 if [[ -n "${TESTS_REGEX}" ]]; then
-    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
+    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
 else
-    ctest "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
+    ctest "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
 fi
 if [[ "${CTEST_RC}" -ne 0 ]]; then
     echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="

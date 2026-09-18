@@ -277,9 +277,18 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "CTest policy such as macOS validation-label exclusion.",
         )
         self.assertTrue(
-            _script_contains('"${EXTRA_CTEST_ARGS[@]}" --output-on-failure'),
+            _script_contains('"${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure'),
             "run_coverage.sh must pass optional CTest args before the shared "
             "output/retry flags.",
+        )
+
+    def test_ctest_success_progress_is_quiet_to_protect_runner_disk(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertEqual(
+            text.count('--quiet --output-on-failure'),
+            2,
+            "both filtered and full coverage runs must suppress successful "
+            "CTest progress while retaining failure output",
         )
 
     def test_profraw_cleanup_uses_find_delete(self) -> None:
