@@ -1416,6 +1416,10 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 accepted = graph.connect(connection.source_node, connection.source_port,
                                          connection.dest_node, connection.dest_port);
             }
+            if (accepted) {
+                SignalGraph::GraphMutationLock lock(graph);
+                parsed_connections[i] = graph.connections_.back();
+            }
             const auto* unresolved_source = graph.node(connection.source_node);
             const bool valid_unresolved_source =
                 unresolved_source != nullptr && unresolved_source->num_output_ports > 0 &&

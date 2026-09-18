@@ -393,6 +393,35 @@ TEST_CASE("GraphSerializer rejects invalid unrelated connections in a region gra
     REQUIRE(loaded.connections().empty());
 }
 
+TEST_CASE("GraphSerializer installs normalized unrelated MIDI ports in a region graph",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+    const auto midi_input = fixture.graph.add_midi_input_node();
+    const auto midi_output = fixture.graph.add_midi_output_node();
+    REQUIRE(fixture.graph.connect_midi(midi_input, midi_output));
+
+    auto json = GraphSerializer::to_json(fixture.graph);
+    const auto source = json.find("\"source_node\": " + std::to_string(midi_input));
+    REQUIRE(source != std::string::npos);
+    const auto source_port = json.find("\"source_port\": 0", source);
+    const auto dest_port = json.find("\"dest_port\": 0", source_port);
+    REQUIRE((source_port != std::string::npos && dest_port != std::string::npos));
+    json.replace(source_port, std::string("\"source_port\": 0").size(), "\"source_port\": 7");
+    json.replace(dest_port, std::string("\"dest_port\": 0").size(), "\"dest_port\": 9");
+
+    SignalGraph loaded;
+    REQUIRE(register_builtin_sample_region_types(loaded));
+    const auto result = GraphSerializer::from_json(loaded, json);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    const auto midi = std::find_if(loaded.connections().begin(), loaded.connections().end(),
+                                   [](const auto& connection) { return connection.midi; });
+    REQUIRE(midi != loaded.connections().end());
+    REQUIRE(midi->source_port == 0);
+    REQUIRE(midi->dest_port == 0);
+}
+
 TEST_CASE("GraphSerializer rejects invalid persisted region metadata",
           "[host][serializer][sample-region][p2]") {
     PersistedRegionFixture fixture;
