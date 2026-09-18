@@ -492,6 +492,15 @@ SampleRegionProof prove_sample_region_impl(const SampleRegionCandidate& candidat
 
 } // namespace
 
+bool is_sample_region_v1_descriptor(const SampleKernelDescriptor& descriptor) noexcept {
+    return descriptor_is_v1(descriptor);
+}
+
+bool sample_region_config_matches(const SampleKernelConfig& config,
+                                  const SampleKernelDescriptor& descriptor) noexcept {
+    return config_matches(config, descriptor);
+}
+
 SampleRegionProof prove_sample_region(const SampleRegionCandidate& candidate) {
     return prove_sample_region_impl(candidate, true);
 }
