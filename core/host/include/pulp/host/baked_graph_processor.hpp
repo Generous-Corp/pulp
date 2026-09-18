@@ -28,6 +28,7 @@
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/host/baked_codec.hpp>
+#include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
 
@@ -236,6 +237,14 @@ public:
                         // reference back into the source graph.
                         std::unordered_map<NodeId, BakedCustomNodeBinding>
                             custom_nodes = {});
+    BakedGraphProcessor(std::vector<GraphNode> nodes,
+                        std::vector<Connection> connections,
+                        int input_channels,
+                        int output_channels,
+                        std::string name,
+                        std::string bundle_id,
+                        std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
+                        std::vector<SampleRegionDefinition> sample_regions);
 
     ~BakedGraphProcessor() override;
 
@@ -301,6 +310,8 @@ private:
 
     std::string name_;
     std::string bundle_id_;
+    SampleRegionParameterContract sample_region_parameter_contract_;
+    std::unique_ptr<SampleRegionParameterBinding> sample_region_parameter_binding_;
     int input_channels_ = 2;
     int output_channels_ = 2;
     int prepared_max_block_ = 0;

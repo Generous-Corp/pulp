@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/host/baked_graph_processor.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <bit>
@@ -237,4 +238,48 @@ TEST_CASE("Prepared edit rejects a borrowed contract with different authored ide
     CHECK(graph.is_prepared());
     CHECK(graph.nodes().size() == nodes_before.size());
     CHECK(graph.sample_region_parameter_binding() == nullptr);
+}
+
+TEST_CASE("Baked graph publishes the frozen promoted parameter manifest",
+          "[host][sample-region][parameters][baked]") {
+    auto coefficient = promoted(90);
+    coefficient.name = "Allpass Coefficient";
+    coefficient.range = {-0.99f, 0.99f, 0.5f, 0.0f};
+    auto feedback = promoted(40, "feedback");
+    feedback.name = "Feedback";
+    feedback.range = {0.0f, 1.0f, 0.25f, 0.0f};
+    const auto definition = region(9, {coefficient, feedback});
+
+    BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked", {},
+                                  {definition});
+    state::StateStore store;
+    processor.define_parameters(store);
+    processor.define_parameters(store);
+
+    REQUIRE(store.param_count() == 2);
+    const auto manifest = store.all_params();
+    CHECK(manifest[0].id == 40);
+    CHECK(manifest[0].name == "Feedback");
+    CHECK(manifest[0].range.default_value == 0.25f);
+    CHECK(manifest[0].rate == state::ParamRate::ControlRate);
+    CHECK(manifest[0].smoothing_ramp_seconds == 0.0f);
+    CHECK(manifest[1].id == 90);
+    CHECK(manifest[1].name == "Allpass Coefficient");
+    CHECK(manifest[1].range.default_value == 0.5f);
+    CHECK(store.get_value(40) == 0.25f);
+    CHECK(store.get_value(90) == 0.5f);
+
+    const auto generation = store.state_generation();
+    store.set_value(90, 0.75f);
+    CHECK(store.get_value(90) == 0.75f);
+    CHECK(store.state_generation() > generation);
+}
+
+TEST_CASE("Baked graph without regions preserves the empty legacy manifest",
+          "[host][sample-region][parameters][baked][compatibility]") {
+    BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked");
+    state::StateStore store;
+    processor.define_parameters(store);
+    CHECK(store.param_count() == 0);
+    CHECK(store.state_generation() == 0);
 }

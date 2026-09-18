@@ -311,12 +311,19 @@ static LowerResult bake_impl(const SignalGraph& graph,
         nodes.push_back(std::move(n));
     }
     std::vector<Connection> conns(graph.connections().begin(), graph.connections().end());
+    std::vector<SampleRegionDefinition> sample_regions;
+    for (auto& descriptor : graph.sample_regions()) {
+        SampleRegionDefinition definition;
+        static_cast<SampleRegionDefinition&>(definition) = std::move(descriptor);
+        sample_regions.push_back(std::move(definition));
+    }
 
     result.processor = std::make_unique<BakedGraphProcessor>(
         std::move(nodes), std::move(conns),
         input_channels > 0 ? input_channels : 2,
         output_channels > 0 ? output_channels : 2,
-        "Baked Graph", "com.pulp.baked-graph", std::move(custom_nodes));
+        "Baked Graph", "com.pulp.baked-graph", std::move(custom_nodes),
+        std::move(sample_regions));
     result.accepted = true;
     result.reason = LowerRejectReason::None;
     return result;
@@ -951,10 +958,26 @@ BakedGraphProcessor::BakedGraphProcessor(
     std::string name,
     std::string bundle_id,
     std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes)
+    : BakedGraphProcessor(std::move(nodes), std::move(connections), input_channels,
+                          output_channels, std::move(name), std::move(bundle_id),
+                          std::move(custom_nodes), {}) {}
+
+BakedGraphProcessor::BakedGraphProcessor(
+    std::vector<GraphNode> nodes,
+    std::vector<Connection> connections,
+    int input_channels,
+    int output_channels,
+    std::string name,
+    std::string bundle_id,
+    std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
+    std::vector<SampleRegionDefinition> sample_regions)
     : nodes_(std::move(nodes)),
       conns_(std::move(connections)),
       name_(std::move(name)),
       bundle_id_(std::move(bundle_id)),
+      sample_region_parameter_contract_(
+          SampleRegionParameterContract::from_regions(sample_regions)
+              .freeze(std::span<const state::ParamInfo>{})),
       input_channels_(input_channels),
       output_channels_(output_channels) {
     // Latency is NOT computed here. A Custom node's intrinsic latency is a
@@ -990,9 +1013,13 @@ fmt::PluginDescriptor BakedGraphProcessor::descriptor() const {
     return desc;
 }
 
-void BakedGraphProcessor::define_parameters(pulp::state::StateStore& /*store*/) {
-    // The lowerable subset (AudioInput/AudioOutput/Gain) exposes no host
-    // parameters in this slice: a Gain's value is frozen into the plan at bake().
+void BakedGraphProcessor::define_parameters(pulp::state::StateStore& store) {
+    if (!sample_region_parameter_contract_.valid() ||
+        sample_region_parameter_binding_ != nullptr)
+        return;
+    for (const auto& parameter : sample_region_parameter_contract_.parameters())
+        store.add_parameter(parameter);
+    sample_region_parameter_binding_ = sample_region_parameter_contract_.bind(store);
 }
 
 void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
