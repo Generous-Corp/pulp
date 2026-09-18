@@ -37,6 +37,11 @@ class SharedUploadActionTests(unittest.TestCase):
         self.assertIn("disable_search: true", self.action)
         self.assertIn("fail_ci_if_error: true", self.action)
         self.assertIn("continue-on-error: true", self.action)
+        self.assertIn("required:", self.action)
+        self.assertIn(
+            "Codecov transport failed after local reports were verified; required upload has no receipt.",
+            self.action,
+        )
         self.assertIn("steps.upload.outcome == 'success'", self.action)
         self.assertIn("actions/upload-artifact@v6", self.action)
 
@@ -88,6 +93,24 @@ class CoverageWorkflowTests(unittest.TestCase):
         self.assertIn(
             "uses: ./.github/actions/upload-codecov-report", self.coverage
         )
+
+    def test_secondary_main_uploads_cannot_publish_partial_native_coverage(self) -> None:
+        # React and Android used to upload independently while a native leg had
+        # failed or Codecov transport had returned no receipt. That made main's
+        # tree look current while containing only a subset of the codebase.
+        self.assertIn(
+            "needs: [resolve-runners, classify, coverage]",
+            self.coverage,
+        )
+        self.assertIn(
+            "needs.coverage.result == 'success'",
+            self.coverage,
+        )
+        self.assertIn(
+            "required: ${{ matrix.os != 'windows' }}",
+            self.coverage,
+        )
+        self.assertGreaterEqual(self.coverage.count("required: true"), 4)
 
     def test_required_native_lanes_skip_slow_proofs_and_fail_on_budget_miss(self) -> None:
         self.assertIn("scripts/run_coverage.sh owns the bounded CTest policy", self.coverage)
@@ -280,6 +303,14 @@ class CoverageWorkflowTests(unittest.TestCase):
             "files=\"${files},build-coverage/python/coverage.python.xml\"",
             self.coverage,
         )
+
+    def test_advisory_swift_coverage_cannot_strand_native_upload(self) -> None:
+        self.assertIn("timeout_seconds = 10 * 60", self.coverage)
+        self.assertIn("start_new_session=True", self.coverage)
+        self.assertIn("stdout=subprocess.DEVNULL", self.coverage)
+        self.assertIn("stderr=subprocess.DEVNULL", self.coverage)
+        self.assertIn("os.killpg(process.pid, signal.SIGTERM)", self.coverage)
+        self.assertIn("continuing so native coverage can upload", self.coverage)
 
     def test_python_upload_is_independent_from_native_report(self) -> None:
         self.assertIn("id: python_coverage", self.coverage)

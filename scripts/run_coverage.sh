@@ -171,7 +171,11 @@ if ! grep -q '^PULP_ENABLE_COVERAGE:BOOL=ON$' "${CACHE_FILE}" 2>/dev/null; then
 fi
 
 echo "=== Building ==="
-cmake --build "${BUILD_DIR}" -j"${JOBS}"
+# Compiler warnings from the large example-driven graph can fill the hosted
+# runner's Actions log pager and exhaust the root disk before report upload.
+# Keep the build output on the runner only; a build failure still returns the
+# original non-zero status and the surrounding step reports it clearly.
+cmake --build "${BUILD_DIR}" -j"${JOBS}" >/dev/null
 
 echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"
@@ -208,13 +212,30 @@ CTEST_JOBS="${TEST_JOBS}"
 if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
+# CTest writes a progress line for every test. With nearly 22,000 tests this
+# can fill the hosted runner's Actions log pager (and its root disk) before
+# coverage generation starts, producing an ENOSPC failure with no receipt.
+# Keep the normal path quiet; if the suite fails, replay only CTest's failed
+# tests so the useful diagnostics remain visible without retaining a giant log.
+run_ctest() {
+    if [[ -n "${TESTS_REGEX}" ]]; then
+        ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure \
+            --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" \
+            >/dev/null
+    else
+        ctest "${EXTRA_CTEST_ARGS[@]}" --output-on-failure \
+            --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" \
+            >/dev/null
+    fi
+}
 if [[ -n "${TESTS_REGEX}" ]]; then
-    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
+    run_ctest || CTEST_RC=$?
 else
-    ctest "${EXTRA_CTEST_ARGS[@]}" --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
+    run_ctest || CTEST_RC=$?
 fi
 if [[ "${CTEST_RC}" -ne 0 ]]; then
-    echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="
+    echo "=== ctest failed with exit ${CTEST_RC}; replaying failed tests for diagnostics. Coverage report WILL be generated from partial profile data. ==="
+    ctest --rerun-failed --output-on-failure -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || true
 fi
 
 echo "=== Merging profiles ==="
