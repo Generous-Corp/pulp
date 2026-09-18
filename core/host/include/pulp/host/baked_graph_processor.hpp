@@ -33,13 +33,14 @@
 
 #include <atomic>
 #include <cstddef>
-#include <span>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace pulp::host {
@@ -327,6 +328,60 @@ LowerResult bake(const SignalGraph& graph);
 // malformed state fails closed before a processor is returned.
 LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
                        const std::vector<CustomNodeType>& custom_types);
+
+// Exact block/scalar registration pair used by the bake-v2 preflight. This is
+// deliberately separate from CustomNodeType so v1 callers retain the original
+// source surface and a v2 artifact can never resolve sample code by block type
+// identity alone.
+struct BakedTypeRegistration {
+    CustomNodeType block;
+    SampleKernelDescriptor sample;
+};
+
+// Named, non-default wrapper keeps the paired overload distinct from legacy
+// calls such as load_baked(bytes, trust, {}).
+class BakedTypeRegistry {
+  public:
+    BakedTypeRegistry() = delete;
+    static BakedTypeRegistry from(std::vector<BakedTypeRegistration> registrations) {
+        return BakedTypeRegistry(std::move(registrations), ConstructionKey{});
+    }
+
+    const std::vector<BakedTypeRegistration>& registrations() const noexcept {
+        return registrations_;
+    }
+
+  private:
+    struct ConstructionKey {};
+    BakedTypeRegistry(std::vector<BakedTypeRegistration> registrations, ConstructionKey)
+        : registrations_(std::move(registrations)) {}
+
+    std::vector<BakedTypeRegistration> registrations_;
+};
+
+// B3's loader/proof boundary. It verifies a signed v2 artifact, reconstructs
+// its authored topology and region metadata in an isolated PreparedTopologyEdit,
+// and re-runs exact sample-region + ordinary graph proofs. It returns the
+// callback-free verified plan for the later I3 BakedGraphProcessor integration;
+// it does not publish or execute a runtime snapshot.
+struct BakedPlanLoadResult {
+    std::optional<BakedPlan> plan;
+    bool accepted = false;
+    LowerRejectReason reason = LowerRejectReason::None;
+    SampleRegionId offending_region = 0;
+    NodeId offending_node = 0;
+    std::string message;
+};
+
+BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                                    const std::vector<BakedTypeRegistration>& registrations);
+
+template <typename Registry>
+    requires std::is_same_v<std::remove_cvref_t<Registry>, BakedTypeRegistry>
+BakedPlanLoadResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                               Registry&& registry) {
+    return load_baked_plan(bytes, trust, registry.registrations());
+}
 
 // Result of bake_to_plan(): `plan` is set iff `accepted`; on refusal the reason /
 // offending_node / message explain why (mirrors bake()'s LowerResult so the write

@@ -1,10 +1,13 @@
-#include <pulp/host/baked_graph_processor.hpp>
 #include "baked_graph_processor_detail.hpp"
+#include <pulp/host/baked_graph_processor.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -40,6 +43,25 @@ LowerabilityProof prepared_custom_bindings_of(const SignalGraph& graph) {
         proof.offending_node = node.id;
         proof.message =
             "Custom node has no runnable prepared process binding; refusing to bake";
+        return proof;
+    }
+    proof.accepted = true;
+    proof.reason = LowerRejectReason::None;
+    return proof;
+}
+
+LowerabilityProof
+prepared_custom_bindings_of(const SignalGraph& graph,
+                            const std::unordered_set<NodeId>& sample_region_nodes) {
+    LowerabilityProof proof;
+    for (const auto& node : graph.nodes()) {
+        if (node.type != NodeType::Custom || sample_region_nodes.contains(node.id))
+            continue;
+        if (graph.live_custom_processor(node.id) || graph.live_custom_param_processor(node.id))
+            continue;
+        proof.reason = LowerRejectReason::CustomNotYetLowerable;
+        proof.offending_node = node.id;
+        proof.message = "Custom node has no runnable prepared process binding; refusing to bake";
         return proof;
     }
     proof.accepted = true;
@@ -311,25 +333,69 @@ BakePlanResult bake_to_plan(const SignalGraph& graph) {
         result.message = "graph is not prepared; call prepare() before bake_to_plan()";
         return result;
     }
-    if (const auto proof = lowerability_of(
-            graph.nodes(), graph.connections(),
-            [&graph](std::string_view type_id, int version) {
-                return graph.custom_node_type(type_id, version);
-            });
+    const auto authored_regions = graph.sample_regions();
+    std::unordered_set<NodeId> sample_region_nodes;
+    for (const auto& region : authored_regions) {
+        const auto proof = graph.prove_sample_region(region.region_id);
+        if (!proof.accepted) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_node = proof.offending_node;
+            result.message =
+                proof.message.empty() ? "sample-region proof rejected graph" : proof.message;
+            return result;
+        }
+        for (const auto& member : region.members)
+            sample_region_nodes.insert(member.node);
+    }
+
+    std::vector<GraphNode> proof_nodes;
+    std::vector<Connection> proof_connections;
+    if (sample_region_nodes.empty()) {
+        proof_nodes.assign(graph.nodes().begin(), graph.nodes().end());
+        proof_connections.assign(graph.connections().begin(), graph.connections().end());
+    } else {
+        for (const auto& node : graph.nodes()) {
+            if (!sample_region_nodes.contains(node.id))
+                proof_nodes.push_back(node);
+        }
+        for (const auto& connection : graph.connections()) {
+            if (!sample_region_nodes.contains(connection.source_node) &&
+                !sample_region_nodes.contains(connection.dest_node))
+                proof_connections.push_back(connection);
+        }
+    }
+    if (const auto proof = lowerability_of(proof_nodes, proof_connections,
+                                           [&graph](std::string_view type_id, int version) {
+                                               return graph.custom_node_type(type_id, version);
+                                           });
         !proof.accepted) {
         result.reason = proof.reason;
         result.offending_node = proof.offending_node;
         result.message = proof.message;
         return result;
     }
-    if (const auto proof = prepared_custom_bindings_of(graph); !proof.accepted) {
+    const auto custom_bindings = sample_region_nodes.empty()
+                                     ? prepared_custom_bindings_of(graph)
+                                     : prepared_custom_bindings_of(graph, sample_region_nodes);
+    if (!custom_bindings.accepted) {
+        const auto& proof = custom_bindings;
         result.reason = proof.reason;
         result.offending_node = proof.offending_node;
         result.message = proof.message;
         return result;
     }
     BakedPlan plan;
-    plan.format_version = kBakedPlanFormatVersion;
+    // Region-free artifacts retain the v1 wire contract. Region-bearing bake
+    // output is admitted by the v2 codec only after the runtime integration
+    // owns the sample-region lowering; this slice still emits v1 for the
+    // existing block-graph path.
+    plan.format_version =
+        authored_regions.empty() ? kBakedPlanV1FormatVersion : kBakedMaxSupportedFormatVersion;
+    for (const auto& descriptor : authored_regions) {
+        SampleRegionDefinition definition;
+        static_cast<SampleRegionDefinition&>(definition) = descriptor;
+        plan.sample_regions.push_back(std::move(definition));
+    }
     const auto [input_channels, output_channels] = derive_bus_arity(graph);
     plan.input_channels = input_channels;
     plan.output_channels = output_channels;
@@ -381,6 +447,15 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
     if (!plan) {
         result.reason = LowerRejectReason::CodecRejected;
         result.message = "signed .pulpbake envelope or bounded plan parse failed";
+        return result;
+    }
+    // The legacy source signature is intentionally a v1-only path. A v2
+    // artifact carries sample-region semantics that this block-only processor
+    // cannot execute; accepting it here would silently flatten sample timing.
+    if (plan->format_version != kBakedPlanV1FormatVersion) {
+        result.reason = LowerRejectReason::CodecRejected;
+        result.message =
+            "signed .pulpbake v2 requires paired sample-kernel loading; refusing in v1 loader";
         return result;
     }
 
@@ -515,6 +590,357 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
         return result;
     }
     return bake_impl(graph, &restore_states);
+}
+
+BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                                    const std::vector<BakedTypeRegistration>& registrations) {
+    BakedPlanLoadResult result;
+    const auto plan = verify_and_extract_plan(bytes, trust);
+    if (!plan) {
+        result.reason = LowerRejectReason::CodecRejected;
+        result.message = "signed .pulpbake envelope or bounded plan parse failed";
+        return result;
+    }
+    if (plan->format_version == kBakedPlanV1FormatVersion) {
+        if (!plan->sample_regions.empty()) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "v1 baked plan unexpectedly contains sample-region metadata";
+            return result;
+        }
+        std::vector<CustomNodeType> legacy_types;
+        legacy_types.reserve(registrations.size());
+        for (const auto& registration : registrations)
+            legacy_types.push_back(registration.block);
+        const auto legacy = load_baked(bytes, trust, legacy_types);
+        if (!legacy.accepted) {
+            result.reason = legacy.reason;
+            result.offending_node = legacy.offending_node;
+            result.message = legacy.message;
+            return result;
+        }
+        result.plan = *plan;
+        result.accepted = true;
+        result.reason = LowerRejectReason::None;
+        return result;
+    }
+    if (plan->format_version != kBakedMaxSupportedFormatVersion || plan->sample_regions.empty()) {
+        result.reason = LowerRejectReason::CodecRejected;
+        result.message = "paired sample-kernel loading requires a non-empty v2 region table";
+        return result;
+    }
+
+    int derived_input_channels = 0;
+    int derived_output_channels = 0;
+    for (const auto& node : plan->nodes) {
+        if (node.id == 0) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_node = node.id;
+            result.message = "v2 baked plan node IDs must be nonzero";
+            return result;
+        }
+        switch (node.type) {
+        case NodeType::AudioInput:
+            if (node.num_input_ports != 0 || node.num_output_ports <= 0 ||
+                node.num_output_ports > kBakedMaxPortsPerNode) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_node = node.id;
+                result.message = "v2 AudioInput shape is not canonical";
+                return result;
+            }
+            derived_input_channels = std::max(derived_input_channels, node.num_output_ports);
+            break;
+        case NodeType::AudioOutput:
+            if (node.num_input_ports <= 0 || node.num_input_ports > kBakedMaxPortsPerNode ||
+                node.num_output_ports != 0) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_node = node.id;
+                result.message = "v2 AudioOutput shape is not canonical";
+                return result;
+            }
+            derived_output_channels = std::max(derived_output_channels, node.num_input_ports);
+            break;
+        case NodeType::Gain:
+            if (node.num_input_ports != 2 || node.num_output_ports != 2) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_node = node.id;
+                result.message = "v2 Gain shape is not canonical";
+                return result;
+            }
+            break;
+        case NodeType::Custom:
+            if (node.num_input_ports < 0 || node.num_output_ports < 0 ||
+                node.num_input_ports > kBakedMaxPortsPerNode ||
+                node.num_output_ports > kBakedMaxPortsPerNode || node.custom_type_id.empty() ||
+                node.custom_version <= 0) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_node = node.id;
+                result.message = "v2 Custom shape or identity is not canonical";
+                return result;
+            }
+            break;
+        default:
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_node = node.id;
+            result.message = "v2 baked plan contains a non-audio node";
+            return result;
+        }
+    }
+    if (plan->input_channels != derived_input_channels ||
+        plan->output_channels != derived_output_channels) {
+        result.reason = LowerRejectReason::CodecRejected;
+        result.message = "v2 baked plan bus arity does not match its AudioInput/AudioOutput nodes";
+        return result;
+    }
+
+    // Validate the pair identities before mutating the isolated candidate.
+    std::unordered_set<std::string> registration_keys;
+    for (const auto& registration : registrations) {
+        if (!registration.block.is_valid_registration() ||
+            !registration.sample.is_valid_registration() ||
+            registration.block.type_id != registration.sample.type_id ||
+            registration.block.version != registration.sample.version ||
+            registration.block.num_input_ports < 0 || registration.block.num_output_ports < 0 ||
+            registration.sample.num_input_ports !=
+                static_cast<std::uint32_t>(registration.block.num_input_ports) ||
+            registration.sample.num_output_ports !=
+                static_cast<std::uint32_t>(registration.block.num_output_ports)) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "paired CustomNodeType/SampleKernelDescriptor identity mismatch";
+            return result;
+        }
+        const auto key =
+            registration.block.type_id + "\x1f" + std::to_string(registration.block.version);
+        if (!registration_keys.insert(key).second) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "duplicate paired sample-kernel registration";
+            return result;
+        }
+    }
+
+    SignalGraph owner;
+    auto edit = owner.begin_prepared_topology_edit();
+    if (!edit || !register_builtin_sample_region_types(*edit)) {
+        result.reason = LowerRejectReason::CodecRejected;
+        result.message = "built-in sample-kernel registrar failed";
+        return result;
+    }
+    for (const auto& registration : registrations) {
+        if (!edit->register_custom_node_type(registration.block, registration.sample)) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "paired sample-kernel registration was refused";
+            return result;
+        }
+    }
+
+    std::unordered_map<NodeId, NodeId> id_map;
+    id_map.reserve(plan->nodes.size());
+    for (const auto& node : plan->nodes) {
+        NodeId mapped = 0;
+        switch (node.type) {
+        case NodeType::AudioInput:
+            mapped = edit->add_input_node(node.num_output_ports, "in");
+            break;
+        case NodeType::AudioOutput:
+            mapped = edit->add_output_node(node.num_input_ports, "out");
+            break;
+        case NodeType::Gain:
+            mapped = edit->add_gain_node("gain");
+            if (mapped != 0 && !edit->set_node_gain(mapped, node.gain))
+                mapped = 0;
+            break;
+        case NodeType::Custom:
+            mapped = edit->add_custom_node(node.custom_type_id, node.custom_version, "custom");
+            break;
+        default:
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_node = node.id;
+            result.message = "v2 baked plan contains a non-audio node";
+            return result;
+        }
+        const auto* reconstructed = mapped == 0 ? nullptr : edit->node(mapped);
+        if (mapped == 0 || reconstructed == nullptr ||
+            reconstructed->num_input_ports != node.num_input_ports ||
+            reconstructed->num_output_ports != node.num_output_ports ||
+            !id_map.emplace(node.id, mapped).second) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_node = node.id;
+            result.message = "could not reconstruct a unique v2 plan node";
+            return result;
+        }
+        if (node.type == NodeType::Custom && !node.custom_state.empty()) {
+            const CustomNodeType* block_type = nullptr;
+            for (const auto& registration : registrations) {
+                if (registration.block.type_id == node.custom_type_id &&
+                    registration.block.version == node.custom_version) {
+                    block_type = &registration.block;
+                    break;
+                }
+            }
+            if (block_type == nullptr || !block_type->create || !block_type->load_state) {
+                result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
+                result.offending_node = node.id;
+                result.message =
+                    "stateful v2 Custom node requires paired create + load_state callbacks";
+                return result;
+            }
+        }
+    }
+
+    std::vector<SampleRegionDefinition> remapped_regions;
+    remapped_regions.reserve(plan->sample_regions.size());
+    std::unordered_map<NodeId, SampleRegionId> region_for_node;
+    for (const auto& authored : plan->sample_regions) {
+        auto region = authored;
+        for (auto& member : region.members) {
+            const auto mapped = id_map.find(member.node);
+            if (mapped == id_map.end()) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_region = region.region_id;
+                result.offending_node = member.node;
+                result.message = "region member references an unknown plan node";
+                return result;
+            }
+            member.node = mapped->second;
+            if (!region_for_node.emplace(member.node, region.region_id).second) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_region = region.region_id;
+                result.offending_node = member.node;
+                result.message = "region member belongs to multiple authored regions";
+                return result;
+            }
+        }
+        for (auto& boundary : region.input_boundaries) {
+            const auto mapped = id_map.find(boundary);
+            if (mapped == id_map.end()) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_region = region.region_id;
+                result.offending_node = boundary;
+                result.message = "region input boundary references an unknown plan node";
+                return result;
+            }
+            boundary = mapped->second;
+        }
+        for (auto& boundary : region.output_boundaries) {
+            const auto mapped = id_map.find(boundary);
+            if (mapped == id_map.end()) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_region = region.region_id;
+                result.offending_node = boundary;
+                result.message = "region output boundary references an unknown plan node";
+                return result;
+            }
+            boundary = mapped->second;
+        }
+        for (auto& parameter : region.promoted_parameters) {
+            const auto mapped = id_map.find(parameter.bound_node_id);
+            if (mapped == id_map.end()) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_region = region.region_id;
+                result.offending_node = parameter.bound_node_id;
+                result.message = "promoted parameter references an unknown plan node";
+                return result;
+            }
+            parameter.bound_node_id = mapped->second;
+        }
+        if (!edit->declare_sample_region(region).accepted) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_region = authored.region_id;
+            result.message = "reconstructed region metadata failed authoring validation";
+            return result;
+        }
+        remapped_regions.push_back(std::move(region));
+    }
+
+    // Region-internal edges use the region-aware insertion path because a legal
+    // UnitDelay cycle is intentionally not an ordinary graph cycle. All other
+    // edges retain the existing graph connection semantics.
+    for (const auto& connection : plan->connections) {
+        const auto source = id_map.find(connection.src_node);
+        const auto destination = id_map.find(connection.dst_node);
+        if (source == id_map.end() || destination == id_map.end()) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "v2 connection references an unknown node";
+            return result;
+        }
+        const auto source_region = region_for_node.find(source->second);
+        const auto destination_region = region_for_node.find(destination->second);
+        const bool same_region = source_region != region_for_node.end() &&
+                                 destination_region != region_for_node.end() &&
+                                 source_region->second == destination_region->second;
+        bool accepted = false;
+        if (same_region) {
+            if (connection.feedback) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_region = source_region->second;
+                result.message = "legacy feedback is not valid inside a sample region";
+                return result;
+            }
+            accepted = edit->connect_in_sample_region(source_region->second, source->second,
+                                                      connection.src_port, destination->second,
+                                                      connection.dst_port)
+                           .accepted;
+        } else if (connection.feedback) {
+            accepted = edit->connect_feedback(source->second, connection.src_port,
+                                              destination->second, connection.dst_port);
+        } else {
+            accepted = edit->connect(source->second, connection.src_port, destination->second,
+                                     connection.dst_port);
+        }
+        if (!accepted) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "could not reconstruct a v2 connection";
+            return result;
+        }
+    }
+
+    for (const auto& region : remapped_regions) {
+        const auto proof = edit->prove_sample_region(region.region_id);
+        if (!proof.accepted) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_region = region.region_id;
+            result.offending_node = proof.offending_node;
+            result.message =
+                proof.message.empty() ? "sample-region proof rejected v2 artifact" : proof.message;
+            return result;
+        }
+    }
+
+    // The ordinary block proof applies to the residual graph only. Region
+    // members are scalar kernels and must not be fed through the block bake
+    // lowerability predicate.
+    std::vector<GraphNode> residual_nodes;
+    residual_nodes.reserve(edit->nodes().size());
+    for (const auto& node : edit->nodes()) {
+        if (!region_for_node.contains(node.id))
+            residual_nodes.push_back(node);
+    }
+    std::vector<Connection> residual_connections;
+    for (const auto& connection : edit->connections()) {
+        if (!region_for_node.contains(connection.source_node) &&
+            !region_for_node.contains(connection.dest_node)) {
+            residual_connections.push_back(connection);
+        }
+    }
+    const auto ordinary = lowerability_of(
+        residual_nodes, residual_connections,
+        [&registrations](std::string_view type_id, int version) -> const CustomNodeType* {
+            for (const auto& registration : registrations) {
+                if (registration.block.type_id == type_id && registration.block.version == version)
+                    return &registration.block;
+            }
+            return nullptr;
+        });
+    if (!ordinary.accepted) {
+        result.reason = ordinary.reason;
+        result.offending_node = ordinary.offending_node;
+        result.message = ordinary.message;
+        return result;
+    }
+
+    result.plan = *plan;
+    result.accepted = true;
+    result.reason = LowerRejectReason::None;
+    return result;
 }
 
 BakedGraphProcessor::BakedGraphProcessor(

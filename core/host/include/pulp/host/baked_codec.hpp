@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <pulp/host/sample_region_authoring.hpp>
 #include <pulp/host/signal_graph.hpp>  // NodeId, NodeType
 
 #include <cstddef>
@@ -35,12 +36,24 @@ inline constexpr int         kBakedMaxBlock         = 16384;
 inline constexpr std::size_t kBakedMaxCustomTypeId  = 256;    // bytes
 inline constexpr std::size_t kBakedMaxCustomState   = 65536;  // bytes per node
 inline constexpr std::size_t kBakedMaxPlanBytes     = 4u * 1024u * 1024u;  // whole plan
-inline constexpr int         kBakedPlanFormatVersion = 1;
+// Version one is the legacy payload. Keep its value explicit so the default
+// constructed plan and every v1 caller retain the original wire bytes while
+// the public format constant now describes the largest format this codec can
+// admit.
+inline constexpr int kBakedPlanV1FormatVersion = 1;
+inline constexpr int kBakedMaxSupportedFormatVersion = 2;
+inline constexpr int kBakedPlanFormatVersion = kBakedMaxSupportedFormatVersion;
+
+inline constexpr std::size_t kBakedMaxRegions = 16;
+inline constexpr std::size_t kBakedMaxRegionMembers = 64;
+inline constexpr std::size_t kBakedMaxRegionBoundaries = 8;
+inline constexpr std::size_t kBakedMaxRegionParameters = 16;
+inline constexpr std::size_t kBakedMaxRegionString = 1024;
 
 // The serializable frozen-graph plan. No Plugin nodes (bake refuses them); no
 // std::function anywhere (Custom code is re-resolved from the registry).
 struct BakedPlan {
-    int format_version = kBakedPlanFormatVersion;
+    int format_version = kBakedPlanV1FormatVersion;
     int input_channels = 0;
     int output_channels = 0;
 
@@ -65,8 +78,76 @@ struct BakedPlan {
     };
     std::vector<Node> nodes;
     std::vector<Conn> connections;
+    // v2 only. These are authored, callback-free records; executable sample
+    // kernels are resolved from the paired registration supplied to the v2
+    // loader. The writer/parser require canonical region/member/parameter
+    // ordering and refuse a non-canonical signed payload.
+    std::vector<SampleRegionDefinition> sample_regions;
 
-    bool operator==(const BakedPlan&) const = default;
+    bool operator==(const BakedPlan& other) const {
+        if (format_version != other.format_version || input_channels != other.input_channels ||
+            output_channels != other.output_channels || nodes != other.nodes ||
+            connections != other.connections ||
+            sample_regions.size() != other.sample_regions.size())
+            return false;
+
+        const auto equal_config = [](const SampleKernelConfig& lhs, const SampleKernelConfig& rhs) {
+            return lhs.kind == rhs.kind &&
+                   lhs.boundary_index_or_parameter_id == rhs.boundary_index_or_parameter_id &&
+                   lhs.constant == rhs.constant;
+        };
+        const auto equal_member = [&](const SampleRegionKernelNode& lhs,
+                                      const SampleRegionKernelNode& rhs) {
+            return lhs.node == rhs.node && lhs.type_id == rhs.type_id &&
+                   lhs.version == rhs.version && equal_config(lhs.config, rhs.config);
+        };
+        const auto equal_limits = [](const SampleRegionLimits& lhs, const SampleRegionLimits& rhs) {
+            return lhs.max_member_nodes == rhs.max_member_nodes &&
+                   lhs.max_internal_connections == rhs.max_internal_connections &&
+                   lhs.max_input_boundaries == rhs.max_input_boundaries &&
+                   lhs.max_output_boundaries == rhs.max_output_boundaries &&
+                   lhs.max_delay_nodes == rhs.max_delay_nodes &&
+                   lhs.max_promoted_parameters == rhs.max_promoted_parameters &&
+                   lhs.max_state_bytes == rhs.max_state_bytes &&
+                   lhs.max_logical_boundary_bytes == rhs.max_logical_boundary_bytes &&
+                   lhs.max_work_per_frame == rhs.max_work_per_frame &&
+                   lhs.max_work_per_block == rhs.max_work_per_block;
+        };
+        const auto equal_range = [](const state::ParamRange& lhs, const state::ParamRange& rhs) {
+            return lhs.min == rhs.min && lhs.max == rhs.max &&
+                   lhs.default_value == rhs.default_value && lhs.step == rhs.step &&
+                   lhs.skew == rhs.skew && lhs.symmetric_skew == rhs.symmetric_skew;
+        };
+        const auto equal_parameter = [&](const SampleRegionPromotedParameter& lhs,
+                                         const SampleRegionPromotedParameter& rhs) {
+            return lhs.param_id == rhs.param_id && lhs.key == rhs.key && lhs.name == rhs.name &&
+                   lhs.unit == rhs.unit && equal_range(lhs.range, rhs.range) &&
+                   lhs.rate == rhs.rate &&
+                   lhs.smoothing_ramp_seconds == rhs.smoothing_ramp_seconds &&
+                   lhs.bound_node_id == rhs.bound_node_id && lhs.bound_port == rhs.bound_port;
+        };
+        const auto equal_region = [&](const SampleRegionDefinition& lhs,
+                                      const SampleRegionDefinition& rhs) {
+            if (lhs.region_id != rhs.region_id || !equal_limits(lhs.limits, rhs.limits) ||
+                lhs.members.size() != rhs.members.size() ||
+                lhs.input_boundaries != rhs.input_boundaries ||
+                lhs.output_boundaries != rhs.output_boundaries ||
+                lhs.promoted_parameters.size() != rhs.promoted_parameters.size())
+                return false;
+            for (std::size_t i = 0; i < lhs.members.size(); ++i)
+                if (!equal_member(lhs.members[i], rhs.members[i]))
+                    return false;
+            for (std::size_t i = 0; i < lhs.promoted_parameters.size(); ++i)
+                if (!equal_parameter(lhs.promoted_parameters[i], rhs.promoted_parameters[i]))
+                    return false;
+            return true;
+        };
+
+        for (std::size_t i = 0; i < sample_regions.size(); ++i)
+            if (!equal_region(sample_regions[i], other.sample_regions[i]))
+                return false;
+        return true;
+    }
 };
 
 // The raw plan payload codec. These are in `detail` — NOT the public surface —
