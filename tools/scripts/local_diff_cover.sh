@@ -26,7 +26,8 @@
 # Exit codes:
 #   0 — diff coverage at or above threshold (or skipped)
 #   1 — diff coverage below threshold, or a hard error during the run
-#   2 — missing required dependency (clear remediation message)
+#   2 — missing required dependency, or evidence invalidated by a worktree
+#       change during the run (both require an explicit rerun/remediation)
 #   3 — not enough free disk space to run the coverage build (nothing built)
 #  10 — preflight-only mode found potentially coverable lines (caller should run)
 #
@@ -54,6 +55,7 @@ CONFIG_JSON="${REPO_ROOT}/tools/scripts/coverage_config.json"
 BUILD_DIR="${REPO_ROOT}/build-cov"
 BUILD_COV_LOCK="${BUILD_DIR}.lock"
 BUILD_ID_FILE="${BUILD_DIR}/.pulp-diff-cover-build-id"
+COVERAGE_BUILD_IDENTITY_START=""
 GOVERNED_BUILD="${REPO_ROOT}/tools/ci/governed-build.sh"
 
 # shellcheck source=../../scripts/coverage_ctest_policy.sh
@@ -201,13 +203,24 @@ acquire_build_cov_lock() {
 coverage_build_identity() {
     {
         printf 'head=%s\n' "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
-        printf 'status=%s\n' "$(git -C "${REPO_ROOT}" status --porcelain=v1)"
+        # Status alone is not an identity: two edits to the same dirty path
+        # have identical porcelain output. Hash the complete tracked diff and
+        # every non-ignored untracked file so profile/object evidence cannot
+        # cross source edits. Ignored generated/dependency inputs remain owned
+        # by their generators and are intentionally outside this identity.
+        printf 'tracked-diff=%s\n' "$(git -C "${REPO_ROOT}" diff --binary HEAD | git hash-object --stdin)"
+        printf 'untracked-files=\n'
+        git -C "${REPO_ROOT}" ls-files --others --exclude-standard -z |
+            while IFS= read -r -d '' path; do
+                printf '%s %s\n' "$(git -C "${REPO_ROOT}" hash-object -- "${path}")" "${path}"
+            done
     }
 }
 
 prepare_coverage_build_identity() {
     local expected actual
     expected="$(coverage_build_identity)"
+    COVERAGE_BUILD_IDENTITY_START="${expected}"
     if [ ! -d "${BUILD_DIR}" ]; then
         return 0
     fi
@@ -1142,8 +1155,13 @@ rc=$?
 set -e
 
 if [ "${rc}" -eq 0 ]; then
+    final_identity="$(coverage_build_identity)"
+    if [ "${final_identity}" != "${COVERAGE_BUILD_IDENTITY_START}" ]; then
+        echo "[local_diff_cover] worktree changed during coverage; refusing to publish mixed evidence" >&2
+        exit 2
+    fi
     identity_tmp="${BUILD_ID_FILE}.tmp.$$"
-    coverage_build_identity > "${identity_tmp}"
+    printf '%s\n' "${final_identity}" > "${identity_tmp}"
     mv -f "${identity_tmp}" "${BUILD_ID_FILE}"
     echo ""
     echo "[local_diff_cover] OK — diff coverage at or above ${THRESHOLD}%."

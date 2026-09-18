@@ -382,6 +382,13 @@ failure (grep exits first, printf takes SIGPIPE). Either one silently clears a w
 with a live build in it. Uncommitted content is reported AT RISK and never removed, and a
 deleted upstream branch is still not merge proof.
 
+Fleet hosts may export `PULP_WORKTREES_ROOT` (the M3/M5 agent-worktrees location),
+while the helper's canonical local override is `PULP_WT_ROOT`; the helper accepts
+both, with `PULP_WT_ROOT` taking precedence. Always verify the resolved root in
+`pulp-worktree.sh list` before interpreting an age or budget report. The
+documented `--max-total-gb` option is currently report-only until the affirmative
+classifier can prove ownership, branch state, and absence of active processes.
+
 Persistent native Actions runners have a separate storage rule: their
 `RUSTUP_HOME` and `CARGO_HOME` belong under each runner's own internal-APFS
 `_toolcache`, never behind `~/.rustup`/`~/.cargo` symlinks into the external VM

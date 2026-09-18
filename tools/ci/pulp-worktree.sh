@@ -18,12 +18,13 @@
 #   pulp-worktree.sh gc [--apply] [--max-total-gb N] [--max-age-days N] [--merged]
 #                           # inventory only unless --apply is explicit
 #
-# Env overrides: PULP_WT_ROOT (default ../pulp-worktrees), PULP_CI_CACHE
+# Env overrides: PULP_WT_ROOT (or legacy fleet spelling
+# PULP_WORKTREES_ROOT; default ../pulp-worktrees), PULP_CI_CACHE
 # (default ~/.cache/pulp-ci), PULP_CCACHE_MAX_SIZE (default 200G).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WT_ROOT="${PULP_WT_ROOT:-$(cd "$REPO_ROOT/.." && pwd)/pulp-worktrees}"
+WT_ROOT="${PULP_WT_ROOT:-${PULP_WORKTREES_ROOT:-$(cd "$REPO_ROOT/.." && pwd)/pulp-worktrees}}"
 CACHE_ROOT="${PULP_CI_CACHE:-$HOME/.cache/pulp-ci}"
 if [ -n "${PULP_SHARED_FETCHCONTENT_SOURCE_DIR:-}" ]; then
   FETCHCONTENT_SOURCE_ROOT="$PULP_SHARED_FETCHCONTENT_SOURCE_DIR"
@@ -177,6 +178,7 @@ cmd_env()  {
   cache_env "$repo"
 }
 cmd_list() {
+  echo "worktree root: $WT_ROOT"
   git -C "$REPO_ROOT" worktree list
   echo "--- build-dir sizes ---"
   for wt in "$WT_ROOT"/*/; do [ -d "$wt/build" ] && du -sh "$wt/build" 2>/dev/null; done

@@ -14,14 +14,38 @@ Run them with:
 python3 tools/scripts/shell_portability_check.py tools/ci scripts tools/scripts
 ```
 
+The same checker accepts an ad-hoc command with `--command` or `--stdin`. The
+repository-local Codex/Claude PreToolUse hooks use that advisory mode, so a
+command typed directly by an agent receives the same warning as a tracked
+script. It follows `PULP_AGENT_SHELL` or `SHELL` (`zsh`/`bash`) and stays
+silent for unknown shells, so a valid Bash command is not reported as a zsh
+defect. It is quote-aware and
+does not treat single-quoted query data as shell syntax. The hooks always
+return success; the regression gate and the user's shell remain authoritative.
+
+Recent M5 evidence included a zsh `${PIPESTATUS[0]}` test that surfaced as
+`unknown condition: -eq`, and `$base:core/...` / `$base:test/...` expansions
+that silently lost the first character after the colon. These were outside
+the tracked-file surface and are the reason command mode exists.
+
+The worktree helper accepts both `PULP_WT_ROOT` and the fleet's existing
+`PULP_WORKTREES_ROOT` spelling, with the former taking precedence. This keeps
+age and budget inventory pointed at the actual M3/M5 worktree root. The
+documented total-budget option remains report-only until an affirmative,
+owner-and-process-aware cleanup classifier is implemented.
+
 For a new recurring nuisance, record three independent root families, the
 supported owner of the fix, a synthetic regression case, and a review date in
 `tools/scripts/shell_portability_rules.json`. Keep the check narrow enough that
 an agent can explain one actionable fix for every finding.
 
 The local diff-coverage gate also protects its evidence lifecycle. A
-`build-cov/` directory is reusable only when it carries the identity of the
-current worktree and a previous run reached a successful diff-coverage result.
+`build-cov/` directory is reusable only when it carries a content identity of
+the current worktree and a previous run reached a successful diff-coverage
+result. The identity includes tracked diffs and non-ignored untracked-file
+content; ignored generated/dependency inputs remain the responsibility of
+their generator. The gate also refuses to publish if the worktree changes
+during the run.
 `tools/scripts/local_diff_cover.sh` removes an unproven or changed directory
 before configuring. This addresses a measured failure mode in recent M3
 sessions where stale objects and `.profraw` files made true coverage near 89%
