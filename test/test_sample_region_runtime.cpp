@@ -24,6 +24,7 @@
 #include <numbers>
 #include <numeric>
 #include <span>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -674,7 +675,7 @@ std::unique_ptr<format::Processor> create_sample_region_allpass_processor() {
 } // namespace
 
 TEST_CASE("Sample region state banks retain exact keys without reading active bytes",
-          "[sample-region][runtime][continuity][state-bank]") {
+          "[sample-region][runtime][continuity][state-bank][i2][RT-06]") {
     reset_state_probe();
     const auto plan = probe_plan();
     const std::array plans{plan};
@@ -765,7 +766,7 @@ TEST_CASE("Sample region state retention rejects changed prepared kernel configu
 }
 
 TEST_CASE("Sample region execution domain excludes overlap and rejects old reentry",
-          "[sample-region][runtime][concurrency]") {
+          "[sample-region][runtime][concurrency][i2][RT-06]") {
     reset_state_probe();
     const auto plan = probe_plan();
     const std::array plans{plan};
@@ -792,7 +793,7 @@ TEST_CASE("Sample region execution domain excludes overlap and rejects old reent
 }
 
 TEST_CASE("Removed sample region state cells retire on the control thread",
-          "[sample-region][runtime][concurrency][retirement]") {
+          "[sample-region][runtime][concurrency][retirement][i2][RT-06]") {
     reset_state_probe();
     g_state_probe.expected_destroy_thread = std::this_thread::get_id();
     const auto plan = probe_plan();
@@ -815,7 +816,7 @@ TEST_CASE("Removed sample region state cells retire on the control thread",
 }
 
 TEST_CASE("Prepared sample region process and reset hooks are realtime safe",
-          "[sample-region][runtime][rt-safety][reset]") {
+          "[sample-region][runtime][rt-safety][reset][i2][RT-01]") {
     reset_state_probe();
     const auto plan = probe_plan();
     const std::array plans{plan};
@@ -845,7 +846,7 @@ TEST_CASE("Prepared sample region process and reset hooks are realtime safe",
 }
 
 TEST_CASE("Pinned sample region snapshots reset state exactly once without reinitializing",
-          "[sample-region][runtime][rt-safety][reset][snapshot]") {
+          "[sample-region][runtime][rt-safety][reset][snapshot][i2][RT-01]") {
     reset_state_probe();
     SignalGraph graph;
     const auto graph_input = graph.add_input_node(1, "Input");
@@ -923,11 +924,52 @@ TEST_CASE("Pinned sample region snapshots reset state exactly once without reini
 }
 
 TEST_CASE("Sample region quotient prepares commits and preserves authored readback",
-          "[sample-region][runtime][quotient]") {
+          "[sample-region][runtime][quotient][i2][GEN-02][RT-03]") {
     AllpassFixture fixture;
     const auto region = fixture.graph.sample_region(kRegionId);
     REQUIRE(region);
     CHECK(region->members.size() == 11);
+    const auto member_count = [&](std::string_view type_id) {
+        return std::count_if(region->members.begin(), region->members.end(),
+                             [&](const auto& member) { return member.type_id == type_id; });
+    };
+    CHECK(member_count("pulp.core.sample-region.input") == 1);
+    CHECK(member_count("pulp.core.sample-region.output") == 1);
+    CHECK(member_count("pulp.core.sample-region.parameter") == 1);
+    CHECK(member_count("pulp.core.sample-region.constant") == 1);
+    CHECK(member_count("pulp.core.sample-region.multiply") == 3);
+    CHECK(member_count("pulp.core.sample-region.add") == 2);
+    CHECK(member_count("pulp.core.unit-delay") == 2);
+    CHECK(std::all_of(region->members.begin(), region->members.end(),
+                      [](const auto& member) { return member.version == 1; }));
+    CHECK(std::count_if(region->members.begin(), region->members.end(), [](const auto& member) {
+              return member.config.kind == SampleKernelConfigKind::BoundaryIndex;
+          }) == 2);
+    CHECK(std::count_if(region->members.begin(), region->members.end(), [](const auto& member) {
+              return member.config.kind == SampleKernelConfigKind::PromotedParameterId;
+          }) == 1);
+    CHECK(std::count_if(region->members.begin(), region->members.end(), [](const auto& member) {
+              return member.config.kind == SampleKernelConfigKind::FiniteConstant;
+          }) == 1);
+    const auto member_with = [&](std::string_view type_id, SampleKernelConfigKind kind,
+                                 std::uint32_t value, float constant_value) {
+        return std::any_of(region->members.begin(), region->members.end(), [&](const auto& member) {
+            return member.type_id == type_id && member.config.kind == kind &&
+                   member.config.boundary_index_or_parameter_id == value &&
+                   member.config.constant == constant_value;
+        });
+    };
+    CHECK(member_with("pulp.core.sample-region.input", SampleKernelConfigKind::BoundaryIndex, 0,
+                      0.0f));
+    CHECK(member_with("pulp.core.sample-region.output", SampleKernelConfigKind::BoundaryIndex, 0,
+                      0.0f));
+    CHECK(member_with("pulp.core.sample-region.parameter",
+                      SampleKernelConfigKind::PromotedParameterId, kCoefficientId, 0.0f));
+    CHECK(member_with("pulp.core.sample-region.constant", SampleKernelConfigKind::FiniteConstant, 0,
+                      -1.0f));
+    REQUIRE(region->promoted_parameters.size() == 1);
+    CHECK(region->promoted_parameters[0].param_id == kCoefficientId);
+    CHECK(region->promoted_parameters[0].key == "coefficient");
     CHECK(region->input_boundaries == std::vector<NodeId>{fixture.region_input});
     CHECK(region->output_boundaries == std::vector<NodeId>{fixture.region_output});
     CHECK(fixture.graph.prove_sample_region(kRegionId).accepted);
@@ -963,7 +1005,7 @@ TEST_CASE("Sample region quotient prepares commits and preserves authored readba
 }
 
 TEST_CASE("Sample region allpass matches its independent oracle and every partition",
-          "[sample-region][runtime][parity][allpass]") {
+          "[sample-region][runtime][parity][allpass][i2][GEN-02][DSP-02][DSP-03][DSP-04]") {
     constexpr int kFrames = 4096;
     auto input = seeded_input(kFrames);
     input[0] = 1.0f;
@@ -1011,7 +1053,7 @@ TEST_CASE("Sample region allpass matches its independent oracle and every partit
 }
 
 TEST_CASE("Sample region allpass response phase and group delay match analysis oracles",
-          "[sample-region][runtime][parity][allpass][doctor]") {
+          "[sample-region][runtime][parity][allpass][doctor][i2][GEN-02][DSP-05][DSP-06]") {
     constexpr int kFft = 16384;
     const std::array coefficients{-0.95f, -0.5f, 0.0f, 0.5f, 0.95f};
     const std::array sample_rates{44100.0, 48000.0, 96000.0, 192000.0};
@@ -1074,7 +1116,7 @@ TEST_CASE("Sample region allpass response phase and group delay match analysis o
 }
 
 TEST_CASE("Sample region reference serial parallel and offline paths agree",
-          "[sample-region][runtime][parity]") {
+          "[sample-region][runtime][parity][i2][GEN-02]") {
     constexpr int kFrames = 4096;
     const auto input = seeded_input(kFrames);
 
@@ -1101,7 +1143,7 @@ TEST_CASE("Sample region reference serial parallel and offline paths agree",
 }
 
 TEST_CASE("Sample region state survives adopted edits and resets on full prepare",
-          "[sample-region][runtime][continuity][reset]") {
+          "[sample-region][runtime][continuity][reset][i2][RT-05]") {
     const std::array impulse{1.0f};
     const std::array silence{0.0f};
     AllpassFixture fixture;
@@ -1144,7 +1186,7 @@ TEST_CASE("Clearing a committed sample region removes its authoring and prepared
 }
 
 TEST_CASE("Sample region quotient permits unrelated reinit-free live swaps",
-          "[sample-region][runtime][continuity][prepared-swap]") {
+          "[sample-region][runtime][continuity][prepared-swap][i2][RT-05]") {
     const std::array impulse{1.0f};
     const std::array silence{0.0f};
     AllpassFixture fixture;
@@ -1161,7 +1203,7 @@ TEST_CASE("Sample region quotient permits unrelated reinit-free live swaps",
 }
 
 TEST_CASE("Stale sample region edits preserve snapshot binding generation and state",
-          "[sample-region][runtime][comp][continuity]") {
+          "[sample-region][runtime][comp][continuity][i2][COMP-06]") {
     const std::array impulse{1.0f};
     const std::array silence{0.0f};
     AllpassFixture fixture;
@@ -1191,7 +1233,7 @@ TEST_CASE("Stale sample region edits preserve snapshot binding generation and st
 }
 
 TEST_CASE("Old sample region execution snapshots fail closed after newer generation admission",
-          "[sample-region][runtime][comp][continuity][negative]") {
+          "[sample-region][runtime][comp][continuity][negative][i2][RT-06][COMP-06]") {
     const std::array impulse{1.0f};
     const std::array silence{0.0f};
     AllpassFixture fixture;
@@ -1268,7 +1310,7 @@ TEST_CASE("Sample region remains exterior while global anticipation is enabled",
 }
 
 TEST_CASE("UnitDelay inside a sample region remains zero-PDC direct feedthrough",
-          "[sample-region][runtime][pdc]") {
+          "[sample-region][runtime][pdc][i2][DSP-07]") {
     AllpassFixture fixture(0.5f, kSampleRate, true, false, false, true);
     CHECK(fixture.graph.latency_samples() == 0);
     CHECK(fixture.graph.node_latency_samples(fixture.region_input) == 0);
@@ -1330,7 +1372,7 @@ TEST_CASE("UnitDelay inside a sample region remains zero-PDC direct feedthrough"
 }
 
 TEST_CASE("Sample region ordinary and reset callbacks are allocation free",
-          "[sample-region][runtime][rt-safety][reset]") {
+          "[sample-region][runtime][rt-safety][reset][i2][RT-01]") {
     AllpassFixture fixture;
     std::array<float, 64> input{};
     std::array<float, 64> output{};
