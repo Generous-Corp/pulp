@@ -330,6 +330,10 @@ TEST_CASE("GraphSerializer validates unresolved region topology",
         std::find_if(definition.members.begin(), definition.members.end(), [](const auto& member) {
             return member.type_id == "pulp.core.sample-region.add";
         })->node;
+    const auto multiply =
+        std::find_if(definition.members.begin(), definition.members.end(), [](const auto& member) {
+            return member.type_id == "pulp.core.sample-region.multiply";
+        })->node;
 
     auto unresolved_json = GraphSerializer::to_json(fixture.graph);
     std::size_t type = 0;
@@ -381,6 +385,50 @@ TEST_CASE("GraphSerializer validates unresolved region topology",
         REQUIRE(pos != std::string::npos);
         json.replace(pos, source.size(), "\"source_node\": " + std::to_string(input_boundary));
         require_topology_rejected(json);
+    }
+
+    SECTION("known combinational members form an instantaneous cycle") {
+        auto json = unresolved_json;
+        const auto destination = json.find("\"dest_node\": " + std::to_string(multiply));
+        REQUIRE(destination != std::string::npos);
+        const auto source = json.rfind("\"source_node\": ", destination);
+        const auto value = json.find(':', source);
+        const auto end = json.find(',', value);
+        REQUIRE((source != std::string::npos && value != std::string::npos &&
+                 end != std::string::npos));
+        json.replace(value + 1, end - value - 1, " " + std::to_string(ordinary));
+        require_topology_rejected(json);
+    }
+
+    SECTION("known member config violates its descriptor") {
+        auto json = unresolved_json;
+        const auto regions = json.find("\"sample_regions\"");
+        const auto member = json.find("\"node\": " + std::to_string(ordinary), regions);
+        const auto config = json.find("\"config_kind\": 1", member);
+        REQUIRE((regions != std::string::npos && member != std::string::npos &&
+                 config != std::string::npos));
+        json.replace(config, std::string("\"config_kind\": 1").size(), "\"config_kind\": 3");
+        SignalGraph loaded;
+        REQUIRE(register_builtin_sample_region_types(loaded));
+        const auto result = GraphSerializer::from_json(loaded, json);
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "invalid or duplicate sample region member");
+        REQUIRE(loaded.nodes().empty());
+    }
+
+    SECTION("known member ports violate its descriptor") {
+        auto json = unresolved_json;
+        const auto node = json.find("\"id\": " + std::to_string(ordinary));
+        const auto inputs = json.find("\"num_input_ports\": 2", node);
+        REQUIRE((node != std::string::npos && inputs != std::string::npos));
+        json.replace(inputs, std::string("\"num_input_ports\": 2").size(),
+                     "\"num_input_ports\": 3");
+        SignalGraph loaded;
+        REQUIRE(register_builtin_sample_region_types(loaded));
+        const auto result = GraphSerializer::from_json(loaded, json);
+        REQUIRE_FALSE(result.ok);
+        REQUIRE(result.error == "invalid or duplicate sample region member");
+        REQUIRE(loaded.nodes().empty());
     }
 }
 

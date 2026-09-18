@@ -392,11 +392,17 @@ bool validate_persisted_region_metadata(const SignalGraph& graph,
         std::size_t delay_nodes = 0;
         for (const auto& member : definition.members) {
             const auto* current = graph.node(member.node);
+            const auto* descriptor = graph.sample_kernel_type(member.type_id, member.version);
             if (member.node == 0 || !members.emplace(member.node, &member).second ||
                 current == nullptr || current->type != NodeType::Custom ||
                 current->custom_type_id != member.type_id ||
                 current->custom_type_version != member.version ||
-                !valid_persisted_kernel_config(member.config)) {
+                !valid_persisted_kernel_config(member.config) ||
+                (descriptor != nullptr &&
+                 (!is_sample_region_v1_descriptor(*descriptor) ||
+                  current->num_input_ports != static_cast<int>(descriptor->num_input_ports) ||
+                  current->num_output_ports != static_cast<int>(descriptor->num_output_ports) ||
+                  !sample_region_config_matches(member.config, *descriptor)))) {
                 error = "invalid or duplicate sample region member";
                 return false;
             }
@@ -652,6 +658,53 @@ bool validate_persisted_region_topology(const SignalGraph& graph,
             if (!reachable_from_source[i] || !reaches_output[i])
                 return reject();
         }
+
+        std::vector<const SampleKernelDescriptor*> descriptors(definition.members.size());
+        std::size_t known_combinational = 0;
+        for (std::size_t i = 0; i < definition.members.size(); ++i) {
+            const auto& member = definition.members[i];
+            descriptors[i] = graph.sample_kernel_type(member.type_id, member.version);
+            if (descriptors[i] != nullptr &&
+                descriptors[i]->causality == SampleKernelCausality::Combinational) {
+                ++known_combinational;
+            }
+        }
+        std::vector<std::size_t> indegree(definition.members.size());
+        std::vector<std::vector<std::size_t>> instantaneous(definition.members.size());
+        for (std::size_t source = 0; source < forward.size(); ++source) {
+            if (descriptors[source] == nullptr ||
+                descriptors[source]->causality == SampleKernelCausality::OneSampleDelay) {
+                continue;
+            }
+            for (const auto destination : forward[source]) {
+                if (descriptors[destination] == nullptr ||
+                    descriptors[destination]->causality == SampleKernelCausality::OneSampleDelay) {
+                    continue;
+                }
+                instantaneous[source].push_back(destination);
+                ++indegree[destination];
+            }
+        }
+        std::queue<std::size_t> acyclic;
+        for (std::size_t i = 0; i < descriptors.size(); ++i) {
+            if (descriptors[i] != nullptr &&
+                descriptors[i]->causality == SampleKernelCausality::Combinational &&
+                indegree[i] == 0) {
+                acyclic.push(i);
+            }
+        }
+        std::size_t visited = 0;
+        while (!acyclic.empty()) {
+            const auto current = acyclic.front();
+            acyclic.pop();
+            ++visited;
+            for (const auto next : instantaneous[current]) {
+                if (--indegree[next] == 0)
+                    acyclic.push(next);
+            }
+        }
+        if (visited != known_combinational)
+            return reject();
     }
     return true;
 }

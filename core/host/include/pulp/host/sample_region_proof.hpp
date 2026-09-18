@@ -193,6 +193,9 @@ struct SampleRegionParserProof {
     std::uint64_t limit = 0;
 };
 
+bool is_sample_region_v1_descriptor(const SampleKernelDescriptor& descriptor) noexcept;
+bool sample_region_config_matches(const SampleKernelConfig& config,
+                                  const SampleKernelDescriptor& descriptor) noexcept;
 SampleRegionProof prove_sample_region(const SampleRegionCandidate& candidate);
 SampleRegionGraphProof prove_sample_regions(const std::vector<SampleRegionCandidate>& candidates);
 SampleRegionParserProof prove_sample_region_parser_shape(const SampleRegionParserShape& shape);
