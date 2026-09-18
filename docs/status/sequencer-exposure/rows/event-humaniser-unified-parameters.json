@@ -18,6 +18,7 @@
     "docs/reference/cli.md",
     "docs/status/cli-commands.yaml",
     "tools/mcp/mcp_timeline_tools.cpp",
+    ".github/vellum-expansion-watch-events/20260918-sequencer-humaniser-cli-catalog.json",
     "docs/status/sequencer-exposure/rows/event-humaniser-unified-parameters.json"
   ],
   "evidence": [
