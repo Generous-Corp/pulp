@@ -10,6 +10,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/planar_audio_ring_buffer.hpp>
+#include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
 namespace pulp::gpu_audio {
@@ -124,6 +125,11 @@ class GpuAudioTransport {
     void pump(uint32_t max_blocks = 0) noexcept;
 
     Stats stats() const noexcept;
+
+    /// Host/UI-only snapshot of the prepared integration path. This is
+    /// allocation-free and does not touch the callback timeline. Provider
+    /// identity is Unknown when a generic staged node cannot establish it.
+    GpuAudioCapabilityReport capability_report() const noexcept;
 
   private:
     GpuAudioNode* node_ = nullptr;

@@ -485,4 +485,25 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     return s;
 }
 
+GpuAudioCapabilityReport GpuAudioTransport::capability_report() const noexcept {
+    GpuAudioCapabilityReport report;
+    if (!prepared_ || node_ == nullptr)
+        return report;
+
+    report.path = realtime_gpu_context_ != nullptr ? GpuAudioExecutionPath::SharedMemory
+                                                    : GpuAudioExecutionPath::Staged;
+    // The only shared path currently admitted by this transport is the
+    // exact-provider Dawn path. Future providers must add their own
+    // authenticated path metadata before they can be reported here.
+    report.provider = realtime_gpu_context_ != nullptr ? GpuAudioProvider::Dawn
+                                                        : GpuAudioProvider::Unknown;
+    report.eligibility = GpuAudioEligibility::Eligible;
+    report.fallback_policy = miss_policy_;
+    report.prepared_lead_blocks = latency_blocks_;
+    report.prepared = true;
+    report.fallback_available = miss_policy_ == MissPolicy::CpuFallback;
+    report.diagnostics_available = true;
+    return report;
+}
+
 } // namespace pulp::gpu_audio

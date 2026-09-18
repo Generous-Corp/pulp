@@ -519,7 +519,12 @@ if(TARGET Pulp::gpu-audio)
 "int main() {\n"
 "    pulp::gpu_audio::GpuAudioTransport transport;\n"
 "    const auto stats = transport.stats();\n"
-"    return transport.is_prepared() ? 1 : (stats.miss_blocks == 0 ? 0 : 2);\n"
+"    const auto report = transport.capability_report();\n"
+"    return transport.is_prepared() ? 1 :\n"
+"        (stats.miss_blocks == 0 &&\n"
+"         report.path == pulp::gpu_audio::GpuAudioExecutionPath::Unavailable &&\n"
+"         report.provider == pulp::gpu_audio::GpuAudioProvider::Unknown &&\n"
+"         !report.prepared ? 0 : 2);\n"
 "}\n")
     add_executable(PulpSDKSmokeGpuAudioProbe
         "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp")

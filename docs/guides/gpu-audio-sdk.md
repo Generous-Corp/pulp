@@ -175,6 +175,16 @@ fills the block — `Silence` by default (a bounded, obvious dropout), or
 `latency_blocks * block_size`, and a host that is not told leaves your track
 shifted late against every other track in the session.
 
+For host diagnostics, `capability_report()` returns an allocation-free snapshot
+of the selected path. `path` distinguishes the ordinary staged worker from the
+experimental shared-memory path, while `provider` is `Dawn` only when the exact
+shared Dawn path is active and is otherwise `Unknown`. The snapshot
+also carries the prepared lead, miss policy, fallback availability, and whether
+transport diagnostics are available. `Eligible` means the path was accepted by
+`prepare()`; it is not a hard real-time scheduling guarantee. The report is
+read-only and deliberately exposes no rings, queues, callback hooks, or live
+path-switching controls.
+
 ## Layer 3 — ready-made processors (`pulp::gpu_audio`)
 
 - `GpuConvolver` — FFT overlap-add convolution with a fixed IR; a continuously-fed, zero-latency `signal::PartitionedConvolver` CPU fallback that stays latency-aligned so a GPU miss is filled seamlessly.
