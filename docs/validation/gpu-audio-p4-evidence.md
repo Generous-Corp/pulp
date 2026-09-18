@@ -15,6 +15,10 @@ records the block count and SHA-256 of its canonical block records, so a killed
 or partially copied run cannot be interpreted as a shorter successful run.
 The ordered Clang/GCC flags must resolve to `-O3` with `NDEBUG` defined; a later
 optimization flag or `-UNDEBUG`/`-U NDEBUG` override makes the capture invalid.
+Flags must be expanded, direct compiler arguments. Response files, compiler
+configuration files, and frontend/preprocessor/architecture forwarding are
+rejected because their effective ordering cannot be established from this
+manifest. Keep the compiler invocation evidence alongside the capture.
 
 Each block carries `(engine_id, generation, sequence)`, the GPU terminal and
 delivery dispositions, deadline/fallback state, and the named payload-transfer
@@ -87,6 +91,8 @@ immediately before publication and refuses an input that changes during analysis
 Raw evidence, benchmark, summary, and CSV paths must identify distinct files,
 including across symbolic links, hard links, and filesystem case-folding or
 Unicode-normalization equivalence for absent outputs. Outputs are staged in
+hidden temporary files; absent-name equivalence is probed in a hidden sibling
+directory, never by creating the final summary or CSV names. Outputs remain in
 their destination directories and atomically replace their individual paths only
 after every requested output has been generated successfully and path identity
 has been rechecked. If any requested replacement fails, the CLI restores every

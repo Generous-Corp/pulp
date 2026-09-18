@@ -90,6 +90,19 @@ Read `test/support/README.md` for the authoritative layering contract.
 
 ## Run the proofs
 
+### Shared-memory GPU timing evidence
+
+Use `tools/scripts/gpu_audio_p4_evidence.py` for paired shared/staged timing
+captures. Its [evidence contract](../../../docs/validation/gpu-audio-p4-evidence.md)
+defines provenance, complete trials, transfer counters, and CPU accounting.
+Keep raw JSONL and the exact benchmark binary with every summary. Supply
+expanded direct compiler flags; response/configuration files and forwarded
+frontend options cannot prove the effective Release settings. Output-name
+validation uses hidden probes and must never publish empty final artifacts.
+Run `python3 tools/scripts/test_gpu_audio_p4_evidence.py` when changing this
+tool. A valid capture or passing schema test is not a physical performance
+verdict, and one paired row cannot authorize a product default.
+
 ```bash
 # Build + run the whole harness (Release — Debug is meaningless for DSP timing/levels)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
