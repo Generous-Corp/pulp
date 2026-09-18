@@ -745,6 +745,8 @@ jobs:
           process = subprocess.Popen(
               [sys.executable, "tools/scripts/run_swift_coverage.py"],
               start_new_session=True,
+              stdout=subprocess.DEVNULL,
+              stderr=subprocess.DEVNULL,
           )
           try:
               raise SystemExit(process.wait(timeout=timeout_seconds))

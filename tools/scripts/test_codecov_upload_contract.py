@@ -307,6 +307,8 @@ class CoverageWorkflowTests(unittest.TestCase):
     def test_advisory_swift_coverage_cannot_strand_native_upload(self) -> None:
         self.assertIn("timeout_seconds = 10 * 60", self.coverage)
         self.assertIn("start_new_session=True", self.coverage)
+        self.assertIn("stdout=subprocess.DEVNULL", self.coverage)
+        self.assertIn("stderr=subprocess.DEVNULL", self.coverage)
         self.assertIn("os.killpg(process.pid, signal.SIGTERM)", self.coverage)
         self.assertIn("continuing so native coverage can upload", self.coverage)
 

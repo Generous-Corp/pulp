@@ -306,6 +306,12 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "failed tests must still be replayed with diagnostics",
         )
 
+    def test_coverage_build_output_does_not_fill_runner_logs(self) -> None:
+        self.assertIn(
+            'cmake --build "${BUILD_DIR}" -j"${JOBS}" >/dev/null',
+            SCRIPT.read_text(),
+        )
+
     def test_profraw_cleanup_uses_find_delete(self) -> None:
         text = SCRIPT.read_text()
         self.assertIn(
