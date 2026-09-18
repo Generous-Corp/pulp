@@ -367,6 +367,21 @@ TEST_CASE("GraphSerializer validates unresolved region topology",
                      "\"max_internal_connections\": 1");
         require_topology_rejected(json);
     }
+
+    SECTION("zero-input source is disconnected from every output") {
+        const auto parameter =
+            std::find_if(definition.members.begin(), definition.members.end(),
+                         [](const auto& member) {
+                             return member.type_id == "pulp.core.sample-region.parameter";
+                         })
+                ->node;
+        auto json = unresolved_json;
+        const auto source = "\"source_node\": " + std::to_string(parameter);
+        const auto pos = json.find(source);
+        REQUIRE(pos != std::string::npos);
+        json.replace(pos, source.size(), "\"source_node\": " + std::to_string(input_boundary));
+        require_topology_rejected(json);
+    }
 }
 
 TEST_CASE("GraphSerializer rejects invalid unrelated connections in a region graph",
@@ -455,6 +470,56 @@ TEST_CASE("GraphSerializer rejects invalid persisted region metadata",
     SECTION("duplicate boundary") {
         auto json = original;
         replace_boundary_list(json, std::to_string(input) + "," + std::to_string(input));
+        require_rejected(json);
+    }
+    SECTION("zero member identity") {
+        auto json = original;
+        const auto regions = json.find("\"sample_regions\"");
+        const auto member =
+            json.find("\"node\": " + std::to_string(definition.members.front().node), regions);
+        REQUIRE(member != std::string::npos);
+        json.replace(
+            member,
+            std::string("\"node\": " + std::to_string(definition.members.front().node)).size(),
+            "\"node\": 0");
+        require_rejected(json);
+    }
+    SECTION("zero serialized node identity") {
+        auto json = original;
+        const auto node = json.find("\"id\": " + std::to_string(definition.members.front().node));
+        REQUIRE(node != std::string::npos);
+        json.replace(
+            node, std::string("\"id\": " + std::to_string(definition.members.front().node)).size(),
+            "\"id\": 0");
+        require_rejected(json);
+    }
+    SECTION("zero connection endpoint") {
+        auto json = original;
+        const auto source = json.find("\"source_node\": ");
+        REQUIRE(source != std::string::npos);
+        const auto value = json.find(':', source);
+        const auto end = json.find(',', value);
+        REQUIRE((value != std::string::npos && end != std::string::npos));
+        json.replace(value + 1, end - value - 1, " 0");
+        require_rejected(json);
+    }
+    SECTION("zero boundary identity") {
+        auto json = original;
+        replace_boundary_list(json, "0");
+        require_rejected(json);
+    }
+    SECTION("zero promoted binding identity") {
+        auto json = original;
+        const auto promoted = json.find("\"promoted_parameters\"");
+        const auto binding =
+            json.find("\"bound_node\": " +
+                          std::to_string(definition.promoted_parameters.front().bound_node_id),
+                      promoted);
+        REQUIRE(binding != std::string::npos);
+        const auto value = json.find(':', binding);
+        const auto end = json.find(',', value);
+        REQUIRE((value != std::string::npos && end != std::string::npos));
+        json.replace(value + 1, end - value - 1, " 0");
         require_rejected(json);
     }
     SECTION("boundary names the wrong member type") {

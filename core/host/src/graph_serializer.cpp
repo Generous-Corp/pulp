@@ -12,6 +12,7 @@
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <queue>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -481,6 +482,8 @@ bool validate_persisted_region_topology(const SignalGraph& graph,
         std::vector<std::vector<std::size_t>> internal_producers;
         std::vector<std::size_t> internal_consumers(definition.members.size());
         std::vector<std::size_t> external_producers(definition.members.size());
+        std::vector<std::vector<std::size_t>> forward(definition.members.size());
+        std::vector<std::vector<std::size_t>> reverse(definition.members.size());
         internal_producers.reserve(definition.members.size());
         for (const auto& member : definition.members) {
             const auto* node = graph.node(member.node);
@@ -516,6 +519,8 @@ bool validate_persisted_region_topology(const SignalGraph& graph,
                 ++internal_connections;
                 ++internal_consumers[source->second];
                 ++internal_producers[destination->second][connection.dest_port];
+                forward[source->second].push_back(destination->second);
+                reverse[destination->second].push_back(source->second);
             } else if (destination_inside) {
                 if (!input_boundaries.contains(connection.dest_node))
                     return reject();
@@ -541,6 +546,48 @@ bool validate_persisted_region_topology(const SignalGraph& graph,
                                    [](const auto count) { return count != 1; })) {
                 return reject();
             }
+        }
+
+        std::vector<bool> reachable_from_source(definition.members.size());
+        std::vector<bool> reaches_output(definition.members.size());
+        std::queue<std::size_t> ready;
+        for (std::size_t i = 0; i < definition.members.size(); ++i) {
+            const auto* node = graph.node(definition.members[i].node);
+            if (input_boundaries.contains(definition.members[i].node) ||
+                (node != nullptr && node->num_input_ports == 0)) {
+                reachable_from_source[i] = true;
+                ready.push(i);
+            }
+        }
+        while (!ready.empty()) {
+            const auto current = ready.front();
+            ready.pop();
+            for (const auto next : forward[current]) {
+                if (!reachable_from_source[next]) {
+                    reachable_from_source[next] = true;
+                    ready.push(next);
+                }
+            }
+        }
+        for (std::size_t i = 0; i < definition.members.size(); ++i) {
+            if (output_boundaries.contains(definition.members[i].node)) {
+                reaches_output[i] = true;
+                ready.push(i);
+            }
+        }
+        while (!ready.empty()) {
+            const auto current = ready.front();
+            ready.pop();
+            for (const auto previous : reverse[current]) {
+                if (!reaches_output[previous]) {
+                    reaches_output[previous] = true;
+                    ready.push(previous);
+                }
+            }
+        }
+        for (std::size_t i = 0; i < definition.members.size(); ++i) {
+            if (!reachable_from_source[i] || !reaches_output[i])
+                return reject();
         }
     }
     return true;
@@ -861,7 +908,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 const auto& cv = conns[i];
                 std::uint64_t n = 0;
                 Connection c{};
-                if (!json_u64(cv["source_node"], std::numeric_limits<NodeId>::max(), n)) {
+                if (!json_u64(cv["source_node"], std::numeric_limits<NodeId>::max(), n) ||
+                    (has_region_records && n == 0)) {
                     result.error = "invalid source_node";
                     return result;
                 }
@@ -871,7 +919,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     return result;
                 }
                 c.source_port = (PortIndex)n;
-                if (!json_u64(cv["dest_node"], std::numeric_limits<NodeId>::max(), n)) {
+                if (!json_u64(cv["dest_node"], std::numeric_limits<NodeId>::max(), n) ||
+                    (has_region_records && n == 0)) {
                     result.error = "invalid dest_node";
                     return result;
                 }
@@ -952,7 +1001,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 for (uint32_t j = 0; j < rv["members"].size(); ++j) {
                     const auto& mv = rv["members"][j];
                     SampleRegionKernelNode m;
-                    if (!json_u64(mv["node"], std::numeric_limits<NodeId>::max(), n)) {
+                    if (!json_u64(mv["node"], std::numeric_limits<NodeId>::max(), n) || n == 0) {
                         result.error = "invalid sample region member node";
                         return result;
                     }
@@ -985,7 +1034,7 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                     if (!rv[key].isArray() || rv[key].size() > 8)
                         return false;
                     for (uint32_t j = 0; j < rv[key].size(); ++j) {
-                        if (!json_u64(rv[key][j], std::numeric_limits<NodeId>::max(), n))
+                        if (!json_u64(rv[key][j], std::numeric_limits<NodeId>::max(), n) || n == 0)
                             return false;
                         out.push_back((NodeId)n);
                     }
@@ -1011,7 +1060,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                 for (uint32_t j = 0; j < ps.size(); ++j) {
                     const auto& pv = ps[j];
                     SampleRegionPromotedParameter p;
-                    if (!json_u64(pv["param_id"], std::numeric_limits<state::ParamID>::max(), n)) {
+                    if (!json_u64(pv["param_id"], std::numeric_limits<state::ParamID>::max(), n) ||
+                        n == 0) {
                         result.error = "invalid promoted parameter id";
                         return result;
                     }
@@ -1027,7 +1077,8 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
                         !json_u64(pv["rate"], 255, n) ||
                         n != (std::uint64_t)state::ParamRate::ControlRate ||
                         !json_float(pv["smoothing"], p.smoothing_ramp_seconds) ||
-                        !json_u64(pv["bound_node"], std::numeric_limits<NodeId>::max(), n)) {
+                        !json_u64(pv["bound_node"], std::numeric_limits<NodeId>::max(), n) ||
+                        n == 0) {
                         result.error = "invalid promoted parameter metadata";
                         return result;
                     }
@@ -1111,7 +1162,16 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         const auto& nodes = root["nodes"];
         for (uint32_t i = 0; i < nodes.size(); ++i) {
             const auto& nv = nodes[i];
-            const NodeId old_id = (NodeId)nv["id"].getInt64();
+            const auto old_id_value = nv["id"].getInt64();
+            const NodeId old_id = (NodeId)old_id_value;
+            if (has_region_records &&
+                (old_id_value <= 0 ||
+                 static_cast<std::uint64_t>(old_id_value) > std::numeric_limits<NodeId>::max() ||
+                 id_map.contains(old_id))) {
+                graph.clear();
+                result.error = "invalid or duplicate node id in sample region graph";
+                return result;
+            }
             const std::string name(nv["name"].getString());
             const std::string type_s(nv["type"].getString());
             if (type_s == "processor") {
