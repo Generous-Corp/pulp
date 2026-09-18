@@ -571,6 +571,7 @@ bool validate_persisted_region_topology(const SignalGraph& graph,
         error = "invalid persisted sample region topology";
         return false;
     };
+    std::uint64_t graph_known_work = 0;
     for (const auto& definition : definitions) {
         std::unordered_map<NodeId, std::size_t> member_index;
         for (std::size_t i = 0; i < definition.members.size(); ++i)
@@ -737,6 +738,30 @@ bool validate_persisted_region_topology(const SignalGraph& graph,
         }
         if (visited != known_combinational)
             return reject();
+
+        std::uint64_t known_member_work = 0;
+        std::uint64_t known_state_bytes = 0;
+        for (const auto causality : causalities) {
+            if (!causality.has_value())
+                continue;
+            if (causality == SampleKernelCausality::OneSampleDelay) {
+                known_member_work += 2;
+                known_state_bytes += sizeof(float);
+            } else {
+                ++known_member_work;
+            }
+        }
+        const std::uint64_t boundary_count =
+            definition.input_boundaries.size() + definition.output_boundaries.size();
+        const std::uint64_t known_work = known_member_work + internal_connections + boundary_count;
+        const std::uint64_t logical_boundary_bytes = boundary_count * sizeof(float);
+        graph_known_work += known_work;
+        if (known_state_bytes > definition.limits.max_state_bytes ||
+            logical_boundary_bytes > definition.limits.max_logical_boundary_bytes ||
+            known_work > definition.limits.max_work_per_frame ||
+            known_work > definition.limits.max_work_per_block || graph_known_work > 1'280) {
+            return reject();
+        }
     }
     return true;
 }

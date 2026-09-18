@@ -429,6 +429,15 @@ TEST_CASE("GraphSerializer validates unresolved region topology",
         REQUIRE(result.error == "invalid or duplicate sample region member");
         REQUIRE(loaded.nodes().empty());
     }
+
+    SECTION("known members exceed the authored work budget") {
+        auto json = unresolved_json;
+        const auto limit = json.find("\"max_work_per_frame\": 190");
+        REQUIRE(limit != std::string::npos);
+        json.replace(limit, std::string("\"max_work_per_frame\": 190").size(),
+                     "\"max_work_per_frame\": 1");
+        require_topology_rejected(json, false);
+    }
 }
 
 TEST_CASE("GraphSerializer rejects invalid unrelated connections in a region graph",
