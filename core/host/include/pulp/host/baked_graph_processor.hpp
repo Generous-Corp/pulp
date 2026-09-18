@@ -66,20 +66,21 @@ struct BakedCustomParamBinding {
 // Why a graph could not be lowered into a self-contained BakedGraphProcessor.
 enum class LowerRejectReason {
     None,
-    NotPrepared,                   // graph.prepare() has not published a snapshot
-    NotExecutorEligible,           // outside the routed executor's bit-exact subset
-    HostedPluginNotSelfContained,  // a Plugin node carries opaque external state
-    CustomNotYetLowerable,         // a Custom node is unresolved, has no lowering yet,
-                                   // or its shape does not match its registered type
-    CustomNotLowerable,            // a Custom type is not opted into baking (lowerable=false)
-    CustomTransportNotLowerable,   // a transport-sensitive Custom node (baked process
-                                   // drops the transport, so it would diverge)
-    NonAudioLaneNotLowerable,      // a MIDI node, or a MIDI/automation/sidechain edge
-    CodecRejected,                 // load_baked: the .pulpbake bytes failed the signed
-                                   // envelope (bad magic/length/manifest/trust/signature/
-                                   // hash) or the bounded plan parse
-    StatefulCustomNotYetLoadable,  // load_baked: matching Custom instance could
-                                   // not be created or rejected authenticated state.
+    NotPrepared,                  // graph.prepare() has not published a snapshot
+    NotExecutorEligible,          // outside the routed executor's bit-exact subset
+    HostedPluginNotSelfContained, // a Plugin node carries opaque external state
+    CustomNotYetLowerable,        // a Custom node is unresolved, has no lowering yet,
+                                  // or its shape does not match its registered type
+    CustomNotLowerable,           // a Custom type is not opted into baking (lowerable=false)
+    CustomTransportNotLowerable,  // a transport-sensitive Custom node (baked process
+                                  // drops the transport, so it would diverge)
+    NonAudioLaneNotLowerable,     // a MIDI node, or a MIDI/automation/sidechain edge
+    CodecRejected,                // load_baked: the .pulpbake bytes failed the signed
+                                  // envelope (bad magic/length/manifest/trust/signature/
+                                  // hash) or the bounded plan parse
+    StatefulCustomNotYetLoadable, // load_baked: matching Custom instance could
+                                  // not be created or rejected authenticated state.
+    ParameterContractMismatch,    // promoted parameter identities or metadata are invalid
 };
 
 // Result of bake(): on success `processor` is non-null and `accepted` is true;
@@ -237,14 +238,15 @@ public:
                         // reference back into the source graph.
                         std::unordered_map<NodeId, BakedCustomNodeBinding>
                             custom_nodes = {});
-    BakedGraphProcessor(std::vector<GraphNode> nodes,
-                        std::vector<Connection> connections,
-                        int input_channels,
-                        int output_channels,
-                        std::string name,
-                        std::string bundle_id,
-                        std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
-                        std::vector<SampleRegionDefinition> sample_regions);
+    // Validate and freeze promoted metadata before a Processor can be returned
+    // to an adapter. Invalid contracts return ParameterContractMismatch with no
+    // processor; this does not replace the graph's topology/lowering proof.
+    static LowerResult
+    create_with_sample_regions(std::vector<GraphNode> nodes, std::vector<Connection> connections,
+                               int input_channels, int output_channels, std::string name,
+                               std::string bundle_id,
+                               std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
+                               std::vector<SampleRegionDefinition> sample_regions);
 
     ~BakedGraphProcessor() override;
 
@@ -274,57 +276,62 @@ public:
     ParamInjector claim_param_injection(NodeId node) noexcept;
 
 private:
-    // Build per-node injection state and install the draining wrapper into each
-    // param-declaring Custom runtime. Called by prepare()
-    // before the executor snapshot is built; off the audio thread.
-    void prepare_param_injection();
+  BakedGraphProcessor(std::vector<GraphNode> nodes, std::vector<Connection> connections,
+                      int input_channels, int output_channels, std::string name,
+                      std::string bundle_id,
+                      std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
+                      SampleRegionParameterContract parameter_contract);
 
-    // The frozen plan, captured at bake() time and owned for the Processor's
-    // lifetime. Gain values ride GraphNode::gain; prepare() seeds the atomics.
-    std::vector<GraphNode> nodes_;
-    std::vector<Connection> conns_;
+  // Build per-node injection state and install the draining wrapper into each
+  // param-declaring Custom runtime. Called by prepare()
+  // before the executor snapshot is built; off the audio thread.
+  void prepare_param_injection();
 
-    // Heap-stable per-Gain-node atomics (one unique_ptr each) so the routed Gain
-    // binding's user_data pointer survives gains_ growth. Built in prepare().
-    std::vector<std::unique_ptr<std::atomic<float>>> gains_;
-    std::unordered_map<NodeId, std::size_t> gain_index_;
+  // The frozen plan, captured at bake() time and owned for the Processor's
+  // lifetime. Gain values ride GraphNode::gain; prepare() seeds the atomics.
+  std::vector<GraphNode> nodes_;
+  std::vector<Connection> conns_;
 
-    // Canonical executor + the serialized fused plan it runs. The snapshot and
-    // pool are sized once in prepare() (off the audio thread); process() only
-    // calls process_routed, which is allocation-free for a fitting pool.
-    pulp::format::GraphRuntimeExecutor executor_;
-    pulp::format::GraphRuntimeSnapshot snapshot_;
-    pulp::format::GraphRuntimeBufferPool pool_;
-    // Empty for this slice's lowerable subset (no Plugin nodes), but the
-    // snapshot builder requires the storage to exist.
-    std::vector<PluginBindingContext> plugin_ctx_;
-    PluginRoutingScratch plugin_scratch_;
-    // One owned runtime record per Custom node, consolidating its process,
-    // lifecycle, parameter injection, mailbox/state, and latency callback. Each
-    // record holds its own instance keepalive. Empty for a custom-free graph;
-    // prepare() binds custom_ctx_ from these records.
-    std::unordered_map<NodeId, std::unique_ptr<detail::BakedCustomNodeRuntime>>
-        custom_nodes_;
-    std::vector<CustomBindingContext> custom_ctx_;
+  // Heap-stable per-Gain-node atomics (one unique_ptr each) so the routed Gain
+  // binding's user_data pointer survives gains_ growth. Built in prepare().
+  std::vector<std::unique_ptr<std::atomic<float>>> gains_;
+  std::unordered_map<NodeId, std::size_t> gain_index_;
 
-    // In-place-host guard scratch: when the host's input channels alias its
-    // output channels, process() copies the input here BEFORE process_routed
-    // zeroes the output bus. Sized in prepare() (input_channels_ × max block);
-    // the audio thread only detects overlap and memcpys — no allocation.
-    std::vector<float> input_alias_scratch_;
-    std::vector<float*> input_alias_ptrs_;
+  // Canonical executor + the serialized fused plan it runs. The snapshot and
+  // pool are sized once in prepare() (off the audio thread); process() only
+  // calls process_routed, which is allocation-free for a fitting pool.
+  pulp::format::GraphRuntimeExecutor executor_;
+  pulp::format::GraphRuntimeSnapshot snapshot_;
+  pulp::format::GraphRuntimeBufferPool pool_;
+  // Empty for this slice's lowerable subset (no Plugin nodes), but the
+  // snapshot builder requires the storage to exist.
+  std::vector<PluginBindingContext> plugin_ctx_;
+  PluginRoutingScratch plugin_scratch_;
+  // One owned runtime record per Custom node, consolidating its process,
+  // lifecycle, parameter injection, mailbox/state, and latency callback. Each
+  // record holds its own instance keepalive. Empty for a custom-free graph;
+  // prepare() binds custom_ctx_ from these records.
+  std::unordered_map<NodeId, std::unique_ptr<detail::BakedCustomNodeRuntime>> custom_nodes_;
+  std::vector<CustomBindingContext> custom_ctx_;
 
-    std::string name_;
-    std::string bundle_id_;
-    SampleRegionParameterContract sample_region_parameter_contract_;
-    std::unique_ptr<SampleRegionParameterBinding> sample_region_parameter_binding_;
-    int input_channels_ = 2;
-    int output_channels_ = 2;
-    int prepared_max_block_ = 0;
-    // Resolved at prepare(), not at construction: a Custom node's intrinsic
-    // latency is a function of the sample rate, which is not known until then.
-    std::atomic<int> prepared_latency_samples_{0};
-    bool prepared_ = false;
+  // In-place-host guard scratch: when the host's input channels alias its
+  // output channels, process() copies the input here BEFORE process_routed
+  // zeroes the output bus. Sized in prepare() (input_channels_ × max block);
+  // the audio thread only detects overlap and memcpys — no allocation.
+  std::vector<float> input_alias_scratch_;
+  std::vector<float*> input_alias_ptrs_;
+
+  std::string name_;
+  std::string bundle_id_;
+  SampleRegionParameterContract sample_region_parameter_contract_;
+  std::unique_ptr<SampleRegionParameterBinding> sample_region_parameter_binding_;
+  int input_channels_ = 2;
+  int output_channels_ = 2;
+  int prepared_max_block_ = 0;
+  // Resolved at prepare(), not at construction: a Custom node's intrinsic
+  // latency is a function of the sample rate, which is not known until then.
+  std::atomic<int> prepared_latency_samples_{0};
+  bool prepared_ = false;
 };
 
 // Lower a prepared, fully-lowerable SignalGraph into a BakedGraphProcessor.

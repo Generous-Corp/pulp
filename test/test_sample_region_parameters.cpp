@@ -253,9 +253,12 @@ TEST_CASE("Baked graph publishes the frozen promoted parameter manifest",
     feedback.range = {0.0f, 1.0f, 0.25f, 0.0f};
     const auto definition = region(9, {coefficient, feedback});
 
-    BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked", {},
-                                  {definition});
     state::StateStore store;
+    auto result = BakedGraphProcessor::create_with_sample_regions(
+        {}, {}, 1, 1, "Baked", "com.test.baked", {}, {definition});
+    REQUIRE(result.accepted);
+    REQUIRE(result.processor);
+    auto& processor = static_cast<BakedGraphProcessor&>(*result.processor);
     processor.define_parameters(store);
     processor.define_parameters(store);
 
@@ -278,9 +281,8 @@ TEST_CASE("Baked graph publishes the frozen promoted parameter manifest",
 
     std::vector<state::ParamID> begins;
     std::vector<state::ParamID> ends;
-    store.set_gesture_callbacks(
-        [&](state::ParamID id) { begins.push_back(id); },
-        [&](state::ParamID id) { ends.push_back(id); });
+    store.set_gesture_callbacks([&](state::ParamID id) { begins.push_back(id); },
+                                [&](state::ParamID id) { ends.push_back(id); });
     const auto generation = store.state_generation();
     store.begin_gesture(90);
     store.set_value(90, 0.75f);
@@ -302,25 +304,25 @@ TEST_CASE("Baked graph without regions preserves the empty legacy manifest",
     CHECK(processor.sample_region_parameter_binding() == nullptr);
 }
 
-TEST_CASE("Baked graph rejects an invalid promoted contract before publication",
+TEST_CASE("Baked graph factory rejects an invalid promoted contract before publication",
           "[host][sample-region][parameters][baked][negative]") {
     auto invalid = promoted(90);
     invalid.bound_node_id = 0;
-    const auto definition = region(9, {invalid});
-    BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked", {},
-                                  {definition});
-    state::StateStore store;
-    processor.define_parameters(store);
-    CHECK_FALSE(processor.sample_region_parameter_contract().valid());
-    CHECK(processor.sample_region_parameter_binding() == nullptr);
-    CHECK(store.param_count() == 0);
-    CHECK(store.state_generation() == 0);
+    const auto result = BakedGraphProcessor::create_with_sample_regions(
+        {}, {}, 1, 1, "Baked", "com.test.baked", {}, {region(9, {invalid})});
+    CHECK_FALSE(result.accepted);
+    CHECK(result.processor == nullptr);
+    CHECK(result.reason == LowerRejectReason::ParameterContractMismatch);
+    CHECK_FALSE(result.message.empty());
 }
 
-TEST_CASE("Baked graph rejects a conflicting adapter manifest without publication",
+TEST_CASE("Baked graph rejects an unexpected prepopulated adapter manifest",
           "[host][sample-region][parameters][baked][negative]") {
-    BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked", {},
-                                  {region(9, {promoted(90)})});
+    auto result = BakedGraphProcessor::create_with_sample_regions(
+        {}, {}, 1, 1, "Baked", "com.test.baked", {}, {region(9, {promoted(90)})});
+    REQUIRE(result.accepted);
+    REQUIRE(result.processor);
+    auto& processor = static_cast<BakedGraphProcessor&>(*result.processor);
     state::StateStore store;
     store.add_parameter(ordinary(7));
     processor.define_parameters(store);
@@ -356,19 +358,19 @@ TEST_CASE("Baked region contract metadata survives plan reload in canonical orde
     for (auto& parameter : reload_definition.promoted_parameters)
         parameter.range.skew = 1.0f;
     reload_definition.members = {
-        {3, "pulp.core.sample-region.input", 1,
-         {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
-        {4, "pulp.core.sample-region.output", 1,
-         {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
-        {5, "pulp.core.sample-region.parameter", 1,
+        {3, "pulp.core.sample-region.input", 1, {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {4, "pulp.core.sample-region.output", 1, {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {5,
+         "pulp.core.sample-region.parameter",
+         1,
          {SampleKernelConfigKind::PromotedParameterId, 40, 0.0f}},
-        {6, "pulp.core.sample-region.constant", 1,
+        {6,
+         "pulp.core.sample-region.constant",
+         1,
          {SampleKernelConfigKind::FiniteConstant, 0, 0.5f}},
-        {7, "pulp.core.sample-region.add", 1,
-         {SampleKernelConfigKind::None, 0, 0.0f}},
+        {7, "pulp.core.sample-region.add", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
         {8, "pulp.core.unit-delay", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
-        {9, "pulp.core.sample-region.multiply", 1,
-         {SampleKernelConfigKind::None, 0, 0.0f}},
+        {9, "pulp.core.sample-region.multiply", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
     };
     reload_definition.input_boundaries = {3};
     reload_definition.output_boundaries = {4};
@@ -390,8 +392,11 @@ TEST_CASE("Baked parameter binding does not outlive its adapter store",
     auto store = std::make_unique<state::StateStore>();
     const auto definition = region(9, {promoted(90)});
     {
-        BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked", {},
-                                      {definition});
+        auto result = BakedGraphProcessor::create_with_sample_regions(
+            {}, {}, 1, 1, "Baked", "com.test.baked", {}, {definition});
+        REQUIRE(result.accepted);
+        REQUIRE(result.processor);
+        auto& processor = static_cast<BakedGraphProcessor&>(*result.processor);
         processor.define_parameters(*store);
         REQUIRE(processor.sample_region_parameter_binding() != nullptr);
         CHECK(&processor.sample_region_parameter_binding()->store() == store.get());

@@ -318,15 +318,10 @@ static LowerResult bake_impl(const SignalGraph& graph,
         sample_regions.push_back(std::move(definition));
     }
 
-    result.processor = std::make_unique<BakedGraphProcessor>(
-        std::move(nodes), std::move(conns),
-        input_channels > 0 ? input_channels : 2,
-        output_channels > 0 ? output_channels : 2,
-        "Baked Graph", "com.pulp.baked-graph", std::move(custom_nodes),
-        std::move(sample_regions));
-    result.accepted = true;
-    result.reason = LowerRejectReason::None;
-    return result;
+    return BakedGraphProcessor::create_with_sample_regions(
+        std::move(nodes), std::move(conns), input_channels > 0 ? input_channels : 2,
+        output_channels > 0 ? output_channels : 2, "Baked Graph", "com.pulp.baked-graph",
+        std::move(custom_nodes), std::move(sample_regions));
 }
 
 LowerResult bake(const SignalGraph& graph) {
@@ -951,35 +946,45 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
 }
 
 BakedGraphProcessor::BakedGraphProcessor(
-    std::vector<GraphNode> nodes,
-    std::vector<Connection> connections,
-    int input_channels,
-    int output_channels,
-    std::string name,
-    std::string bundle_id,
+    std::vector<GraphNode> nodes, std::vector<Connection> connections, int input_channels,
+    int output_channels, std::string name, std::string bundle_id,
     std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes)
-    : BakedGraphProcessor(std::move(nodes), std::move(connections), input_channels,
-                          output_channels, std::move(name), std::move(bundle_id),
-                          std::move(custom_nodes), {}) {}
+    : BakedGraphProcessor(
+          std::move(nodes), std::move(connections), input_channels, output_channels,
+          std::move(name), std::move(bundle_id), std::move(custom_nodes),
+          SampleRegionParameterContract::from_regions(std::vector<SampleRegionDefinition>{})
+              .freeze(std::span<const state::ParamInfo>{})) {}
+
+LowerResult BakedGraphProcessor::create_with_sample_regions(
+    std::vector<GraphNode> nodes, std::vector<Connection> connections, int input_channels,
+    int output_channels, std::string name, std::string bundle_id,
+    std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
+    std::vector<SampleRegionDefinition> sample_regions) {
+    LowerResult result;
+    auto contract = SampleRegionParameterContract::from_regions(sample_regions)
+                        .freeze(std::span<const state::ParamInfo>{});
+    if (!contract.valid()) {
+        result.reason = LowerRejectReason::ParameterContractMismatch;
+        result.message = contract.error();
+        return result;
+    }
+    result.processor = std::unique_ptr<BakedGraphProcessor>(new BakedGraphProcessor(
+        std::move(nodes), std::move(connections), input_channels, output_channels, std::move(name),
+        std::move(bundle_id), std::move(custom_nodes), std::move(contract)));
+    result.accepted = true;
+    result.reason = LowerRejectReason::None;
+    return result;
+}
 
 BakedGraphProcessor::BakedGraphProcessor(
-    std::vector<GraphNode> nodes,
-    std::vector<Connection> connections,
-    int input_channels,
-    int output_channels,
-    std::string name,
-    std::string bundle_id,
+    std::vector<GraphNode> nodes, std::vector<Connection> connections, int input_channels,
+    int output_channels, std::string name, std::string bundle_id,
     std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
-    std::vector<SampleRegionDefinition> sample_regions)
-    : nodes_(std::move(nodes)),
-      conns_(std::move(connections)),
-      name_(std::move(name)),
+    SampleRegionParameterContract parameter_contract)
+    : nodes_(std::move(nodes)), conns_(std::move(connections)), name_(std::move(name)),
       bundle_id_(std::move(bundle_id)),
-      sample_region_parameter_contract_(
-          SampleRegionParameterContract::from_regions(sample_regions)
-              .freeze(std::span<const state::ParamInfo>{})),
-      input_channels_(input_channels),
-      output_channels_(output_channels) {
+      sample_region_parameter_contract_(std::move(parameter_contract)),
+      input_channels_(input_channels), output_channels_(output_channels) {
     // Latency is NOT computed here. A Custom node's intrinsic latency is a
     // function of the sample rate, which the constructor does not have, so the
     // graph total is derived in prepare() into prepared_latency_samples_.
@@ -1014,8 +1019,7 @@ fmt::PluginDescriptor BakedGraphProcessor::descriptor() const {
 }
 
 void BakedGraphProcessor::define_parameters(pulp::state::StateStore& store) {
-    if (!sample_region_parameter_contract_.valid() ||
-        sample_region_parameter_binding_ != nullptr ||
+    if (!sample_region_parameter_contract_.valid() || sample_region_parameter_binding_ != nullptr ||
         sample_region_parameter_contract_.parameters().empty())
         return;
     // Validate an already-populated adapter store before attempting any
