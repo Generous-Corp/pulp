@@ -736,17 +736,25 @@ jobs:
           # Keep enough time for a normal run, but let the later native
           # verification and Codecov upload steps execute when Swift stalls.
           python3 - <<'PY'
+          import os
+          import signal
           import subprocess
           import sys
 
-          timeout_seconds = 20 * 60
+          timeout_seconds = 10 * 60
+          process = subprocess.Popen(
+              [sys.executable, "tools/scripts/run_swift_coverage.py"],
+              start_new_session=True,
+          )
           try:
-              raise SystemExit(subprocess.run(
-                  [sys.executable, "tools/scripts/run_swift_coverage.py"],
-                  check=False,
-                  timeout=timeout_seconds,
-              ).returncode)
+              raise SystemExit(process.wait(timeout=timeout_seconds))
           except subprocess.TimeoutExpired:
+              os.killpg(process.pid, signal.SIGTERM)
+              try:
+                  process.wait(timeout=15)
+              except subprocess.TimeoutExpired:
+                  os.killpg(process.pid, signal.SIGKILL)
+                  process.wait()
               print(
                   f"::warning::Swift Apple coverage exceeded {timeout_seconds}s; "
                   "continuing so native coverage can upload."
