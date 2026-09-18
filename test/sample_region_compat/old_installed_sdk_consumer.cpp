@@ -7,6 +7,10 @@
 #include <pulp/native_components/pulp_node_v1.h>
 #include <pulp/runtime/node_abi.hpp>
 
+#if defined(PULP_COMPAT_OLD_READER_V2_PROBE)
+#include "old_graph_serializer_v2.hpp"
+#endif
+
 #include <iostream>
 #include <type_traits>
 
@@ -59,9 +63,20 @@ static_assert(std::is_same_v<format::reload::ReloadDestroyFn, void (*)(format::P
 int main() {
     OldProcessor processor;
     host::SignalGraph graph;
-    const bool valid = processor.descriptor().category == format::PluginCategory::Effect &&
-                       old_custom.version == 1 && pulp_node_v1_abi_major() == 1u &&
-                       graph.nodes().empty();
+    bool valid = processor.descriptor().category == format::PluginCategory::Effect &&
+                 old_custom.version == 1 && pulp_node_v1_abi_major() == 1u && graph.nodes().empty();
+#if defined(PULP_COMPAT_OLD_READER_V2_PROBE)
+    host::SignalGraph rejected;
+    const auto result = host::GraphSerializer::from_json(
+        rejected, R"({"format_version":3,"nodes":[],"connections":[]})");
+    const bool old_reader_refused_v3 =
+        host::GraphSerializer::current_format_version() == 2 && !result.ok &&
+        rejected.nodes().empty() && rejected.connections().empty() &&
+        result.error.find("unsupported graph format_version 3") != std::string::npos;
+    valid = valid && old_reader_refused_v3;
+    if (old_reader_refused_v3)
+        std::cerr << "compatibility_ok=COMP-03.old-reader-refuses-v3\n";
+#endif
     if (valid)
         std::cout << "old-installed-sdk-consumer=pass\n";
     return valid ? 0 : 1;
