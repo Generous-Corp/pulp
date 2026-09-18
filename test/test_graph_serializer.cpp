@@ -11,8 +11,10 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/sample_region_authoring.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <array>
 #include <cstdint>
@@ -120,6 +122,87 @@ const GraphNode* find_node_named(const SignalGraph& graph,
     return nullptr;
 }
 
+struct PersistedRegionFixture {
+    SignalGraph graph;
+    std::unique_ptr<SampleRegionParameterOwner> parameters;
+};
+
+void make_persisted_region(PersistedRegionFixture& fixture) {
+    const auto input = fixture.graph.add_input_node(1, "Input");
+    const auto output = fixture.graph.add_output_node(1, "Output");
+    REQUIRE(fixture.graph.connect(input, 0, output, 0));
+    REQUIRE(fixture.graph.prepare(48000.0, 16));
+
+    auto edit = fixture.graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    REQUIRE(edit->disconnect(input, 0, output, 0));
+    REQUIRE(register_builtin_sample_region_types(*edit));
+    const auto region_input = edit->add_custom_node("pulp.core.sample-region.input");
+    const auto add = edit->add_custom_node("pulp.core.sample-region.add");
+    const auto multiply = edit->add_custom_node("pulp.core.sample-region.multiply");
+    const auto delay = edit->add_custom_node("pulp.core.unit-delay");
+    const auto region_output = edit->add_custom_node("pulp.core.sample-region.output");
+    const auto parameter = edit->add_custom_node("pulp.core.sample-region.parameter");
+    REQUIRE((region_input && add && multiply && delay && region_output && parameter));
+    REQUIRE(edit->connect(input, 0, region_input, 0));
+    REQUIRE(edit->connect(region_output, 0, output, 0));
+
+    constexpr pulp::state::ParamID kParam = 771;
+    SampleRegionDefinition definition;
+    definition.region_id = 771;
+    definition.members = {
+        {region_input,
+         "pulp.core.sample-region.input",
+         1,
+         {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {add, "pulp.core.sample-region.add", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
+        {multiply, "pulp.core.sample-region.multiply", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
+        {delay, "pulp.core.unit-delay", 1, {SampleKernelConfigKind::None, 0, 0.0f}},
+        {region_output,
+         "pulp.core.sample-region.output",
+         1,
+         {SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {parameter,
+         "pulp.core.sample-region.parameter",
+         1,
+         {SampleKernelConfigKind::PromotedParameterId, kParam, 0.0f}},
+    };
+    definition.input_boundaries = {region_input};
+    definition.output_boundaries = {region_output};
+    SampleRegionPromotedParameter promoted;
+    promoted.param_id = kParam;
+    promoted.key = "amount";
+    promoted.name = "Amount";
+    promoted.unit = "ratio";
+    promoted.range = pulp::state::ParamRange::linear(0.0f, 1.0f, 0.5f);
+    promoted.bound_node_id = parameter;
+    definition.promoted_parameters = {promoted};
+    definition.limits.max_member_nodes = 63;
+    definition.limits.max_internal_connections = 124;
+    definition.limits.max_input_boundaries = 7;
+    definition.limits.max_output_boundaries = 7;
+    definition.limits.max_delay_nodes = 31;
+    definition.limits.max_promoted_parameters = 15;
+    definition.limits.max_state_bytes = 127;
+    definition.limits.max_logical_boundary_bytes = 1'048'575;
+    definition.limits.max_work_per_frame = 190;
+    definition.limits.max_work_per_block = 3'129'343;
+    REQUIRE(edit->declare_sample_region(definition).accepted);
+    REQUIRE(edit->connect_in_sample_region(771, region_input, 0, add, 0).accepted);
+    REQUIRE(edit->connect_in_sample_region(771, delay, 0, multiply, 0).accepted);
+    REQUIRE(edit->connect_in_sample_region(771, parameter, 0, multiply, 1).accepted);
+    REQUIRE(edit->connect_in_sample_region(771, multiply, 0, add, 1).accepted);
+    REQUIRE(edit->connect_in_sample_region(771, add, 0, delay, 0).accepted);
+    REQUIRE(edit->connect_in_sample_region(771, delay, 0, region_output, 0).accepted);
+    REQUIRE(edit->prove_sample_region(definition.region_id).accepted);
+    fixture.parameters =
+        SampleRegionParameterOwner::create({}, edit->sample_region_parameter_contract());
+    REQUIRE(fixture.parameters);
+    REQUIRE(edit->bind_sample_region_parameters(fixture.parameters->binding()).accepted);
+    REQUIRE(edit->prepare(48000.0, 16) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+}
+
 CustomNodeType make_custom_node_type(std::string type_id,
                                      int version,
                                      int inputs,
@@ -148,6 +231,108 @@ TEST_CASE("GraphSerializer round-trips an empty graph", "[host][serializer]") {
     REQUIRE(result.missing_plugins.empty());
     REQUIRE(dst.nodes().empty());
     REQUIRE(dst.connections().empty());
+
+    // The no-region form is deliberately still v2 and must remain byte stable.
+    REQUIRE(json.find("\"format_version\": 2") != std::string::npos);
+    REQUIRE(json.find("sample_regions") == std::string::npos);
+    REQUIRE(GraphSerializer::to_json(dst) == json);
+}
+
+TEST_CASE("GraphSerializer persists an executable sample region",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+    const auto json = GraphSerializer::to_json(fixture.graph);
+    REQUIRE(json.find("\"format_version\": 3") != std::string::npos);
+    REQUIRE(json.find("sample_regions") != std::string::npos);
+    REQUIRE(json.find("\"promoted_parameters\"") != std::string::npos);
+
+    SignalGraph loaded;
+    REQUIRE(register_builtin_sample_region_types(loaded));
+    const auto result = GraphSerializer::from_json(loaded, json);
+    INFO(result.error);
+    REQUIRE(result.ok);
+    REQUIRE(loaded.sample_regions().size() == 1);
+    REQUIRE(loaded.sample_regions().front().members.size() ==
+            fixture.graph.sample_regions().front().members.size());
+    REQUIRE(loaded.sample_regions().front().promoted_parameters.size() == 1);
+    REQUIRE(loaded.sample_regions().front().promoted_parameters.front().key == "amount");
+    REQUIRE(loaded.sample_regions().front().limits.max_work_per_block == 3'129'343);
+    REQUIRE(GraphSerializer::to_json(loaded) == json);
+
+    auto edit = loaded.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    auto owner = SampleRegionParameterOwner::create({}, edit->sample_region_parameter_contract());
+    REQUIRE(owner);
+    REQUIRE(edit->bind_sample_region_parameters(owner->binding()).accepted);
+    REQUIRE(edit->prepare(48000.0, 16) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+    REQUIRE(loaded.prove_sample_region(771).accepted);
+}
+
+TEST_CASE("GraphSerializer preserves unresolved region type versions and refuses futures",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+    auto json = GraphSerializer::to_json(fixture.graph);
+    auto rewrite_one = [](std::string& text, std::size_t start) {
+        const auto type_pos = text.find("pulp.core.unit-delay", start);
+        REQUIRE(type_pos != std::string::npos);
+        text.replace(type_pos, std::string("pulp.core.unit-delay").size(),
+                     "pulp.future.unit-delay");
+        const auto version_pos = text.find("\"version\": 1", type_pos);
+        REQUIRE(version_pos != std::string::npos);
+        text.replace(version_pos, std::string("\"version\": 1").size(), "\"version\": 77");
+        return version_pos;
+    };
+    const auto first_version = rewrite_one(json, 0);
+    rewrite_one(json, first_version + 1);
+
+    SignalGraph unresolved;
+    REQUIRE(register_builtin_sample_region_types(unresolved));
+    const auto loaded = GraphSerializer::from_json(unresolved, json);
+    INFO(loaded.error);
+    REQUIRE(loaded.ok);
+    REQUIRE_FALSE(loaded.missing_custom_node_types.empty());
+    REQUIRE(GraphSerializer::to_json(unresolved) == json);
+    REQUIRE(unresolved.prove_sample_region(771).reason ==
+            SampleRegionRefusalReason::UnresolvedSampleKernel);
+    REQUIRE_FALSE(unresolved.prepare(48000.0, 16));
+
+    auto future = GraphSerializer::to_json(fixture.graph);
+    const auto version_pos = future.find("\"format_version\": 3");
+    REQUIRE(version_pos != std::string::npos);
+    future.replace(version_pos, std::string("\"format_version\": 3").size(),
+                   "\"format_version\": 4");
+    SignalGraph rejected;
+    const auto refusal = GraphSerializer::from_json(rejected, future);
+    REQUIRE_FALSE(refusal.ok);
+    REQUIRE(refusal.error.find("unsupported graph format_version 4") != std::string::npos);
+    REQUIRE(rejected.nodes().empty());
+}
+
+TEST_CASE("GraphSerializer rejects invalid unrelated connections in a region graph",
+          "[host][serializer][sample-region][p2]") {
+    PersistedRegionFixture fixture;
+    make_persisted_region(fixture);
+    const auto unrelated_source = fixture.graph.add_input_node(1, "Unrelated Source");
+    const auto unrelated_destination = fixture.graph.add_output_node(1, "Unrelated Destination");
+    REQUIRE(fixture.graph.connect(unrelated_source, 0, unrelated_destination, 0));
+
+    auto json = GraphSerializer::to_json(fixture.graph);
+    const auto source = json.find("\"source_node\": " + std::to_string(unrelated_source));
+    REQUIRE(source != std::string::npos);
+    const auto port = json.find("\"source_port\": 0", source);
+    REQUIRE(port != std::string::npos);
+    json.replace(port, std::string("\"source_port\": 0").size(), "\"source_port\": 99");
+
+    SignalGraph loaded;
+    REQUIRE(register_builtin_sample_region_types(loaded));
+    const auto result = GraphSerializer::from_json(loaded, json);
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error == "connection failed validation");
+    REQUIRE(loaded.nodes().empty());
+    REQUIRE(loaded.connections().empty());
 }
 
 TEST_CASE("GraphSerializer round-trips topology with gain and I/O nodes", "[host][serializer]") {
@@ -345,7 +530,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
 
     SignalGraph future_version;
     auto future_result = GraphSerializer::from_json(future_version, R"({
-  "format_version": 3,
+  "format_version": 4,
   "nodes": [
     {
       "id": 1,
@@ -358,8 +543,7 @@ TEST_CASE("GraphSerializer fails closed before loading missing or future graph v
   "connections": []
 })");
     REQUIRE_FALSE(future_result.ok);
-    REQUIRE(future_result.error.find("unsupported graph format_version 3")
-            != std::string::npos);
+    REQUIRE(future_result.error.find("unsupported graph format_version 4") != std::string::npos);
     REQUIRE(future_version.nodes().empty());
 }
 
@@ -394,7 +578,7 @@ TEST_CASE("GraphSerializer dispatches graph format migrations before materializi
             const auto pos = migrated_json.find("\"format_version\": 0");
             if (pos == std::string::npos) return false;
             migrated_json.replace(pos, std::string("\"format_version\": 0").size(),
-                                  "\"format_version\": 2");
+                                  "\"format_version\": 3");
             return true;
         }));
 
@@ -428,7 +612,7 @@ TEST_CASE("GraphSerializer rejects graph migrations that do not advance versions
 
 TEST_CASE("GraphSerializer rejects invalid graph migration registrations",
           "[host][serializer][migration]") {
-    REQUIRE(GraphSerializer::current_format_version() == 2);
+    REQUIRE(GraphSerializer::current_format_version() == 3);
     REQUIRE_FALSE(GraphSerializer::register_migration(
         2, 2,
         [](const std::string& source_json, std::string& migrated_json) {
@@ -574,7 +758,7 @@ TEST_CASE("GraphSerializer clears partially loaded graphs after connection field
 })");
 
     REQUIRE_FALSE(result.ok);
-    REQUIRE(result.error.find("field deserialization failed") != std::string::npos);
+    REQUIRE(result.error.find("invalid source_node") != std::string::npos);
     REQUIRE(dst.nodes().empty());
     REQUIRE(dst.connections().empty());
 }

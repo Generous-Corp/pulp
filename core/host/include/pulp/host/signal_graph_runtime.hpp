@@ -44,6 +44,8 @@
 
 namespace pulp::host {
 
+class GraphSerializer;
+
 namespace detail {
 struct ExactParameterIngressOwner;
 // Mints an exact-parameter ingress ownership token. The type stays defined in
@@ -749,6 +751,7 @@ public:
     std::size_t custom_node_type_count() const;
 
 private:
+  friend class GraphSerializer;
   friend bool register_builtin_sample_region_types(SignalGraph& graph);
   friend class ExecutionSnapshot;
   struct PrepareLifecycleObserver {

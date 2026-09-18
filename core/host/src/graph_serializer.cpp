@@ -5,11 +5,14 @@
 
 #include <choc/text/choc_JSON.h>
 
-#include <sstream>
-#include <unordered_map>
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace pulp::host {
@@ -26,7 +29,7 @@ inline double get_double(const V& v) {
     return 0.0;
 }
 
-constexpr int kFormatVersion = 2;
+constexpr int kFormatVersion = 3;
 
 struct GraphMigrationEntry {
     int from_version = 0;
@@ -36,10 +39,12 @@ struct GraphMigrationEntry {
 
 bool migrate_graph_v1_to_v2(const std::string& source_json,
                             std::string& migrated_json);
+bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrated_json);
 
 std::vector<GraphMigrationEntry>& graph_migrations() {
     static std::vector<GraphMigrationEntry> migrations = {
         {1, 2, migrate_graph_v1_to_v2},
+        {2, 3, migrate_graph_v2_to_v3},
     };
     return migrations;
 }
@@ -111,6 +116,30 @@ bool migrate_graph_v1_to_v2(const std::string& source_json,
 
     migrated_json = source_json;
     return replace_format_version(migrated_json, 1, 2);
+}
+
+bool migrate_graph_v2_to_v3(const std::string& source_json, std::string& migrated_json) {
+    migrated_json = source_json;
+    try {
+        const auto root = choc::json::parse(source_json);
+        if (!root.isObject())
+            return false;
+        if (root.hasObjectMember("sample_regions")) {
+            const auto& regions = root["sample_regions"];
+            if (!regions.isArray() || regions.size() != 0)
+                return false;
+            return replace_format_version(migrated_json, 2, 3);
+        }
+    } catch (...) {
+        return false;
+    }
+    const auto end = migrated_json.rfind('}');
+    if (end == std::string::npos)
+        return false;
+    const auto body_end = migrated_json.find_last_not_of(" \t\r\n", end - 1);
+    const bool comma = body_end != std::string::npos && migrated_json[body_end] != '{';
+    migrated_json.insert(end, std::string(comma ? "," : "") + "\"sample_regions\":[]");
+    return replace_format_version(migrated_json, 2, 3);
 }
 
 const GraphMigrationEntry* find_graph_migration(int from_version) {
@@ -285,6 +314,27 @@ bool validate_generated_node_shape(NodeType type,
     return fail_shape();
 }
 
+template <typename V> bool json_u64(const V& value, std::uint64_t max, std::uint64_t& out) {
+    if (!(value.isInt32() || value.isInt64()))
+        return false;
+    const auto n = value.getInt64();
+    if (n < 0 || static_cast<std::uint64_t>(n) > max)
+        return false;
+    out = static_cast<std::uint64_t>(n);
+    return true;
+}
+
+template <typename V> bool json_float(const V& value, float& out) {
+    if (!(value.isFloat32() || value.isFloat64() || value.isInt32() || value.isInt64()))
+        return false;
+    const auto d = get_double(value);
+    if (!std::isfinite(d) || d < -std::numeric_limits<float>::max() ||
+        d > std::numeric_limits<float>::max())
+        return false;
+    out = static_cast<float>(d);
+    return true;
+}
+
 // Minimal base64 encoder (no padding stripping), good enough for state
 // blobs in JSON — choc::json escapes inline strings already.
 std::string b64_encode(const std::vector<uint8_t>& bytes) {
@@ -394,7 +444,9 @@ std::string GraphSerializer::to_json(
         }
     }
     auto root = choc::value::createObject("PulpGraph");
-    root.addMember("format_version", (int64_t)kFormatVersion);
+    const auto regions = graph.sample_regions();
+    const int version = regions.empty() ? 2 : kFormatVersion;
+    root.addMember("format_version", (int64_t)version);
 
     // Nodes
     auto nodes_arr = choc::value::createEmptyArray();
@@ -473,6 +525,71 @@ std::string GraphSerializer::to_json(
     }
     root.addMember("connections", conns_arr);
 
+    if (!regions.empty()) {
+        auto regions_arr = choc::value::createEmptyArray();
+        for (const auto& region : regions) {
+            auto ro = choc::value::createObject("SampleRegion");
+            ro.addMember("id", (int64_t)region.region_id);
+            auto members = choc::value::createEmptyArray();
+            for (const auto& member : region.members) {
+                auto mo = choc::value::createObject("Member");
+                mo.addMember("node", (int64_t)member.node);
+                mo.addMember("type_id", member.type_id);
+                mo.addMember("version", (int64_t)member.version);
+                mo.addMember("config_kind", (int64_t)member.config.kind);
+                mo.addMember("config_value", (int64_t)member.config.boundary_index_or_parameter_id);
+                mo.addMember("constant", (double)member.config.constant);
+                members.addArrayElement(mo);
+            }
+            ro.addMember("members", members);
+            auto inputs = choc::value::createEmptyArray();
+            for (auto id : region.input_boundaries)
+                inputs.addArrayElement((int64_t)id);
+            ro.addMember("input_boundaries", inputs);
+            auto outputs = choc::value::createEmptyArray();
+            for (auto id : region.output_boundaries)
+                outputs.addArrayElement((int64_t)id);
+            ro.addMember("output_boundaries", outputs);
+            auto params = choc::value::createEmptyArray();
+            for (const auto& p : region.promoted_parameters) {
+                auto po = choc::value::createObject("Parameter");
+                po.addMember("param_id", (int64_t)p.param_id);
+                po.addMember("key", p.key);
+                po.addMember("name", p.name);
+                po.addMember("unit", p.unit);
+                po.addMember("min", (double)p.range.min);
+                po.addMember("max", (double)p.range.max);
+                po.addMember("default", (double)p.range.default_value);
+                po.addMember("step", (double)p.range.step);
+                po.addMember("skew", (double)p.range.skew);
+                po.addMember("symmetric_skew", p.range.symmetric_skew);
+                po.addMember("rate", (int64_t)p.rate);
+                po.addMember("smoothing", (double)p.smoothing_ramp_seconds);
+                po.addMember("bound_node", (int64_t)p.bound_node_id);
+                po.addMember("bound_port", (int64_t)p.bound_port);
+                params.addArrayElement(po);
+            }
+            ro.addMember("promoted_parameters", params);
+            auto lim = choc::value::createObject("Limits");
+            lim.addMember("max_member_nodes", (int64_t)region.limits.max_member_nodes);
+            lim.addMember("max_internal_connections",
+                          (int64_t)region.limits.max_internal_connections);
+            lim.addMember("max_input_boundaries", (int64_t)region.limits.max_input_boundaries);
+            lim.addMember("max_output_boundaries", (int64_t)region.limits.max_output_boundaries);
+            lim.addMember("max_delay_nodes", (int64_t)region.limits.max_delay_nodes);
+            lim.addMember("max_promoted_parameters",
+                          (int64_t)region.limits.max_promoted_parameters);
+            lim.addMember("max_state_bytes", (int64_t)region.limits.max_state_bytes);
+            lim.addMember("max_logical_boundary_bytes",
+                          (int64_t)region.limits.max_logical_boundary_bytes);
+            lim.addMember("max_work_per_frame", (int64_t)region.limits.max_work_per_frame);
+            lim.addMember("max_work_per_block", (int64_t)region.limits.max_work_per_block);
+            ro.addMember("limits", lim);
+            regions_arr.addArrayElement(ro);
+        }
+        root.addMember("sample_regions", regions_arr);
+    }
+
     return choc::json::toString(root, true);
 }
 
@@ -494,6 +611,259 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
     }
     if (!root.isObject()) {
         result.error = "root is not an object";
+        return result;
+    }
+
+    struct ParsedRegion {
+        SampleRegionDefinition definition;
+    };
+    std::vector<ParsedRegion> parsed_regions;
+    std::vector<Connection> parsed_connections;
+    const bool has_region_records = root.hasObjectMember("sample_regions") &&
+                                    root["sample_regions"].isArray() &&
+                                    root["sample_regions"].size() != 0;
+    try {
+        if (root.hasObjectMember("connections")) {
+            const auto& conns = root["connections"];
+            if (has_region_records && conns.size() > 2'048) {
+                result.error = "too many connections";
+                return result;
+            }
+            parsed_connections.reserve(conns.size());
+            for (uint32_t i = 0; i < conns.size(); ++i) {
+                const auto& cv = conns[i];
+                std::uint64_t n = 0;
+                Connection c{};
+                if (!json_u64(cv["source_node"], std::numeric_limits<NodeId>::max(), n)) {
+                    result.error = "invalid source_node";
+                    return result;
+                }
+                c.source_node = (NodeId)n;
+                if (!json_u64(cv["source_port"], std::numeric_limits<PortIndex>::max(), n)) {
+                    result.error = "invalid source_port";
+                    return result;
+                }
+                c.source_port = (PortIndex)n;
+                if (!json_u64(cv["dest_node"], std::numeric_limits<NodeId>::max(), n)) {
+                    result.error = "invalid dest_node";
+                    return result;
+                }
+                c.dest_node = (NodeId)n;
+                if (!json_u64(cv["dest_port"], std::numeric_limits<PortIndex>::max(), n)) {
+                    result.error = "invalid dest_port";
+                    return result;
+                }
+                c.dest_port = (PortIndex)n;
+                if (!cv["feedback"].isBool() || !cv["midi"].isBool() ||
+                    !cv["automation"].isBool()) {
+                    result.error = "invalid connection flags";
+                    return result;
+                }
+                c.feedback = cv["feedback"].getBool();
+                c.midi = cv["midi"].getBool();
+                c.automation = cv["automation"].getBool();
+                c.audio_rate_modulation = cv.hasObjectMember("audio_rate_modulation") &&
+                                                  cv["audio_rate_modulation"].isBool()
+                                              ? cv["audio_rate_modulation"].getBool()
+                                              : false;
+                c.sidechain = cv.hasObjectMember("sidechain") && cv["sidechain"].isBool()
+                                  ? cv["sidechain"].getBool()
+                                  : false;
+                if (c.automation || c.audio_rate_modulation) {
+                    if (!json_u64(cv["auto_param_id"], std::numeric_limits<std::uint32_t>::max(),
+                                  n)) {
+                        result.error = "invalid automation parameter";
+                        return result;
+                    }
+                    c.automation_param_id = (std::uint32_t)n;
+                    if (!json_float(cv["auto_range_lo"], c.automation_range_lo) ||
+                        !json_float(cv["auto_range_hi"], c.automation_range_hi) ||
+                        !json_float(cv["auto_smoothing"], c.automation_smoothing_ms) ||
+                        !json_u64(cv["auto_mix"], 255, n)) {
+                        result.error = "invalid automation values";
+                        return result;
+                    }
+                    c.automation_mix = (AutomationMix)(std::uint8_t)n;
+                }
+                parsed_connections.push_back(c);
+            }
+        }
+        if (root.hasObjectMember("sample_regions")) {
+            const auto& regions = root["sample_regions"];
+            if (!regions.isArray() || regions.size() > 16) {
+                result.error = "invalid sample_regions";
+                return result;
+            }
+            SampleRegionParserShape shape{};
+            shape.regions = regions.size();
+            std::unordered_set<SampleRegionId> region_ids;
+            for (uint32_t i = 0; i < regions.size(); ++i) {
+                const auto& rv = regions[i];
+                if (!rv.isObject()) {
+                    result.error = "invalid sample region";
+                    return result;
+                }
+                ParsedRegion parsed;
+                auto& d = parsed.definition;
+                std::uint64_t n = 0;
+                if (!json_u64(rv["id"], std::numeric_limits<SampleRegionId>::max(), n) || n == 0 ||
+                    !region_ids.insert((SampleRegionId)n).second) {
+                    result.error = "invalid or duplicate sample region id";
+                    return result;
+                }
+                d.region_id = (SampleRegionId)n;
+                if (!rv["members"].isArray() || rv["members"].size() > 64) {
+                    result.error = "invalid sample region members";
+                    return result;
+                }
+                shape.members_total += rv["members"].size();
+                shape.members_per_region =
+                    std::max(shape.members_per_region, (std::uint64_t)rv["members"].size());
+                for (uint32_t j = 0; j < rv["members"].size(); ++j) {
+                    const auto& mv = rv["members"][j];
+                    SampleRegionKernelNode m;
+                    if (!json_u64(mv["node"], std::numeric_limits<NodeId>::max(), n)) {
+                        result.error = "invalid sample region member node";
+                        return result;
+                    }
+                    m.node = (NodeId)n;
+                    m.type_id = mv["type_id"].getString();
+                    if (!json_u64(mv["version"], std::numeric_limits<int>::max(), n) || n == 0) {
+                        result.error = "invalid sample region member version";
+                        return result;
+                    }
+                    m.version = (int)n;
+                    if (!json_u64(mv["config_kind"], 255, n) || n == 0 ||
+                        (n > (std::uint64_t)SampleKernelConfigKind::PromotedParameterId)) {
+                        result.error = "invalid sample kernel config kind";
+                        return result;
+                    }
+                    m.config.kind = (SampleKernelConfigKind)(std::uint8_t)n;
+                    if (!json_u64(mv["config_value"], std::numeric_limits<std::uint32_t>::max(),
+                                  n)) {
+                        result.error = "invalid sample kernel config value";
+                        return result;
+                    }
+                    m.config.boundary_index_or_parameter_id = (std::uint32_t)n;
+                    if (!json_float(mv["constant"], m.config.constant)) {
+                        result.error = "invalid sample kernel constant";
+                        return result;
+                    }
+                    d.members.push_back(std::move(m));
+                }
+                auto parse_ids = [&](const char* key, std::vector<NodeId>& out) -> bool {
+                    if (!rv[key].isArray() || rv[key].size() > 8)
+                        return false;
+                    for (uint32_t j = 0; j < rv[key].size(); ++j) {
+                        if (!json_u64(rv[key][j], std::numeric_limits<NodeId>::max(), n))
+                            return false;
+                        out.push_back((NodeId)n);
+                    }
+                    return true;
+                };
+                if (!parse_ids("input_boundaries", d.input_boundaries) ||
+                    !parse_ids("output_boundaries", d.output_boundaries)) {
+                    result.error = "invalid sample region boundaries";
+                    return result;
+                }
+                shape.input_boundaries_total += d.input_boundaries.size();
+                shape.output_boundaries_total += d.output_boundaries.size();
+                shape.input_boundaries_per_region = std::max(
+                    shape.input_boundaries_per_region, (std::uint64_t)d.input_boundaries.size());
+                shape.output_boundaries_per_region = std::max(
+                    shape.output_boundaries_per_region, (std::uint64_t)d.output_boundaries.size());
+                const auto& ps = rv["promoted_parameters"];
+                if (!ps.isArray() || ps.size() > 16) {
+                    result.error = "invalid promoted parameters";
+                    return result;
+                }
+                shape.parameters_total += ps.size();
+                for (uint32_t j = 0; j < ps.size(); ++j) {
+                    const auto& pv = ps[j];
+                    SampleRegionPromotedParameter p;
+                    if (!json_u64(pv["param_id"], std::numeric_limits<state::ParamID>::max(), n)) {
+                        result.error = "invalid promoted parameter id";
+                        return result;
+                    }
+                    p.param_id = (state::ParamID)n;
+                    p.key = pv["key"].getString();
+                    p.name = pv["name"].getString();
+                    p.unit = pv["unit"].getString();
+                    if (!json_float(pv["min"], p.range.min) ||
+                        !json_float(pv["max"], p.range.max) ||
+                        !json_float(pv["default"], p.range.default_value) ||
+                        !json_float(pv["step"], p.range.step) ||
+                        !json_float(pv["skew"], p.range.skew) || !pv["symmetric_skew"].isBool() ||
+                        !json_u64(pv["rate"], 255, n) ||
+                        n != (std::uint64_t)state::ParamRate::ControlRate ||
+                        !json_float(pv["smoothing"], p.smoothing_ramp_seconds) ||
+                        !json_u64(pv["bound_node"], std::numeric_limits<NodeId>::max(), n)) {
+                        result.error = "invalid promoted parameter metadata";
+                        return result;
+                    }
+                    p.range.symmetric_skew = pv["symmetric_skew"].getBool();
+                    p.rate = state::ParamRate::ControlRate;
+                    p.bound_node_id = (NodeId)n;
+                    if (!json_u64(pv["bound_port"], std::numeric_limits<PortIndex>::max(), n)) {
+                        result.error = "invalid promoted parameter binding";
+                        return result;
+                    }
+                    p.bound_port = (PortIndex)n;
+                    d.promoted_parameters.push_back(std::move(p));
+                }
+                shape.parameters_per_region =
+                    std::max(shape.parameters_per_region, (std::uint64_t)ps.size());
+                const auto& lv = rv["limits"];
+                if (!lv.isObject()) {
+                    result.error = "invalid sample region limits";
+                    return result;
+                }
+                auto u32 = [&](const char* k, std::uint32_t& v) {
+                    if (!json_u64(lv[k], std::numeric_limits<std::uint32_t>::max(), n))
+                        return false;
+                    v = (std::uint32_t)n;
+                    return true;
+                };
+                auto u64 = [&](const char* k, std::uint64_t& v) {
+                    return json_u64(lv[k], std::numeric_limits<std::uint64_t>::max(), v);
+                };
+                if (!u32("max_member_nodes", d.limits.max_member_nodes) ||
+                    !u32("max_internal_connections", d.limits.max_internal_connections) ||
+                    !u32("max_input_boundaries", d.limits.max_input_boundaries) ||
+                    !u32("max_output_boundaries", d.limits.max_output_boundaries) ||
+                    !u32("max_delay_nodes", d.limits.max_delay_nodes) ||
+                    !u32("max_promoted_parameters", d.limits.max_promoted_parameters) ||
+                    !u32("max_state_bytes", d.limits.max_state_bytes) ||
+                    !u64("max_logical_boundary_bytes", d.limits.max_logical_boundary_bytes) ||
+                    !u32("max_work_per_frame", d.limits.max_work_per_frame) ||
+                    !u64("max_work_per_block", d.limits.max_work_per_block)) {
+                    result.error = "invalid sample region limits";
+                    return result;
+                }
+                parsed_regions.push_back(std::move(parsed));
+            }
+            shape.connections_total = parsed_connections.size();
+            shape.available_bytes = json.size();
+            for (const auto& r : parsed_regions) {
+                std::uint64_t region_connections = 0;
+                for (const auto& c : parsed_connections) {
+                    const auto touches = [&](NodeId id) {
+                        return std::any_of(r.definition.members.begin(), r.definition.members.end(),
+                                           [&](const auto& m) { return m.node == id; });
+                    };
+                    if (touches(c.source_node) || touches(c.dest_node))
+                        ++region_connections;
+                }
+                shape.connections_per_region =
+                    std::max(shape.connections_per_region, region_connections);
+            }
+            if (!prove_sample_region_parser_shape(shape).accepted) {
+                result.error = "sample region parser shape exceeds limits";
+                return result;
+            }
+        }
+    } catch (const std::exception& e) {
+        result.error = std::string("preflight failed: ") + e.what();
         return result;
     }
 
@@ -632,8 +1002,194 @@ GraphSerializer::LoadResult GraphSerializer::from_json(SignalGraph& graph, const
         }
     }
 
-    // Pass 2: replay connections using the id map.
-    if (root.hasObjectMember("connections")) {
+    // v3 region-bearing graphs are installed as one locked authoring mutation.
+    if (!parsed_regions.empty()) {
+        std::vector<SampleRegionDefinition> definitions;
+        definitions.reserve(parsed_regions.size());
+        const auto remap_node = [&](const char* context, NodeId persisted, NodeId& remapped) {
+            const auto it = id_map.find(persisted);
+            if (it == id_map.end()) {
+                result.error = std::string("sample region ") + context +
+                               " references missing node " + std::to_string(persisted);
+                return false;
+            }
+            remapped = it->second;
+            return true;
+        };
+        for (auto& parsed : parsed_regions) {
+            auto definition = std::move(parsed.definition);
+            for (auto& member : definition.members) {
+                if (!remap_node("member", member.node, member.node)) {
+                    graph.clear();
+                    return result;
+                }
+            }
+            for (auto& id : definition.input_boundaries) {
+                if (!remap_node("input boundary", id, id)) {
+                    graph.clear();
+                    return result;
+                }
+            }
+            for (auto& id : definition.output_boundaries) {
+                if (!remap_node("output boundary", id, id)) {
+                    graph.clear();
+                    return result;
+                }
+            }
+            for (auto& parameter : definition.promoted_parameters) {
+                if (!remap_node("promoted parameter", parameter.bound_node_id,
+                                parameter.bound_node_id)) {
+                    graph.clear();
+                    return result;
+                }
+            }
+            definitions.push_back(std::move(definition));
+        }
+        std::sort(definitions.begin(), definitions.end(),
+                  [](const auto& a, const auto& b) { return a.region_id < b.region_id; });
+        for (auto& definition : definitions) {
+            std::sort(definition.members.begin(), definition.members.end(),
+                      [](const auto& a, const auto& b) { return a.node < b.node; });
+            std::sort(definition.promoted_parameters.begin(), definition.promoted_parameters.end(),
+                      [](const auto& a, const auto& b) { return a.param_id < b.param_id; });
+            const auto boundary_index = [&](NodeId id) {
+                const auto it = std::find_if(definition.members.begin(), definition.members.end(),
+                                             [&](const auto& m) { return m.node == id; });
+                return it == definition.members.end() ? std::numeric_limits<std::uint32_t>::max()
+                                                      : it->config.boundary_index_or_parameter_id;
+            };
+            std::sort(definition.input_boundaries.begin(), definition.input_boundaries.end(),
+                      [&](NodeId a, NodeId b) { return boundary_index(a) < boundary_index(b); });
+            std::sort(definition.output_boundaries.begin(), definition.output_boundaries.end(),
+                      [&](NodeId a, NodeId b) { return boundary_index(a) < boundary_index(b); });
+        }
+        for (auto& connection : parsed_connections) {
+            if (!remap_node("connection source", connection.source_node, connection.source_node) ||
+                !remap_node("connection destination", connection.dest_node, connection.dest_node)) {
+                graph.clear();
+                return result;
+            }
+        }
+        std::string connection_error;
+        std::unordered_map<NodeId, SampleRegionId> region_members;
+        for (const auto& definition : definitions) {
+            for (const auto& member : definition.members) {
+                if (!region_members.emplace(member.node, definition.region_id).second) {
+                    connection_error = "sample region member belongs to multiple regions";
+                    break;
+                }
+            }
+            if (!connection_error.empty())
+                break;
+        }
+        const auto node_region = [&](NodeId id) {
+            const auto found = region_members.find(id);
+            return found == region_members.end() ? SampleRegionId{} : found->second;
+        };
+        const auto region_internal = [&](const Connection& connection) {
+            const auto source_region = node_region(connection.source_node);
+            return source_region != 0 && source_region == node_region(connection.dest_node);
+        };
+
+        // Region-internal cycles are legal when a UnitDelay makes them sample-causal,
+        // so validate their structural subset manually and stage them before replaying
+        // every exterior edge through the normal public connection API.
+        {
+            SignalGraph::GraphMutationLock lock(graph);
+            graph.connections_.clear();
+            graph.connection_identities_.clear();
+            for (const auto& connection : parsed_connections) {
+                const unsigned lane_count =
+                    static_cast<unsigned>(connection.midi) +
+                    static_cast<unsigned>(connection.automation) +
+                    static_cast<unsigned>(connection.audio_rate_modulation) +
+                    static_cast<unsigned>(connection.sidechain);
+                if (lane_count > 1 || (connection.feedback && lane_count != 0)) {
+                    connection_error = "connection has conflicting lane flags";
+                    break;
+                }
+                if ((connection.automation || connection.audio_rate_modulation) &&
+                    (connection.automation_mix != AutomationMix::Replace &&
+                     connection.automation_mix != AutomationMix::Add)) {
+                    connection_error = "connection has an invalid automation mix";
+                    break;
+                }
+                if (!region_internal(connection)) {
+                    if ((node_region(connection.source_node) != 0 ||
+                         node_region(connection.dest_node) != 0) &&
+                        (lane_count != 0 || connection.feedback)) {
+                        connection_error = "sample region boundary connection is not plain audio";
+                        break;
+                    }
+                    continue;
+                }
+                const auto* source = graph.node(connection.source_node);
+                const auto* destination = graph.node(connection.dest_node);
+                if (source == nullptr || destination == nullptr || lane_count != 0 ||
+                    connection.feedback || source->num_output_ports <= 0 ||
+                    destination->num_input_ports <= 0 ||
+                    connection.source_port >= static_cast<PortIndex>(source->num_output_ports) ||
+                    connection.dest_port >= static_cast<PortIndex>(destination->num_input_ports)) {
+                    connection_error = "sample region connection has an invalid shape";
+                    break;
+                }
+                if (std::find(graph.connections_.begin(), graph.connections_.end(), connection) !=
+                    graph.connections_.end()) {
+                    connection_error = "sample region connection is duplicated";
+                    break;
+                }
+                graph.append_connection_locked_(connection);
+            }
+        }
+
+        for (const auto& connection : parsed_connections) {
+            if (!connection_error.empty() || region_internal(connection))
+                continue;
+            bool accepted = false;
+            if (connection.audio_rate_modulation) {
+                accepted = graph.connect_audio_rate_modulation(
+                    connection.source_node, connection.source_port, connection.dest_node,
+                    connection.automation_param_id, connection.automation_range_lo,
+                    connection.automation_range_hi, connection.automation_smoothing_ms,
+                    connection.automation_mix);
+            } else if (connection.automation) {
+                accepted = graph.connect_automation(
+                    connection.source_node, connection.source_port, connection.dest_node,
+                    connection.automation_param_id, connection.automation_range_lo,
+                    connection.automation_range_hi, connection.automation_smoothing_ms,
+                    connection.automation_mix);
+            } else if (connection.sidechain) {
+                accepted = graph.connect_sidechain(connection.source_node, connection.source_port,
+                                                   connection.dest_node, connection.dest_port);
+            } else if (connection.midi) {
+                accepted = graph.connect_midi(connection.source_node, connection.dest_node);
+            } else if (connection.feedback) {
+                accepted = graph.connect_feedback(connection.source_node, connection.source_port,
+                                                  connection.dest_node, connection.dest_port);
+            } else {
+                accepted = graph.connect(connection.source_node, connection.source_port,
+                                         connection.dest_node, connection.dest_port);
+            }
+            if (!accepted)
+                connection_error = "connection failed validation";
+        }
+
+        if (connection_error.empty()) {
+            SignalGraph::GraphMutationLock lock(graph);
+            graph.connections_.clear();
+            graph.connection_identities_.clear();
+            for (const auto& connection : parsed_connections)
+                graph.append_connection_locked_(connection);
+            graph.sample_region_definitions_ = std::move(definitions);
+            graph.invalidate_live_locked_();
+        }
+        if (!connection_error.empty()) {
+            graph.clear();
+            result.error = std::move(connection_error);
+            return result;
+        }
+    } else if (root.hasObjectMember("connections")) {
+        // Pass 2: replay connections using the id map (legacy v1/v2 path).
         const auto& conns = root["connections"];
         for (uint32_t i = 0; i < conns.size(); ++i) {
             const auto& cv = conns[i];
