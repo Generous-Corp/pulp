@@ -21,16 +21,6 @@
         "rationale": "The initial ledger contains only releases whose protected head, merge, and source evidence were reverified; older planning RELEASE prose still requires protected-main reconciliation before the audit may be called complete."
       },
       {
-        "id": "live-product-control-semantic-zero",
-        "surface": "live_product_control",
-        "owner": "sequencer-control-closure",
-        "dependencies": [
-          "product-a-timeline-document-session",
-          "product-a-sequencer-control-tranche"
-        ],
-        "rationale": "The Product A registry has generic state and test-input operations, including a transport-shaped test event, but no sequencer or timeline document capability ID, operation, executor, or policy projection."
-      },
-      {
         "id": "p2-21-ios-simulator-acceptance-held",
         "surface": "historical_census",
         "owner": "sequencer-p2-21-acceptance",
