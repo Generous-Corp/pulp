@@ -19,11 +19,13 @@
 #include <pulp/host/baked_graph_processor.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/runtime/crypto.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -43,6 +45,20 @@ using pulp::host::CustomNodeType;
 
 constexpr double kSr = 48000.0;
 constexpr int kFrames = 128;
+
+std::atomic<int> g_scalar_pair_sample_calls{0};
+std::atomic<int> g_scalar_pair_block_calls{0};
+
+void scalar_pair_block_callback(pulp::audio::BufferView<float>&,
+                                const pulp::audio::BufferView<const float>&, int) {
+    ++g_scalar_pair_block_calls;
+}
+
+void scalar_pair_sample_callback(void*, const pulp::host::PreparedSampleKernelConfig&,
+                                 const pulp::host::SampleFrameContext&, const float*,
+                                 float*) noexcept {
+    ++g_scalar_pair_sample_calls;
+}
 
 std::vector<float> ramp(int n, float seed) {
     std::vector<float> v(static_cast<std::size_t>(n));
@@ -1087,6 +1103,7 @@ TEST_CASE("signed bake restores meaningful zero-byte Custom state",
         };
 
     pulp::host::BakedPlan plan;
+    plan.format_version = pulp::host::kBakedPlanV1FormatVersion;
     plan.input_channels = 1;
     plan.output_channels = 1;
     plan.nodes.push_back(
@@ -1119,4 +1136,254 @@ TEST_CASE("signed bake restores meaningful zero-byte Custom state",
         std::vector<float>(static_cast<std::size_t>(kFrames), 1.0f)};
     const auto restored = run_baked(*loaded.processor, kFrames, ones, 1);
     CHECK(restored[0][0] == 0.4f);
+}
+
+TEST_CASE("signed v2 bake preflight remaps and re-proves sample regions",
+          "[host][graph][bake][codec][sample-region]") {
+    g_scalar_pair_sample_calls.store(0);
+    g_scalar_pair_block_calls.store(0);
+
+    pulp::host::BakedPlan plan;
+    plan.format_version = pulp::host::kBakedMaxSupportedFormatVersion;
+    plan.input_channels = 1;
+    plan.output_channels = 1;
+    plan.nodes.push_back({1, pulp::host::NodeType::AudioInput, 0, 1, 1.0f, {}, 0, {}});
+    plan.nodes.push_back({2, pulp::host::NodeType::AudioOutput, 1, 0, 1.0f, {}, 0, {}});
+    plan.nodes.push_back(
+        {3, pulp::host::NodeType::Custom, 1, 1, 1.0f, "pulp.core.sample-region.input", 1, {}});
+    plan.nodes.push_back(
+        {4, pulp::host::NodeType::Custom, 1, 1, 1.0f, "pulp.core.sample-region.output", 1, {}});
+    plan.connections = {{1, 0, 3, 0, false}, {3, 0, 4, 0, false}, {4, 0, 2, 0, false}};
+
+    pulp::host::SampleRegionDefinition region;
+    region.region_id = 11;
+    region.members = {
+        {3,
+         "pulp.core.sample-region.input",
+         1,
+         {pulp::host::SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {4,
+         "pulp.core.sample-region.output",
+         1,
+         {pulp::host::SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+    };
+    region.input_boundaries = {3};
+    region.output_boundaries = {4};
+    plan.sample_regions.push_back(region);
+
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i < seed.size(); ++i)
+        seed[i] = static_cast<std::uint8_t>(i + 101);
+    const auto kp = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+    REQUIRE(kp.has_value());
+    const auto bytes = pulp::host::write_baked_signed(plan, kp->private_key);
+    REQUIRE_FALSE(bytes.empty());
+
+    auto registration = [] {
+        pulp::host::BakedTypeRegistration value;
+        value.block.type_id = "pulp.test.scalar-pair";
+        value.block.version = 1;
+        value.block.num_input_ports = 1;
+        value.block.num_output_ports = 1;
+        value.block.process = scalar_pair_block_callback;
+        value.sample.type_id = value.block.type_id;
+        value.sample.version = value.block.version;
+        value.sample.num_input_ports = 1;
+        value.sample.num_output_ports = 1;
+        value.sample.authored_config_kind = pulp::host::SampleKernelConfigKind::None;
+        value.sample.metadata.category = "test";
+        value.sample.process = scalar_pair_sample_callback;
+        return value;
+    };
+    auto builtin_registrations = [] {
+        SignalGraph registry;
+        REQUIRE(pulp::host::register_builtin_sample_region_types(registry));
+        constexpr std::array<const char*, 7> kBuiltinIds = {
+            "pulp.core.sample-region.input",
+            "pulp.core.sample-region.output",
+            "pulp.core.sample-region.constant",
+            "pulp.core.sample-region.parameter",
+            "pulp.core.sample-region.add",
+            "pulp.core.sample-region.multiply",
+            "pulp.core.unit-delay",
+        };
+        std::vector<pulp::host::BakedTypeRegistration> result;
+        result.reserve(kBuiltinIds.size());
+        for (const auto* id : kBuiltinIds) {
+            const auto* block = registry.custom_node_type(id, 1);
+            const auto* sample = registry.sample_kernel_type(id, 1);
+            REQUIRE(block);
+            REQUIRE(sample);
+            result.push_back({*block, *sample});
+        }
+        return result;
+    };
+    const auto builtins = builtin_registrations();
+
+    pulp::host::BakedTrust trust;
+    trust.trusted_public_keys.push_back(kp->public_key);
+    const auto loaded =
+        pulp::host::load_baked(bytes, trust, pulp::host::BakedTypeRegistry::from(builtins));
+    REQUIRE(loaded.accepted);
+    REQUIRE(loaded.plan.has_value());
+    CHECK(*loaded.plan == plan);
+    CHECK(g_scalar_pair_sample_calls.load() == 0);
+    CHECK(g_scalar_pair_block_calls.load() == 0);
+
+    pulp::host::BakedPlan v1_plan;
+    v1_plan.format_version = pulp::host::kBakedPlanV1FormatVersion;
+    v1_plan.input_channels = 1;
+    v1_plan.output_channels = 1;
+    v1_plan.nodes = {
+        {1, pulp::host::NodeType::AudioInput, 0, 1, 1.0f, {}, 0, {}},
+        {2, pulp::host::NodeType::AudioOutput, 1, 0, 1.0f, {}, 0, {}},
+    };
+    v1_plan.connections = {{1, 0, 2, 0, false}};
+    const auto v1_bytes = pulp::host::write_baked_signed(v1_plan, kp->private_key);
+    REQUIRE_FALSE(v1_bytes.empty());
+    const auto v1_loaded = pulp::host::load_baked_plan(v1_bytes, trust, {});
+    CHECK(v1_loaded.accepted);
+    CHECK(v1_loaded.plan.has_value());
+    CHECK(*v1_loaded.plan == v1_plan);
+    const auto v1_legacy_loaded = pulp::host::load_baked(v1_bytes, trust, {});
+    CHECK(v1_legacy_loaded.accepted);
+
+    // The legacy processor loader must refuse this artifact before it can
+    // flatten the region nodes into block Custom records.
+    const auto legacy = pulp::host::load_baked(bytes, trust, {});
+    CHECK_FALSE(legacy.accepted);
+    CHECK(legacy.reason == pulp::host::LowerRejectReason::CodecRejected);
+
+    SECTION("mismatched, duplicate, and zero-callback pairs fail before reconstruction") {
+        auto mismatched = registration();
+        mismatched.sample.type_id = "pulp.test.other-scalar";
+        auto rejected = pulp::host::load_baked_plan(bytes, trust, {mismatched});
+        CHECK_FALSE(rejected.accepted);
+        CHECK(rejected.reason == pulp::host::LowerRejectReason::CodecRejected);
+
+        auto duplicate = registration();
+        rejected = pulp::host::load_baked_plan(bytes, trust, {registration(), duplicate});
+        CHECK_FALSE(rejected.accepted);
+        CHECK(rejected.reason == pulp::host::LowerRejectReason::CodecRejected);
+
+        auto no_callback = registration();
+        no_callback.sample.process = nullptr;
+        rejected = pulp::host::load_baked_plan(bytes, trust, {no_callback});
+        CHECK_FALSE(rejected.accepted);
+        CHECK(rejected.reason == pulp::host::LowerRejectReason::CodecRejected);
+        CHECK(g_scalar_pair_sample_calls.load() == 0);
+        CHECK(g_scalar_pair_block_calls.load() == 0);
+    }
+    SECTION("authenticated late failure never executes either callback") {
+        auto late_failure = plan;
+        late_failure.sample_regions.front().members[1].config.kind =
+            pulp::host::SampleKernelConfigKind::None;
+        const auto late_failure_bytes =
+            pulp::host::write_baked_signed(late_failure, kp->private_key);
+        REQUIRE_FALSE(late_failure_bytes.empty());
+        const auto rejected = pulp::host::load_baked_plan(late_failure_bytes, trust, builtins);
+        CHECK_FALSE(rejected.accepted);
+        CHECK(rejected.reason == pulp::host::LowerRejectReason::CodecRejected);
+        CHECK(g_scalar_pair_sample_calls.load() == 0);
+        CHECK(g_scalar_pair_block_calls.load() == 0);
+    }
+    SECTION("authenticated topology shape and bus mismatches are refused") {
+        auto bad_shape = plan;
+        bad_shape.nodes.front().num_input_ports = 1;
+        const auto bad_shape_bytes = pulp::host::write_baked_signed(bad_shape, kp->private_key);
+        REQUIRE_FALSE(bad_shape_bytes.empty());
+        const auto shape_rejected = pulp::host::load_baked_plan(bad_shape_bytes, trust, builtins);
+        CHECK_FALSE(shape_rejected.accepted);
+        CHECK(shape_rejected.reason == pulp::host::LowerRejectReason::CodecRejected);
+
+        auto bad_bus = plan;
+        bad_bus.input_channels = 2;
+        const auto bad_bus_bytes = pulp::host::write_baked_signed(bad_bus, kp->private_key);
+        REQUIRE_FALSE(bad_bus_bytes.empty());
+        const auto bus_rejected = pulp::host::load_baked_plan(bad_bus_bytes, trust, builtins);
+        CHECK_FALSE(bus_rejected.accepted);
+        CHECK(bus_rejected.reason == pulp::host::LowerRejectReason::CodecRejected);
+    }
+    SECTION("signed Custom arity must match its exact registered pair") {
+        auto bad_custom_arity = plan;
+        bad_custom_arity.nodes[2].num_input_ports = 2;
+        const auto bad_custom_arity_bytes =
+            pulp::host::write_baked_signed(bad_custom_arity, kp->private_key);
+        REQUIRE_FALSE(bad_custom_arity_bytes.empty());
+        const auto rejected = pulp::host::load_baked_plan(bad_custom_arity_bytes, trust, builtins);
+        CHECK_FALSE(rejected.accepted);
+        CHECK(rejected.reason == pulp::host::LowerRejectReason::CodecRejected);
+    }
+    SECTION("an authored kernel with no exact registration is refused") {
+        auto missing_plan = plan;
+        missing_plan.nodes[2].custom_type_id = "pulp.test.missing-scalar";
+        missing_plan.sample_regions.front().members.front().type_id = "pulp.test.missing-scalar";
+        const auto missing_bytes = pulp::host::write_baked_signed(missing_plan, kp->private_key);
+        REQUIRE_FALSE(missing_bytes.empty());
+        const auto rejected = pulp::host::load_baked_plan(missing_bytes, trust, {});
+        CHECK_FALSE(rejected.accepted);
+        CHECK(rejected.reason == pulp::host::LowerRejectReason::CodecRejected);
+    }
+}
+
+TEST_CASE("bake_to_plan emits authored v2 sample-region metadata",
+          "[host][graph][bake][codec][sample-region]") {
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1, "In");
+    const auto output = graph.add_output_node(1, "Out");
+    REQUIRE(graph.connect(input, 0, output, 0));
+    REQUIRE(graph.prepare(kSr, kFrames));
+    auto edit = graph.begin_prepared_topology_edit();
+    REQUIRE(edit);
+    REQUIRE(edit->disconnect(input, 0, output, 0));
+    REQUIRE(pulp::host::register_builtin_sample_region_types(*edit));
+    const auto region_input = edit->add_custom_node("pulp.core.sample-region.input");
+    const auto region_output = edit->add_custom_node("pulp.core.sample-region.output");
+    REQUIRE(region_input != 0);
+    REQUIRE(region_output != 0);
+    REQUIRE(edit->connect(input, 0, region_input, 0));
+
+    pulp::host::SampleRegionDefinition region;
+    region.region_id = 19;
+    region.members = {
+        {region_input,
+         "pulp.core.sample-region.input",
+         1,
+         {pulp::host::SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+        {region_output,
+         "pulp.core.sample-region.output",
+         1,
+         {pulp::host::SampleKernelConfigKind::BoundaryIndex, 0, 0.0f}},
+    };
+    region.input_boundaries = {region_input};
+    region.output_boundaries = {region_output};
+    REQUIRE(edit->declare_sample_region(region).accepted);
+    REQUIRE(edit->connect_in_sample_region(19, region_input, 0, region_output, 0).accepted);
+    REQUIRE(edit->connect(region_output, 0, output, 0));
+    const auto parameter_contract = edit->sample_region_parameter_contract();
+    auto parameter_owner = pulp::host::SampleRegionParameterOwner::create({}, parameter_contract);
+    REQUIRE(parameter_owner);
+    REQUIRE(edit->bind_sample_region_parameters(parameter_owner->binding()).accepted);
+    REQUIRE(edit->prepare(kSr, kFrames) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+    REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+
+    const auto baked = pulp::host::bake_to_plan(graph);
+    REQUIRE(baked.accepted);
+    REQUIRE(baked.plan.has_value());
+    CHECK(baked.plan->format_version == pulp::host::kBakedMaxSupportedFormatVersion);
+    REQUIRE(baked.plan->sample_regions.size() == 1);
+
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i < seed.size(); ++i)
+        seed[i] = static_cast<std::uint8_t>(i + 151);
+    const auto kp = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+    REQUIRE(kp.has_value());
+    const auto bytes = pulp::host::write_baked_signed(*baked.plan, kp->private_key);
+    REQUIRE_FALSE(bytes.empty());
+    pulp::host::BakedTrust trust;
+    trust.trusted_public_keys.push_back(kp->public_key);
+    const auto loaded = pulp::host::load_baked_plan(bytes, trust, {});
+    REQUIRE(loaded.accepted);
+    REQUIRE(loaded.plan.has_value());
+    CHECK(*loaded.plan == *baked.plan);
 }
