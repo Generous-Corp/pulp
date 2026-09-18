@@ -253,6 +253,12 @@ public:
         return prepared_latency_samples_.load(std::memory_order_relaxed);
     }
     void define_parameters(pulp::state::StateStore& store) override;
+    const SampleRegionParameterContract& sample_region_parameter_contract() const noexcept {
+        return sample_region_parameter_contract_;
+    }
+    const SampleRegionParameterBinding* sample_region_parameter_binding() const noexcept {
+        return sample_region_parameter_binding_.get();
+    }
     void prepare(const pulp::format::PrepareContext& context) override;
     void process(pulp::audio::BufferView<float>& audio_output,
                  const pulp::audio::BufferView<const float>& audio_input,

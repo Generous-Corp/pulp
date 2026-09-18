@@ -256,6 +256,10 @@ TEST_CASE("Baked graph publishes the frozen promoted parameter manifest",
     processor.define_parameters(store);
     processor.define_parameters(store);
 
+    REQUIRE(processor.sample_region_parameter_contract().frozen());
+    REQUIRE(processor.sample_region_parameter_binding() != nullptr);
+    CHECK(&processor.sample_region_parameter_binding()->store() == &store);
+    CHECK(processor.sample_region_parameter_binding()->value(90) == 0.5f);
     REQUIRE(store.param_count() == 2);
     const auto manifest = store.all_params();
     CHECK(manifest[0].id == 40);
@@ -269,10 +273,20 @@ TEST_CASE("Baked graph publishes the frozen promoted parameter manifest",
     CHECK(store.get_value(40) == 0.25f);
     CHECK(store.get_value(90) == 0.5f);
 
+    std::vector<state::ParamID> begins;
+    std::vector<state::ParamID> ends;
+    store.set_gesture_callbacks(
+        [&](state::ParamID id) { begins.push_back(id); },
+        [&](state::ParamID id) { ends.push_back(id); });
     const auto generation = store.state_generation();
+    store.begin_gesture(90);
     store.set_value(90, 0.75f);
+    store.end_gesture(90);
     CHECK(store.get_value(90) == 0.75f);
     CHECK(store.state_generation() > generation);
+    CHECK(begins == std::vector<state::ParamID>{90});
+    CHECK(ends == std::vector<state::ParamID>{90});
+    CHECK(store.open_gesture_count() == 0);
 }
 
 TEST_CASE("Baked graph without regions preserves the empty legacy manifest",
@@ -282,4 +296,53 @@ TEST_CASE("Baked graph without regions preserves the empty legacy manifest",
     processor.define_parameters(store);
     CHECK(store.param_count() == 0);
     CHECK(store.state_generation() == 0);
+    CHECK(processor.sample_region_parameter_binding() == nullptr);
+}
+
+TEST_CASE("Baked graph rejects an invalid promoted contract before publication",
+          "[host][sample-region][parameters][baked][negative]") {
+    auto invalid = promoted(90);
+    invalid.bound_node_id = 0;
+    const auto definition = region(9, {invalid});
+    BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked", {},
+                                  {definition});
+    state::StateStore store;
+    processor.define_parameters(store);
+    CHECK_FALSE(processor.sample_region_parameter_contract().valid());
+    CHECK(processor.sample_region_parameter_binding() == nullptr);
+    CHECK(store.param_count() == 0);
+    CHECK(store.state_generation() == 0);
+}
+
+TEST_CASE("Baked region contract metadata survives plan reload in canonical order",
+          "[host][sample-region][parameters][baked][reload]") {
+    const auto definition = region(9, {promoted(90), promoted(40, "feedback")});
+    BakedPlan plan;
+    plan.format_version = kBakedMaxSupportedFormatVersion;
+    plan.sample_regions.push_back(definition);
+    const auto bytes = detail::serialize_plan(plan);
+    const auto reloaded = detail::parse_plan_bounded(bytes);
+    REQUIRE(reloaded);
+    const auto authored = SampleRegionParameterContract::from_regions(plan.sample_regions);
+    const auto restored = SampleRegionParameterContract::from_regions(reloaded->sample_regions);
+    REQUIRE(authored.valid());
+    REQUIRE(restored.valid());
+    CHECK(authored.matches_promoted(restored));
+    REQUIRE(restored.entries().size() == 2);
+    CHECK(restored.entries()[0].info.id == 40);
+    CHECK(restored.entries()[1].info.id == 90);
+}
+
+TEST_CASE("Baked parameter binding does not outlive its adapter store",
+          "[host][sample-region][parameters][baked][lifetime]") {
+    auto store = std::make_unique<state::StateStore>();
+    const auto definition = region(9, {promoted(90)});
+    {
+        BakedGraphProcessor processor({}, {}, 1, 1, "Baked", "com.test.baked", {},
+                                      {definition});
+        processor.define_parameters(*store);
+        REQUIRE(processor.sample_region_parameter_binding() != nullptr);
+        CHECK(&processor.sample_region_parameter_binding()->store() == store.get());
+    }
+    CHECK(store->param_count() == 1);
 }
