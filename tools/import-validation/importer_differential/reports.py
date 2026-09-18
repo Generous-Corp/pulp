@@ -17,6 +17,10 @@ def format_summary(report: dict[str, Any]) -> str:
         f"- Native import: {timings['native_import_ms']} ms",
         f"- Native render: {timings['native_render_ms']} ms",
         f"- Import-only speedup: {timings['browser_to_native_import_speedup']}x",
+        f"- TTFP: {report['observability']['ttfp']['status']}",
+        f"- TTNI: {report['observability']['ttni']['value_ms']} ms",
+        f"- IFNF: {report['observability']['ifnf']['status']}",
+        f"- Cache state: {report['observability']['cache_state']['identity']}",
     ]
     lines += [
         f"- {name.title()} score: {comparison[name]['score']:.3f}"
@@ -52,6 +56,10 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
         f"- Mean native import: {timings['native_import']:.1f} ms",
         f"- Mean native render: {timings['native_render']:.1f} ms",
         f"- Mean import-only speedup: {aggregate['mean_import_only_speedup']:.2f}x",
+        f"- TTFP: {aggregate['observability']['ttfp']['status']}",
+        f"- TTNI p95: {aggregate['observability']['ttni']['p95_ms']} ms",
+        f"- IFNF: {aggregate['observability']['ifnf']['status']}",
+        f"- Cache states: {', '.join(aggregate['observability']['cache_states']) or 'none'}",
         f"- Native-authoritative: {counts['native-authoritative']}",
         f"- Native with browser validation: {counts['native-with-browser-validation']}",
         f"- Browser-required: {counts['browser-required']}",
