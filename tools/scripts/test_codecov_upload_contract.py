@@ -304,6 +304,10 @@ class CoverageWorkflowTests(unittest.TestCase):
             self.coverage,
         )
 
+    def test_advisory_swift_coverage_cannot_strand_native_upload(self) -> None:
+        self.assertIn("timeout_seconds = 20 * 60", self.coverage)
+        self.assertIn("continuing so native coverage can upload", self.coverage)
+
     def test_python_upload_is_independent_from_native_report(self) -> None:
         self.assertIn("id: python_coverage", self.coverage)
         self.assertNotIn("steps.python_coverage.outcome", self.coverage)
