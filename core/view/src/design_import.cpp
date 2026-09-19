@@ -1453,6 +1453,23 @@ static std::vector<HtmlAssetCandidate> collect_html_asset_uris(const std::string
         append_html_asset_candidate(assets, std::move(uri));
     }
 
+    // Vite and similar ESM bundlers commonly preserve a literal asset edge as
+    // `new URL('./asset.png', import.meta.url)`.  The browser resolves this
+    // edge at runtime, but the source importer must also admit the referenced
+    // file into its content-addressed manifest for native materialization.
+    // Only a literal string is discoverable here; dynamic expressions remain
+    // unresolved and are reported by the normal asset-resolution pass.
+    static const std::regex vite_url_re(
+        R"RX(new\s+URL\s*\(\s*(['"])([^'"]+)\1\s*,\s*import\.meta\.url\s*\))RX",
+        std::regex::icase);
+    auto vite_begin = std::sregex_iterator(html.begin(), html.end(), vite_url_re);
+    auto vite_end = std::sregex_iterator();
+    for (auto it = vite_begin; it != vite_end; ++it) {
+        auto uri = (*it)[2].str();
+        if (!uri.empty() && uri.front() != '#')
+            append_html_asset_candidate(assets, std::move(uri));
+    }
+
     return assets;
 }
 
