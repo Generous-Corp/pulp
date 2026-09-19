@@ -9,8 +9,11 @@ LUA=ROOT/'sample_region_native_reaper.lua'
 
 def run(fmt,bundle,out,timeout):
     out.mkdir(parents=True,exist_ok=True); receipt=out/f'{fmt}-receipt.log'; wav=out/f'{fmt}-impulse-output.wav'; project=out/f'{fmt}.rpp'
-    state_before=out/f'{fmt}-state-before.bin'; state_after=out/f'{fmt}-state-after.bin'
-    env=os.environ.copy(); env.update(PULP_F4_FORMAT=fmt,PULP_F4_FX_NAME='Sample Region Allpass',PULP_F4_PLUGIN_PATH=str(bundle),PULP_F4_WAV=str(wav),PULP_F4_PROJECT=str(project),PULP_F4_RECEIPT=str(receipt),PULP_F4_STATE_BEFORE=str(state_before),PULP_F4_STATE_AFTER=str(state_after))
+    state_before=out/f'{fmt}-state-before.bin'; state_after=out/f'{fmt}-state-after.bin'; input_wav=out/f'{fmt}-impulse-input.wav'
+    import wave, struct
+    with wave.open(str(input_wav),'wb') as w:
+        w.setnchannels(1); w.setsampwidth(4); w.setframerate(48000); samples=[1.0]+[0.0]*16383; w.writeframes(struct.pack('<16384f',*samples))
+    env=os.environ.copy(); env.update(PULP_F4_FORMAT=fmt,PULP_F4_FX_NAME='Sample Region Allpass',PULP_F4_PLUGIN_PATH=str(bundle),PULP_F4_WAV=str(wav),PULP_F4_PROJECT=str(project),PULP_F4_RECEIPT=str(receipt),PULP_F4_STATE_BEFORE=str(state_before),PULP_F4_STATE_AFTER=str(state_after),PULP_F4_INPUT_WAV=str(input_wav))
     reaper=env.get('REAPER_BIN','/Applications/REAPER.app/Contents/MacOS/REAPER')
     if not Path(reaper).is_file(): return {'format':fmt,'status':'inconclusive','reason':'REAPER unavailable'}
     cmd=[reaper,'-new','-nosplash','-script',str(LUA)]

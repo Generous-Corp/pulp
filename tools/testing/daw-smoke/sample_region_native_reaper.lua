@@ -7,6 +7,7 @@ local fx_name = os.getenv("PULP_F4_FX_NAME") or "Sample Region Allpass"
 local out_wav = os.getenv("PULP_F4_WAV")
 local out_receipt = os.getenv("PULP_F4_RECEIPT")
 local project_path = os.getenv("PULP_F4_PROJECT")
+local input_wav = os.getenv("PULP_F4_INPUT_WAV")
 local state_before_path = os.getenv("PULP_F4_STATE_BEFORE")
 local state_after_path = os.getenv("PULP_F4_STATE_AFTER")
 local function emit(v)
@@ -28,15 +29,16 @@ local function sha(s) return tostring(#s)..":"..string.sub(s,1,32) end
 local function qualify() return (fmt=="au" and "AU:" or fmt=="clap" and "CLAP:" or "VST3:")..fx_name end
 local tr = reaper.GetTrack(0,0)
 if not tr then tr=reaper.InsertTrackAtIndex(0,true); tr=reaper.GetTrack(0,0) end
+if input_wav then local item=reaper.InsertMedia(input_wav,0); if item then reaper.SetMediaItemLength(item,16384/48000,true) end end
 local fx = reaper.TrackFX_AddByName(tr, qualify(), false, 1)
 if fx < 0 then emit({packet="PKT-F4-01",format=fmt,host="REAPER",error="qualified FX not found: "..qualify()}); reaper.defer(function() reaper.Main_OnCommand(40004,0) end); return end
 local n = reaper.TrackFX_GetNumParams(tr,fx)
 local ids, names = {}, {}
-for i=0,n-1 do local ok,name = reaper.TrackFX_GetParamName(tr,fx,i,""); names[#names+1]=name or ""; ids[#ids+1]=string.format("index:%d;name:%s",i,name or "") end
-local env = n>0 and reaper.TrackFX_GetFXEnvelope(tr,fx,0,true) or nil
+for i=0,n-1 do local _,ident = reaper.TrackFX_GetParamIdent(tr,fx,i); local _,name = reaper.TrackFX_GetParamName(tr,fx,i); names[#names+1]=name or ""; ids[#ids+1]=string.format("index:%d;ident:%s;name:%s",i,ident or "",name or "") end
+local env = n>0 and reaper.GetFXEnvelope(tr,fx,0,true) or nil
 local automation = false
 local automation_points = {}
-if env then reaper.SetEnvelopePoint(env,0,0.0,0.25,0,0,false,false); reaper.SetEnvelopePoint(env,1,1.0,0.75,0,0,false,false); reaper.Envelope_SortPoints(env); automation=true; automation_points={0.25,0.75} end
+if env then reaper.InsertEnvelopePoint(env,0.0,0.25,0,0,false,false); reaper.InsertEnvelopePoint(env,1.0,0.75,0,0,false,false); reaper.Envelope_SortPoints(env); local _,t0,v0 = reaper.GetEnvelopePoint(env,0); local _,t1,v1 = reaper.GetEnvelopePoint(env,1); automation=(t0==0.0 and t1==1.0 and v0==0.25 and v1==0.75); automation_points={v0,v1} end
 if n>0 then reaper.TrackFX_SetParam(tr,fx,0,0.5) end
 local _, before = reaper.GetTrackStateChunk(tr,"",false)
 local state_before = before or ""
@@ -64,5 +66,5 @@ if out_wav then
 end
 local receipt={pdc_api="TrackFX_GetNamedConfigParm:pdc",packet="PKT-F4-01",format=fmt,host="REAPER",host_version=reaper.GetAppVersion(),host_instance=tostring(reaper.GetProjectName(0,"")),plugin_path=os.getenv("PULP_F4_PLUGIN_PATH") or "",bundle_id="com.pulp.sample-region-allpass",host_parameter_ids=ids,parameter_names=names,parameter_identity=true,parameter_order=ids,automation=automation,automation_points=automation_points,state_save=#state_before>0,state_reload=state_equal,reload=(reloaded>=0),audio=audio,zero_pdc=(latency==0),pdc_samples=latency,audio_peak=1,saved_generation=#state_before,reload_generation=#state_after,wav_path=out_wav or "",negative_control="unrun"}
 emit(receipt)
-if project_path then reaper.Main_SaveProject(0,false) end
+if project_path then reaper.Main_SaveProjectEx(0,project_path,8); reaper.Main_openProject("noprompt:"..project_path) end
 reaper.defer(function() reaper.Main_OnCommand(40004,0) end)

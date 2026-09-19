@@ -24,9 +24,9 @@ def receipt(**overrides):
         "installed": True, "signed": True, "automation": True,
         "state_save": True, "state_reload": True, "audio": True,
         "reload": True, "zero_pdc": True, "parameter_identity": True,
-        "parameter_order": [2901], "parameter_ids": [2901],
+        "host_parameter_ids": ["index:0;name:Coefficient"], "parameter_order": ["index:0;name:Coefficient"], "parameter_ids": ["index:0;name:Coefficient"],
         "pdc_samples": 0, "audio_peak": 0.25,
-        "saved_generation": 4, "reload_generation": 4,
+        "saved_generation": 4, "reload_generation": 4, "state_before_sha256": "a", "state_after_sha256": "a", "state_hash_equal": True, "wav_exists": True, "wav_sha256": "b", "audio_oracle_pass": True, "automation_points": [0.25, 0.75], "pdc_api": "TrackFX_GetNamedConfigParm:pdc",
     }
     value.update(overrides)
     return value
@@ -51,7 +51,7 @@ class NativeProof(unittest.TestCase):
         self.assertEqual(value.code, mod.EXIT_INCONCLUSIVE)
 
     def test_wrong_parameter_order_fails(self):
-        value = mod.validate_receipt(receipt(parameter_ids=[901, 2901], parameter_order=[2901]))
+        value = mod.validate_receipt(receipt(host_parameter_ids=["index:1"], parameter_ids=["index:1"], parameter_order=["index:0;name:Coefficient"]))
         self.assertEqual(value.code, mod.EXIT_FAIL)
 
     def test_nonzero_pdc_fails(self):
