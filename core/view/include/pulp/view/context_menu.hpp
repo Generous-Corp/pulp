@@ -98,7 +98,17 @@ public:
         float border = 0.0f;         ///< panel-edge padding on all four sides
         FontSpec font{};             ///< the font the rows are measured/drawn with
         std::vector<Rect> rows{};    ///< one per item, in item order
+        /// Height the rows want, before the panel is capped to the overlay.
+        float content_height = 0.0f;
+        /// `content_height - box.height`, clamped at 0. Non-zero means the
+        /// panel could not show every row and the rows scroll inside it.
+        float max_scroll = 0.0f;
     };
+
+    /// Current scroll offset in pixels, clamped to `[0, max_scroll]`. Exposed
+    /// so a test can assert that a row was brought into view rather than
+    /// asserting on painted pixels.
+    float scroll_offset() const { return scroll_; }
 
     /// Compute the menu's own size and row positions, with no canvas and no
     /// paint. This is the sizing entry point: it asks the metrics delegate
@@ -114,6 +124,8 @@ public:
 private:
     // Row index under a local point, or -1 if outside the box / on a non-row.
     int row_at(Point local_point, const MenuLayout& lay) const;
+    // Keyboard nav must not move the hover somewhere the panel is not showing.
+    void scroll_row_into_view(int index);
     void move_hover(int delta);    // keyboard nav, skipping separators + disabled
     void move_hover_to_edge(bool last);  // Home / End
     void fire_close(std::optional<int> result);
@@ -122,6 +134,7 @@ private:
     Point anchor_{0, 0};
     int hover_index_ = -1;
     bool closed_ = false;
+    float scroll_ = 0.0f;
 
     static constexpr float kRowHeight = 24.0f;
     static constexpr float kHPad = 34.0f;   // total horizontal label padding
@@ -134,6 +147,10 @@ private:
     /// separator.
     static constexpr float kSeparatorHeight = 7.0f;
     static constexpr float kFontSize = 12.0f;
+    /// Gap kept between the panel and the overlay edge when the panel has to
+    /// be capped. Without it a full-height menu sits flush against the window
+    /// edge and reads as clipped rather than scrollable.
+    static constexpr float kEdgeMargin = 4.0f;
 };
 
 /// Design-system alias. The Ink & Signal Figma library names this primitive

@@ -87,19 +87,38 @@ ContextMenu::MenuLayout ContextMenu::layout() const {
 
     if (!any_delegated_width) widest = std::max(widest, kMinWidth);
     const float width = widest + lay.border * 2.0f;
-    const float height = stacked + lay.border * 2.0f;
+    lay.content_height = stacked + lay.border * 2.0f;
+    float height = lay.content_height;
 
     // Position: flip left / up if the box would spill past the overlay bounds.
     auto b = local_bounds();
     float x = anchor_.x;
     float y = anchor_.y;
     if (b.width > 0.0f && x + width > b.width) x = anchor_.x - width;
-    if (b.height > 0.0f && y + height > b.height) y = anchor_.y - height;
+
+    // A menu taller than the overlay cannot be made to fit by flipping it up:
+    // the flip drives `y` negative, the clamp to 0 pins the panel to the top
+    // edge, and the panel keeps its full content height — so every row past
+    // the overlay was laid out, hit-tested and PAINTED outside the panel, on
+    // top of the app behind it. Cap the panel to the space available and let
+    // the rows scroll inside it instead.
+    if (b.height > 0.0f) {
+        const float avail = std::max(kRowHeight, b.height - kEdgeMargin * 2.0f);
+        height = std::min(height, avail);
+        if (y + height > b.height - kEdgeMargin) y = anchor_.y - height;
+        const float y_max = std::max(kEdgeMargin, b.height - height - kEdgeMargin);
+        y = std::clamp(y, kEdgeMargin, y_max);
+    }
     x = std::max(0.0f, x);
     y = std::max(0.0f, y);
     lay.box = {x, y, width, height};
 
-    float row_y = y + lay.border;
+    // Rows carry the scroll offset in their own rects, so painting and
+    // hit-testing cannot disagree about where a row is: both walk `rows`.
+    lay.max_scroll = std::max(0.0f, lay.content_height - height);
+    const float scroll = std::clamp(scroll_, 0.0f, lay.max_scroll);
+
+    float row_y = y + lay.border - scroll;
     lay.rows.reserve(items_.size());
     for (float h : heights) {
         lay.rows.push_back({x + lay.border, row_y, widest, h});
@@ -142,6 +161,7 @@ void ContextMenu::move_hover(int delta) {
         idx = next;
         if (is_selectable(items_[static_cast<size_t>(idx)])) {
             hover_index_ = idx;
+            scroll_row_into_view(idx);
             request_repaint();
             return;
         }
@@ -157,9 +177,29 @@ void ContextMenu::move_hover_to_edge(bool last) {
         const int idx = last ? n - 1 - step : step;
         if (is_selectable(items_[static_cast<size_t>(idx)])) {
             hover_index_ = idx;
+            scroll_row_into_view(idx);
             request_repaint();
             return;
         }
+    }
+}
+
+void ContextMenu::scroll_row_into_view(int index) {
+    if (index < 0) return;
+    const MenuLayout lay = layout();
+    if (lay.max_scroll <= 0.0f) return;
+    if (index >= static_cast<int>(lay.rows.size())) return;
+    const Rect& r = lay.rows[static_cast<size_t>(index)];
+    const float top = lay.box.y + lay.border;
+    const float bottom = lay.box.y + lay.box.height - lay.border;
+    float delta = 0.0f;
+    if (r.y < top)
+        delta = r.y - top;
+    else if (r.y + r.height > bottom)
+        delta = (r.y + r.height) - bottom;
+    if (delta != 0.0f) {
+        scroll_ = std::clamp(scroll_ + delta, 0.0f, lay.max_scroll);
+        request_repaint();
     }
 }
 
@@ -203,6 +243,12 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
         canvas.set_line_width(1);
         canvas.stroke_rounded_rect(box.x, box.y, box.width, box.height, kRadius);
     }
+
+    // Rows are clipped to the panel. A capped menu scrolls, so a row can sit
+    // partly or wholly outside the box; without this clip it painted over the
+    // app behind the menu, which is what made an overflowing menu look garbled.
+    canvas.save();
+    canvas.clip_rect(box.x, box.y, box.width, box.height);
 
     canvas.set_font(lay.font.family, lay.font.size);
     for (int i = 0; i < static_cast<int>(items_.size()); ++i) {
@@ -263,12 +309,42 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
         canvas.fill_text(it.label, row.x + 22, iy + rh * 0.5f + 4.0f);
     }
 
+    // Scroll affordance: a chevron on whichever edge has rows beyond it, so a
+    // capped menu does not read as a menu that simply lost its remaining rows.
+    if (lay.max_scroll > 0.0f) {
+        const float scroll = std::clamp(scroll_, 0.0f, lay.max_scroll);
+        const float cx = box.x + box.width * 0.5f;
+        const float w = 4.0f;
+        canvas.set_stroke_color(text_dim);
+        canvas.set_line_width(1.0f);
+        if (scroll > 0.0f) {
+            const float cy = box.y + 3.0f;
+            canvas.stroke_line(cx - w, cy + w * 0.5f, cx, cy - w * 0.5f);
+            canvas.stroke_line(cx, cy - w * 0.5f, cx + w, cy + w * 0.5f);
+        }
+        if (scroll < lay.max_scroll) {
+            const float cy = box.y + box.height - 3.0f;
+            canvas.stroke_line(cx - w, cy - w * 0.5f, cx, cy + w * 0.5f);
+            canvas.stroke_line(cx, cy + w * 0.5f, cx + w, cy - w * 0.5f);
+        }
+    }
+
+    canvas.restore();  // row clip
+
     canvas.restore();
 }
 
 void ContextMenu::on_mouse_event(const MouseEvent& event) {
     if (closed_ || items_.empty()) return;
-    if (event.is_wheel) return;
+    if (event.is_wheel) {
+        // Matches the text-editor idiom: the host's delta is already pixels.
+        const MenuLayout lay = layout();
+        if (lay.max_scroll <= 0.0f) return;
+        const float before = scroll_;
+        scroll_ = std::clamp(scroll_ + event.scroll_delta_y, 0.0f, lay.max_scroll);
+        if (scroll_ != before) request_repaint();
+        return;
+    }
 
     const MenuLayout lay = layout();  // canvas-free geometry
     const int row = row_at(event.position, lay);
