@@ -1708,9 +1708,19 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
             asset.mime = guess_asset_mime_type(resolved_uri);
         }
 
-        const auto dedupe_key = is_data_uri(uri) && !asset.content_hash.empty()
-            ? std::string("data:") + asset.content_hash
-            : asset.source_url.value_or(asset.local_path.value_or(asset.original_uri));
+        std::string dedupe_key;
+        if (is_data_uri(uri) && !asset.content_hash.empty()) {
+            dedupe_key = std::string("data:") + asset.content_hash;
+        } else if (bytes && asset.local_path
+                   && fs::path(*asset.local_path).is_relative()) {
+            // A resolved package-local path is a different identity boundary
+            // from an unresolved URI. Keep the relative path stable across
+            // relocation while ensuring a refresh rewrites a stale asset id.
+            dedupe_key = "resolved:" + *asset.local_path;
+        } else {
+            dedupe_key = asset.source_url.value_or(
+                asset.local_path.value_or(asset.original_uri));
+        }
         auto [known, inserted] = asset_index_by_key.emplace(dedupe_key, manifest.assets.size());
         if (!inserted) {
             auto& existing = manifest.assets[known->second];
