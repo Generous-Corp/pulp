@@ -173,9 +173,16 @@ fi
 echo "=== Building ==="
 # Compiler warnings from the large example-driven graph can fill the hosted
 # runner's Actions log pager and exhaust the root disk before report upload.
-# Keep the build output on the runner only; a build failure still returns the
-# original non-zero status and the surrounding step reports it clearly.
-cmake --build "${BUILD_DIR}" -j"${JOBS}" >/dev/null
+# Keep compiler output off the Actions log pager. Clang writes warnings to
+# stderr, so redirecting stdout alone still lets a warning-heavy build consume
+# runner log/disk resources before the report can be uploaded. Preserve a
+# bounded tail for diagnosis when the build itself fails.
+BUILD_LOG="${BUILD_DIR}/build.log"
+if ! cmake --build "${BUILD_DIR}" -j"${JOBS}" > /dev/null 2>"${BUILD_LOG}"; then
+    echo "=== Coverage build failed; last 200 log lines ===" >&2
+    tail -n 200 "${BUILD_LOG}" >&2 || true
+    exit 1
+fi
 
 echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"

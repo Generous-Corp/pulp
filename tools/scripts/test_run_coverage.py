@@ -307,10 +307,12 @@ class ObjectDiscoveryTests(unittest.TestCase):
         )
 
     def test_coverage_build_output_does_not_fill_runner_logs(self) -> None:
+        script = SCRIPT.read_text()
         self.assertIn(
-            'cmake --build "${BUILD_DIR}" -j"${JOBS}" >/dev/null',
-            SCRIPT.read_text(),
+            'cmake --build "${BUILD_DIR}" -j"${JOBS}" > /dev/null 2>"${BUILD_LOG}"',
+            script,
         )
+        self.assertIn('tail -n 200 "${BUILD_LOG}"', script)
 
     def test_html_drilldown_can_be_disabled_for_ci(self) -> None:
         text = SCRIPT.read_text()
