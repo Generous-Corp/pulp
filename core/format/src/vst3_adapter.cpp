@@ -2440,9 +2440,20 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 
     // Wrap the plugin call in a ScopedNoAlloc so debug hooks can flag a
     // plugin that allocates on the audio thread.
+    // A strict mono Processor accepted through REAPER's stereo compatibility
+    // shape can still be rendered by a host that selected f64 buffers. Route
+    // that one case through the Processor's prepared f64 fallback so its
+    // channel-zero view stays direct, rather than relying on the adapter's
+    // widened host scratch/writeback path. Native f64 processors and ordinary
+    // negotiated layouts retain their existing paths.
+    const bool mono_stereo_f64_fallback =
+        host_f64 && boundary_f64 && silence_unsupported_active_ &&
+        native_in_ == 1 && native_out_ == 1 && proc_in == 1 && proc_out == 1;
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
-        if (native_f64) {
+        if (mono_stereo_f64_fallback) {
+            processor_->process_f64(process_buffers64, midi_in_, midi_out_, ctx);
+        } else if (native_f64) {
             processor_->process_f64(process_buffers64, midi_in_, midi_out_, ctx);
         } else {
             processor_->process(process_buffers, midi_in_, midi_out_, ctx);
@@ -2461,7 +2472,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
         data.outputs[b].silenceFlags = 0;
     }
 
-    if (boundary_f64) {
+    if (boundary_f64 && !mono_stereo_f64_fallback) {
         if (data.numOutputs > 0 && data.outputs[0].channelBuffers64) {
             for (int ch = 0; ch < out_channels; ++ch) {
                 boundary::copy_f32_to_f64(
