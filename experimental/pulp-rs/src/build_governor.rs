@@ -112,12 +112,22 @@ pub fn strip_parallel_args(args: &[String]) -> Result<(Vec<String>, Option<u32>)
     while index < args.len() {
         let arg = &args[index];
         if arg == "--parallel" || arg == "-j" {
-            let value = args
-                .get(index + 1)
-                .and_then(|value| parse_jobs(value))
-                .ok_or_else(|| CliError::BadUsage(format!("{arg} requires a positive job count")))?;
-            requested = Some(value);
-            index += 1;
+            match args.get(index + 1) {
+                Some(value) if parse_jobs(value).is_some() => {
+                    requested = parse_jobs(value);
+                    index += 1;
+                }
+                // CMake accepts a bare spelling and chooses its default. The
+                // governed environment supplies a bounded default, so remove
+                // the flag without turning this existing input into an error.
+                Some(value) if value.starts_with('-') => {}
+                Some(_) => {
+                    return Err(CliError::BadUsage(format!(
+                        "{arg} requires a positive job count"
+                    )))
+                }
+                None => {}
+            }
         } else if let Some(value) = arg.strip_prefix("--parallel=").and_then(parse_jobs) {
             requested = Some(value);
         } else if let Some(value) = arg.strip_prefix("-j").and_then(parse_jobs) {
@@ -195,6 +205,24 @@ fn physical_memory_mb() -> Option<u32> {
             .ok()?;
         return u32::try_from(kb / 1024).ok();
     }
+    #[cfg(target_os = "windows")]
+    {
+        let mut status = windows_sys::Win32::System::SystemInformation::MEMORYSTATUSEX {
+            dwLength: std::mem::size_of::<
+                windows_sys::Win32::System::SystemInformation::MEMORYSTATUSEX,
+            >() as u32,
+            ..unsafe { std::mem::zeroed() }
+        };
+        // SAFETY: `status` is a correctly sized, initialized MEMORYSTATUSEX
+        // value and the API writes only within that struct.
+        let ok = unsafe {
+            windows_sys::Win32::System::SystemInformation::GlobalMemoryStatusEx(&mut status)
+        };
+        if ok == 0 {
+            return None;
+        }
+        return u32::try_from(status.ullTotalPhys / 1024 / 1024).ok();
+    }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         None
@@ -225,6 +253,15 @@ mod tests {
         let args = ["--parallel".to_owned(), "bogus".to_owned()];
         let err = strip_parallel_args(&args).unwrap_err();
         assert!(err.to_string().contains("requires a positive job count"));
+    }
+
+    #[test]
+    fn bare_parallel_flags_use_governed_default() {
+        for flag in ["--parallel", "-j"] {
+            let (clean, requested) = strip_parallel_args(&[flag.to_owned()]).unwrap();
+            assert!(clean.is_empty());
+            assert_eq!(requested, None);
+        }
     }
 
     #[test]

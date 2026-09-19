@@ -366,6 +366,10 @@ fi
 
 export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"
 export CTEST_PARALLEL_LEVEL="$jobs"
+# Cargo does not consume CMake's parallel-level variables. Export the same
+# governed share explicitly so Rust custom targets cannot fan out across every
+# host core inside an otherwise bounded CMake build.
+export CARGO_BUILD_JOBS="$jobs"
 
 # Name an unresolvable build command before running it.
 #
