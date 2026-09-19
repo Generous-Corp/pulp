@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260919-pr8554-plugin-script-keys-watch",
+  "created_at": "2026-09-19T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "tests": [
+    "pulp-test-plugin-view-host-script-keys",
+    "plugin-view-host-script-keys",
+    "Plugin document shortcuts consume only keys claimed by the owning JavaScript",
+    "Plugin unconsumed document keys still reach the host exactly once",
+    "Plugin document shortcut dispatch cannot reach another editor",
+    "Plugin nested document keys preserve each event's consumption result",
+    "Plugin focused text input wins over document shortcuts",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "rationale": "Routes plugin-host keyboard events through the focused editor's existing document-level JavaScript key dispatcher and uses its consumption result to decide whether the event is handled or remains available to the DAW. Focused text input and navigation retain priority, and an unconsumed key is forwarded exactly once so transport and host shortcuts are not swallowed. The change crosses render-assets-and-backends because the macOS plugin view host lives under core/view; it does not alter rendering, GPU surfaces, fonts, assets or the framework authority boundary. The native test fixture asserts a JavaScript listener actually fires, proves claimed keys are consumed, proves an unclaimed Space key reaches the host, proves nested dispatch keeps each event's result, isolates multiple editors, and preserves text-input precedence. Windows/Linux and VST3 are outside this change because their plugin-host key paths do not share this macOS AppKit implementation; no cross-platform behavior is claimed."
+}
