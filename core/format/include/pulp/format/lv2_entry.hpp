@@ -324,6 +324,13 @@ inline LV2_Handle instantiate(
     format::PrepareContext ctx;
     ctx.sample_rate = sample_rate;
     ctx.max_buffer_size = inst->max_block_length;
+    // LV2 descriptors define the audio shape used by this instance. Preserve
+    // the historical defaults for descriptors without audio buses while
+    // passing concrete bus counts to processors that validate their layout.
+    if (inst->num_audio_inputs > 0)
+        ctx.input_channels = inst->num_audio_inputs;
+    if (inst->num_audio_outputs > 0)
+        ctx.output_channels = inst->num_audio_outputs;
     inst->processor->prepare(ctx);
 
     return static_cast<LV2_Handle>(inst);

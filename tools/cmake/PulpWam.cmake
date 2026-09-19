@@ -106,6 +106,22 @@ set(_PULP_WAM_CORE_SOURCES
 set(_PULP_WAM_SINGLE_ENTRY ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_entry.cpp)
 set(_PULP_WAM_CHAIN_ENTRY  ${_PULP_WAM_ROOT}/core/format/src/wasm/wam_chain_entry.cpp)
 
+option(PULP_SAMPLE_REGION_WEB "Build an isolated sample-region EH/RTTI web profile" OFF)
+if(DEFINED _PULP_WEB_CONFIGURED_REGION AND
+   NOT "${_PULP_WEB_CONFIGURED_REGION}" STREQUAL "${PULP_SAMPLE_REGION_WEB}")
+    message(FATAL_ERROR "Use a fresh build directory when selecting a different web profile")
+endif()
+set(_PULP_WEB_CONFIGURED_REGION "${PULP_SAMPLE_REGION_WEB}" CACHE INTERNAL "Web profile")
+if(PULP_SAMPLE_REGION_WEB)
+    include(${CMAKE_CURRENT_LIST_DIR}/PulpSampleRegionWebSources.cmake)
+    pulp_sample_region_web_sources("${_PULP_WAM_ROOT}" _region_sources)
+    list(APPEND _PULP_WAM_CORE_SOURCES ${_region_sources})
+    list(REMOVE_DUPLICATES _PULP_WAM_CORE_SOURCES)
+    list(APPEND _PULP_WAM_INCLUDES
+        ${_PULP_WAM_ROOT}/core/host/include
+        ${_PULP_WAM_ROOT}/core/graph/include)
+endif()
+
 add_library(pulp-wam-dsp OBJECT ${_PULP_WAM_CORE_SOURCES})
 target_compile_features(pulp-wam-dsp PUBLIC cxx_std_20)
 target_include_directories(pulp-wam-dsp PUBLIC ${_PULP_WAM_INCLUDES})
@@ -120,7 +136,11 @@ target_include_directories(pulp-wam-dsp PUBLIC ${_PULP_WAM_INCLUDES})
 # convention.
 target_compile_definitions(pulp-wam-dsp PUBLIC
     PULP_WASM=1 PULP_HEADLESS=1 PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1)
-target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
+if(PULP_SAMPLE_REGION_WEB)
+    pulp_sample_region_web_profile(pulp-wam-dsp)
+else()
+    target_compile_options(pulp-wam-dsp PRIVATE -fno-exceptions -fno-rtti -O2)
+endif()
 
 # The wam_* C symbols every plugin entry point exports.
 # THE wam_* ABI IS LISTED IN FOUR PLACES THAT MUST STAY IN SYNC:
@@ -211,7 +231,11 @@ function(pulp_add_wam_plugin NAME)
         ${ARG_SOURCES}
     )
     target_include_directories(${NAME}-wam PRIVATE ${_PULP_WAM_INCLUDES} ${ARG_INCLUDES})
-    target_compile_options(${NAME}-wam PRIVATE -fno-exceptions -fno-rtti -O2)
+    if(PULP_SAMPLE_REGION_WEB)
+        pulp_sample_region_web_profile(${NAME}-wam)
+    else()
+        target_compile_options(${NAME}-wam PRIVATE -fno-exceptions -fno-rtti -O2)
+    endif()
     _pulp_wam_apply_lane_defines(${NAME}-wam)
     if(ARG_DEFINES)
         target_compile_definitions(${NAME}-wam PRIVATE ${ARG_DEFINES})
@@ -277,7 +301,11 @@ function(pulp_add_wam_rack NAME)
         ${ARG_SOURCES}
     )
     target_include_directories(${NAME}-wam PRIVATE ${_PULP_WAM_INCLUDES} ${ARG_INCLUDES})
-    target_compile_options(${NAME}-wam PRIVATE -fno-exceptions -fno-rtti -O2)
+    if(PULP_SAMPLE_REGION_WEB)
+        pulp_sample_region_web_profile(${NAME}-wam)
+    else()
+        target_compile_options(${NAME}-wam PRIVATE -fno-exceptions -fno-rtti -O2)
+    endif()
     _pulp_wam_apply_lane_defines(${NAME}-wam)
 
     _pulp_wam_apply_link_flags(${NAME}-wam ${NAME} "${ARG_SINGLE_FILE}")
