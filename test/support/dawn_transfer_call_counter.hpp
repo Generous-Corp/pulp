@@ -99,8 +99,10 @@ class DawnTransferCallCounter {
                 copy_buffer_to_buffer_bytes_.load(std::memory_order_relaxed),
             .buffer_map_async_calls = buffer_map_async_calls_.load(std::memory_order_relaxed),
             .buffer_map_async_bytes = buffer_map_async_bytes_.load(std::memory_order_relaxed),
-            .buffer_get_mapped_range_calls = buffer_get_mapped_range_calls_.load(std::memory_order_relaxed),
-            .buffer_get_mapped_range_bytes = buffer_get_mapped_range_bytes_.load(std::memory_order_relaxed),
+            .buffer_get_mapped_range_calls =
+                buffer_get_mapped_range_calls_.load(std::memory_order_relaxed),
+            .buffer_get_mapped_range_bytes =
+                buffer_get_mapped_range_bytes_.load(std::memory_order_relaxed),
             .buffer_unmap_calls = buffer_unmap_calls_.load(std::memory_order_relaxed),
             .queue_submit_calls = queue_submit_calls_.load(std::memory_order_relaxed),
             .submitted_command_buffers = submitted_command_buffers_.load(std::memory_order_relaxed),
@@ -194,10 +196,11 @@ class DawnTransferCallCounter {
     }
 
     static void* count_buffer_get_mapped_range(WGPUBuffer buffer, unsigned long offset,
-                                                std::size_t size) {
+                                               std::size_t size) {
         auto& counter = active();
         add_saturating(counter.buffer_get_mapped_range_calls_, 1);
-        add_saturating(counter.buffer_get_mapped_range_bytes_, mapped_bytes(counter, buffer, offset, size));
+        add_saturating(counter.buffer_get_mapped_range_bytes_,
+                       mapped_bytes(counter, buffer, offset, size));
         return counter.original_.bufferGetMappedRange(buffer, offset, size);
     }
 
@@ -220,7 +223,8 @@ class DawnTransferCallCounter {
                                  WGPUProcCommandEncoderCopyBufferToBuffer>);
     static_assert(std::is_same_v<decltype(&count_buffer_map_async), WGPUProcBufferMapAsync>);
     static_assert(std::is_same_v<decltype(&count_queue_submit), WGPUProcQueueSubmit>);
-    static_assert(std::is_same_v<decltype(&count_buffer_get_mapped_range), WGPUProcBufferGetMappedRange>);
+    static_assert(
+        std::is_same_v<decltype(&count_buffer_get_mapped_range), WGPUProcBufferGetMappedRange>);
     static_assert(std::is_same_v<decltype(&count_buffer_unmap), WGPUProcBufferUnmap>);
 
     InstallMode mode_ = InstallMode::InstallAndRestore;

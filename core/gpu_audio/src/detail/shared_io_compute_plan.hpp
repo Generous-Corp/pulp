@@ -22,8 +22,7 @@ class SharedIoComputePlan {
     };
     struct Completion {
         SubmitToken token;
-        SharedIoArena::CompletionStatus status =
-            SharedIoArena::CompletionStatus::RetiredFailed;
+        SharedIoArena::CompletionStatus status = SharedIoArena::CompletionStatus::RetiredFailed;
         bool late = false;
     };
     struct Telemetry {
@@ -47,10 +46,14 @@ class SharedIoComputePlan {
     bool prepare(SharedIoArenaProvider& provider, const Config& config);
     bool prepare(SharedIoArenaProvider& provider, const Config& config,
                  std::unique_ptr<SharedIoPreparedProgram> program);
-    bool prepared() const noexcept { return arena_.prepared(); }
-    std::uint64_t preparation_epoch() const noexcept { return arena_.preparation_epoch(); }
-    std::optional<SharedIoArena::WriteLease>
-    acquire_input(std::uint64_t sequence, std::uint64_t deadline_ns) noexcept;
+    bool prepared() const noexcept {
+        return arena_.prepared();
+    }
+    std::uint64_t preparation_epoch() const noexcept {
+        return arena_.preparation_epoch();
+    }
+    std::optional<SharedIoArena::WriteLease> acquire_input(std::uint64_t sequence,
+                                                           std::uint64_t deadline_ns) noexcept;
     bool submit(const SubmitToken& token) noexcept;
     // A pre-submit refusal must return the write lease to the fixed ledger.
     bool cancel(const SubmitToken& token) noexcept;
@@ -77,8 +80,12 @@ class SharedIoComputePlan {
     bool release_output(const SharedIoArena::ReleaseRecord& record) noexcept {
         return arena_.release_output(record);
     }
-    bool release() noexcept { return arena_.release(); }
-    const Telemetry& telemetry() const noexcept { return telemetry_; }
+    bool release() noexcept {
+        return arena_.release();
+    }
+    const Telemetry& telemetry() const noexcept {
+        return telemetry_;
+    }
 
   private:
     struct Pending {

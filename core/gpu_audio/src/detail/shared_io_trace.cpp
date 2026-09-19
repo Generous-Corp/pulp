@@ -321,9 +321,9 @@ drain_shared_io_trace(SharedIoTraceRecorder& recorder,
         config.contract.block_size, "sample_rate", config.contract.sample_rate, "channels",
         config.contract.channels, "lead_blocks", config.contract.algorithmic_lead_blocks,
         "pipeline_depth", config.contract.pipeline_depth, "provider_slots",
-        config.contract.provider_slots, "success_stride", config.success_stride, "capture_admissions",
-        config.capture_admissions, "cpu_clock", "worker.monotonic", "event_time", "drain",
-        "gpu_clock_mapped", false);
+        config.contract.provider_slots, "success_stride", config.success_stride,
+        "capture_admissions", config.capture_admissions, "cpu_clock", "worker.monotonic",
+        "event_time", "drain", "gpu_clock_mapped", false);
     const auto emit_terminal = [&](const SharedIoTraceRecord& record) {
         emit_record(config, record);
     };

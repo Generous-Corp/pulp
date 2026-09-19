@@ -80,8 +80,8 @@ int run(Config config) {
     constexpr std::size_t ir_frames = 257;
     const auto total_blocks = config.warmup + config.blocks + config.lead;
     const auto total_frames = static_cast<std::size_t>(total_blocks) * config.frames;
-    auto input = pulp::test::audio::make_sine(channels, static_cast<int>(total_frames),
-                                             731.0f, sample_rate, 0.2f);
+    auto input = pulp::test::audio::make_sine(channels, static_cast<int>(total_frames), 731.0f,
+                                              sample_rate, 0.2f);
     input.channel(0)[0] += 0.5f;
     for (std::size_t i = 0; i < total_frames; ++i)
         input.channel(1)[i] *= -0.7f;
@@ -109,8 +109,8 @@ int run(Config config) {
     const auto start = Clock::now() + std::chrono::milliseconds(10);
     std::uint64_t previous_misses = 0;
     for (std::uint32_t block = 0; block < total_blocks; ++block) {
-        const auto scheduled = static_cast<std::uint64_t>(block) * config.frames *
-                               1'000'000'000ull / sample_rate;
+        const auto scheduled =
+            static_cast<std::uint64_t>(block) * config.frames * 1'000'000'000ull / sample_rate;
         std::this_thread::sleep_until(start + std::chrono::nanoseconds(scheduled));
         const auto offset = static_cast<std::size_t>(block) * config.frames;
         const float* inputs[channels] = {input.channel(0).data() + offset,
@@ -140,8 +140,8 @@ int run(Config config) {
     std::uint64_t measured_misses = 0;
     std::uint64_t callback_overruns = 0;
     std::uint64_t late_callback_starts = 0;
-    const auto period_ns = static_cast<std::uint64_t>(config.frames) * 1'000'000'000ull /
-                           sample_rate;
+    const auto period_ns =
+        static_cast<std::uint64_t>(config.frames) * 1'000'000'000ull / sample_rate;
     for (std::uint32_t block = 0; block < total_blocks; ++block) {
         auto& record = records[block];
         for (std::uint32_t channel = 0; channel < channels; ++channel) {
@@ -151,7 +151,8 @@ int run(Config config) {
                 if (position >= latency_frames) {
                     const auto source = position - latency_frames;
                     for (std::size_t tap = 0; tap < ir.size() && tap <= source; ++tap)
-                        expected += static_cast<double>(ir[tap]) * input.channel(channel)[source - tap];
+                        expected +=
+                            static_cast<double>(ir[tap]) * input.channel(channel)[source - tap];
                 }
                 const double actual = output[channel][position];
                 record.finite = record.finite && std::isfinite(actual);
@@ -199,13 +200,15 @@ int run(Config config) {
         stream << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\",\"status\":\""
                << (correct && gpu_progress ? "completed" : "failed")
                << "\",\"performance_verdict\":\"unassigned\",\"path\":\"shared_async\","
-                  "\"completion_service\":\"process_events\",\"callback_driver\":\"sleep_until_non_rt\","
+                  "\"completion_service\":\"process_events\",\"callback_driver\":\"sleep_until_non_"
+                  "rt\","
                   "\"gpu_timestamps\":\"unavailable\",\"clock\":\"steady_clock\","
                   "\"timing_scope\":\"external_callback_envelope\",\"sample_rate_hz\":"
                << sample_rate << ",\"channels\":" << channels << ",\"ir_frames\":" << ir.size()
                << ",\"frames\":" << config.frames << ",\"lead_blocks\":" << config.lead
                << ",\"provider_slots\":2,\"warmup_blocks\":" << config.warmup
-               << ",\"measured_blocks\":" << config.blocks << ",\"total_callbacks\":" << total_blocks
+               << ",\"measured_blocks\":" << config.blocks
+               << ",\"total_callbacks\":" << total_blocks
                << ",\"measured_miss_counter_delta\":" << measured_misses
                << ",\"callback_overruns\":" << callback_overruns
                << ",\"late_callback_starts\":" << late_callback_starts

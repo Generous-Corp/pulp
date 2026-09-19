@@ -494,9 +494,8 @@ GpuAudioCapabilityReport GpuAudioTransport::capability_report() const noexcept {
     // concrete shared path helper returns Dawn only after identifying the
     // exact provider-backed node; future providers must add equivalent proof.
     report.provider = detail::realtime_gpu_provider(node_);
-    report.path = report.provider != GpuAudioProvider::Unknown
-                      ? GpuAudioExecutionPath::SharedMemory
-                      : GpuAudioExecutionPath::Staged;
+    report.path = report.provider != GpuAudioProvider::Unknown ? GpuAudioExecutionPath::SharedMemory
+                                                               : GpuAudioExecutionPath::Staged;
     report.eligibility = GpuAudioEligibility::Eligible;
     report.fallback_policy = miss_policy_;
     report.prepared_lead_blocks = latency_blocks_;

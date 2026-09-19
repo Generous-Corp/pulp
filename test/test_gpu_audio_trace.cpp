@@ -775,11 +775,8 @@ TEST_CASE("stamped bridge applies configurable lead to delivery and trace identi
             REQUIRE(recorder.enabled());
 
             SharedIoStampedBridge bridge;
-            REQUIRE(bridge.prepare({.capacity = lead + 1u,
-                                    .channels = 1,
-                                    .block_size = 2,
-                                    .lead_blocks = lead},
-                                   1));
+            REQUIRE(bridge.prepare(
+                {.capacity = lead + 1u, .channels = 1, .block_size = 2, .lead_blocks = lead}, 1));
             bridge.set_trace(&recorder);
             CHECK(bridge.lead_blocks() == lead);
 

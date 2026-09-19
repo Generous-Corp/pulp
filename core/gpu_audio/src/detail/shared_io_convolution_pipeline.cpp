@@ -8,9 +8,8 @@ bool SharedIoConvolutionPipeline::prepare(Config config, std::uint64_t epoch,
         config.ir_length == 0 || config.lead_blocks == 0 || config.capacity <= config.lead_blocks ||
         std::uint64_t(config.block_size) + config.ir_length - 1u > config.fft_size)
         return false;
-    if (!bridge_.prepare({config.capacity, config.channels, config.block_size,
-                          config.lead_blocks}, epoch,
-                         first_sequence))
+    if (!bridge_.prepare({config.capacity, config.channels, config.block_size, config.lead_blocks},
+                         epoch, first_sequence))
         return false;
     if (!executor_.prepare({config.capacity, config.channels, config.block_size, config.fft_size,
                             config.ir_length},

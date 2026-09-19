@@ -53,8 +53,8 @@ bool expected_dawn_revision_available() noexcept {
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
-    : GpuConvolver(channels, block_size, sample_rate, std::move(impulse_response),
-                   kLatencyBlocks) {}
+    : GpuConvolver(channels, block_size, sample_rate, std::move(impulse_response), kLatencyBlocks) {
+}
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response, uint32_t latency_blocks)
@@ -123,8 +123,7 @@ bool GpuConvolver::prepare() {
         try {
             constexpr uint32_t kSharedIoCapacity = 8;
             constexpr uint32_t kSharedIoSlots = 2;
-            const uint32_t shared_capacity =
-                std::max(kSharedIoCapacity, latency_blocks_ + 1u);
+            const uint32_t shared_capacity = std::max(kSharedIoCapacity, latency_blocks_ + 1u);
             if (fft_size_ <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
                 auto state = std::make_unique<SharedIoState>();
                 const auto samples_per_block = static_cast<std::size_t>(channels_) * block_;

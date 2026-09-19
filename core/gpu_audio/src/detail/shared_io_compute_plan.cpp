@@ -40,14 +40,13 @@ SharedIoComputePlan::acquire_input(std::uint64_t sequence, std::uint64_t deadlin
     std::size_t active = 0;
     for (const auto& item : pending_)
         active += item.active;
-    telemetry_.high_water_in_flight = std::max<std::uint64_t>(
-        telemetry_.high_water_in_flight, active);
+    telemetry_.high_water_in_flight =
+        std::max<std::uint64_t>(telemetry_.high_water_in_flight, active);
     return lease;
 }
 
 bool SharedIoComputePlan::submit(const SubmitToken& token) noexcept {
-    if (token.slot.slot >= pending_.size() ||
-        !pending_[token.slot.slot].active ||
+    if (token.slot.slot >= pending_.size() || !pending_[token.slot.slot].active ||
         !(pending_[token.slot.slot].token.slot == token.slot))
         return false;
     if (!arena_.publish_written({token.slot})) {
@@ -62,15 +61,15 @@ bool SharedIoComputePlan::submit(const SubmitToken& token) noexcept {
         pending_[token.slot.slot].active = false;
         return false;
     }
-    telemetry_.encode_submit_ns += static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - started).count());
+    telemetry_.encode_submit_ns +=
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now() - started)
+                                       .count());
     return true;
 }
 
 bool SharedIoComputePlan::cancel(const SubmitToken& token) noexcept {
-    if (token.slot.slot >= pending_.size() ||
-        !pending_[token.slot.slot].active ||
+    if (token.slot.slot >= pending_.size() || !pending_[token.slot.slot].active ||
         !(pending_[token.slot.slot].token.slot == token.slot))
         return false;
     pending_[token.slot.slot].active = false;
@@ -118,16 +117,17 @@ std::size_t SharedIoComputePlan::drain(std::uint64_t now_ns) noexcept {
     auto cursor = before;
     while (cursor != completion_write_) {
         auto& completion = completions_[cursor];
-        completion.late = completion.token.deadline_ns != 0 &&
-                          now_ns > completion.token.deadline_ns;
+        completion.late =
+            completion.token.deadline_ns != 0 && now_ns > completion.token.deadline_ns;
         if (completion.late)
             ++telemetry_.late_completions;
         ++count;
         cursor = (cursor + 1) % completions_.size();
     }
-    telemetry_.completion_wall_ns += static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - started).count());
+    telemetry_.completion_wall_ns +=
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now() - started)
+                                       .count());
     return count;
 }
 

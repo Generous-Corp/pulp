@@ -14,8 +14,7 @@ class SharedIoTransportBridge {
     enum class Disposition : std::uint8_t { Deliver, SuppressLate, Reprime };
     struct Result {
         std::uint64_t sequence = 0;
-        SharedIoArena::CompletionStatus status =
-            SharedIoArena::CompletionStatus::RetiredFailed;
+        SharedIoArena::CompletionStatus status = SharedIoArena::CompletionStatus::RetiredFailed;
         bool late = false;
         Disposition disposition = Disposition::Reprime;
     };

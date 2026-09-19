@@ -353,7 +353,8 @@ void SharedIoArena::retry_rejected_submissions() noexcept {
     }
 }
 
-SharedIoArena::CompletionDrain SharedIoArena::drain_completions(CompletionObserver observer) noexcept {
+SharedIoArena::CompletionDrain
+SharedIoArena::drain_completions(CompletionObserver observer) noexcept {
     CompletionDrain result;
     if (!terminal_inbox_)
         return result;
@@ -372,7 +373,9 @@ SharedIoArena::CompletionDrain SharedIoArena::drain_completions(CompletionObserv
             if (discarded) {
                 rejected = {};
                 ++result.accepted;
-                if (observer) observer.callback(observer.context, record.token, CompletionStatus::RetiredFailed);
+                if (observer)
+                    observer.callback(observer.context, record.token,
+                                      CompletionStatus::RetiredFailed);
             } else {
                 ++result.rejected_stale_or_duplicate;
             }
@@ -383,7 +386,8 @@ SharedIoArena::CompletionDrain SharedIoArena::drain_completions(CompletionObserv
                                     : SharedIoSlotLedger::GpuCompletion::Failed;
         if (ledger_.complete_gpu(record.token, completion)) {
             ++result.accepted;
-            if (observer) observer.callback(observer.context, record.token, record.status);
+            if (observer)
+                observer.callback(observer.context, record.token, record.status);
         } else
             ++result.rejected_stale_or_duplicate;
     }

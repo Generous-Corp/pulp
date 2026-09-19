@@ -9,8 +9,8 @@ namespace pulp::gpu_audio {
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response)
-    : GpuConvolver(channels, block_size, sample_rate, std::move(impulse_response),
-                   kLatencyBlocks) {}
+    : GpuConvolver(channels, block_size, sample_rate, std::move(impulse_response), kLatencyBlocks) {
+}
 
 GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                            std::vector<float> impulse_response, uint32_t latency_blocks)
