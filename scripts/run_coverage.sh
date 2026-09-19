@@ -466,13 +466,17 @@ llvm-cov report \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     | tee "${REPORT_DIR}/summary.txt"
 
-echo "=== llvm-cov show (HTML drilldown) ==="
-llvm-cov show \
-    "@${OBJ_RSP}" \
-    -instr-profile="${PROFDATA}" \
-    -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
-    -format=html \
-    -output-dir="${REPORT_DIR}"
+if [[ "${PULP_COVERAGE_SKIP_HTML:-0}" == "1" ]]; then
+    echo "=== Skipping llvm-cov HTML drilldown (report XML/LCOV remain enabled) ==="
+else
+    echo "=== llvm-cov show (HTML drilldown) ==="
+    llvm-cov show \
+        "@${OBJ_RSP}" \
+        -instr-profile="${PROFDATA}" \
+        -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
+        -format=html \
+        -output-dir="${REPORT_DIR}"
+fi
 
 # Emit Cobertura XML for Codecov + diff-cover via
 #   llvm-cov export --format=lcov  →  lcov_cobertura.py  →  Cobertura XML

@@ -587,6 +587,9 @@ jobs:
           # lower linker parallelism instead.
           PULP_COVERAGE_CMAKE_ARGS: ${{ matrix.os == 'linux' && '-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON' || '-DPULP_BUILD_EXAMPLES=ON' }}
           PULP_COVERAGE_JOBS: ${{ matrix.os == 'macos' && runner.environment == 'github-hosted' && '2' || '' }}
+          # HTML drilldowns are useful locally but can consume several GB on
+          # hosted runners; Codecov only needs the Cobertura/LCOV producers.
+          PULP_COVERAGE_SKIP_HTML: '1'
           # scripts/run_coverage.sh owns the bounded CTest policy so SSH and
           # self-hosted coverage callers use the same exclusions as this lane.
           # Coverage workflow targets C++ source coverage. The Rust CLI
@@ -765,7 +768,7 @@ jobs:
           PY
 
       - name: Upload HTML report
-        if: always()
+        if: always() && env.PULP_COVERAGE_SKIP_HTML != '1'
         uses: actions/upload-artifact@v6
         with:
           name: coverage-report-${{ matrix.os }}-${{ github.sha }}

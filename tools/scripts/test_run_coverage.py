@@ -306,6 +306,11 @@ class ObjectDiscoveryTests(unittest.TestCase):
             SCRIPT.read_text(),
         )
 
+    def test_html_drilldown_can_be_disabled_for_ci(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn('PULP_COVERAGE_SKIP_HTML:-0', text)
+        self.assertIn('Skipping llvm-cov HTML drilldown', text)
+
     def test_profraw_cleanup_uses_find_delete(self) -> None:
         text = SCRIPT.read_text()
         self.assertIn(
