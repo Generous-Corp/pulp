@@ -1,6 +1,7 @@
 #include <pulp_tooling/gpu_probe/dpr_measurement.hpp>
 
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/runtime/trace_session.hpp>
 #include <pulp/state/store.hpp>
@@ -67,6 +68,60 @@ double empirical_resolution(std::vector<double> values) {
             resolution = std::min(resolution, values[i] - values[i - 1]);
     if (std::isfinite(resolution) && resolution > 0.0) return resolution;
     return std::max(1e-9, values.empty() ? 1e-9 : values.front() / 1000.0);
+}
+
+struct TimerCalibrationTrialDebug {
+    std::uint32_t trial = 0;
+    bool baseline_valid = false;
+    std::optional<double> baseline_ms;
+    bool extra_valid = false;
+    std::optional<double> extra_ms;
+};
+
+std::string timer_calibration_diagnostics_json(
+    const DprMeasurementRequest& request,
+    const std::vector<double>& baseline, const std::vector<double>& extra,
+    const std::vector<TimerCalibrationTrialDebug>& trials,
+    double resolution, double baseline_median, double extra_median,
+    double threshold, std::string_view failure_class,
+    std::string_view reason) {
+    auto result = choc::value::createObject("");
+    result.setMember("schema", "pulp.gpu-dpr-calibration-diagnostics.v1");
+    result.setMember("stage", "calibration");
+    result.setMember("attempt_nonce", request.attempt_nonce);
+    result.setMember("clock", "dawn-gpu-timestamp");
+    result.setMember("failure_class", failure_class);
+    result.setMember("control_detected", false);
+    result.setMember("reason", reason);
+    result.setMember("resolution_ms", resolution);
+    result.setMember("baseline_median_ms", baseline_median);
+    result.setMember("extra_work_median_ms", extra_median);
+    result.setMember("delta_ms", extra_median - baseline_median);
+    result.setMember("detection_threshold_ms", threshold);
+    auto values = [](const std::vector<double>& samples) {
+        auto array = choc::value::createEmptyArray();
+        for (const auto value : samples) array.addArrayElement(value);
+        return array;
+    };
+    result.setMember("baseline_samples_ms", values(baseline));
+    result.setMember("extra_work_samples_ms", values(extra));
+    auto aligned = choc::value::createEmptyArray();
+    for (const auto& trial : trials) {
+        auto item = choc::value::createObject("");
+        item.setMember("trial", static_cast<std::int64_t>(trial.trial));
+        auto sample = [](bool valid, const std::optional<double>& value) {
+            auto object = choc::value::createObject("");
+            object.setMember("valid", valid);
+            object.setMember("value_ms", value.has_value()
+                ? choc::value::Value(*value) : choc::value::Value());
+            return object;
+        };
+        item.setMember("baseline", sample(trial.baseline_valid, trial.baseline_ms));
+        item.setMember("extra", sample(trial.extra_valid, trial.extra_ms));
+        aligned.addArrayElement(std::move(item));
+    }
+    result.setMember("trials", std::move(aligned));
+    return choc::json::toString(result, true) + "\n";
 }
 
 [[maybe_unused]] bool write_bytes(const std::filesystem::path& path,
@@ -674,16 +729,33 @@ bool terminate_and_reap_child(pid_t pid, int& status, std::string& error) {
 }
 
 std::string incomplete_json(const DprMeasurementRequest& request,
-                            std::string_view reason, std::string_view dependency) {
+                            std::string_view reason, std::string_view dependency,
+                            std::string_view diagnostics = {}) {
     auto result = evaluate_dpr_measurement_readiness(request);
     result.reason = std::string(reason);
     result.dependencies = {std::string(dependency)};
-    return to_json(result, true) + "\n";
+    auto json = choc::json::parse(to_json(result, true));
+    if (!diagnostics.empty())
+        json.setMember("diagnostics", choc::json::parse(diagnostics));
+    return choc::json::toString(json, true) + "\n";
 }
 
 } // namespace
 
 namespace testing {
+
+std::string timer_calibration_diagnostics_json_for_test(
+    std::string_view failure_class) {
+    DprMeasurementRequest request;
+    request.attempt_nonce = "22222222222222222222222222222222";
+    std::vector<TimerCalibrationTrialDebug> trials{
+        {0, true, 1.00, true, 1.10},
+        {1, true, 1.10, false, std::nullopt},
+    };
+    return timer_calibration_diagnostics_json(
+        request, {1.00}, {1.10}, trials, 0.10, 1.05, 1.10, 0.20,
+        failure_class, "GPU timer did not detect the known-extra-work control");
+}
 
 std::optional<double> run_first_frame_child_time_for_test(
     const DprMeasurementRequest& request,
@@ -928,17 +1000,28 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
         return 3;
     }
     std::vector<double> calibration_baseline, calibration_extra;
+    std::vector<TimerCalibrationTrialDebug> calibration_trials;
     for (std::uint32_t trial = 0; trial < request.gpu_timer_calibration_trials;
          ++trial) {
-        if (!session.calibration_frame(1, cpu, gpu) ||
-            !std::isfinite(gpu) || gpu <= 0.0) {
+        TimerCalibrationTrialDebug debug_trial;
+        debug_trial.trial = trial;
+        const bool baseline_ok = session.calibration_frame(1, cpu, gpu) &&
+            std::isfinite(gpu) && gpu > 0.0;
+        debug_trial.baseline_valid = baseline_ok;
+        if (baseline_ok) debug_trial.baseline_ms = gpu;
+        if (!baseline_ok) {
+            calibration_trials.push_back(std::move(debug_trial));
             message = "GPU timer baseline calibration did not complete";
             break;
         }
         calibration_baseline.push_back(gpu);
-        if (!session.calibration_frame(request.gpu_timer_extra_work_multiplier,
-                                       cpu, gpu) ||
-            !std::isfinite(gpu) || gpu <= 0.0) {
+        const bool extra_ok = session.calibration_frame(
+            request.gpu_timer_extra_work_multiplier, cpu, gpu) &&
+            std::isfinite(gpu) && gpu > 0.0;
+        debug_trial.extra_valid = extra_ok;
+        if (extra_ok) debug_trial.extra_ms = gpu;
+        calibration_trials.push_back(std::move(debug_trial));
+        if (!extra_ok) {
             message = "GPU timer extra-work calibration did not complete";
             break;
         }
@@ -952,14 +1035,33 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
         ? 0.0 : median(calibration_baseline);
     const double timer_extra_median = calibration_extra.empty()
         ? 0.0 : median(calibration_extra);
+    const double timer_detection_threshold = std::max(
+        timer_resolution * 2.0, timer_baseline_median * 0.10);
     const bool timer_control_detected = message.empty() &&
-        timer_extra_median >= timer_baseline_median +
-            std::max(timer_resolution * 2.0, timer_baseline_median * 0.10);
+        timer_extra_median >= timer_baseline_median + timer_detection_threshold;
     if (!timer_control_detected) {
-        if (message.empty()) message = "GPU timer did not detect the known-extra-work control";
+        std::string failure_class;
+        if (!message.empty()) {
+            failure_class = "producer_sample_invalid";
+        } else {
+            const auto delta = timer_extra_median - timer_baseline_median;
+            failure_class = delta <= timer_resolution * 2.0
+                ? "timer_quantization" : "insufficient_extra_work";
+            message = "GPU timer did not detect the known-extra-work control";
+        }
+        const auto diagnostics = timer_calibration_diagnostics_json(
+            request, calibration_baseline, calibration_extra, calibration_trials,
+            timer_resolution, timer_baseline_median, timer_extra_median,
+            timer_detection_threshold, failure_class, message);
+        const auto diagnostics_path = cell /
+            ("gpu-timer-calibration-diagnostics-" + request.attempt_nonce + ".json");
+        if (!write_text(diagnostics_path, diagnostics)) {
+            runtime::log_error("DPR calibration diagnostics could not be written: {}",
+                               diagnostics_path.string());
+        }
         (void)runtime::Tracing::stop_owned(*tracing.ownership);
         write_text(receipt_path, incomplete_json(request, message,
-                                                 "gpu:timer-calibration"));
+                                                 "gpu:timer-calibration", diagnostics));
         if (error) *error = message;
         return 3;
     }

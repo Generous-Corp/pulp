@@ -289,6 +289,74 @@ def main() -> int:
         )
         assert producer_log.stat().st_size == 1024 * 1024
 
+        diagnostics_receipt = {
+            "schema": "pulp.gpu-dpr-cell-receipt.v1", "version": 1,
+            "attempt_nonce": document["attempt_nonce"],
+            "attempt_number": document["attempt_number"],
+            "scenario_id": document["scenario"]["id"],
+            "scenario_kind": document["scenario"]["kind"],
+            "mode": document["mode"],
+            "requested_dpr": document["requested_dpr"],
+            "outcome": "inconclusive",
+            "reason": "GPU timer did not detect the known-extra-work control",
+            "dependencies": ["gpu:timer-calibration"],
+            "diagnostics": {
+                "schema": "pulp.gpu-dpr-calibration-diagnostics.v1",
+                "stage": "calibration",
+                "clock": "dawn-gpu-timestamp",
+                "attempt_nonce": document["attempt_nonce"],
+                "failure_class": "timer_quantization",
+                "control_detected": False,
+                "reason": "GPU timer did not detect the known-extra-work control",
+                "resolution_ms": 0.1,
+                "baseline_median_ms": 1.05,
+                "extra_work_median_ms": 1.1,
+                "delta_ms": 0.05,
+                "detection_threshold_ms": 0.20,
+                "trials": [
+                    {"trial": 0,
+                     "baseline": {"valid": True, "value_ms": 1.0},
+                     "extra": {"valid": True, "value_ms": 1.1}},
+                    {"trial": 1,
+                     "baseline": {"valid": True, "value_ms": 1.0},
+                     "extra": {"valid": False, "value_ms": None}},
+                ],
+            },
+        }
+        native_adapter.validate_measurement_receipt(
+            document, diagnostics_receipt, tmp, producer
+        )
+        planted = json.loads(json.dumps(diagnostics_receipt))
+        planted["diagnostics"]["attempt_nonce"] = "0" * 32
+        try:
+            native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("unbound calibration diagnostics passed")
+        for field, value in (
+            ("failure_class", "unknown"),
+            ("delta_ms", 0.0),
+            ("control_detected", True),
+        ):
+            planted = json.loads(json.dumps(diagnostics_receipt))
+            planted["diagnostics"][field] = value
+            try:
+                native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"invalid diagnostics {field} passed")
+        planted = json.loads(json.dumps(diagnostics_receipt))
+        planted["diagnostics"]["trials"][0]["baseline"]["valid"] = False
+        planted["diagnostics"]["trials"][0]["baseline"]["value_ms"] = 1.0
+        try:
+            native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid calibration sample passed")
+
     print(
         "gpu_dpr_pulp_native_adapter_selftest=true real_capture_protocol=pass "
         "measured_producer_protocol=pass planted_digest_drift=pass "

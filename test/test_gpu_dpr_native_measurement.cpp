@@ -1,5 +1,7 @@
 #include <pulp_tooling/gpu_probe/dpr_measurement.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
@@ -7,6 +9,7 @@
 #include <fstream>
 #include <signal.h>
 #include <string>
+#include <string_view>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -19,6 +22,8 @@ std::optional<double> run_first_frame_child_time_for_test(
     const std::filesystem::path& output_path,
     std::string* error,
     std::chrono::milliseconds timeout = std::chrono::seconds(5));
+std::string timer_calibration_diagnostics_json_for_test(
+    std::string_view failure_class);
 
 } // namespace pulp::tooling::gpu_probe::testing
 
@@ -85,6 +90,41 @@ TEST_CASE("native DPR measurement refuses to manufacture terminal counters",
     CHECK(json.find("correlated-five-category") != std::string::npos);
     CHECK(json.find("\"metrics\"") == std::string::npos);
     CHECK(json.find("\"measurement_scope\"") == std::string::npos);
+}
+
+TEST_CASE("GPU calibration diagnostics retain aligned partial trials",
+          "[gpu][dpr][measurement]") {
+    const auto document = choc::json::parse(
+        probe::testing::timer_calibration_diagnostics_json_for_test(
+            "producer_sample_invalid"));
+    CHECK(document["schema"].getString() ==
+          "pulp.gpu-dpr-calibration-diagnostics.v1");
+    CHECK(document["stage"].getString() == "calibration");
+    CHECK(document["clock"].getString() == "dawn-gpu-timestamp");
+    CHECK(document["failure_class"].getString() == "producer_sample_invalid");
+    CHECK(document["control_detected"].getBool() == false);
+    CHECK_FALSE(document["reason"].getString().empty());
+    CHECK(document["delta_ms"].getFloat64() ==
+          document["extra_work_median_ms"].getFloat64() -
+              document["baseline_median_ms"].getFloat64());
+    CHECK(document["detection_threshold_ms"].getFloat64() == 0.20);
+    REQUIRE(document["trials"].size() == 2);
+    CHECK(document["trials"][0]["baseline"]["valid"].getBool());
+    CHECK(document["trials"][0]["extra"]["valid"].getBool());
+    CHECK(document["trials"][1]["baseline"]["valid"].getBool());
+    CHECK(document["trials"][1]["extra"]["valid"].getBool() == false);
+    CHECK(document["trials"][1]["extra"]["value_ms"].isVoid());
+}
+
+TEST_CASE("GPU calibration diagnostics preserve deterministic failure classes",
+          "[gpu][dpr][measurement]") {
+    for (const auto failure : {"timer_quantization", "insufficient_extra_work"}) {
+        const auto document = choc::json::parse(
+            probe::testing::timer_calibration_diagnostics_json_for_test(failure));
+        CHECK(document["failure_class"].getString() == failure);
+        CHECK(document["delta_ms"].isFloat64());
+        CHECK(document["detection_threshold_ms"].isFloat64());
+    }
 }
 
 TEST_CASE("native DPR measurement rejects forged requests",

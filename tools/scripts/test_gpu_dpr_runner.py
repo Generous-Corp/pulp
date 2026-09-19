@@ -688,6 +688,33 @@ def main() -> int:
         )
         assert analyzed_scope["evidence_id"] == analyzer_probe_id
 
+        malformed_analyzer = root / "malformed-trace-analyzer.py"
+        malformed_analyzer.write_text(
+            "#!/usr/bin/env python3\nprint('not-json')\n",
+            encoding="utf-8",
+        )
+        malformed_analyzer.chmod(0o755)
+        malformed_identity = {
+            "path": str(malformed_analyzer.resolve()),
+            "sha256": runner.sha256_file(malformed_analyzer),
+        }
+        try:
+            evidence.analyze_trace(
+                malformed_identity, analyzer_probe_trace, analyzer_probe_id,
+            )
+        except evidence.AnalyzerRejection as rejection:
+            assert rejection.metadata["schema"] == (
+                "pulp.gpu-dpr-analyzer-rejection.v1"
+            )
+            assert rejection.metadata["status"] == "rejected"
+            assert rejection.metadata["question"] == "gpu-health"
+            assert rejection.metadata["returncode"] == 0
+            assert len(rejection.metadata["stdout_sha256"]) == 64
+            assert len(rejection.metadata["stderr_sha256"]) == 64
+            assert rejection.metadata["parse_error"]
+        else:
+            raise AssertionError("malformed analyzer output was accepted")
+
         def analyze_selftest_trace(
             identity: dict[str, str], trace_path: Path, evidence_id: str,
         ) -> tuple[list[str], set[str], dict[str, object]]:
@@ -797,6 +824,44 @@ def main() -> int:
         analyzer.chmod(0o755)
 
         dense = runner.cell_key("dense-text-thin-strokes", "exact", 1)
+
+        analyzer_rejection_run = root / "analyzer-rejection-run"
+        analyzer_rejection_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(analyzer_rejection_run, analyzer_rejection_state)
+        rejection_metadata = {
+            "schema": "pulp.gpu-dpr-analyzer-rejection.v1",
+            "status": "rejected",
+            "question": "gpu-health",
+            "returncode": 0,
+            "stdout_sha256": "a" * 64,
+            "stderr_sha256": "b" * 64,
+            "parse_error": "malformed JSON",
+        }
+        real_ingest = runner.ingest_receipt
+
+        def planted_analyzer_rejection(*_args: object, **_kwargs: object) -> str:
+            raise evidence.AnalyzerRejection(
+                "trace analyzer returned invalid JSON", rejection_metadata
+            )
+
+        runner.ingest_receipt = planted_analyzer_rejection
+        try:
+            runner.run_cells(
+                analyzer_rejection_run,
+                {"dense-text-thin-strokes": test_adapter_script(root)},
+                {dense},
+                None,
+            )
+        finally:
+            runner.ingest_receipt = real_ingest
+        analyzer_rejection_state = runner.load_state(analyzer_rejection_run)
+        analyzer_rejection_attempt = analyzer_rejection_state["cells"][dense]["attempts"][-1]
+        assert analyzer_rejection_attempt["outcome"] == "inconclusive"
+        assert analyzer_rejection_attempt["dependencies"] == ["analyzer:rejected"]
+        assert analyzer_rejection_attempt["diagnostics"] == rejection_metadata
+
         good = make_receipt(
             run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
         )
@@ -1882,7 +1947,7 @@ def main() -> int:
         "typed_adapter_termination=pass "
         "skip_inconclusive_incomplete=pass timeout_incomplete=pass "
         "malformed_receipt_incomplete=pass nested_v2_snapshot_finalize=pass "
-        "b5_gate=pass"
+        "analyzer_rejection_metadata=pass b5_gate=pass"
     )
     return 0
 

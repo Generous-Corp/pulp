@@ -180,6 +180,76 @@ def validate_measurement_receipt(
             or not isinstance(dependencies, list) or not dependencies
         ):
             raise ValueError("incomplete measurement receipt lacks reason/dependencies")
+        diagnostics = receipt.get("diagnostics")
+        if diagnostics is not None:
+            if not isinstance(diagnostics, dict) or diagnostics.get("schema") != (
+                "pulp.gpu-dpr-calibration-diagnostics.v1"
+            ):
+                raise ValueError("incomplete measurement diagnostics schema is invalid")
+            if diagnostics.get("stage") != "calibration" or diagnostics.get("clock") != (
+                "dawn-gpu-timestamp"
+            ):
+                raise ValueError("incomplete measurement diagnostics stage/clock is invalid")
+            if diagnostics.get("attempt_nonce") != request["attempt_nonce"]:
+                raise ValueError("incomplete measurement diagnostics nonce is unbound")
+            failure_class = diagnostics.get("failure_class")
+            if failure_class not in {
+                "producer_sample_invalid", "timer_quantization", "insufficient_extra_work",
+            }:
+                raise ValueError("incomplete measurement diagnostics failure class is invalid")
+            if diagnostics.get("control_detected") is not False:
+                raise ValueError("incomplete measurement diagnostics control state is invalid")
+            if not isinstance(diagnostics.get("reason"), str) or not diagnostics["reason"]:
+                raise ValueError("incomplete measurement diagnostics reason is invalid")
+            numeric_fields = (
+                "resolution_ms", "baseline_median_ms", "extra_work_median_ms",
+                "delta_ms", "detection_threshold_ms",
+            )
+            for field in numeric_fields:
+                value = diagnostics.get(field)
+                if (
+                    isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value)) or float(value) < 0
+                ):
+                    raise ValueError(f"incomplete measurement diagnostics {field} is invalid")
+            expected_delta = (
+                float(diagnostics["extra_work_median_ms"])
+                - float(diagnostics["baseline_median_ms"])
+            )
+            expected_threshold = max(
+                float(diagnostics["resolution_ms"]) * 2.0,
+                float(diagnostics["baseline_median_ms"]) * 0.10,
+            )
+            if not math.isclose(float(diagnostics["delta_ms"]), expected_delta,
+                                rel_tol=1e-12, abs_tol=1e-12):
+                raise ValueError("incomplete measurement diagnostics delta is inconsistent")
+            if not math.isclose(
+                float(diagnostics["detection_threshold_ms"]), expected_threshold,
+                rel_tol=1e-12, abs_tol=1e-12,
+            ):
+                raise ValueError("incomplete measurement diagnostics threshold is inconsistent")
+            trials = diagnostics.get("trials")
+            if not isinstance(trials, list) or not trials:
+                raise ValueError("incomplete measurement diagnostics lack trials")
+            for index, trial in enumerate(trials):
+                if not isinstance(trial, dict) or trial.get("trial") != index:
+                    raise ValueError("incomplete measurement diagnostics trials are unaligned")
+                for side in ("baseline", "extra"):
+                    sample = trial.get(side)
+                    if not isinstance(sample, dict) or set(sample) != {"valid", "value_ms"}:
+                        raise ValueError("incomplete measurement diagnostics sample is malformed")
+                    if not isinstance(sample["valid"], bool):
+                        raise ValueError("incomplete measurement diagnostics validity is malformed")
+                    value = sample["value_ms"]
+                    if sample["valid"]:
+                        if (
+                            value is None or isinstance(value, bool)
+                            or not isinstance(value, (int, float))
+                            or not math.isfinite(float(value)) or float(value) <= 0
+                        ):
+                            raise ValueError("valid calibration sample value is malformed")
+                    elif value is not None:
+                        raise ValueError("invalid calibration sample must have null value")
         return receipt
 
     scope = receipt.get("measurement_scope")
