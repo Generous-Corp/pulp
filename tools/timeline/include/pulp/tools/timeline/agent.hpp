@@ -73,8 +73,14 @@ OperationResult command_apply(const ProjectSource& project, std::string_view com
 /// internal error, but it is still a failure to validate.
 OperationResult validate(const ProjectSource& project, std::uint32_t sample_rate = 48'000);
 OperationResult explain(const ProjectSource& project, std::uint32_t sample_rate = 48'000);
+/// Offline-renders the root sequence to a WAV file.
+///
+/// `tail_frames` pads the bounce with that many frames rendered after the
+/// transport stops, so a delay, reverb, or release envelope still ringing past
+/// the last event is captured rather than cut at it. Zero ends the file exactly
+/// at the sequence end, which is what an unflagged render produces.
 OperationResult render(const ProjectSource& project, const std::filesystem::path& output,
-                       std::uint32_t sample_rate = 48'000);
+                       std::uint32_t sample_rate = 48'000, std::uint32_t tail_frames = 0);
 
 /// Plan a canonical project export without selecting or fabricating an output.
 ///
@@ -109,7 +115,7 @@ OperationResult command_apply(std::string_view project, std::string_view command
 OperationResult validate(std::string_view project, std::uint32_t sample_rate = 48'000);
 OperationResult explain(std::string_view project, std::uint32_t sample_rate = 48'000);
 OperationResult render(std::string_view project, const std::filesystem::path& output,
-                       std::uint32_t sample_rate = 48'000);
+                       std::uint32_t sample_rate = 48'000, std::uint32_t tail_frames = 0);
 OperationResult schema();
 
 } // namespace pulp::tools::timeline

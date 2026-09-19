@@ -195,6 +195,33 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(aggregate["false_promotions"], 0)
         self.assertEqual(aggregate["ranked_gaps"][0]["cause"], "flex-layout")
 
+    def test_observability_is_fail_closed_and_cache_state_is_declared(self) -> None:
+        report = {
+            "observability": {
+                "ttfp": {"value_ms": None, "status": "unverified"},
+                "ttni": {"value_ms": None, "status": "unverified"},
+                "ttni_proxy": {"value_ms": 12, "status": "measured"},
+                "ifnf": {"value_ms": None, "status": "readback-only"},
+                "cache_state": {
+                    "identity": "cold",
+                    "dimensions": {"dawn_device": "not-applicable"},
+                },
+            },
+            "promotion": {"classification": "browser-required"},
+            "comparison": {name: {"score": 1.0} for name in
+                            ("structural", "geometry", "typography", "visual")},
+            "timings": {"browser_import_ms": 20, "native_import_ms": 12,
+                        "native_render_ms": 4, "native_total_ms": 16,
+                        "browser_to_native_import_speedup": 1.667},
+            "classifications": [],
+        }
+        aggregate = LAB.aggregate_reports([report])
+        self.assertEqual(aggregate["observability"]["ttfp"]["status"], "unverified")
+        self.assertEqual(aggregate["observability"]["ttni"]["status"], "unverified")
+        self.assertEqual(aggregate["observability"]["ttni_proxy"]["p50_ms"], 12.0)
+        self.assertEqual(aggregate["observability"]["ifnf"]["status"], "readback-only")
+        self.assertEqual(aggregate["observability"]["cache_states"], ["cold"])
+
     def test_missing_corpus_fixture_is_counted_in_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

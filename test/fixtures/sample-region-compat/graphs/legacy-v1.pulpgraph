@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "nodes": [
+    {"id": 1, "type": "audio_in", "name": "Input", "num_input_ports": 0, "num_output_ports": 1, "gain": 1},
+    {"id": 2, "type": "gain", "name": "Legacy gain", "num_input_ports": 2, "num_output_ports": 2, "gain": 0.625},
+    {"id": 3, "type": "audio_out", "name": "Output", "num_input_ports": 1, "num_output_ports": 0, "gain": 1}
+  ],
+  "connections": [
+    {"source_node": 1, "source_port": 0, "dest_node": 2, "dest_port": 0, "feedback": false, "midi": false, "automation": false},
+    {"source_node": 2, "source_port": 0, "dest_node": 3, "dest_port": 0, "feedback": false, "midi": false, "automation": false}
+  ]
+}

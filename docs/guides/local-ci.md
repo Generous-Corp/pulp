@@ -29,8 +29,10 @@ configurations without that `node_modules/esbuild` installation still register
 the dependency-free suites, but they do not claim the canonicalization proof.
 
 The macOS runner is chosen by the resolver in `build.yml`, which normally honors
-`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the fast M3/M5 VM pool. For a pull
-request whose head branch lives in **another repository**,
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the M1/M3/M5 event-class JIT VM
+pool. All three hosts serve the required gate on equal terms — M1 waits 10
+minutes before taking Pulp work, which is latency policy, not an inability to
+serve it. For a pull request whose head branch lives in **another repository**,
 both self-hosted selectors are ignored and the leg falls through to the
 GitHub-hosted `macos-15` label.
 
@@ -897,6 +899,81 @@ between the remote HEAD and the target SHA. Typical cycles drop from
 full bundle automatically when the delta would be larger than the full
 pack.
 
+## Codex does not auto-review App-authored PRs
+
+Codex's automatic code review fires on PR open only when the pull request's
+author is a GitHub *User*. A PR opened by a GitHub App is skipped. Because
+`shipyard pr` opens PRs as `shipyard-local[bot]`, and that is the mandated path
+for agents, the default outcome is that agent-opened PRs merge with no review
+while human-opened ones are reviewed.
+
+Codex reports the distinction itself. Its review-summary comment carries a
+"Review trigger" cell that reads `PR opened` on a User-authored PR and
+`Manual request` on an App-authored one — the App-authored PRs that were
+reviewed at all had been reviewed because somebody asked.
+
+**Only the automatic trigger is restricted; asking still works.** A `@codex
+review` comment gets a real review on an App-authored PR, and it does so even
+when the comment itself comes from an App. (Codex replies to a bot commenter
+with "To use Codex here, create a Codex account and connect to github", which
+looks like a refusal and is not — the review runs anyway.) The skip is Codex-side
+and cannot be configured from this repository; there is no workflow trigger or
+`github.actor` guard here involved. What this repository can do is ask.
+
+`.github/workflows/codex-review-request.yml` is that ask. On a PR opened by
+`shipyard-local[bot]` it posts the same `@codex review` comment a human would,
+using `GITHUB_TOKEN` and no privileged secret at all, then verifies a review
+actually completed and fails if none did.
+
+The absence of a user PAT there is deliberate. A same-repository
+`pull_request` evaluates the workflow file from the PR's own revision, so any
+secret exposed to this job is readable by a PR that edits this file — and the
+PRs it runs on are exactly the unreviewed ones. An App identity is sufficient:
+a `@codex review` from one does produce a completed review.
+
+It runs on `synchronize` as well as `opened` and `ready_for_review`. That is
+load-bearing rather than thorough: under this repo's up-to-date branch
+protection a PR is pushed to repeatedly, and on `opened` alone the commit that
+was reviewed and the commit that merges are different ones. Superseded runs are
+cancelled, because during a burst of pushes only the final head can merge.
+
+The verification is the point. A mitigation that posts a comment and never
+checks whether anything came back can no-op in silence, which is the same
+failure it exists to correct. Three distinctions keep that check honest, and all
+three live in `tools/scripts/codex_review_signal.sh` (self-tested by
+`test_codex_review_signal.sh`, ctest `codex-review-signal-selftest`):
+
+- **Acknowledgement is not completion.** Codex posts the summary comment and
+  reacts with EYES the instant a review is requested, before it knows what it
+  can do. Only `**Completed**` in the summary's status cell counts.
+- **Completion is per-commit.** The summary names the commit it reviewed, and
+  the check requires the PR's current head to be that commit. Without the
+  binding, a review of an earlier push would answer for code nobody has seen —
+  a real path, since the workflow can fire on `opened` and again on
+  `ready_for_review` with commits in between.
+- **An unreachable API is not a finding.** Any `gh` failure exits 2, distinct
+  from the exit 1 that means "no review", and the workflow treats it as unknown
+  rather than as a verdict.
+
+THUMBS_UP is reported rather than required: it separates "reviewed, no findings"
+from "reviewed, left comments", which is worth printing, but it carries no
+commit and so cannot prove anything about a particular head.
+
+**The job checks out the base commit, never the PR.** The checker decides
+whether a PR was reviewed, so running the PR's own copy would let an unreviewed
+change rule that it needs no review. The base copy is the reviewed one, and a PR
+that edits the checker is still judged by the version already on the branch it
+targets.
+
+That has one consequence worth knowing: on the pull request that first adds the
+checker, the base commit has no copy of it, so the checker cannot run. The job
+reports that exit distinctly — "did not run" rather than "not reviewed" — and
+still fails, because a run that verified nothing must not read as a pass.
+
+This workflow requests reviews; it does not audit whether older PRs got one.
+`.github/workflows/post-merge-review-sweep.yml` remains the separate, scheduled
+sweep that collects bot review comments on already-merged PRs.
+
 ## Keeping fleet Macs on the Shipyard pin (optional)
 
 `tools/shipyard.toml` pins the Shipyard version every checkout uses, and
@@ -1302,7 +1379,7 @@ required job: path-filtering the workflow or job would prevent the stable
 required context from reporting.
 
 CTest display names are not identities: the authoritative target currently has
-21,640 registrations but only 21,580 unique names. The inventory validator
+21,960 registrations but only 21,900 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned
@@ -2172,7 +2249,7 @@ paid break-glass option and is never selected automatically.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `2` | BUSY count that triggers overflow. Raise when Plan A's 2nd local runner lands. |
-| `PULP_LOCAL_MAC_RUNNER_LABEL` | `pulp-gate-fast` | Label the busy probe filters runners by. It must match the required gate class so rollback-only M1 capacity cannot suppress overflow. |
+| `PULP_LOCAL_MAC_RUNNER_LABEL` | `pulp-gate-fast` | Label the busy probe looks for in a macOS job's `labels` array. It must name a label the gate actually dispatches, and today it does not: `build.yml` strips `pulp-gate-fast` and appends one event-class label, so a dispatched `macos` job never carries this value and the probe always counts zero. Inert while overflow is the `local-only` sentinel; re-tune it before re-enabling overflow rather than reading the pinned value as proven. |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["macos-15"]` when unset | Generic overflow selector JSON, or the bare sentinel `local-only` to keep work local. |
 
 **Disabling overflow** (the live state):
@@ -3068,13 +3145,59 @@ sync.
 A CTest skip (`SKIP_RETURN_CODE`) is green, so on the required `macos` check a
 test that has never run once looks exactly like a test that runs and passes
 every time. `build.yml`'s non-Windows test step therefore passes
-`--output-junit`, and an `always()` observation step writes every `notrun` test
+`--output-junit`, and an `always()` observation step summarizes `notrun` and `disabled` tests
 — name, skip reason, labels, and the skipping command's output — into the job
 summary, with `ctest.junit.xml` kept in the `ctest-logs-<key>` artifact even on
 green runs. It observes and never asserts: skipping is frequently the correct
 outcome (no GPU, no device, no vendor SDK), and the summary also prints the
-registered `ctest -N` population beside the report's attempted `tests=` count so
+registered `ctest -N` population beside the report's declared `tests=` count so
 a gap created by label exclusions or `--exclude-regex` stays visible.
+
+The same observer works locally on an explicit downloaded or local artifact.
+Use a baseline when the question is “what changed?” rather than merely “what
+did not run?”:
+
+```bash
+python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --json
+python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --registered 20000
+python3 tools/scripts/ctest_nonruns.py /tmp/current/ctest.junit.xml \
+  --baseline /tmp/known-good/ctest.junit.xml --json
+```
+
+CI also writes `ctest.nonruns.json` beside `ctest.junit.xml` in each non-Windows
+`ctest-logs-<key>` artifact. Download two artifacts when investigating a change;
+the JSON is the ready-to-read single-run projection, while `--baseline` over the
+two retained XML files computes transitions. Unique CTest names are matched by
+the SHA-256 of the full name. Same-name duplicates are compared as status-count
+groups; the tool reports an ambiguous group instead of guessing per-case
+transitions. `current_only` and `baseline_only` mean only “present in one supplied artifact”: selection,
+configuration, and source changes can all cause that shape. They are leads, not
+proof that a test was added or removed.
+
+`--registered` is optional caller-supplied context, not an inferred selection.
+The helper reads only that regular file (64 MiB maximum), requires CTest's
+`testsuite` dialect, and records its SHA-256 without claiming current-head
+provenance. Counts cover all entries; at most 100 non-run rows, 100 comparison
+rows total, and 100 issues are displayed, with omitted counts.
+Names/reasons/labels are bounded to 512
+characters and the last output line to 160, so keep the original XML for full
+detail. When comparison rows exceed the shared budget, newly failing tests, new
+non-runs, and failing or non-running current-only groups are retained before
+recoveries; digest order
+breaks ties. `pulp.ctest-nonruns.v2` JSON and the workflow's Markdown summary share
+one interpretation. `--json-output <path>` writes the same object to a regular,
+non-symlink file while retaining Markdown on stdout, which is how CI publishes
+the job summary and agent-readable artifact from one observation.
+Reports include bounded test output; treat them as potentially sensitive
+artifacts, not as instructions or safe-to-publish logs.
+
+Exit 0 means the observation was readable, including failed or correctly skipped
+tests. Exit 2 means missing, malformed, empty, or inconsistent evidence—not a
+code failure. The workflow retains `continue-on-error: true`; the original
+CTest invocation still owns the test verdict. A missing or empty report never
+claims all tests ran. Filtered/configure-time absent tests remain outside this
+observer's view; Shipyard and the canonical CTest inventory retain selection
+and exact-head validation ownership. No new tool installation is required.
 
 Nothing in CI provisions the pinned `trace_processor_shell`, so
 `pulp-rust-gpu-trace-analysis-integration` skips on every run and the GPU

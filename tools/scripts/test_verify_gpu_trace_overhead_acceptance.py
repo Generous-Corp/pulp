@@ -581,6 +581,21 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         errors = MODULE.verify(receipt, ROOT)
         self.assertTrue(any("path-scoped tree delta" in error for error in errors))
 
+    def test_rolling_history_window_cannot_be_forged(self):
+        for mutation in ("base", "revision"):
+            with self.subTest(mutation=mutation):
+                receipt = self.structural_receipt()
+                inventory = receipt["producer_overhead_disposition"]["evidence"]
+                if mutation == "base":
+                    inventory["history_base_revision"] = "0" * 40
+                else:
+                    window = inventory["scope_touching_revision_window"]
+                    window["revisions"][0]["revision"] = "0" * 40
+                errors = MODULE.verify(receipt, ROOT)
+                self.assertTrue(any(
+                    "path-scoped tree delta" in error for error in errors
+                ))
+
     def test_no_producer_inventory_cannot_omit_real_a2t_behavior_delta(self):
         receipt = self.structural_receipt()
         deltas = receipt["producer_overhead_disposition"]["evidence"]["path_deltas"]

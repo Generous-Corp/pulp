@@ -6,6 +6,13 @@ add_executable(pulp-test-build-check test_build_check.cpp)
 target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime)
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
+add_library(pulp-faust-legacy-forwarding-header-compile OBJECT
+    header_compile/faust_legacy_forwarding.cpp)
+target_include_directories(
+    pulp-faust-legacy-forwarding-header-compile PRIVATE "${CMAKE_SOURCE_DIR}")
+target_link_libraries(
+    pulp-faust-legacy-forwarding-header-compile PRIVATE pulp::dsl)
+
 # Installed agent capability manifest: curated snapshot, negative validation,
 # and compile proof for every advertised include/symbol pair.
 add_executable(pulp-test-agent-capability-compile test_agent_capability_compile.cpp)
@@ -20,6 +27,12 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME dsp-provenance-audit
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/dsp_provenance_audit.py")
+    add_test(NAME dsp-provenance-audit-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_dsp_provenance_audit.py")
     add_test(NAME gpu-recipe-catalog-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_recipe_catalog.py")
@@ -530,6 +543,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME fleet-runner-policy-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/fleet/test_fleet_lib.py")
 
+    # Fleet remote probe: a non-login ssh shell gets a minimal PATH that omits
+    # ~/.local/bin, so `ssh host 'command -v <tool>'` reports an installed tool
+    # as MISSING, and `command -v` answers with the shell's opinion of a name
+    # (a whence/hook.sh function resolves regardless of PATH). The probe scans
+    # PATH for an executable FILE and refuses to report absence when any of its
+    # self-checks fail. These tests pin that refusal.
+    add_test(NAME fleet-remote-probe-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/fleet/test_probe_remote.py")
+
     # Planning-gitlink guard: reject an accidental `planning` submodule pointer
     # bump (a `git reset --hard` + `git add -A` re-staging the drifted gitlink);
     # a deliberate re-pin passes with a `Planning-Bump:` trailer.
@@ -584,6 +606,8 @@ if(Python3_Interpreter_FOUND)
     # else's unrelated PR, which is exactly the signal nobody attributes here.
     add_test(NAME gpu-test-resource-locks COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_test_resource_locks.py")
+    add_test(NAME gpu-audio-provider-identity-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_provider_identity.py")
     add_test(NAME gpu-provenance-hydration-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_gpu_provenance_commits.py")
 

@@ -214,6 +214,7 @@ struct NodeCapabilities {
     bool supports_mpe = false;
     bool supports_ump = false;
     bool supports_f64_audio = false;
+    bool consumes_audio_rate_modulations = false;
 };
 
 /// Plugin metadata — declared once, immutable.
@@ -312,6 +313,7 @@ struct PluginDescriptor {
             .supports_mpe = supports_mpe || node_capabilities.supports_mpe,
             .supports_ump = supports_ump || node_capabilities.supports_ump,
             .supports_f64_audio = supports_f64_audio || node_capabilities.supports_f64_audio,
+            .consumes_audio_rate_modulations = node_capabilities.consumes_audio_rate_modulations,
         };
     }
 

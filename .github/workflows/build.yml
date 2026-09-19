@@ -1767,7 +1767,7 @@ jobs:
       # them is real information rather than a fault: label exclusions, the
       # --exclude-regex list, and configure-time absence remove tests from the
       # report entirely — a broader class this step measures but does not close.
-      # No <testcase> entries at all means --output-junit did not take.
+      # An empty report provides no execution evidence; selection may be empty.
       - name: Observe ctest non-runs (non-Windows)
         if: always() && runner.os != 'Windows'
         continue-on-error: true
@@ -1785,100 +1785,10 @@ jobs:
           # finished run; the log can. Same reason the ctest-failure step below
           # echoes its names twice.
           echo "ctest-nonruns: registered(ctest -N raw lines)=$raw_lines registered(total)=${registered:-unknown}"
-          PULP_CTEST_JUNIT="$junit" \
-          PULP_CTEST_RAW_LINES="$raw_lines" \
-          PULP_CTEST_REGISTERED="${registered:-unknown}" \
-          python3 - >> "$GITHUB_STEP_SUMMARY" <<'PYEOF'
-          import os
-          import sys
-          import xml.etree.ElementTree as ET
-
-          leg = os.environ.get("PULP_CTEST_LEG", "")
-          junit = os.environ["PULP_CTEST_JUNIT"]
-          print(f"## ctest non-runs — {leg}")
-          if not os.path.isfile(junit):
-              print(
-                  "_No JUnit report — the job did not reach ctest "
-                  "(configure/build failure), or `--output-junit` did not take._"
-              )
-              raise SystemExit(0)
-          suite = ET.parse(junit).getroot()
-          cases = suite.findall("testcase")
-          # ctest statuses: "run", "fail", "notrun" (skipped), "disabled".
-          # A failure ran; only "notrun"/"disabled" are non-runs.
-          nonruns = [c for c in cases if c.get("status") in ("notrun", "disabled")]
-          print("")
-          print("| population | count |")
-          print("| --- | --- |")
-          print(f"| registered (`ctest -N` raw lines) | {os.environ['PULP_CTEST_RAW_LINES']} |")
-          print(f"| registered (`ctest -N` total) | {os.environ['PULP_CTEST_REGISTERED']} |")
-          print(f"| attempted (JUnit `tests=`) | {suite.get('tests')} |")
-          print(f"| reported non-runs (`notrun`/`disabled`) | {len(nonruns)} |")
-          print(f"| `<testcase>` entries in the report | {len(cases)} |")
-          print("")
-          # Same numbers to the job log, which (unlike the summary) is
-          # retrievable from a finished run.
-          print(
-              f"ctest-nonruns: attempted={suite.get('tests')} "
-              f"testcases={len(cases)} nonruns={len(nonruns)}",
-              file=sys.stderr,
-          )
-          if not cases:
-              print("_The report has no `<testcase>` entries: `--output-junit` did not take._")
-          if not nonruns:
-              print("_Every attempted test ran._")
-              raise SystemExit(0)
-          # ctest's <skipped message=...> is the MECHANISM ("SKIP_RETURN_CODE=4"),
-          # identical for every Catch2 skip in the suite. The author's reason is
-          # the fact worth reading -- "SheenBidi not linked" and "pulp not built"
-          # are very different statements about a lane -- and it is present, but
-          # in the captured console output rather than in an attribute. Catch2
-          # prints it as:
-          #
-          #     path/to/test.cpp:140: SKIPPED:
-          #     explicitly with message:
-          #       pulp binary not built for this test run; skipping
-          #
-          # Recover it, and fall back to the mechanism for a non-Catch2 skip (a
-          # script exiting SKIP_RETURN_CODE has no such block) so the row still
-          # says something rather than going blank.
-          def catch2_skip(case):
-              lines = (case.findtext("system-out") or "").splitlines()
-              for i, line in enumerate(lines):
-                  if not line.rstrip().endswith(": SKIPPED:"):
-                      continue
-                  where = line.rstrip()[: -len(": SKIPPED:")].strip()
-                  rest = lines[i + 1 :]
-                  if rest and rest[0].strip() == "explicitly with message:":
-                      rest = rest[1:]
-                  message = []
-                  for entry in rest:
-                      if not entry.strip():
-                          break
-                      message.append(entry.strip())
-                  if message:
-                      return " ".join(message), where
-              return "", ""
-
-          print("### Tests that did not run")
-          print("")
-          print("| test | reason | labels | where |")
-          print("| --- | --- | --- | --- |")
-          for case in sorted(nonruns, key=lambda c: c.get("name") or ""):
-              skipped = case.find("skipped")
-              mechanism = (skipped.get("message") if skipped is not None else None) or case.get("status") or ""
-              labels = ""
-              for prop in case.iterfind("properties/property"):
-                  if prop.get("name") == "cmake_labels":
-                      labels = prop.get("value") or ""
-              message, where = catch2_skip(case)
-              reason = message or mechanism
-              if not where:
-                  out = (case.findtext("system-out") or "").strip().splitlines()
-                  where = out[-1][:160] if out else ""
-              cell = lambda s: s.replace("|", "\\|").replace("\n", " ")
-              print(f"| `{case.get('name')}` | {cell(reason[:200])} | {cell(labels)} | {cell(where)} |")
-          PYEOF
+          python3 tools/scripts/ctest_nonruns.py "$junit" \
+            --registered "${registered:-unknown}" --raw-lines "$raw_lines" \
+            --json-output "$PULP_BUILD_DIR/ctest.nonruns.json" \
+            --leg "$PULP_CTEST_LEG" >> "$GITHUB_STEP_SUMMARY"
 
       # Observation, not a gate. Every GPU case in the suite skips when no
       # adapter is present, so a green `macos` check reads identically whether
@@ -1993,6 +1903,7 @@ jobs:
           path: |
             ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
             ${{ env.PULP_BUILD_DIR }}/ctest.junit.xml
+            ${{ env.PULP_BUILD_DIR }}/ctest.nonruns.json
           if-no-files-found: ignore
           retention-days: 7
 

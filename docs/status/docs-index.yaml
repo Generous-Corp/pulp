@@ -119,6 +119,11 @@ docs:
     kind: guide
     summary: Optional WebView runtime, asset serving, messaging, and debug workflow
 
+  - slug: tracing
+    path: guides/tracing.md
+    kind: guide
+    summary: Off-by-default Perfetto tracing — capture paths, analysis tiers and skills, category taxonomy, instant events, GPU diagnostics bridge, RT-safety rules
+
   - slug: claude-code-plugin
     path: guides/claude-code-plugin.md
     kind: guide

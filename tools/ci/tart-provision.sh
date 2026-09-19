@@ -178,7 +178,7 @@ provision_pulp(){ # $1=from-apple-xcode-vm  $2=new-vm
   if [ -d "$repo_root/external/skia-build/build" ]; then
     note "seeding prebuilt Skia into VM (~/pulp-skia-build)"
     vm_ssh "$ip" 'mkdir -p ~/pulp-skia-build'
-    vm_rsync "$repo_root/external/skia-build/" "$ip:pulp-skia-build/"
+    vm_rsync "$repo_root/external/skia-build/" "${ip}:pulp-skia-build/"
     note "in-VM builds should: export SKIA_DIR=~/pulp-skia-build (FindSkia wants the dir CONTAINING build/, not .../build/mac-gpu)"
   else
     warn "no prebuilt Skia at $repo_root/external/skia-build/build — the VM's first build will fetch/build it"
@@ -195,12 +195,12 @@ provision_pulp(){ # $1=from-apple-xcode-vm  $2=new-vm
 cmd_tag(){ # $1=src-vm  $2=base-name  [$3=date]
   need_tart; local src="$1" name="$2" d="${3:-$(date +%Y-%m-%d)}"
   [ -n "$src" ] && [ -n "$name" ] || die "usage: tag <src-vm> <base-name> [YYYY-MM-DD]"
-  tart clone "$src" "$name:$d"
-  note "tagged $src → $name:$d"
-  note "also refreshing rolling alias $name:latest"
-  tart delete "$name:latest" >/dev/null 2>&1 || true
-  tart clone "$name:$d" "$name:latest"
-  note "clone for a job:  tart clone $name:latest <job-vm>"
+  tart clone "$src" "${name}:${d}"
+  note "tagged $src → ${name}:${d}"
+  note "also refreshing rolling alias ${name}:latest"
+  tart delete "${name}:latest" >/dev/null 2>&1 || true
+  tart clone "${name}:${d}" "${name}:latest"
+  note "clone for a job:  tart clone ${name}:latest <job-vm>"
 }
 
 # ── Runner layer — CI-complete ephemeral GitHub Actions runner golden ───────

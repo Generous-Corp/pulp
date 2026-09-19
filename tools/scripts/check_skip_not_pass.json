@@ -123,6 +123,11 @@
       "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."
     },
     {
+      "file": "test/test_cli_timeline_render_shellout.cpp",
+      "sites": 5,
+      "reason": "Mechanically convertible, but the file is sequencer-owned: sequencer_exposure_check.py claims every test/ path whose name carries `timeline`, and editing one requires an added or materially changed row in docs/status/sequencer-exposure. That is a different review surface than a tree-wide lint, so the sites are frozen here and converted in a change that can carry the ledger row."
+    },
+    {
       "file": "test/test_cli_validator_discovery.cpp",
       "sites": 1,
       "reason": "Whole-case `#else` arm on a host where the backend is not compiled. A real skip, but the case asserts nothing in that branch and several of these suites also assert their own case counts, so converting needs a per-suite audit."

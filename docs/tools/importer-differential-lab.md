@@ -37,6 +37,17 @@ python3 tools/import-validation/importer_differential_lab.py compare \
   --output /tmp/importer-differential/flex
 ```
 
+Cache state is caller supplied and is never inferred from elapsed time. Declare
+it when the harness is run (`--cache-state cold|warm|unknown`). Each receipt
+also uses the shared GPU observability vocabulary: TTFP (time to first present),
+TTNI (time to native interactive), and IFNF (import to first validated native
+frame). This lab does not measure TTNI: it records native import completion as
+an explicitly named `ttni_proxy`. TTFP and TTNI are unverified, and IFNF
+remains readback-only until a real native present, interaction readiness event,
+and same-transaction fidelity gate are captured. The cache declaration is
+scoped to this importer lab; Graphite, pipeline, and Dawn-device dimensions
+are explicitly marked not applicable here, not treated as measured.
+
 The stable output protocol is:
 
 ```text
@@ -62,8 +73,10 @@ comparison/
 
 Every report has `schema: "pulp-importer-differential-report-v1"` and records
 source hash, browser provenance, source recognition, dynamic blockers, timings,
-layer scores, likely root causes with confidence, and an advisory promotion
-classification.
+layer scores, likely root causes with confidence, an `observability` receipt,
+and an advisory promotion classification. The receipt paths are relative to
+each fixture output, so they can be copied under `/tmp/pulp-p0a-8458/receipts/`
+without exposing machine-local paths.
 
 ## Analyze a corpus
 

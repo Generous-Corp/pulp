@@ -42,6 +42,10 @@ target_sources(pulp-host PRIVATE
     src/timeline_graph_binding_routes.cpp
     src/timeline_graph_stretch_policy.cpp
     src/graph_editor_view.cpp
+    src/sample_region_plan.cpp
+    src/sample_region_proof.cpp
+    src/sample_region_parameters.cpp
+    src/sample_region_runtime.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)

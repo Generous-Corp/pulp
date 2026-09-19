@@ -2097,7 +2097,7 @@ commands:
             kind: option
             description: "proposal, editor (default), or trusted; an unknown name is a usage error"
       - name: capabilities
-        summary: "Report the command classes and intents each named writer profile admits; with no --writer-profile the object also carries a device_catalog of every built-in device a track's device chain may name, each device's domain and reported latency, and the chain-length and latency bounds admission enforces"
+        summary: "Report the command classes and intents each named writer profile admits; with no --writer-profile the object also carries a device_catalog of every built-in device a track's device chain may name, each device's domain, reported latency, stable parameter metadata and behavior flags, and the chain-length and latency bounds admission enforces"
         args:
           - name: --writer-profile
             kind: option
@@ -2186,6 +2186,9 @@ commands:
         required: true
       - name: --sample-rate
         kind: option
+      - name: --tail-frames
+        kind: option
+        description: Extra frames rendered after the sequence ends, so a ringing delay, reverb, or release is captured instead of cut at the last event. Defaults to 0, which ends the file exactly at the sequence end.
     docs: reference/cli.md#render
 
   - name: audio

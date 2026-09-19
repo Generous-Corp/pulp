@@ -287,13 +287,13 @@ def verify_installed_build_info(
 
 def _cache_bool(build_dir: Path, name: str) -> bool:
     cache = _read_text(build_dir / "CMakeCache.txt")
-    match = re.search(rf"(?m)^{re.escape(name)}:BOOL=(.+)$", cache)
+    match = re.search(rf"(?m)^{re.escape(name)}:(?:BOOL|INTERNAL)=(.+)$", cache)
     if not match:
         raise ProvenanceError(f"{name} is missing from {build_dir / 'CMakeCache.txt'}")
     value = match.group(1).strip().upper()
-    if value not in {"ON", "OFF"}:
+    if value not in {"ON", "OFF", "TRUE", "FALSE"}:
         raise ProvenanceError(f"{name} has non-boolean cache value {value!r}")
-    return value == "ON"
+    return value in {"ON", "TRUE"}
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -369,6 +369,20 @@ def build_release_marker(
         raise ProvenanceError(
             "official release SDK feature contract requires tracing=OFF; this "
             "build was configured with PULP_TRACING=ON and is development-only"
+        )
+    has_vellum_d15 = _cache_bool(build_dir, "PULP_GPU_AUDIO_HAS_VELLUM_D15")
+    vellum_d15_release_eligible = _cache_bool(
+        build_dir, "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE"
+    )
+    if has_vellum_d15:
+        detail = (
+            "development-only"
+            if not vellum_d15_release_eligible
+            else "not yet supported by the production archive contract"
+        )
+        raise ProvenanceError(
+            "official release SDK feature contract forbids the Vellum D15 "
+            f"GPU-audio provider ({detail})"
         )
 
     marker = {

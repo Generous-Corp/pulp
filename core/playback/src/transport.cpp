@@ -330,6 +330,8 @@ TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_
         reset();
         return loop_error;
     }
+    control_state_.prepared = true;
+    control_state_.loop_sequence = ++loop_sequence_;
 
     tempo_cursor_.reset(tempo_map);
     timeline_sample_ = tempo_map.ticks_to_samples(config.initial_position);
@@ -440,6 +442,7 @@ TransportError MasterTransport::set_loop(LoopRegion loop) noexcept {
     if (error != TransportError::None)
         return error;
     control_state_.loop = loop;
+    control_state_.loop_sequence = ++loop_sequence_;
     publish_desired();
     return TransportError::None;
 }
@@ -878,6 +881,7 @@ void MasterTransport::reset() noexcept {
     tempo_sync_quantum_beats_ = 4.0;
     max_buffer_size_ = 0;
     control_state_ = {};
+    control_state_.loop_sequence = ++loop_sequence_;
     desired_.write(control_state_);
     timeline_sample_ = {};
     timeline_tick_ = {};

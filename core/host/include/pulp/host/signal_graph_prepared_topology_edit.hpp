@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/host/sample_region_parameters.hpp>
 #include <pulp/host/signal_graph_execution_snapshot.hpp>
 
 #include <optional>
@@ -39,6 +40,8 @@ class SignalGraph::PreparedTopologyEdit {
         QuiescedRollbackFailed,
         NotPrepared,
         AlreadyCommitted,
+        RegionRuntimeUnavailable,
+        ParameterContractMismatch,
     };
 
     ~PreparedTopologyEdit();
@@ -46,6 +49,7 @@ class SignalGraph::PreparedTopologyEdit {
     PreparedTopologyEdit& operator=(const PreparedTopologyEdit&) = delete;
 
     bool register_custom_node_type(CustomNodeType type);
+    bool register_custom_node_type(CustomNodeType type, SampleKernelDescriptor sample_kernel);
     bool unregister_custom_node_type(std::string_view type_id, int version);
     std::size_t prune_unused_custom_node_types();
     std::size_t custom_node_type_count() const;
@@ -58,6 +62,10 @@ class SignalGraph::PreparedTopologyEdit {
     /// Transfers a pathless Pulp-owned slot into this disposable candidate.
     NodeId add_owned_builtin_plugin_node(std::unique_ptr<PluginSlot> slot, int num_inputs,
                                          int num_outputs, const std::string& name);
+    NodeId add_processor_node(std::shared_ptr<format::ProcessorNodeInstance> processor,
+                              const std::string& name = {});
+    NodeId add_processor_node(std::unique_ptr<format::Processor> processor,
+                              const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id, const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id, int version,
                            const std::string& name = {});
@@ -71,6 +79,25 @@ class SignalGraph::PreparedTopologyEdit {
     bool connect_midi(NodeId source, NodeId dest);
     bool disconnect(NodeId source, PortIndex source_port, NodeId dest, PortIndex dest_port);
     bool set_node_gain(NodeId id, float linear_gain);
+
+    SampleRegionResult declare_sample_region(SampleRegionDefinition definition);
+    SampleRegionResult remove_sample_region(SampleRegionId id);
+    SampleRegionResult add_sample_region_member(SampleRegionId id, NodeId member,
+                                                SampleKernelConfig config);
+    SampleRegionResult remove_sample_region_member(SampleRegionId id, NodeId member);
+    SampleRegionResult set_sample_kernel_config(SampleRegionId id, NodeId member,
+                                                SampleKernelConfig config);
+    SampleRegionResult connect_in_sample_region(SampleRegionId id, NodeId source,
+                                                PortIndex source_port, NodeId destination,
+                                                PortIndex destination_port);
+    SampleRegionProof prove_sample_region(SampleRegionId id) const;
+    std::optional<SampleRegionDescriptor> sample_region(SampleRegionId id) const;
+    std::vector<SampleRegionDescriptor> sample_regions() const;
+    SampleRegionParameterContract sample_region_parameter_contract() const;
+    SampleRegionResult bind_sample_region_parameters(const SampleRegionParameterBinding& binding);
+    const SampleRegionParameterBinding* sample_region_parameter_binding() const noexcept {
+        return sample_region_parameter_binding_;
+    }
 
     void set_canonical_executor_routing_enabled(bool enabled) noexcept;
     void set_parallel_routing_enabled(bool enabled) noexcept;
@@ -98,12 +125,17 @@ class SignalGraph::PreparedTopologyEdit {
 
   private:
     friend class SignalGraph;
+    friend bool register_builtin_sample_region_types(PreparedTopologyEdit& edit);
     explicit PreparedTopologyEdit(SignalGraph& owner);
     bool base_is_current_locked_() const;
     bool is_new_node_(NodeId id) const;
     std::optional<Result> baseline_removal_rejection_locked_() const;
     bool rollback_quiesced_lifecycles_locked_() noexcept;
     void release_new_custom_instances_() noexcept;
+    SampleRegionResult replace_sample_region_(SampleRegionDefinition definition, bool declaration);
+    SampleRegionResult reject_sample_region_(SampleRegionId id, SampleRegionRefusalReason reason,
+                                             std::string message, NodeId node = 0);
+    std::optional<Result> sample_region_preparation_result_(double sample_rate, int max_block_size);
 
     struct QuiescedPluginLifecycle {
         std::shared_ptr<PluginSlot> plugin;
@@ -114,6 +146,11 @@ class SignalGraph::PreparedTopologyEdit {
         std::function<void(void*, double, int)> prepare;
         std::function<void(void*)> release;
         bool touched = false;
+    };
+    struct QuiescedProcessorLifecycle {
+        std::shared_ptr<format::ProcessorNodeInstance> processor;
+        int input_channels = 0;
+        int output_channels = 0;
     };
 
     template <typename Fn> NodeId add_node_(Fn&& fn) {
@@ -147,6 +184,7 @@ class SignalGraph::PreparedTopologyEdit {
     std::vector<NodeId> prepared_new_custom_ids_;
     std::vector<QuiescedPluginLifecycle> quiesced_plugins_;
     std::vector<QuiescedCustomLifecycle> quiesced_customs_;
+    std::vector<QuiescedProcessorLifecycle> quiesced_processors_;
     std::uint64_t base_authoring_generation_ = 0;
     std::shared_ptr<SignalGraph::CompiledGraph> base_live_;
     bool base_canonical_routing_ = false;
@@ -156,6 +194,7 @@ class SignalGraph::PreparedTopologyEdit {
     bool prepare_attempted_ = false;
     bool quiesced_lifecycles_dirty_ = false;
     bool committed_ = false;
+    const SampleRegionParameterBinding* sample_region_parameter_binding_ = nullptr;
     Result last_result_ = Result::NotPrepared;
 };
 

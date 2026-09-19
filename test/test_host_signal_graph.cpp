@@ -2,12 +2,13 @@
 // stays reviewable. Self-contained: uses
 // SignalGraph from pulp/host/signal_graph.hpp (in the shared host includes) and
 // carries its own interleaved helper namespaces.
+#include "harness/rt_allocation_probe.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include "harness/rt_allocation_probe.hpp"
-#include <pulp/host/scanner.hpp>
-#include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/baked_graph_processor.hpp>
 #include <pulp/host/graph_serializer.hpp>
+#include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/scanner.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
@@ -6741,6 +6742,253 @@ TEST_CASE("SignalGraph prepared edit feedback rejection preserves live graph",
     REQUIRE(graph.connections() == connections_before);
     REQUIRE(graph.nodes().size() == 3);
     REQUIRE(graph.is_prepared());
+}
+
+namespace {
+constexpr std::uint32_t kDenseHostGainParam = 0x4844u;
+
+class DenseHostGainProcessor final : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor descriptor;
+        descriptor.name = "DenseHostGain";
+        descriptor.manufacturer = "Pulp";
+        descriptor.bundle_id = "dev.pulp.test.dense-host-gain";
+        descriptor.version = "1.0.0";
+        descriptor.category = pulp::format::PluginCategory::Effect;
+        descriptor.input_buses = {{"Main In", 1, false}};
+        descriptor.output_buses = {{"Main Out", 1, false}};
+        descriptor.node_capabilities.consumes_audio_rate_modulations = true;
+        return descriptor;
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        pulp::state::ParamInfo gain;
+        gain.id = kDenseHostGainParam;
+        gain.name = "Gain";
+        gain.range = {0.0f, 1.0f, 0.25f};
+        gain.rate = pulp::state::ParamRate::AudioRate;
+        store.add_parameter(gain);
+    }
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+    bool process_block(pulp::format::ProcessBlock& block) override {
+        if (block.buses == nullptr || block.events == nullptr ||
+            block.events->audio_rate_modulations.size() != 1) {
+            return false;
+        }
+        const auto& lane = block.events->audio_rate_modulations.front();
+        const auto* input =
+            block.buses->first(pulp::format::BusDirection::Input, pulp::format::BusRole::Main);
+        auto* output =
+            block.buses->first(pulp::format::BusDirection::Output, pulp::format::BusRole::Main);
+        if (lane.param_id != kDenseHostGainParam || input == nullptr || output == nullptr ||
+            lane.values.size() != block.frame_count) {
+            return false;
+        }
+        for (std::uint32_t frame = 0; frame < block.frame_count; ++frame) {
+            output->output.channel_ptr(0)[frame] =
+                input->input.channel_ptr(0)[frame] * lane.values[frame];
+        }
+        return true;
+    }
+};
+
+struct ProcessorLifecycleCounts {
+    int prepares = 0;
+    int releases = 0;
+    int destructions = 0;
+};
+
+class LifecycleHostProcessor final : public pulp::format::Processor {
+  public:
+    explicit LifecycleHostProcessor(std::shared_ptr<ProcessorLifecycleCounts> counts)
+        : counts_(std::move(counts)) {}
+    ~LifecycleHostProcessor() override {
+        ++counts_->destructions;
+    }
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor descriptor;
+        descriptor.name = "LifecycleHostProcessor";
+        descriptor.manufacturer = "Pulp";
+        descriptor.bundle_id = "dev.pulp.test.lifecycle-host-processor";
+        descriptor.version = "1.0.0";
+        descriptor.category = pulp::format::PluginCategory::Effect;
+        descriptor.input_buses = {{"Main In", 1, false}};
+        descriptor.output_buses = {{"Main Out", 1, false}};
+        return descriptor;
+    }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {
+        ++counts_->prepares;
+    }
+    void release() override {
+        ++counts_->releases;
+    }
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        for (std::size_t channel = 0;
+             channel < std::min(output.num_channels(), input.num_channels()); ++channel) {
+            std::copy_n(input.channel_ptr(channel), output.num_samples(),
+                        output.channel_ptr(channel));
+        }
+    }
+
+  private:
+    std::shared_ptr<ProcessorLifecycleCounts> counts_;
+};
+} // namespace
+
+TEST_CASE("SignalGraph authors and prepares a dense Processor node",
+          "[host][signal-graph][processor-node][audio-rate]") {
+    constexpr int frames = 4096;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "audio + modulation");
+    auto instance =
+        pulp::format::ProcessorNodeInstance::create(std::make_unique<DenseHostGainProcessor>());
+    REQUIRE(instance);
+    const auto processor = graph.add_processor_node(instance);
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(processor != 0);
+    REQUIRE(graph.add_processor_node(instance) == 0);
+    REQUIRE(graph.is_processor_node(processor));
+    REQUIRE(graph.connect(input, 0, processor, 0));
+    REQUIRE(
+        graph.connect_audio_rate_modulation(input, 1, processor, kDenseHostGainParam, 0.0f, 1.0f));
+    REQUIRE(graph.connect(processor, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, frames));
+    const auto baked = bake(graph);
+    REQUIRE_FALSE(baked.accepted);
+    REQUIRE(baked.reason == LowerRejectReason::HostedPluginNotSelfContained);
+
+    std::vector<float> audio(frames, 0.5f);
+    std::vector<float> modulation(frames);
+    std::vector<float> rendered(frames, -1.0f);
+    for (int frame = 0; frame < frames; ++frame) {
+        modulation[frame] = static_cast<float>(frame) / static_cast<float>(frames - 1);
+    }
+    const float* input_channels[] = {audio.data(), modulation.data()};
+    float* output_channels[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(input_channels, 2, frames);
+    pulp::audio::BufferView<float> out(output_channels, 1, frames);
+    graph.process(out, in, frames);
+    REQUIRE(graph.routed_walk_fallbacks() == 0);
+    for (int frame = 0; frame < frames; ++frame) {
+        REQUIRE_THAT(rendered[frame], WithinAbs(0.5f * modulation[frame], 1.0e-7f));
+    }
+}
+
+TEST_CASE("PreparedTopologyEdit mirrors Processor-node authoring",
+          "[host][signal-graph][processor-node][prepared-edit]") {
+    using Result = SignalGraph::PreparedTopologyEdit::Result;
+    SignalGraph graph;
+    REQUIRE(graph.prepare(48000.0, 64));
+    auto edit = graph.begin_prepared_topology_edit();
+    const auto input = edit->add_input_node(2, "input");
+    const auto processor = edit->add_processor_node(std::make_unique<DenseHostGainProcessor>());
+    const auto output = edit->add_output_node(1, "output");
+    REQUIRE(processor != 0);
+    REQUIRE(edit->connect(input, 0, processor, 0));
+    REQUIRE(edit->connect(processor, 0, output, 0));
+    REQUIRE(edit->prepare(48000.0, 64) == Result::Prepared);
+    REQUIRE(edit->commit() == Result::Committed);
+    REQUIRE(graph.is_processor_node(processor));
+}
+
+TEST_CASE("Processor-node release is balanced across graph and edit lifetimes",
+          "[host][signal-graph][processor-node][lifecycle]") {
+    SECTION("removal waits for the last executable snapshot despite caller retention") {
+        auto counts = std::make_shared<ProcessorLifecycleCounts>();
+        auto instance = pulp::format::ProcessorNodeInstance::create(
+            std::make_unique<LifecycleHostProcessor>(counts));
+        REQUIRE(instance);
+        SignalGraph graph;
+        REQUIRE(graph.prepare(48000.0, 64));
+        auto edit = graph.begin_prepared_topology_edit();
+        const auto processor = edit->add_processor_node(instance);
+        REQUIRE(processor != 0);
+        REQUIRE(edit->prepare(48000.0, 64) == SignalGraph::PreparedTopologyEdit::Result::Prepared);
+        REQUIRE(edit->commit() == SignalGraph::PreparedTopologyEdit::Result::Committed);
+        auto pinned = edit->committed_execution_snapshot();
+        REQUIRE(pinned);
+        edit.reset();
+        REQUIRE(counts->prepares == 1);
+
+        REQUIRE(graph.remove_node(processor));
+        REQUIRE(counts->releases == 0);
+        pinned = {};
+        REQUIRE(counts->releases == 1);
+
+        graph.release();
+        instance.reset();
+        REQUIRE(counts->releases == 1);
+        REQUIRE(counts->destructions == 1);
+    }
+
+    SECTION("graph release is idempotent after snapshot quiescence") {
+        auto counts = std::make_shared<ProcessorLifecycleCounts>();
+        auto instance = pulp::format::ProcessorNodeInstance::create(
+            std::make_unique<LifecycleHostProcessor>(counts));
+        REQUIRE(instance);
+        SignalGraph graph;
+        REQUIRE(graph.add_processor_node(instance) != 0);
+        REQUIRE(graph.prepare(48000.0, 64));
+        REQUIRE(counts->prepares == 1);
+        graph.release();
+        graph.release();
+        REQUIRE(counts->releases == 1);
+        graph.clear();
+        instance.reset();
+        REQUIRE(counts->destructions == 1);
+    }
+
+    SECTION("prepared-edit rollback releases a caller-retained instance") {
+        auto counts = std::make_shared<ProcessorLifecycleCounts>();
+        auto instance = pulp::format::ProcessorNodeInstance::create(
+            std::make_unique<LifecycleHostProcessor>(counts));
+        REQUIRE(instance);
+        SignalGraph graph;
+        REQUIRE(graph.prepare(48000.0, 64));
+        {
+            auto edit = graph.begin_prepared_topology_edit();
+            REQUIRE(edit->add_processor_node(instance) != 0);
+            REQUIRE(edit->prepare(48000.0, 64) ==
+                    SignalGraph::PreparedTopologyEdit::Result::Prepared);
+            REQUIRE(counts->prepares == 1);
+        }
+        REQUIRE(counts->releases == 1);
+        instance.reset();
+        REQUIRE(counts->destructions == 1);
+    }
+
+    SECTION("quiesced rollback restores a retained instance to base dimensions") {
+        auto counts = std::make_shared<ProcessorLifecycleCounts>();
+        auto instance = pulp::format::ProcessorNodeInstance::create(
+            std::make_unique<LifecycleHostProcessor>(counts));
+        REQUIRE(instance);
+        SignalGraph graph;
+        REQUIRE(graph.add_processor_node(instance) != 0);
+        REQUIRE(graph.prepare(48000.0, 64));
+        {
+            auto edit = graph.begin_prepared_topology_edit();
+            REQUIRE(edit->add_gain_node("candidate") != 0);
+            REQUIRE(edit->prepare_quiesced(96000.0, 128) ==
+                    SignalGraph::PreparedTopologyEdit::Result::Prepared);
+            REQUIRE(counts->prepares == 2);
+            REQUIRE(counts->releases == 1);
+        }
+        REQUIRE(counts->prepares == 3);
+        REQUIRE(counts->releases == 2);
+        graph.release();
+        REQUIRE(counts->releases == 3);
+        graph.clear();
+        instance.reset();
+        REQUIRE(counts->destructions == 1);
+    }
 }
 
 // ── GraphSerializer round-trip ───────────────────────────────────────────

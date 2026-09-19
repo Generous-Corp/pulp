@@ -44,6 +44,9 @@ find_package(Pulp REQUIRED CONFIG)
 add_executable(PulpSDKSmokeSpectralBandMaskProbe spectral_band_mask_probe.cpp)
 target_link_libraries(PulpSDKSmokeSpectralBandMaskProbe PRIVATE Pulp::signal)
 
+add_executable(PulpSDKSmokeUnitDelayProbe unit_delay_probe.cpp)
+target_link_libraries(PulpSDKSmokeUnitDelayProbe PRIVATE Pulp::signal)
+
 # The installed Pulp archives use /MT. CMake initializes this target property
 # from CMAKE_MSVC_RUNTIME_LIBRARY when the target is created, so this checks the
 # real downstream contract rather than merely inspecting PulpConfig.cmake text.
@@ -485,6 +488,28 @@ endif()
 # surfacing later as a broken downstream GPU plugin. Guarded because a non-GPU
 # or minimally-configured SDK need not carry the transport.
 if(TARGET Pulp::gpu-audio)
+    if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+        if(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE)
+            message(FATAL_ERROR
+                "Pulp SDK smoke: installed D15 package claims production "
+                "release eligibility before exhaustive builder provenance")
+        endif()
+        if(NOT TARGET Pulp::gpu-audio-vellum-provider)
+            message(FATAL_ERROR
+                "Pulp SDK smoke: D15 SDK did not recreate its installed "
+                "Pulp::gpu-audio-vellum-provider target")
+        endif()
+        get_property(_pulp_gpu_audio_linked_runtimes GLOBAL PROPERTY
+            PULP_MACHO_LINKED_RUNTIME_DEPENDENCY_TARGETS)
+        if(NOT Pulp::gpu-audio-vellum-provider IN_LIST
+               _pulp_gpu_audio_linked_runtimes)
+            message(FATAL_ERROR
+                "Pulp SDK smoke: the installed Vellum provider is not "
+                "registered for final Mach-O link inspection: "
+                "${_pulp_gpu_audio_linked_runtimes}")
+        endif()
+        unset(_pulp_gpu_audio_linked_runtimes)
+    endif()
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp"
 "#include <pulp/gpu_audio/gpu_audio_transport.hpp>\n"
 "\n"
@@ -499,6 +524,23 @@ if(TARGET Pulp::gpu-audio)
     add_executable(PulpSDKSmokeGpuAudioProbe
         "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp")
     target_link_libraries(PulpSDKSmokeGpuAudioProbe PRIVATE Pulp::gpu-audio)
+    if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+        set_target_properties(PulpSDKSmokeGpuAudioProbe PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-probe/$<CONFIG>")
+        pulp_stage_runtime_dependencies(PulpSDKSmokeGpuAudioProbe)
+        pulp_verify_runtime_dependencies_staged(PulpSDKSmokeGpuAudioProbe)
+
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/no_gpu_audio_probe.cpp"
+            "int main() { return 0; }\n")
+        add_executable(PulpSDKSmokeNoGpuAudioProbe
+            "${CMAKE_CURRENT_BINARY_DIR}/no_gpu_audio_probe.cpp")
+        set_target_properties(PulpSDKSmokeNoGpuAudioProbe PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_CURRENT_BINARY_DIR}/no-gpu-audio-probe/$<CONFIG>")
+        pulp_stage_runtime_dependencies(PulpSDKSmokeNoGpuAudioProbe)
+        pulp_verify_runtime_dependencies_staged(PulpSDKSmokeNoGpuAudioProbe)
+    endif()
 endif()
 
 # Bundle-relocatability helper reachability.

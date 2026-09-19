@@ -5,6 +5,7 @@
 #include "control_static_code_identity.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include "support/control_manifest_fixtures.hpp"
 #include "support/control_runtime_closure_sanitizer.hpp"
 
 #include <algorithm>
@@ -59,21 +60,7 @@ TEST_CASE("trusted host platform identity recognizes only Apple-signed Rosetta r
 }
 #endif
 
-constexpr std::string_view kManifest = R"({
-  "schema": "dev.pulp.control/artifact-manifest@1",
-  "schema_version": 1,
-  "profile": "developer-local",
-  "target": "pulp-control-trusted-host-fixture",
-  "product_name": "Pulp Trusted Host Fixture",
-  "bundle_id": "dev.pulp.test.trusted-host-fixture",
-  "build_id": "build:0123456789abcdef0123456789abcdef",
-  "registry_digest": "70578eae97288609fe384bd2caa1641e62af016127f3abc6e4a3cd754422d584",
-  "endpoint_included": true,
-  "unsafe_runtime_eval_acknowledged": false,
-  "permission_terms": ["implemented", "built", "host_available", "activated", "policy_eligible", "client_granted", "session_live"],
-  "capabilities": ["dev.pulp.instance/read@1"]
-}
-)";
+constexpr std::string_view kManifest = pulp::test::kTrustedHostFixtureManifest;
 
 class Fixture {
   public:

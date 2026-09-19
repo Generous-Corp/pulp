@@ -295,7 +295,7 @@ pack" and bake-layer parameter injection.
 | Lane | What | Use for |
 |------|------|---------|
 | **C++** — `tools/audio/analysis/` (lib `pulp-audio-analysis`, linked by the shipped CLI) + `test/support/` (scenario/stimulus/contract wiring) | Seeded generators, metrics, assertions (incl. `assert_null_near`), `RenderScenario` over `HeadlessHost` (offline render, SR×block matrix), contracts, Audio Doctor (frequency response, THD/THD+N), FFT + windowing | **Required per-PR ctest gates.** Fast, no venv, already CI-wired. |
-| **Python** — `tools/audio/quality-lab/` (`pulp tool install audio-quality-lab`) | Null residual **with alignment** (`estimate_global_lag`/`local_align`), LTAS log-spectral distance (**phase-blind**), spectral flux/centroid, HNR, Theil-Sen slope, Kaiser-sinc resampling, license-guarded corpus + provenance, `regression_net` ratchet | **Advisory/offline**: deep investigation, A/B packs, model fitting, perceptual artifacts. **Not in CI** — it cannot hold a required gate as-is. |
+| **Python** — `tools/audio/quality-lab/` (`pulp tool install audio-quality-lab`) | Null residual **with alignment** (`estimate_global_lag`/`local_align`), LTAS log-spectral distance (**phase-blind**), spectral flux/centroid, HNR, Theil-Sen slope, Kaiser-sinc resampling, license-guarded corpus + provenance, `regression_net` ratchet, opt-in ViSQOL/PEAQ layer (env-path, never bundled) | **Advisory/offline**: deep investigation, A/B packs, perceptual artifacts. **Cannot hold a required gate**: behind `PULP_AUDIO_QUALITY_LAB_GATE=OFF` + an operator-supplied interpreter, and its `quality-lab` label is excluded from the required lane. |
 
 **The closed A/B loop — use it instead of asking a human to listen.** Pulp can
 host a reference plugin offline, render it, render your candidate under identical
@@ -306,13 +306,13 @@ device, nobody listening. Every piece already exists:
 # Reference and candidate, identical stimulus, offline (no DAW, no audio device)
 pulp audio render --plugin Reference.vst3 --out /tmp/ref.wav  --duration-ms 2000 ...
 pulp audio render --plugin Candidate.clap --out /tmp/cand.wav --duration-ms 2000 ...
-# Per-detector, timestamped verdicts (transient smear, dulling, metallic HF, graininess)
-pulp tool run audio-quality-lab -- compare /tmp/ref.wav /tmp/cand.wav
+# ONE curated axis per invocation (--profile, default tonal-balance), NOT timestamped
+pulp tool run audio-quality-lab -- compare /tmp/ref.wav /tmp/cand.wav --profile added-hf
 ```
 
-`core/host/plugin_slot.hpp` (`PluginSlot`: load → prepare → process, VST3/AU/CLAP/LV2)
-and `offline_signal_graph_host.hpp` are the hosting spine; `regression_net.py`
-already shells to `pulp audio render --plugin` to ratchet it. See the
+`compare` runs ONE axis, **no timestamps** (localized output: `run --out-dir`;
+multi-axis: `regression-net`, which does NOT shell to `pulp audio render`).
+`core/host/plugin_slot.hpp` + `offline_signal_graph_host.hpp` are the spine. See the
 [`hosting`](.agents/skills/hosting/SKILL.md) skill. **Caveat:** `pulp audio render`
 is bundle-only — an in-tree `Processor` must be rendered test-side via
 `RenderScenario` and written to WAV first.
@@ -333,16 +333,16 @@ Non-obvious things that cost real time when you don't know them:
   rejection.** Any anti-aliasing measurement that doesn't explicitly pin
   `Kind::linear_phase_fir` (96 dB standard / 140 dB pristine) or `polyphase_iir`
   is measuring the filter, not your DSP.
-- **Deep-dynamic-range measurement is a window problem, and no ordinary window
-  solves it.** The analysis `Window` enum exposes only `{rectangular, hann}`, and
-  Hann's −31.5 dB first side lobe cannot resolve a −100 dB component beside a 0 dB
-  fundamental. Widening it from `core/signal/windowing.hpp` does **not** fix that
-  by itself: blackman is ~−58 dB and **flat_top is only ~−93 dB** (flat_top buys
-  amplitude accuracy, *not* dynamic range) — neither can gate −100 dBc at any FFT
-  length. Only a high-β Kaiser (β≈14, ~−126 dB) could. **Prefer least-squares tone
-  projection**, which sidesteps leakage entirely: prior art is `tone_residual_db()`
-  in `test/test_oversampling_quality.cpp`, which already asserts `< -100 dB` in a
-  passing test.
+- **Deep-dynamic-range measurement is a window problem most windows cannot solve.**
+  The `Window` enum ships **six** members (rectangular, hann, hamming, blackman,
+  flat_top, kaiser), first side lobes −14/−31/−41/−57/−93/−124 dB. **flat_top buys
+  amplitude accuracy, NOT dynamic range**; it, hann and blackman cannot gate
+  −100 dBc at any FFT length. Only `kaiser` at β = 14 can, and only near the tone
+  (a DC pedestal leaves bins 1-3 at ≈−66/−75/−92 dB through any window).
+  **Prefer least-squares tone projection** — no leakage, off-bin frequencies, and
+  **public API** not test-local: `fit_tone`/`tone_residual_db`/`measure_aliasing`
+  in `audio_spectrum.hpp`, asserted `< -100 dB` in `test_oversampling_quality.cpp`
+  (pinning `linear_phase_fir`+`pristine`+x16).
 - **State every analyzer's detection floor, and keep gate thresholds above it.**
   A gate that passes because the measurement cannot see the failure is worse than
   no gate — it fails silently. And **prove the floor, don't derive it**: the usual
@@ -357,10 +357,10 @@ Non-obvious things that cost real time when you don't know them:
   `RenderScenario` is the only path unless you render to WAV first.
 - **`estimate_frequency()` is a zero-crossing detector** and its own doc disclaims
   harmonically dense material. It is not a pitch tracker; a saw will defeat it.
-- **`test_golden_audio.cpp` is not a golden corpus** — it holds computed-expectation
-  tests. There are no stored reference renders and no audio ratchet in CI.
-- **DSP perf is tracked, not gated** (`tools/scripts/bench_diff.py` + committed
-  `planning/bench/*.json`). Perf assertions flake on shared runners.
+- **`test_golden_audio.cpp` is not a golden corpus** (computed expectations). The one
+  committed reference is a byte-exact **determinism** fixture; no quality ratchet.
+- **DSP perf is neither gated nor tracked by `bench_diff.py`** — it diffs UI/GPU
+  frame-timing JSON, not DSP, and is referenced by zero workflows.
 
 ### Thread Model
 
@@ -536,6 +536,15 @@ In the first case the control was *present but misread*: `runs-on` matched 56 fi
 like a healthy instrument — but the same control returns 72 on `main`. **A control that returns
 non-zero only proves the tool ran. Compare its COUNT against the expected target** when the two
 could differ.
+
+**And a control must be sensitive to the SPECIFIC failure you fear, not merely non-zero.**
+`ssh m3 'command -v shipyard …'` reported MISSING (it was installed); its control
+`command -v ghapp` printed `present` — but `ghapp` is a shell *function*, which resolves
+regardless of PATH, so the control could not fail the way the probe did. **A control that
+would still pass when the instrument is broken in the way you fear is decoration.** State
+each control's blind spot. For fleet probes don't hand-roll it:
+`tools/fleet/probe_remote.py --hosts m1,m3 <tool>` (login shell, PATH scan for a real file,
+exits 3 rather than claiming a false absence).
 
 Practical forms:
 
@@ -997,6 +1006,10 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
 - Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
+
+**test-evidence**
+- Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
+  - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
 
 This digest is GENERATED from `docs/status/tools.yaml` by
 `tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.
@@ -1489,6 +1502,49 @@ The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
 one implementation.
 
+**A reused `build-cov` reports WRONG NUMBERS, not just wasted disk — and every
+ordinary check passes while it does.** Reclaiming it is a correctness
+requirement after the branch changes, not only a space one.
+
+Lead with the tell, because nothing else gives it away. In one observed case
+the objects and every `.profraw` were NEWER than the source, all 270 tests
+passed, the diff-cover report listed every changed file, and the number was a
+plausible 82% — comfortably over the gate. The only signal was a line that is
+easy to read past:
+
+```
+warning: 66495 functions have mismatched data     # corrupted
+warning:  9764 functions have mismatched data     # same branch, clean build-cov
+```
+
+`llvm-cov` drops functions it cannot match to a binary, and a dropped function
+reads as UNCOVERED. On byte-identical source with identical diff hunks,
+`label.cpp` scored **70.5% corrupted vs 90.2% clean** — a 20-point swing, in the
+conservative direction here but not guaranteed to be. Compare the mismatch count
+against a known-clean baseline for the same suite; a raw count means nothing on
+its own, since a healthy run already reports thousands.
+
+The mechanism is sharper than "the directory is stale", and worth knowing
+because a clean `build-cov` alone does not protect you:
+
+> **The tests you run must come from the targets you built.**
+
+`local_diff_cover.sh <targets>` builds ONLY the targets you name, while
+`PULP_DIFF_COVER_CTEST_REGEX` selects whatever it matches. A narrow target list
+with a broad regex therefore runs binaries nobody rebuilt — in the case above,
+270 tests ran against 4 rebuilt targets, and the other ~266 binaries still held
+a previous branch's objects. On a clean `build-cov` the same invocation ran 131
+tests, because the stale binaries did not exist to run. That is also why the
+corruption needs a branch switch to appear: within one branch the leftovers
+still match.
+
+So when passing targets, keep the ctest filter inside them, and remove this
+worktree's `build-cov` after switching branches:
+
+```bash
+rm -rf build-cov            # this worktree only; never sweep while other lanes build
+```
+
 **Reclaiming coverage build dirs.** `local_diff_cover.sh` (and shipyard's
 local validation, which runs it) creates a per-worktree `build-cov/` and never
 cleans it. Across many worktrees these accumulate into hundreds of GB and fill
@@ -1809,7 +1865,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `daw-smoke` | Real-DAW (REAPER) functional smoke for reload/editor/format-adapter changes — opt-in, scoped, headless-safe, zero-pollution |
 | `decide` | Ask Daniel a blocking decision as options with a recommendation and honest pros/cons, rather than prose. |
 | `engine` | Query, recommend, and switch the Pulp JS engine backend (QuickJS, JavaScriptCore, V8). |
-| `faust` | Create FAUST DSP plugins in Pulp using offline codegen, pre-generated C++ headers, and the FaustProcessor template wrapper. |
+| `faust` | Create Faust DSP plugins in Pulp using Pulp-owned reference DSPs, optional external code generation, and the FaustProcessor template wrapper. |
 | `forge-app-delivery` | Building and shipping a Forge app (Modular, Instrument, MIDI, FX, and the sequencer work to come) as a signed installer somebody else can actually use. |
 | `forge-modular` | Forge Modular's generator, patch checker, module pack and Forge-worktree seam — the traps that make green results untrue |
 | `friction-report` | Turn a moment of friction — a conflicting PR, a wedged runner, a mysterious red check, a repeated manual chore — into a durable, actionable report. |

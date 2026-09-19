@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections import Counter
 import hashlib
 import json
+import math
 import re
 import shutil
 import statistics
@@ -21,6 +22,7 @@ from .reports import format_summary
 SCHEMA_VERSION = 1
 REPORT_SCHEMA = "pulp-importer-differential-report-v1"
 CORPUS_SCHEMA = "pulp-importer-differential-corpus-v1"
+OBSERVABILITY_SCHEMA = "pulp-importer-observability-v1"
 
 # `layout.styles` rows are positional, so a row is unreadable without the
 # request order that produced it. The capture writes that order into the
@@ -75,6 +77,12 @@ ROOT_CAUSE_ORDER = [
 
 class LabError(RuntimeError):
     pass
+
+
+def percentile(values: list[int], fraction: float) -> int:
+    ordered = sorted(values)
+    return ordered[max(0, min(len(ordered) - 1,
+                               math.ceil(len(ordered) * fraction) - 1))]
 
 
 @dataclass
@@ -664,6 +672,7 @@ def compare_one(
     from_source: str,
     browser_path: Path | None,
     fixture_metadata: dict[str, Any] | None = None,
+    cache_state: str = "unknown",
 ) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=True)
     source_copy_dir = output / "source"
@@ -816,6 +825,52 @@ def compare_one(
         "browser_to_native_import_speedup": round(
             browser_run.elapsed_ms / max(1, native_run.elapsed_ms), 3),
     }
+    # These timings deliberately keep presentation claims fail-closed. The
+    # importer and observer run headlessly and the observer emits a readback;
+    # neither is proof of a real GPU present or native interaction event.
+    observability = {
+        "schema": OBSERVABILITY_SCHEMA,
+        "ttfp": {
+            "value_ms": None,
+            "status": "unverified",
+            "definition": "time to first present",
+            "evidence": "no native present timestamp is emitted by this lab",
+        },
+        "ttni": {
+            "value_ms": None,
+            "status": "unverified",
+            "definition": "time to native interactive",
+            "evidence": "no interaction-ready event is emitted by this lab",
+        },
+        "ttni_proxy": {
+            "value_ms": native_run.elapsed_ms,
+            "status": "measured",
+            "definition": "time to native import process completion",
+            "evidence": "import process completion is a proxy, not interaction readiness",
+        },
+        "ifnf": {
+            "value_ms": None,
+            "status": "readback-only",
+            "definition": "import to first validated native frame",
+            "evidence": "CPU/readback render completion cannot establish first native GPU frame",
+        },
+        "cache_state": {
+            "identity": cache_state,
+            "status": "declared" if cache_state in ("cold", "warm") else "unverified",
+            "source": "caller-declared; never inferred from elapsed time",
+            "scope": "importer-differential-lab",
+            "dimensions": {
+                "source": "not-measured",
+                "browser": "not-measured",
+                "pulp_import": "not-measured",
+                "asset_decode": "not-measured",
+                "graphite_resource": "not-applicable",
+                "pipeline": "not-applicable",
+                "dawn_device": "not-applicable",
+                "readback": "not-measured",
+            },
+        },
+    }
     report = {
         "schema": REPORT_SCHEMA,
         "version": SCHEMA_VERSION,
@@ -838,6 +893,12 @@ def compare_one(
         "source_recognition": recognition,
         "unsupported_dynamic_features": blockers,
         "timings": timings,
+        "observability": observability,
+        "receipt_paths": {
+            "fixture_report": "comparison/report.json",
+            "browser_capture": "browser/capture.json",
+            "native_readback": "candidate/render.png",
+        },
         "comparison": {
             "structural": structural,
             "geometry": geometry,
@@ -950,5 +1011,24 @@ def aggregate_reports(
                 report["promotion"].get("production_promotion_enabled", False)
                 for report in reports)
             else "evaluated"),
+        "observability": {
+            "ttfp": {"value_ms": None, "status": "unverified"},
+            "ttni": {"p50_ms": None, "p95_ms": None, "status": "unverified"},
+            "ttni_proxy": {
+                "p50_ms": round(statistics.median([
+                    report.get("observability", {}).get("ttni_proxy", {}).get(
+                        "value_ms", report["timings"]["native_import_ms"])
+                    for report in reports]), 1) if reports else None,
+                "p95_ms": percentile([
+                    report.get("observability", {}).get("ttni_proxy", {}).get(
+                        "value_ms", report["timings"]["native_import_ms"])
+                    for report in reports], 0.95) if reports else None,
+                "status": "measured" if reports else "unverified",
+            },
+            "ifnf": {"value_ms": None, "status": "readback-only"},
+            "cache_states": sorted({
+                report.get("observability", {}).get("cache_state", {}).get(
+                    "identity", "unknown") for report in reports}),
+        },
         "ranked_gaps": ranked,
     }

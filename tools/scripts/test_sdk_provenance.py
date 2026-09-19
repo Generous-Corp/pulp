@@ -37,7 +37,9 @@ class SdkProvenanceTests(unittest.TestCase):
         (self.build / "CMakeCache.txt").write_text(
             "PULP_TRACING:BOOL=OFF\n"
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
-            "PULP_ENABLE_INSPECTOR:BOOL=ON\n",
+            "PULP_ENABLE_INSPECTOR:BOOL=ON\n"
+            "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE\n"
+            "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=FALSE\n",
             encoding="utf-8",
         )
         subprocess.run(["git", "init", "-q", self.source], check=True)
@@ -137,6 +139,36 @@ class SdkProvenanceTests(unittest.TestCase):
         with self.assertRaises(provenance.ProvenanceError) as caught:
             self.marker()
         self.assertIn("tracing=OFF", str(caught.exception))
+
+    def test_development_vellum_d15_cannot_mint_release_provenance(self) -> None:
+        # Control: a build without D15 mints the production marker.
+        self.assertTrue(self.marker()["distribution_eligible"])
+
+        cache = (self.build / "CMakeCache.txt").read_text(encoding="utf-8")
+        cache = cache.replace(
+            "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE",
+            "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=TRUE",
+        )
+        (self.build / "CMakeCache.txt").write_text(cache, encoding="utf-8")
+        with self.assertRaisesRegex(
+            provenance.ProvenanceError, "Vellum D15.*development-only"
+        ):
+            self.marker()
+
+    def test_release_eligible_flag_alone_cannot_mint_d15_provenance(self) -> None:
+        cache = (self.build / "CMakeCache.txt").read_text(encoding="utf-8")
+        cache = cache.replace(
+            "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE",
+            "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=TRUE",
+        ).replace(
+            "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=FALSE",
+            "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=TRUE",
+        )
+        (self.build / "CMakeCache.txt").write_text(cache, encoding="utf-8")
+        with self.assertRaisesRegex(
+            provenance.ProvenanceError, "not yet supported by the production archive"
+        ):
+            self.marker()
 
     def test_verify_rejects_a_marker_claiming_a_traced_release(self) -> None:
         marker = self.marker()
@@ -296,7 +328,9 @@ class SdkProvenanceTests(unittest.TestCase):
         (self.build / "CMakeCache.txt").write_text(
             "PULP_TRACING:BOOL=OFF\n"
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
-            "PULP_ENABLE_INSPECTOR:BOOL=OFF\n",
+            "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
+            "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE\n"
+            "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=FALSE\n",
             encoding="utf-8",
         )
         with self.assertRaisesRegex(provenance.ProvenanceError, "inspector=ON"):
@@ -309,7 +343,9 @@ class SdkProvenanceTests(unittest.TestCase):
         (self.build / "CMakeCache.txt").write_text(
             "PULP_TRACING:BOOL=OFF\n"
             "PULP_ENABLE_AUDIO_PROBES:BOOL=OFF\n"
-            "PULP_ENABLE_INSPECTOR:BOOL=OFF\n",
+            "PULP_ENABLE_INSPECTOR:BOOL=OFF\n"
+            "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE\n"
+            "PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE:INTERNAL=FALSE\n",
             encoding="utf-8",
         )
         subprocess.run(

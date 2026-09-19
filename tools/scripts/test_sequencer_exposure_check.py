@@ -21,6 +21,7 @@ from sequencer_exposure_check import (
     _load_base_transition_with_receipt,
     _load_sequencer_trailers,
     _read_ledger_at_anchor,
+    _mechanical_version_paths,
     _semantic_added_paths,
     assemble_ledger,
     is_ledger_path,
@@ -957,6 +958,7 @@ def main() -> int:
             "owned_paths": [
                 "docs/status/gpu-vellum-handoff.yaml",
                 "docs/validation/gpu-handoff-provenance/receipt.json",
+                "tools/agent-capabilities/contract-history.json",
                 "inspect/src/control_generated_sibling.cpp",
             ],
         })
@@ -964,6 +966,7 @@ def main() -> int:
         for regenerated_path in (
             "docs/status/gpu-vellum-handoff.yaml",
             "docs/validation/gpu-handoff-provenance/receipt.json",
+            "tools/agent-capabilities/contract-history.json",
         ):
             transition_errors = validate_transition(
                 generated_base, generated_base, [regenerated_path]
@@ -1463,6 +1466,101 @@ def main() -> int:
         worktree, _, worktree_errors = load_ledger_from_worktree(split_lane)
         if worktree_errors or not same_ledger(worktree, base_document):
             raise AssertionError(f"worktree read drifted from history: {worktree_errors}")
+
+    # A mechanical version rewrite of a declared artifact is not an exposure
+    # decision, so it must not demand a ledger row -- but the exemption is
+    # scoped to the DIFF, not the path, and the controls below are what prove
+    # that. Without the second and third, this would be indistinguishable from
+    # quietly un-watching the file.
+    with tempfile.TemporaryDirectory() as mechanical_tmp:
+        mech_root = Path(mechanical_tmp)
+        git(mech_root, "init", "-q")
+        git(mech_root, "config", "user.email", "selftest@example.com")
+        git(mech_root, "config", "user.name", "selftest")
+        mech_path = "docs/status/pulp-tooling-disposition.json"
+        write(mech_root, mech_path, json.dumps(
+            {"entries": {"plugin_registrations": [
+                {"name": "claude-plugin:pulp", "disposition": "pulp-owned",
+                 "version": "0.457.3", "catalog_version": "0.457.3"}]}},
+            indent=2) + "\n")
+        git(mech_root, "add", mech_path)
+        git(mech_root, "commit", "-q", "-m", "seed disposition map")
+        mech_base = git(mech_root, "rev-parse", "HEAD").strip()
+
+        # 1. version-only rewrite -> recognised as mechanical
+        write(mech_root, mech_path, json.dumps(
+            {"entries": {"plugin_registrations": [
+                {"name": "claude-plugin:pulp", "disposition": "pulp-owned",
+                 "version": "0.457.4", "catalog_version": "0.457.4"}]}},
+            indent=2) + "\n")
+        git(mech_root, "add", mech_path)
+        git(mech_root, "commit", "-q", "-m", "bump versions")
+        mech_paths, mech_errors = _mechanical_version_paths(
+            mech_root, mech_base, [mech_path], "HEAD"
+        )
+        if mech_errors or mech_path not in mech_paths:
+            raise AssertionError(
+                f"version-only rewrite not recognised as mechanical: {mech_paths}, {mech_errors}"
+            )
+        _CHECK_TALLY["clean"] += 1
+
+        # 2. CONTROL: a non-version edit to the SAME file must NOT be mechanical.
+        #    Without this, test 1 would also pass if the path were simply
+        #    exempted outright, which is the bug this design avoids.
+        nonver_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, mech_path, json.dumps(
+            {"entries": {"plugin_registrations": [
+                {"name": "claude-plugin:pulp", "disposition": "candidate-shared-later",
+                 "version": "0.457.4", "catalog_version": "0.457.4"}]}},
+            indent=2) + "\n")
+        git(mech_root, "add", mech_path)
+        git(mech_root, "commit", "-q", "-m", "change a disposition")
+        nonver_paths, nonver_errors = _mechanical_version_paths(
+            mech_root, nonver_base, [mech_path], "HEAD"
+        )
+        if nonver_errors or mech_path in nonver_paths:
+            raise AssertionError(
+                "control: a disposition change was treated as a mechanical version "
+                f"rewrite, so the exemption is not diff-scoped: {nonver_paths}"
+            )
+        _CHECK_TALLY["calibrated"] += 1
+
+        # 3. CONTROL: an undeclared path is never mechanical, however it changes.
+        other = "docs/status/some-other-artifact.json"
+        other_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, other, '{\n  "version": "1.0.1"\n}\n')
+        git(mech_root, "add", other)
+        git(mech_root, "commit", "-q", "-m", "undeclared artifact")
+        other_paths, _ = _mechanical_version_paths(
+            mech_root, other_base, [other], "HEAD"
+        )
+        if other in other_paths:
+            raise AssertionError(
+                "control: an undeclared path was exempted, so the map is not consulted"
+            )
+        _CHECK_TALLY["calibrated"] += 1
+
+    # The watch itself: a watched path stays red unless the transition is
+    # mechanical, and goes green when it is.
+    mech_current = copy.deepcopy(valid)
+    watched_path = "docs/status/pulp-tooling-disposition.json"
+    mech_current["rows"][0]["owned_paths"] = [watched_path]
+    mech_base_doc = copy.deepcopy(mech_current)
+    red = validate_transition(
+        mech_base_doc, mech_current, [watched_path], mechanical_version_paths=set()
+    )
+    if not any(watched_path in error for error in red):
+        raise AssertionError(
+            f"control: a watched path changed with no covering row passed: {red}"
+        )
+    green = validate_transition(
+        mech_base_doc, mech_current, [watched_path],
+        mechanical_version_paths={watched_path},
+    )
+    if any(watched_path in error for error in green):
+        raise AssertionError(
+            f"a mechanical version rewrite still demanded a ledger row: {green}"
+        )
 
     print(
         "sequencer exposure checker selftest: OK "

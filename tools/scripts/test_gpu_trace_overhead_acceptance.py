@@ -1087,6 +1087,130 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MODULE.a2t_scope_inventory(Path("/repo"), "HEAD")
 
+    def test_scope_history_base_rejects_nonancestor(self):
+        with self.assertRaisesRegex(ValueError, "not an ancestor of source"):
+            MODULE._validate_a2t_scope_history_base(ROOT, MODULE.A2T_SCOPE_BASE)
+
+    def test_scope_history_base_rejects_second_parent_only_commit(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        with mock.patch.object(
+            MODULE, "A2T_SCOPE_HISTORY_BASE", MODULE.A2T_SCOPE_BASE
+        ):
+            with self.assertRaisesRegex(ValueError, "first-parent chain"):
+                MODULE._validate_a2t_scope_history_base(ROOT, head)
+
+    def test_scope_history_window_rejects_empty_walk(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        manifest = MODULE._load_a2t_scope_manifest(ROOT, head)
+        with mock.patch.object(MODULE, "A2T_SCOPE_HISTORY_BASE", head):
+            with self.assertRaisesRegex(ValueError, "window is empty"):
+                MODULE._a2t_scope_touching_revision_ids(
+                    ROOT, head, manifest["scope_paths"]
+                )
+
+    def test_scope_history_limit_names_repin_cause(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        manifest = MODULE._load_a2t_scope_manifest(ROOT, head)
+        with mock.patch.object(MODULE, "A2T_SCOPE_HISTORY_LIMIT", 1):
+            with self.assertRaisesRegex(
+                ValueError, "pinned A2T scope history base is .*re-pin"
+            ):
+                MODULE._a2t_scope_touching_revision_ids(
+                    ROOT, head, manifest["scope_paths"]
+                )
+
+    def test_rolling_history_pin_cannot_change_authority_results(self):
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        first = MODULE.a2t_scope_inventory(ROOT, head)
+        with mock.patch.object(
+            MODULE,
+            "A2T_SCOPE_HISTORY_BASE",
+            "e5a5217f3ebe0a2ee47b778fd2c393d4b1194cf3",
+        ):
+            second = MODULE.a2t_scope_inventory(ROOT, head)
+        authority_fields = (
+            "base_revision",
+            "path_deltas",
+            "producer_prefixes_checked",
+            "a2t_scoped_producer_paths",
+            "no_a2t_scoped_producer_delta",
+            "non_a2t_product_producers",
+        )
+        for field in authority_fields:
+            self.assertEqual(first[field], second[field])
+        first_authority_bytes = json.dumps(
+            {field: first[field] for field in authority_fields},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        second_authority_bytes = json.dumps(
+            {field: second[field] for field in authority_fields},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        self.assertEqual(first_authority_bytes, second_authority_bytes)
+        self.assertNotEqual(
+            first["scope_touching_revision_window"],
+            second["scope_touching_revision_window"],
+        )
+
+    def test_scope_touching_history_keeps_headroom_under_its_limit(self):
+        """The bounded-history limit must be raised before traffic reaches it.
+
+        The count this guards is a property of repository history, not of the
+        contract: the scope covers shared paths that unrelated changes touch, so
+        it climbs whether or not anything GPU-related happens. When it reaches
+        the limit the resulting failure points away from the cause -- a merge ref
+        carries one scope-touching commit more than the main it merges, so main
+        keeps passing at the limit while every pull request fails at once. This
+        fails first, and while there is still room to act.
+        """
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        headroom = MODULE.a2t_scope_history_headroom(ROOT, head)
+        # Positive control: a shallow or disconnected checkout walks to zero, and
+        # a zero would satisfy the bound below while proving nothing ran.
+        self.assertGreater(
+            headroom["count"], 0,
+            "scope-touching walk returned no revisions: the checkout has no "
+            "connected history, so this guard measured nothing",
+        )
+        self.assertLessEqual(
+            headroom["count"], headroom["budget"],
+            f"A2T scope-touching history is at {headroom['count']} revisions of "
+            f"a {headroom['limit']} limit, past the "
+            f"{MODULE.A2T_SCOPE_HEADROOM_RATIO:.0%} mark. Re-pin "
+            "A2T_SCOPE_HISTORY_BASE to a protected-main first-parent commit, "
+            "retaining roughly 25% of the window. Do not move A2T_SCOPE_BASE "
+            "or raise A2T_SCOPE_HISTORY_LIMIT to re-arm this timer.",
+        )
+
+    def test_scope_path_count_keeps_headroom_under_its_limit(self):
+        """The scope-path limit must be raised before surfaces reach it.
+
+        Same growth shape as the history bound and the same silent ending: the
+        derived scope widens as surfaces are added, and the limit announces
+        nothing until a configure fails on it. Measured against the derived
+        scope rather than the manifest, so a scope that grows past its limit
+        fails here whether or not the manifest has been regenerated.
+        """
+        head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
+        headroom = MODULE.a2t_scope_path_headroom(ROOT, head)
+        # Positive control: discovery against an empty or unreadable tree yields
+        # no paths, and zero satisfies the maximum below while proving nothing
+        # was measured.
+        self.assertGreater(
+            headroom["count"], 0,
+            "derived A2T scope is empty: discovery measured nothing, so the "
+            "bound below proves nothing",
+        )
+        self.assertLessEqual(
+            headroom["count"], headroom["budget"],
+            f"derived A2T scope is at {headroom['count']} paths of a "
+            f"{headroom['limit']} limit, past the "
+            f"{MODULE.A2T_SCOPE_HEADROOM_RATIO:.0%} mark. Raise "
+            "A2T_SCOPE_PATH_LIMIT in gpu_trace_overhead_acceptance.py.",
+        )
+
     def test_scope_manifest_matches_authoritative_current_path_contract(self):
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
         manifest = MODULE._load_a2t_scope_manifest(ROOT, head)

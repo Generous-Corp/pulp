@@ -117,8 +117,48 @@ A2T_ANALYZER_SOURCE_PATHS = {
     "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
 }
 A2T_SCOPE_MANIFEST_PATH = "tools/scripts/gpu_trace_overhead_scope.json"
+# Immutable authority for scope discovery, accepted implementation identity,
+# blob deltas, and producer attribution.  It must never move for history cost.
 A2T_SCOPE_BASE = "d694994433aec73396caffd8bb10bdc77e15379f"
+# Rolling diagnostic-history pin.  Re-pin on protected main when the 75%
+# headroom guard fires, retaining roughly 25% of the bounded window.
+A2T_SCOPE_HISTORY_BASE = "441026872035bf3fe38b9e07024e20af3219e4b6"
 A2T_INTEGRATED_PATCH_EQUIVALENT = "bc1cfaa0aacc881da4c3753ca9d3862f55b571c9"
+
+# How many scope-touching revisions the rolling-base-to-source window may carry.
+# This only keeps the per-revision work finite; it says nothing about whether the
+# immutable authority scope is right. The distinction matters because the count
+# it bounds is a property of repository history, not of this contract: the 63
+# scope paths include shared
+# surfaces -- docs/reference/cli.md, docs/status/cli-commands.yaml,
+# docs/status/gpu-vellum-handoff.yaml -- that ordinary unrelated changes touch, so
+# the count climbs on its own. It was 50 when the scope was pinned on 2026-08-29
+# and 128 by 2026-09-15, roughly 4.6 a day.
+#
+# A limit sized to the count of the day is therefore a fuse, and it burns down
+# quietly. At 128 it took seventeen days, and the failure it produced pointed away
+# from the cause: main sits AT the limit and still passes, while every pull request
+# fails, because a merge ref adds its own scope-touching commit on top of an
+# already-full main. That reads as unrelated branches breaking one GPU test.
+# a2t_scope_history_headroom() is the warning this lacked -- it fails while there
+# is still room and names A2T_SCOPE_HISTORY_BASE as the pin to move, rather than
+# letting the limit be discovered by every open pull request at once.
+#
+# The ceiling above it is cost, not correctness: the walk runs about 49ms a
+# revision and the suite drives four of them, so the measured ctest budget in
+# test_ctest_measured_budgets.py must be re-measured before raising this much
+# further.
+A2T_SCOPE_HISTORY_LIMIT = 512
+
+# How many paths the derived A2T scope may carry. Unlike the stamp and producer
+# bounds this shares the history limit's growth shape -- the scope widens as
+# surfaces are added, and nothing announces the approach -- so it carries the
+# same headroom guard. It measured 63 of 128 on 2026-09-15.
+A2T_SCOPE_PATH_LIMIT = 128
+
+# The share of either A2T limit that may be consumed before its headroom guard
+# fails, chosen so the remaining room is months of ordinary traffic, not days.
+A2T_SCOPE_HEADROOM_RATIO = 0.75
 A2T_SEMANTIC_IDENTIFIERS = (
     "pulp.trace-gpu-analysis.v1",
     "pulp_gpu_startup_breakdown",
@@ -167,6 +207,12 @@ A2T_PRODUCER_AUTHORITY_SOURCE_PATHS = {A3_SCOPE_AUTHORITY_PATH}
 PRODUCT_PRODUCER_ROOTS = (
     "core/runtime", "core/render", "core/view", "core/format", "inspect",
 )
+# How many product source files may carry a PULP_TRACE_ call site before
+# discovery is treated as unbounded. This one tracks how widely the product is
+# instrumented, so it climbs only when trace call sites are added: 5 at the
+# scope base and 6 at HEAD on 2026-09-15. Far enough from the limit that naming
+# it is the whole fix.
+PRODUCT_PRODUCER_DISCOVERY_LIMIT = 128
 PRODUCER_SOURCE_ANNOTATION = '"gpu_evidence_id"'
 PRODUCT_TRACE_MACROS = {
     "PULP_TRACE_SCOPE",
@@ -251,6 +297,12 @@ HUMAN_REVIEW_SCHEMA_PATH = (
 HUMAN_REVIEW_PATH_PREFIX = "docs/validation/gpu-trace-overhead/human-reviews/"
 HUMAN_REVIEW_MAX_BYTES = 256 * 1024
 PROVIDER_MANIFEST_PATH = "tools/deps/manifest.json"
+# A generation stamp holds one asset digest and nothing else, so this rejects a
+# file that is something else entirely rather than bounding a growing quantity.
+# A sha256 hex digest is 64 characters whatever the asset, so the real content is
+# 65 bytes with its newline and cannot grow. Fixed by construction: no headroom
+# guard applies, and raising it would only widen what counts as a stamp.
+PROVIDER_STAMP_MAX_BYTES = 128
 SKIA_PROVIDER_TOP_LEVEL = frozenset({
     ".skia-asset-sha256", "VERSION.md", "build", "include", "lib",
     "modules", "share",
@@ -1636,7 +1688,7 @@ def _provider_generation_authority(
     manifest_sha256, pinned_digests = _pinned_provider_asset_digests(
         dependency_name
     )
-    if len(stamp_bytes) > 128 or asset_sha256 not in pinned_digests:
+    if len(stamp_bytes) > PROVIDER_STAMP_MAX_BYTES or asset_sha256 not in pinned_digests:
         raise ValueError(
             f"{dependency_name} provider generation is not pinned by the manifest"
         )
@@ -2897,7 +2949,10 @@ def _product_producer_paths(
         line.removeprefix(prefix) for line in completed.stdout.splitlines()
         if line.startswith(prefix)
     }
-    if len(candidates) > 128 or any(path not in tracked for path in candidates):
+    if (
+        len(candidates) > PRODUCT_PRODUCER_DISCOVERY_LIMIT
+        or any(path not in tracked for path in candidates)
+    ):
         raise ValueError(f"product GPU producer discovery at {revision} is unsafe or unbounded")
     producers: dict[str, tuple[str, ...]] = {}
     for path in candidates:
@@ -3243,7 +3298,7 @@ def authoritative_a2t_scope_paths(
         repository, source_revision, producer_paths
     )
     paths = (accepted_paths | A2T_FIXED_SCOPE_PATHS | discovered) - producer_paths
-    if len(paths) > 128 or any(
+    if len(paths) > A2T_SCOPE_PATH_LIMIT or any(
         path not in base_tracked and path not in source_tracked for path in paths
     ):
         raise ValueError("derived A2T scope is missing, unsafe, or unbounded")
@@ -3334,6 +3389,73 @@ def path_limited_changed_paths(
     return sorted({path for path in changed_paths if path in scope_paths})
 
 
+def _validate_a2t_scope_history_base(
+    repository: Path, source_revision: str
+) -> None:
+    """Prove the rolling history pin is ordered and on source's first parent."""
+    for older, newer, message in (
+        (
+            A2T_SCOPE_BASE,
+            A2T_SCOPE_HISTORY_BASE,
+            "A2T authority base is not an ancestor of the rolling history base",
+        ),
+        (
+            A2T_SCOPE_HISTORY_BASE,
+            source_revision,
+            "rolling A2T scope history base is not an ancestor of source",
+        ),
+    ):
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", older, newer],
+            cwd=repository, check=False, capture_output=True, text=True,
+        )
+        if ancestor.returncode != 0:
+            raise ValueError(message)
+
+    first_parent = subprocess.run(
+        ["git", "rev-list", "--first-parent", source_revision],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if (
+        first_parent.returncode != 0
+        or A2T_SCOPE_HISTORY_BASE not in first_parent.stdout.splitlines()
+    ):
+        raise ValueError(
+            "rolling A2T scope history base is not on the protected-main "
+            "first-parent chain"
+        )
+
+
+def _a2t_scope_touching_revision_ids(
+    repository: Path, source_revision: str, paths: list[str]
+) -> list[str]:
+    _validate_a2t_scope_history_base(repository, source_revision)
+    history = subprocess.run(
+        [
+            "git", "rev-list", "--first-parent", "--reverse",
+            f"{A2T_SCOPE_HISTORY_BASE}..{source_revision}", "--", *paths,
+        ],
+        cwd=repository, check=False, capture_output=True, text=True,
+    )
+    if history.returncode != 0:
+        raise ValueError("cannot walk the rolling A2T scope-touching history window")
+    revisions = history.stdout.splitlines()
+    if not revisions:
+        raise ValueError(
+            "rolling A2T scope history window is empty; re-pin "
+            "A2T_SCOPE_HISTORY_BASE to an earlier protected-main first-parent commit"
+        )
+    if len(revisions) > A2T_SCOPE_HISTORY_LIMIT:
+        raise ValueError(
+            f"pinned A2T scope history base is {len(revisions)} scope-touching "
+            f"revisions behind source, over the {A2T_SCOPE_HISTORY_LIMIT} limit; "
+            "re-pin A2T_SCOPE_HISTORY_BASE on protected main"
+        )
+    if any(not valid_lower_hex(revision, 40) for revision in revisions):
+        raise ValueError("rolling A2T scope history contains an invalid revision")
+    return revisions
+
+
 def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any]:
     """Recompute the immutable-base-to-source, path-scoped A2T tree delta."""
     if not valid_lower_hex(source_revision, 40):
@@ -3382,18 +3504,9 @@ def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any
     if not deltas:
         raise ValueError("A2T path-scoped tree delta is empty")
 
-    history = subprocess.run(
-        [
-            "git", "rev-list", "--first-parent", "--reverse",
-            f"{base_revision}..{source_revision}", "--", *paths,
-        ],
-        cwd=repository, check=False, capture_output=True, text=True,
+    revisions = _a2t_scope_touching_revision_ids(
+        repository, source_revision, paths
     )
-    revisions = history.stdout.splitlines() if history.returncode == 0 else []
-    if not revisions or len(revisions) > 128 or any(
-        not valid_lower_hex(revision, 40) for revision in revisions
-    ):
-        raise ValueError("cannot derive bounded A2T scope-touching history")
     touching: list[dict[str, Any]] = []
     scope_set = set(paths)
     for revision in revisions:
@@ -3428,13 +3541,53 @@ def a2t_scope_inventory(repository: Path, source_revision: str) -> dict[str, Any
         },
         "accepted_plan_implementation": accepted,
         "base_revision": base_revision,
+        "history_base_revision": A2T_SCOPE_HISTORY_BASE,
         "source_revision": source_revision,
         "path_deltas": deltas,
-        "scope_touching_revisions": touching,
+        "scope_touching_revision_window": {
+            "method": "rolling-base-to-source first-parent path-scoped history",
+            "revisions": touching,
+        },
         "producer_prefixes_checked": producer_prefixes,
         "a2t_scoped_producer_paths": producer_paths,
         "no_a2t_scoped_producer_delta": not producer_paths,
         "non_a2t_product_producers": external_producers,
+    }
+
+
+
+def a2t_scope_history_headroom(
+    repository: Path, source_revision: str
+) -> dict[str, Any]:
+    """Report the scope-touching revision count against its bounded limit.
+
+    Exposed as a value rather than left inside a2t_scope_inventory so the limit
+    can be checked without walking every revision to rebuild the inventory.
+    """
+    manifest = _load_a2t_scope_manifest(repository, source_revision)
+    count = len(_a2t_scope_touching_revision_ids(
+        repository, source_revision, manifest["scope_paths"]
+    ))
+    return {
+        "count": count,
+        "limit": A2T_SCOPE_HISTORY_LIMIT,
+        "headroom": A2T_SCOPE_HISTORY_LIMIT - count,
+        "budget": int(A2T_SCOPE_HISTORY_LIMIT * A2T_SCOPE_HEADROOM_RATIO),
+    }
+
+
+def a2t_scope_path_headroom(
+    repository: Path, source_revision: str
+) -> dict[str, Any]:
+    """Report the derived A2T scope path count against its bounded limit."""
+    paths, _accepted, _external = authoritative_a2t_scope_paths(
+        repository, source_revision
+    )
+    return {
+        "count": len(paths),
+        "limit": A2T_SCOPE_PATH_LIMIT,
+        "headroom": A2T_SCOPE_PATH_LIMIT - len(paths),
+        "budget": int(A2T_SCOPE_PATH_LIMIT * A2T_SCOPE_HEADROOM_RATIO),
     }
 
 

@@ -51,6 +51,32 @@ authorizes maintenance routing only; it does not authorize Pulp consumption,
 downstream cutover, or implementation before the corresponding Vellum
 acknowledgement.
 
+## A test-manifest line can cross a capability family
+
+`vellum_expansion_watch_check.py` matches changed paths against per-family
+selectors, and `visual-proof-harness` owns `test/cmake/view_widget_bridge_tests.cmake`
+outright. Registering **any** new test target in that manifest crosses the family
+— including a control-plane or audio test with no screenshot, golden, capture or
+render surface anywhere in it — so the change needs its own append-only event
+under `.github/vellum-expansion-watch-events/`.
+
+The failure reads as a false positive and is not one:
+
+```
+watch event family coverage differs; affected=['visual-proof-harness'] covered=[]
+```
+
+Two things make it hard to place. The checker reports the family, never the path
+that selected it, so grep the selector lists in `vellum_expansion_watch_check.py`
+for each changed path rather than guessing from the family's name. And an event
+file is only counted once it is **committed** — the checker reads the diff, not
+the working tree, so writing the JSON and re-running reports the identical
+failure and reads as a rejected event.
+
+The event's `capability_families` must equal the affected set exactly, and its
+`rationale` should name the single line that crossed the selector, so a reader
+can tell a manifest registration apart from a real harness change.
+
 ## GPU doctor boundary
 
 Pulp owns the `pulp doctor gpu` CLI/MCP adapters, typed GPU-health evidence,
@@ -427,6 +453,39 @@ and the regeneration is owed. Regenerating is not optional politeness — the
 identities are invalid until you do, and every tier says so:
 
 ```sh
+python3 tools/scripts/gpu_handoff_provenance.py resolve   # preferred: decides the branch below
+```
+
+`resolve` runs the whole sequence from a committed merge: it regenerates pinned
+to `HEAD` — a commit that already exists, because the receipt names its own
+source commit and pinning to the commit the write is about to create cannot
+converge — then decides whether anything actually moved, and proves the receipt
+binds the ledger it was written beside with a control on a mutated ledger that
+must come back False.
+
+**The baseline is HEAD, not `origin/main`.** Regeneration always rewrites the
+receipt's `source_commit`, so a diff is never by itself evidence of movement;
+and a branch that already re-pinned its ledger differs from main *for a reason
+that is not movement*, so taking main as the baseline calls an inert merge a
+re-pin and commits the churn it was supposed to prevent. The question is only
+whether regeneration changed what HEAD committed.
+
+| Signal | Verdict | What `resolve` does |
+|---|---|---|
+| regeneration changes the ledger HEAD committed | `MOVED` | keeps it; reports `repaired N identity fields` |
+| ledger unchanged, HEAD's receipt already binds it | `CHURN` | keeps HEAD's bytes; writes and commits nothing |
+| ledger unchanged, HEAD's receipt does not bind it | `REBIND` | rewrites the receipt only — a text merge that took one side of the pair |
+| ledger unchanged, receipt would change in a field that cannot move on an unmoved ledger | refuses (exit 3) | that is a human edit |
+
+It also refuses (exit 2) while `MERGE_HEAD` is present or the index holds
+unmerged entries, on an unclean canonical path, and (exit 3) when
+`regenerate-me` survives regeneration — which means the driver poisoned a field
+`write` does not rewrite, and no repair command clears it. Add `--commit` to
+land the result, and `--json` for the verdict as data.
+
+The manual form remains available and is what `resolve` performs:
+
+```sh
 python3 tools/scripts/gpu_handoff_provenance.py write --source-commit HEAD --receipt
 git commit docs/status/gpu-vellum-handoff.yaml \
            docs/validation/gpu-handoff-provenance/receipt.json
@@ -437,14 +496,27 @@ changes that path's owning revision and re-stales the row just repaired. Drop
 `--receipt` and the ledger is repaired while the receipt stays bound to bytes
 that no longer exist — green locally, red in CI.
 
+**`check` answers the binding question, and it is the only thing that does.**
+The identity tiers compare pins against Git; none of them reads the receipt, so
+every pinned identity can match while the receipt names a ledger that no longer
+exists. `check` therefore compares `sha256(ledger)` against the receipt's
+`handoff_sha256` unconditionally — not behind a flag — and prints
+`RECEIPT …` plus a nonzero exit when they disagree, or `the receipt binds this
+ledger` when they agree. When no receipt is present it says so loudly rather
+than exiting 0 on a claim it never examined.
+
 Two limits worth knowing before trusting the driver:
 
-- **A clone that never ran `setup.sh` has no driver**, because Git resolves
-  `merge=<name>` against *local* config that no clone carries. The attribute is
-  still present and the merge still conflicts as text, so such a checkout gets
-  the old hand-resolution rather than anything worse. The failure is silent,
-  which is why `install-githooks.sh` registers the driver every run rather than
-  only on first setup.
+- **A checkout that never ran `setup.sh` has no driver**, because Git resolves
+  `merge=<name>` against *local* config that no clone carries — and it does not
+  error on a name it cannot resolve, it falls back to the ordinary text merge in
+  silence. A checkout bootstrapped *before* the driver landed is the same state
+  and the likelier one: the attribute is there, so the automation looks
+  installed while every sweep re-conflicts. `gpu_ledger_sentinel_check.py` now
+  reports that directly — it reads the routed paths out of `.gitattributes` and
+  asks Git whether the name resolves — so the pre-push hook and `gates.sh` both
+  fail with `install-githooks.sh` as the repair. Re-running the installer is
+  idempotent and takes a second.
 - **GitHub's server-side merge does not run merge drivers.** A pull request can
   still show `CONFLICTING` on github.com while the same merge is clean locally.
   Merge `origin/main` into the branch, regenerate, and push.
@@ -481,3 +553,22 @@ The event is a new JSON file directly under
 claiming the affected families sorted. Coverage is compared for **equality**,
 not containment: claiming a family the diff does not touch fails the same way
 omitting one does.
+
+## Refreshing the ledger pulls this skill into skill-sync
+
+The repair for a stale pin edits `docs/status/gpu-vellum-handoff.yaml`, and that
+path is mapped to this skill in `tools/scripts/skill_path_map.json`. So a change
+that never intended to touch Vellum routing — refreshing one registry-digest
+literal inside a pinned validator script such as
+`tools/scripts/test_release_artifact_contents.py` — fails three gates in a chain,
+each naming something further from the edit than the last:
+
+1. the ctest, as `gpu-recipe-catalog-selftest`, for a stale row;
+2. the pre-push `gpu-handoff-pin` guard, once the ledger is behind the pin;
+3. `skill-sync`, once the ledger is regenerated, for `pulp-vellum-change-routing`.
+
+Expect the third rather than discovering it: the regeneration is mechanical and
+carries no routing decision, so either record what the pinned edit taught you
+here, or declare it with `Skill-Update: skip skill=pulp-vellum-change-routing
+reason="..."` on a commit in the range. Do not resolve it by reverting the ledger
+refresh — that puts step 1 back.

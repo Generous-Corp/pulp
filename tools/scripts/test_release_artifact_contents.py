@@ -33,6 +33,26 @@ spec.loader.exec_module(rac)
 
 VERSION = "9.8.7"
 ROOT = SCRIPT.parents[2]
+CONTROL_REGISTRY_DIGEST_INCLUDE = (
+    ROOT / "inspect" / "include" / "pulp" / "inspect" / "control_registry_digest.inc"
+)
+
+
+def canonical_control_registry_digest() -> str:
+    """Read the checked-in registry digest straight from its canonical include.
+
+    The digest is derived from the capability registry, so a copy of it here
+    would have to be retyped on every registry change. Reading the include
+    keeps this suite's oracle independent of the resolver under test without
+    pinning a value that moves.
+    """
+    match = re.search(
+        r'"([0-9a-f]{64})"',
+        CONTROL_REGISTRY_DIGEST_INCLUDE.read_text(encoding="utf-8"),
+    )
+    assert match, f"no registry digest in {CONTROL_REGISTRY_DIGEST_INCLUDE}"
+    return match.group(1)
+
 INSTALL_RULES = SCRIPT.parents[1] / "cmake" / "PulpInstallRules.cmake"
 IMPORT_DESIGN_RUNTIME_MANIFEST = (
     SCRIPT.parents[1] / "import-design" / "browser_capture" / "runtime_manifest.txt"
@@ -425,7 +445,7 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
         ), mock.patch.object(rac, "__file__", str(Path(td) / "release_artifact_contents.py")):
             self.assertEqual(
                 rac._control_registry_digest(),
-                "70578eae97288609fe384bd2caa1641e62af016127f3abc6e4a3cd754422d584",
+                canonical_control_registry_digest(),
             )
 
     def test_cli_contract_tracks_import_design_runtime_manifest(self) -> None:
@@ -1095,6 +1115,27 @@ class ReleaseArtifactContentsTests(unittest.TestCase):
             with self.assertRaisesRegex(rac.ContentError, "retired-target"):
                 rac.verify_platform(
                     root, "darwin-arm64", VERSION, SOURCE_SHA, native_signatures=False
+                )
+
+    def test_negative_control_rejects_development_vellum_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sdk = set(
+                rac.required_sdk_members(
+                    "darwin-arm64", rac.DEFAULT_MATRIX, VERSION
+                )
+            )
+            sdk.add(rac.VELLUM_D15_DEVELOPMENT_RUNTIME_MEMBER)
+            path = root / rac.sdk_asset_name("darwin-arm64")
+            write_archive(
+                path, sdk, as_zip=False, platform="darwin-arm64"
+            )
+            with self.assertRaisesRegex(
+                rac.ContentError, "development-only Vellum D15 runtime"
+            ):
+                rac.verify_sdk_archive(
+                    path, "darwin-arm64", VERSION, SOURCE_SHA,
+                    rac.DEFAULT_MATRIX,
                 )
 
     def test_negative_control_unexpected_cli_payload_fires(self) -> None:

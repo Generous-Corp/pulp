@@ -73,6 +73,35 @@ make_repo() {
     echo "$d"
 }
 
+# A PATH containing exactly the tools format_changed.sh shells out to, and
+# provably NOT clang-format. `PATH=/usr/bin:/bin` is an ASSUMPTION about the
+# host, not a construction: /usr/bin/clang-format is absent on macOS and present
+# (v18) on Ubuntu, so the "no binary" cases below silently stopped testing
+# absence on Linux while staying green on the macOS gate. Build the directory
+# instead, then prove it is clang-format-free before asserting anything about
+# what happens when none is found.
+make_sandbox_path() {
+    local dir="$1" t src
+    mkdir -p "$dir"
+    for t in cat diff git grep head printf sed sort; do
+        src="$(command -v "$t" 2>/dev/null)" || continue
+        [ -n "$src" ] && ln -sf "$src" "$dir/$t"
+    done
+    echo "$dir"
+}
+
+# The control for every "no clang-format" assertion. If this fails, the cases
+# below are measuring a host that HAS a binary, and their verdicts mean nothing.
+expect_sandbox_is_bare() { # <name> <sandbox-bin-dir>
+    local found
+    found="$(PATH="$2" command -v clang-format 2>/dev/null || true)"
+    if [ -z "$found" ]; then
+        ok "$1"
+    else
+        bad "$1" "sandbox PATH still resolves clang-format at $found — the absence was never created"
+    fi
+}
+
 # run <repo> <fake-dir> [args...]  → stdout+stderr in $out, exit in $rc
 run() {
     local repo="$1" fake="$2"; shift 2
@@ -98,7 +127,18 @@ echo "format_changed.sh self-tests"
 
 # ── no binary anywhere → exit 3 with install guidance ───────────────────────
 repo="$(make_repo)"
-out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="" PULP_CLANG_FORMAT_CANDIDATES="" \
+# An explicit --binary/PULP_CLANG_FORMAT that does not exist. resolve_binary
+# short-circuits on it, so this never reaches the PATH lookup — deterministic on
+# every host, and the case the next block cannot cover.
+out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="$repo/missing-clang-format" PULP_CLANG_FORMAT_CANDIDATES="" \
+    /bin/bash "$SCRIPT" --base main 2>&1)"; rc=$?
+expect_rc "explicit missing binary → exit 3" 3
+
+# Nothing named clang-format anywhere on PATH, which is the branch the case above
+# short-circuits past. The control proves the sandbox really is bare first.
+sandbox="$(make_sandbox_path "$repo/sandbox-bin")"
+expect_sandbox_is_bare "no-clang-format control: the sandbox PATH really has none" "$sandbox"
+out="$(cd "$repo" && PATH="$sandbox" PULP_CLANG_FORMAT="" PULP_CLANG_FORMAT_CANDIDATES="" \
     /bin/bash "$SCRIPT" --base main 2>&1)"; rc=$?
 expect_rc "no clang-format → exit 3" 3
 expect_out "no clang-format → names the pinned major" "pinned major 21"
@@ -173,13 +213,66 @@ expect_rc "external/ + .md + .py changes → nothing to format" 0
 expect_out "external/ + .md + .py changes → says so" "nothing to format"
 rm -rf "$repo"
 
-# ── another major warns but still runs ──────────────────────────────────────
+# ── another major: refused under --check, allowed for a local rewrite ───────
+# A binary of the wrong major reflows differently, so under --check its answer
+# would not be about .clang-format as pinned. That is the "measurement that
+# succeeds without measuring" shape, so --check must refuse rather than emit a
+# verdict. A rewrite still runs: the warning is visible and the author owns it.
 repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
 printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
 out="$(cd "$repo" && PATH=/usr/bin:/bin FAKE_MAJOR=19 FAKE_LOG="$repo/fake.log" PULP_CLANG_FORMAT="$fake/clang-format" \
     PULP_CLANG_FORMAT_CANDIDATES="" /bin/bash "$SCRIPT" --base main --check 2>&1)"; rc=$?
-expect_rc "clang-format 19 → still runs (exit 1 on the dirty line)" 1
-expect_out "clang-format 19 → warns about the pinned major" "expected clang-format 21"
+expect_rc "clang-format 19 under --check → exit 3, not a verdict" 3
+expect_out "clang-format 19 under --check → labelled INFRASTRUCTURE" "INFRASTRUCTURE"
+expect_out "clang-format 19 under --check → names the pinned major" "not the pinned major 21"
+expect_no_out "clang-format 19 under --check → emits no formatting diff" "+F:"
+rm -rf "$repo"
+
+# The same binary must NOT block a local rewrite — only the verdict path.
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+out="$(cd "$repo" && PATH=/usr/bin:/bin FAKE_MAJOR=19 FAKE_LOG="$repo/fake.log" PULP_CLANG_FORMAT="$fake/clang-format" \
+    PULP_CLANG_FORMAT_CANDIDATES="" /bin/bash "$SCRIPT" --base main 2>&1)"; rc=$?
+expect_rc "clang-format 19 rewriting → still runs (exit 0)" 0
+expect_out "clang-format 19 rewriting → warns about the pinned major" "not the pinned major 21"
+if grep -Fq "F:CHANGED" "$repo/core/a.cpp"; then
+    ok "clang-format 19 rewriting → the changed line was actually formatted"
+else
+    bad "clang-format 19 rewriting → the changed line was actually formatted" "core/a.cpp was not rewritten"
+fi
+rm -rf "$repo"
+
+# ── an unwritable report is INFRASTRUCTURE, never a clean verdict ───────────
+# Every tally is a `grep -c` over one report file, so an unreadable report and a
+# clean tree produce identical counts. Without a sentinel the tool reports
+# "clean" for a scan it never ran — a missing TMPDIR and a full disk both land
+# here. This is the exact shape the wrapper exists to prevent elsewhere.
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+out="$(cd "$repo" && TMPDIR=/tmp/pulp-no-such-dir-$$/ PATH=/usr/bin:/bin FAKE_LOG="$repo/fake.log" \
+    PULP_CLANG_FORMAT="$fake/clang-format" PULP_CLANG_FORMAT_CANDIDATES="" \
+    /bin/bash "$SCRIPT" --base main --check 2>&1)"; rc=$?
+expect_rc "unwritable report → exit 2, not a verdict" 2
+expect_out "unwritable report → labelled INFRASTRUCTURE" "INFRASTRUCTURE"
+expect_no_out "unwritable report → never claims the tree is clean" "clean on touched lines"
+rm -rf "$repo"
+
+# ── a formatter that dies under --check is INFRASTRUCTURE, not "misformatted" ─
+# Piping the formatter straight into diff hides its exit status behind diff's,
+# so a dead formatter reads as "every line of your file is wrong".
+repo="$(make_repo)"; fake="$repo/fake"; make_fake "$fake"
+cat > "$fake/clang-format" <<'EOF'
+#!/usr/bin/env bash
+[ "${1:-}" = "--version" ] && { echo "clang-format version 21.0.0 (fake)"; exit 0; }
+echo "boom" >&2; exit 1
+EOF
+chmod +x "$fake/clang-format"
+printf 'line1\nline2\nCHANGED\nline4\nline5\n' > "$repo/core/a.cpp"
+out="$(cd "$repo" && PATH=/usr/bin:/bin PULP_CLANG_FORMAT="$fake/clang-format" \
+    PULP_CLANG_FORMAT_CANDIDATES="" /bin/bash "$SCRIPT" --base main --check 2>&1)"; rc=$?
+expect_rc "formatter dies under --check → exit 2, not exit 1" 2
+expect_out "formatter dies under --check → reported as a failure, not a diff" "clang-format failed"
+expect_no_out "formatter dies under --check → emits no formatting verdict" "need formatting"
 rm -rf "$repo"
 
 # ── path restriction ────────────────────────────────────────────────────────

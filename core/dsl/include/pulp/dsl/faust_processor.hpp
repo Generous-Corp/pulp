@@ -11,13 +11,14 @@
 // FaustProcessor acts as both the FAUST UI builder (to reflect parameters)
 // and the Pulp Processor (to map into StateStore and process audio).
 
-#include <pulp/dsl/dsl_processor.hpp>
-#include <pulp/dsl/faust_base.hpp>
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
+#include <pulp/dsl/dsl_processor.hpp>
+#include <pulp/dsl/faust_base.hpp>
 #include <string>
 #include <vector>
 
@@ -145,7 +146,8 @@ private:
     std::map<std::string, std::string> metadata_;
 };
 
-// Template wrapper: T must be a FAUST-generated class derived from ::dsp.
+// Template wrapper: FaustDsp must be default-constructible and implement the
+// FAUST dsp ABI by deriving from ::dsp.
 // This is the concrete FaustProcessor that ships as a Pulp Processor.
 template <typename FaustDsp>
 class FaustProcessor : public DslProcessor {
@@ -240,9 +242,20 @@ public:
     }
 
     void prepare(const format::PrepareContext& ctx) override {
+        prepared_ = false;
         sample_rate_ = ctx.sample_rate;
         max_block_size_ = ctx.max_buffer_size;
+        const int num_in = bus_layout_.num_inputs;
+        const int num_out = bus_layout_.num_outputs;
+        if (num_in < 0 || num_out < 0 || max_block_size_ < 0) {
+            input_ptrs_.clear();
+            output_ptrs_.clear();
+            return;
+        }
+        input_ptrs_.assign(static_cast<std::size_t>(num_in), nullptr);
+        output_ptrs_.assign(static_cast<std::size_t>(num_out), nullptr);
         faust_dsp_->init(static_cast<int>(sample_rate_));
+        prepared_ = ctx.input_channels == num_in && ctx.output_channels == num_out;
     }
 
     void process(
@@ -252,30 +265,45 @@ public:
         midi::MidiBuffer&,
         const format::ProcessContext& ctx) override
     {
+        int n = ctx.num_samples;
+        if (n <= 0) {
+            if (output.num_samples() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+                output.clear();
+                return;
+            }
+            n = static_cast<int>(output.num_samples());
+        }
+
+        const int num_in = bus_layout_.num_inputs;
+        const int num_out = bus_layout_.num_outputs;
+        const auto frames = static_cast<std::size_t>(n);
+        if (!prepared_ || input.num_channels() != input_ptrs_.size() ||
+            output.num_channels() != output_ptrs_.size() || n > max_block_size_ ||
+            frames > output.num_samples() || (num_in > 0 && frames > input.num_samples())) {
+            output.clear();
+            return;
+        }
+
         // Sync StateStore → FAUST zone pointers
         for (const auto& zone : ui_.zones()) {
             *zone.zone_ptr = state().get_value(zone.param_id);
         }
 
-        int n = ctx.num_samples;
-        if (n <= 0) n = static_cast<int>(output.num_samples());
-
-        // Build raw pointer arrays for FAUST compute()
-        const int num_in = bus_layout_.num_inputs;
-        const int num_out = bus_layout_.num_outputs;
-
-        // FAUST expects float** — build arrays on stack for small channel counts
-        std::vector<float*> in_ptrs(num_in);
-        std::vector<float*> out_ptrs(num_out);
+        if (n == 0) {
+            faust_dsp_->compute(0, input_ptrs_.data(), output_ptrs_.data());
+            return;
+        }
 
         for (int ch = 0; ch < num_in; ++ch) {
-            in_ptrs[ch] = const_cast<float*>(input.channel_ptr(static_cast<std::size_t>(ch)));
+            input_ptrs_[static_cast<std::size_t>(ch)] =
+                const_cast<float*>(input.channel_ptr(static_cast<std::size_t>(ch)));
         }
         for (int ch = 0; ch < num_out; ++ch) {
-            out_ptrs[ch] = output.channel_ptr(static_cast<std::size_t>(ch));
+            output_ptrs_[static_cast<std::size_t>(ch)] =
+                output.channel_ptr(static_cast<std::size_t>(ch));
         }
 
-        faust_dsp_->compute(n, in_ptrs.data(), out_ptrs.data());
+        faust_dsp_->compute(n, input_ptrs_.data(), output_ptrs_.data());
     }
 
     void release() override {
@@ -290,6 +318,9 @@ private:
     PulpFaustMeta meta_;
     double sample_rate_ = 48000.0;
     int max_block_size_ = 512;
+    bool prepared_ = false;
+    std::vector<float*> input_ptrs_;
+    std::vector<float*> output_ptrs_;
 
     static std::string sanitize_id(const std::string& name) {
         std::string result;

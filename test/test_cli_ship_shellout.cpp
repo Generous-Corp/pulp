@@ -1368,6 +1368,29 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign rejects an explicit stale Vellum D15 artifact",
+                 "[cli][shellout][ship][sign][vellum-d15]") {
+    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    auto root = make_fake_project("sign-path-vellum-d15", true);
+    auto app = root.parent_path() / (root.filename().string() + "-outside.app");
+    fs::create_directories(app / "Contents" / "Frameworks");
+    std::ofstream(app / "Contents" / "Frameworks" / "libvellum-gpu.dylib")
+        << "stale development runtime\n";
+
+    auto r = run_pulp_in(root, {"ship", "sign", "--identity", "Developer ID Application: Fake",
+                                "--path", app.string()});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only Vellum D15"));
+    REQUIRE(contains(combined, "libvellum-gpu.dylib"));
+    REQUIRE_FALSE(contains(combined, "Signing " + app.filename().string()));
+
+    fs::remove_all(app);
+    fs::remove_all(root);
+}
+
 #ifdef __APPLE__
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize --path targets the explicit artifact in dry-run argv",
@@ -1408,6 +1431,26 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     // Must not have produced a notarytool submit line for the app.
     REQUIRE_FALSE(contains(combined, "notarytool submit \"" + appp));
 
+    fs::remove_all(root);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize rejects inspectable stale Vellum D15 input before stapling",
+                 "[cli][shellout][ship][notarize][vellum-d15]") {
+    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    auto root = make_fake_project("notarize-vellum-d15", true);
+    auto package = root.parent_path() / (root.filename().string() + "-outside.pkg");
+    fs::create_directories(package / "Payload");
+    std::ofstream(package / "Payload" / "libvellum-gpu.dylib") << "stale development runtime\n";
+
+    auto r = run_pulp_in(root, {"ship", "notarize", "--path", package.string(), "--staple"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only Vellum D15"));
+    REQUIRE_FALSE(contains(combined, "Stapling "));
+
+    fs::remove_all(package);
     fs::remove_all(root);
 }
 
@@ -1504,6 +1547,27 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     fs::remove_all(root);
 }
 
+TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship share rejects an explicit stale Vellum D15 app",
+                 "[cli][shellout][ship][share][vellum-d15]") {
+    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    auto root = make_fake_project("share-vellum-d15", true);
+    auto app = root.parent_path() / (root.filename().string() + "-outside.app");
+    make_fake_standalone_app(app, "Stale");
+    std::ofstream(app / "Contents" / "MacOS" / "libvellum-gpu.dylib")
+        << "stale development runtime\n";
+
+    auto r = run_pulp_in(root, {"ship", "share", app.string(), "--dry-run"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only Vellum D15"));
+    REQUIRE_FALSE(contains(combined, "share plan"));
+    REQUIRE_FALSE(contains(combined, "Signing app"));
+
+    fs::remove_all(app);
+    fs::remove_all(root);
+}
+
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship share --dry-run notes pkg is already productsigned",
                  "[cli][shellout][ship][share][oneoff]") {
@@ -1573,6 +1637,52 @@ TEST_CASE_METHOD(ShipShelloutFixture,
     REQUIRE_FALSE(fs::exists(root / "artifacts"));
     fs::remove_all(root);
 }
+
+TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship refuses to package a Vellum D15 source build",
+                 "[cli][shellout][ship][sdk-provenance]") {
+    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    auto root = make_fake_project("vellum-d15-package", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=TRUE\n";
+    }
+    auto r = run_pulp_in(root, {"ship", "package"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only Vellum D15"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts"));
+    fs::remove_all(root);
+}
+
+#ifdef __APPLE__
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package rejects stale Vellum D15 bytes when cache is false",
+                 "[cli][shellout][ship][package][vellum-d15]") {
+    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    auto root = make_fake_project("stale-vellum-d15-package", true);
+    {
+        std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
+        cache << "PULP_GPU_AUDIO_HAS_VELLUM_D15:INTERNAL=FALSE\n"
+              << "PULP_SDK_DISTRIBUTION_ELIGIBLE:INTERNAL=TRUE\n";
+    }
+    auto bundle = make_fake_bundle(root, "CLAP", "Stale.clap");
+    fs::create_directories(bundle / "Contents" / "Frameworks");
+    std::ofstream(bundle / "Contents" / "Frameworks" / "libvellum-gpu.dylib")
+        << "stale development runtime\n";
+
+    auto r = run_pulp_in(root, {"ship", "package", "--product", "Stale"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "development-only Vellum D15"));
+    REQUIRE_FALSE(contains(combined, "Packaging Stale"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts" / "Stale-2.3.4.pkg"));
+    REQUIRE_FALSE(fs::exists(root / "artifacts" / "Stale-CLAP-2.3.4.dmg"));
+
+    fs::remove_all(root);
+}
+#endif
 
 // ── Linux packaging CLI routing ──────────────────────────────────────────
 // Regression guard: `pulp ship package` on Linux must invoke the first-party

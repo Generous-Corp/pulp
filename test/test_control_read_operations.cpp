@@ -337,6 +337,8 @@ TEST_CASE("Phase 4 state reads return bounded canonical catalog snapshots",
     CHECK(secret["designation"].getString() == "reset");
     CHECK(secret["isTrigger"].getBool());
     CHECK(secret["rate"].getString() == "audio");
+    CHECK_FALSE(secret.hasObjectMember("audio_rate_modulations"));
+    CHECK_FALSE(secret.hasObjectMember("samples"));
     REQUIRE(secret["labels"].size() == 3);
 
     auto values_only = detail(session.dispatch(encode_control_envelope(

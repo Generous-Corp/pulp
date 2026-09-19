@@ -2002,3 +2002,129 @@ TEST_CASE("Label starts text at the content edge whether or not its cached "
     CHECK(origin_x(*matching) == Catch::Approx(kPaddingLeft));
     CHECK(origin_x(*stale) == Catch::Approx(origin_x(*matching)));
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Typography is geometry: the layout gates only re-solve a tree whose
+// layout generation moved, so a setter that changes what the shaper
+// measures has to move it.
+// ═══════════════════════════════════════════════════════════════════
+
+TEST_CASE("typography that changes the measured box invalidates layout",
+          "[view][widget][label][layout]") {
+    auto changes_layout = [](auto&& mutate) {
+        Label label("Mute / Unmute selection");
+        label.clear_layout_dirty();
+        const auto generation = View::layout_generation();
+        mutate(label);
+        return std::pair{label.layout_dirty(), View::layout_generation() != generation};
+    };
+
+    SECTION("font size") {
+        auto [dirty, moved] = changes_layout([](Label& l) { l.set_font_size(40.0f); });
+        CHECK(dirty);
+        CHECK(moved);
+    }
+    SECTION("font family") {
+        auto [dirty, moved] = changes_layout([](Label& l) { l.set_font_family("JetBrains Mono"); });
+        CHECK(dirty);
+        CHECK(moved);
+    }
+    SECTION("font weight") {
+        auto [dirty, moved] = changes_layout([](Label& l) { l.set_font_weight(700); });
+        CHECK(dirty);
+        CHECK(moved);
+    }
+    SECTION("font style") {
+        auto [dirty, moved] = changes_layout([](Label& l) { l.set_font_style(1); });
+        CHECK(dirty);
+        CHECK(moved);
+    }
+    SECTION("letter spacing") {
+        auto [dirty, moved] = changes_layout([](Label& l) { l.set_letter_spacing(2.0f); });
+        CHECK(dirty);
+        CHECK(moved);
+    }
+    SECTION("line height") {
+        auto [dirty, moved] = changes_layout([](Label& l) { l.set_line_height(2.0f); });
+        CHECK(dirty);
+        CHECK(moved);
+    }
+    SECTION("wrap mode") {
+        auto [dirty, moved] = changes_layout([](Label& l) { l.set_multi_line(true); });
+        CHECK(dirty);
+        CHECK(moved);
+    }
+    SECTION("case transform") {
+        auto [dirty, moved] =
+            changes_layout([](Label& l) { l.set_text_transform(Label::TextTransform::uppercase); });
+        CHECK(dirty);
+        CHECK(moved);
+    }
+}
+
+// The control that keeps the cluster above honest. A materialized React commit
+// replays an element's whole style object when only paint state moved; if an
+// identical write dirtied the tree, every geometry read after one would pay for
+// a full Yoga pass. So the guard is part of the contract, not an optimisation
+// detail — and a test suite that only asserts "the setter dirties" would pass
+// just as happily with the guard deleted.
+TEST_CASE("replaying identical typography leaves the tree clean",
+          "[view][widget][label][layout][perf]") {
+    Label label("Mute / Unmute selection");
+    label.set_font_size(10.5f);
+    label.set_font_weight(500);
+    label.set_letter_spacing(0.3f);
+    label.set_multi_line(false);
+    label.set_text_transform(Label::TextTransform::uppercase);
+    label.clear_layout_dirty();
+
+    const auto generation = View::layout_generation();
+    label.set_font_size(10.5f);
+    label.set_font_weight(500);
+    label.set_letter_spacing(0.3f);
+    label.set_multi_line(false);
+    label.set_text_transform(Label::TextTransform::uppercase);
+
+    CHECK_FALSE(label.layout_dirty());
+    CHECK(View::layout_generation() == generation);
+}
+
+// End to end, on the gate the macOS window host and plugin editor host actually
+// call: a container sized to its text has to re-size when that text is
+// restyled. layout_children_if_needed() elides the pass while the applied
+// generation matches the tree's, so this reads the whole path rather than the
+// setter's bookkeeping.
+TEST_CASE("a container re-sizes when its label is restyled under the layout gate",
+          "[view][widget][label][layout]") {
+    View root;
+    root.set_bounds({0, 0, 320, 480});
+    auto panel = std::make_unique<View>();
+    panel->flex().direction = FlexDirection::column;
+    panel->flex().preferred_width = 230.0f;
+    View* box = panel.get();
+    auto row = std::make_unique<Label>("Mute / Unmute selection");
+    Label* label = row.get();
+    box->add_child(std::move(row));
+    root.add_child(std::move(panel));
+
+    root.layout_children();
+    root.mark_layout_current();
+    const float small = box->bounds().height;
+    REQUIRE(small > 0.0f);
+
+    SECTION("restyled: the box grows without anyone forcing a pass") {
+        label->set_font_size(40.0f);
+        root.layout_children_if_needed();
+        CHECK(box->bounds().height > small);
+        // and it is the real solved height, not merely "some larger number"
+        const float gated = box->bounds().height;
+        root.layout_children();
+        CHECK(box->bounds().height == gated);
+    }
+
+    SECTION("negative control: an identical restyle leaves the box alone") {
+        label->set_font_size(label->font_size());
+        root.layout_children_if_needed();
+        CHECK(box->bounds().height == small);
+    }
+}

@@ -6863,6 +6863,16 @@ C++ baker), one partial (native-JS), and one non-sharer (Swift).
 
 ## The materialized runtime pays its metadata cost on EVERY React commit
 
+Captured state geometry is valid only for the captured child structure. When
+a matched state gains or loses children, the materialized runtime releases
+that state's positional boxes and captured line boxes back to authored layout.
+The React registry publishes the latest normalized layout props so a retained
+container can recover its intrinsic height and fixed positioning. Bindings
+outside that state remain active, and an unchanged state keeps its captured
+geometry. Keep the dynamic-layout tests and the commit-cost tests together:
+an extra conditional row must not inherit another row's captured position,
+and the fix must not rebuild the registry index for every binding.
+
 `materialized_runtime_entry.mjs` reapplies import metadata from
 `resetAfterCommit` — every commit, not just mount. Two shapes inside it are
 therefore multiplied by the commit rate, and both read as "fine" in isolation:

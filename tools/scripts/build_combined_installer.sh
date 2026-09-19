@@ -50,8 +50,8 @@ CLI="${PULP_CPP:-$ROOT/build/tools/cli/pulp-cpp}"
 NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
 HOST_ARCHITECTURES=""
 # Parallel arrays of components.
-declare -a P_KIND P_PATH      # plugins: kind + bundle path
-declare -a A_TITLE A_PATH A_ENT  # apps: choice title + bundle path + entitlements (or "")
+declare -a P_KIND=() P_PATH=()      # plugins: kind + bundle path
+declare -a A_TITLE=() A_PATH=() A_ENT=()  # apps: choice title + bundle path + entitlements (or "")
 declare -a C_TITLE C_DESC C_DEST C_SRC  # content: title + description + install dest + source dir
 declare -a A_GROUP                      # apps: plugin name to nest under ("" = top level)
 declare -a PT_NAME PT_TITLE             # product display titles: bundle name -> title
@@ -99,6 +99,21 @@ fi
 UNINSTALL_IN="${UNINSTALL_IN:-}"
 WELCOME_FILE="${WELCOME_FILE:-}"; LICENSE_FILE="${LICENSE_FILE:-}"
 README_FILE="${README_FILE:-}"; CONCLUSION_FILE="${CONCLUSION_FILE:-}"
+
+# D15 is deliberately development-only. This direct installer recipe bypasses
+# `pulp ship`, so enforce the same contract from the actual input artifacts
+# before signing, notarizing, or creating a package. A future attested provider
+# can replace this exact membership guard with signed provenance.
+for _distribution_input in \
+    ${P_PATH[@]+"${P_PATH[@]}"} \
+    ${A_PATH[@]+"${A_PATH[@]}"}; do
+  [[ -e "$_distribution_input" ]] || continue
+  _d15_runtime="$(find -L "$_distribution_input" -name libvellum-gpu.dylib -print -quit)"
+  if [[ -n "$_d15_runtime" ]]; then
+    echo "[installer] ERROR: development-only Vellum D15 GPU-audio runtime found in $_distribution_input; refusing to package, sign, or notarize" >&2
+    exit 1
+  fi
+done
 
 STAGE="$(mktemp -d)"; mkdir -p "$OUT" "$STAGE/comp"
 trap 'rm -rf "$STAGE"' EXIT   # clean the staging tree on any exit (success, error, signal)
@@ -396,10 +411,10 @@ for ((i=0; i<${#A_TITLE[@]}; i++)); do
   component_plist="$STAGE/$id-components.plist"
   pkgbuild --analyze --root "$r" "$component_plist" >/dev/null
   component_index=0
-  while /usr/libexec/PlistBuddy -c "Print :$component_index" \
+  while /usr/libexec/PlistBuddy -c "Print :${component_index}" \
       "$component_plist" >/dev/null 2>&1; do
     /usr/libexec/PlistBuddy -c \
-      "Set :$component_index:BundleIsRelocatable false" "$component_plist"
+      "Set :${component_index}:BundleIsRelocatable false" "$component_plist"
     component_index=$((component_index + 1))
   done
   [[ "$component_index" -gt 0 ]] || {
