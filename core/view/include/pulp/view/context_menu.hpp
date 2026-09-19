@@ -108,7 +108,9 @@ public:
     /// Current scroll offset in pixels, clamped to `[0, max_scroll]`. Exposed
     /// so a test can assert that a row was brought into view rather than
     /// asserting on painted pixels.
-    float scroll_offset() const { return scroll_; }
+    float scroll_offset() const {
+        return scroll_;
+    }
 
     /// Compute the menu's own size and row positions, with no canvas and no
     /// paint. This is the sizing entry point: it asks the metrics delegate

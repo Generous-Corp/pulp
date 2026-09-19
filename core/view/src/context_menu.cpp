@@ -105,7 +105,8 @@ ContextMenu::MenuLayout ContextMenu::layout() const {
     if (b.height > 0.0f) {
         const float avail = std::max(kRowHeight, b.height - kEdgeMargin * 2.0f);
         height = std::min(height, avail);
-        if (y + height > b.height - kEdgeMargin) y = anchor_.y - height;
+        if (y + height > b.height - kEdgeMargin)
+            y = anchor_.y - height;
         const float y_max = std::max(kEdgeMargin, b.height - height - kEdgeMargin);
         y = std::clamp(y, kEdgeMargin, y_max);
     }
@@ -185,10 +186,13 @@ void ContextMenu::move_hover_to_edge(bool last) {
 }
 
 void ContextMenu::scroll_row_into_view(int index) {
-    if (index < 0) return;
+    if (index < 0)
+        return;
     const MenuLayout lay = layout();
-    if (lay.max_scroll <= 0.0f) return;
-    if (index >= static_cast<int>(lay.rows.size())) return;
+    if (lay.max_scroll <= 0.0f)
+        return;
+    if (index >= static_cast<int>(lay.rows.size()))
+        return;
     const Rect& r = lay.rows[static_cast<size_t>(index)];
     const float top = lay.box.y + lay.border;
     const float bottom = lay.box.y + lay.box.height - lay.border;
@@ -329,7 +333,7 @@ void ContextMenu::paint(canvas::Canvas& canvas) {
         }
     }
 
-    canvas.restore();  // row clip
+    canvas.restore(); // row clip
 
     canvas.restore();
 }
@@ -339,10 +343,12 @@ void ContextMenu::on_mouse_event(const MouseEvent& event) {
     if (event.is_wheel) {
         // Matches the text-editor idiom: the host's delta is already pixels.
         const MenuLayout lay = layout();
-        if (lay.max_scroll <= 0.0f) return;
+        if (lay.max_scroll <= 0.0f)
+            return;
         const float before = scroll_;
         scroll_ = std::clamp(scroll_ + event.scroll_delta_y, 0.0f, lay.max_scroll);
-        if (scroll_ != before) request_repaint();
+        if (scroll_ != before)
+            request_repaint();
         return;
     }
 

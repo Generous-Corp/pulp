@@ -436,13 +436,12 @@ void scroll_to_end(ContextMenu& menu) {
 constexpr float kShortRoot = 200.0f;
 constexpr int kOverflowRows = 20;
 
-}  // namespace
+} // namespace
 
-TEST_CASE("ContextMenu taller than its overlay is capped to fit",
-          "[view][context-menu]") {
+TEST_CASE("ContextMenu taller than its overlay is capped to fit", "[view][context-menu]") {
     auto root = make_short_root(kShortRoot);
-    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
-                                   numbered_items(kOverflowRows), {});
+    auto* menu =
+        ContextMenu::show(root.get(), {kAnchorX, kAnchorY}, numbered_items(kOverflowRows), {});
     const auto lay = menu->layout();
 
     // Control: the scenario must really overflow, or everything below is
@@ -455,13 +454,11 @@ TEST_CASE("ContextMenu taller than its overlay is capped to fit",
     REQUIRE(lay.max_scroll > 0.0f);
 }
 
-TEST_CASE("ContextMenu that already fits neither caps nor scrolls",
-          "[view][context-menu]") {
+TEST_CASE("ContextMenu that already fits neither caps nor scrolls", "[view][context-menu]") {
     // The negative control for the whole feature: on a roomy overlay the
     // panel keeps its natural height and the wheel does nothing.
-    auto root = make_root();  // 400x400
-    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
-                                   numbered_items(4), {});
+    auto root = make_root(); // 400x400
+    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY}, numbered_items(4), {});
     const auto lay = menu->layout();
     REQUIRE(lay.content_height <= 400.0f);
     REQUIRE(lay.box.height == lay.content_height);
@@ -475,10 +472,10 @@ TEST_CASE("ContextMenu that already fits neither caps nor scrolls",
 TEST_CASE("ContextMenu wheel scrolls a capped menu and clamps at both ends",
           "[view][context-menu]") {
     auto root = make_short_root(kShortRoot);
-    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
-                                   numbered_items(kOverflowRows), {});
+    auto* menu =
+        ContextMenu::show(root.get(), {kAnchorX, kAnchorY}, numbered_items(kOverflowRows), {});
     const float max_scroll = menu->layout().max_scroll;
-    REQUIRE(max_scroll > 0.0f);  // control
+    REQUIRE(max_scroll > 0.0f); // control
 
     menu->on_mouse_event(wheel_by(30.0f, kInsideX, 50.0f));
     REQUIRE(menu->scroll_offset() == 30.0f);
@@ -500,12 +497,14 @@ TEST_CASE("ContextMenu last row of a capped menu is reachable and selects",
     auto root = make_short_root(kShortRoot);
     std::optional<int> got;
     bool fired = false;
-    auto* menu = ContextMenu::show(
-        root.get(), {kAnchorX, kAnchorY}, numbered_items(kOverflowRows),
-        [&](std::optional<int> r) { got = r; fired = true; });
+    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY}, numbered_items(kOverflowRows),
+                                   [&](std::optional<int> r) {
+                                       got = r;
+                                       fired = true;
+                                   });
 
     const int last = kOverflowRows - 1;
-    REQUIRE(menu->layout().max_scroll > 0.0f);  // control
+    REQUIRE(menu->layout().max_scroll > 0.0f); // control
 
     scroll_to_end(*menu);
 
@@ -517,15 +516,14 @@ TEST_CASE("ContextMenu last row of a capped menu is reachable and selects",
 
     menu->on_mouse_event(down_at(kInsideX, row.y + row.height * 0.5f));
     REQUIRE(fired);
-    REQUIRE(got == kOverflowRows);  // ids are 1-based
+    REQUIRE(got == kOverflowRows); // ids are 1-based
 }
 
-TEST_CASE("ContextMenu End key scrolls the last row into view",
-          "[view][context-menu]") {
+TEST_CASE("ContextMenu End key scrolls the last row into view", "[view][context-menu]") {
     auto root = make_short_root(kShortRoot);
-    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
-                                   numbered_items(kOverflowRows), {});
-    REQUIRE(menu->layout().max_scroll > 0.0f);  // control
+    auto* menu =
+        ContextMenu::show(root.get(), {kAnchorX, kAnchorY}, numbered_items(kOverflowRows), {});
+    REQUIRE(menu->layout().max_scroll > 0.0f); // control
     REQUIRE(menu->scroll_offset() == 0.0f);
 
     menu->on_key_event(key_down(KeyCode::end_));
@@ -543,16 +541,15 @@ TEST_CASE("ContextMenu End key scrolls the last row into view",
 
 TEST_CASE("ContextMenu clips its rows to the panel", "[view][context-menu]") {
     auto root = make_short_root(kShortRoot);
-    auto* menu = ContextMenu::show(root.get(), {kAnchorX, kAnchorY},
-                                   numbered_items(kOverflowRows), {});
+    auto* menu =
+        ContextMenu::show(root.get(), {kAnchorX, kAnchorY}, numbered_items(kOverflowRows), {});
     const auto lay = menu->layout();
 
     // Control that the clip is load-bearing: at least one row really does
     // fall outside the panel, so without a clip it would paint over the app.
     bool any_row_outside = false;
     for (const auto& r : lay.rows) {
-        if (r.height > 0.0f &&
-            (r.y < lay.box.y || r.y + r.height > lay.box.y + lay.box.height)) {
+        if (r.height > 0.0f && (r.y < lay.box.y || r.y + r.height > lay.box.y + lay.box.height)) {
             any_row_outside = true;
             break;
         }
@@ -564,9 +561,10 @@ TEST_CASE("ContextMenu clips its rows to the panel", "[view][context-menu]") {
 
     bool clipped_to_panel = false;
     for (const auto& cmd : canvas.commands()) {
-        if (cmd.type != DrawCommand::Type::clip_rect) continue;
-        if (cmd.f[0] == lay.box.x && cmd.f[1] == lay.box.y &&
-            cmd.f[2] == lay.box.width && cmd.f[3] == lay.box.height) {
+        if (cmd.type != DrawCommand::Type::clip_rect)
+            continue;
+        if (cmd.f[0] == lay.box.x && cmd.f[1] == lay.box.y && cmd.f[2] == lay.box.width &&
+            cmd.f[3] == lay.box.height) {
             clipped_to_panel = true;
             break;
         }
