@@ -1005,6 +1005,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
 - Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
+- Validate complete matched GPU-audio trial captures and summarize their declared CPU, latency, transfer, and disposition evidence. → `tools/scripts/gpu_audio_p4_evidence.py`
+  - ⚠ **Cannot see:** Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
 
 **test-evidence**
