@@ -272,7 +272,9 @@ struct ShipShelloutFixture {
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship default help does not require a project directory",
                  "[cli][shellout][ship]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto r = run_pulp_in(fs::temp_directory_path(), {"ship"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
@@ -285,7 +287,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign outside a project directory errors cleanly",
                  "[cli][shellout][ship]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto r = run_pulp_in(fs::temp_directory_path(),
                          {"ship", "sign", "--identity", "fake-id"});
     REQUIRE_FALSE(r.timed_out);
@@ -299,7 +303,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship appcast outside a project errors cleanly",
                  "[cli][shellout][ship]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto r = run_pulp_in(fs::temp_directory_path(),
                          {"ship", "appcast"});
     REQUIRE_FALSE(r.timed_out);
@@ -309,7 +315,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize outside a project errors cleanly",
                  "[cli][shellout][ship]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto r = run_pulp_in(fs::temp_directory_path(), {"ship", "notarize"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code != 0);
@@ -318,7 +326,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship check outside a project errors cleanly",
                  "[cli][shellout][ship]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto r = run_pulp_in(fs::temp_directory_path(), {"ship", "check"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code != 0);
@@ -327,7 +337,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship help does not require a project or build directory",
                  "[cli][shellout][ship][help]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     auto outside = run_pulp_in(fs::temp_directory_path(), {"ship", "--help"});
     REQUIRE_FALSE(outside.timed_out);
@@ -351,7 +363,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package outside a project errors cleanly",
                  "[cli][shellout][ship]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto r = run_pulp_in(fs::temp_directory_path(),
                          {"ship", "package", "--version", "1.0.0"});
     REQUIRE_FALSE(r.timed_out);
@@ -361,7 +375,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship help (or default) enumerates every subcommand",
                  "[cli][shellout][ship][help]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("help", true);
     auto r = run_pulp_in(root, {"ship"});
     REQUIRE_FALSE(r.timed_out);
@@ -380,7 +396,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship rejects unknown subcommands before side effects",
                  "[cli][shellout][ship][help]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("unknown-subcommand", true);
 
     auto r = run_pulp_in(root, {"ship", "spaceship", "--identity", "fake-id"});
@@ -398,7 +416,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship inside project without build cache reports build guidance",
                  "[cli][shellout][ship][issue-643]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("missing-build", false);
 
     auto r = run_pulp_in(root, {"ship", "check"});
@@ -420,7 +440,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship doctor runs without a build dir and shells the readiness script",
                  "[cli][shellout][ship][doctor]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("doctor-no-build", /*with_build_cache=*/false);
     auto scripts = root / "tools" / "scripts";
     fs::create_directories(scripts);
@@ -448,7 +470,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship doctor reports a clear error when the readiness script is missing",
                  "[cli][shellout][ship][doctor]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("doctor-missing-script", /*with_build_cache=*/false);
 
     auto r = run_pulp_in(root, {"ship", "doctor"});
@@ -463,7 +487,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign in project without identity reports signing guidance",
                  "[cli][shellout][ship][issue-643][issue-901]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("missing-identity", true);
     write_signing_doctor_stub(root);
 
@@ -481,7 +507,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign discovers desktop bundles via env and config identities",
                  "[cli][shellout][ship]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("sign-bundles", true);
     write_signing_doctor_stub(root);
     make_fake_bundle(root, "VST3", "FakeShipPlugin.vst3");
@@ -517,7 +545,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign refuses to continue after unattended preflight failure",
                  "[cli][shellout][ship][doctor]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 #ifndef __APPLE__
     SKIP("unattended signing preflight is macOS-only");
 #else
@@ -541,7 +571,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship validates option parser errors before side effects",
                  "[cli][shellout][ship]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("parser-errors", true);
 
     struct ParserCase {
@@ -602,7 +634,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship check reports desktop bundle signing status without credentials",
                  "[cli][shellout][ship]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("check-desktop", true);
     make_fake_bundle(root, "VST3", "CheckMe.vst3");
     make_fake_bundle(root, "CLAP", "CheckMe.clap");
@@ -626,7 +660,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship Android validation paths fail before external tooling",
                  "[cli][shellout][ship][android][issue-643][issue-901]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("android-validation", true);
     // PULP_HOME / ANDROID_STORE_PASS / ANDROID_KEY_PASS isolation now
     // lives on the fixture; no need to scope them locally.
@@ -660,7 +696,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship appcast uses safe defaults and preserves existing invalid feed fallback",
                  "[cli][shellout][ship][appcast]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("appcast-defaults", true);
     auto feed = root / "artifacts" / "defaults.xml";
     fs::create_directories(feed.parent_path());
@@ -689,7 +727,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship appcast writes local feed and rejects remote signing",
                  "[cli][shellout][ship][appcast][issue-643]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("appcast", true);
     auto feed = root / "artifacts" / "updates.xml";
 
@@ -736,7 +776,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship appcast appends local artifact metadata",
                  "[cli][shellout][ship][appcast]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("appcast-local", true);
     auto feed = root / "artifacts" / "updates.xml";
     auto artifact = root / "artifacts" / "FakeShipPlugin-3.0.0.pkg";
@@ -825,7 +867,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship appcast fails closed on invalid local signing keys",
                  "[cli][shellout][ship][appcast]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("appcast-bad-sign", true);
     auto artifact = root / "artifacts" / "FakeShipPlugin-4.0.0.pkg";
     auto feed = root / "artifacts" / "signed.xml";
@@ -854,7 +898,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship android check tolerates empty artifacts directory",
                  "[cli][shellout][ship][android]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("android-empty-artifacts", true);
     fs::create_directories(root / "artifacts");
     {
@@ -875,7 +921,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package with no plugin bundles reports zero artifacts",
                  "[cli][shellout][ship][package]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("package-empty", true);
 
     auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9"});
@@ -891,7 +939,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package on Linux with no plugin bundles reports missing plugins",
                  "[cli][shellout][ship][package][linux-package]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("package-empty-linux", true);
 
     auto r = run_pulp_in(root, {"ship", "package", "--version", "9.9.9"});
@@ -913,7 +963,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package rejects mutually-exclusive --pkg + --dmg",
                  "[cli][shellout][ship][package][macos-7.5]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("pkg-vs-dmg", true);
 
     auto r = run_pulp_in(root,
@@ -934,7 +986,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship release argv parsing surfaces flag errors before side effects",
                  "[cli][shellout][ship][release][macos-7.4]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("release-parse", true);
 
     // Unknown flag — must fail with exit 2 before any pkgbuild invocation.
@@ -964,7 +1018,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship release aborts before later stages when signing fails",
                  "[cli][shellout][ship][release][macos-7.4]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("release-sign-fail", true);
 
     auto r = run_pulp_in(root,
@@ -996,7 +1052,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship release --skip-{sign,package,notarize} runs orchestration to clean exit",
                  "[cli][shellout][ship][release][macos-7.4]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("release-skip-all", true);
 
     auto r = run_pulp_in(root, {"ship", "release", "--target", "macos",
@@ -1026,7 +1084,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp build --skip-validation without --install is rejected",
                  "[cli][shellout][build][install][macos-7.4b]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("build-skip-no-install", true);
 
     auto r = run_pulp_in(root, {"build", "--skip-validation"});
@@ -1041,7 +1101,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp build --install + --watch is rejected",
                  "[cli][shellout][build][install][macos-7.4b]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("build-install-watch", true);
 
     auto r = run_pulp_in(root, {"build", "--install", "--watch"});
@@ -1066,7 +1128,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship auv3-xcodeproj requires a target name",
                  "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("auv3-xcodeproj-no-target", true);
 
     auto r = run_pulp_in(root, {"ship", "auv3-xcodeproj"});
@@ -1086,7 +1150,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship auv3-xcodeproj rejects unknown --sdk values",
                  "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("auv3-xcodeproj-bad-sdk", true);
 
     auto r = run_pulp_in(root,
@@ -1104,7 +1170,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship auv3-xcodeproj parser rejects missing values and extra positionals",
                  "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("auv3-xcodeproj-parser", true);
 
     const struct {
@@ -1132,7 +1200,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship auv3-xcodeproj --dry-run prints the resolved cmake invocation",
                  "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("auv3-xcodeproj-dry-run", true);
 
     auto r = run_pulp_in(root,
@@ -1172,7 +1242,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize --dry-run with --api-key flags emits notarytool ASC argv",
                  "[cli][shellout][ship][notarize][asc-key]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("notarize-asc-cli", true);
 
     auto r = run_pulp_in(root,
@@ -1199,7 +1271,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize --dry-run reads notary.env via --env-file",
                  "[cli][shellout][ship][notarize][asc-key]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("notarize-asc-envfile", true);
 
     auto env_path = root / "notary.env";
@@ -1228,7 +1302,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize --dry-run CLI flag beats env-file value",
                  "[cli][shellout][ship][notarize][asc-key][precedence]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("notarize-asc-precedence", true);
 
     auto env_path = root / "notary.env";
@@ -1257,7 +1333,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize with no creds reports both lanes in error",
                  "[cli][shellout][ship][notarize][asc-key]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("notarize-no-creds", true);
 
     // Point env override at a non-existent file so the resolver finds
@@ -1280,7 +1358,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize --dry-run falls back to legacy flags when ASC absent",
                  "[cli][shellout][ship][notarize][legacy]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("notarize-legacy", true);
     ScopedEnvVar override("PULP_NOTARY_ENV", (root / "no-such.env").string());
 
@@ -1304,7 +1384,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship auv3-xcodeproj --sdk macosx skips iOS toolchain",
                  "[cli][shellout][ship][auv3-xcodeproj][macos-3.10]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("auv3-xcodeproj-macosx", true);
 
     auto r = run_pulp_in(root,
@@ -1333,7 +1415,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign --path rejects a missing artifact",
                  "[cli][shellout][ship][sign][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("sign-path-missing", true);
 
     auto r = run_pulp_in(root,
@@ -1352,7 +1436,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign --path refuses a .pkg with a productsign pointer",
                  "[cli][shellout][ship][sign][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("sign-path-pkg", true);
     auto pkg = root / "Installer.pkg";
     { std::ofstream out(pkg); out << "not a real pkg"; }
@@ -1371,7 +1457,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship sign rejects an explicit stale Vellum D15 artifact",
                  "[cli][shellout][ship][sign][vellum-d15]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("sign-path-vellum-d15", true);
     auto app = root.parent_path() / (root.filename().string() + "-outside.app");
     fs::create_directories(app / "Contents" / "Frameworks");
@@ -1395,7 +1483,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize --path targets the explicit artifact in dry-run argv",
                  "[cli][shellout][ship][notarize][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("notarize-path", true);
     auto dmg = (root / "PulpDemo-1.2.3.dmg").string();
 
@@ -1416,7 +1506,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize --path rejects a raw .app bundle",
                  "[cli][shellout][ship][notarize][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("notarize-path-app", true);
     auto appp = (root / "Demo.app").string();
 
@@ -1437,7 +1529,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize rejects inspectable stale Vellum D15 input before stapling",
                  "[cli][shellout][ship][notarize][vellum-d15]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("notarize-vellum-d15", true);
     auto package = root.parent_path() / (root.filename().string() + "-outside.pkg");
     fs::create_directories(package / "Payload");
@@ -1457,7 +1551,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship release --dmg builds the disk image and refuses to notarize it unsigned",
                  "[cli][shellout][ship][release][oneoff][hdiutil]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("release-dmg-notarize", true);
     // A standalone .app under build/Standalone is packaged to a .dmg by the
     // package stage; release collects THAT dmg as the distributable.
@@ -1487,7 +1583,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship share requires an input artifact",
                  "[cli][shellout][ship][share][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("share-usage", true);
 
     auto r = run_pulp_in(root, {"ship", "share"});
@@ -1502,7 +1600,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship share rejects a missing and an unsupported input",
                  "[cli][shellout][ship][share][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("share-bad-input", true);
 
     auto missing = run_pulp_in(root,
@@ -1525,7 +1625,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship share --dry-run prints the full plan for an app",
                  "[cli][shellout][ship][share][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("share-dry-app", true);
     auto app = root / "Cube.app";
     make_fake_standalone_app(app, "Cube");
@@ -1549,7 +1651,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship share rejects an explicit stale Vellum D15 app",
                  "[cli][shellout][ship][share][vellum-d15]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("share-vellum-d15", true);
     auto app = root.parent_path() / (root.filename().string() + "-outside.app");
     make_fake_standalone_app(app, "Stale");
@@ -1571,7 +1675,9 @@ TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship share rejects an explicit stale
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship share --dry-run notes pkg is already productsigned",
                  "[cli][shellout][ship][share][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("share-dry-pkg", true);
     auto pkg = root / "Demo.pkg";
     { std::ofstream out(pkg); out << "x"; }
@@ -1589,7 +1695,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship share without an identity refuses to sign an app",
                  "[cli][shellout][ship][share][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("share-no-identity", true);
     auto app = root / "Cube.app";
     make_fake_standalone_app(app, "Cube");
@@ -1609,7 +1717,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship share is macOS-only on other platforms",
                  "[cli][shellout][ship][share][oneoff]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("share-non-apple", true);
     auto r = run_pulp_in(root, {"ship", "share", "whatever.app"});
     REQUIRE_FALSE(r.timed_out);
@@ -1622,7 +1732,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship refuses to package a development SDK build",
                  "[cli][shellout][ship][sdk-provenance]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("development-sdk-package", true);
     {
         std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
@@ -1640,7 +1752,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 
 TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship refuses to package a Vellum D15 source build",
                  "[cli][shellout][ship][sdk-provenance]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("vellum-d15-package", true);
     {
         std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
@@ -1659,7 +1773,9 @@ TEST_CASE_METHOD(ShipShelloutFixture, "pulp ship refuses to package a Vellum D15
 TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package rejects stale Vellum D15 bytes when cache is false",
                  "[cli][shellout][ship][package][vellum-d15]") {
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("stale-vellum-d15-package", true);
     {
         std::ofstream cache(root / "build" / "CMakeCache.txt", std::ios::app);
@@ -1693,7 +1809,9 @@ TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship package on Linux produces a .deb/.tar.gz, not pkgbuild",
                  "[cli][shellout][ship][linux-package][issue-3327]") {
 #if defined(__linux__)
-    if (!binary_exists()) { SKIP("pulp binary not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
     auto root = make_fake_project("linux-deb-route", true);
     make_fake_bundle(root, "VST3", "Foo.vst3");
 

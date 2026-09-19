@@ -177,7 +177,9 @@ pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
 
 TEST_CASE("pulp create without a name fails before project resolution",
           "[cli][create][shellout][issue-643]") {
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     auto r = run_create({"create", "--ci"}, source_root());
 
@@ -189,7 +191,9 @@ TEST_CASE("pulp create without a name fails before project resolution",
 
 TEST_CASE("pulp create rejects standalone output paths inside the checkout",
           "[cli][create][shellout][issue-643]") {
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     auto out_dir = source_root() / "build" / "pulp-create-standalone-policy-reject";
     std::error_code ec;
@@ -215,7 +219,9 @@ TEST_CASE("pulp create rejects standalone output paths inside the checkout",
 
 TEST_CASE("pulp create --in-tree rejects output paths outside examples",
           "[cli][create][shellout][issue-643]") {
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     TempDir tmp("pulp-create-in-tree-policy");
     auto out_dir = tmp.path / "OutsideExamples";
@@ -251,7 +257,9 @@ TEST_CASE("pulp create is not gated by release-publishing credentials",
     // and a security assertion that fails environmentally gets dismissed as
     // noise. So this asserts the scoping directly rather than leaving it
     // implied by that test's exit code.
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     TempDir tmp("pulp-create-doctor-scope");
     ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
@@ -304,7 +312,9 @@ TEST_CASE("pulp create is not gated by release-publishing credentials",
 
 TEST_CASE("pulp create accepts local template kit paths without executing package code",
           "[cli][create][shellout][kit]") {
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     TempDir tmp("pulp-create-template-kit");
     ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
@@ -353,7 +363,9 @@ TEST_CASE("pulp create accepts local template kit paths without executing packag
 
 TEST_CASE("pulp create accepts bare relative local template kit directories",
           "[cli][create][shellout][kit]") {
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     TempDir tmp("pulp-create-template-kit-relative");
     ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
@@ -376,7 +388,9 @@ TEST_CASE("pulp create accepts bare relative local template kit directories",
 
 TEST_CASE("pulp create accepts template kits when curated dependencies are installed",
           "[cli][create][shellout][kit]") {
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     TempDir tmp("pulp-create-template-kit-deps");
     ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
@@ -426,7 +440,9 @@ TEST_CASE("pulp create accepts template kits when curated dependencies are insta
 
 TEST_CASE("pulp create rejects template kits missing core scaffold templates",
           "[cli][create][shellout][kit]") {
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     TempDir tmp("pulp-create-template-kit-missing-cmake");
     ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
@@ -454,7 +470,9 @@ TEST_CASE("pulp create rejects template kits missing core scaffold templates",
 
 TEST_CASE("pulp create resolves built-in template names before same-named local paths",
           "[cli][create][shellout][kit]") {
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     TempDir tmp("pulp-create-template-shadow");
     ScopedEnvVar pulp_home("PULP_HOME", native_path_string(tmp.path / "pulp-home").c_str());
@@ -483,7 +501,9 @@ TEST_CASE("pulp create resolves built-in template names before same-named local 
 
 TEST_CASE("pulp create rejects non-template kits passed as template paths",
           "[cli][create][shellout][kit]") {
-    if (!pulp_binary_exists()) { SKIP("pulp binary not built"); }
+    if (!pulp_binary_exists()) {
+        SKIP("pulp binary not built");
+    }
 
     TempDir tmp("pulp-create-template-kit-reject");
     const auto out_dir = tmp.path / "Rejected";

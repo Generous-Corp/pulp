@@ -340,7 +340,9 @@ private:
 
 TEST_CASE("pulp-import-design reports help and argument diagnostics",
           "[cli][import-design][tool][issue-493]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     SECTION("help exits cleanly") {
         auto r = run_import_design({"--help"});
@@ -441,7 +443,9 @@ TEST_CASE("pulp-import-design reports help and argument diagnostics",
 
 TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
           "[cli][import-design][tool][issue-493][network]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-flags");
     const auto input = tmp.path / "screen.html";
@@ -1112,7 +1116,9 @@ TEST_CASE("pulp-import-design validates phase 0.5 import vocabulary",
 
 TEST_CASE("pulp-import-design export-tokens dry-run emits the built-in theme",
           "[cli][import-design][tool][issue-493]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     auto r = run_import_design({"--export-tokens", "--dry-run"});
 
@@ -1126,7 +1132,9 @@ TEST_CASE("pulp-import-design export-tokens dry-run emits the built-in theme",
 
 TEST_CASE("pulp-import-design writes a web-compat Stitch import to nested outputs",
           "[cli][import-design][tool][issue-493]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-stitch");
     const auto input = tmp.path / "screen.html";
@@ -1172,7 +1180,9 @@ TEST_CASE("pulp-import-design writes a web-compat Stitch import to nested output
 
 TEST_CASE("pulp-import-design handles literal file paths and rejects unsafe URLs",
           "[cli][import-design][tool][issue-493]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-shell-meta");
     const auto sentinel = tmp.path / "sentinel";
@@ -1238,7 +1248,9 @@ TEST_CASE("pulp-import-design handles literal file paths and rejects unsafe URLs
 #ifndef _WIN32
 TEST_CASE("pulp-import-design URL fetch uses a unique temp file and argv-safe curl",
           "[cli][import-design][tool][issue-493][network]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-url-fetch");
     const auto bin = tmp.path / "bin";
@@ -1281,7 +1293,9 @@ TEST_CASE("pulp-import-design URL fetch uses a unique temp file and argv-safe cu
 
 TEST_CASE("pulp-import-design debug report names the default bridge-native mode",
           "[cli][import-design][tool][issue-2439]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-debug");
     const auto input = tmp.path / "screen.html";
@@ -1438,7 +1452,9 @@ std::vector<std::uint8_t> transparent_bleed_png_bytes() {
 
 TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
           "[cli][import-design][tool][figma-plugin][issue-47]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip");
     const auto zip = tmp.path / "smoke.pulp.zip";
@@ -1519,7 +1535,9 @@ TEST_CASE("pulp-import-design auto-unpacks .pulp.zip Figma-plugin exports",
 
 TEST_CASE("pulp-import-design --param-binding-manifest: wiring + error paths",
           "[cli][import-design][tool][figma-plugin][param-binding]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-param-binding");
     const auto zip = tmp.path / "scene.pulp.zip";
@@ -1617,7 +1635,9 @@ TEST_CASE("pulp-import-design --param-binding-manifest: wiring + error paths",
 
 TEST_CASE("pulp-import-design persists .pulp.zip assets beside generated output",
           "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-assets");
     const auto zip = tmp.path / "with-asset.pulp.zip";
@@ -1689,7 +1709,9 @@ TEST_CASE("pulp-import-design emits a self-contained artifact (relative asset pa
     // emitted ui.js must therefore reference copies of its assets placed NEXT
     // TO the output, by output-relative path — never the decode-time absolute
     // location, which silently loses every image on a later render.
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-selfcontained");
     const auto envelope_dir = tmp.path / "decode-scratch";
@@ -1759,7 +1781,9 @@ TEST_CASE("pulp-import-design emits a self-contained artifact (relative asset pa
 
 TEST_CASE("pulp-import-design replaces only marked .pulp.zip asset sidecars on success",
           "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-assets-replace");
     const auto zip = tmp.path / "with-asset.pulp.zip";
@@ -1818,7 +1842,9 @@ TEST_CASE("pulp-import-design replaces only marked .pulp.zip asset sidecars on s
 
 TEST_CASE("pulp-import-design dry-run .pulp.zip extraction stays temporary",
           "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-dry-run");
     const auto zip = tmp.path / "with-asset.pulp.zip";
@@ -1863,7 +1889,9 @@ TEST_CASE("pulp-import-design dry-run .pulp.zip extraction stays temporary",
 
 TEST_CASE("pulp-import-design baked ir-json .pulp.zip uses the figma-plugin parser",
           "[cli][import-design][tool][figma-plugin][issue-47][assets][baked]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-baked-ir");
     const auto zip = tmp.path / "with-asset.pulp.zip";
@@ -1928,7 +1956,9 @@ TEST_CASE("pulp-import-design baked ir-json .pulp.zip uses the figma-plugin pars
 
 TEST_CASE("pulp-import-design keeps .pulp.zip assets beside resolved C++ source output",
           "[cli][import-design][tool][figma-plugin][issue-47][assets][baked]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-cpp-sidecar");
     const auto zip = tmp.path / "valid.pulp.zip";
@@ -1987,7 +2017,9 @@ TEST_CASE("pulp-import-design keeps .pulp.zip assets beside resolved C++ source 
 
 TEST_CASE("pulp-import-design enriches .pulp.zip image metadata before baked C++ emit",
           "[cli][import-design][tool][figma-plugin][assets][baked][fidelity]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-cpp-image-metadata");
     const auto zip = tmp.path / "metadata.pulp.zip";
@@ -2054,7 +2086,9 @@ TEST_CASE("pulp-import-design enriches .pulp.zip image metadata before baked C++
 
 TEST_CASE("pulp-import-design rejects .pulp.zip with no scene.pulp.json",
           "[cli][import-design][tool][figma-plugin][issue-47]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-empty");
     const auto zip = tmp.path / "empty.pulp.zip";
@@ -2083,7 +2117,9 @@ TEST_CASE("pulp-import-design rejects .pulp.zip with no scene.pulp.json",
 
 TEST_CASE("pulp-import-design keeps existing .pulp.zip asset sidecar on extraction failure",
           "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-asset-fail");
     const auto zip = tmp.path / "empty.pulp.zip";
@@ -2114,7 +2150,9 @@ TEST_CASE("pulp-import-design keeps existing .pulp.zip asset sidecar on extracti
 
 TEST_CASE("pulp-import-design preserves existing output and sidecar when staged .pulp.zip parse fails",
           "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-parse-fail");
     const auto zip = tmp.path / "malformed.pulp.zip";
@@ -2139,7 +2177,9 @@ TEST_CASE("pulp-import-design preserves existing output and sidecar when staged 
 
 TEST_CASE("pulp-import-design refuses to replace an unmarked .pulp.zip asset sidecar",
           "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-unmarked-sidecar");
     const auto zip = tmp.path / "with-asset.pulp.zip";
@@ -2178,7 +2218,9 @@ TEST_CASE("pulp-import-design refuses to replace an unmarked .pulp.zip asset sid
 
 TEST_CASE("pulp-import-design restores marked .pulp.zip sidecar when output write fails",
           "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-write-fail");
     const auto zip = tmp.path / "valid.pulp.zip";
@@ -2220,7 +2262,9 @@ TEST_CASE("pulp-import-design restores marked .pulp.zip sidecar when output writ
 
 TEST_CASE("pulp-import-design rolls back .pulp.zip sidecar and C++ files as one transaction",
           "[cli][import-design][tool][figma-plugin][issue-47][assets]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-cpp-write-fail");
     const auto zip = tmp.path / "valid.pulp.zip";
@@ -2319,7 +2363,9 @@ bool make_zip_with_entry(const fs::path& zip_path,
 
 TEST_CASE("pulp-import-design refuses .pulp.zip with oversized filename (issue-50 truncation bypass)",
           "[cli][import-design][tool][figma-plugin][issue-50]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-truncation");
     const auto zip = tmp.path / "evil.pulp.zip";
@@ -2345,7 +2391,9 @@ TEST_CASE("pulp-import-design refuses .pulp.zip with oversized filename (issue-5
 
 TEST_CASE("pulp-import-design refuses .pulp.zip with `..` in entry path",
           "[cli][import-design][tool][figma-plugin][issue-50]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-dotdot");
     const auto zip = tmp.path / "evil.pulp.zip";
@@ -2364,7 +2412,9 @@ TEST_CASE("pulp-import-design refuses .pulp.zip with `..` in entry path",
 
 TEST_CASE("pulp-import-design refuses .pulp.zip with Windows drive-relative path",
           "[cli][import-design][tool][figma-plugin][issue-50]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-driveletter");
     const auto zip = tmp.path / "evil.pulp.zip";
@@ -2392,7 +2442,9 @@ TEST_CASE("pulp-import-design refuses .pulp.zip with Windows drive-relative path
 
 TEST_CASE("pulp-import-design refuses .pulp.zip exceeding the file-count cap",
           "[cli][import-design][tool][figma-plugin][issue-50]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-tool-zip-count-cap");
     const auto zip = tmp.path / "many.pulp.zip";
@@ -2428,7 +2480,9 @@ TEST_CASE("pulp-import-design refuses .pulp.zip exceeding the file-count cap",
 
 TEST_CASE("pulp-import-design --export-tokens --format css-variables writes theme.css",
           "[cli][import-design][tool][css]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-export-tokens-css");
     // No --tokens: the css-variables default leaf is theme.css, written to cwd.
@@ -2452,7 +2506,9 @@ TEST_CASE("pulp-import-design --export-tokens --format css-variables writes them
 
 TEST_CASE("pulp-import-design --export-tokens defaults to W3C tokens.json",
           "[cli][import-design][tool][css]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-export-tokens-w3c");
     auto r = run_import_design_in(tmp.path, {"--export-tokens"});
@@ -2467,7 +2523,9 @@ TEST_CASE("pulp-import-design --export-tokens defaults to W3C tokens.json",
 
 TEST_CASE("pulp-import-design --export-tokens --tokens honors an explicit css path",
           "[cli][import-design][tool][css]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-export-tokens-css-explicit");
     auto out = tmp.path / "custom-theme.css";
@@ -2482,7 +2540,9 @@ TEST_CASE("pulp-import-design --export-tokens --tokens honors an explicit css pa
 
 TEST_CASE("pulp-import-design rejects an unknown --format value",
           "[cli][import-design][tool][css]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-export-tokens-bogus");
     auto out = tmp.path / "out.txt";
@@ -2501,7 +2561,9 @@ TEST_CASE("pulp-import-design rejects an unknown --format value",
 // --export-tokens (no designmd context) and on a non-designmd import source.
 TEST_CASE("pulp-import-design --export-tokens rejects tailwind formats",
           "[cli][import-design][tool][css]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-export-tokens-tailwind");
     for (const char* fmt : {"tailwind", "json-tailwind", "css-tailwind"}) {
@@ -2519,7 +2581,9 @@ TEST_CASE("pulp-import-design --export-tokens rejects tailwind formats",
 
 TEST_CASE("pulp-import-design rejects tailwind format on a non-designmd source",
           "[cli][import-design][tool][css]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-tailwind-nondesignmd");
     // Minimal figma-plugin envelope; we never get to parse it — the format
@@ -2543,7 +2607,9 @@ TEST_CASE("pulp-import-design rejects tailwind format on a non-designmd source",
 // placeholder). An unknown value is rejected up front.
 TEST_CASE("pulp-import-design rejects an unknown --screenshot-backend",
           "[cli][import-design][tool][screenshot]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-screenshot-backend-bogus");
     auto scene = tmp.path / "scene.pulp.json";
@@ -2568,7 +2634,9 @@ TEST_CASE("pulp-import-design rejects an unknown --screenshot-backend",
 // of whether a headless Skia render is available in the test environment.
 TEST_CASE("pulp-import-design --validate labels faithful_svg fidelity honestly",
           "[cli][import-design][tool][faithful-svg][validate]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     SECTION("faithful_svg scene prints the native-materialize caveat") {
         TempDir tmp("pulp-validate-faithful");
@@ -2630,7 +2698,9 @@ TEST_CASE("pulp-import-design --validate labels faithful_svg fidelity honestly",
 // (no render) must omit it. Durations print as "123ms" or "4.59s".
 TEST_CASE("pulp-import-design prints a per-stage timing breakdown",
           "[cli][import-design][tool][timing]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     const std::string scene_json =
         R"({"format_version":"2026.05-figma-plugin-v1",)"
@@ -2712,7 +2782,9 @@ TEST_CASE("pulp-import-design prints a per-stage timing breakdown",
 
 TEST_CASE("pulp-import-design validates style selector values",
           "[cli][import-design][tool][style]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-style-selector-values");
     auto scene = tmp.path / "scene.pulp.json";
@@ -2782,7 +2854,9 @@ const char* kMiniSwiftScene =
 
 TEST_CASE("pulp-import-design --emit swiftui PulpTheme.swift output does not clobber the view",
           "[cli][import-design][tool][swiftui]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-swiftui-collision");
     auto scene = tmp.path / "scene.pulp.json";
@@ -2805,7 +2879,9 @@ TEST_CASE("pulp-import-design --emit swiftui PulpTheme.swift output does not clo
 
 TEST_CASE("pulp-import-design --emit swiftui gives each view a distinct theme (no clobber)",
           "[cli][import-design][tool][swiftui]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-swiftui-multiview");
     auto scene = tmp.path / "scene.pulp.json";
@@ -2865,8 +2941,12 @@ struct FigDecodeEnv {
 
 TEST_CASE("pulp-import-design --from fig decodes a local .fig offline",
           "[cli][import-design][tool][fig]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
-    if (!node_available()) { SKIP("node not on PATH"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+    if (!node_available()) {
+        SKIP("node not on PATH");
+    }
     static FigDecodeEnv fig_env;
     const std::string fixture = PULP_FIG_FIXTURE;
     REQUIRE_FALSE(fixture.empty());
@@ -2958,8 +3038,12 @@ TEST_CASE("pulp-import-design --from fig decodes a local .fig offline",
 
 TEST_CASE("pulp-import-design cleans its .fig scratch dir and sweeps stale ones",
           "[cli][import-design][tool][fig][assets]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
-    if (!node_available()) { SKIP("node not on PATH"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+    if (!node_available()) {
+        SKIP("node not on PATH");
+    }
     static FigDecodeEnv fig_env;
     const std::string fixture = PULP_FIG_FIXTURE;
     REQUIRE_FALSE(fixture.empty());
@@ -3022,7 +3106,9 @@ TEST_CASE("pulp-import-design cleans its .fig scratch dir and sweeps stale ones"
 // directly so its control flow is instrumented rather than run out-of-process.
 TEST_CASE("fig::handle drives the offline lane in-process",
           "[cli][import-design][tool][fig]") {
-    if (!node_available()) { SKIP("node not on PATH"); }
+    if (!node_available()) {
+        SKIP("node not on PATH");
+    }
     static FigDecodeEnv fig_env;
     const std::string fixture = PULP_FIG_FIXTURE;
     REQUIRE_FALSE(fixture.empty());
@@ -3178,8 +3264,12 @@ std::vector<std::string> emitted_frame_payloads(const std::string& source) {
 
 TEST_CASE("multi-state capture reaches add_frame through the REST faithful lane",
           "[cli][import-design][tool][multi-state]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
-    if (!python_available()) { SKIP("python3 not on PATH"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+    if (!python_available()) {
+        SKIP("python3 not on PATH");
+    }
     const std::string exporter = PULP_FIGMA_REST_EXPORT;
     if (exporter.empty() || !fs::exists(exporter)) {
         SKIP("figma_rest_export.py not located");
@@ -3286,8 +3376,12 @@ TEST_CASE("multi-state capture reaches add_frame through the REST faithful lane"
 
 TEST_CASE("captured states that cannot render fail loudly instead of dropping",
           "[cli][import-design][tool][multi-state][fig]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
-    if (!node_available()) { SKIP("node not on PATH"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
+    if (!node_available()) {
+        SKIP("node not on PATH");
+    }
     static FigDecodeEnv fig_env;
     const std::string fixture = PULP_FIG_FIXTURE;
     REQUIRE_FALSE(fixture.empty());
@@ -3314,7 +3408,9 @@ TEST_CASE("captured states that cannot render fail loudly instead of dropping",
 
 TEST_CASE("repeated --frame on a source that resolves one frame is rejected",
           "[cli][import-design][tool][multi-state]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
     TempDir tmp("pulp-multi-state-frame-reject");
     write_text(tmp.path / "d.json", "{}");
     auto r = run_import_design({"--from", "figma", "--file", (tmp.path / "d.json").string(),
@@ -3437,7 +3533,9 @@ TEST_CASE("pulp-import-design --fail-below requires --reference to compare again
     // so the CLI must refuse (exit 2) rather than silently pass — the
     // silent-no-op class this whole effort is about. Feature landed via
     // #6186/#6232; this is the shellout test deferred during that merge.
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-import-design-fail-below");
     const auto input = tmp.path / "page.html";
@@ -3465,7 +3563,9 @@ TEST_CASE("generic browser HTML supplies the reference for --fail-below",
     // the contract Forge relies on for agent-authored styling: a caller must
     // not have to capture a second, unrelated PNG just to turn the comparison
     // into an enforcement gate.
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 #ifndef PULP_IMPORT_DESIGN_TEST_HAS_SKIA
     SKIP("Skia image compositing is unavailable in this build");
 #else
@@ -3508,7 +3608,9 @@ const std::string kValidateSceneJson =
 
 TEST_CASE("pulp-import-design reports an unreferenced --validate run as SKIPPED",
           "[cli][import-design][tool][validate]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-validate-no-reference");
     const auto scene = tmp.path / "scene.pulp.json";
@@ -3547,7 +3649,9 @@ TEST_CASE("pulp-import-design reports an unreferenced --validate run as SKIPPED"
 
 TEST_CASE("pulp-import-design requires a validation pass for --fail-on-unvalidated",
           "[cli][import-design][tool][validate]") {
-    if (!binary_exists()) { SKIP("pulp-import-design not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp-import-design not built");
+    }
 
     TempDir tmp("pulp-validate-gate-needs-validate");
     const auto scene = tmp.path / "scene.pulp.json";

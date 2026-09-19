@@ -183,7 +183,9 @@ TEST_CASE("status and doctor describe an accepting untrusted carrier as reachabl
 
 TEST_CASE("pulp doctor android|ios are recognized subcommands",
           "[cli][shellout][doctor][issue-355]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     const auto bin = fs::absolute(pulp_binary());
 
@@ -234,7 +236,9 @@ TEST_CASE("pulp doctor android|ios are recognized subcommands",
 // this test guards against.
 TEST_CASE("pulp doctor --validators is a recognized flag",
           "[cli][shellout][doctor][issue-743]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     const auto bin = fs::absolute(pulp_binary());
     auto r = exec(bin.string(), {"doctor", "--validators"}, 30000);
@@ -255,7 +259,9 @@ TEST_CASE("pulp doctor --validators is a recognized flag",
 
 TEST_CASE("pulp dev fails fast when standalone SDK is ahead of the installed CLI",
           "[cli][shellout][dev][issue-682]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = fs::temp_directory_path() /
                ("pulp-shellout-dev-skew-" +
@@ -286,7 +292,9 @@ TEST_CASE("pulp dev fails fast when standalone SDK is ahead of the installed CLI
 
 TEST_CASE("pulp design validates owned option values before autobind",
           "[cli][shellout][design]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     struct Case {
         std::vector<std::string> args;
@@ -311,7 +319,9 @@ TEST_CASE("pulp design validates owned option values before autobind",
 
 TEST_CASE("pulp dev validates value options before build or watch",
           "[cli][shellout][dev]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = fs::temp_directory_path() /
                ("pulp-shellout-dev-parser-" +
@@ -365,7 +375,9 @@ TEST_CASE("pulp dev validates value options before build or watch",
 // pass CI green without this test.
 TEST_CASE("pulp doctor --versions prints diagnostics and exits 0",
           "[cli][shellout][doctor][issue-499]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto r = run_pulp({"doctor", "--versions"}, 30000);
     REQUIRE_FALSE(r.timed_out);
@@ -383,7 +395,9 @@ TEST_CASE("pulp doctor --versions prints diagnostics and exits 0",
 // race with other tests on the same runner.
 TEST_CASE("pulp doctor --au-cache --dry-run reports the command and exits 0",
           "[cli][shellout][doctor][au-cache]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto r = run_pulp({"doctor", "--au-cache", "--dry-run"}, 10000);
     REQUIRE_FALSE(r.timed_out);
@@ -404,7 +418,9 @@ TEST_CASE("pulp doctor --au-cache --dry-run reports the command and exits 0",
 // the test host.
 TEST_CASE("pulp upgrade --notes --from A --to B prints migration header",
           "[cli][shellout][upgrade][issue-548]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     // Use an env override to neutralise the network-facing update
     // banner so its stderr noise doesn't interfere.
@@ -421,7 +437,9 @@ TEST_CASE("pulp upgrade --notes --from A --to B prints migration header",
 
 TEST_CASE("pulp upgrade --notes --json emits stable-shape JSON keys",
           "[cli][shellout][upgrade][issue-548]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto r = run_pulp({"upgrade", "--notes", "--json",
                        "--from", "0.23.0", "--to", "0.29.0"}, 15000);
@@ -440,7 +458,9 @@ TEST_CASE("pulp upgrade --notes --json emits stable-shape JSON keys",
 
 TEST_CASE("pulp upgrade validates parser errors before network access",
           "[cli][shellout][upgrade]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     struct Case {
         std::vector<std::string> args;
@@ -466,7 +486,9 @@ TEST_CASE("pulp upgrade validates parser errors before network access",
 
 TEST_CASE("pulp sdk install validates parser errors before side effects",
           "[cli][shellout][sdk]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto home = unique_temp_dir("pulp-sdk-parser-home");
 
@@ -500,7 +522,9 @@ TEST_CASE("pulp sdk install validates parser errors before side effects",
 
 TEST_CASE("pulp sdk status and clean report cache state deterministically",
           "[cli][shellout][sdk]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto home = unique_temp_dir("pulp-sdk-status-home");
     ScopedEnvVar scoped_pulp_home("PULP_HOME");
@@ -555,7 +579,9 @@ TEST_CASE("pulp sdk status and clean report cache state deterministically",
 
 TEST_CASE("pulp status quotes source checkout paths before reading Git metadata",
           "[cli][shellout][status]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto root = unique_temp_dir("pulp status path with spaces and quote ' fixture");
     fs::create_directories(root / "core");
@@ -598,7 +624,9 @@ TEST_CASE("pulp status quotes source checkout paths before reading Git metadata"
 
 TEST_CASE("pulp upgrade --check-only honors disabled update checks with an empty cache",
           "[cli][shellout][upgrade]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = fs::temp_directory_path() /
                ("pulp-shellout-upgrade-disabled-" +
@@ -624,7 +652,9 @@ TEST_CASE("pulp upgrade --check-only honors disabled update checks with an empty
 
 TEST_CASE("pulp upgrade --notes with no hop prints the empty-notes line",
           "[cli][shellout][upgrade][issue-548]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     // from == to → degenerate hop with zero applicable notes.
     auto r = run_pulp({"upgrade", "--notes", "--from", "0.29.0", "--to", "0.29.0"}, 15000);
@@ -646,7 +676,9 @@ TEST_CASE("pulp upgrade --notes with no hop prints the empty-notes line",
 // `applies_if` included.
 TEST_CASE("pulp upgrade --notes --json is slash-command-parseable",
           "[cli][shellout][upgrade][issue-549]") {
-    if (!binary_exists()) { SKIP("pulp not built"); }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     // Real hop over the seeded migration docs — we expect >=1 entry so
     // the JSON document isn't a degenerate "entries": [] case.
