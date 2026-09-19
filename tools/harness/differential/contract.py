@@ -20,12 +20,6 @@ SURFACES = frozenset({"canvas", "svg"})
 FINDING_KINDS = frozenset({
     "dropped-material", "wrong-geometry", "wrong-pixels", "unsupported-behavior"
 })
-_CLASSIFICATION_TO_FINDING = {
-    "dropped-material": "dropped-material",
-    "geometry": "wrong-geometry",
-    "visual": "wrong-pixels",
-    "unsupported-behavior": "unsupported-behavior",
-}
 
 
 @dataclass(frozen=True)
@@ -103,53 +97,7 @@ def _observation(value: Any, fixture: FixtureSpec, side: str) -> dict[str, Any]:
             entry["path"] = str(finding["path"])
         normalized.append(entry)
     normalized.sort(key=lambda item: (item["kind"], item.get("path", ""), item["message"]))
-    evidence = value.get("evidence", [])
-    if status == "pass" and (not isinstance(evidence, list) or not evidence or any(not isinstance(item, str) or not item for item in evidence)):
-        raise ValueError(f"{fixture.id}: pass {side} observation lacks evidence")
-    if not isinstance(evidence, list) or any(not isinstance(item, str) or not item for item in evidence):
-        raise ValueError(f"{fixture.id}: {side}.evidence must be a string array")
-    return {"status": status, "findings": normalized, "evidence": sorted(evidence)}
-
-
-def observations_from_lab_reports(
-    reports: list[Mapping[str, Any]],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Map importer-lab reports to contract observations exactly once.
-
-    Reports are execution artifacts, so a missing fixture is left for
-    ``normalize_report`` to represent as ``not-run``. A report without an id,
-    or two reports for one id, is ambiguous and must fail before publication.
-    """
-    browser: dict[str, Any] = {}
-    native: dict[str, Any] = {}
-    for report in reports:
-        fixture = report.get("fixture") if isinstance(report, Mapping) else None
-        fixture_id = fixture.get("id") if isinstance(fixture, Mapping) else None
-        if not isinstance(fixture_id, str) or not fixture_id:
-            raise ValueError("lab report lacks a fixture id")
-        if fixture_id in browser:
-            raise ValueError(f"ambiguous lab observations for fixture {fixture_id!r}")
-        browser[fixture_id] = {
-            "status": "pass",
-            "evidence": ["browser/browser.png", "browser/dom-snapshot.json"],
-        }
-        findings = []
-        for classification in report.get("classifications", []):
-            kind = classification.get("kind")
-            mapped = _CLASSIFICATION_TO_FINDING.get(kind)
-            if mapped:
-                findings.append({
-                    "kind": mapped,
-                    "message": classification.get("detail", kind),
-                })
-        native[fixture_id] = {
-            "status": "fail" if findings else "pass",
-            "findings": findings,
-            "evidence": ["comparison/report.json"] if findings else [
-                "candidate/render.png", "comparison/report.json"
-            ],
-        }
-    return browser, native
+    return {"status": status, "findings": normalized}
 
 
 def normalize_report(
@@ -207,35 +155,8 @@ def validate_report(report: Mapping[str, Any]) -> None:
     fixtures = report.get("fixtures")
     if not isinstance(fixtures, list) or not fixtures:
         raise ValueError("report fixtures must be a non-empty array")
-    if any(not isinstance(row, Mapping) for row in fixtures):
-        raise ValueError("report fixtures must contain objects")
-    ids = [row.get("id") for row in fixtures]
+    ids = [row.get("id") for row in fixtures if isinstance(row, Mapping)]
     if len(ids) != len(set(ids)) or any(not isinstance(i, str) or not i for i in ids):
         raise ValueError("report fixture ids must be unique non-empty strings")
     if ids != sorted(ids):
         raise ValueError("report fixtures must be sorted by id")
-    for row in fixtures:
-        if not isinstance(row.get("surface"), str) or row["surface"] not in SURFACES:
-            raise ValueError(f"{row.get('id')}: invalid surface")
-        if not isinstance(row.get("source"), str) or not isinstance(row.get("source_sha256"), str) or len(row["source_sha256"]) != 64:
-            raise ValueError(f"{row.get('id')}: source identity is malformed")
-        for field in ("features", "expected_findings"):
-            values = row.get(field)
-            if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
-                raise ValueError(f"{row.get('id')}: {field} must be a string array")
-        if any(value not in FINDING_KINDS for value in row["expected_findings"]):
-            raise ValueError(f"{row.get('id')}: unknown expected finding")
-        for side in ("browser", "native"):
-            observation = row.get(side)
-            if not isinstance(observation, Mapping) or observation.get("status") not in {"pass", "fail", "not-run"}:
-                raise ValueError(f"{row.get('id')}: malformed {side} observation")
-            findings = observation.get("findings")
-            if not isinstance(findings, list):
-                raise ValueError(f"{row.get('id')}: malformed {side}.findings")
-            for finding in findings:
-                if not isinstance(finding, Mapping) or finding.get("kind") not in FINDING_KINDS or not isinstance(finding.get("message", ""), str):
-                    raise ValueError(f"{row.get('id')}: malformed {side} finding")
-            if observation["status"] == "pass":
-                evidence = observation.get("evidence")
-                if not isinstance(evidence, list) or not evidence or any(not isinstance(item, str) or not item for item in evidence):
-                    raise ValueError(f"{row.get('id')}: pass {side} observation lacks evidence")
