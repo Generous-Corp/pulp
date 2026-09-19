@@ -25,10 +25,7 @@ from .core import (
     write_json,
 )
 from .reports import format_corpus_summary, format_summary
-from tools.harness.differential.contract import (
-    normalize_report,
-    observations_from_lab_reports,
-)
+from tools.harness.differential.contract import normalize_report
 
 
 def positive_int(value: str) -> int:
@@ -108,7 +105,25 @@ def command_corpus(args: argparse.Namespace) -> int:
         manifest_path = args.manifest.resolve()
         manifest_doc = json.loads(manifest_path.read_text())
         if manifest_doc.get("schema") == "pulp-canvas-svg-differential-manifest-v1":
-            browser_observations, native_observations = observations_from_lab_reports(reports)
+            browser_observations = {}
+            native_observations = {}
+            for report in reports:
+                fixture_id = (report.get("fixture") or {}).get("id")
+                if not fixture_id:
+                    continue
+                evidence = ["browser/browser.png", "browser/dom-snapshot.json"]
+                browser_observations[fixture_id] = {"status": "pass", "evidence": evidence}
+                findings = []
+                for classification in report.get("classifications", []):
+                    kind = classification.get("kind")
+                    mapping = {"dropped-material": "dropped-material", "geometry": "wrong-geometry", "visual": "wrong-pixels", "unsupported-behavior": "unsupported-behavior"}
+                    if kind in mapping:
+                        findings.append({"kind": mapping[kind], "message": classification.get("detail", kind)})
+                native_observations[fixture_id] = {
+                    "status": "fail" if findings else "pass",
+                    "findings": findings,
+                    "evidence": ["candidate/render.png", "comparison/report.json"] if not findings else ["comparison/report.json"],
+                }
             contract = normalize_report(manifest_path, browser=browser_observations, native=native_observations)
             (output / "differential-report.json").write_text(contract.to_json(), encoding="utf-8")
     (output / "summary.md").write_text(format_corpus_summary(aggregate))
