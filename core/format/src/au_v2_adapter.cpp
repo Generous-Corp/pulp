@@ -417,10 +417,24 @@ OSStatus PulpAUEffect::Initialize()
         // GetNumberOfChannels() is the AU host/mixer width and may be stereo
         // even when the negotiated effect buses are mono.  Prepare from the
         // actual stream formats that ProcessBufferLists will validate.
-        const int input_channels = static_cast<int>(Input(0).GetStreamFormat().mChannelsPerFrame);
-        const int output_channels = static_cast<int>(Output(0).GetStreamFormat().mChannelsPerFrame);
-        if (input_channels != descriptor_.default_input_channels() ||
-            output_channels != descriptor_.default_output_channels()) {
+        const auto& input_format = Input(0).GetStreamFormat();
+        const auto& output_format = Output(0).GetStreamFormat();
+        const int input_channels = static_cast<int>(input_format.mChannelsPerFrame);
+        const int output_channels = static_cast<int>(output_format.mChannelsPerFrame);
+        // AU hosts commonly keep an effect's main bus stereo even when the
+        // Processor declares a strict mono contract. Keep the native prepare
+        // width at one channel and normalize that host shape in
+        // ProcessBufferLists, where surplus channels can be cleared safely.
+        const bool mono_effect_stereo_compat =
+            descriptor_.default_input_channels() == 1 &&
+            descriptor_.default_output_channels() == 1 &&
+            input_channels == 2 && output_channels == 2 &&
+            (input_format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0 &&
+            (output_format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
+        if ((!mono_effect_stereo_compat &&
+             input_channels != descriptor_.default_input_channels()) ||
+            (!mono_effect_stereo_compat &&
+             output_channels != descriptor_.default_output_channels())) {
             runtime::log_error("AU v2: negotiated bus width {} in / {} out does not match "
                                "descriptor {} in / {} out",
                                input_channels, output_channels,
@@ -428,8 +442,8 @@ OSStatus PulpAUEffect::Initialize()
                                descriptor_.default_output_channels());
             return kAudioUnitErr_FormatNotSupported;
         }
-        ctx.input_channels = input_channels;
-        ctx.output_channels = output_channels;
+        ctx.input_channels = mono_effect_stereo_compat ? 1 : input_channels;
+        ctx.output_channels = mono_effect_stereo_compat ? 1 : output_channels;
         processor_->prepare(ctx);
         // No reconcile state to seed and no Globals→store pull: store_ is the
         // single source of truth and already holds the current values (defaults
@@ -568,6 +582,13 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
 
     UInt32 in_channels = inBuffer.mNumberBuffers;
     UInt32 out_channels = outBuffer.mNumberBuffers;
+    const bool mono_effect_stereo_compat =
+        descriptor_.default_input_channels() == 1 &&
+        descriptor_.default_output_channels() == 1 &&
+        input_format.mChannelsPerFrame == 2 &&
+        output_format.mChannelsPerFrame == 2 &&
+        input_noninterleaved && output_noninterleaved &&
+        in_channels == 2 && out_channels == 2;
 
     input_ptrs_.resize(in_channels);
     output_ptrs_.resize(out_channels);
@@ -608,10 +629,19 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         return noErr;
     }
 
+    const UInt32 processor_in_channels = mono_effect_stereo_compat ? 1 : in_channels;
+    const UInt32 processor_out_channels = mono_effect_stereo_compat ? 1 : out_channels;
+    if (mono_effect_stereo_compat) {
+        // The strict mono Processor owns only channel zero. Never leave the
+        // host's surplus output channel stale when the adapter accepts the
+        // stereo compatibility shape.
+        std::memset(output_ptrs_[1], 0,
+                    sizeof(float) * static_cast<std::size_t>(inFramesToProcess));
+    }
     audio::BufferView<const float> input_view(
-        input_ptrs_.data(), in_channels, inFramesToProcess);
+        input_ptrs_.data(), processor_in_channels, inFramesToProcess);
     audio::BufferView<float> output_view(
-        output_ptrs_.data(), out_channels, inFramesToProcess);
+        output_ptrs_.data(), processor_out_channels, inFramesToProcess);
 
     // Reuse the member MIDI buffers (pre-reserved + capacity-limited in
     // Initialize); reset them rather than constructing new ones each block.
@@ -664,7 +694,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     std::array<ProcessBusBufferInfo, 2> in_infos{};
     const std::size_t n_in =
         build_input_bus_infos(descriptor_, in_infos.data(), in_infos.size());
-    in_infos[0].declared_channels = static_cast<int>(in_channels);
+    in_infos[0].declared_channels = static_cast<int>(processor_in_channels);
     in_infos[0].active = input_view.num_channels() > 0;
     std::array<ProcessBusBufferView<const float>, 2> input_buses{};
     input_buses[0] = {.info = in_infos[0], .buffer = input_view};
@@ -682,7 +712,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
                 .index = 0,
                 .direction = BusDirection::Output,
                 .role = BusRole::Main,
-                .declared_channels = static_cast<int>(out_channels),
+                .declared_channels = static_cast<int>(processor_out_channels),
                 .optional = false,
                 .active = output_view.num_channels() > 0,
             },
