@@ -1074,17 +1074,36 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     };
 
     if (!natively_supported) {
+        // REAPER negotiates a stereo main bus for mono effects even when the
+        // track is mono. Preserve the processor's strict mono prepare contract
+        // while accepting that host shape through the existing silence
+        // accommodation: process channel zero and clear the surplus channel.
+        const bool mono_effect_stereo_compat =
+            desc.input_buses.size() == 1 && desc.output_buses.size() == 1 &&
+            desc.input_buses[0].default_channels == 1 &&
+            desc.output_buses[0].default_channels == 1 &&
+            inputs[0] == SpeakerArr::kStereo &&
+            outputs[0] == SpeakerArr::kStereo;
         // When the arrangement is a mono/stereo layout the processor
         // explicitly vetoed, honor that veto. It encodes a real contract
         // such as linked main/sidechain channel counts or stereo-only
         // output, and there are no extra channels the silence
         // accommodation could neutralize.
-        if (all_empty_mono_stereo) {
+        if (all_empty_mono_stereo && !mono_effect_stereo_compat) {
             runtime::log_info(
                 "VST3 setBusArrangements: rejected processor-vetoed empty/mono/stereo "
                 "layout ({} in / {} out buses) — honoring is_bus_layout_supported",
                 numIns, numOuts);
             return kResultFalse;
+        }
+
+        if (mono_effect_stereo_compat) {
+            apply_arrangements();
+            silence_unsupported_active_ = true;
+            runtime::log_info(
+                "VST3 setBusArrangements: accepted stereo host shape for strict mono effect "
+                "via channel-zero compatibility");
+            return kResultTrue;
         }
 
         // An explicit layout list is an exact host-facing contract. Do not
