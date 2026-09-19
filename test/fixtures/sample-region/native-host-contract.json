@@ -21,7 +21,20 @@
         "default": 0.5,
         "step": 0.0
       }
-    ]
+    ],
+    "native_identity": {
+      "au": {
+        "type": "aufx",
+        "subtype": "SrAp",
+        "manufacturer": "Pulp"
+      },
+      "vst3": {
+        "fuid": "50554C50-53414D50-52454749-4F4E414C"
+      },
+      "clap": {
+        "id": "com.pulp.sample-region-allpass"
+      }
+    }
   },
   "required_proof": {
     "signed_installed_package": true,
@@ -31,6 +44,23 @@
     "audio_render": true,
     "plugin_reload": true,
     "zero_reported_pdc": true,
-    "formats": ["au", "vst3", "clap"]
+    "formats": [
+      "au",
+      "vst3",
+      "clap"
+    ]
+  },
+  "artifacts": {
+    "targets": [
+      "SampleRegionAllpass_Core",
+      "SampleRegionAllpass_VST3",
+      "SampleRegionAllpass_CLAP",
+      "SampleRegionAllpass_AU"
+    ],
+    "bundles": {
+      "au": "SampleRegionAllpass.component",
+      "vst3": "SampleRegionAllpass.vst3",
+      "clap": "SampleRegionAllpass.clap"
+    }
   }
 }
