@@ -77,3 +77,21 @@ The recommended audit prompt is:
 > merge-queue delays, permission loops, and false human blockers. Do not export
 > transcript text or secrets. Recommend implementation only when the pattern
 > appears in at least three independent root families and has a clear owner.
+
+## Current next-goal slices
+
+The Rust-native `pulp build` path now uses the same governed-build owner as the
+source checkout's Shipyard lane. In a source checkout it invokes
+`tools/ci/governed-build.sh`, which owns TartCI lease admission, heartbeat, and
+release; in a generated or consumer checkout it applies the existing tier-0
+memory/CPU bound and honors an inherited `PULP_BUILD_JOBS` share. Explicit
+`-j`/`--parallel` values are caps, never permission to exceed the host share,
+and are removed from the raw CMake invocation. Native and WAM/WCLAP builds use
+the same planner and preserve child exit codes. This reuses the existing
+governor rather than creating a second lease implementation.
+
+The M3/M5 Shipyard handoff wedge is evidence-only for now. Pulp does not own
+the canonical `GEN-*` validator, and changing `auto_handoff` before that
+upstream validator is fixed would recreate unmanaged PRs. The bounded evidence
+and canary requirements live in
+`planning/friction/2026-09-18-shipyard-workstream-validator-evidence.md`.
