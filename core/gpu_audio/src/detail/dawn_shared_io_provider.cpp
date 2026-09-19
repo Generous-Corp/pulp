@@ -393,8 +393,7 @@ struct DawnSharedIoProvider::Impl {
                     return true;
                 }
                 timeout_ns = static_cast<std::uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now)
-                        .count());
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now).count());
                 if (completion_wait_ns != 0)
                     timeout_ns = std::min(timeout_ns, completion_wait_ns);
                 if (timeout_ns == 0)
@@ -1474,8 +1473,7 @@ void DawnSharedIoProvider::poll() noexcept {
         return;
     auto deadline = std::chrono::steady_clock::now();
     if (impl_->completion_policy == CompletionPolicy::TimedWaitAny) {
-        const auto wait_ns = impl_->completion_wait_ns == 0 ? 1'000'000 :
-                                                                  impl_->completion_wait_ns;
+        const auto wait_ns = impl_->completion_wait_ns == 0 ? 1'000'000 : impl_->completion_wait_ns;
         deadline += std::chrono::nanoseconds(wait_ns);
     }
     (void)impl_->wait_for_queue_callbacks(deadline);

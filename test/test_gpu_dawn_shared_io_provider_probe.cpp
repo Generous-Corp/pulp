@@ -144,9 +144,12 @@ parse_completion_policy(std::string_view value) {
 
 std::string_view completion_policy_name(DawnSharedIoProvider::CompletionPolicy policy) {
     switch (policy) {
-        case DawnSharedIoProvider::CompletionPolicy::ProcessEvents: return "process-events";
-        case DawnSharedIoProvider::CompletionPolicy::WaitAny: return "wait-any";
-        case DawnSharedIoProvider::CompletionPolicy::TimedWaitAny: return "timed-wait-any";
+    case DawnSharedIoProvider::CompletionPolicy::ProcessEvents:
+        return "process-events";
+    case DawnSharedIoProvider::CompletionPolicy::WaitAny:
+        return "wait-any";
+    case DawnSharedIoProvider::CompletionPolicy::TimedWaitAny:
+        return "timed-wait-any";
     }
     return "unknown";
 }
@@ -276,23 +279,18 @@ int main(int argc, char** argv) {
             completion_policy = *parsed;
         } else if (argument.starts_with("--completion-wait-ns=")) {
             try {
-                completion_wait_ns = std::stoull(std::string(
-                    argument.substr(std::string_view("--completion-wait-ns=").size())));
+                completion_wait_ns = std::stoull(
+                    std::string(argument.substr(std::string_view("--completion-wait-ns=").size())));
             } catch (...) {
                 return 1;
             }
-        }
-        else
+        } else
             return 1;
     }
     if (verify_completion_wait_bound) {
         const auto invalid_wait_ns = kMaxCompletionWaitNs + 1;
-        const auto rejected = DawnSharedIoProvider::create(
-            {.completion_wait_ns = invalid_wait_ns});
-        return !rejected.provider &&
-                       rejected.reason == "completion_wait_ns_out_of_range"
-                   ? 0
-                   : 1;
+        const auto rejected = DawnSharedIoProvider::create({.completion_wait_ns = invalid_wait_ns});
+        return !rejected.provider && rejected.reason == "completion_wait_ns_out_of_range" ? 0 : 1;
     }
     const auto scenario = parse_scenario(scenario_name);
     if (!scenario)
@@ -313,8 +311,8 @@ int main(int argc, char** argv) {
         std::cout << "{\"schema\":\"pulp.gpu-dawn-shared-io-provider.v2\","
                   << "\"scenario\":\"" << scenario->name
                   << "\",\"status\":\"unavailable\",\"reason\":\"" << created.reason
-                  << "\",\"completion_policy\":\""
-                  << completion_policy_name(completion_policy) << "\"}\n";
+                  << "\",\"completion_policy\":\"" << completion_policy_name(completion_policy)
+                  << "\"}\n";
         return strict ? 1 : 77;
     }
     transfer_counter->reset();
@@ -561,8 +559,7 @@ int main(int argc, char** argv) {
         reason = "timed_wait_any_unsupported";
     }
     created.provider.reset();
-    emit(scenario->name, passed ? "passed" : "failed", reason, completion_policy, oracle,
-         alignment, installs,
-         transfers, submissions, stats, adapter);
+    emit(scenario->name, passed ? "passed" : "failed", reason, completion_policy, oracle, alignment,
+         installs, transfers, submissions, stats, adapter);
     return passed ? 0 : 1;
 }
