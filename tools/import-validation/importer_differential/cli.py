@@ -10,6 +10,12 @@ import statistics
 import sys
 from pathlib import Path
 
+# The development wrapper is invoked by path, so the repository root is not
+# otherwise guaranteed to be importable.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from .core import (
     LabError,
     aggregate_reports,
@@ -19,6 +25,10 @@ from .core import (
     write_json,
 )
 from .reports import format_corpus_summary, format_summary
+from tools.harness.differential.contract import (
+    normalize_report,
+    observations_from_lab_reports,
+)
 
 
 def positive_int(value: str) -> int:
@@ -33,8 +43,7 @@ def command_compare(args: argparse.Namespace) -> int:
         report = compare_one(
             args.importer.resolve(), args.observer.resolve(),
             args.file.resolve(), args.output.resolve(), args.timeout_seconds,
-            args.from_source, args.browser.resolve() if args.browser else None,
-            cache_state=args.cache_state)
+            args.from_source, args.browser.resolve() if args.browser else None)
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -49,7 +58,7 @@ def command_corpus(args: argparse.Namespace) -> int:
     if args.manifest:
         manifest_path = args.manifest.resolve()
         manifest = json.loads(manifest_path.read_text())
-        if manifest.get("schema") != "pulp-importer-differential-manifest-v1":
+        if manifest.get("schema") not in {"pulp-importer-differential-manifest-v1", "pulp-canvas-svg-differential-manifest-v1"}:
             print("importer_differential_lab: unsupported manifest schema",
                   file=sys.stderr)
             return 2
@@ -80,8 +89,7 @@ def command_corpus(args: argparse.Namespace) -> int:
                 args.importer.resolve(), args.observer.resolve(), source,
                 fixture_output, args.timeout_seconds,
                 metadata.get("from", args.from_source) if metadata else args.from_source,
-                args.browser.resolve() if args.browser else None, metadata,
-                metadata.get("cache_state", args.cache_state) if metadata else args.cache_state))
+                args.browser.resolve() if args.browser else None, metadata))
         except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
             failures.append({
                 "fixture_id": fixture_id,
@@ -94,6 +102,15 @@ def command_corpus(args: argparse.Namespace) -> int:
     aggregate = aggregate_reports(reports, len(failures))
     aggregate["failures"] = failures
     write_json(output / "report.json", aggregate)
+    # P1-B consumes the existing execution artifacts; this is an additional
+    # stable receipt, never a second renderer or comparison implementation.
+    if args.manifest:
+        manifest_path = args.manifest.resolve()
+        manifest_doc = json.loads(manifest_path.read_text())
+        if manifest_doc.get("schema") == "pulp-canvas-svg-differential-manifest-v1":
+            browser_observations, native_observations = observations_from_lab_reports(reports)
+            contract = normalize_report(manifest_path, browser=browser_observations, native=native_observations)
+            (output / "differential-report.json").write_text(contract.to_json(), encoding="utf-8")
     (output / "summary.md").write_text(format_corpus_summary(aggregate))
     print(format_corpus_summary(aggregate))
     if failures:
@@ -123,8 +140,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
                 args.importer.resolve(), args.observer.resolve(),
                 args.file.resolve(), output / "runs" / str(index + 1),
                 args.timeout_seconds, args.from_source,
-                args.browser.resolve() if args.browser else None,
-                cache_state="cold" if index == 0 else "warm"))
+                args.browser.resolve() if args.browser else None))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -147,17 +163,6 @@ def command_benchmark(args: argparse.Namespace) -> int:
             "p50_ms_saved": round(
                 statistics.median(browser) - statistics.median(native), 1),
         },
-        "observability": {
-            "ttfp": {"value_ms": None, "status": "unverified"},
-            "ttni": {"p50_ms": None, "p95_ms": None, "status": "unverified"},
-            "ttni_proxy": {"p50_ms": round(statistics.median(
-                [report["observability"]["ttni_proxy"]["value_ms"] for report in warm]), 1),
-                     "p95_ms": percentile(
-                         [report["observability"]["ttni_proxy"]["value_ms"] for report in warm], 0.95),
-                     "status": "measured"},
-            "ifnf": {"value_ms": None, "status": "readback-only"},
-            "cache_states": [report["observability"]["cache_state"]["identity"] for report in reports],
-        },
     }
     write_json(output / "benchmark.json", benchmark)
     print(json.dumps(benchmark, indent=2))
@@ -177,9 +182,6 @@ def build_parser() -> argparse.ArgumentParser:
             "--from", dest="from_source", default="claude",
             choices=("claude", "html", "stitch"))
         subparser.add_argument("--timeout-seconds", type=positive_int, default=60)
-        subparser.add_argument(
-            "--cache-state", choices=("cold", "warm", "unknown"), default="unknown",
-            help="caller-declared cache state; never inferred from timing")
 
     compare = subparsers.add_parser("compare")
     shared(compare)
