@@ -13,6 +13,11 @@
 #include <lv2/state/state.h>
 #include <lv2/time/time.h>
 
+// This test consumes the public sample-region Processor/example. Keep graph
+// construction in that example so format coverage exercises the same API as
+// installed consumers.
+#include "../examples/sample-region-allpass/allpass_processor.hpp"
+
 #include <array>
 #include <cstring>
 #include <memory>
@@ -425,6 +430,85 @@ void append_midi_event(LV2_Atom_Sequence* seq,
     REQUIRE(lv2_atom_sequence_append_event(seq, capacity, &pkt.hdr));
 }
 } // namespace
+
+TEST_CASE("LV2 sample-region allpass preserves catalog, partitions, and fresh-instance parity",
+          "[format][lv2][sample-region]") {
+    using pulp::examples::create_sample_region_allpass;
+
+    Lv2FactoryGuard factory(&create_sample_region_allpass);
+    Lv2FeatureBundle features;
+
+    auto render = [&](std::vector<float>& output, bool vary_coefficient) {
+        Lv2HandleGuard handle{
+            lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor,
+                                     48000.0, "", features.features)};
+        REQUIRE(handle.handle != nullptr);
+        auto* instance = static_cast<PulpLv2Instance*>(handle.handle);
+        auto* allpass = dynamic_cast<pulp::examples::SampleRegionAllpassProcessor*>(
+            instance->processor.get());
+        REQUIRE(allpass != nullptr);
+        REQUIRE(allpass->ready());
+        REQUIRE(instance->num_audio_inputs == 1);
+        REQUIRE(instance->num_audio_outputs == 1);
+        REQUIRE(instance->num_params == 1);
+        REQUIRE(instance->param_ids.size() == 1);
+        REQUIRE(instance->param_ids[0] == pulp::examples::kAllpassCoefficient);
+        REQUIRE(instance->store.get_value(pulp::examples::kAllpassCoefficient) ==
+                Catch::Approx(0.5f));
+
+        float coefficient = 0.5f;
+        float latency = -1.0f;
+        std::vector<float> input(output.size(), 0.0f);
+        input[0] = 1.0f;
+        lv2_generic::connect_port(handle.handle, 2, &coefficient);
+        lv2_generic::connect_port(handle.handle, 3, &latency);
+        lv2_generic::activate(handle.handle);
+
+        constexpr std::array<std::size_t, 2> partitions = {3, 5};
+        std::size_t offset = 0;
+        for (const auto count : partitions) {
+            if (vary_coefficient && offset == partitions[0])
+                coefficient = 0.25f;
+            lv2_generic::connect_port(handle.handle, 0, input.data() + offset);
+            lv2_generic::connect_port(handle.handle, 1, output.data() + offset);
+            lv2_generic::run(handle.handle, static_cast<uint32_t>(count));
+            offset += count;
+        }
+        lv2_generic::deactivate(handle.handle);
+        REQUIRE(latency == 0.0f);
+        REQUIRE(instance->store.get_value(pulp::examples::kAllpassCoefficient) ==
+                Catch::Approx(vary_coefficient ? 0.25f : 0.5f));
+    };
+
+    std::vector<float> first(8, 0.0f);
+    render(first, true);
+
+    auto oracle = [&](float second_block_coefficient) {
+        std::vector<float> expected(first.size(), 0.0f);
+        float x_previous = 0.0f;
+        float y_previous = 0.0f;
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            const float coefficient = i < 3 ? 0.5f : second_block_coefficient;
+            const float x = i == 0 ? 1.0f : 0.0f;
+            const float y = coefficient * x + x_previous - coefficient * y_previous;
+            expected[i] = y;
+            x_previous = x;
+            y_previous = y;
+        }
+        return expected;
+    };
+    const auto expected = oracle(0.25f);
+    for (std::size_t i = 0; i < first.size(); ++i)
+        REQUIRE(first[i] == Catch::Approx(expected[i]).margin(1e-6f));
+
+    // A fresh LV2 instance is the format's reset/reload boundary. Its default
+    // stream must not depend on the prior instance's UnitDelay state.
+    std::vector<float> fresh(first.size(), 0.0f);
+    render(fresh, false);
+    const auto expected_fresh = oracle(0.5f);
+    for (std::size_t i = 0; i < fresh.size(); ++i)
+        REQUIRE(fresh[i] == Catch::Approx(expected_fresh[i]).margin(1e-6f));
+}
 
 TEST_CASE("LV2 generic entry refuses instantiation without URID map",
           "[format][lv2][issue-493]") {
