@@ -1470,6 +1470,19 @@ static std::vector<HtmlAssetCandidate> collect_html_asset_uris(const std::string
             append_html_asset_candidate(assets, std::move(uri));
     }
 
+    // Preserve dynamic template edges as unresolved candidates so the asset
+    // manifest receipt records the limitation instead of silently dropping
+    // the browser-visible URL. Runtime evaluation remains the browser's job.
+    static const std::regex vite_template_url_re(
+        R"RX(new\s+URL\s*\(\s*`([^`]*)`\s*,\s*import\.meta\.url\s*\))RX",
+        std::regex::icase);
+    auto template_begin = std::sregex_iterator(html.begin(), html.end(), vite_template_url_re);
+    for (auto it = template_begin; it != vite_end; ++it) {
+        auto uri = (*it)[1].str();
+        if (!uri.empty() && uri.front() != '#')
+            append_html_asset_candidate(assets, std::move(uri));
+    }
+
     return assets;
 }
 

@@ -1129,21 +1129,31 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
     SECTION("literal Vite import.meta URL edges enter the asset manifest") {
         TempDir tmp("pulp-design-ir-vite-assets");
         write_text(tmp.path / "hero.png", "vite-image-bytes");
-        auto ir = parse_claude_html(R"html(
-            <html><body><script type="module">
-              const hero = new URL('./hero.png', import.meta.url);
-              const runtime = new URL(`./${name}.png`, import.meta.url);
-            </script></body></html>
-        )html");
+        auto ir = parse_claude_html(read_fixture(
+            "test/fixtures/imports/claude/vite-assets/index.html"));
 
         DesignIrAssetOptions options;
         options.base_directory = tmp.path;
         refresh_design_ir_asset_manifest(ir, options);
 
-        REQUIRE(ir.asset_manifest.assets.size() == 1);
-        CHECK(ir.asset_manifest.assets.front().original_uri == "./hero.png");
-        CHECK(ir.asset_manifest.assets.front().diagnostics.empty());
-        CHECK_FALSE(ir.asset_manifest.assets.front().content_hash.empty());
+        REQUIRE(ir.asset_manifest.assets.size() == 2);
+        const auto hero = std::find_if(ir.asset_manifest.assets.begin(),
+                                       ir.asset_manifest.assets.end(),
+                                       [](const auto& asset) {
+                                           return asset.original_uri == "./hero.png";
+                                       });
+        REQUIRE(hero != ir.asset_manifest.assets.end());
+        CHECK(hero->diagnostics.empty());
+        CHECK_FALSE(hero->content_hash.empty());
+        const auto dynamic = std::find_if(ir.asset_manifest.assets.begin(),
+                                          ir.asset_manifest.assets.end(),
+                                          [](const auto& asset) {
+                                              return asset.original_uri == "./${name}.png";
+                                          });
+        REQUIRE(dynamic != ir.asset_manifest.assets.end());
+        REQUIRE_FALSE(dynamic->diagnostics.empty());
+        CHECK(dynamic->diagnostics.front().kind ==
+              ImportDiagnosticKind::unresolved_asset);
     }
 }
 
