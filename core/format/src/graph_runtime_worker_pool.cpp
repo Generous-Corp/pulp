@@ -1,10 +1,12 @@
 #include <pulp/format/graph_runtime_worker_pool.hpp>
 
-#include <pulp/audio/workgroup.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
 #include <cassert>
+#if !defined(PULP_WASM)
+#include <pulp/audio/workgroup.hpp>
 #include <chrono>
+#endif
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
 #include <intrin.h>
 #endif
@@ -19,9 +21,11 @@ static_assert(std::atomic<void*>::is_always_lock_free,
 static_assert(std::atomic<bool>::is_always_lock_free,
               "GraphRuntimeWorkerPool RT acknowledgments require lock-free bool atomics");
 
+#if !defined(PULP_WASM)
 constexpr auto kHotIdleWindow = std::chrono::microseconds(5000);
 constexpr auto kColdIdleSleep = std::chrono::milliseconds(1);
 constexpr std::uint32_t kIdleSpinBeforeBackoff = 256;
+#endif
 
 // Even static split of [0, count) across `workers` participants: participant w
 // owns [w*count/workers, (w+1)*count/workers). Balanced to within one task.
@@ -54,6 +58,11 @@ void cpu_relax() noexcept {
 GraphRuntimeWorkerPool::~GraphRuntimeWorkerPool() { stop(); }
 
 bool GraphRuntimeWorkerPool::start(std::uint32_t worker_count) {
+#if defined(PULP_WASM)
+    // AudioWorklet hosts cannot spawn workers. Refuse before disturbing an
+    // existing inline pool, and omit the unreachable thread-spawn import.
+    if (worker_count > 1) return false;
+#endif
     stop();
     if (worker_count == 0) return false;
     worker_count_ = worker_count;
@@ -72,6 +81,7 @@ bool GraphRuntimeWorkerPool::start(std::uint32_t worker_count) {
         running_.store(true, std::memory_order_release);
         return true;
     }
+#if !defined(PULP_WASM)
     try {
         worker_workgroup_generation_ =
             std::make_unique<std::atomic<std::uint64_t>[]>(worker_count_ - 1);
@@ -90,11 +100,13 @@ bool GraphRuntimeWorkerPool::start(std::uint32_t worker_count) {
         stop();
         return false;
     }
+#endif
     running_.store(true, std::memory_order_release);
     return true;
 }
 
 void GraphRuntimeWorkerPool::stop() noexcept {
+#if !defined(PULP_WASM)
     if (!threads_.empty()) {
         // Worker loops poll the epoch while hot and sleep while cold. This is
         // off-RT; join latency is bounded by kColdIdleSleep.
@@ -106,6 +118,7 @@ void GraphRuntimeWorkerPool::stop() noexcept {
         }
         threads_.clear();
     }
+#endif
     worker_count_ = 0;
     worker_workgroup_generation_.reset();
     worker_workgroup_join_succeeded_.reset();
@@ -339,6 +352,7 @@ void GraphRuntimeWorkerPool::clear_transient_reheat_if_no_worker_cold() noexcept
     }
 }
 
+#if !defined(PULP_WASM)
 void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
     pulp::audio::AudioWorkgroup workgroup;
     std::uint64_t local_workgroup_generation = 0;
@@ -480,5 +494,6 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
         hot_until = std::chrono::steady_clock::now() + kHotIdleWindow;
     }
 }
+#endif
 
 } // namespace pulp::format

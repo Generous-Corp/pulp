@@ -246,6 +246,46 @@ see it.
 It is a declaration today: nothing enforces it yet, so reading it is safe and
 *relying* on someone else having enforced it is not.
 
+## Sample-region web profile: native exceptions and RTTI
+
+The canonical graph uses typed exception refusal and RTTI-based callback identity.
+Build it with `-DPULP_SAMPLE_REGION_WEB=ON` in a **separate build directory**.
+The WAM helper uses Emscripten 6.0.2 with standard native Wasm EH; WebCLAP uses
+WASI SDK **33.0**, `wasm32-wasip1-threads`, `-fwasm-exceptions -frtti`, the standard
+EH dialect, and `-lunwind`. The entire C++ object closure uses matching flags.
+LTO is refused for this profile. Do not suppress catches or change refusal into
+an abort to make a no-exceptions build compile.
+
+SDK33 is installed side by side for this headless profile. Keep SDK25 and the
+Skia `determinism.web_toolchain` tuple unchanged. Official release artifacts:
+
+- `wasi-sdk-33.0-x86_64-linux.tar.gz`: SHA-256 `0ba8b5bfaeb2adf3f29bab5841d76cf5318ab8e1642ea195f88baba1abd47bce`.
+- `wasi-sdk-33.0-arm64-macos.tar.gz`: SHA-256 `85c997a2665ead91673b5bb88b7d0df3fc8900df3bfa244f720d478187bbdc78`.
+
+Both are under `https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/`.
+Verify the archive before extracting it, then pass its directory as
+`-DWASI_SDK_PREFIX=...` only to the isolated WebCLAP configure.
+
+Standard Wasm EH requires Chrome 137, Firefox 131, or Safari 18.4 according to
+Emscripten's feature matrix. Node 22 probes need `--experimental-wasm-exnref`;
+apply that flag only to the new profile's module probes. Node 26.7 supports the
+profile without the flag. These minimums do not change the default no-region
+module requirements.
+
+The worker pool keeps its existing inline executor for one participant and
+refuses additional workers on Wasm. Merely avoiding the spawn branch at runtime
+still leaves a `wasi.thread-spawn` import, so native-only thread code is excluded
+at compile time. No second executor or replacement allpass is used.
+
+Build `SampleRegionAllpassWorklet-wam` and `SampleRegionAllpass-wclap`, then run
+`node test/sample_region_web/validate.mjs --wam-dir <region-wam-build>
+--wclap-dir <region-wclap-build> --baseline-wam-dir <default-wam-build>
+--baseline-wclap-dir <default-wclap-build> --report <receipt.json>`.
+This drives real Chrome AudioWorklet and WebCLAP hosts, checks the canonical
+coefficient catalog, audio oracle, state/reset/reload, and default PulpGain
+compatibility. The report includes browser version and artifact hashes. A
+standalone Node exception probe is early runtime evidence, not browser acceptance.
+
 ## The worklet has no second thread
 
 A WAM module runs entirely inside the audio worklet: **there is no `std::thread`
