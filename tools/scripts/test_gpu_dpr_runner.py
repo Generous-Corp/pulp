@@ -10,6 +10,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import textwrap
 import tempfile
 import zlib
 from pathlib import Path
@@ -52,6 +53,46 @@ def plan(manifest: dict) -> dict:
 def write_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+
+def analyzer_rejection_adapter_script(
+    root: Path, *, binary: Path, analyzer: Path,
+) -> Path:
+    """Create a terminal adapter so run_cells reaches the real analyzer path."""
+    script = root / "terminal-receipt-adapter.py"
+    script.write_text(
+        textwrap.dedent(f'''#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+
+sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})
+import test_gpu_dpr_runner as fixture
+import gpu_dpr_runner as runner
+
+args = sys.argv
+request_path = Path(args[args.index('--request') + 1])
+receipt_path = Path(args[args.index('--receipt') + 1])
+run_dir = request_path.parents[2]
+request = runner.load_json(request_path)
+state = runner.load_state(run_dir)
+manifest = runner.load_json(Path(state['manifest_path']))
+key = runner.cell_key(
+    request['scenario']['id'], request['mode'], float(request['requested_dpr'])
+)
+generated = fixture.make_receipt(
+    run_dir, state, manifest, key,
+    analyzer=Path({str(analyzer)!r}), binary=Path({str(binary)!r}),
+    attempt_nonce=request['attempt_nonce'],
+)
+document = runner.load_json(generated)
+document['attempt_nonce'] = request['attempt_nonce']
+document['attempt_number'] = request['attempt_number']
+receipt_path.write_text(json.dumps(document) + '\\n', encoding='utf-8')
+'''),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
 
 
 def fixture_png(width: int, height: int, *, flat: bool = False) -> bytes:
@@ -826,41 +867,41 @@ def main() -> int:
         dense = runner.cell_key("dense-text-thin-strokes", "exact", 1)
 
         analyzer_rejection_run = root / "analyzer-rejection-run"
+        malformed_analyzer = root / "malformed-run-analyzer.py"
+        malformed_analyzer.write_text(
+            "#!/usr/bin/env python3\nprint('not-json')\n",
+            encoding="utf-8",
+        )
+        malformed_analyzer.chmod(0o755)
+        malformed_identity = {
+            "path": str(malformed_analyzer.resolve()),
+            "sha256": runner.sha256_file(malformed_analyzer),
+        }
         analyzer_rejection_state = runner.initial_state(
-            planned, manifest, manifest_path, analyzer_identity
+            planned, manifest, manifest_path, malformed_identity
         )
         runner.save_state(analyzer_rejection_run, analyzer_rejection_state)
-        rejection_metadata = {
-            "schema": "pulp.gpu-dpr-analyzer-rejection.v1",
-            "status": "rejected",
-            "question": "gpu-health",
-            "returncode": 0,
-            "stdout_sha256": "a" * 64,
-            "stderr_sha256": "b" * 64,
-            "parse_error": "malformed JSON",
-        }
-        real_ingest = runner.ingest_receipt
-
-        def planted_analyzer_rejection(*_args: object, **_kwargs: object) -> str:
-            raise evidence.AnalyzerRejection(
-                "trace analyzer returned invalid JSON", rejection_metadata
-            )
-
-        runner.ingest_receipt = planted_analyzer_rejection
-        try:
-            runner.run_cells(
-                analyzer_rejection_run,
-                {"dense-text-thin-strokes": test_adapter_script(root)},
-                {dense},
-                None,
-            )
-        finally:
-            runner.ingest_receipt = real_ingest
+        terminal_adapter = analyzer_rejection_adapter_script(
+            root, binary=binary, analyzer=analyzer,
+        )
+        runner.run_cells(
+            analyzer_rejection_run,
+            {"dense-text-thin-strokes": terminal_adapter},
+            {dense},
+            None,
+        )
         analyzer_rejection_state = runner.load_state(analyzer_rejection_run)
         analyzer_rejection_attempt = analyzer_rejection_state["cells"][dense]["attempts"][-1]
         assert analyzer_rejection_attempt["outcome"] == "inconclusive"
         assert analyzer_rejection_attempt["dependencies"] == ["analyzer:rejected"]
-        assert analyzer_rejection_attempt["diagnostics"] == rejection_metadata
+        rejection_metadata = analyzer_rejection_attempt["diagnostics"]
+        assert rejection_metadata["schema"] == "pulp.gpu-dpr-analyzer-rejection.v1"
+        assert rejection_metadata["status"] == "rejected"
+        assert rejection_metadata["question"] == "gpu-health"
+        assert rejection_metadata["returncode"] == 0
+        assert len(rejection_metadata["stdout_sha256"]) == 64
+        assert len(rejection_metadata["stderr_sha256"]) == 64
+        assert rejection_metadata["parse_error"]
 
         good = make_receipt(
             run_dir, state, manifest, dense, analyzer=analyzer, binary=binary
