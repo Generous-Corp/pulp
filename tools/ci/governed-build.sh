@@ -292,6 +292,11 @@ acquire_lease() {
 
 jobs=""
 qos=""
+# A caller may request a lower cap (for example, `pulp build -j2`).  Apply it
+# only after lease admission: it can reduce the granted share, never enlarge
+# it.  The value is deliberately read before this script exports its own
+# resolved PULP_BUILD_JOBS below.
+requested_jobs="${PULP_BUILD_JOBS:-}"
 
 if [ "${PULP_TARTCI_LEASES:-}" != "0" ]; then
   TARTCI_BIN="$(find_tartci)"
@@ -340,6 +345,12 @@ else
   # No tartci (build VM / plain checkout): bounded tier-0 parallelism.
   jobs="$(tier0_jobs)"
   log "no tartci host profile — bounded local build at -j$jobs"
+fi
+
+if [ -n "$requested_jobs" ] && [ "$requested_jobs" -ge 1 ] 2>/dev/null \
+    && [ "$requested_jobs" -lt "$jobs" ]; then
+  jobs="$requested_jobs"
+  log "applying requested lower parallelism cap -j$jobs"
 fi
 
 export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"

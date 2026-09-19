@@ -77,6 +77,7 @@
 
 pub mod build_info;
 pub mod bump;
+pub mod build_governor;
 pub mod cmd;
 pub mod color;
 pub mod config;

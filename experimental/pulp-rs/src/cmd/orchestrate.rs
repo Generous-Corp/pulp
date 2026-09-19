@@ -45,6 +45,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use super::aax_sdk;
+use crate::build_governor::plan_cmake_build;
 use crate::config::pulp_home;
 use crate::error::{CliError, Result};
 use crate::proc::{Invocation, Spawner};
@@ -408,12 +409,7 @@ fn build_with_dependency_policy<S: Spawner>(
         }
     }
 
-    let mut build = Invocation::new("cmake")
-        .arg("--build")
-        .arg(build_dir.to_string_lossy().into_owned());
-    for a in &args.passthrough {
-        build = build.arg(a.clone());
-    }
+    let build = plan_cmake_build(&proj.root, &build_dir, &args.passthrough).invocation;
     let rc = spawner.run(&build)?;
     if rc != 0 {
         return Ok(rc);
@@ -579,12 +575,7 @@ fn build_web<S: Spawner>(
         }
     }
 
-    let mut build = Invocation::new("cmake")
-        .arg("--build")
-        .arg(build_dir.to_string_lossy().into_owned());
-    for a in &args.passthrough {
-        build = build.arg(a.clone());
-    }
+    let build = plan_cmake_build(&proj.root, &build_dir, &args.passthrough).invocation;
     spawner.run(&build)
 }
 

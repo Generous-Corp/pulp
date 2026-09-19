@@ -266,6 +266,12 @@ class GovernedBuildTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._granted(r), PROFILE_JOBS, r.stderr)
 
+    def test_requested_lower_cap_never_widens_or_bypasses_lease(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                      STUB_MAX_GRANT=str(PROFILE_JOBS), PULP_BUILD_JOBS="3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), 3, r.stderr)
+
     def test_ctest_parallelism_uses_the_granted_lease_size(self) -> None:
         r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
                       STUB_MAX_GRANT=str(PROFILE_JOBS))
