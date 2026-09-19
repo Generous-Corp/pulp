@@ -1203,11 +1203,11 @@ TEST_CASE("Vite URL intake ignores lexical false positives and malformed calls",
           new URL;
           new URL foo;
           new URL(123);
+          new URL('./valid.png', import.meta.url);
           new URL('./unterminated.png, import.meta.url);
           new URL('./missing-comma.png' import.meta.url);
           new URL('./wrong-meta.png', other.url);
           new URL('./missing-close.png', import.meta.url;
-          new URL('./valid.png', import.meta.url);
         </script></body></html>
     )html");
 
