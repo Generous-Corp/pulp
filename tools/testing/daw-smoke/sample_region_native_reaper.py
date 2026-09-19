@@ -86,6 +86,7 @@ def run(fmt,bundle,out,timeout):
             # command-line render so AU/VST3 receive the declared mono layout.
             text=project.read_text()
             text=text.replace('    NCHAN 2\n','    NCHAN 1\n',1)
+            text=text.replace('<IN_PINS\n        >','<IN_PINS\n          PIN 0 0 1\n        >',1)
             project.write_text(text)
         render_cmd=[reaper,'-newinst','-new','-nosplash','-renderproject',str(project)]
         try: subprocess.run(render_cmd,env=env,text=True,capture_output=True,timeout=timeout,check=False)
