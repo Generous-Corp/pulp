@@ -48,6 +48,8 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         InvalidCommandAfterSubmit,
         SyntheticQueueError,
         SyntheticQueueCancelled,
+        SyntheticWaitAnyTimeout,
+        SyntheticWaitAnyError,
         ForceLossBeforeSubmit,
         ForceLossBetweenSubmitAndCompletionRegistration,
         ForceLossAfterCompletionRegistration,
@@ -68,6 +70,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         CompletionPolicy completion_policy = CompletionPolicy::ProcessEvents;
         // Used only by TimedWaitAny.  A zero value uses the provider's
         // dispatcher deadline for each wait; this is not an audio deadline.
+        // Each serialized wait is capped at one millisecond.
         // Values above std::chrono::nanoseconds::max().count() fail closed.
         std::uint64_t completion_wait_ns = 0;
     };
@@ -94,8 +97,12 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         std::uint64_t fault_injections = 0;
         std::uint64_t process_events_calls = 0;
         std::uint64_t wait_any_calls = 0;
+        std::uint64_t wait_any_timed_calls = 0;
         std::uint64_t wait_any_timeouts = 0;
+        std::uint64_t wait_any_errors = 0;
         std::uint64_t wait_any_unsupported = 0;
+        std::uint64_t wait_any_max_futures = 0;
+        std::uint64_t wait_any_max_timeout_ns = 0;
     };
 
     struct AdapterIdentity {
