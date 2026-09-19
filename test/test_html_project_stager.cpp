@@ -183,16 +183,13 @@ TEST_CASE("HTML staging copies literal Vite import.meta URL assets",
           "[import-design][browser-capture][staging][vite]") {
     TempTree tree;
     tree.write("index.html", R"(<script type="module" src="assets/index.js"></script>)");
-    tree.write(
-        "assets/index.js",
-        R"(const hero = new URL('./hero.png', import.meta.url);
-           const dynamic = new URL(`./${name}.png`, import.meta.url);)"
-    );
+    tree.write("assets/index.js",
+               R"(const hero = new URL('./hero.png', import.meta.url);
+           const dynamic = new URL(`./${name}.png`, import.meta.url);)");
     tree.write("assets/hero.png", "generated-vite-asset");
 
-    auto staged = stage_html_project(
-        tree.root / "index.html",
-        R"(<script type="module" src="assets/index.js"></script>)");
+    auto staged = stage_html_project(tree.root / "index.html",
+                                     R"(<script type="module" src="assets/index.js"></script>)");
 
     INFO(staged.error);
     REQUIRE(staged);

@@ -7,8 +7,8 @@
 #include <fstream>
 #include <iostream>
 
-#include <pulp/view/widgets.hpp>
 #include "text_diagnostic_observer.hpp"
+#include <pulp/view/widgets.hpp>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -43,10 +43,10 @@ bool write_text(const std::filesystem::path& path, const std::string& text) {
 }
 
 void usage() {
-    std::cerr
-        << "Usage: pulp-design-ir-observe --input <design.ir.json> "
-           "--render <png> --layout <json> --width <px> --height <px> "
-           "[--scale <factor>] [--text-diagnostics <json>] [--set-value <anchor>=<normalized>]...\n";
+    std::cerr << "Usage: pulp-design-ir-observe --input <design.ir.json> "
+                 "--render <png> --layout <json> --width <px> --height <px> "
+                 "[--scale <factor>] [--text-diagnostics <json>] [--set-value "
+                 "<anchor>=<normalized>]...\n";
 }
 
 std::optional<std::pair<std::string, float>> parse_value_override(
@@ -97,7 +97,8 @@ int main(int argc, char** argv) {
         if (arg == "--input") input_path = value;
         else if (arg == "--render") render_path = value;
         else if (arg == "--layout") layout_path = value;
-        else if (arg == "--text-diagnostics") text_diagnostics_path = value;
+        else if (arg == "--text-diagnostics")
+            text_diagnostics_path = value;
         else if (arg == "--width" && parse_positive(value, width)) {}
         else if (arg == "--height" && parse_positive(value, height)) {}
         else if (arg == "--scale" && parse_positive(value, scale)) {}
@@ -188,8 +189,9 @@ int main(int argc, char** argv) {
         std::cerr << "Error: could not write layout observation\n";
         return 1;
     }
-    if (!text_diagnostics_path.empty() && !write_text(text_diagnostics_path,
-            pulp::import_design::observe_text(*root, input_path.string()))) {
+    if (!text_diagnostics_path.empty() &&
+        !write_text(text_diagnostics_path,
+                    pulp::import_design::observe_text(*root, input_path.string()))) {
         std::cerr << "Error: could not write text observation\n";
         return 1;
     }

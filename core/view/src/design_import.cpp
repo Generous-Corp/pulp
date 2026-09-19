@@ -1292,8 +1292,8 @@ static std::optional<std::vector<uint8_t>> resolve_local_asset(
         const auto canonical_base = fs::weakly_canonical(base_directory, ec);
         const auto canonical_path = fs::weakly_canonical(path, ec);
         const auto relative = canonical_path.lexically_relative(canonical_base);
-        if (!relative.empty() && !relative.is_absolute()
-            && (relative.begin() == relative.end() || *relative.begin() != "..")) {
+        if (!relative.empty() && !relative.is_absolute() &&
+            (relative.begin() == relative.end() || *relative.begin() != "..")) {
             asset.local_path = relative.generic_string();
         } else {
             asset.local_path = path.string();
@@ -1391,8 +1391,7 @@ static void collect_font_face_asset_candidates(const std::string& css,
     }
 }
 
-static std::vector<std::string> collect_vite_url_asset_candidates(
-    std::string_view source) {
+static std::vector<std::string> collect_vite_url_asset_candidates(std::string_view source) {
     std::vector<std::string> candidates;
     auto is_ident = [](char c) {
         return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$';
@@ -1402,11 +1401,13 @@ static std::vector<std::string> collect_vite_url_asset_candidates(
             ++pos;
     };
     auto match_word = [&](size_t& pos, std::string_view word) {
-        if (source.substr(pos, word.size()) != word) return false;
+        if (source.substr(pos, word.size()) != word)
+            return false;
         const auto before_ok = pos == 0 || !is_ident(source[pos - 1]);
         const auto after = pos + word.size();
         const auto after_ok = after >= source.size() || !is_ident(source[after]);
-        if (!before_ok || !after_ok) return false;
+        if (!before_ok || !after_ok)
+            return false;
         pos = after;
         return true;
     };
@@ -1423,12 +1424,14 @@ static std::vector<std::string> collect_vite_url_asset_candidates(
     for (size_t i = 0; i < source.size();) {
         if (source[i] == '/' && i + 1 < source.size() && source[i + 1] == '/') {
             i += 2;
-            while (i < source.size() && source[i] != '\n' && source[i] != '\r') ++i;
+            while (i < source.size() && source[i] != '\n' && source[i] != '\r')
+                ++i;
             continue;
         }
         if (source[i] == '/' && i + 1 < source.size() && source[i + 1] == '*') {
             i += 2;
-            while (i + 1 < source.size() && !(source[i] == '*' && source[i + 1] == '/')) ++i;
+            while (i + 1 < source.size() && !(source[i] == '*' && source[i + 1] == '/'))
+                ++i;
             i = std::min(source.size(), i + 2);
             continue;
         }
@@ -1452,15 +1455,18 @@ static std::vector<std::string> collect_vite_url_asset_candidates(
             continue;
         }
         skip_space(pos);
-        if (pos >= source.size() || (source[pos] != '\'' && source[pos] != '"' && source[pos] != '`')) {
+        if (pos >= source.size() ||
+            (source[pos] != '\'' && source[pos] != '"' && source[pos] != '`')) {
             i = pos;
             continue;
         }
         const char quote = source[pos++];
         const auto value_start = pos;
         while (pos < source.size() && source[pos] != quote) {
-            if (source[pos] == '\\') pos += std::min<size_t>(2, source.size() - pos);
-            else ++pos;
+            if (source[pos] == '\\')
+                pos += std::min<size_t>(2, source.size() - pos);
+            else
+                ++pos;
         }
         if (pos >= source.size()) {
             i = pos;
@@ -1484,7 +1490,8 @@ static std::vector<std::string> collect_vite_url_asset_candidates(
             i = pos;
             continue;
         }
-        if (!value.empty() && value.front() != '#') candidates.push_back(value);
+        if (!value.empty() && value.front() != '#')
+            candidates.push_back(value);
         i = pos;
     }
     return candidates;
@@ -1711,15 +1718,13 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
         std::string dedupe_key;
         if (is_data_uri(uri) && !asset.content_hash.empty()) {
             dedupe_key = std::string("data:") + asset.content_hash;
-        } else if (bytes && asset.local_path
-                   && fs::path(*asset.local_path).is_relative()) {
+        } else if (bytes && asset.local_path && fs::path(*asset.local_path).is_relative()) {
             // A resolved package-local path is a different identity boundary
             // from an unresolved URI. Keep the relative path stable across
             // relocation while ensuring a refresh rewrites a stale asset id.
             dedupe_key = "resolved:" + *asset.local_path;
         } else {
-            dedupe_key = asset.source_url.value_or(
-                asset.local_path.value_or(asset.original_uri));
+            dedupe_key = asset.source_url.value_or(asset.local_path.value_or(asset.original_uri));
         }
         auto [known, inserted] = asset_index_by_key.emplace(dedupe_key, manifest.assets.size());
         if (!inserted) {

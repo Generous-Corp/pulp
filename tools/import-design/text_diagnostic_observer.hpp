@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include <pulp/view/widgets.hpp>
 #include <choc/text/choc_JSON.h>
+#include <pulp/view/widgets.hpp>
 
 namespace pulp::import_design {
 
@@ -15,8 +15,7 @@ inline void enable_text_observation(view::View& root) {
         enable_text_observation(*root.child_at(i));
 }
 
-inline void observe_text_tree(const view::View& node,
-                              float parent_x, float parent_y,
+inline void observe_text_tree(const view::View& node, float parent_x, float parent_y,
                               bool supported, choc::value::Value& rows) {
     const auto bounds = node.bounds();
     const float x = parent_x + bounds.x, y = parent_y + bounds.y;
@@ -28,7 +27,8 @@ inline void observe_text_tree(const view::View& node,
         // This is the paint request, not a resolved SkTypeface census.
         row.addMember("paint_font_request", label->effective_font_family());
         row.addMember("paint_font_weight", label->effective_font_weight());
-        const bool text_supported = label->text_transform() == view::Label::TextTransform::none &&
+        const bool text_supported =
+            label->text_transform() == view::Label::TextTransform::none &&
             label->text_direction() == canvas::TextDirection::left_to_right &&
             !label->has_attributed_string();
         row.addMember("coordinate_supported", supported && text_supported);
@@ -44,8 +44,10 @@ inline void observe_text_tree(const view::View& node,
                 value.addMember("selection_height", line.height);
                 auto positions = choc::value::createEmptyArray();
                 auto offsets = choc::value::createEmptyArray();
-                for (float position : line.x_offsets) positions.addArrayElement(x + position);
-                for (int offset : line.byte_offsets) offsets.addArrayElement(offset);
+                for (float position : line.x_offsets)
+                    positions.addArrayElement(x + position);
+                for (int offset : line.byte_offsets)
+                    offsets.addArrayElement(offset);
                 value.addMember("caret_x", std::move(positions));
                 value.addMember("byte_offsets", std::move(offsets));
                 lines.addArrayElement(std::move(value));
@@ -55,8 +57,8 @@ inline void observe_text_tree(const view::View& node,
         rows.addArrayElement(std::move(row));
     }
     for (std::size_t i = 0; i < node.child_count(); ++i)
-        observe_text_tree(*node.child_at(i), x, y,
-                          supported && !node.applies_child_paint_offset(), rows);
+        observe_text_tree(*node.child_at(i), x, y, supported && !node.applies_child_paint_offset(),
+                          rows);
 }
 
 inline std::string observe_text(const view::View& root, const std::string& input) {
@@ -67,7 +69,8 @@ inline std::string observe_text(const view::View& root, const std::string& input
     report.addMember("viewport_width", root.bounds().width);
     report.addMember("viewport_height", root.bounds().height);
     report.addMember("source", "Label::selectable_layout after Skia render");
-    report.addMember("limitations", "Selection bands and caret positions are not glyph ink, glyph advances, baselines or a resolved-face census");
+    report.addMember("limitations", "Selection bands and caret positions are not glyph ink, glyph "
+                                    "advances, baselines or a resolved-face census");
     auto rows = choc::value::createEmptyArray();
     observe_text_tree(root, 0, 0, true, rows);
     report.addMember("runs", std::move(rows));

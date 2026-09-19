@@ -1,5 +1,5 @@
-#include "test_design_import_shared.hpp"
 #include "../core/view/src/design_ir_helpers.hpp"
+#include "test_design_import_shared.hpp"
 #include <pulp/runtime/crypto.hpp>
 
 // ── Design source parsing ───────────────────────────────────────────────
@@ -1131,31 +1131,26 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
     SECTION("literal Vite import.meta URL edges enter the asset manifest") {
         TempDir tmp("pulp-design-ir-vite-assets");
         write_text(tmp.path / "hero.png", "vite-image-bytes");
-        auto ir = parse_claude_html(read_fixture(
-            "test/fixtures/imports/claude/vite-assets/index.html"));
+        auto ir =
+            parse_claude_html(read_fixture("test/fixtures/imports/claude/vite-assets/index.html"));
 
         DesignIrAssetOptions options;
         options.base_directory = tmp.path;
         refresh_design_ir_asset_manifest(ir, options);
 
         REQUIRE(ir.asset_manifest.assets.size() == 2);
-        const auto hero = std::find_if(ir.asset_manifest.assets.begin(),
-                                       ir.asset_manifest.assets.end(),
-                                       [](const auto& asset) {
-                                           return asset.original_uri == "./hero.png";
-                                       });
+        const auto hero =
+            std::find_if(ir.asset_manifest.assets.begin(), ir.asset_manifest.assets.end(),
+                         [](const auto& asset) { return asset.original_uri == "./hero.png"; });
         REQUIRE(hero != ir.asset_manifest.assets.end());
         CHECK(hero->diagnostics.empty());
         CHECK_FALSE(hero->content_hash.empty());
-        const auto dynamic = std::find_if(ir.asset_manifest.assets.begin(),
-                                          ir.asset_manifest.assets.end(),
-                                          [](const auto& asset) {
-                                              return asset.original_uri == "./${name}.png";
-                                          });
+        const auto dynamic =
+            std::find_if(ir.asset_manifest.assets.begin(), ir.asset_manifest.assets.end(),
+                         [](const auto& asset) { return asset.original_uri == "./${name}.png"; });
         REQUIRE(dynamic != ir.asset_manifest.assets.end());
         REQUIRE_FALSE(dynamic->diagnostics.empty());
-        CHECK(dynamic->diagnostics.front().kind ==
-              ImportDiagnosticKind::unresolved_asset);
+        CHECK(dynamic->diagnostics.front().kind == ImportDiagnosticKind::unresolved_asset);
     }
 
     SECTION("serialized relative asset paths survive relocation") {
@@ -1165,8 +1160,8 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
         write_text(relocated.path / "assets/hero.png", "portable-vite-asset");
         std::ifstream package_input;
 
-        DesignIR ir = parse_claude_html(
-            R"html(<html><body><img src="./assets/hero.png"></body></html>)html");
+        DesignIR ir =
+            parse_claude_html(R"html(<html><body><img src="./assets/hero.png"></body></html>)html");
         DesignIrAssetOptions options;
         options.base_directory = source.path;
         refresh_design_ir_asset_manifest(ir, options);
@@ -1181,8 +1176,8 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
         package_bytes << package_input.rdbuf();
         const auto reloaded = parse_design_ir_json(package_bytes.str());
         REQUIRE(reloaded.asset_manifest.assets.size() == 1);
-        const auto resolved = resolve_asset_file(
-            reloaded.asset_manifest.assets.front(), relocated.path);
+        const auto resolved =
+            resolve_asset_file(reloaded.asset_manifest.assets.front(), relocated.path);
         REQUIRE(resolved.has_value());
         CHECK(resolved->lexically_normal() ==
               (relocated.path / "assets/hero.png").lexically_normal());
