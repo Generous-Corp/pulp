@@ -415,6 +415,22 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
     REQUIRE(observed_owner_position.x == Catch::Approx(40.0f));
     REQUIRE(observed_owner_position.y == Catch::Approx(40.0f));
 
+    int context_menus = 0;
+    Point observed_context_position;
+    behavior_wrapper->on_context_menu = [&context_menus,
+                                          &observed_context_position](Point p) {
+        ++context_menus;
+        observed_context_position = p;
+    };
+    REQUIRE(captured->on_context_menu);
+    REQUIRE(dispatch_context_menu(root, {50, 60}));
+    REQUIRE(context_menus == 1);
+    // The retained canvas and behavior wrapper are siblings with different
+    // origins; the relay must remap through root space before calling the
+    // owner's handler.
+    REQUIRE(observed_context_position.x == Catch::Approx(40.0f));
+    REQUIRE(observed_context_position.y == Catch::Approx(40.0f));
+
     MouseEvent down;
     down.phase = MousePhase::press;
     down.button = MouseButton::left;

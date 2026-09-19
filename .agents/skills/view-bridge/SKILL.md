@@ -25,6 +25,14 @@ times to be worth remembering.
 
 ### Native scripted UI is not a WebView
 
+When a materialized canvas is retained as the native paint and hit-test
+surface, its authored behavior wrapper may be a sibling view. The bridge must
+relay every DOM input channel that the wrapper can subscribe to, including
+`on_context_menu`; pointer, wheel, click, and context-menu relays must remain
+liveness-checked and preserve callbacks already installed on the retained
+surface. A right-click that lands on the retained canvas must still reach the
+wrapper's context-menu handler after React replaces that wrapper.
+
 `ScriptedUiSession`, `WidgetBridge`, and `@pulp/react` execute through Pulp's JS
 engine and native Skia/Dawn view tree; they do not require `WebViewPanel`. In an
 SDK configured with `PULP_BUILD_WEBVIEW=ON`, use `pulp::view-native` (or
