@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260919-pr8556-gpu-observability-watch",
+  "created_at": "2026-09-19T00:15:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record the P0-A observability receipt slice for #8458. The change is confined to the existing importer differential lab, its documentation, and its unit test: the twelve-fixture corpus remains unchanged and Chromium remains the oracle. Receipts use TTFP, TTNI, IFNF, and caller-declared cache-state vocabulary. TTFP is explicitly unverified and IFNF is readback-only because this headless CPU/readback lab has no native present or interaction-ready event. Receipt paths are relative to each fixture output and are intended for /tmp/pulp-p0a-8458/receipts/. The slice excludes #8457 production capture, #8448/#8449 host scheduling, Graphite threading, and transferred render/canvas changes; no Vellum source authority or accepted boundary changes.",
+  "tests": [
+    "python3 -m unittest discover -s test -p test_importer_differential_lab.py",
+    "python3 -m py_compile tools/import-validation/importer_differential/*.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
