@@ -9,6 +9,14 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    "pulp/host/signal_graph.hpp": "Pulp::host",
+    "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
+    "pulp/host/signal_graph_prepared_topology_edit.hpp": "Pulp::host",
+    "pulp/host/custom_node_type.hpp": "Pulp::host",
+    "pulp/host/sample_region_authoring.hpp": "Pulp::host",
+    "pulp/host/sample_region_proof.hpp": "Pulp::host",
+    "pulp/host/sample_region_parameters.hpp": "Pulp::host",
+
     "pulp/format/processor.hpp": "Pulp::format",
     "pulp/format/processor_node_adapter.hpp": "Pulp::format",
     "pulp/audio/instrument_voice_allocator.hpp": "Pulp::audio",
@@ -144,18 +152,6 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
-    {
-        "include": "pulp/signal/unit_delay.hpp",
-        "fingerprint": "sha256:7e91b280e5a3a83b78ed1f84301990eee1b6dcaa8b7736f07287452896d22726",
-        "disposition": "infrastructure",
-        "capability_keys": [],
-        "rationale": (
-            "Exact one-sample state primitive for ordinary Processor composition and the "
-            "sample-region causal cut. The complete sample-region capability is published "
-            "only after its graph authoring, runtime, persistence, and control surfaces land; "
-            "this helper makes no standalone generator capability claim."
-        ),
-    },
     {
         "include": "pulp/signal/character_delay/reverse.hpp",
         "fingerprint": "sha256:8ffe9c4341a734e18aeae9900554cb042acfc3dd0982b243cde8705067140c91",

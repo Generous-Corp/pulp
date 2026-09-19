@@ -1802,6 +1802,62 @@
         {"key": "position", "label": "Position", "unit": "%", "kind": "continuous", "curve": "linear", "description": "Morph position across the wavetable bank.", "choices": [], "contracts": [{"realization_mode": "default", "min": 0, "max": 1, "default": 0}], "realization_modes": []},
         {"key": "level_db", "label": "Level", "unit": "dB", "kind": "continuous", "curve": "linear", "description": "Oscillator output level.", "choices": [], "contracts": [{"realization_mode": "default", "min": -60, "max": 0, "default": -12}], "realization_modes": []}
       ]
+    },
+    {
+      "key": "sample_region_input_boundary",
+      "label": "Sample Region Input",
+      "description": "Internal exact-version region boundary; created only by the region builder.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "pulp.core.sample-region.input", "type_version": 1, "sample_kernel_version": 1, "sample_region_v1": {"dsp_key": "pulp.core.sample-region.input", "type_version": 1, "sample_kernel_version": 1, "placement": "region_builder_only", "builder_role": "input_boundary"}, "settings": {}}],
+      "parameters": []
+    },
+    {
+      "key": "sample_region_output_boundary",
+      "label": "Sample Region Output",
+      "description": "Internal exact-version region boundary; created only by the region builder.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "pulp.core.sample-region.output", "type_version": 1, "sample_kernel_version": 1, "sample_region_v1": {"dsp_key": "pulp.core.sample-region.output", "type_version": 1, "sample_kernel_version": 1, "placement": "region_builder_only", "builder_role": "output_boundary"}, "settings": {}}],
+      "parameters": []
+    },
+    {
+      "key": "sample_region_constant",
+      "label": "Constant",
+      "description": "Exact-version block and scalar node for ordinary placement or a sample region.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "pulp.core.sample-region.constant", "type_version": 1, "sample_kernel_version": 1, "sample_region_v1": {"dsp_key": "pulp.core.sample-region.constant", "type_version": 1, "sample_kernel_version": 1, "placement": "normal_node", "builder_role": "constant"}, "settings": {}}],
+      "parameters": []
+    },
+    {
+      "key": "sample_region_parameter",
+      "label": "Parameter",
+      "description": "Exact-version block and scalar node for ordinary placement or a sample region.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "pulp.core.sample-region.parameter", "type_version": 1, "sample_kernel_version": 1, "sample_region_v1": {"dsp_key": "pulp.core.sample-region.parameter", "type_version": 1, "sample_kernel_version": 1, "placement": "normal_node", "builder_role": "parameter"}, "settings": {}}],
+      "parameters": []
+    },
+    {
+      "key": "sample_region_add",
+      "label": "Add",
+      "description": "Exact-version block and scalar node for ordinary placement or a sample region.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "pulp.core.sample-region.add", "type_version": 1, "sample_kernel_version": 1, "sample_region_v1": {"dsp_key": "pulp.core.sample-region.add", "type_version": 1, "sample_kernel_version": 1, "placement": "normal_node", "builder_role": "add"}, "settings": {}}],
+      "parameters": []
+    },
+    {
+      "key": "sample_region_multiply",
+      "label": "Multiply",
+      "description": "Exact-version block and scalar node for ordinary placement or a sample region.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "pulp.core.sample-region.multiply", "type_version": 1, "sample_kernel_version": 1, "sample_region_v1": {"dsp_key": "pulp.core.sample-region.multiply", "type_version": 1, "sample_kernel_version": 1, "placement": "normal_node", "builder_role": "multiply"}, "settings": {}}],
+      "parameters": []
+    },
+    {
+      "key": "sample_region_unit_delay",
+      "label": "Unit Delay",
+      "description": "Exact-version block and scalar node for ordinary placement or a sample region.",
+      "realization_axes": [],
+      "realizations": [{"mode": "default", "type_id": "pulp.core.unit-delay", "type_version": 1, "sample_kernel_version": 1, "sample_region_v1": {"dsp_key": "pulp.core.unit-delay", "type_version": 1, "sample_kernel_version": 1, "placement": "normal_node", "builder_role": "unit_delay"}, "settings": {}}],
+      "parameters": []
     }
   ]
 }

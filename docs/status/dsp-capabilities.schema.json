@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pulp dsp catalog with optional sample-region v1 metadata",
+  "type": "object",
+  "$defs": {
+    "sample_region_v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sample_kernel_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "role": {
+          "enum": [
+            "input_boundary",
+            "output_boundary",
+            "constant",
+            "parameter",
+            "add",
+            "multiply",
+            "unit_delay"
+          ]
+        },
+        "inputs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "state_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "state_alignment": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "config_kind": {
+          "enum": [
+            "BoundaryIndex",
+            "FiniteConstant",
+            "PromotedParameterId",
+            "None"
+          ]
+        }
+      },
+      "required": [
+        "type_version",
+        "sample_kernel_version",
+        "role",
+        "inputs",
+        "outputs",
+        "state_bytes",
+        "state_alignment",
+        "config_kind"
+      ]
+    },
+    "realization": {
+      "type": "object",
+      "properties": {
+        "type_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sample_kernel_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sample_region_v1": {
+          "$ref": "#/$defs/sample_region_v1"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "sample_region_v1": false
+          }
+        },
+        {
+          "required": [
+            "sample_region_v1",
+            "type_version",
+            "sample_kernel_version"
+          ]
+        }
+      ]
+    }
+  },
+  "properties": {
+    "catalogs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/realization"
+            }
+          }
+        }
+      }
+    }
+  }
+}
