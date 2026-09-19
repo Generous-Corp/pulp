@@ -124,6 +124,51 @@ struct ProductResponse {
     std::string detail_json;
 };
 
+ControlRequestEnvelope make_trace_request(const std::string& client_id,
+                                          const std::string& registration_id,
+                                          const std::string& publication_id,
+                                          const std::string& grant_id,
+                                          const std::string& request_id, std::string params_json) {
+    ControlRequestEnvelope request{
+        .request_id = request_id,
+        .client_id = client_id,
+        .registration_id = registration_id,
+        .grant_id = grant_id,
+        .instance_generation = publication_id,
+        .operation_id = "dev.pulp.trace/session-control@1",
+        .operation_version = 1,
+        .idempotency_key = "a3-product-trace-key-" + request_id,
+        .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                (std::chrono::system_clock::now() + 10s).time_since_epoch())
+                                .count(),
+        .params_json = std::move(params_json),
+    };
+    request.request_hash = *control_request_hash(request);
+    return request;
+}
+
+ControlRequestEnvelope
+make_session_request(const std::string& client_id, const std::string& registration_id,
+                     const std::string& publication_id, const std::string& grant_id,
+                     const std::string& request_id, std::string params_json) {
+    ControlRequestEnvelope request{
+        .request_id = request_id,
+        .client_id = client_id,
+        .registration_id = registration_id,
+        .grant_id = grant_id,
+        .instance_generation = publication_id,
+        .operation_id = "dev.pulp.session/control@1",
+        .operation_version = 1,
+        .idempotency_key = "a3-product-session-key-" + request_id,
+        .deadline_unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                (std::chrono::system_clock::now() + 10s).time_since_epoch())
+                                .count(),
+        .params_json = std::move(params_json),
+    };
+    request.request_hash = *control_request_hash(request);
+    return request;
+}
+
 ProductResponse run_campaign(bool use_gpu, bool seed_blank = false) {
     TemporaryRoot root;
     const auto broker_executable = current_executable();
@@ -218,6 +263,62 @@ ProductResponse run_campaign(bool use_gpu, bool seed_blank = false) {
     ControlClient client(connection);
     REQUIRE(client.negotiate({.mandatory_features = {"receipts"}}).succeeded());
 
+    std::optional<std::string> trace_grant_id;
+    std::optional<std::string> controller_grant_id;
+    std::optional<std::string> controller_lease_id;
+    if (std::getenv("PULP_A3_CAPTURE_TRACE")) {
+        auto controller_grant = choc::value::createObject("");
+        controller_grant.addMember("instance_id", choc::value::createString(product.instance_id));
+        controller_grant.addMember("operation_id",
+                                   choc::value::createString("dev.pulp.session/control@1"));
+        const auto controller_granted =
+            connection.manage("grant-request", choc::json::toString(controller_grant, false));
+        INFO(controller_granted.explanation);
+        REQUIRE(controller_granted.status_id == "granted");
+        controller_grant_id =
+            std::string(choc::json::parse(controller_granted.data_json)["grant_id"].getString());
+        REQUIRE_FALSE(controller_grant_id->empty());
+
+        const auto acquired = client.request(
+            make_session_request(client_id, product.registration_id, product.publication_id,
+                                 *controller_grant_id, "a3-product-session-acquire",
+                                 R"({"action":"acquire"})"),
+            10s);
+        INFO(acquired.error_code);
+        INFO(acquired.explanation);
+        REQUIRE(acquired.succeeded());
+        REQUIRE(acquired.response);
+        REQUIRE(acquired.response->state == ControlReceiptState::Completed);
+        REQUIRE_FALSE(acquired.response->result_code);
+        const auto acquire_detail = choc::json::parse(acquired.response->detail_json);
+        REQUIRE(acquire_detail["lease_id"].isString());
+        controller_lease_id = std::string(acquire_detail["lease_id"].getString());
+        REQUIRE_FALSE(controller_lease_id->empty());
+
+        auto trace_grant = choc::value::createObject("");
+        trace_grant.addMember("instance_id", choc::value::createString(product.instance_id));
+        trace_grant.addMember("operation_id",
+                              choc::value::createString("dev.pulp.trace/session-control@1"));
+        const auto trace_granted =
+            connection.manage("grant-request", choc::json::toString(trace_grant, false));
+        INFO(trace_granted.explanation);
+        REQUIRE(trace_granted.status_id == "granted");
+        trace_grant_id =
+            std::string(choc::json::parse(trace_granted.data_json)["grant_id"].getString());
+        REQUIRE_FALSE(trace_grant_id->empty());
+
+        const auto started = client.request(
+            make_trace_request(
+                client_id, product.registration_id, product.publication_id, *trace_grant_id,
+                "a3-product-trace-start",
+                R"({"action":"start","categories":["render","gpu","state","js","layout","text","canvas"],"ring_mb":128})"),
+            10s);
+        INFO(started.error_code);
+        INFO(started.explanation);
+        REQUIRE(started.succeeded());
+        REQUIRE(started.response);
+    }
+
     const auto response_deadline = std::chrono::steady_clock::now() + 10s;
     std::uint64_t sequence = 0;
     while (std::chrono::steady_clock::now() < response_deadline) {
@@ -254,6 +355,51 @@ ProductResponse run_campaign(bool use_gpu, bool seed_blank = false) {
         std::this_thread::sleep_for(2ms);
     }
     REQUIRE_FALSE(product.detail_json.empty());
+
+    if (trace_grant_id) {
+        const auto stop_request =
+            make_trace_request(client_id, product.registration_id, product.publication_id,
+                               *trace_grant_id, "a3-product-trace-stop", R"({"action":"stop"})");
+        auto stopped = client.request(stop_request, 15s);
+        for (unsigned attempt = 0; attempt < 100 && stopped.response &&
+                                   stopped.response->state != ControlReceiptState::Completed;
+             ++attempt) {
+            std::this_thread::sleep_for(20ms);
+            stopped = client.request(stop_request, 15s);
+        }
+        INFO(stopped.error_code);
+        INFO(stopped.explanation);
+        if (stopped.response) {
+            INFO(stopped.response->explanation);
+            INFO(stopped.response->detail_json);
+        }
+        REQUIRE(stopped.succeeded());
+        REQUIRE(stopped.response);
+        REQUIRE(stopped.response->state == ControlReceiptState::Completed);
+        const auto stop_detail = choc::json::parse(stopped.response->detail_json);
+        const auto trace_path =
+            std::filesystem::path{std::string(stop_detail["out_path"].getString())};
+        REQUIRE(std::filesystem::is_regular_file(trace_path));
+        if (const auto* destination = std::getenv("PULP_A3_TRACE_CAPTURE_PATH")) {
+            const auto target = std::filesystem::path{destination};
+            std::error_code copy_error;
+            std::filesystem::copy_file(
+                trace_path, target, std::filesystem::copy_options::overwrite_existing, copy_error);
+            REQUIRE_FALSE(copy_error);
+        }
+
+        const auto released = client.request(
+            make_session_request(client_id, product.registration_id, product.publication_id,
+                                 *controller_grant_id, "a3-product-session-release",
+                                 R"({"action":"release"})"),
+            10s);
+        INFO(released.error_code);
+        INFO(released.explanation);
+        REQUIRE(released.succeeded());
+        REQUIRE(released.response);
+        REQUIRE(released.response->state == ControlReceiptState::Completed);
+        REQUIRE_FALSE(released.response->result_code);
+    }
     connection.disconnect();
     daemon.stop();
     return product;

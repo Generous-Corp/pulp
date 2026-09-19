@@ -115,7 +115,7 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
     _pulp_cache_control_declarations(
         pulp-control-gpu-health-standalone-product-fixture
         developer-local
-        "dev.pulp.gpu/health.read@1" FALSE)
+        "dev.pulp.gpu/health.read@1;dev.pulp.session/control@1;dev.pulp.trace/session-control@1" FALSE)
     _pulp_configure_control_shipping(
         pulp-control-gpu-health-standalone-product-fixture
         "dev.pulp.test.gpu-health-standalone-product"
