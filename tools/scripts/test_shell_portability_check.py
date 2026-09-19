@@ -79,6 +79,70 @@ class ShellPortabilityTests(unittest.TestCase):
             False,
         )
 
+    def test_build_output_filter_warns_when_status_is_not_preserved(self) -> None:
+        findings = check.check_text(
+            "cmake --build build 2>&1 | tail -20", "<command>", bash=False
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertIn("status may be masked", findings[0])
+        self.assertIn("set -o pipefail", findings[0])
+
+    def test_ctest_output_filter_warns_for_common_consumers(self) -> None:
+        for consumer in ("head -30", "grep FAILED", "sed -n '1,20p'", "tee /tmp/ctest.log"):
+            with self.subTest(consumer=consumer):
+                findings = check.check_text(
+                    f"ctest --test-dir build --output-on-failure | {consumer}",
+                    "<command>",
+                    bash=False,
+                )
+                self.assertEqual(len(findings), 1)
+
+    def test_pipefail_makes_build_output_filter_safe(self) -> None:
+        self.assertEqual(
+            check.check_text(
+                "set -euo pipefail\ncmake --build build 2>&1 | tail -20",
+                "<script>",
+                bash=True,
+            ),
+            [],
+        )
+
+    def test_explicit_pipeline_status_check_is_safe(self) -> None:
+        self.assertEqual(
+            check.check_text(
+                "cmake --build build 2>&1 | tail -20\n"
+                "status=${PIPESTATUS[0]}\n"
+                "test ${status} -eq 0",
+                "<script>",
+                bash=True,
+            ),
+            [],
+        )
+
+    def test_pipefail_can_be_disabled_again(self) -> None:
+        findings = check.check_text(
+            "set -o pipefail\nset +o pipefail\nctest | tail -10",
+            "<script>",
+            bash=True,
+        )
+        self.assertEqual(len(findings), 1)
+
+    def test_comments_are_not_reported_as_masked_pipelines(self) -> None:
+        self.assertEqual(
+            check.check_text(
+                "# cmake --build build 2>&1 | tail -20\n",
+                "<script>",
+                bash=False,
+            ),
+            [],
+        )
+
+    def test_unrelated_output_filter_is_not_reported(self) -> None:
+        self.assertEqual(
+            check.check_text("git status --short | tail -20", "<command>", bash=False),
+            [],
+        )
+
     def test_advisory_hook_warns_without_blocking(self) -> None:
         hook = Path(__file__).parents[2] / "hooks/scripts/shell-portability-hint.sh"
         payload = json.dumps({"tool_input": {"command": "test ${PIPESTATUS[0]} -eq 0"}})

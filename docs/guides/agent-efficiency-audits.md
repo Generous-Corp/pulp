@@ -23,6 +23,20 @@ defect. It is quote-aware and
 does not treat single-quoted query data as shell syntax. The hooks always
 return success; the regression gate and the user's shell remain authoritative.
 
+The checker also catches a narrower reporting failure: a `cmake --build` or
+`ctest` command whose result is sent through a final output consumer such as
+`tail`, `head`, `grep`, `sed`, `awk`, or `tee`. Without `pipefail`, that
+consumer's zero exit code can make a failed build or test run look successful;
+this was observed in recent M3/M5 agent sessions. The advisory points to two
+small repairs: enable `set -o pipefail` before the pipeline, or capture Bash
+`${PIPESTATUS[0]}` / zsh `${pipestatus[1]}` on the immediately following line
+before running another command. It recognizes an already-enabled `pipefail`
+and the direct status-capture pattern, so it does not nag about a pipeline
+whose producer status is being preserved. It intentionally does not attempt
+to prove arbitrary shell control flow, and it does not flag unrelated command
+output filters. Prefer retaining the full build/test log and filtering it only
+after the command's status has been recorded when a short summary is useful.
+
 Recent M5 evidence included a zsh `${PIPESTATUS[0]}` test that surfaced as
 `unknown condition: -eq`, and `$base:core/...` / `$base:test/...` expansions
 that silently lost the first character after the colon. These were outside
