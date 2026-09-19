@@ -31,6 +31,12 @@ class ShellPortabilityTests(unittest.TestCase):
     def test_bare_pipestatus_is_rejected_in_zsh(self) -> None:
         self.assert_findings('#!/bin/zsh\nprint -- "$PIPESTATUS"\n', True)
 
+    def test_incidental_bash_word_does_not_change_file_shell_detection(self) -> None:
+        self.assert_findings(
+            "#!/bin/zsh\n# bash compatibility note\ntest ${PIPESTATUS[0]} -eq 0\n",
+            True,
+        )
+
     def test_ad_hoc_command_mode_catches_zsh_colon_modifier(self) -> None:
         self.assertEqual(
             bool(check.check_text('git show "$base:core/file.cpp"', "<command>", bash=False)),
@@ -127,6 +133,24 @@ class ShellPortabilityTests(unittest.TestCase):
         )
         self.assertEqual(len(findings), 1)
 
+    def test_unrelated_command_after_pipefail_is_conservative(self) -> None:
+        findings = check.check_text(
+            "set -o pipefail\necho preparing\ncmake --build build | tail -10",
+            "<script>",
+            bash=True,
+        )
+        self.assertEqual(len(findings), 1)
+
+    def test_same_line_pipefail_prefix_is_safe(self) -> None:
+        self.assertEqual(
+            check.check_text(
+                "set -o pipefail; cmake --build build | tail -10",
+                "<script>",
+                bash=True,
+            ),
+            [],
+        )
+
     def test_comments_are_not_reported_as_masked_pipelines(self) -> None:
         self.assertEqual(
             check.check_text(
@@ -142,6 +166,40 @@ class ShellPortabilityTests(unittest.TestCase):
             check.check_text("git status --short | tail -20", "<command>", bash=False),
             [],
         )
+
+    def test_quoted_build_text_is_not_reported_as_a_pipeline(self) -> None:
+        self.assertEqual(
+            check.check_text(
+                'printf "%s\\n" "cmake --build build | tail -20"',
+                "<command>",
+                bash=False,
+            ),
+            [],
+        )
+
+    def test_arbitrary_status_word_does_not_prove_pipeline_safety(self) -> None:
+        findings = check.check_text(
+            "cmake --build build | tail -20\necho PIPESTATUS",
+            "<script>",
+            bash=True,
+        )
+        self.assertEqual(len(findings), 1)
+
+    def test_quoted_pipefail_text_does_not_prove_pipeline_safety(self) -> None:
+        findings = check.check_text(
+            'echo "set -o pipefail"\ncmake --build build | tail -20',
+            "<script>",
+            bash=True,
+        )
+        self.assertEqual(len(findings), 1)
+
+    def test_multiline_build_pipeline_is_checked(self) -> None:
+        findings = check.check_text(
+            "cmake --build build 2>&1 |\\\n  tail -20",
+            "<script>",
+            bash=False,
+        )
+        self.assertEqual(len(findings), 1)
 
     def test_advisory_hook_warns_without_blocking(self) -> None:
         hook = Path(__file__).parents[2] / "hooks/scripts/shell-portability-hint.sh"

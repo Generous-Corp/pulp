@@ -9,6 +9,7 @@
 
 use std::path::Path;
 
+use crate::error::{CliError, Result};
 use crate::proc::Invocation;
 
 /// A planned CMake build, with parallelism removed from argv and expressed
@@ -34,12 +35,12 @@ pub fn plan_cmake_build(
     project_root: &Path,
     build_dir: &Path,
     passthrough: &[String],
-) -> BuildPlan {
-    let (args, requested) = strip_parallel_args(passthrough);
+) -> Result<BuildPlan> {
+    let (args, requested) = strip_parallel_args(passthrough)?;
     let tier0 = tier0_jobs();
     let inherited = positive_env("PULP_BUILD_JOBS");
     let lease_held = env_is_true("PULP_TARTCI_LEASE_HELD");
-    plan_cmake_build_with_caps(
+    Ok(plan_cmake_build_with_caps(
         project_root,
         build_dir,
         args,
@@ -47,7 +48,7 @@ pub fn plan_cmake_build(
         tier0,
         inherited,
         lease_held,
-    )
+    ))
 }
 
 fn plan_cmake_build_with_caps(
@@ -67,7 +68,10 @@ fn plan_cmake_build_with_caps(
     let jobs = requested.map_or(host_cap, |value| value.min(host_cap).max(1));
 
     let wrapper = project_root.join("tools/ci/governed-build.sh");
-    let use_wrapper = wrapper.is_file() && !lease_held;
+    // A POSIX shell script cannot be spawned directly by CreateProcess on
+    // Windows. Consumer/source builds on Windows still receive the same
+    // bounded environment, while POSIX source checkouts use the lease owner.
+    let use_wrapper = cfg!(unix) && wrapper.is_file() && !lease_held;
     let mut invocation = if use_wrapper {
         Invocation::new(wrapper.to_string_lossy().into_owned())
             .args(["cmake", "--build"])
@@ -101,27 +105,34 @@ fn plan_cmake_build_with_caps(
 
 /// Remove CMake parallel flags while retaining a positive explicit request.
 #[must_use]
-pub fn strip_parallel_args(args: &[String]) -> (Vec<String>, Option<u32>) {
+pub fn strip_parallel_args(args: &[String]) -> Result<(Vec<String>, Option<u32>)> {
     let mut clean = Vec::with_capacity(args.len());
     let mut requested = None;
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
         if arg == "--parallel" || arg == "-j" {
-            if let Some(value) = args.get(index + 1).and_then(|value| parse_jobs(value)) {
-                requested = Some(value);
-                index += 1;
-            }
+            let value = args
+                .get(index + 1)
+                .and_then(|value| parse_jobs(value))
+                .ok_or_else(|| CliError::BadUsage(format!("{arg} requires a positive job count")))?;
+            requested = Some(value);
+            index += 1;
         } else if let Some(value) = arg.strip_prefix("--parallel=").and_then(parse_jobs) {
             requested = Some(value);
         } else if let Some(value) = arg.strip_prefix("-j").and_then(parse_jobs) {
             requested = Some(value);
+        } else if arg.starts_with("--parallel=") || (arg.starts_with("-j") && arg.len() > 2)
+        {
+            return Err(CliError::BadUsage(format!(
+                "{arg} requires a positive job count"
+            )));
         } else {
             clean.push(arg.clone());
         }
         index += 1;
     }
-    (clean, requested)
+    Ok((clean, requested))
 }
 
 fn parse_jobs(value: &str) -> Option<u32> {
@@ -142,9 +153,21 @@ fn env_is_true(name: &str) -> bool {
 fn tier0_jobs() -> u32 {
     let cores = std::thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get) as u32;
-    let memory_mb = physical_memory_mb();
-    let memory_jobs = memory_mb
-        .map(|mb| (mb.saturating_mul(3) / 4 / 1536).max(1))
+    // Match the C++ governor: an explicit budget is already the post-reserve
+    // budget, while detected physical memory reserves roughly 25% for the OS.
+    let memory_budget_mb = if let Some(budget_mb) = positive_env("PULP_BUILD_MEM_BUDGET_MB") {
+        Some(budget_mb)
+    } else if let Some(total_mb) = physical_memory_mb() {
+        Some(total_mb.saturating_mul(3) / 4)
+    } else {
+        None
+    };
+    jobs_for_budget(cores, memory_budget_mb)
+}
+
+fn jobs_for_budget(cores: u32, memory_budget_mb: Option<u32>) -> u32 {
+    let memory_jobs = memory_budget_mb
+        .map(|mb| (mb / 1536).max(1))
         .unwrap_or(cores);
     cores.min(memory_jobs).max(1)
 }
@@ -192,7 +215,7 @@ mod tests {
             "4".to_owned(),
             "-j2".to_owned(),
         ];
-        let (clean, requested) = strip_parallel_args(&args);
+        let (clean, requested) = strip_parallel_args(&args).unwrap();
         assert_eq!(clean, ["--target", "plugin"]);
         assert_eq!(requested, Some(2));
     }
@@ -200,9 +223,16 @@ mod tests {
     #[test]
     fn malformed_parallel_value_does_not_disappear() {
         let args = ["--parallel".to_owned(), "bogus".to_owned()];
-        let (clean, requested) = strip_parallel_args(&args);
-        assert_eq!(clean, ["bogus"]);
-        assert_eq!(requested, None);
+        let err = strip_parallel_args(&args).unwrap_err();
+        assert!(err.to_string().contains("requires a positive job count"));
+    }
+
+    #[test]
+    fn rejects_zero_and_attached_malformed_parallel_values() {
+        for arg in ["-j0", "--parallel=0", "-jbogus"] {
+            let err = strip_parallel_args(&[arg.to_owned()]).unwrap_err();
+            assert!(err.to_string().contains("requires a positive job count"));
+        }
     }
 
     #[test]
@@ -211,9 +241,16 @@ mod tests {
     }
 
     #[test]
+    fn explicit_memory_budget_matches_cpp_governor_contract() {
+        assert_eq!(jobs_for_budget(8, Some(3072)), 2);
+        assert_eq!(jobs_for_budget(8, Some(512)), 1);
+        assert_eq!(jobs_for_budget(8, None), 8);
+    }
+
+    #[test]
     fn plan_without_wrapper_uses_environment_bound() {
         let root = tempfile::tempdir().unwrap();
-        let plan = plan_cmake_build(root.path(), &root.path().join("build"), &[]);
+        let plan = plan_cmake_build(root.path(), &root.path().join("build"), &[]).unwrap();
         assert_eq!(plan.invocation.program, "cmake");
         assert!(plan.jobs > 0);
         assert!(plan
@@ -272,6 +309,12 @@ mod tests {
         let script = root.path().join("tools/ci");
         std::fs::create_dir_all(&script).unwrap();
         std::fs::write(script.join("governed-build.sh"), "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(
+            script.join("governed-build.sh"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
         let plan = plan_cmake_build_with_caps(
             root.path(),
             &root.path().join("build"),

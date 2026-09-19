@@ -7,7 +7,8 @@ real defects without adding noise. Retire a rule when its evidence disappears;
 do not preserve it merely because it is already installed.
 
 The current shell portability checks cover two silent zsh hazards: unbraced
-`$name:path` expansions, and Bash-only `${PIPESTATUS[...]}` in zsh sessions.
+`$name:path` expansions, and Bash-only `${PIPESTATUS[...]}` in zsh sessions;
+they also flag build/test pipeline status masking.
 Run them with:
 
 ```sh
@@ -19,8 +20,8 @@ repository-local Codex/Claude PreToolUse hooks use that advisory mode, so a
 command typed directly by an agent receives the same warning as a tracked
 script. It follows `PULP_AGENT_SHELL` or `SHELL` (`zsh`/`bash`) and stays
 silent for unknown shells, so a valid Bash command is not reported as a zsh
-defect. It is quote-aware and
-does not treat single-quoted query data as shell syntax. The hooks always
+defect. It is quote-aware for quoted data and does not treat quoted query or
+log text as shell syntax. The hooks always
 return success; the regression gate and the user's shell remain authoritative.
 
 The checker also catches a narrower reporting failure: a `cmake --build` or
@@ -28,10 +29,11 @@ The checker also catches a narrower reporting failure: a `cmake --build` or
 `tail`, `head`, `grep`, `sed`, `awk`, or `tee`. Without `pipefail`, that
 consumer's zero exit code can make a failed build or test run look successful;
 this was observed in recent M3/M5 agent sessions. The advisory points to two
-small repairs: enable `set -o pipefail` before the pipeline, or capture Bash
+small repairs: enable `set -o pipefail` immediately before the pipeline, or capture Bash
 `${PIPESTATUS[0]}` / zsh `${pipestatus[1]}` on the immediately following line
-before running another command. It recognizes an already-enabled `pipefail`
-and the direct status-capture pattern, so it does not nag about a pipeline
+before running another command. It recognizes an immediately preceding or
+same-line `pipefail` and the direct status-capture pattern, so it does not nag
+about a pipeline
 whose producer status is being preserved. It intentionally does not attempt
 to prove arbitrary shell control flow, and it does not flag unrelated command
 output filters. Prefer retaining the full build/test log and filtering it only

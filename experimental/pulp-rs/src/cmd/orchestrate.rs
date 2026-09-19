@@ -409,7 +409,7 @@ fn build_with_dependency_policy<S: Spawner>(
         }
     }
 
-    let build = plan_cmake_build(&proj.root, &build_dir, &args.passthrough).invocation;
+    let build = plan_cmake_build(&proj.root, &build_dir, &args.passthrough)?.invocation;
     let rc = spawner.run(&build)?;
     if rc != 0 {
         return Ok(rc);
@@ -575,7 +575,7 @@ fn build_web<S: Spawner>(
         }
     }
 
-    let build = plan_cmake_build(&proj.root, &build_dir, &args.passthrough).invocation;
+    let build = plan_cmake_build(&proj.root, &build_dir, &args.passthrough)?.invocation;
     spawner.run(&build)
 }
 
@@ -1899,6 +1899,18 @@ mod tests {
     }
 
     #[test]
+    fn build_preserves_governed_child_failure_status() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        let spawner = RecordingSpawner::with_codes(vec![23]);
+        let mut out = Vec::new();
+        let rc = build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+        assert_eq!(rc, 23);
+        assert_eq!(spawner.calls.borrow().len(), 1);
+    }
+
+    #[test]
     fn source_tree_build_prepares_dependencies_before_required_configure() {
         let td = tempfile::tempdir().unwrap();
         source_tree_fixture(td.path());
@@ -2027,6 +2039,21 @@ mod tests {
         assert_eq!(calls[1].program, "cmake");
         assert!(calls[1].args.iter().any(|a| a == "--build"));
         assert!(calls[1].args.iter().any(|a| a.ends_with("build-wam")));
+    }
+
+    #[test]
+    fn build_wam_preserves_build_failure_status_and_parallel_env() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let spawner = RecordingSpawner::with_codes(vec![0, 17]);
+        let mut out = Vec::new();
+        let args = BuildArgs { web_format: Some("wam".to_owned()), ..Default::default() };
+        let rc = build_with(&proj, &args, &spawner, &mut out).unwrap();
+        assert_eq!(rc, 17);
+        let calls = spawner.calls.borrow();
+        assert!(calls[1].envs.iter().any(|(key, value)| {
+            key == "CMAKE_BUILD_PARALLEL_LEVEL" && value.parse::<u32>().unwrap() > 0
+        }));
     }
 
     #[test]
