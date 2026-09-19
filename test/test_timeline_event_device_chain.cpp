@@ -85,7 +85,8 @@ struct ChainRender {
 
 /// Binds `devices` on one track and renders `blocks` consecutive blocks.
 ChainRender render_chain(const std::shared_ptr<const CompiledTempoMap>& map,
-                         std::vector<DevicePlacement> devices, std::size_t blocks = 128) {
+                         std::vector<DevicePlacement> devices, std::size_t blocks = 128,
+                         std::span<const std::pair<std::uint32_t, float>> parameters = {}) {
     constexpr std::size_t kFrames = 64;
     ProgramHarness programs;
     programs.publish(chain_project(*map, std::move(devices)), map,
@@ -98,6 +99,12 @@ ChainRender render_chain(const std::shared_ptr<const CompiledTempoMap>& map,
     TimelineGraphPlaybackBinding binding(graph, programs.store);
     const std::array routes{TimelineTrackGraphRoute{{10}, output_node}};
     REQUIRE(binding.prepare(*pinned, routes, config(2), 48'000.0, kFrames));
+    if (!parameters.empty()) {
+        const auto humaniser_node = binding.device_node_for({20});
+        REQUIRE(humaniser_node != 0);
+        for (const auto& [id, value] : parameters)
+            REQUIRE(graph.set_node_parameter(humaniser_node, id, value));
+    }
 
     ChainRender result;
     result.shift_samples = binding.event_compensation_shift_for({10}).samples;
@@ -169,6 +176,58 @@ TEST_CASE("timeline event device chain plays an event-to-event device before the
     REQUIRE(uncompensated.energy > 0.0);
     REQUIRE(compensated.audio != uncompensated.audio);
     REQUIRE(sample_hash(compensated.audio) != sample_hash(uncompensated.audio));
+}
+
+TEST_CASE("timeline humaniser depth reaches the compiled device through host controls") {
+    const auto map = tempo_map();
+    const std::array zero_depth{
+        std::pair{kEventHumaniserTimingDepthParamId, 0.0f},
+        std::pair{kEventHumaniserVelocityDepthParamId, 0.0f},
+    };
+    const std::array timing_zero{
+        std::pair{kEventHumaniserTimingDepthParamId, 0.0f},
+    };
+    const std::array velocity_zero{
+        std::pair{kEventHumaniserVelocityDepthParamId, 0.0f},
+    };
+    const auto zero = render_chain(map,
+                                   {DevicePlacement{{20}, humaniser_configuration()},
+                                    DevicePlacement{{21}, instrument_configuration()}},
+                                   128, zero_depth);
+    const auto zero_repeat = render_chain(map,
+                                          {DevicePlacement{{20}, humaniser_configuration()},
+                                           DevicePlacement{{21}, instrument_configuration()}},
+                                          128, zero_depth);
+    const auto default_depth =
+        render_chain(map, {DevicePlacement{{20}, humaniser_configuration()},
+                           DevicePlacement{{21}, instrument_configuration()}});
+    const auto timing_changed = render_chain(map,
+                                             {DevicePlacement{{20}, humaniser_configuration()},
+                                              DevicePlacement{{21}, instrument_configuration()}},
+                                             128, timing_zero);
+    const auto velocity_changed = render_chain(map,
+                                               {DevicePlacement{{20}, humaniser_configuration()},
+                                                DevicePlacement{{21}, instrument_configuration()}},
+                                               128, velocity_zero);
+
+    // Depth changes the attack-jitter span inside the fixed compensated window;
+    // it does not bypass the device. Releases retain the kernel's existing
+    // causal clamp semantics, so zero depth is deterministic but need not equal
+    // an instrument-only render.
+    REQUIRE(zero.shift_samples == kEventHumaniserWindowSamples);
+    REQUIRE(default_depth.shift_samples == kEventHumaniserWindowSamples);
+    REQUIRE(zero.energy > 0.0);
+    REQUIRE(default_depth.energy > 0.0);
+    REQUIRE(zero.audio == zero_repeat.audio);
+    REQUIRE(sample_hash(zero.audio) == sample_hash(zero_repeat.audio));
+    REQUIRE(zero.audio != default_depth.audio);
+    REQUIRE(sample_hash(zero.audio) != sample_hash(default_depth.audio));
+    // Independent controls: either setter being dead must fail its own render,
+    // rather than being masked by the other setter changing the combined case.
+    REQUIRE(timing_changed.audio != default_depth.audio);
+    REQUIRE(sample_hash(timing_changed.audio) != sample_hash(default_depth.audio));
+    REQUIRE(velocity_changed.audio != default_depth.audio);
+    REQUIRE(sample_hash(velocity_changed.audio) != sample_hash(default_depth.audio));
 }
 
 TEST_CASE("timeline event device chain admits one event edge between the two devices") {
@@ -346,6 +405,43 @@ TEST_CASE("timeline built-in device catalog describes what a chain may name") {
         REQUIRE(slot != nullptr);
         REQUIRE(slot->latency_samples() == descriptor.latency_samples);
     }
+
+    auto humaniser_slot =
+        pulp::host::load_builtin_plugin(pulp::host::builtin_device_plugin_info(*humaniser));
+    REQUIRE(humaniser_slot != nullptr);
+    const auto parameters = humaniser_slot->parameters();
+    REQUIRE(parameters.size() == 2);
+    REQUIRE(parameters[0].id == kEventHumaniserTimingDepthParamId);
+    REQUIRE(parameters[0].name == "Timing Depth");
+    REQUIRE(parameters[0].unit.empty());
+    REQUIRE(parameters[0].min_value == 0.0f);
+    REQUIRE(parameters[0].max_value == 1.0f);
+    REQUIRE(parameters[0].default_value == 1.0f);
+    REQUIRE_FALSE(parameters[0].flags.automatable);
+    REQUIRE_FALSE(parameters[0].flags.rampable);
+    REQUIRE_FALSE(parameters[0].flags.modulatable);
+    REQUIRE_FALSE(parameters[0].flags.stepped);
+    REQUIRE(parameters[1].id == kEventHumaniserVelocityDepthParamId);
+    REQUIRE(parameters[1].name == "Velocity Depth");
+    REQUIRE(parameters[1].unit == "MIDI velocity");
+    REQUIRE(parameters[1].min_value == 0.0f);
+    REQUIRE(parameters[1].max_value == 127.0f);
+    REQUIRE(parameters[1].default_value == 12.0f);
+    REQUIRE_FALSE(parameters[1].flags.automatable);
+    REQUIRE_FALSE(parameters[1].flags.rampable);
+    REQUIRE_FALSE(parameters[1].flags.modulatable);
+    REQUIRE(parameters[1].flags.stepped);
+    humaniser_slot->set_parameter(kEventHumaniserTimingDepthParamId, -1.0f);
+    humaniser_slot->set_parameter(kEventHumaniserVelocityDepthParamId, 200.0f);
+    REQUIRE(humaniser_slot->get_parameter(kEventHumaniserTimingDepthParamId) == 0.0f);
+    REQUIRE(humaniser_slot->get_parameter(kEventHumaniserVelocityDepthParamId) == 127.0f);
+    humaniser_slot->set_parameter(kEventHumaniserVelocityDepthParamId, 12.6f);
+    REQUIRE(humaniser_slot->get_parameter(kEventHumaniserVelocityDepthParamId) == 13.0f);
+    // Built-in placement state is refused by admission; these controls use the
+    // unified runtime parameter path and must not imply an opaque state format.
+    REQUIRE(humaniser_slot->save_state().empty());
+    REQUIRE(humaniser_slot->restore_state({}));
+    REQUIRE_FALSE(humaniser_slot->restore_state({0}));
 
     // The chain bounds a caller reads to predict a refusal.
     REQUIRE(pulp::host::kAdmittedDeviceChainLength == 2);

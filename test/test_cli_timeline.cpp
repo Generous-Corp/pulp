@@ -816,6 +816,14 @@ TEST_CASE("timeline CLI selects a writer profile by name and refuses unknown one
     REQUIRE(capabilities.find(R"("binding_key":"pulp.device.event.humanise")") !=
             std::string::npos);
     REQUIRE(capabilities.find(R"("domain":"event-to-event")") != std::string::npos);
+    REQUIRE(capabilities.find(R"("name":"Timing Depth","unit":"","min":0.000000,"max":1.000000)") !=
+            std::string::npos);
+    REQUIRE(capabilities.find(R"("name":"Velocity Depth","unit":"MIDI velocity")") !=
+            std::string::npos);
+    REQUIRE(
+        capabilities.find(
+            R"("automatable":false,"read_only":false,"hidden":false,"stepped":false,"is_bypass":false,"rampable":false,"modulatable":false)") !=
+        std::string::npos);
     REQUIRE(capabilities.find(R"("binding_key":"pulp.instrument.basic")") != std::string::npos);
     REQUIRE(capabilities.find(R"("domain":"event-to-audio")") != std::string::npos);
     // The bounds a caller adds its own latencies against, so a chain that would

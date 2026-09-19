@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -9,6 +10,22 @@ namespace pulp::tools::timeline {
 /** @addtogroup tools_timeline
  * @{
  */
+
+struct DeviceParameterCatalogEntry {
+    std::uint32_t id = 0;
+    std::string name;
+    std::string unit;
+    float min_value = 0.0f;
+    float max_value = 1.0f;
+    float default_value = 0.0f;
+    bool automatable = false;
+    bool read_only = false;
+    bool hidden = false;
+    bool stepped = false;
+    bool is_bypass = false;
+    bool rampable = false;
+    bool modulatable = false;
+};
 
 /// One instantiable Pulp-owned Timeline device, projected for offline callers.
 ///
@@ -33,6 +50,7 @@ struct DeviceCatalogEntry {
     int num_audio_outputs = 0;
     int latency_samples = 0;
     bool is_instrument = false;
+    std::vector<DeviceParameterCatalogEntry> parameters;
 };
 
 /// Every device the host binding can instantiate, in chain order: an

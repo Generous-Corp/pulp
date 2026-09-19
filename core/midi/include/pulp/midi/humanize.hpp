@@ -13,7 +13,8 @@ namespace pulp::midi {
 
 /// Seeded timing and velocity jitter over note attacks.
 ///
-/// Timing jitter is a forward-only delay in `[0, timing_samples]`. A kernel on
+/// Timing jitter is a forward-only delay in
+/// `[minimum_timing_samples, timing_samples]`. A kernel on
 /// the audio thread cannot emit an event earlier than it arrived, so a
 /// symmetric jitter would only be expressible by delaying the whole stream;
 /// a forward delay keeps the kernel causal and keeps latency equal to the
@@ -26,6 +27,7 @@ struct HumanizeSpec {
     std::int64_t timing_samples = 0;
     std::uint8_t velocity_amount = 0;
     std::uint64_t seed = 0;
+    std::int64_t minimum_timing_samples = 0;
     constexpr auto operator<=>(const HumanizeSpec&) const = default;
 };
 
@@ -48,7 +50,8 @@ template <std::size_t MaximumPendingAttacks = 128> class Humanize {
     }
 
     static constexpr bool valid_spec(HumanizeSpec spec) noexcept {
-        return spec.timing_samples >= 0 && spec.velocity_amount <= 127;
+        return spec.minimum_timing_samples >= 0 &&
+               spec.minimum_timing_samples <= spec.timing_samples && spec.velocity_amount <= 127;
     }
 
     /// True when the spec cannot change any event, which is the kernel's
@@ -76,9 +79,11 @@ template <std::size_t MaximumPendingAttacks = 128> class Humanize {
                                           std::uint8_t note, std::int64_t absolute) noexcept {
         if (spec.timing_samples <= 0)
             return absolute;
-        const auto draw = draw_value(spec.seed, channel, note, absolute, kTimingStream,
-                                     static_cast<std::uint64_t>(spec.timing_samples) + 1);
-        return utility_detail::saturating_sample_add(absolute, static_cast<std::int64_t>(draw));
+        const auto width =
+            static_cast<std::uint64_t>(spec.timing_samples - spec.minimum_timing_samples) + 1;
+        const auto draw = draw_value(spec.seed, channel, note, absolute, kTimingStream, width);
+        return utility_detail::saturating_sample_add(absolute, spec.minimum_timing_samples +
+                                                                   static_cast<std::int64_t>(draw));
     }
 
     /// The velocity `velocity` becomes, derived only from the spec and the
@@ -185,6 +190,19 @@ template <std::size_t MaximumPendingAttacks = 128> class Humanize {
             pending_spec_ = spec;
         }
         return report;
+    }
+
+    /// Change the spec used to schedule future attacks without disturbing
+    /// attacks already materialized in the pending queue. Their final velocity
+    /// and scheduled position are stored in each slot, so changing the source
+    /// spec cannot reinterpret or drop them.
+    bool update_spec_for_future_attacks(HumanizeSpec spec) noexcept {
+        if (!valid_spec(spec))
+            return false;
+        spec_ = spec;
+        valid_ = true;
+        pending_spec_.reset();
+        return true;
     }
 
     bool empty() const noexcept {

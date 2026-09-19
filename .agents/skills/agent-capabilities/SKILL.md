@@ -1112,3 +1112,11 @@ header to the install list is exactly what lets the same exposure row claim
 `installed_sdk: exposed`, because an embedding host then links the typed source
 seam rather than re-declaring it. Omit the install entry and that claim is
 false, while the manifest row would still have been wrong.
+
+## Humaniser kernel versus placed-device controls
+
+`midi.humanize` 1.1 advertises the compatible future-attack spec update method
+and supports a nonnegative timing floor. Its operational binding constructs a
+kernel and invokes the update with a bounded spec. This design-time kernel
+registration does not advertise placed-device parameter operations or grants;
+the event-humaniser exposure ledger keeps those product-control gaps explicit.
