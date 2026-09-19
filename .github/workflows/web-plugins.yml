@@ -12,6 +12,11 @@ on:
   pull_request:
     paths:
       - "core/format/**"
+      - "core/host/**"
+      - "core/graph/**"
+      - "examples/sample-region-allpass/**"
+      - "test/sample_region_web/**"
+      - "tools/cmake/PulpSampleRegionWebSources.cmake"
       - "core/timebase/**"
       - "core/timeline/**"
       - "core/interchange/**"
@@ -309,6 +314,49 @@ jobs:
           set -euo pipefail
           ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/wclap-build/browser-host/node_modules
           node examples/web-demos/wclap-build/browser-host/validate.mjs --screenshot /tmp/wclap-browser.png
+
+      - name: Install pinned headless sample-region WASI SDK
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/wasi-sdk-33.0-x86_64-linux.tar.gz"
+          curl -fsSL https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-33.0-x86_64-linux.tar.gz -o "$archive"
+          echo "0ba8b5bfaeb2adf3f29bab5841d76cf5318ab8e1642ea195f88baba1abd47bce  $archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/wasi-sdk33-region"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/wasi-sdk33-region" --strip-components=1
+
+      - name: Build isolated sample-region web profiles
+        run: |
+          set -euo pipefail
+          emcmake cmake -S examples/web-demos/wasm-build -B build-sample-region-wam \
+            -DCMAKE_BUILD_TYPE=Release -DPULP_SAMPLE_REGION_WEB=ON \
+            -DPULP_WAM_CHOC_INCLUDE="$PULP_WAM_CHOC_INCLUDE"
+          tools/ci/governed-build.sh cmake --build build-sample-region-wam --target SampleRegionAllpassWorklet-wam
+          cmake -S examples/web-demos/wclap-build -B build-sample-region-wclap \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/tools/cmake/wasi-toolchain.cmake" \
+            -DWASI_SDK_PREFIX="$RUNNER_TEMP/wasi-sdk33-region" \
+            -DCMAKE_BUILD_TYPE=Release -DPULP_SAMPLE_REGION_WEB=ON
+          tools/ci/governed-build.sh cmake --build build-sample-region-wclap --target SampleRegionAllpass-wclap
+          node --experimental-wasm-exnref core/format/src/wasm/wclap_probe.mjs build-sample-region-wclap/SampleRegionAllpass.wasm
+
+      - name: Sample-region WAM and WebCLAP browser acceptance
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          node test/sample_region_web/validate.mjs \
+            --wam-dir build-sample-region-wam --wclap-dir build-sample-region-wclap \
+            --baseline-wam-dir examples/web-demos/wasm-build/build \
+            --baseline-wclap-dir examples/web-demos/wclap-build/build \
+            --report /tmp/sample-region-web-proof.json
+
+      - name: Upload sample-region browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sample-region-web-proof
+          path: /tmp/sample-region-web-proof.json
+          retention-days: 14
+          if-no-files-found: warn
 
       # ── Pulp UI in the browser (Skia Ganesh on WebGL2) ────────────────────
       # DSP-free: the same module mounts against the WAM demo and the WebCLAP

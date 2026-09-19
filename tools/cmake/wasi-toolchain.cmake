@@ -38,21 +38,32 @@ set(CMAKE_LINKER "${WASI_SDK_PREFIX}/bin/wasm-ld")
 # Sysroot
 set(CMAKE_SYSROOT "${WASI_SDK_PREFIX}/share/wasi-sysroot")
 
-# Target triple — wasm32-wasi with threads support. The threaded sysroot is the
-# only one whose libc++ tolerates the pthread primitives Pulp's runtime pulls in;
-# its libc++abi ships WITHOUT an exception runtime, which is why -fno-exceptions
-# below is mandatory, not a size optimization.
-set(WASI_TARGET "wasm32-wasi-threads")
+# SDK25 remains the default profile. The isolated sample-region profile uses
+# SDK33's standard Wasm EH libraries throughout the C++ object closure.
+option(PULP_SAMPLE_REGION_WEB "Build the isolated sample-region EH/RTTI web profile" OFF)
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES PULP_SAMPLE_REGION_WEB WASI_SDK_PREFIX)
+if(PULP_SAMPLE_REGION_WEB)
+    if(NOT EXISTS "${WASI_SDK_PREFIX}/VERSION")
+        message(FATAL_ERROR "Sample-region WebCLAP requires WASI SDK 33.0")
+    endif()
+    file(READ "${WASI_SDK_PREFIX}/VERSION" _pulp_wasi_version)
+    string(STRIP "${_pulp_wasi_version}" _pulp_wasi_version)
+    if(NOT _pulp_wasi_version MATCHES "^33[.]0([+].*)?$")
+        message(FATAL_ERROR "Sample-region WebCLAP requires pinned WASI SDK 33.0, got ${_pulp_wasi_version}")
+    endif()
+    set(WASI_TARGET "wasm32-wasip1-threads")
+    if(NOT EXISTS "${CMAKE_SYSROOT}/lib/${WASI_TARGET}/eh/libunwind.a")
+        message(FATAL_ERROR "Selected WASI SDK lacks the threaded exception runtime")
+    endif()
+    set(CMAKE_C_FLAGS_INIT "-pthread -D_WASI_EMULATED_SIGNAL -fno-lto")
+    set(CMAKE_CXX_FLAGS_INIT "-pthread -D_WASI_EMULATED_SIGNAL -frtti -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -fno-lto")
+else()
+    set(WASI_TARGET "wasm32-wasi-threads")
+    set(CMAKE_C_FLAGS_INIT "-fno-exceptions -pthread -D_WASI_EMULATED_SIGNAL")
+    set(CMAKE_CXX_FLAGS_INIT "-fno-exceptions -fno-rtti -pthread -D_WASI_EMULATED_SIGNAL")
+endif()
 set(CMAKE_C_COMPILER_TARGET "${WASI_TARGET}")
 set(CMAKE_CXX_COMPILER_TARGET "${WASI_TARGET}")
-
-# Compile flags.
-# - -fno-exceptions / -fno-rtti: the threaded sysroot has no EH/RTTI runtime.
-# - -pthread: matches the threaded target's TLS / atomics ABI.
-# - _WASI_EMULATED_SIGNAL: the runtime references signal symbols the bare
-#   wasi-libc omits; the emulation shim (linked below) provides them.
-set(CMAKE_C_FLAGS_INIT "-fno-exceptions -pthread -D_WASI_EMULATED_SIGNAL")
-set(CMAKE_CXX_FLAGS_INIT "-fno-exceptions -fno-rtti -pthread -D_WASI_EMULATED_SIGNAL")
 
 # WebAssembly-specific link flags for a WebCLAP module:
 # - reactor mode: no _start; the host drives the module through clap_entry.
@@ -66,6 +77,10 @@ set(CMAKE_EXE_LINKER_FLAGS_INIT
      -Wl,--shared-memory -Wl,--import-memory -Wl,--export-memory \
      -Wl,--max-memory=1073741824"
 )
+
+if(PULP_SAMPLE_REGION_WEB)
+    string(APPEND CMAKE_EXE_LINKER_FLAGS_INIT " -fwasm-exceptions -lunwind -fno-lto")
+endif()
 
 # Don't try to run test executables
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
