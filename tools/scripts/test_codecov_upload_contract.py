@@ -295,6 +295,8 @@ class CoverageWorkflowTests(unittest.TestCase):
         self.assertNotIn("-DPULP_BUILD_EXAMPLES=OFF", self.coverage)
         self.assertIn("timeout-minutes: 300", self.coverage)
         self.assertIn("budget=$(( 240 * 60 ))", self.coverage)
+        self.assertIn("PULP_COVERAGE_JOBS: '2'", self.coverage)
+        self.assertIn("PULP_COVERAGE_TEST_JOBS: '4'", self.coverage)
         self.assertIn("leaves 60 min for post-suite work", self.coverage)
         self.assertNotIn("coverage_args+=(--test-jobs", self.coverage)
         self.assertNotIn("steps.coverage-suite.outcome }} != \"success\"", self.coverage)

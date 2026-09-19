@@ -326,6 +326,12 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "profile files.",
         )
 
+    def test_profraw_shards_are_reclaimed_after_merge(self) -> None:
+        text = SCRIPT.read_text()
+        marker = 'echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="'
+        self.assertIn(marker, text)
+        self.assertIn('find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete', text[text.index(marker):])
+
     def test_profraw_pattern_is_per_process(self) -> None:
         """One profile per process, with a merge pool inside it.
 
