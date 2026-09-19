@@ -2350,5 +2350,58 @@ class ReleaseBuildParallelismExplicit(unittest.TestCase):
                 )
 
 
+class StdlibGuardStepExtractionMatchesYaml(unittest.TestCase):
+    """`test_release_trailer_guard.py` reads the guard step out of the workflow
+    with the stdlib only, because the ctest lane that runs it has no PyYAML and
+    a guarded import there would degrade the proof into a silent skip.
+
+    That trade is only sound while the hand-rolled reader returns exactly what a
+    real YAML parse returns. This lane installs PyYAML, so it is where that can
+    be checked — and it is checked against the live workflow, so a restructure
+    that fools the regex fails here rather than quietly narrowing what the ctest
+    exercises.
+    """
+
+    def setUp(self) -> None:
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+        import test_release_trailer_guard
+
+        self.module = test_release_trailer_guard
+
+    def _yaml_guard_step_run(self) -> str:
+        document = yaml.safe_load(AUTO_RELEASE.read_text(encoding="utf-8"))
+        for step in document["jobs"]["tag"]["steps"]:
+            if step.get("id") == "guard":
+                return step["run"]
+        raise AssertionError("auto-release.yml has no `guard` step")
+
+    def test_the_two_readers_return_the_same_script(self) -> None:
+        self.assertEqual(self.module._guard_step_body(), self._yaml_guard_step_run())
+
+    def test_the_step_the_regex_finds_is_the_step_yaml_finds(self) -> None:
+        """The two readers key on different things — a `name:` and an `id:` —
+        so agreeing on the text is only meaningful if they agree on the step."""
+        document = yaml.safe_load(AUTO_RELEASE.read_text(encoding="utf-8"))
+        by_id = [s for s in document["jobs"]["tag"]["steps"] if s.get("id") == "guard"]
+        self.assertEqual(len(by_id), 1)
+        self.assertEqual(by_id[0].get("name"), self.module.GUARD_STEP_NAME)
+
+    def test_a_renamed_step_raises_rather_than_extracting_nothing(self) -> None:
+        """The failure that would hide a vacuous pass: returning "" quietly."""
+        original = self.module.GUARD_STEP_NAME
+        try:
+            self.module.GUARD_STEP_NAME = "a step that does not exist"
+            self.module._STEP_RE = re.compile(
+                r"(?m)^(?P<indent>[ ]*)-[ ]+name:[ ]+a step that does not exist[ ]*$"
+            )
+            with self.assertRaises(AssertionError):
+                self.module._guard_step_body()
+        finally:
+            self.module.GUARD_STEP_NAME = original
+            self.module._STEP_RE = re.compile(
+                rf"(?m)^(?P<indent>[ ]*)-[ ]+name:[ ]+{re.escape(original)}[ ]*$"
+            )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
