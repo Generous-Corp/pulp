@@ -51,8 +51,8 @@ from agent_capability_transaction import recover_transaction, write_transaction
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 52
-SURFACE_INVENTORY_VERSION = 77
+MANIFEST_REVISION = 53
+SURFACE_INVENTORY_VERSION = 78
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
 )
@@ -288,6 +288,9 @@ def compile_fixture() -> str:
 
 
 def _render_link_probe(probe: dict[str, Any], index: int) -> str:
+    if "setup" in probe:
+        call = _render_link_probe({key: value for key, value in probe.items() if key != "setup"}, index)
+        return "{ " + probe["setup"] + " " + call + " }"
     binding = probe["binding"]
     arguments = probe["arguments"]
     operation = probe["operation"]
@@ -349,6 +352,10 @@ def _link_probe_problems(row: dict[str, Any]) -> list[str]:
             required.add("member")
         if operation == "member_function_call":
             required.add("object")
+        if "setup" in probe:
+            required.add("setup")
+            if not isinstance(probe["setup"], str) or not probe["setup"]:
+                problems.append(f"{where} setup must be a nonempty C++ statement string")
         if set(probe) != required:
             problems.append(f"{where} fields are not exact for {operation!r}")
             continue
