@@ -648,10 +648,16 @@ private:
         if (hwnd_)
             KillTimer(hwnd_, kFrameTimerId);
         frame_pump_.suspend();
+        needs_repaint_ = false;
         continuous_frames_ = false;
     }
 
     void handle_frame_timer() {
+        // KillTimer cannot remove a WM_TIMER already queued by the host loop.
+        // Teardown must therefore be checked at dispatch time as well as at
+        // detach, so a stale callback cannot paint an orphaned child HWND.
+        if (!attached_.load(std::memory_order_acquire))
+            return;
         // The Windows plug-in host is embedded in a DAW-owned message loop, so
         // WM_TIMER is the portable frame source available to this HWND. Gate
         // the UI-thread work before walking the tree; static editors therefore
