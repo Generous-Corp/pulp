@@ -64,8 +64,8 @@ class SharedIoExecutionController {
     SharedIoExecutionController& operator=(const SharedIoExecutionController&) = delete;
 
     // Host/quiescent only. The contract is copied by value so callback code
-    // never consults a mutable node descriptor. The physical pipeline depth
-    // is the only completion-table capacity and must cover the declared lead.
+    // never consults a mutable node descriptor. The logical pipeline depth is
+    // the only completion-table capacity and must cover the declared lead.
     bool prepare(const SharedIoExecutionContract& contract,
                  SharedIoTelemetry* telemetry = nullptr) {
         if (prepared_ || !validate_shared_io_contract(contract).accepted() ||

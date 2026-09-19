@@ -119,6 +119,23 @@ class SharedIoArenaProvider {
         bool host_freed = false;
     };
 
+    // Non-owning capability for a provider-owned slot buffer pair. The weak
+    // lifetime token expires when the provider is destroyed; generation is
+    // invalidated at slot retirement. Consumers must validate before encoding.
+    struct SlotBufferHandle {
+        const void* provider = nullptr;
+        const void* device = nullptr;
+        const void* input_buffer = nullptr;
+        const void* output_buffer = nullptr;
+        std::uint32_t slot = 0;
+        std::uint64_t generation = 0;
+        std::weak_ptr<const void> lifetime;
+
+        bool has_lifetime() const noexcept {
+            return !lifetime.expired();
+        }
+    };
+
     struct SlotResources {
         std::byte* input = nullptr;
         std::size_t input_size = 0;
@@ -144,6 +161,16 @@ class SharedIoArenaProvider {
     virtual void retire_slot(SlotResources& resources) noexcept = 0;
     virtual void destroy_slot(SlotResources& resources) noexcept = 0;
 
+    // Optional private Dawn interop capability. The default keeps test and
+    // non-Dawn providers source-compatible; only a provider that owns the
+    // device and imported buffers may issue a valid capability.
+    virtual bool acquire_slot_buffers(const SlotResources&, SlotBufferHandle&) const noexcept {
+        return false;
+    }
+    virtual bool validate_slot_buffers(const SlotBufferHandle&) const noexcept {
+        return false;
+    }
+
     // Accepted work completes exactly once through the independently retained
     // inbox. Rejection must not push. A provider must correlate the token with
     // live device/submission state; raw OnSubmittedWorkDone Success/Error/
@@ -167,6 +194,17 @@ class SharedIoArenaProvider {
     // make accepted work visible to drain_completions(); it must not wait for a
     // future callback or start a new provider lifecycle phase.
     virtual void poll() noexcept = 0;
+    // Serialized non-RT diagnostic. A lost provider cannot open another epoch;
+    // retirement still requires the independent physical drain barrier.
+    virtual bool device_lost() const noexcept {
+        return false;
+    }
+    // Affirmative proof that the same prepared provider can accept a fresh
+    // logical epoch after drain. Providers that require a new preparation
+    // transaction leave this false and remain CPU-only until reconstructed.
+    virtual bool can_resume_after_drain() const noexcept {
+        return false;
+    }
 
     // Repeatable lifecycle-phase barrier over the bounded activity initiated
     // before this call. It stops new submission activity for the current
@@ -179,6 +217,31 @@ class SharedIoArenaProvider {
     // False preserves every backing allocation and makes arena release fail;
     // a deadline is never evidence that callbacks or GPU access have ended.
     virtual bool drain() noexcept = 0;
+};
+
+// Private backend-neutral owner for a prepared compute program. The arena
+// supplies only provider-certified slot capabilities at prepare time and keeps
+// the program alive until every accepted submission is terminal. This leaves
+// the P1 provider's ordinary submit() contract as its affine mechanism probe
+// while later DSP programs reuse the same allocation and retirement machinery.
+class SharedIoPreparedProgram {
+  public:
+    using SlotBufferHandle = SharedIoArenaProvider::SlotBufferHandle;
+    using SlotResources = SharedIoArenaProvider::SlotResources;
+    using SlotToken = SharedIoArenaProvider::SlotToken;
+
+    virtual ~SharedIoPreparedProgram() = default;
+    virtual bool prepare(SharedIoArenaProvider& provider,
+                         std::span<const SlotBufferHandle> slots) noexcept = 0;
+    // The provider submit contract applies unchanged: after any backend queue
+    // submission attempt this must return true and retire exactly once through
+    // the supplied inbox. False is reserved for proven pre-submit refusal.
+    virtual bool submit(SharedIoArenaProvider& provider, const SlotResources& resources,
+                        SlotToken token,
+                        std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept = 0;
+    // Called only after provider drain and ledger/inbox quiescence, before slot
+    // buffers retire. False preserves the complete prepared transaction.
+    virtual bool release() noexcept = 0;
 };
 
 // Prepared, fixed-capacity owner for shared CPU/GPU I/O slots. All methods other
@@ -231,6 +294,15 @@ class SharedIoArena {
         std::size_t rejected_stale_or_duplicate = 0;
     };
 
+    struct CompletionObserver {
+        using Callback = void (*)(void*, const SlotToken&, CompletionStatus) noexcept;
+        void* context = nullptr;
+        Callback callback = nullptr;
+        explicit operator bool() const noexcept {
+            return callback != nullptr;
+        }
+    };
+
     SharedIoArena() = default;
     ~SharedIoArena();
 
@@ -240,6 +312,8 @@ class SharedIoArena {
     SharedIoArena& operator=(SharedIoArena&&) = delete;
 
     bool prepare(SharedIoArenaProvider& provider, const Config& config);
+    bool prepare(SharedIoArenaProvider& provider, const Config& config,
+                 std::unique_ptr<SharedIoPreparedProgram> program);
     // Host/quiescent teardown. Calling this explicitly asserts every producer
     // has returned its write lease and every consumer has stopped reading its
     // output lease. The provider is then terminally drained before resources are
@@ -275,7 +349,10 @@ class SharedIoArena {
     bool expire_delivery(const SlotToken& token) noexcept {
         return ledger_.expire_delivery(token);
     }
-    CompletionDrain drain_completions() noexcept;
+    CompletionDrain drain_completions(CompletionObserver observer) noexcept;
+    CompletionDrain drain_completions() noexcept {
+        return drain_completions(CompletionObserver{});
+    }
     std::optional<OutputLease> acquire_output(std::uint64_t expected_epoch,
                                               std::uint64_t expected_sequence) noexcept;
     bool release_output(const ReleaseRecord& record) noexcept {
@@ -307,6 +384,7 @@ class SharedIoArena {
     std::vector<SharedIoArenaProvider::SlotResources> resources_;
     std::vector<RejectedSubmission> rejected_submissions_;
     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox_;
+    std::unique_ptr<SharedIoPreparedProgram> program_;
     bool prepared_ = false;
 };
 

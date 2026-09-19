@@ -5,9 +5,21 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace pulp::gpu_audio::detail {
+
+class DawnSharedIoConvolutionProgram;
+
+struct SharedIoConvolutionProgramSpec {
+    std::uint32_t fft_size = 0;
+    std::uint32_t channels = 0;
+    std::uint32_t logical_frames = 0;
+    std::uint32_t ir_length = 0;
+    std::span<const float> normalized_ir_spectrum;
+};
 
 class DawnSharedIoProvider final : public SharedIoArenaProvider {
   public:
@@ -33,6 +45,8 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         HoldTerminalBusy,
         NativeInputOom,
         NativeOutputOom,
+        ConvolutionPrepareAfterScopesFailure,
+        ConvolutionSubmitAfterScopesFailure,
     };
 
     struct Options {
@@ -73,6 +87,8 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     };
 
     static CreateResult create(const Options& options) noexcept;
+    std::unique_ptr<SharedIoPreparedProgram>
+    make_convolution_program(const SharedIoConvolutionProgramSpec& spec) noexcept;
     ~DawnSharedIoProvider() override;
 
     DawnSharedIoProvider(const DawnSharedIoProvider&) = delete;
@@ -82,9 +98,13 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
                      SlotResources& resources) noexcept override;
     void retire_slot(SlotResources& resources) noexcept override;
     void destroy_slot(SlotResources& resources) noexcept override;
+    bool acquire_slot_buffers(const SlotResources& resources,
+                              SlotBufferHandle& handle) const noexcept override;
+    bool validate_slot_buffers(const SlotBufferHandle& handle) const noexcept override;
     bool submit(const SlotResources& resources, SlotToken token,
                 std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept override;
     void poll() noexcept override;
+    bool device_lost() const noexcept override;
     bool drain() noexcept override;
 
     std::uint32_t alignment() const noexcept;
@@ -93,6 +113,14 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     AdapterIdentity adapter_identity() const;
 
   private:
+    friend class DawnSharedIoConvolutionProgram;
+    bool prepare_convolution_program(const SharedIoConvolutionProgramSpec&) noexcept;
+    bool submit_convolution_program(const SlotResources&, SlotToken,
+                                    std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept;
+    bool release_convolution_program() noexcept;
+    bool submit_impl(const SlotResources&, SlotToken,
+                     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox,
+                     bool use_convolution) noexcept;
     struct Impl;
     explicit DawnSharedIoProvider(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;
