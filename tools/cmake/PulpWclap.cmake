@@ -21,8 +21,9 @@
 # or a real platform backend will fail to compile under -fno-exceptions and flag
 # the drift immediately.
 #
-# WHY -fno-exceptions IS LOAD-BEARING: the wasi-sdk threaded libc++abi ships
-# without an exception runtime. The subset below is exception-clean: the one
+# The default SDK25 profile has no exception runtime. The isolated sample-region
+# SDK33 profile opts into native EH and RTTI for its complete object closure.
+# The default subset below is exception-clean: the one
 # defensive try/catch in plugin_state_io.cpp uses pulp/runtime/exceptions.hpp,
 # and the JSON/filesystem-bound native PresetManager is replaced by the headless
 # core/state/src/wasm/preset_manager_wasm.cpp stub (a browser sandbox has no
@@ -146,13 +147,33 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/runtime/src/trace.cpp
 )
 
+option(PULP_SAMPLE_REGION_WEB "Build an isolated sample-region EH/RTTI web profile" OFF)
+if(DEFINED _PULP_WEB_CONFIGURED_REGION AND
+   NOT "${_PULP_WEB_CONFIGURED_REGION}" STREQUAL "${PULP_SAMPLE_REGION_WEB}")
+    message(FATAL_ERROR "Use a fresh build directory when selecting a different web profile")
+endif()
+set(_PULP_WEB_CONFIGURED_REGION "${PULP_SAMPLE_REGION_WEB}" CACHE INTERNAL "Web profile")
+if(PULP_SAMPLE_REGION_WEB)
+    include(${CMAKE_CURRENT_LIST_DIR}/PulpSampleRegionWebSources.cmake)
+    pulp_sample_region_web_sources("${_PULP_WCLAP_ROOT}" _region_sources)
+    list(APPEND _PULP_WCLAP_CORE_SOURCES ${_region_sources})
+    list(REMOVE_DUPLICATES _PULP_WCLAP_CORE_SOURCES)
+    list(APPEND _PULP_WCLAP_INCLUDES
+        ${_PULP_WCLAP_ROOT}/core/host/include
+        ${_PULP_WCLAP_ROOT}/core/graph/include)
+endif()
+
 add_library(pulp-wclap-dsp OBJECT ${_PULP_WCLAP_CORE_SOURCES})
 target_compile_features(pulp-wclap-dsp PUBLIC cxx_std_20)
 target_include_directories(pulp-wclap-dsp PUBLIC ${_PULP_WCLAP_INCLUDES})
 target_compile_definitions(pulp-wclap-dsp PUBLIC
     PULP_WCLAP=1 PULP_WASM=1 PULP_HEADLESS=1
     PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1)
-target_compile_options(pulp-wclap-dsp PRIVATE -fno-exceptions -fno-rtti)
+if(PULP_SAMPLE_REGION_WEB)
+    pulp_sample_region_web_profile(pulp-wclap-dsp)
+else()
+    target_compile_options(pulp-wclap-dsp PRIVATE -fno-exceptions -fno-rtti)
+endif()
 
 # pulp_add_wclap(<Name>
 #     ENTRY    <entry.cpp>          # required: the WebCLAP entry point (PULP_WCLAP_PLUGIN)
@@ -185,6 +206,10 @@ function(pulp_add_wclap NAME)
     # A pure-DSP plugin like PulpGain has no editor, so this is a harmless no-op
     # there. The shared DSP subset never branches on it (0 references).
     target_compile_definitions(${NAME}-wclap PRIVATE PULP_WCLAP=1 PULP_WASM=1 PULP_HEADLESS=1)
+
+    if(PULP_SAMPLE_REGION_WEB)
+        pulp_sample_region_web_profile(${NAME}-wclap)
+    endif()
 
     # The reactor / memory / table flags are toolchain-level (see
     # wasi-toolchain.cmake), so only the clap_entry data export is per-target.
