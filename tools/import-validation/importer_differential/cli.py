@@ -149,10 +149,11 @@ def command_benchmark(args: argparse.Namespace) -> int:
         },
         "observability": {
             "ttfp": {"value_ms": None, "status": "unverified"},
-            "ttni": {"p50_ms": round(statistics.median(
-                [report["observability"]["ttni"]["value_ms"] for report in warm]), 1),
+            "ttni": {"p50_ms": None, "p95_ms": None, "status": "unverified"},
+            "ttni_proxy": {"p50_ms": round(statistics.median(
+                [report["observability"]["ttni_proxy"]["value_ms"] for report in warm]), 1),
                      "p95_ms": percentile(
-                         [report["observability"]["ttni"]["value_ms"] for report in warm], 0.95),
+                         [report["observability"]["ttni_proxy"]["value_ms"] for report in warm], 0.95),
                      "status": "measured"},
             "ifnf": {"value_ms": None, "status": "readback-only"},
             "cache_states": [report["observability"]["cache_state"]["identity"] for report in reports],

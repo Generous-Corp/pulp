@@ -837,10 +837,16 @@ def compare_one(
             "evidence": "no native present timestamp is emitted by this lab",
         },
         "ttni": {
+            "value_ms": None,
+            "status": "unverified",
+            "definition": "time to native interactive",
+            "evidence": "no interaction-ready event is emitted by this lab",
+        },
+        "ttni_proxy": {
             "value_ms": native_run.elapsed_ms,
             "status": "measured",
-            "definition": "time to native interactive",
-            "evidence": "native import process completion; interaction readiness is not exercised",
+            "definition": "time to native import process completion",
+            "evidence": "import process completion is a proxy, not interaction readiness",
         },
         "ifnf": {
             "value_ms": None,
@@ -852,6 +858,17 @@ def compare_one(
             "identity": cache_state,
             "status": "declared" if cache_state in ("cold", "warm") else "unverified",
             "source": "caller-declared; never inferred from elapsed time",
+            "scope": "importer-differential-lab",
+            "dimensions": {
+                "source": "not-measured",
+                "browser": "not-measured",
+                "pulp_import": "not-measured",
+                "asset_decode": "not-measured",
+                "graphite_resource": "not-applicable",
+                "pipeline": "not-applicable",
+                "dawn_device": "not-applicable",
+                "readback": "not-measured",
+            },
         },
     }
     report = {
@@ -996,13 +1013,14 @@ def aggregate_reports(
             else "evaluated"),
         "observability": {
             "ttfp": {"value_ms": None, "status": "unverified"},
-            "ttni": {
+            "ttni": {"p50_ms": None, "p95_ms": None, "status": "unverified"},
+            "ttni_proxy": {
                 "p50_ms": round(statistics.median([
-                    report.get("observability", {}).get("ttni", {}).get(
+                    report.get("observability", {}).get("ttni_proxy", {}).get(
                         "value_ms", report["timings"]["native_import_ms"])
                     for report in reports]), 1) if reports else None,
                 "p95_ms": percentile([
-                    report.get("observability", {}).get("ttni", {}).get(
+                    report.get("observability", {}).get("ttni_proxy", {}).get(
                         "value_ms", report["timings"]["native_import_ms"])
                     for report in reports], 0.95) if reports else None,
                 "status": "measured" if reports else "unverified",

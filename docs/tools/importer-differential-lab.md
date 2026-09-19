@@ -41,9 +41,12 @@ Cache state is caller supplied and is never inferred from elapsed time. Declare
 it when the harness is run (`--cache-state cold|warm|unknown`). Each receipt
 also uses the shared GPU observability vocabulary: TTFP (time to first present),
 TTNI (time to native interactive), and IFNF (import to first validated native
-frame). This lab measures TTNI as native import completion. TTFP is explicitly
-unverified, and IFNF remains readback-only until a real native present and
-interaction readiness event are captured.
+frame). This lab does not measure TTNI: it records native import completion as
+an explicitly named `ttni_proxy`. TTFP and TTNI are unverified, and IFNF
+remains readback-only until a real native present, interaction readiness event,
+and same-transaction fidelity gate are captured. The cache declaration is
+scoped to this importer lab; Graphite, pipeline, and Dawn-device dimensions
+are explicitly marked not applicable here, not treated as measured.
 
 The stable output protocol is:
 
