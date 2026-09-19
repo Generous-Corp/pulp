@@ -577,9 +577,11 @@ EXPORTS = [
     capability(
         key="midi.humanize",
         domain="midi",
+        contract_version={"major": 1, "minor": 1},
         summary=(
             "Seeded timing and velocity jitter over note attacks, with forward-only timing so the "
-            "kernel stays causal and its latency equals the declared bound."
+            "kernel stays causal and its latency equals the declared bound. A nonnegative minimum "
+            "timing offset is supported; future-attack spec updates preserve pending schedules."
         ),
         rt_class="audio",
         lifecycle={
@@ -611,7 +613,17 @@ EXPORTS = [
             include="pulp/midi/humanize.hpp",
             qualified_name="pulp::midi::Humanize<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:eb1b342c0dc35280d028d649d911262c8f2249f3c35d64badc58ad966408c02e",
+            header_fingerprint="sha256:1c4307dd8107cb3e38f9b3fd5046303f8ab8346164f021ecca414c9f227468b1",
+        ), binding(
+            role="future-attack-update", kind="cpp_function",
+            include="pulp/midi/humanize.hpp",
+            qualified_name="pulp::midi::Humanize<>::update_spec_for_future_attacks",
+            target="Pulp::midi",
+            header_fingerprint="sha256:1c4307dd8107cb3e38f9b3fd5046303f8ab8346164f021ecca414c9f227468b1",
+            address_expression=(
+                "static_cast<bool (pulp::midi::Humanize<>::*)(pulp::midi::HumanizeSpec) noexcept>("
+                "&pulp::midi::Humanize<>::update_spec_for_future_attacks)"
+            ),
         )],
         _link_probes=[{
             "role": "entrypoint",
@@ -619,6 +631,12 @@ EXPORTS = [
             "operation": "member_call",
             "member": "valid",
             "arguments": "",
+        }, {
+            "role": "future-attack-update",
+            "binding": "pulp::midi::Humanize<>::update_spec_for_future_attacks",
+            "operation": "member_function_call",
+            "object": "pulp::midi::Humanize<>{}",
+            "arguments": "pulp::midi::HumanizeSpec{512, 8, 42, 256}",
         }],
     ),
     capability(

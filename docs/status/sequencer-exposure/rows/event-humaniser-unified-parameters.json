@@ -19,7 +19,14 @@
     "docs/status/cli-commands.yaml",
     "tools/mcp/mcp_timeline_tools.cpp",
     ".github/vellum-expansion-watch-events/20260918-sequencer-humaniser-cli-catalog.json",
-    "docs/status/sequencer-exposure/rows/event-humaniser-unified-parameters.json"
+    "docs/status/sequencer-exposure/rows/event-humaniser-unified-parameters.json",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
+    "test/test_agent_capability_compile.cpp",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/scripts/agent_capability_catalog_performance.py",
+    "tools/scripts/agent_capability_manifest.py",
+    ".agents/skills/agent-capabilities/SKILL.md"
   ],
   "evidence": [
     {
