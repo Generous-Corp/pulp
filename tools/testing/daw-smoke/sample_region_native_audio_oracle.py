@@ -10,10 +10,27 @@ def scalar_impulse(n=16384,a=.5):
     return y
 
 def read_wav(path):
-    with wave.open(str(path),'rb') as w:
-        if w.getnchannels()!=1 or w.getsampwidth()!=4 or w.getframerate()!=48000: raise ValueError('expected mono float32 48k WAV')
-        raw=w.readframes(w.getnframes())
-    return list(struct.unpack('<%df'%(len(raw)//4),raw))
+    try:
+        with wave.open(str(path),'rb') as w:
+            if w.getnchannels()!=1 or w.getframerate()!=48000 or w.getsampwidth()!=4: raise wave.Error('non-float/extended WAV')
+            raw=w.readframes(w.getnframes())
+        return list(struct.unpack('<%df'%(len(raw)//4),raw))
+    except wave.Error:
+        # REAPER writes IEEE-float WAVE_FORMAT_EXTENSIBLE (40-byte fmt
+        # chunk).  Read that standard container directly, while retaining the
+        # canonical CLI as the authoritative file comparison below.
+        b=Path(path).read_bytes(); pos=12; raw=None; channels=rate=bits=None; is_float=False
+        while pos+8<=len(b):
+            ident=b[pos:pos+4]; size=struct.unpack_from('<I',b,pos+4)[0]; chunk=b[pos+8:pos+8+size]; pos+=8+size+(size&1)
+            if ident==b'fmt ':
+                tag,channels,rate=struct.unpack_from('<HHI',chunk,0); bits=struct.unpack_from('<H',chunk,14)[0]
+                is_float=(tag==3 or (tag==0xfffe and len(chunk)>=40 and chunk[24:40].startswith(bytes.fromhex('0300000000001000800000aa00389b71'))))
+            elif ident==b'data': raw=chunk
+        if channels!=1 or rate!=48000 or raw is None: raise ValueError('expected mono 48k WAV')
+        if bits==32 and is_float: return list(struct.unpack('<%df'%(len(raw)//4),raw))
+        if bits==24 and not is_float:
+            return [int.from_bytes(raw[i:i+3]+(b'\xff' if raw[i+2]&0x80 else b'\x00'),'little',signed=True)/8388608.0 for i in range(0,len(raw),3)]
+        raise ValueError('expected mono float32 or 24-bit PCM 48k WAV')
 
 def main(argv=None):
     p=argparse.ArgumentParser(); p.add_argument('--reference',required=True); p.add_argument('--candidate',required=True); p.add_argument('--pulp',default='pulp'); p.add_argument('--evidence',required=True); p.add_argument('--tolerance',type=float,default=1e-6); a=p.parse_args(argv)

@@ -142,7 +142,13 @@ def assert_bundle_identity(bundle: Path, fmt: str) -> dict[str, Any]:
             value = plist.get("CFBundleIdentifier")
             if value is not None:
                 plist_ids.append(value)
-                if value != EXPECTED_BUNDLE_ID:
+                # Pulp's format packagers append the format to the stable
+                # product identifier in CFBundleIdentifier (for example
+                # ``.au`` and ``.vst3``).  The stable base id is still
+                # required in the bundle payload and binary metadata above.
+                if value != EXPECTED_BUNDLE_ID and not value.startswith(
+                    EXPECTED_BUNDLE_ID + "."
+                ):
                     raise ValueError(f"{fmt} plist has wrong CFBundleIdentifier: {value!r}")
         except plistlib.InvalidFileException:
             continue
