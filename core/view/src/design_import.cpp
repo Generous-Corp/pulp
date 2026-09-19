@@ -1284,7 +1284,23 @@ static std::optional<std::vector<uint8_t>> resolve_local_asset(
             ImportDiagnosticKind::unresolved_asset));
         return std::nullopt;
     }
-    asset.local_path = path.string();
+    // A packaged DesignIR is relocated by loading its document directory as
+    // the asset base. Keep paths inside that boundary portable; preserve an
+    // absolute path for external files so the existing hash-gated recovery
+    // path remains available instead of silently rebasing an unrelated file.
+    if (!base_directory.empty()) {
+        const auto canonical_base = fs::weakly_canonical(base_directory, ec);
+        const auto canonical_path = fs::weakly_canonical(path, ec);
+        const auto relative = canonical_path.lexically_relative(canonical_base);
+        if (!relative.empty() && !relative.is_absolute()
+            && (relative.begin() == relative.end() || *relative.begin() != "..")) {
+            asset.local_path = relative.generic_string();
+        } else {
+            asset.local_path = path.string();
+        }
+    } else {
+        asset.local_path = path.string();
+    }
     return bytes;
 }
 
