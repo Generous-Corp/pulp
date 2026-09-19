@@ -42,6 +42,46 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(report["nonruns"][0]["output"], "last")
         self.assertEqual(report["counts"]["disabled"], 1)
 
+    def test_catch2_skip_reason_is_recovered_not_the_shared_mechanism(self):
+        # Every Catch2 skip carries the same <skipped message>, so two cases that
+        # did not run for entirely different reasons render identically unless the
+        # author's message is recovered from the captured output.
+        def row(name, where, message):
+            return (
+                f'<testcase name="{name}" status="notrun">'
+                '<skipped message="SKIP_RETURN_CODE=4"/>'
+                f'<system-out>{where}: SKIPPED:\nexplicitly with message:\n  {message}\n'
+                '\nassertions: - none -</system-out></testcase>'
+            )
+        report = self.observe(
+            '<testsuite tests="2">'
+            + row("bidi", "test/test_text.cpp:140", "SheenBidi not linked")
+            + row("cli", "test/test_cli.cpp:24", "pulp not built")
+            + "</testsuite>"
+        )
+        self.assertEqual(report["observation"], "observed")
+        reasons = [r["reason"] for r in report["nonruns"]]
+        self.assertEqual(reasons, ["SheenBidi not linked", "pulp not built"])
+        self.assertEqual(len(set(reasons)), 2)
+        self.assertNotIn("SKIP_RETURN_CODE=4", reasons)
+        # The fourth column becomes the source location rather than the trailing
+        # `assertions: - none -` every skipped case ends with.
+        self.assertEqual(
+            [r["output"] for r in report["nonruns"]],
+            ["test/test_text.cpp:140", "test/test_cli.cpp:24"],
+        )
+
+    def test_non_catch2_skip_falls_back_to_the_mechanism(self):
+        # A script exiting SKIP_RETURN_CODE prints no Catch2 block; the row must
+        # still say something rather than going blank.
+        report = self.observe(
+            '<testsuite tests="1"><testcase name="script" status="notrun">'
+            '<skipped message="SKIP_RETURN_CODE=4"/>'
+            "<system-out>no adapter</system-out></testcase></testsuite>"
+        )
+        self.assertEqual(report["nonruns"][0]["reason"], "SKIP_RETURN_CODE=4")
+        self.assertEqual(report["nonruns"][0]["output"], "no adapter")
+
     def test_zero_tests_never_claims_every_test_ran(self):
         report = self.observe('<testsuite tests="0"/>')
         self.assertEqual(report["observation"], "incomplete")

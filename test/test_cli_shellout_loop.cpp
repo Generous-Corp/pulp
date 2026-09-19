@@ -33,7 +33,7 @@ using namespace pulp_test_cli;
 // developer's real config.toml is never touched.
 TEST_CASE("pulp loop --help exits 0 with focus-mode banner",
           "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
     auto r = run_pulp({"loop", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE_FALSE(r.timed_out);
@@ -44,7 +44,7 @@ TEST_CASE("pulp loop --help exits 0 with focus-mode banner",
 
 TEST_CASE("pulp loop --status reports detected host and focus state",
           "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-940-status");
     fs::create_directories(tmp_home);
@@ -66,7 +66,7 @@ TEST_CASE("pulp loop --status reports detected host and focus state",
 
 TEST_CASE("pulp loop --off clears focus state idempotently",
           "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-940-off");
     fs::create_directories(tmp_home);
@@ -98,7 +98,7 @@ TEST_CASE("pulp loop --off clears focus state idempotently",
 
 TEST_CASE("pulp loop --platform=<known> accepts macos|linux|windows",
           "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-940-platform");
     fs::create_directories(tmp_home);
@@ -120,7 +120,7 @@ TEST_CASE("pulp loop --platform=<known> accepts macos|linux|windows",
 
 TEST_CASE("pulp loop --platform=<unknown> exits non-zero with diagnostic",
           "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-940-unknown");
     fs::create_directories(tmp_home);
@@ -141,7 +141,7 @@ TEST_CASE("pulp loop --platform=<unknown> exits non-zero with diagnostic",
 
 TEST_CASE("pulp loop validates value options before focus state changes",
           "[cli][shellout][loop]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-loop-parser-errors");
     fs::create_directories(tmp_home);
@@ -183,7 +183,7 @@ TEST_CASE("pulp loop validates value options before focus state changes",
 
 TEST_CASE("pulp loop --watch-issues prints compatibility diagnostic",
           "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-940-watch-issues");
     fs::create_directories(tmp_home);
@@ -203,7 +203,7 @@ TEST_CASE("pulp loop --watch-issues prints compatibility diagnostic",
 
 TEST_CASE("pulp loop --ar-swap-from prints compatibility diagnostic",
           "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-940-ar-swap");
     fs::create_directories(tmp_home);
@@ -231,7 +231,7 @@ TEST_CASE("pulp loop --ar-swap-from prints compatibility diagnostic",
 
 TEST_CASE("pulp loop --status reports persisted focus platform",
           "[cli][shellout][loop][issue-940]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-940-status-set");
     fs::create_directories(tmp_home);
@@ -255,7 +255,7 @@ TEST_CASE("pulp loop --status reports persisted focus platform",
 
 TEST_CASE("pulp loop ignores invalid persisted focus platform",
           "[cli][shellout][loop]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-loop-invalid-focus");
     fs::create_directories(tmp_home);
@@ -295,7 +295,7 @@ TEST_CASE("pulp loop ignores invalid persisted focus platform",
 
 TEST_CASE("pulp loop reuses persisted focus platform until overridden",
           "[cli][shellout][loop]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-loop-persisted-focus");
     fs::create_directories(tmp_home);
@@ -338,7 +338,7 @@ TEST_CASE("pulp loop accepts --test, --validate, --target, --run flags via --no-
     // The flags exercise the parser branches that wouldn't otherwise run
     // when only --status / --off / --no-watch are used. With --no-watch
     // we exit before the watch loop, so the binary still terminates.
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) { SKIP("pulp not built"); }
 
     auto tmp_home = unique_temp_dir("pulp-940-flags");
     fs::create_directories(tmp_home);

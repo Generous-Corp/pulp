@@ -2511,8 +2511,7 @@ TEST_CASE("an unregistered comparison scores identical pixels as a near-miss",
     if (whole.empty() || corner.empty()) {
         // This build carries no PNG pixel decoder. Reporting that as a pass is
         // wrong, but so is reporting it as a defect in the code under test.
-        SUCCEED("PNG decoding is unavailable in this build");
-        return;
+        SKIP("PNG decoding is unavailable in this build");
     }
 
     const auto unregistered = pulp::view::compare_screenshots(whole, corner);

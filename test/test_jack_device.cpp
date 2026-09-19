@@ -86,8 +86,7 @@ TEST_CASE("JACK: default in/out devices mirror the enumerated server",
 TEST_CASE("JACK: open/start/stop round-trip when a server is reachable",
           "[audio][jack][issue-3327]") {
     if (!jack_is_available()) {
-        SUCCEED("no JACK server reachable — open smoke skipped");
-        return;
+        SKIP("no JACK server reachable — open smoke skipped");
     }
 
     JackSystem sys;

@@ -62,8 +62,7 @@ pulp::canvas::FontOptions default_opts() {
 TEST_CASE("planner — bidi split for Hello עברית world",
           "[font][planner][bidi][issue-2163]") {
 #ifndef PULP_HAS_SKIA
-    SUCCEED("Skia not linked — real ICU iterators not available");
-    return;
+    SKIP("Skia not linked — real ICU iterators not available");
 #else
     const std::string text = "Hello \xD7\xA2\xD7\x91\xD7\xA8\xD7\x99\xD7\xAA world";
     auto out = pulp::canvas::TextRunPlanner::instance().shape(text, default_opts());
@@ -103,8 +102,7 @@ TEST_CASE("planner — bidi split for Hello עברית world",
 TEST_CASE("planner — script split for Hello 日本語 world",
           "[font][planner][script][issue-2163]") {
 #ifndef PULP_HAS_SKIA
-    SUCCEED("Skia not linked — real ICU iterators not available");
-    return;
+    SKIP("Skia not linked — real ICU iterators not available");
 #else
     const std::string text = "Hello \xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E world";
     auto out = pulp::canvas::TextRunPlanner::instance().shape(text, default_opts());
@@ -132,8 +130,7 @@ TEST_CASE("planner — script split for Hello 日本語 world",
 TEST_CASE("planner — single-run RTL preserves bidi level after atEnd",
           "[font][planner][bidi][issue-2311]") {
 #ifndef PULP_HAS_SKIA
-    SUCCEED("Skia not linked — real ICU iterators not available");
-    return;
+    SKIP("Skia not linked — real ICU iterators not available");
 #else
     const std::string text = "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D";  // שלום
     auto out = pulp::canvas::TextRunPlanner::instance().shape(text, default_opts());
@@ -158,8 +155,7 @@ TEST_CASE("planner — single-run RTL preserves bidi level after atEnd",
 TEST_CASE("planner — single-run CJK preserves script tag after atEnd",
           "[font][planner][script][issue-2311]") {
 #ifndef PULP_HAS_SKIA
-    SUCCEED("Skia not linked — real ICU iterators not available");
-    return;
+    SKIP("Skia not linked — real ICU iterators not available");
 #else
     const std::string text = "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E";  // 日本語
     auto out = pulp::canvas::TextRunPlanner::instance().shape(text, default_opts());

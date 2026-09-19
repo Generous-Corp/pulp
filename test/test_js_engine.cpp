@@ -413,9 +413,8 @@ TEST_CASE("V8 engine reports a non-empty runtime version and provider identity",
     // the test TU never sees it. is_engine_available() is the truthful query for
     // whether V8 is linked into pulp::view in this build.
     if (!is_engine_available(JsEngineType::v8)) {
-        SUCCEED("V8 not linked in this build — identity asserts covered by the "
-                "strict provider_identity CTest on the sealed lane");
-        return;
+        SKIP("V8 not linked in this build — identity asserts covered by the "
+             "strict provider_identity CTest on the sealed lane");
     }
     auto engine = create_js_engine(JsEngineType::v8);
     REQUIRE(engine != nullptr);

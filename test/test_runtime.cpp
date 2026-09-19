@@ -1127,8 +1127,7 @@ TEST_CASE("DynamicLibrary move transfers an open handle", "[runtime][dynamic_lib
     const char* symbol = "malloc";
 #else
     const char* symbol = nullptr;
-    SUCCEED("No stable system library fixture on this platform.");
-    return;
+    SKIP("No stable system library fixture on this platform.");
 #endif
 
     DynamicLibrary moved(std::move(original));
@@ -1157,8 +1156,7 @@ TEST_CASE("DynamicLibrary failed reopen closes the previous handle",
     const char* symbol = "GetCurrentProcess";
 #else
     const char* symbol = nullptr;
-    SUCCEED("No stable system library fixture on this platform.");
-    return;
+    SKIP("No stable system library fixture on this platform.");
 #endif
 
     REQUIRE(library.is_open());

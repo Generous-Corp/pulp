@@ -2322,8 +2322,7 @@ TEST_CASE("pulp kit apply rejects symlinks inside exported directories before co
     write_file(outside, "outside secret\n");
     fs::create_symlink(outside, kit_copy.path / "basic-ui-kit" / "assets" / "outside-link.txt", ec);
     if (ec) {
-        SUCCEED("symlink creation unavailable on this platform");
-        return;
+        SKIP("symlink creation unavailable on this platform");
     }
 
     REQUIRE(cmd_kit({"apply", (kit_copy.path / "basic-ui-kit").string(),
@@ -2518,8 +2517,7 @@ TEST_CASE("pulp kit pack rejects symlinks before writing archive payloads",
     write_file(outside, "outside secret\n");
     fs::create_symlink(outside, kit_copy.path / "basic-ui-kit" / "assets" / "outside-link.txt", ec);
     if (ec) {
-        SUCCEED("symlink creation unavailable on this platform");
-        return;
+        SKIP("symlink creation unavailable on this platform");
     }
 
     REQUIRE(cmd_kit({"pack", (kit_copy.path / "basic-ui-kit").string(),

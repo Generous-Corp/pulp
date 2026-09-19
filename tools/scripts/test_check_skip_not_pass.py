@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Self-test for check_gpu_skip_not_pass.py.
+"""Self-test for check_skip_not_pass.py.
 
-Two things here are load-bearing and neither is "the lint fires."
+Three things here are load-bearing and none of them is "the lint fires."
 
 The first is polarity. `if (!gpu) return;` skips because the device is missing;
 `if (node.gpu_available()) return;` skips because it is present, and converting
@@ -9,19 +9,26 @@ that one to SKIP() would delete a real assertion. A lint that cannot tell those
 apart would force wrong conversions across the tree, so both directions are
 asserted here.
 
-The second is that the lint refuses to report a clean result when its own
+The second is the message classifier. The rule cannot key on syntax, because
+SUCCEED("no crash across repeated attach/detach") states a real observed outcome
+while SUCCEED("skipped: pulp not built") states that nothing was observed. Run
+whole-tree without that split the rule reports every informational assertion in
+the tree, so both polarities of the message test are asserted here too.
+
+The third is that the lint refuses to report a clean result when its own
 patterns stop matching. That is how a source lint normally dies: the file it
 guards is renamed or restructured, the scan quietly matches nothing, and the
 gate stays green forever over zero coverage.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 import sys
 import tempfile
 
-LINT = pathlib.Path(__file__).with_name("check_gpu_skip_not_pass.py")
+LINT = pathlib.Path(__file__).with_name("check_skip_not_pass.py")
 
 CLEAN = """
 TEST_CASE("gpu thing", "[render][gpu]") {
@@ -52,6 +59,23 @@ WARNED = CLEAN.replace(
     'if (!gpu) SKIP("no Dawn device");',
     'if (!gpu) { WARN("no adapter; skipping"); return; }',
 )
+# A SUCCEED that states a real observed outcome using words the skip vocabulary
+# also matches ("unavailable"). Only the positive-outcome override rescues it,
+# so this fixture actually exercises that override -- a message the skip
+# vocabulary never matched would pass this case no matter what the override did.
+# Without the rescue, widening the scan to the whole test tree turns the rule
+# into a false-positive generator and it gets disabled instead of fixed.
+INFORMATIONAL = CLEAN.replace(
+    'if (!gpu) SKIP("no Dawn device");',
+    'if (!gpu) SKIP("no Dawn device");\n'
+    '    SUCCEED("unavailable is the only state in which the warning is true");',
+)
+# The second skip vocabulary: a platform/build precondition, no "skip" word.
+PLATFORM_ONLY = CLEAN.replace(
+    'if (!gpu) SKIP("no Dawn device");',
+    'SUCCEED("Linux AT-SPI provider is a Linux-only runtime backend");',
+)
+
 # Every guard shape removed: the population control must fire.
 EMPTY = "TEST_CASE(\"nothing to guard\", \"[render][gpu]\") { REQUIRE(1 == 1); }\n"
 
@@ -65,6 +89,47 @@ def run(source: str, name: str = "test_gpu_selftest.cpp") -> subprocess.Complete
             capture_output=True,
             text=True,
         )
+
+
+# A full scan plus a ledger, which `--file` deliberately cannot exercise: the
+# ledger is only consulted on a census. The ctest registration passes an
+# ABSOLUTE --root, so the two invocations below must be the same measurement.
+FROZEN_SOURCE = """
+TEST_CASE("frozen backlog case", "[cli]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    REQUIRE(1 == 1);
+}
+"""
+
+
+def run_tree(root_arg: str, cwd: str, tree: pathlib.Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-B", str(LINT), "--root", root_arg,
+         "--ledger", str(tree / "ledger.json")],
+        capture_output=True, text=True, cwd=cwd,
+    )
+
+
+def check_root_forms(failures: list) -> None:
+    with tempfile.TemporaryDirectory() as d:
+        tree = pathlib.Path(d)
+        (tree / "test").mkdir()
+        (tree / "test" / "test_frozen.cpp").write_text(FROZEN_SOURCE)
+        (tree / "ledger.json").write_text(json.dumps({
+            "schema_version": 1,
+            "allow": [{"file": "test/test_frozen.cpp", "sites": 1,
+                       "reason": "self-test fixture"}],
+        }))
+        absolute = run_tree(str(tree), d, tree)
+        relative = run_tree(".", d, tree)
+        for label, r in (("absolute", absolute), ("relative", relative)):
+            if r.returncode != 0:
+                failures.append(
+                    f"a ledgered file was reported under an {label} --root: the "
+                    "scan key is not repo-relative, so no ledger entry matches "
+                    "and every frozen file reports its findings and its entry "
+                    f"as unscanned: {r.stderr.strip()[:300]}"
+                )
 
 
 def main() -> int:
@@ -108,6 +173,24 @@ def main() -> int:
             "force SKIP() onto a case that skips when the GPU is PRESENT"
         )
 
+    r = run(INFORMATIONAL)
+    if r.returncode != 0:
+        failures.append(
+            "SUCCEED(\"unavailable is the only state ...\") was reported -- the "
+            "positive-outcome override no longer rescues a stated outcome whose "
+            f"wording the skip vocabulary also matches: {r.stderr.strip()}"
+        )
+
+    r = run(PLATFORM_ONLY)
+    if r.returncode == 0:
+        failures.append(
+            "SUCCEED(\"... is a Linux-only runtime backend\") was accepted -- the "
+            "classifier only recognises the word `skip`, so the platform-only "
+            "half of the population stays invisible"
+        )
+
+    check_root_forms(failures)
+
     r = run(EMPTY)
     if r.returncode == 0:
         failures.append(
@@ -119,7 +202,7 @@ def main() -> int:
         for f in failures:
             print(f"FAIL: {f}", file=sys.stderr)
         return 1
-    print("check_gpu_skip_not_pass selftest: ok")
+    print("check_skip_not_pass selftest: ok")
     return 0
 
 

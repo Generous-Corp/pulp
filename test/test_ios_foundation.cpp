@@ -173,8 +173,7 @@ TEST_CASE("PluginViewHost::Size custom values", "[ios][view]") {
 TEST_CASE("ios-auv3 HostApp template matches the embedded descriptor exactly",
           "[ios][auv3][template][issue-3095]") {
 #ifndef PULP_SOURCE_DIR
-    SUCCEED("PULP_SOURCE_DIR not defined — skipping template-shape assertion");
-    return;
+    SKIP("PULP_SOURCE_DIR not defined — skipping template-shape assertion");
 #else
     namespace fs = std::filesystem;
     fs::path template_path = fs::path{PULP_SOURCE_DIR}

@@ -1380,8 +1380,7 @@ TEST_CASE("a capture frame that is not the declared root box is refused",
     INFO(agreeing.registration_reason);
     REQUIRE(agreeing.valid);
     if (!agreeing.scored) {
-        SUCCEED("PNG cropping is unavailable in this build");
-        return;
+        SKIP("PNG cropping is unavailable in this build");
     }
 
     SECTION("a frame agreeing with the root scores") {

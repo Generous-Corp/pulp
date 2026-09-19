@@ -144,8 +144,7 @@ TEST_CASE("embedded GPU plugin host attaches + paints first frame (mac)",
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window available — embedded host smoke skipped.");
-            return;
+            SKIP("No Cocoa window available — embedded host smoke skipped.");
         }
 
         smoke::GpuEditorProcessor p;
@@ -426,8 +425,7 @@ TEST_CASE("mac CPU plugin host reopen survives a display-link teardown race",
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window available — mac CPU reopen smoke skipped.");
-            return;
+            SKIP("No Cocoa window available — mac CPU reopen smoke skipped.");
         }
 
         view::PluginViewHost::Options opts;

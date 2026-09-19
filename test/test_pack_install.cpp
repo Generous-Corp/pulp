@@ -113,7 +113,7 @@ TEST_CASE("install: a symlinked pack file is refused", "[reload][install]") {
     fs::remove(b.root / "ui.js");
     std::error_code ec;
     fs::create_symlink(outside, b.root / "ui.js", ec);
-    if (ec) { SUCCEED("platform does not support symlinks; skipping"); return; }
+    if (ec) { SKIP("platform does not support symlinks; skipping"); }
 
     const fs::path base = make_root("base-symlink");
     auto r = install_verified_pack(b.root, b.manifest, b.trusted_key, base);

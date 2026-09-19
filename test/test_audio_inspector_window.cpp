@@ -464,8 +464,7 @@ TEST_CASE("AudioInspectorPanel renders a non-empty headless snapshot",
     // through the offscreen GPU surface (Dawn + Skia). Skips honestly when this
     // build has no GPU capture (CPU-only / no Skia / headless CI without GPU).
     if (!has_gpu_capture()) {
-        SUCCEED("no GPU capture in this build — render proof skipped");
-        return;
+        SKIP("no GPU capture in this build — render proof skipped");
     }
 
     AudioProbe probe;
@@ -520,8 +519,7 @@ TEST_CASE("AudioInspectorPanel renders a non-empty headless snapshot",
     // GPU-independently by the status_color() channel-range check above.
     auto png = render_to_png_gpu(panel, 300, 440, 2.0f);
     if (png.empty()) {
-        SUCCEED("offscreen GPU device unavailable at runtime — pixel proof skipped");
-        return;
+        SKIP("offscreen GPU device unavailable at runtime — pixel proof skipped");
     }
     REQUIRE(png.size() > 100);  // a real PNG, not an empty/blank buffer
     const auto out =

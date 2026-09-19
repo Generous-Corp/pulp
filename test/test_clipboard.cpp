@@ -90,8 +90,7 @@ TEST_CASE("Clipboard large binary payload round-trips byte-for-byte",
     }
     const bool ok = Clipboard::set_data("com.pulp.bigblob", big);
     if (!ok) {
-        SUCCEED("binary clipboard unsupported on this platform");
-        return;
+        SKIP("binary clipboard unsupported on this platform");
     }
     auto got = Clipboard::get_data("com.pulp.bigblob");
     REQUIRE(got.has_value());
