@@ -1191,6 +1191,34 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
     }
 }
 
+TEST_CASE("Vite URL intake ignores lexical false positives and malformed calls",
+          "[view][import][assets][vite]") {
+    auto ir = parse_claude_html(R"html(
+        <html><body><script>
+          // new URL('./comment.png', import.meta.url)
+          /* new URL('./block.png', import.meta.url) */
+          const quoted = "new URL('./string.png', import.meta.url)";
+          const escaped = 'skip\\\' quote';
+          new Nope('./wrong-constructor.png', import.meta.url);
+          new URL;
+          new URL foo;
+          new URL(123);
+          new URL('./unterminated.png, import.meta.url);
+          new URL('./missing-comma.png' import.meta.url);
+          new URL('./wrong-meta.png', other.url);
+          new URL('./missing-close.png', import.meta.url;
+          new URL('./valid.png', import.meta.url);
+        </script></body></html>
+    )html");
+
+    DesignIrAssetOptions options;
+    refresh_design_ir_asset_manifest(ir, options);
+
+    REQUIRE(ir.asset_manifest.assets.size() == 1);
+    CHECK(ir.asset_manifest.assets.front().original_uri == "./valid.png");
+    CHECK_FALSE(ir.asset_manifest.assets.front().diagnostics.empty());
+}
+
 TEST_CASE("DesignIR asset manifest preserves top-level asset refs and writes asset ids",
           "[view][import][assets]") {
     TempDir tmp("pulp-design-ir-top-level-assets");
