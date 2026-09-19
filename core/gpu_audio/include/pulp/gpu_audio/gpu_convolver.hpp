@@ -124,7 +124,9 @@ class GpuConvolver : public GpuAudioNode {
     bool gpu_available() const {
         return gpu_ != nullptr || has_realtime_shared_io();
     }
-    /// The live compute backend ("Metal"/"D3D12"/"Vulkan"), or "" if CPU-only.
+    /// The live native compute backend ("Metal"/"D3D12"/"Vulkan"), or "" if CPU-only.
+    /// On the shared path this names Dawn's underlying Metal backend; use the
+    /// transport capability report when the provider identity itself matters.
     std::string backend() const {
         return gpu_                       ? gpu_->capabilities().backend
                : has_realtime_shared_io() ? std::string("Metal")
