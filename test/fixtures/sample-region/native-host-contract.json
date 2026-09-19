@@ -48,7 +48,12 @@
       "au",
       "vst3",
       "clap"
-    ]
+    ],
+    "host_observed_parameter_identity": true,
+    "host_automation_observation": true,
+    "state_chunk_hash_reload": true,
+    "canonical_processed_audio": true,
+    "negative_controls": true
   },
   "artifacts": {
     "targets": [

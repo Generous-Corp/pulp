@@ -25,7 +25,6 @@ EXIT_PASS, EXIT_FAIL, EXIT_SKIP, EXIT_INCONCLUSIVE = 0, 1, 2, 3
 PREFIX = "[sample-region-f4] "
 FORMATS = ("au", "vst3", "clap")
 EXPECTED_BUNDLE_ID = "com.pulp.sample-region-allpass"
-EXPECTED_PARAMETER_IDS = [2901]
 REQUIRED_TRUE = (
     "installed", "signed", "automation", "state_save", "state_reload",
     "audio", "reload", "zero_pdc", "parameter_identity",
@@ -81,10 +80,12 @@ def validate_receipt(receipt: dict[str, Any], *, expected_format: str | None = N
     missing = [key for key in REQUIRED_TRUE if receipt.get(key) is not True]
     if missing:
         return Verdict(EXIT_INCONCLUSIVE, "missing proof fields: " + ", ".join(missing), receipt)
+    if not isinstance(receipt.get("host_parameter_ids"), list) or not receipt["host_parameter_ids"]:
+        return Verdict(EXIT_INCONCLUSIVE, "host-observed parameter identity list is missing", receipt)
     if not isinstance(receipt.get("parameter_ids"), list) or not receipt["parameter_ids"]:
         return Verdict(EXIT_INCONCLUSIVE, "parameter identity list is missing", receipt)
-    if receipt.get("parameter_ids") != EXPECTED_PARAMETER_IDS:
-        return Verdict(EXIT_FAIL, f"unexpected parameter identity list: {receipt.get('parameter_ids')!r}", receipt)
+    if receipt.get("host_parameter_ids") != receipt.get("parameter_ids"):
+        return Verdict(EXIT_FAIL, "host parameter identity was not bound to receipt order", receipt)
     if receipt.get("parameter_ids") != receipt.get("parameter_order"):
         return Verdict(EXIT_FAIL, "parameter identity/order mismatch", receipt)
     if receipt.get("pdc_samples") not in (0, 0.0):
@@ -93,6 +94,14 @@ def validate_receipt(receipt: dict[str, Any], *, expected_format: str | None = N
         return Verdict(EXIT_INCONCLUSIVE, "audio proof has no positive measured peak", receipt)
     if receipt.get("reload_generation") != receipt.get("saved_generation"):
         return Verdict(EXIT_FAIL, "reload generation did not restore saved state", receipt)
+    if not receipt.get("state_hash_equal") or not receipt.get("state_before_sha256") or not receipt.get("state_after_sha256"):
+        return Verdict(EXIT_INCONCLUSIVE, "state chunk hashes are missing or unequal", receipt)
+    if not receipt.get("wav_exists") or not receipt.get("wav_sha256") or receipt.get("audio_oracle_pass") is not True:
+        return Verdict(EXIT_INCONCLUSIVE, "canonical processed audio oracle evidence is missing", receipt)
+    if not isinstance(receipt.get("automation_points"), list) or len(receipt["automation_points"]) < 2:
+        return Verdict(EXIT_INCONCLUSIVE, "host automation observations are missing", receipt)
+    if not receipt.get("pdc_api"):
+        return Verdict(EXIT_INCONCLUSIVE, "host PDC query source is missing", receipt)
     return Verdict(EXIT_PASS, f"PASS {fmt}: signed installed REAPER host proof", receipt)
 
 
