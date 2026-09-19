@@ -436,8 +436,11 @@ pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
 # pump + lock-free rings + miss policy). GPU-agnostic scheduling logic, so it
 # runs on no-GPU CI too.
 pulp_add_test_suite(pulp-test-gpu-audio-transport
-    SOURCES test_gpu_audio_transport.cpp
-    LIBRARIES pulp::gpu-audio pulp::audio)
+    SOURCES test_gpu_audio_transport.cpp harness/rt_allocation_probe.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/gpu_audio_transport.cpp
+    LIBRARIES pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
 # Dawn-free private contract for P2's explicit algorithmic lead, typed
 # fallback, and bridge telemetry. This is a CPU/fake lane; it intentionally
@@ -477,6 +480,44 @@ pulp_add_test_suite(pulp-test-gpu-shared-io-arena-link
     LIBRARIES pulp::gpu-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+pulp_add_test_suite(pulp-test-gpu-shared-io-compute-plan
+    SOURCES test_gpu_shared_io_compute_plan.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# Deterministic Dawn-free chronology/OLA reducer. It compiles the private source
+# directly so this test remains independent of real-provider availability.
+pulp_add_test_suite(pulp-test-gpu-shared-io-convolution-executor
+    SOURCES test_gpu_shared_io_convolution_executor.cpp
+            ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_convolution_executor.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# Trace the real private session and bridge with a deterministic provider. The
+# focused source closure remains independent of GPU availability.
+set(_pulp_shared_io_session_sources
+    ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_arena.cpp
+    ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_compute_plan.cpp
+    ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_stamped_bridge.cpp
+    ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_convolution_executor.cpp
+    ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_convolution_pipeline.cpp
+    ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_convolution_session.cpp
+    ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_trace.cpp)
+foreach(_pulp_shared_io_suite gpu-audio-trace gpu-shared-io-convolution-pipeline
+                           gpu-shared-io-convolution-session)
+    string(REPLACE "-" "_" _pulp_shared_io_test ${_pulp_shared_io_suite})
+    pulp_add_test_suite(pulp-test-${_pulp_shared_io_suite}
+        SOURCES test_${_pulp_shared_io_test}.cpp harness/rt_allocation_probe.cpp
+                ${_pulp_shared_io_session_sources}
+        LIBRARIES pulp::audio pulp::runtime Threads::Threads
+        INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                     ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+endforeach()
+if(Python3_EXECUTABLE)
+    add_test(NAME gpu-audio-trace-validator-selftest
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_validate_gpu_audio_trace_captures.py")
+endif()
+
 # Flow pans: pure per-room constant-power pan math + GpuMultiConvolver::set_flow
 # (an atomic store). GPU-agnostic, so it runs — and keeps the flow math covered —
 # in the no-GPU coverage build too.
@@ -495,7 +536,12 @@ pulp_add_test_suite(pulp-test-flow-pans
 pulp_add_test_suite(pulp-test-gpu-convolver
     SOURCES test_gpu_convolver.cpp
     LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
     PROPERTIES RESOURCE_LOCK pulp_gpu)
+if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
+    target_compile_definitions(pulp-test-gpu-convolver PRIVATE
+        PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+endif()
 
 if(PULP_HAS_SKIA)
     # GPU STFT primitive: window+FFT analyze, inverse-FFT synthesize,

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <new>
+#include <utility>
 
 namespace pulp::gpu_audio::detail {
 
@@ -42,7 +43,10 @@ SharedIoArena::~SharedIoArena() {
     // A conforming provider's terminal drain makes this succeed. If it violates
     // that contract, destruction deliberately leaks the backing allocations,
     // with no recovery claim, rather than free storage the GPU may still access.
-    release();
+    // A prepared program retains those same buffers, so it must join that leak
+    // instead of having its member destructor release live backend handles.
+    if (!release())
+        (void)program_.release();
 }
 
 bool SharedIoTerminalInbox::prepare(std::uint32_t capacity) {
@@ -201,6 +205,11 @@ bool SharedIoTerminalInbox::quiescent() const noexcept {
 }
 
 bool SharedIoArena::prepare(SharedIoArenaProvider& provider, const Config& config) {
+    return prepare(provider, config, {});
+}
+
+bool SharedIoArena::prepare(SharedIoArenaProvider& provider, const Config& config,
+                            std::unique_ptr<SharedIoPreparedProgram> program) {
     if (prepared_ && !release())
         return false;
     if (config.slots == 0 || config.input_bytes_per_slot == 0 ||
@@ -237,10 +246,30 @@ bool SharedIoArena::prepare(SharedIoArenaProvider& provider, const Config& confi
             }
             throw std::bad_alloc{};
         }
+        if (program) {
+            std::vector<SharedIoArenaProvider::SlotBufferHandle> handles(config.slots);
+            for (std::uint32_t slot = 0; slot < config.slots; ++slot) {
+                if (!provider_->acquire_slot_buffers(resources_[slot], handles[slot]) ||
+                    !provider_->validate_slot_buffers(handles[slot]) ||
+                    handles[slot].slot != slot) {
+                    throw std::bad_alloc{};
+                }
+            }
+            program_ = std::move(program);
+            if (!program_->prepare(*provider_, handles))
+                throw std::bad_alloc{};
+        }
     } catch (...) {
         // A failed or malformed creation can still own successful imports and
         // deferred disposal callbacks. Roll the whole attempted transaction
         // through release, drain, then host free before making prepare retryable.
+        if (program_ && (!provider.drain() || !program_->release())) {
+            prepared_ = provider_ != nullptr;
+            if (prepared_)
+                begin_retirement();
+            return false;
+        }
+        program_.reset();
         if (!retire_drain_destroy(provider, resources_)) {
             // Keep the entire attempted transaction alive. A later release()
             // can retry the physical barrier; clearing these records here
@@ -293,7 +322,10 @@ bool SharedIoArena::submit(const SlotToken& token) noexcept {
         ledger_.discard(*claimed);
         return false;
     }
-    if (provider_->submit(*resource, *claimed, terminal_inbox_))
+    const bool accepted = program_
+                              ? program_->submit(*provider_, *resource, *claimed, terminal_inbox_)
+                              : provider_->submit(*resource, *claimed, terminal_inbox_);
+    if (accepted)
         return true;
 
     // A callback for an older generation may temporarily own Completing. Keep
@@ -321,7 +353,7 @@ void SharedIoArena::retry_rejected_submissions() noexcept {
     }
 }
 
-SharedIoArena::CompletionDrain SharedIoArena::drain_completions() noexcept {
+SharedIoArena::CompletionDrain SharedIoArena::drain_completions(CompletionObserver observer) noexcept {
     CompletionDrain result;
     if (!terminal_inbox_)
         return result;
@@ -340,6 +372,7 @@ SharedIoArena::CompletionDrain SharedIoArena::drain_completions() noexcept {
             if (discarded) {
                 rejected = {};
                 ++result.accepted;
+                if (observer) observer.callback(observer.context, record.token, CompletionStatus::RetiredFailed);
             } else {
                 ++result.rejected_stale_or_duplicate;
             }
@@ -348,9 +381,10 @@ SharedIoArena::CompletionDrain SharedIoArena::drain_completions() noexcept {
         const auto completion = record.status == CompletionStatus::RetiredSuccess
                                     ? SharedIoSlotLedger::GpuCompletion::Success
                                     : SharedIoSlotLedger::GpuCompletion::Failed;
-        if (ledger_.complete_gpu(record.token, completion))
+        if (ledger_.complete_gpu(record.token, completion)) {
             ++result.accepted;
-        else
+            if (observer) observer.callback(observer.context, record.token, record.status);
+        } else
             ++result.rejected_stale_or_duplicate;
     }
     retry_rejected_submissions();
@@ -401,6 +435,10 @@ bool SharedIoArena::release() noexcept {
     discard_cpu_owned_after_quiescence();
     if (!ledger_.quiescent() || !terminal_inbox_->quiescent())
         return false;
+
+    if (program_ && !program_->release())
+        return false;
+    program_.reset();
 
     // The first drain retired accepted submissions. Releasing the imported
     // buffer handles can enqueue disposal callbacks of its own, so drain again

@@ -511,6 +511,7 @@ if(TARGET Pulp::gpu-audio)
         unset(_pulp_gpu_audio_linked_runtimes)
     endif()
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp"
+"#include <pulp/gpu_audio/gpu_audio_capability.hpp>\n"
 "#include <pulp/gpu_audio/gpu_audio_transport.hpp>\n"
 "\n"
 "// Reference a header type and an archive-defined symbol (stats()) so the\n"
@@ -519,11 +520,29 @@ if(TARGET Pulp::gpu-audio)
 "int main() {\n"
 "    pulp::gpu_audio::GpuAudioTransport transport;\n"
 "    const auto stats = transport.stats();\n"
-"    return transport.is_prepared() ? 1 : (stats.miss_blocks == 0 ? 0 : 2);\n"
+"    const auto report = transport.capability_report();\n"
+"    return transport.is_prepared() ? 1 :\n"
+"        (stats.miss_blocks == 0 &&\n"
+"         report.path == pulp::gpu_audio::GpuAudioExecutionPath::Unavailable &&\n"
+"         report.provider == pulp::gpu_audio::GpuAudioProvider::Unknown &&\n"
+"         report.eligibility == pulp::gpu_audio::GpuAudioEligibility::Unavailable &&\n"
+"         report.fallback_policy == pulp::gpu_audio::MissPolicy::Silence &&\n"
+"         report.prepared_lead_blocks == 0 &&\n"
+"         !report.prepared && !report.fallback_available &&\n"
+"         !report.diagnostics_available ? 0 : 2);\n"
 "}\n")
     add_executable(PulpSDKSmokeGpuAudioProbe
         "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp")
     target_link_libraries(PulpSDKSmokeGpuAudioProbe PRIVATE Pulp::gpu-audio)
+
+    # Public installed-SDK lifecycle proof. This deliberately exercises only
+    # the backend-neutral transport contract: prepare/release/reprepare,
+    # worker-serviced delivery, and a bounded CpuFallback result when the
+    # worker is late or absent. Provider-side device-loss injection is private
+    # to the Dawn shared-I/O probes; the public SDK has no loss-injection hook.
+    add_executable(PulpSDKSmokeGpuAudioLifecycleProbe
+        gpu_audio_lifecycle_probe.cpp)
+    target_link_libraries(PulpSDKSmokeGpuAudioLifecycleProbe PRIVATE Pulp::gpu-audio)
     if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
         set_target_properties(PulpSDKSmokeGpuAudioProbe PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY

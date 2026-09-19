@@ -236,6 +236,35 @@ if(NOT _audio_timing_result EQUAL 0)
         "${_audio_timing_output}\n${_audio_timing_error}")
 endif()
 
+# Public GPU-audio lifecycle consumer. This proves the installed
+# Pulp::gpu-audio target can drive prepare/release/reprepare, worker-serviced
+# delivery, and CpuFallback on late/missing worker service. Device-loss
+# injection remains a private Dawn-provider concern because the public SDK has
+# no provider-loss injection/status hook.
+set(_gpu_audio_lifecycle_probe
+    "${_consumer_build}/PulpSDKSmokeGpuAudioLifecycleProbe${CMAKE_EXECUTABLE_SUFFIX}")
+if(NOT EXISTS "${_gpu_audio_lifecycle_probe}")
+    set(_gpu_audio_lifecycle_probe
+        "${_consumer_build}/${_config}/PulpSDKSmokeGpuAudioLifecycleProbe${CMAKE_EXECUTABLE_SUFFIX}")
+endif()
+if(PULP_PARENT_GPU_AUDIO_AVAILABLE AND NOT EXISTS "${_gpu_audio_lifecycle_probe}")
+    message(FATAL_ERROR
+        "Installed-SDK GPU-audio lifecycle probe was not built: ${_gpu_audio_lifecycle_probe}")
+endif()
+if(EXISTS "${_gpu_audio_lifecycle_probe}")
+    execute_process(
+        COMMAND "${_gpu_audio_lifecycle_probe}"
+        RESULT_VARIABLE _gpu_audio_lifecycle_result
+        OUTPUT_VARIABLE _gpu_audio_lifecycle_output
+        ERROR_VARIABLE _gpu_audio_lifecycle_error)
+    if(NOT _gpu_audio_lifecycle_result EQUAL 0)
+        message(FATAL_ERROR
+            "Installed-SDK GPU-audio lifecycle probe failed "
+            "(${_gpu_audio_lifecycle_result})\n"
+            "${_gpu_audio_lifecycle_output}\n${_gpu_audio_lifecycle_error}")
+    endif()
+endif()
+
 # This probe calls the archive-defined AgentView::create() entry point with an
 # invalid snapshot and succeeds only when the installed SDK links and preserves
 # the API's fail-closed runtime contract. Check both single- and multi-config

@@ -11,6 +11,7 @@ requires:
   - .agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql
   - .agents/skills/trace-sql/pulp_gpu_health_transitions.sql
   - .agents/skills/trace-sql/pulp_gpu_probe_correlation.sql
+  - .agents/skills/trace-sql/pulp_gpu_audio_blocks.sql
 ---
 
 # trace-sql — querying Pulp traces with `trace_processor`
@@ -404,6 +405,7 @@ GROUP BY name ORDER BY avg_all_us DESC;
 - `.agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql`
 - `.agents/skills/trace-sql/pulp_gpu_health_transitions.sql`
 - `.agents/skills/trace-sql/pulp_gpu_probe_correlation.sql`
+- `.agents/skills/trace-sql/pulp_gpu_audio_blocks.sql` — independent admission/terminal and eligibility/delivery identities; see `docs/guides/gpu-audio-tracing.md` for its explicit-load validator.
 - `core/runtime/include/pulp/runtime/trace.hpp` — the macro surface + category taxonomy
 - `docs/guides/tracing.md` — the guide, tiers, and worked use cases
 

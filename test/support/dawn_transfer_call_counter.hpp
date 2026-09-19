@@ -38,6 +38,9 @@ class DawnTransferCallCounter {
         std::uint64_t copy_buffer_to_buffer_bytes = 0;
         std::uint64_t buffer_map_async_calls = 0;
         std::uint64_t buffer_map_async_bytes = 0;
+        std::uint64_t buffer_get_mapped_range_calls = 0;
+        std::uint64_t buffer_get_mapped_range_bytes = 0;
+        std::uint64_t buffer_unmap_calls = 0;
         std::uint64_t queue_submit_calls = 0;
         std::uint64_t submitted_command_buffers = 0;
     };
@@ -52,6 +55,8 @@ class DawnTransferCallCounter {
         interposed_->queueWriteBuffer = &count_queue_write_buffer;
         interposed_->commandEncoderCopyBufferToBuffer = &count_copy_buffer_to_buffer;
         interposed_->bufferMapAsync = &count_buffer_map_async;
+        interposed_->bufferGetMappedRange = &count_buffer_get_mapped_range;
+        interposed_->bufferUnmap = &count_buffer_unmap;
         interposed_->queueSubmit = &count_queue_submit;
         if (mode_ == InstallMode::InstallAndRestore)
             dawnProcSetProcs(interposed_.get());
@@ -94,6 +99,9 @@ class DawnTransferCallCounter {
                 copy_buffer_to_buffer_bytes_.load(std::memory_order_relaxed),
             .buffer_map_async_calls = buffer_map_async_calls_.load(std::memory_order_relaxed),
             .buffer_map_async_bytes = buffer_map_async_bytes_.load(std::memory_order_relaxed),
+            .buffer_get_mapped_range_calls = buffer_get_mapped_range_calls_.load(std::memory_order_relaxed),
+            .buffer_get_mapped_range_bytes = buffer_get_mapped_range_bytes_.load(std::memory_order_relaxed),
+            .buffer_unmap_calls = buffer_unmap_calls_.load(std::memory_order_relaxed),
             .queue_submit_calls = queue_submit_calls_.load(std::memory_order_relaxed),
             .submitted_command_buffers = submitted_command_buffers_.load(std::memory_order_relaxed),
         };
@@ -108,6 +116,9 @@ class DawnTransferCallCounter {
         copy_buffer_to_buffer_bytes_.store(0, std::memory_order_relaxed);
         buffer_map_async_calls_.store(0, std::memory_order_relaxed);
         buffer_map_async_bytes_.store(0, std::memory_order_relaxed);
+        buffer_get_mapped_range_calls_.store(0, std::memory_order_relaxed);
+        buffer_get_mapped_range_bytes_.store(0, std::memory_order_relaxed);
+        buffer_unmap_calls_.store(0, std::memory_order_relaxed);
         queue_submit_calls_.store(0, std::memory_order_relaxed);
         submitted_command_buffers_.store(0, std::memory_order_relaxed);
     }
@@ -182,6 +193,20 @@ class DawnTransferCallCounter {
         return counter.original_.bufferMapAsync(buffer, mode, offset, size, callback_info);
     }
 
+    static void* count_buffer_get_mapped_range(WGPUBuffer buffer, unsigned long offset,
+                                                std::size_t size) {
+        auto& counter = active();
+        add_saturating(counter.buffer_get_mapped_range_calls_, 1);
+        add_saturating(counter.buffer_get_mapped_range_bytes_, mapped_bytes(counter, buffer, offset, size));
+        return counter.original_.bufferGetMappedRange(buffer, offset, size);
+    }
+
+    static void count_buffer_unmap(WGPUBuffer buffer) {
+        auto& counter = active();
+        add_saturating(counter.buffer_unmap_calls_, 1);
+        counter.original_.bufferUnmap(buffer);
+    }
+
     static void count_queue_submit(WGPUQueue queue, std::size_t command_count,
                                    const WGPUCommandBuffer* commands) {
         auto& counter = active();
@@ -195,6 +220,8 @@ class DawnTransferCallCounter {
                                  WGPUProcCommandEncoderCopyBufferToBuffer>);
     static_assert(std::is_same_v<decltype(&count_buffer_map_async), WGPUProcBufferMapAsync>);
     static_assert(std::is_same_v<decltype(&count_queue_submit), WGPUProcQueueSubmit>);
+    static_assert(std::is_same_v<decltype(&count_buffer_get_mapped_range), WGPUProcBufferGetMappedRange>);
+    static_assert(std::is_same_v<decltype(&count_buffer_unmap), WGPUProcBufferUnmap>);
 
     InstallMode mode_ = InstallMode::InstallAndRestore;
     DawnProcTable original_{};
@@ -206,6 +233,9 @@ class DawnTransferCallCounter {
     std::atomic<std::uint64_t> copy_buffer_to_buffer_bytes_{0};
     std::atomic<std::uint64_t> buffer_map_async_calls_{0};
     std::atomic<std::uint64_t> buffer_map_async_bytes_{0};
+    std::atomic<std::uint64_t> buffer_get_mapped_range_calls_{0};
+    std::atomic<std::uint64_t> buffer_get_mapped_range_bytes_{0};
+    std::atomic<std::uint64_t> buffer_unmap_calls_{0};
     std::atomic<std::uint64_t> queue_submit_calls_{0};
     std::atomic<std::uint64_t> submitted_command_buffers_{0};
 

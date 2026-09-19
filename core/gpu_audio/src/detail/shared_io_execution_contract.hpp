@@ -9,9 +9,11 @@ namespace pulp::gpu_audio::detail {
 
 // This is deliberately private until the installed SDK contract is settled.
 // `algorithmic_lead_blocks` is the number of complete blocks by which a result
-// may trail the callback timeline; `pipeline_depth` is only the number of
-// physical shared slots. They are distinct knobs, but a GPU path needs at
-// least one physical slot for every block of declared lead.
+// may trail the callback timeline. `pipeline_depth` is the logical bridge and
+// completion-table capacity, so it must cover the declared lead plus the
+// callback currently being published. `provider_slots` is the independent
+// number of physical provider-arena slots; retired slots may be reused within
+// the lead window.
 enum class SharedIoPath : std::uint8_t { Cpu, StagedAsync, SharedHostPointer };
 enum class SharedIoRequest : std::uint8_t {
     Auto,
@@ -33,6 +35,7 @@ enum class SharedIoFallbackReason : std::uint8_t {
     InputSaturated,
     SequenceGap,
     Teardown,
+    CompletionFailed,
 };
 
 enum class SharedIoContractError : std::uint8_t {
@@ -44,6 +47,7 @@ enum class SharedIoContractError : std::uint8_t {
     CpuFallbackNotPrepared,
     ProviderUnavailable,
     RequestedPathUnavailable,
+    MissingProviderSlots,
 };
 
 struct SharedIoExecutionContract {
@@ -52,6 +56,7 @@ struct SharedIoExecutionContract {
     std::uint32_t sample_rate = 0;
     std::uint32_t algorithmic_lead_blocks = 0;
     std::uint32_t pipeline_depth = 0;
+    std::uint32_t provider_slots = 0;
     SharedIoRequest requested_path = SharedIoRequest::Auto;
     SharedIoPath active_path = SharedIoPath::Cpu;
     MissPolicy miss_policy = MissPolicy::Silence;
@@ -78,8 +83,10 @@ validate_shared_io_contract(const SharedIoExecutionContract& contract) noexcept 
         return {SharedIoContractError::MissingAlgorithmicLead};
     if (gpu_path && contract.pipeline_depth == 0)
         return {SharedIoContractError::MissingPipelineDepth};
-    if (gpu_path && contract.pipeline_depth < contract.algorithmic_lead_blocks)
+    if (gpu_path && contract.pipeline_depth <= contract.algorithmic_lead_blocks)
         return {SharedIoContractError::InsufficientPipelineDepth};
+    if (gpu_path && contract.provider_slots == 0)
+        return {SharedIoContractError::MissingProviderSlots};
     if (contract.active_path == SharedIoPath::SharedHostPointer &&
         !contract.shared_host_pointer_capable)
         return {SharedIoContractError::ProviderUnavailable};
