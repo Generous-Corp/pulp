@@ -1,4 +1,6 @@
 #include "test_design_import_shared.hpp"
+#include "../core/view/src/design_ir_helpers.hpp"
+#include <pulp/runtime/crypto.hpp>
 
 // ── Design source parsing ───────────────────────────────────────────────
 
@@ -1154,6 +1156,40 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
         REQUIRE_FALSE(dynamic->diagnostics.empty());
         CHECK(dynamic->diagnostics.front().kind ==
               ImportDiagnosticKind::unresolved_asset);
+    }
+
+    SECTION("serialized relative asset paths survive relocation") {
+        TempDir source("pulp-design-ir-package-source");
+        TempDir relocated("pulp-design-ir-package-relocated");
+        write_text(source.path / "assets/hero.png", "portable-vite-asset");
+        write_text(relocated.path / "assets/hero.png", "portable-vite-asset");
+        std::ifstream package_input;
+
+        DesignIR ir;
+        ir.root.type = "frame";
+        IRAssetRef asset;
+        asset.asset_id = "asset-portable-hero";
+        asset.original_uri = "./hero.png";
+        asset.local_path = "assets/hero.png";
+        asset.content_hash = pulp::runtime::sha256_hex(
+            reinterpret_cast<const uint8_t*>("portable-vite-asset"), 19);
+        ir.asset_manifest.assets.push_back(std::move(asset));
+
+        const auto serialized = serialize_design_ir(ir);
+        write_text(relocated.path / "scene.pulp.json", serialized);
+        package_input.open(relocated.path / "scene.pulp.json", std::ios::binary);
+        std::ostringstream package_bytes;
+        package_bytes << package_input.rdbuf();
+        const auto reloaded = parse_design_ir_json(
+            package_bytes.str());
+        REQUIRE(reloaded.asset_manifest.assets.size() == 1);
+        const auto resolved = resolve_asset_file(
+            reloaded.asset_manifest.assets.front(), relocated.path);
+        REQUIRE(resolved.has_value());
+        CHECK(resolved->lexically_normal() ==
+              (relocated.path / "assets/hero.png").lexically_normal());
+        CHECK(reloaded.asset_manifest.assets.front().local_path ==
+              std::optional<std::string>("assets/hero.png"));
     }
 }
 

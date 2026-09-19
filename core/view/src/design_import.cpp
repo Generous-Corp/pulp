@@ -1375,6 +1375,105 @@ static void collect_font_face_asset_candidates(const std::string& css,
     }
 }
 
+static std::vector<std::string> collect_vite_url_asset_candidates(
+    std::string_view source) {
+    std::vector<std::string> candidates;
+    auto is_ident = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$';
+    };
+    auto skip_space = [&](size_t& pos) {
+        while (pos < source.size() && std::isspace(static_cast<unsigned char>(source[pos])))
+            ++pos;
+    };
+    auto match_word = [&](size_t& pos, std::string_view word) {
+        if (source.substr(pos, word.size()) != word) return false;
+        const auto before_ok = pos == 0 || !is_ident(source[pos - 1]);
+        const auto after = pos + word.size();
+        const auto after_ok = after >= source.size() || !is_ident(source[after]);
+        if (!before_ok || !after_ok) return false;
+        pos = after;
+        return true;
+    };
+    auto skip_quoted = [&](size_t& pos, char quote) {
+        ++pos;
+        while (pos < source.size()) {
+            if (source[pos] == '\\') {
+                pos += std::min<size_t>(2, source.size() - pos);
+            } else if (source[pos++] == quote) {
+                break;
+            }
+        }
+    };
+    for (size_t i = 0; i < source.size();) {
+        if (source[i] == '/' && i + 1 < source.size() && source[i + 1] == '/') {
+            i += 2;
+            while (i < source.size() && source[i] != '\n' && source[i] != '\r') ++i;
+            continue;
+        }
+        if (source[i] == '/' && i + 1 < source.size() && source[i + 1] == '*') {
+            i += 2;
+            while (i + 1 < source.size() && !(source[i] == '*' && source[i + 1] == '/')) ++i;
+            i = std::min(source.size(), i + 2);
+            continue;
+        }
+        if (source[i] == '\'' || source[i] == '"') {
+            skip_quoted(i, source[i]);
+            continue;
+        }
+        size_t pos = i;
+        if (!match_word(pos, "new")) {
+            ++i;
+            continue;
+        }
+        skip_space(pos);
+        if (!match_word(pos, "URL")) {
+            i = pos;
+            continue;
+        }
+        skip_space(pos);
+        if (pos >= source.size() || source[pos++] != '(') {
+            i = pos;
+            continue;
+        }
+        skip_space(pos);
+        if (pos >= source.size() || (source[pos] != '\'' && source[pos] != '"' && source[pos] != '`')) {
+            i = pos;
+            continue;
+        }
+        const char quote = source[pos++];
+        const auto value_start = pos;
+        while (pos < source.size() && source[pos] != quote) {
+            if (source[pos] == '\\') pos += std::min<size_t>(2, source.size() - pos);
+            else ++pos;
+        }
+        if (pos >= source.size()) {
+            i = pos;
+            continue;
+        }
+        const std::string value(source.substr(value_start, pos - value_start));
+        ++pos;
+        skip_space(pos);
+        if (pos >= source.size() || source[pos++] != ',') {
+            i = pos;
+            continue;
+        }
+        skip_space(pos);
+        if (source.substr(pos, 15) != "import.meta.url") {
+            i = pos;
+            continue;
+        }
+        pos += 15;
+        skip_space(pos);
+        if (pos >= source.size() || source[pos++] != ')') {
+            i = pos;
+            continue;
+        }
+        if (!value.empty() && value.front() != '#') candidates.push_back(value);
+        i = pos;
+    }
+    return candidates;
+}
+
 static std::vector<HtmlAssetCandidate> collect_html_asset_uris(const std::string& html) {
     std::vector<HtmlAssetCandidate> assets;
 
@@ -1454,34 +1553,12 @@ static std::vector<HtmlAssetCandidate> collect_html_asset_uris(const std::string
     }
 
     // Vite and similar ESM bundlers commonly preserve a literal asset edge as
-    // `new URL('./asset.png', import.meta.url)`.  The browser resolves this
-    // edge at runtime, but the source importer must also admit the referenced
-    // file into its content-addressed manifest for native materialization.
-    // Only a literal string is discoverable here; dynamic expressions remain
-    // unresolved and are reported by the normal asset-resolution pass.
-    static const std::regex vite_url_re(
-        R"RX(new\s+URL\s*\(\s*(['"])([^'"]+)\1\s*,\s*import\.meta\.url\s*\))RX",
-        std::regex::icase);
-    auto vite_begin = std::sregex_iterator(html.begin(), html.end(), vite_url_re);
-    auto vite_end = std::sregex_iterator();
-    for (auto it = vite_begin; it != vite_end; ++it) {
-        auto uri = (*it)[2].str();
-        if (!uri.empty() && uri.front() != '#')
-            append_html_asset_candidate(assets, std::move(uri));
-    }
-
-    // Preserve dynamic template edges as unresolved candidates so the asset
-    // manifest receipt records the limitation instead of silently dropping
-    // the browser-visible URL. Runtime evaluation remains the browser's job.
-    static const std::regex vite_template_url_re(
-        R"RX(new\s+URL\s*\(\s*`([^`]*)`\s*,\s*import\.meta\.url\s*\))RX",
-        std::regex::icase);
-    auto template_begin = std::sregex_iterator(html.begin(), html.end(), vite_template_url_re);
-    for (auto it = template_begin; it != vite_end; ++it) {
-        auto uri = (*it)[1].str();
-        if (!uri.empty() && uri.front() != '#')
-            append_html_asset_candidate(assets, std::move(uri));
-    }
+    // `new URL('./asset.png', import.meta.url)`. Scan lexically so comments and
+    // ordinary JS strings cannot manufacture manifest entries. Template values
+    // remain candidates with their unresolved expression for deterministic
+    // diagnostics; runtime evaluation remains the browser's job.
+    for (auto& uri : collect_vite_url_asset_candidates(html))
+        append_html_asset_candidate(assets, std::move(uri));
 
     return assets;
 }
