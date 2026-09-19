@@ -20,6 +20,12 @@ SURFACES = frozenset({"canvas", "svg"})
 FINDING_KINDS = frozenset({
     "dropped-material", "wrong-geometry", "wrong-pixels", "unsupported-behavior"
 })
+_CLASSIFICATION_TO_FINDING = {
+    "dropped-material": "dropped-material",
+    "geometry": "wrong-geometry",
+    "visual": "wrong-pixels",
+    "unsupported-behavior": "unsupported-behavior",
+}
 
 
 @dataclass(frozen=True)
@@ -103,6 +109,47 @@ def _observation(value: Any, fixture: FixtureSpec, side: str) -> dict[str, Any]:
     if not isinstance(evidence, list) or any(not isinstance(item, str) or not item for item in evidence):
         raise ValueError(f"{fixture.id}: {side}.evidence must be a string array")
     return {"status": status, "findings": normalized, "evidence": sorted(evidence)}
+
+
+def observations_from_lab_reports(
+    reports: list[Mapping[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Map importer-lab reports to contract observations exactly once.
+
+    Reports are execution artifacts, so a missing fixture is left for
+    ``normalize_report`` to represent as ``not-run``. A report without an id,
+    or two reports for one id, is ambiguous and must fail before publication.
+    """
+    browser: dict[str, Any] = {}
+    native: dict[str, Any] = {}
+    for report in reports:
+        fixture = report.get("fixture") if isinstance(report, Mapping) else None
+        fixture_id = fixture.get("id") if isinstance(fixture, Mapping) else None
+        if not isinstance(fixture_id, str) or not fixture_id:
+            raise ValueError("lab report lacks a fixture id")
+        if fixture_id in browser:
+            raise ValueError(f"ambiguous lab observations for fixture {fixture_id!r}")
+        browser[fixture_id] = {
+            "status": "pass",
+            "evidence": ["browser/browser.png", "browser/dom-snapshot.json"],
+        }
+        findings = []
+        for classification in report.get("classifications", []):
+            kind = classification.get("kind")
+            mapped = _CLASSIFICATION_TO_FINDING.get(kind)
+            if mapped:
+                findings.append({
+                    "kind": mapped,
+                    "message": classification.get("detail", kind),
+                })
+        native[fixture_id] = {
+            "status": "fail" if findings else "pass",
+            "findings": findings,
+            "evidence": ["comparison/report.json"] if findings else [
+                "candidate/render.png", "comparison/report.json"
+            ],
+        }
+    return browser, native
 
 
 def normalize_report(

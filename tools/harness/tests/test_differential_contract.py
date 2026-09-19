@@ -10,6 +10,7 @@ from tools.harness.differential.contract import (
     SCHEMA,
     load_fixture_manifest,
     normalize_report,
+    observations_from_lab_reports,
     validate_report,
 )
 
@@ -73,6 +74,13 @@ class DifferentialContractTests(unittest.TestCase):
         row = next(item for item in report["fixtures"] if item["id"] == "canvas-primitives")
         self.assertEqual(row["native"]["status"], "fail")
         self.assertEqual(row["native"]["findings"][0]["kind"], "wrong-pixels")
+
+    def test_lab_observation_mapping_rejects_missing_or_ambiguous_ids(self) -> None:
+        with self.assertRaisesRegex(ValueError, "lacks a fixture id"):
+            observations_from_lab_reports([{"classifications": []}])
+        report = {"fixture": {"id": "canvas-primitives"}, "classifications": []}
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            observations_from_lab_reports([report, report])
 
     def test_validate_rejects_unsorted_rows_and_wrong_native(self) -> None:
         report = json.loads(normalize_report(MANIFEST).to_json())
