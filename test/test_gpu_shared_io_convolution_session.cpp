@@ -427,11 +427,37 @@ TEST_CASE("shared convolution session retains a failed preparation until its dra
     CHECK_FALSE(session.release());
     CHECK_FALSE(state->program_released);
     CHECK_FALSE(state->program_destroyed);
+
+    // A retained failed transaction still owns the provider/program. A new
+    // prepare must be rejected until its physical drain succeeds; otherwise
+    // replacing provider_ would leave the plan pointing at a destroyed owner.
+    auto replacement_state = std::make_shared<State>();
+    auto replacement_provider = std::make_unique<FakeProvider>(replacement_state);
+    auto replacement_program =
+        std::make_unique<FakeProgram>(*replacement_provider, replacement_state);
+    CHECK_FALSE(session.prepare(
+        {std::move(replacement_provider), std::move(replacement_program)},
+        {.pipeline = {.capacity = 3, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+         .slots = 1}));
+    CHECK_FALSE(state->program_released);
+    CHECK_FALSE(state->program_destroyed);
+
     provider_control->allow_drain = true;
     REQUIRE(session.release());
     CHECK(state->program_released);
     CHECK(state->program_destroyed);
     CHECK_FALSE(state->retired_before_program_release);
+
+    // Once release clears the retained owner, a fresh transaction can prepare
+    // and release normally.
+    auto fresh_provider = std::make_unique<FakeProvider>(replacement_state);
+    auto fresh_program = std::make_unique<FakeProgram>(*fresh_provider, replacement_state);
+    REQUIRE(session.prepare(
+        {std::move(fresh_provider), std::move(fresh_program)},
+        {.pipeline = {.capacity = 3, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
+         .slots = 1}));
+    REQUIRE(session.release());
+    CHECK(replacement_state->program_released);
 }
 
 TEST_CASE("shared convolution session releases its prepared program before provider slots",

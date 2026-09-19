@@ -177,8 +177,11 @@ void SharedIoConvolutionSession::trace_terminal(SharedIoSlotLedger::SlotToken to
 }
 
 bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
-    if (prepared_ || !pair.provider || !pair.program || config.slots == 0 ||
-        !convolution_geometry_valid(config.pipeline))
+    // A failed arena transaction may retain its provider/program while a
+    // physical drain barrier is retried. Do not overwrite that owner with a
+    // new provider: the plan still points at the retained transaction.
+    if (prepared_ || provider_ || plan_.prepared() || !pair.provider || !pair.program ||
+        config.slots == 0 || !convolution_geometry_valid(config.pipeline))
         return false;
     const auto bytes = complex_slot_bytes(config.pipeline);
     if (!bytes)
@@ -521,8 +524,13 @@ bool SharedIoConvolutionSession::fence_and_reprime() noexcept {
 }
 
 bool SharedIoConvolutionSession::release() noexcept {
-    if (!prepared_)
-        return plan_.release();
+    if (!prepared_) {
+        if (!plan_.release())
+            return false;
+        terminal_.clear();
+        provider_.reset();
+        return true;
+    }
     // Stop callbacks before this boundary. Harvest physical terminal results
     // before arena release consumes its terminal inbox internally.
     if (!drain_quiescent())
