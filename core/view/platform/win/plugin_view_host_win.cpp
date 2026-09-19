@@ -18,16 +18,16 @@
 // invalidates and a WM_PAINT triggers render_frame(). For embed callers that
 // drive frames explicitly (pulp_embed_tick), repaint() renders synchronously.
 
-#include <pulp/view/plugin_view_host.hpp>
-#include <pulp/view/plugin_frame_renderer.hpp>  // shared with the Linux host
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
-#include <pulp/view/pointer_dispatch.hpp>
-#include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
-#include <pulp/view/platform/win_pointer_input.hpp>
 #include <pulp/view/platform/win_plugin_input_router.hpp>
+#include <pulp/view/platform/win_pointer_input.hpp>
 #include <pulp/view/platform/win_surface_lifecycle.hpp>
-#include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
+#include <pulp/view/plugin_frame_renderer.hpp> // shared with the Linux host
+#include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/repaint_damage.hpp> // compute_effective_damage (platform-free)
+#include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
 #include <pulp/view/window_host.hpp>
 
 #ifdef PULP_HAS_SKIA
@@ -61,9 +61,9 @@
 #include <pulp/view/drag_drop.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <cwchar>
 #include <functional>
@@ -422,7 +422,6 @@ public:
         input_router_.on_focus_changed(gained);
     }
 
-
     // Paint/invalidate without changing the host's dirty state. The timer uses
     // this after it has consumed the dirty bit for the measured frame; public
     // repaint() remains the dirty signal used by input, resize, and View.
@@ -646,7 +645,8 @@ private:
     }
 
     void stop_frame_timer() {
-        if (hwnd_) KillTimer(hwnd_, kFrameTimerId);
+        if (hwnd_)
+            KillTimer(hwnd_, kFrameTimerId);
         frame_pump_.suspend();
         continuous_frames_ = false;
     }
@@ -656,14 +656,13 @@ private:
         // WM_TIMER is the portable frame source available to this HWND. Gate
         // the UI-thread work before walking the tree; static editors therefore
         // pay no frame-clock or render cost after their first paint.
-        if (!should_dispatch_host_frame(frame_pump_, needs_repaint_,
-                                        continuous_frames_,
+        if (!should_dispatch_host_frame(frame_pump_, needs_repaint_, continuous_frames_,
                                         static_cast<bool>(idle_callback_)))
             return;
 
-        const auto now = std::chrono::duration<double>(
-                              std::chrono::steady_clock::now().time_since_epoch())
-                              .count();
+        const auto now =
+            std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
+                .count();
         const bool dirty = needs_repaint_;
         needs_repaint_ = false;
         const auto tick = begin_host_frame(&root_, frame_clock_, frame_pump_, now, dirty);
