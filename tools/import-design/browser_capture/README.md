@@ -115,3 +115,58 @@ detail is written to `capture-error.json`.
 Arbitrary JavaScript evaluation is intentionally not a CLI escape hatch: it
 would weaken the source/evidence boundary and make captures difficult to
 reproduce or audit.
+
+## Offline text mismatch evidence
+
+From a source checkout, build an optional diagnostic sidecar from an existing
+capture (no browser launch, capture instrumentation, or DesignIR change):
+
+```sh
+node tools/import-design/browser_capture/text_diagnostics.mjs \
+  /path/to/capture/dom-snapshot.json /path/to/capture/platform-fonts.json \
+  > /path/to/text-diagnostics.json
+```
+
+`pulp-text-diagnostics-v1` records the requested font, resolved owner-element
+face census and glyph counts, snapshot text-fragment rectangles and UTF-16
+ranges, and computed CSS line-height. Face counts are deliberately not summed
+across runs: sibling text runs can repeat the same owner census. Multiple faces
+show participation, but do not identify which character used which face or
+prove that a CSS family alias failed. The report preserves the census rather
+than declaring a guessed fallback. `normal` remains a CSS value, not a guessed
+pixel height.
+
+Every metric has `status: observed` with `source` and `value`, or
+`status: unavailable` with `reason`. Current CDP snapshots do not provide
+per-glyph ink bounds/advances, laid-out baselines, face ascent/descent, or full
+CSS inline line boxes. These fields remain explicitly unavailable. Snapshot
+text-fragment rectangles are not glyph ink bounds or full CSS line boxes;
+fragment width is not an advance. Do not infer a baseline from font size or
+clamp negative half-leading to manufacture measured evidence.
+
+The report covers the primary document and preserves the font census's
+truncation summary. Run IDs are capture-local `document:0/layout:N`; rectangles
+remain in primary-document snapshot CSS pixels, independent of screenshot DPR.
+`capture_basis` is SHA-256 of the concatenated ASCII SHA-256 digests of the two
+input files, snapshot first. It identifies retained inputs, not a native render
+or proof that independently supplied inputs were captured together. Supply
+both files from the same retained capture directory.
+
+`compareTextDiagnostics(reference, candidate, tolerance = 0.25)` is an exported
+adapter seam. A future native producer must explicitly join reference run IDs,
+text, capture basis and coordinate space, and report the same metric meanings.
+Use arrays for glyph metrics and baselines, numbers for ascent/descent, and
+`{bounds: [x,y,width,height], start, length}` records for fragment/line boxes;
+keep run-relative UTF-16 ranges exact. Metrics requiring additional conventions
+(such as glyph order and font-metric units) need an agreed producer contract
+before comparison. This helper does not collect native metrics or establish
+native parity. It returns per-metric `match`, `mismatch`, or `unavailable`, and
+`incomparable` for missing/extra runs or changed text. Different capture bases
+or coordinates are rejected. Geometry uses CSS-pixel tolerance; ranges, font
+counts, identities, and CSS strings compare exactly. Missing metrics never
+count as matches, including in a self-comparison. Coverage accompanies findings;
+there is no overall pass that could hide truncation or missing instrumentation.
+
+The diagnostic module is a source-checkout analysis tool, not a shipped capture
+runtime dependency. Its tests join the existing `pulp-browser-capture-node-unit`
+CTest glob and can also run with `node --test` directly.
