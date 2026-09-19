@@ -1617,7 +1617,13 @@ bool PulpVst3Processor::process_validate_layout(
         if (!declared_bus) return false;
         const int expected_channels = static_cast<int>(
             SpeakerArr::getChannelCount(declared_bus->getArrangement()));
-        if (host_bus.numChannels == 0) return true;
+        // A declared audio bus with zero host channels is not a usable
+        // ProcessData layout.  Accept zero only for a genuinely channel-less
+        // optional bus; otherwise reject before wiring zero-channel views into
+        // the Processor (which otherwise renders silence while appearing
+        // successful to the host).
+        if (host_bus.numChannels == 0)
+            return expected_channels == 0;
         if (host_bus.numChannels != expected_channels) return false;
         if (host_f64) {
             if (!host_bus.channelBuffers64) return false;

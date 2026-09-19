@@ -414,8 +414,22 @@ OSStatus PulpAUEffect::Initialize()
         PrepareContext ctx;
         ctx.sample_rate = GetSampleRate();
         ctx.max_buffer_size = GetMaxFramesPerSlice();
-        ctx.input_channels = static_cast<int>(GetNumberOfChannels());
-        ctx.output_channels = static_cast<int>(GetNumberOfChannels());
+        // GetNumberOfChannels() is the AU host/mixer width and may be stereo
+        // even when the negotiated effect buses are mono.  Prepare from the
+        // actual stream formats that ProcessBufferLists will validate.
+        const int input_channels = static_cast<int>(Input(0).GetStreamFormat().mChannelsPerFrame);
+        const int output_channels = static_cast<int>(Output(0).GetStreamFormat().mChannelsPerFrame);
+        if (input_channels != descriptor_.default_input_channels() ||
+            output_channels != descriptor_.default_output_channels()) {
+            runtime::log_error("AU v2: negotiated bus width {} in / {} out does not match "
+                               "descriptor {} in / {} out",
+                               input_channels, output_channels,
+                               descriptor_.default_input_channels(),
+                               descriptor_.default_output_channels());
+            return kAudioUnitErr_FormatNotSupported;
+        }
+        ctx.input_channels = input_channels;
+        ctx.output_channels = output_channels;
         processor_->prepare(ctx);
         // No reconcile state to seed and no Globals→store pull: store_ is the
         // single source of truth and already holds the current values (defaults
@@ -444,8 +458,8 @@ OSStatus PulpAUEffect::Initialize()
     // block resizes to the host-supplied buffer count, which is at most the
     // configured channel count in AU's non-interleaved float model; reserving to
     // it up front turns the first render / reconfig resize into a no-op realloc.
-    input_ptrs_.reserve(static_cast<std::size_t>(GetNumberOfChannels()));
-    output_ptrs_.reserve(static_cast<std::size_t>(GetNumberOfChannels()));
+    input_ptrs_.reserve(static_cast<std::size_t>(Input(0).GetStreamFormat().mChannelsPerFrame));
+    output_ptrs_.reserve(static_cast<std::size_t>(Output(0).GetStreamFormat().mChannelsPerFrame));
 
     runtime::log_info("AU v2: initialized with {} channels at {} Hz",
                       GetNumberOfChannels(), GetSampleRate());
