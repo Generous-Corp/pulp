@@ -20,8 +20,10 @@ The runtime has two transport costs to manage: payload movement and scheduling.
 The ordinary staged path uploads and reads back each block. On supported Apple
 Silicon/Dawn configurations, the experimental shared-memory path imports
 persistent host allocations and lets CPU and GPU operate on the same storage,
-so those payload copies disappear. Both paths still depend on non-real-time GPU
-submission, scheduling, and completion observation. The audio thread publishes
+so the per-block CPU-to-GPU upload and GPU-to-CPU readback disappear. CPU-side
+planar-to-complex packing, overlap-add, and callback buffer copies still exist.
+Both paths still depend on non-real-time GPU submission, scheduling, and
+completion observation. The audio thread publishes
 work and reads a result a fixed number of blocks later (reported to the host as
 plugin delay compensation); it never waits for the GPU. To make that pay off,
 keep resources resident, fuse or batch enough work, and prepare explicit lead
@@ -184,7 +186,8 @@ The ordinary staged transport copies between its CPU rings and the provider.
 The experimental shared path instead keeps provider-owned slots persistently
 imported from host-visible storage. The callback still publishes and consumes
 bounded records; a non-RT service owns submission and completion. Shared memory
-therefore removes the payload-copy problem, not the scheduling problem. Choose
+therefore removes per-block CPU/GPU staging transfers, not all CPU-side copies
+and not the scheduling problem. Choose
 enough fixed lead for the measured workload and keep the CPU fallback ready for
 late, stale, failed, or unavailable GPU results.
 
@@ -193,7 +196,9 @@ of the selected path. `path` distinguishes the ordinary staged worker from the
 experimental shared-memory path, while `provider` is `Dawn` only when the exact
 shared Dawn path is active and is otherwise `Unknown`. The snapshot
 also carries the prepared lead, miss policy, fallback availability, and whether
-transport diagnostics are available. `Eligible` means the path was accepted by
+transport diagnostics are available. `GpuConvolver::backend()` reports the
+underlying native backend (`Metal` for this Dawn path), while `provider` reports
+the API implementation (`Dawn`). `Eligible` means the path was accepted by
 `prepare()`; it is not a hard real-time scheduling guarantee. The report is
 read-only and deliberately exposes no rings, queues, callback hooks, or live
 path-switching controls.
