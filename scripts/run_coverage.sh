@@ -188,11 +188,13 @@ echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 cd "${BUILD_DIR}"
-# Use a merge pool per instrumented binary. `%Nm` is LLVM's concurrency-safe
-# online merge form: the runtime selects and locks one of N shards. Plain `%m`
-# means N=1, which corrupts that sole shard when parallel CTest processes exit
-# together on Linux. Keep the pool equal to the capped CTest concurrency while
-# avoiding per-PID file growth and PID-reuse collisions.
+# Use a bounded merge pool per instrumented module. `%Nm` is LLVM's
+# concurrency-safe online merge form: the runtime selects and locks one of N
+# shards, and `%m` scopes the pool to the instrumented module. A per-process
+# `%p-%m` file grows without bound across the full suite and can exhaust the
+# hosted runner before llvm-profdata runs. Keep the pool equal to the capped
+# CTest concurrency so parallel exits remain safe without retaining one raw
+# profile per test process.
 
 # Regression guard for #317: track the test-suite outcome without aborting the
 # coverage report. A broken test run should still upload its partial coverage
@@ -211,11 +213,8 @@ CTEST_RC=0
 # even the macOS leg past the workflow's internal budget (a killed run drops the
 # Cobertura report and reddens main). `-j` matches the parallelism the primary
 # build.yml/build-macos.yml lanes already use; source-based instrumentation is
-# parallel-safe because `%p-%m` gives each test PROCESS its own merge-enabled
-# profile. This comment used to claim that of the `%Nm` pool, which was not
-# true: an N-file pool is shared across binaries, profiles with different
-# counter layouts cannot merge, and most were discarded — so this lane was
-# reporting a number well below the coverage it actually had. Cap at 8 like the
+# parallel-safe because the `%Nm` pool is module-scoped and each shard is
+# locked by the profile runtime. Cap at 8 like the
 # primary lanes so a
 # high-core self-hosted runner doesn't oversubscribe memory with instrumented
 # Debug test processes. `--timeout` bounds a single wedged test so it can't eat
@@ -225,7 +224,7 @@ CTEST_RC=0
 CTEST_JOBS="${TEST_JOBS}"
 if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${CTEST_JOBS}m.profraw"
 # CTest writes a progress line for every test. With nearly 22,000 tests this
 # can fill the hosted runner's Actions log pager (and its root disk) before
 # coverage generation starts, producing an ENOSPC failure with no receipt.

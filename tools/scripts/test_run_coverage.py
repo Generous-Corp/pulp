@@ -356,38 +356,19 @@ class ObjectDiscoveryTests(unittest.TestCase):
         self.assertIn(marker, text)
         self.assertIn('find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete', text[text.index(marker):])
 
-    def test_profraw_pattern_is_per_process(self) -> None:
-        """One profile per process, with a merge pool inside it.
-
-        The earlier `%{CTEST_JOBS}m` pool was chosen to stop parallel exits
-        corrupting a single shared `%m` file, and it did — but an N-file pool is
-        shared by every binary writing into the directory, and profiles with
-        different counter layouts cannot merge into one file. ctest runs
-        hundreds of different test binaries, so all but a handful were silently
-        discarded: a full run left seven profraw files, and the gate reported
-        71% where the same tests measured 91% serially. The number moved DOWN
-        when coverage was added, which is how it surfaced.
-
-        `%p-%m` keeps each process isolated, so the original corruption cannot
-        recur, and removes the cross-binary collision entirely.
-        """
+    def test_profraw_pattern_is_bounded_merge_pool(self) -> None:
+        """Use a bounded, module-scoped pool instead of one file per process."""
         text = SCRIPT.read_text()
         self.assertIn(
-            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"',
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${CTEST_JOBS}m.profraw"',
             text,
-            "run_coverage.sh should give each test process its own merge-enabled "
-            "profile; a pool shared across binaries discards most of them.",
+            "run_coverage.sh should bound raw profiles with LLVM's module-scoped "
+            "merge pool so hosted runners cannot exhaust disk.",
         )
         self.assertNotIn(
-            'pulp-%m.profraw"',
+            'pulp-%p-%m.profraw',
             text,
-            "a single shared profile is corrupted by parallel exits.",
-        )
-        self.assertNotIn(
-            "m.profraw" if False else 'pulp-%${CTEST_JOBS}m.profraw',
-            text,
-            "an N-file pool is shared across binaries, so profiles with "
-            "different counter layouts cannot merge and are dropped.",
+            "per-process profile files grow without bound on the full suite.",
         )
 
     def test_merge_tolerates_isolated_bad_shards_but_has_a_mass_guard(self) -> None:
