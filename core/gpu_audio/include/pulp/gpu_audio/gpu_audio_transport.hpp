@@ -22,9 +22,9 @@ namespace pulp::gpu_audio {
 /// ring and reads a block that was produced `latency_blocks` ago from a second
 /// ring — it never waits on, allocates for, or synchronizes with the GPU. A
 /// separate non-RT context calls pump() to drain the input ring, run the node,
-/// and fill the output ring. (pump() is driven by a background worker thread in
-/// a later slice; exposing it directly keeps the scheduling logic
-/// deterministically testable.)
+/// and fill the output ring. Config::run_worker_thread can drive pump() from an
+/// internal non-RT worker; exposing pump() directly keeps the scheduling logic
+/// deterministically testable and supports an externally owned service worker.
 ///
 /// Latency is established by priming the output ring with `latency_blocks` of
 /// silence at prepare(); the host is told `latency_samples()` for PDC.
@@ -34,10 +34,10 @@ class GpuAudioTransport {
     // size, and latency. Config only carries transport knobs.
     struct Config {
         uint32_t ring_blocks = 4; // ring capacity, in blocks (>= latency+2)
-        // Spawn an internal non-RT worker thread that drives pump(). The worker
-        // POLLS the input ring (the audio thread never signals it), so the RT
-        // path stays fully decoupled and lock-free. When false, the caller
-        // drives pump() (deterministic tests / custom worker integration).
+        // Spawn an internal non-RT worker thread that drives pump(). By default
+        // the worker polls the input ring, so the RT path stays fully decoupled
+        // and lock-free. When false, the caller drives pump() (deterministic
+        // tests / custom worker integration).
         bool run_worker_thread = false;
         // Opt-in: the RT process() posts a semaphore after each input write and
         // the worker waits on it (with the poll interval as a fallback timeout)

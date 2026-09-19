@@ -1,4 +1,5 @@
 #include <pulp/gpu_audio/gpu_convolver.hpp>
+#include <pulp/runtime/trace.hpp>
 
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
 
@@ -154,7 +155,7 @@ bool GpuConvolver::prepare() {
                                                   .lead_blocks = latency_blocks_},
                                      .slots = kSharedIoSlots,
                                      .sample_rate = sample_rate_,
-                                     .trace = {.enabled = bool(PULP_TRACING_ENABLED)}},
+                                     .trace = {.enabled = pulp::runtime::kTracingEnabled}},
                          .normalized_ir_spectrum = state->normalized_ir_spectrum});
                     // A failed preparation may still own physically live
                     // storage. Retain that session even when it cannot run.

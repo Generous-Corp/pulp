@@ -91,6 +91,17 @@ int main() {
     if (transport.is_prepared()) return 14;
     if (!check(transport.prepare(&node, {.ring_blocks = 8}))) return 15;
 
+    // A fresh prepare primes the declared fixed latency with silence. Consume
+    // that latency before checking the no-pump fallback path; otherwise the
+    // first calls are intentionally priming output, not worker misses.
+    std::fill(input.channel(0).begin(), input.channel(0).end(), 0.0f);
+    for (std::uint32_t block = 0; block < LifecycleNode::kLatency; ++block) {
+        auto input_view = static_cast<const Buffer<float>&>(input).view();
+        auto output_view = output.view();
+        transport.process(input_view, output_view, LifecycleNode::kBlock);
+        if (output.channel(0)[0] != 0.0f) return 151;
+    }
+
     // Missing/late worker proof: with no pump, the public CpuFallback policy
     // must produce a bounded substitute and account for each miss.
     std::fill(input.channel(0).begin(), input.channel(0).end(), 3.0f);
