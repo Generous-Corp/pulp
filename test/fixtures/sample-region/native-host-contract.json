@@ -1,0 +1,36 @@
+{
+  "schema": "pulp.sample-region.native-host-contract.v1",
+  "packet": "PKT-F4-01",
+  "acceptance": "PUB-04",
+  "plugin": {
+    "name": "Sample Region Allpass",
+    "bundle_id": "com.pulp.sample-region-allpass",
+    "version": "1.0.0",
+    "audio": {
+      "input_channels": 1,
+      "output_channels": 1,
+      "reported_latency_samples": 0
+    },
+    "parameters": [
+      {
+        "id": 2901,
+        "key": "coefficient",
+        "name": "Allpass coefficient",
+        "minimum": -0.99,
+        "maximum": 0.99,
+        "default": 0.5,
+        "step": 0.0
+      }
+    ]
+  },
+  "required_proof": {
+    "signed_installed_package": true,
+    "parameter_identity_and_order": true,
+    "automation": true,
+    "state_save_reload": true,
+    "audio_render": true,
+    "plugin_reload": true,
+    "zero_reported_pdc": true,
+    "formats": ["au", "vst3", "clap"]
+  }
+}
