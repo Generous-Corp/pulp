@@ -186,27 +186,42 @@ run_step() {
     return 0
 }
 
-reap_coverage() {
-    local script="${REPO_ROOT}/tools/scripts/clean_build_cov.sh"
-    [ -x "${script}" ] || { echo "  (clean_build_cov.sh not present; skipped)"; return 0; }
-    if [ "${APPLY}" -eq 1 ]; then "${script}" --yes; else "${script}"; fi
-}
-
+# Coverage directories are reclaimed HERE, by the gated reaper — this responder
+# deliberately does not call `clean_build_cov.sh`.
+#
+# That script is not unsafe; it is built for a different caller. An operator
+# running it deliberately wants its contract, "delete every matching coverage
+# dir", and it carries none of the gates that contract does not need: no
+# merge-base, no ancestry, no lineage row, no dirty-worktree check, no
+# open-file/cwd check, no stop-at-target. What changed is the caller. Fired
+# automatically under disk pressure, that contract is the wrong one — it would
+# remove coverage caches out from under unmerged or actively edited worktrees,
+# and it would not stop at the floor.
+#
+# Nothing is lost by dropping it: `clean_worktree_builds.sh` matches `build` and
+# `build-*`, so `build-cov` in every registered worktree is already a candidate,
+# and it judges each one on the five gates. The single directory that falls out
+# of automatic reach is a coverage build in the PRIMARY checkout, which this
+# reaper protects on purpose as a human's interactive rebuild cost. Reclaiming
+# that one stays an operator's deliberate `clean_build_cov.sh` call.
 reap_worktree_builds() {
     local script="${REPO_ROOT}/tools/scripts/clean_worktree_builds.sh"
     [ -x "${script}" ] || { echo "  (clean_worktree_builds.sh not present; skipped)"; return 0; }
-    # Hand the reaper the exact stopping condition so it reclaims up to the
-    # target and then stops, rather than freeing every eligible byte.
+    # Two separate bounds, and the second is not optional. STOP_AT is *when to
+    # stop*; SAME_DEVICE_AS is *what is eligible*. Without the latter the reaper
+    # enumerates the whole registry in path order and can delete a build on
+    # another volume, which cannot raise free space on the one that is full.
     if [ "${APPLY}" -eq 1 ]; then
         PULP_REAP_STOP_AT_FREE_BYTES="${TARGET}" PULP_REAP_STOP_AT_PATH="${PROBE_PATH}" \
+            PULP_REAP_SAME_DEVICE_AS="${PROBE_PATH}" \
             "${script}" --yes
     else
         PULP_REAP_STOP_AT_FREE_BYTES="${TARGET}" PULP_REAP_STOP_AT_PATH="${PROBE_PATH}" \
+            PULP_REAP_SAME_DEVICE_AS="${PROBE_PATH}" \
             "${script}" --verbose
     fi
 }
 
-run_step "coverage scratch (clean_build_cov.sh)" reap_coverage
 run_step "merged worktree build artifacts (clean_worktree_builds.sh)" reap_worktree_builds
 
 # ── 4. Report removals, never a free-space delta ──────────────────────────

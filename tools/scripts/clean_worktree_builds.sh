@@ -88,6 +88,39 @@ if [ -n "${ROOT_FILTER}" ] && [ -d "${ROOT_FILTER}" ]; then
     ROOT_FILTER="$(cd "${ROOT_FILTER}" && pwd -P)"
 fi
 
+# Restrict candidates to one filesystem.
+#
+# Free space is a per-VOLUME quantity, but candidates are enumerated from the
+# whole worktree registry in path order. A caller relieving a full volume would
+# therefore delete a build on a DIFFERENT device, re-measure the volume it cares
+# about, see no improvement, and keep going — destroying the most while
+# accomplishing the least, and still missing the floor. This fleet already has
+# such a host: M3 keeps worktrees on /Volumes/Workshop while the repo and its
+# in-repo `.claude/worktrees` stay on the internal disk. A caller that names the
+# volume it is trying to relieve gets only candidates that can actually relieve
+# it.
+DEVICE_FILTER=""
+path_device() {
+    # `stat -f` means two different things: the BSD field format, and Linux's
+    # --file-system (where %d is FREE BLOCKS). Picking by OS matters — the Linux
+    # misread would return a plausible number and silently compare the wrong
+    # quantity.
+    case "$(uname -s)" in
+        Darwin|*BSD) stat -f '%d' "$1" 2>/dev/null ;;
+        *)           stat -c '%d' "$1" 2>/dev/null ;;
+    esac
+}
+if [ -n "${PULP_REAP_SAME_DEVICE_AS:-}" ]; then
+    DEVICE_FILTER="$(path_device "${PULP_REAP_SAME_DEVICE_AS}" || true)"
+    if ! [[ "${DEVICE_FILTER}" =~ ^[0-9]+$ ]]; then
+        # Proceeding unfiltered is exactly the overshoot this exists to prevent,
+        # so an unreadable device is a stop rather than a fallback.
+        echo "clean_worktree_builds: cannot read the filesystem of" >&2
+        echo "clean_worktree_builds: '${PULP_REAP_SAME_DEVICE_AS}'. Nothing removed." >&2
+        exit 2
+    fi
+fi
+
 if ! [[ "${IDLE_HOURS}" =~ ^[0-9]+$ ]]; then
     echo "clean_worktree_builds: invalid PULP_WORKTREE_BUILD_IDLE_HOURS: '${IDLE_HOURS}'" >&2
     exit 2
@@ -547,6 +580,25 @@ lineage_proves_exact_merge() {
     merged_pr_proves_exact_head "${pr}" "${head}" "${expected_tip}"
 }
 
+# An explicit `active` row is the ONE signal in this system that speaks to
+# occupancy rather than to history, so git ancestry may not overrule it.
+#
+# Ancestry proves a head LANDED. It says nothing about whether work in that
+# worktree has STOPPED, and the ordinary pattern is to land a PR and keep
+# working in the same checkout on the follow-up — where the head is an ancestor
+# of the tip while `active` correctly means someone is still there. Ancestry is
+# therefore the right instrument for a row that is MISSING, unclassified or
+# stale (nobody recorded a closeout, which is what left 947 GB unreclaimable),
+# and the wrong instrument for a row somebody affirmatively set to `active`.
+# Filling a gap in the registry is a much smaller claim than contradicting it.
+lineage_records_active_occupancy() {
+    local branch="$1" status
+    [ -n "${branch}" ] || return 1
+    status="$(git -C "${REPO_ROOT}" config --local --get \
+        "branch.${branch}.pulpWorktreeStatus" 2>/dev/null || true)"
+    [ "${status}" = "active" ]
+}
+
 # Uncommitted tracked work means somebody is mid-change in this worktree right
 # now. HEAD does not move when a file is edited, so the merge gates above see a
 # landed branch and every other gate sees an idle build — the warm build is
@@ -590,8 +642,12 @@ current_worktree_identity_proves_merge() {
         "refs/remotes/origin/${DEFAULT_BRANCH}" 2>/dev/null || true)"
     [ -n "${expected_tip}" ] && [ "${current_tip}" = "${expected_tip}" ] || return 1
     [ "${current_head}" != "${expected_tip}" ] || return 1
-    lineage_proves_exact_merge "${current_branch}" "${current_head}" "${expected_tip}" || \
-        git_proves_exact_merge "${current_head}" "${expected_tip}"
+    lineage_proves_exact_merge "${current_branch}" "${current_head}" "${expected_tip}" && return 0
+    # Re-read occupancy here too, not just in the main loop: this runs after the
+    # directory is quarantined, so a row that turns `active` mid-flight must
+    # still force the restore.
+    lineage_records_active_occupancy "${current_branch}" && return 1
+    git_proves_exact_merge "${current_head}" "${expected_tip}"
 }
 
 # Let tests exercise the invariant and the path handling without enumerating or
@@ -677,12 +733,20 @@ WORKTREE_ARTIFACT_TABLE="${SCRATCH}/worktree-artifact-table"
 : > "${WORKTREE_ARTIFACT_TABLE}"
 while IFS=$'\t' read -r wt_row head_row branch_row; do
     [ -n "${wt_row}" ] && [ -d "${wt_row}" ] || continue
-    while IFS= read -r artifact_dir; do
-        [ -n "${artifact_dir}" ] || continue
+    # A shell glob, not `find`. `find` is also the idle probe, and there it can
+    # report a failure this loop cannot see: with stderr discarded a non-zero
+    # exit produced no rows, so a `find` that refused every worktree enumerated
+    # ZERO candidates and the run reported "0 worktree build dir(s) ... kept 0"
+    # as if the disk were already clean. A glob cannot fail that way, and it
+    # keeps the one surviving `find` — the freshness probe — where its exit
+    # status is already checked and surfaces as "build freshness is unreadable".
+    # `-d` plus `! -L` matches the `-type d` semantics this replaced: a symlink
+    # named `build` is not a candidate.
+    for artifact_dir in "${wt_row}"/build "${wt_row}"/build-*; do
+        [ -d "${artifact_dir}" ] && [ ! -L "${artifact_dir}" ] || continue
         printf '%s\t%s\t%s\t%s\n' "${wt_row}" "${head_row}" "${branch_row}" \
             "${artifact_dir##*/}" >> "${WORKTREE_ARTIFACT_TABLE}"
-    done < <(find "${wt_row}" -maxdepth 1 -mindepth 1 -type d \
-                 \( -name build -o -name 'build-*' \) 2>/dev/null | LC_ALL=C sort)
+    done
 done < "${WORKTREE_TABLE}"
 
 # The first entry `git worktree list` prints is the main worktree. That is where
@@ -736,7 +800,16 @@ note_skip() {
     fi
 }
 
-while IFS=$'\t' read -r wt head branch artifact; do
+# TAB is IFS whitespace, so `IFS=$'\t' read` COLLAPSES a run of tabs and drops
+# the empty field between them. A detached worktree has no branch, so its row is
+# `path<TAB>head<TAB><TAB>build` and the collapsing read landed "build" in
+# ${branch} and left ${artifact} empty — every detached worktree's build
+# directory was silently dropped before any gate could judge it. Split the
+# fields explicitly so an empty one keeps its position.
+while IFS= read -r artifact_row; do
+    wt="${artifact_row%%$'\t'*}";        artifact_rest="${artifact_row#*$'\t'}"
+    head="${artifact_rest%%$'\t'*}";     artifact_rest="${artifact_rest#*$'\t'}"
+    branch="${artifact_rest%%$'\t'*}";   artifact="${artifact_rest#*$'\t'}"
     [ -z "${wt}" ] && continue
     if [ "${APPLY}" -eq 1 ] && reclaim_goal_met; then
         if [ -z "${REACHED_GOAL_ANNOUNCED:-}" ]; then
@@ -753,6 +826,17 @@ while IFS=$'\t' read -r wt head branch artifact; do
         case "${wt}" in "${ROOT_FILTER}"/*|"${ROOT_FILTER}") ;; *) continue ;; esac
     fi
     found=$((found + 1))
+    if [ -n "${DEVICE_FILTER}" ]; then
+        build_device="$(path_device "${build}" || true)"
+        if ! [[ "${build_device}" =~ ^[0-9]+$ ]]; then
+            note_skip "filesystem is unreadable" "${build}"
+            continue
+        fi
+        if [ "${build_device}" != "${DEVICE_FILTER}" ]; then
+            note_skip "on a different filesystem than the volume being relieved" "${build}"
+            continue
+        fi
+    fi
     wt_identity="$(path_identity "${wt}" 2>/dev/null || true)"
     if [ -z "${wt_identity}" ]; then
         note_skip "worktree filesystem identity is unreadable" "${build}"
@@ -796,6 +880,9 @@ while IFS=$'\t' read -r wt head branch artifact; do
     # filled. Absence of a record is not evidence of non-merge.
     if lineage_proves_exact_merge "${branch}" "${head}" "${DEFAULT_TIP}"; then
         merge_proof="lineage-proven"
+    elif lineage_records_active_occupancy "${branch}"; then
+        note_skip "the lineage registry records it active; ancestry proves landing, not that work stopped" "${build}"
+        continue
     elif git_proves_exact_merge "${head}" "${DEFAULT_TIP}"; then
         merge_proof="git-ancestry-proven"
     else
