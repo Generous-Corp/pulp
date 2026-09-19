@@ -2,8 +2,8 @@
   "_doc": "Canonical DSP capability surface, extracted statically from the Forge bake catalog headers by tools/scripts/dsp_capability_registry.py. Regenerate with `pulp dsp capabilities --write`. Construction-time values (notably rate-dependent latency) are deliberately absent \u2014 a static reader cannot evaluate them.",
   "counts": {
     "catalogs": 31,
-    "type_ids": 107,
-    "factories": 70,
+    "type_ids": 114,
+    "factories": 77,
     "baked_params": 400
   },
   "catalogs": [
@@ -61,8 +61,164 @@
     },
     {
       "header": "core/host/include/pulp/host/forge_catalog_export.hpp",
-      "type_ids": [],
-      "nodes": []
+      "type_ids": [
+        {
+          "constant": "input_boundary",
+          "value": "pulp.core.sample-region.input"
+        },
+        {
+          "constant": "output_boundary",
+          "value": "pulp.core.sample-region.output"
+        },
+        {
+          "constant": "constant",
+          "value": "pulp.core.sample-region.constant"
+        },
+        {
+          "constant": "parameter",
+          "value": "pulp.core.sample-region.parameter"
+        },
+        {
+          "constant": "add",
+          "value": "pulp.core.sample-region.add"
+        },
+        {
+          "constant": "multiply",
+          "value": "pulp.core.sample-region.multiply"
+        },
+        {
+          "constant": "unit_delay",
+          "value": "pulp.core.unit-delay"
+        }
+      ],
+      "nodes": [
+        {
+          "key": "pulp.core.sample-region.input",
+          "type_id": "pulp.core.sample-region.input",
+          "type_version": 1,
+          "sample_kernel_version": 1,
+          "factory": "register_builtin_sample_region_types",
+          "baked_params": [],
+          "sample_region_v1": {
+            "type_version": 1,
+            "sample_kernel_version": 1,
+            "role": "input_boundary",
+            "inputs": 1,
+            "outputs": 1,
+            "state_bytes": 0,
+            "state_alignment": 1,
+            "config_kind": "BoundaryIndex"
+          }
+        },
+        {
+          "key": "pulp.core.sample-region.output",
+          "type_id": "pulp.core.sample-region.output",
+          "type_version": 1,
+          "sample_kernel_version": 1,
+          "factory": "register_builtin_sample_region_types",
+          "baked_params": [],
+          "sample_region_v1": {
+            "type_version": 1,
+            "sample_kernel_version": 1,
+            "role": "output_boundary",
+            "inputs": 1,
+            "outputs": 1,
+            "state_bytes": 0,
+            "state_alignment": 1,
+            "config_kind": "BoundaryIndex"
+          }
+        },
+        {
+          "key": "pulp.core.sample-region.constant",
+          "type_id": "pulp.core.sample-region.constant",
+          "type_version": 1,
+          "sample_kernel_version": 1,
+          "factory": "register_builtin_sample_region_types",
+          "baked_params": [],
+          "sample_region_v1": {
+            "type_version": 1,
+            "sample_kernel_version": 1,
+            "role": "constant",
+            "inputs": 0,
+            "outputs": 1,
+            "state_bytes": 0,
+            "state_alignment": 1,
+            "config_kind": "FiniteConstant"
+          }
+        },
+        {
+          "key": "pulp.core.sample-region.parameter",
+          "type_id": "pulp.core.sample-region.parameter",
+          "type_version": 1,
+          "sample_kernel_version": 1,
+          "factory": "register_builtin_sample_region_types",
+          "baked_params": [],
+          "sample_region_v1": {
+            "type_version": 1,
+            "sample_kernel_version": 1,
+            "role": "parameter",
+            "inputs": 0,
+            "outputs": 1,
+            "state_bytes": 0,
+            "state_alignment": 1,
+            "config_kind": "PromotedParameterId"
+          }
+        },
+        {
+          "key": "pulp.core.sample-region.add",
+          "type_id": "pulp.core.sample-region.add",
+          "type_version": 1,
+          "sample_kernel_version": 1,
+          "factory": "register_builtin_sample_region_types",
+          "baked_params": [],
+          "sample_region_v1": {
+            "type_version": 1,
+            "sample_kernel_version": 1,
+            "role": "add",
+            "inputs": 2,
+            "outputs": 1,
+            "state_bytes": 0,
+            "state_alignment": 1,
+            "config_kind": "None"
+          }
+        },
+        {
+          "key": "pulp.core.sample-region.multiply",
+          "type_id": "pulp.core.sample-region.multiply",
+          "type_version": 1,
+          "sample_kernel_version": 1,
+          "factory": "register_builtin_sample_region_types",
+          "baked_params": [],
+          "sample_region_v1": {
+            "type_version": 1,
+            "sample_kernel_version": 1,
+            "role": "multiply",
+            "inputs": 2,
+            "outputs": 1,
+            "state_bytes": 0,
+            "state_alignment": 1,
+            "config_kind": "None"
+          }
+        },
+        {
+          "key": "pulp.core.unit-delay",
+          "type_id": "pulp.core.unit-delay",
+          "type_version": 1,
+          "sample_kernel_version": 1,
+          "factory": "register_builtin_sample_region_types",
+          "baked_params": [],
+          "sample_region_v1": {
+            "type_version": 1,
+            "sample_kernel_version": 1,
+            "role": "unit_delay",
+            "inputs": 1,
+            "outputs": 1,
+            "state_bytes": 4,
+            "state_alignment": 4,
+            "config_kind": "None"
+          }
+        }
+      ]
     },
     {
       "header": "core/host/include/pulp/host/forge_catalog_index.hpp",

@@ -1070,6 +1070,10 @@ def exercise_surface_mutations() -> int:
         root = pathlib.Path(temp)
         for public_root in surface.PUBLIC_ROOTS:
             (root / public_root["source"]).mkdir(parents=True)
+        for include in surface.SAMPLE_REGION_HOST_HEADERS:
+            header = root / "core/host/include" / include
+            header.parent.mkdir(parents=True, exist_ok=True)
+            header.write_text("#pragma once\n")
         directory = root / "core/signal/include/pulp/signal"
         legacy = directory / "legacy.hpp"
         legacy.write_text("#pragma once\nstruct Existing {};\n")

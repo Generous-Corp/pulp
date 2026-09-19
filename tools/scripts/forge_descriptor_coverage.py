@@ -25,6 +25,8 @@ import argparse
 import collections
 import re
 import sys
+
+from dsp_capability_registry import sample_region_rows
 from pathlib import Path
 
 HOST_INCLUDE = Path("core/host/include/pulp/host")
@@ -127,6 +129,13 @@ def report_set_diff(label: str, actual: set[str], expected: set[str]) -> bool:
     return ok
 
 
+# The closed scalar cohort is registered by SignalGraph, not a Forge pack.
+# Keep its expected identities independent of the exported metadata table.
+SAMPLE_REGION_ROLES = (
+    "input_boundary", "output_boundary", "constant", "parameter", "add", "multiply", "unit_delay",
+)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".", help="repository root")
@@ -140,7 +149,7 @@ def main() -> int:
             print(f"forge-descriptor-coverage: cannot read {path}", file=sys.stderr)
         return 2
 
-    keys = canonical_keys()
+    keys = canonical_keys() + ["sample_region_" + role for role in SAMPLE_REGION_ROLES]
     key_counts = collections.Counter(keys)
     duplicate_manifest_keys = sorted(key for key, count in key_counts.items() if count != 1)
     if duplicate_manifest_keys:
@@ -184,6 +193,17 @@ def main() -> int:
             ok = False
             print("\n  export expected-node list contains duplicates", file=sys.stderr)
 
+    region_rows = sample_region_rows(root)
+    roles = [row["sample_region_v1"]["role"] for row in region_rows]
+    ok = report_set_diff("sample-region roles", set(roles), set(SAMPLE_REGION_ROLES)) and ok
+    if len(roles) != len(set(roles)):
+        ok = False
+        print("sample-region authoring roles are duplicated", file=sys.stderr)
+    route_match = re.search(r"region_keys\[\]\s*=\s*\{(?P<body>.*?)\};", export_text, re.S)
+    route_keys = STRING_RE.findall(route_match.group("body")) if route_match else []
+    if route_keys != ["sample_region_" + role for role in roles]:
+        ok = False
+        print("sample-region export route order differs from exact scalar rows", file=sys.stderr)
     direct_registrations = len(ADD_RE.findall(export_text))
     drum_registrations = len(ADD_DRUM_RE.findall(export_text))
     # The parameterized drum family uses one small helper so every EngineId is
@@ -192,7 +212,13 @@ def main() -> int:
     # template for the calls rather than an additional node.
     if "const auto add_drum" in export_text:
         direct_registrations -= 1
-    registrations = direct_registrations + drum_registrations
+    # One loop add emits exactly the independently checked seven region routes.
+    # Missing loop or missing add still changes the total and fails closed.
+    region_registrations = 0
+    if "for (const auto& row : kForgeSampleRegionV1)" in export_text:
+        direct_registrations -= 1
+        region_registrations = len(region_rows)
+    registrations = direct_registrations + drum_registrations + region_registrations
     if registrations != len(keys):
         ok = False
         print(f"\n  export registry has {registrations} add(...) registrations; "

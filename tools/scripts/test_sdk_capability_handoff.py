@@ -182,5 +182,83 @@ class SdkCapabilityHandoffTests(unittest.TestCase):
             self.verify()
 
 
+class DevelopmentHandoffCliTests(unittest.TestCase):
+    """Exercise CLI identity checks with real Git snapshots and installed bytes."""
+
+    def setUp(self) -> None:
+        SdkCapabilityHandoffTests.setUp(self)
+        import subprocess
+        self.source_temporary = tempfile.TemporaryDirectory()
+        self.source = Path(self.source_temporary.name)
+        subprocess.run(["git", "init", "-q", str(self.source)], check=True)
+        subprocess.run(["git", "-C", str(self.source), "-c", "user.name=SDK fixture",
+                        "-c", "user.email=sdk-fixture@example.invalid", "commit", "-q",
+                        "--allow-empty", "-m", "Immutable source fixture"], check=True)
+        self.source_sha = subprocess.check_output(
+            ["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True).strip()
+        (self.prefix / "version.txt").write_text("1.0.0\n")
+        (self.prefix / "sdk_build_type.txt").write_text("Release\n")
+        from sdk_provenance import _importer_runtime_paths
+        for name in _importer_runtime_paths(self.prefix, PLATFORM):
+            path = self.prefix / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fixture runtime")
+        self.marker = {
+            "schema": "pulp.sdk-provenance.v1", "kind": "development", "profile": "forge-dev",
+            "distribution_eligible": False, "source_git_dirty": False, "build_type": "Release",
+            "source_git_sha": self.source_sha, "platform": PLATFORM, "sdk_version": "1.0.0",
+        }
+        self.write_marker()
+
+    def tearDown(self) -> None:
+        self.source_temporary.cleanup()
+        SdkCapabilityHandoffTests.tearDown(self)
+
+    def write_marker(self) -> None:
+        (self.prefix / "sdk-provenance.json").write_text(json.dumps(self.marker, indent=3) + "\n")
+
+    def cli(self, command: str, *, source_sha: str | None = None) -> int:
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            return handoff.main([command, "--prefix", str(self.prefix), "--source-dir", str(self.source),
+                                 "--source-sha", source_sha or self.source_sha, "--platform", PLATFORM])
+
+    def test_local_cli_preserves_both_development_profiles(self) -> None:
+        for profile in ("forge-dev", "trace"):
+            self.marker["profile"] = profile
+            self.write_marker()
+            original = (self.prefix / "sdk-provenance.json").read_bytes()
+            self.assertEqual(self.cli("stamp-dev"), 0)
+            self.assertEqual(self.cli("verify-dev"), 0)
+            self.assertEqual((self.prefix / "sdk-provenance.json").read_bytes(), original)
+            document = json.loads((self.prefix / handoff.HANDOFF_PATH).read_text())
+            self.assertNotIn("distribution_eligible", document)
+            self.assertEqual(document["sdk_source_sha"], self.source_sha)
+
+    def test_local_cli_rejects_missing_handoff_and_tampered_importer(self) -> None:
+        self.assertEqual(self.cli("verify-dev"), 1)
+        self.assertEqual(self.cli("stamp-dev"), 0)
+        (self.prefix / handoff.importer_path(PLATFORM)).write_bytes(b"changed importer")
+        self.assertEqual(self.cli("verify-dev"), 1)
+
+    def test_local_cli_rejects_dirty_or_wrong_source(self) -> None:
+        self.assertEqual(self.cli("stamp-dev", source_sha="f" * 40), 1)
+        (self.source / "untracked.txt").write_text("uncommitted")
+        self.assertEqual(self.cli("stamp-dev"), 1)
+        self.assertFalse((self.prefix / handoff.HANDOFF_PATH).exists())
+
+    def test_local_cli_refuses_official_or_mismatched_provenance(self) -> None:
+        for key, value in (("kind", "official_release"), ("distribution_eligible", True),
+                           ("platform", "linux-arm64"), ("source_git_sha", "f" * 40),
+                           ("build_type", "Debug")):
+            original = self.marker[key]
+            self.marker[key] = value
+            self.write_marker()
+            self.assertEqual(self.cli("stamp-dev"), 1, key)
+            self.marker[key] = original
+        self.assertFalse((self.prefix / handoff.HANDOFF_PATH).exists())
+
+
 if __name__ == "__main__":
     unittest.main()

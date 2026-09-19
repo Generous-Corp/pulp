@@ -443,6 +443,8 @@ def inspect_isolation(
     configuration_name: str | None,
     forbidden_roots: list[pathlib.Path],
     target_name: str = "consumer",
+    *,
+    allowed_source_roots: tuple[pathlib.Path, ...] = (),
 ) -> None:
     reply = project / "build/.cmake/api/v1/reply"
     indexes = sorted(reply.glob("index-*.json"))
@@ -505,12 +507,15 @@ def inspect_isolation(
     ]
     prefix_root = prefix.resolve()
     forbidden_resolved = [path.resolve() for path in forbidden_roots]
+    allowed_source_resolved = [path.resolve() for path in allowed_source_roots]
     for include in includes:
         entry = include["path"]
         path = pathlib.Path(entry).resolve()
         if any(path.is_relative_to(forbidden) for forbidden in forbidden_resolved):
             raise AssertionError(f"consumer include directory leaks checkout path: {entry}")
-        if not path.is_relative_to(prefix_root) and include.get("isSystem") is not True:
+        if (not path.is_relative_to(prefix_root)
+                and not any(path.is_relative_to(root) for root in allowed_source_resolved)
+                and include.get("isSystem") is not True):
             raise AssertionError(
                 f"non-system exported include directory escapes install prefix: {entry}"
             )

@@ -43,6 +43,9 @@ add_subdirectory(pulp-tone)
 
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
+if(TARGET pulp::host AND NOT TARGET sample-region-allpass-core)
+    add_subdirectory(sample-region-allpass)
+endif()
 # Pulp Delay: stereo character delay with tempo and in-loop tone controls
 add_subdirectory(pulp-delay)
 # Combined-bundle demo: ONE binary per format exposing TWO plugins via
