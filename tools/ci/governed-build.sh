@@ -355,6 +355,15 @@ else
   log "no tartci host profile — bounded local build at -j$jobs"
 fi
 
+# The no-profile and lease-denied fallbacks never pass through the admission
+# branch above, so enforce the caller's lower cap here as well. This is a cap,
+# never a widening: an invalid value is ignored and the safe bound remains.
+if [ -n "$requested_jobs" ] && [ "$requested_jobs" -ge 1 ] 2>/dev/null \
+    && [ "$requested_jobs" -lt "$jobs" ]; then
+  jobs="$requested_jobs"
+  log "applying requested lower parallelism cap -j$jobs"
+fi
+
 export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"
 export CTEST_PARALLEL_LEVEL="$jobs"
 

@@ -151,6 +151,14 @@ class ShellPortabilityTests(unittest.TestCase):
             [],
         )
 
+    def test_same_line_pipefail_with_intervening_failure_is_not_safe(self) -> None:
+        findings = check.check_text(
+            "set -o pipefail; false; cmake --build build | tail -10",
+            "<script>",
+            bash=True,
+        )
+        self.assertEqual(len(findings), 1)
+
     def test_comments_are_not_reported_as_masked_pipelines(self) -> None:
         self.assertEqual(
             check.check_text(

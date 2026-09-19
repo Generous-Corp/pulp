@@ -131,8 +131,16 @@ def _pipeline_preserves_status(previous_line: str, line: str) -> bool:
         last_off = [match.start() for match in PIPEFAIL_OFF.finditer(setup)]
         if not last_on or last_off[-1] > last_on[-1]:
             return False
-    if PIPEFAIL_ON.fullmatch(previous_line.strip()) or PIPEFAIL_PREFIX.match(line):
+    if PIPEFAIL_ON.fullmatch(previous_line.strip()):
         return True
+    prefix = PIPEFAIL_PREFIX.match(line)
+    if prefix:
+        # A same-line setup is safe only when the build pipeline is the next
+        # command. Do not let `set -o pipefail; false; cmake ... | tail` claim
+        # that a later pipeline is protected by the setup heuristic.
+        between = line[prefix.end():]
+        if not re.search(r";|&&|\|\|", between):
+            return True
     return bool(PIPESTATUS_CAPTURE.search(line))
 
 
