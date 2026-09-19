@@ -7,36 +7,41 @@
 
 This is **not** "run your audio on the GPU." It's a runtime that lets a plugin
 selectively accelerate *computationally expensive* DSP on the GPU **while
-preserving real-time audio guarantees and seamless CPU compatibility** — the
-audio thread is never blocked on the GPU, and anything the GPU can't do (or
-can't keep up with) falls back to the CPU. This guide is the developer surface:
-the compute primitives, the real-time transport, and the ready-made processors.
+keeping the audio callback bounded and preserving seamless CPU
+compatibility**. The audio thread is never blocked on the GPU, and anything the
+GPU can't do (or can't finish before its prepared lead) falls back to the CPU.
+The callback contract is real-time-safe; GPU scheduling itself is not a hard
+real-time guarantee. This guide is the developer surface: the compute
+primitives, the real-time transport, and the ready-made processors.
 
 ## The model in one paragraph
 
-The bottleneck isn't GPU compute — it's **CPU↔GPU communication**, so the whole
-runtime is built around that. The audio thread **never talks to the GPU**: it
-hands work to a non-real-time worker and reads results a fixed number of blocks
-later (reported to the host as plugin delay compensation). To make that pay off,
-batch lots of work together, keep intermediates GPU-resident, do **one** readback
-instead of many, and add predictable latency instead of blocking. Small/
-low-latency DSP stays on the CPU; the GPU does the coarse, heavy, batched,
-latency-tolerant work — with a CPU fallback wherever one is tractable.
+The runtime has two transport costs to manage: payload movement and scheduling.
+The ordinary staged path uploads and reads back each block. On supported Apple
+Silicon/Dawn configurations, the experimental shared-memory path imports
+persistent host allocations and lets CPU and GPU operate on the same storage,
+so those payload copies disappear. Both paths still depend on non-real-time GPU
+submission, scheduling, and completion observation. The audio thread publishes
+work and reads a result a fixed number of blocks later (reported to the host as
+plugin delay compensation); it never waits for the GPU. To make that pay off,
+keep resources resident, fuse or batch enough work, and prepare explicit lead
+instead of blocking. Small, low-latency DSP stays on the CPU, with a continuously
+prepared fallback wherever one is tractable.
 
 ## Honest tradeoffs (read this first)
 
 GPU audio is easy to oversell, so here are the hard parts up front — three things
 to know before reaching for it:
 
-1. **The round-trip tax is real and we don't hide it.** Every block crosses
-   CPU→GPU and back. That transfer + the GPU's own dispatch/readback latency is
-   pure overhead, and for small or scalar work it *dwarfs* the compute — the GPU
-   is then **slower** than the CPU, full stop. We measured it on our own
-   convolution path: at a 256-sample block the per-call readback dominates, so
-   the CPU wins there. GPU only pays off when the per-block compute is large
-   enough to swamp the round-trip (long IRs, many voices/IRs batched, big FFTs).
-   That's why SuperConvolver **defaults to the CPU engine** and the GPU engine is
-   opt-in, aimed at the heavy regime.
+1. **The fixed cost is real and we don't hide it.** The staged path pays for
+   upload and readback. The Apple shared-memory path can remove those copies,
+   but it does not remove submission, scheduling, completion observation, cache
+   traffic, or contention. For small or scalar work those fixed costs can still
+   dwarf the compute, and the GPU is then **slower** than the CPU. GPU work pays
+   off when it is large or fused enough to amortize the fixed cost (long IRs,
+   many voices/IRs batched, big FFTs, or neural inference). That's why
+   SuperConvolver **defaults to the CPU engine** and the GPU engine is opt-in,
+   aimed at the heavy regime.
 
 2. **It is NOT a free speed-up for any plugin.** If your DSP is gain, biquads,
    a compressor, a small delay, an envelope follower, or MIDI — keep it on the
@@ -69,8 +74,8 @@ to know before reaching for it:
    until we've tested it.
 
 Bottom line: GPU audio here is a **latency-tolerant accelerator for heavy,
-batched, parallel DSP** — not a magic across-the-board speed-up, and never a hard
-GPU dependency. Where a CPU fallback is tractable a node carries one; where it is
+batched, parallel DSP**, not a hard GPU dependency or a hard scheduling
+guarantee. Where a CPU fallback is tractable a node carries one; where it is
 not, the node says so and fails to silence rather than to wrong audio.
 
 ## What belongs on the GPU (and what doesn't)
@@ -174,6 +179,14 @@ fills the block — `Silence` by default (a bounded, obvious dropout), or
 `latency_samples()` to the host**: the transport delays your output by
 `latency_blocks * block_size`, and a host that is not told leaves your track
 shifted late against every other track in the session.
+
+The ordinary staged transport copies between its CPU rings and the provider.
+The experimental shared path instead keeps provider-owned slots persistently
+imported from host-visible storage. The callback still publishes and consumes
+bounded records; a non-RT service owns submission and completion. Shared memory
+therefore removes the payload-copy problem, not the scheduling problem. Choose
+enough fixed lead for the measured workload and keep the CPU fallback ready for
+late, stale, failed, or unavailable GPU results.
 
 For host diagnostics, `capability_report()` returns an allocation-free snapshot
 of the selected path. `path` distinguishes the ordinary staged worker from the
