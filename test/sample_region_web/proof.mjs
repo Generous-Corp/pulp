@@ -10,7 +10,7 @@ const check = (condition, name) => {
 const near = (a, b, tolerance = 1e-5) => Number.isFinite(a) && Math.abs(a - b) <= tolerance;
 const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 const assertAudio = (actual, expected, name) => check(actual.length === expected.length && actual.every((v, i) => near(v, expected[i])), name);
-const RATE = 48000, PARAM = 2901;
+const RATE = 48000, PARAM = 2901, SYNTHETIC_BYPASS = 1883404656;
 const signal = n => Float32Array.from({ length: n }, (_, i) => Math.fround(0.2 * Math.sin(i * 0.17) + (i === 0 ? 0.25 : 0)));
 function oracle(input, coefficient, history = { x: 0, y: 0 }) {
   return Float32Array.from(input, x => {
@@ -25,7 +25,14 @@ async function bytes(url) {
   return new Uint8Array(await response.arrayBuffer());
 }
 function catalog(params, wam, name) {
-  check(params.length === 1 && Number(params[0].id) === PARAM, `${name} exact promoted catalog/order`);
+  // The Processor exposes exactly one promoted region parameter. Some format
+  // adapters synthesize their standard bypass control at the adapter boundary;
+  // that control is permitted only as one trailing entry and can never add a
+  // second promoted region identity.
+  const ids = params.map(p => Number(p.id));
+  check(ids.length >= 1 && ids.length <= 2 && ids[0] === PARAM
+    && ids.filter(id => id === PARAM).length === 1
+    && ids.slice(1).every(id => id === SYNTHETIC_BYPASS), `${name} exact promoted catalog/order`);
   const p = params[0];
   check(near(wam ? p.minValue : p.min, -0.99) && near(wam ? p.maxValue : p.max, 0.99)
     && near(wam ? p.defaultValue : p.default, 0.5), `${name} range/default`);
