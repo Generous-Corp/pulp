@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260919-p1a-vite-import-stager-watch",
+  "created_at": "2026-09-19T04:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-ir-contract",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "tests": [
+    "build/test/pulp-test-design-import '[assets]'",
+    "build/test/pulp-test-browser-capture-import '[vite]'",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none",
+  "rationale": "P1-A extends Pulp-owned generated-source intake and contained HTML staging to recognize literal Vite import.meta URL asset edges. The change adds lexical false-positive guards, a relocation round-trip for relative content-addressed package paths, and bounded staging evidence. It does not alter transferred renderer paths or expand source authority."
+}
