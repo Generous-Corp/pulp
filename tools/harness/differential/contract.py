@@ -97,7 +97,12 @@ def _observation(value: Any, fixture: FixtureSpec, side: str) -> dict[str, Any]:
             entry["path"] = str(finding["path"])
         normalized.append(entry)
     normalized.sort(key=lambda item: (item["kind"], item.get("path", ""), item["message"]))
-    return {"status": status, "findings": normalized}
+    evidence = value.get("evidence", [])
+    if status == "pass" and (not isinstance(evidence, list) or not evidence or any(not isinstance(item, str) or not item for item in evidence)):
+        raise ValueError(f"{fixture.id}: pass {side} observation lacks evidence")
+    if not isinstance(evidence, list) or any(not isinstance(item, str) or not item for item in evidence):
+        raise ValueError(f"{fixture.id}: {side}.evidence must be a string array")
+    return {"status": status, "findings": normalized, "evidence": sorted(evidence)}
 
 
 def normalize_report(
@@ -155,8 +160,35 @@ def validate_report(report: Mapping[str, Any]) -> None:
     fixtures = report.get("fixtures")
     if not isinstance(fixtures, list) or not fixtures:
         raise ValueError("report fixtures must be a non-empty array")
-    ids = [row.get("id") for row in fixtures if isinstance(row, Mapping)]
+    if any(not isinstance(row, Mapping) for row in fixtures):
+        raise ValueError("report fixtures must contain objects")
+    ids = [row.get("id") for row in fixtures]
     if len(ids) != len(set(ids)) or any(not isinstance(i, str) or not i for i in ids):
         raise ValueError("report fixture ids must be unique non-empty strings")
     if ids != sorted(ids):
         raise ValueError("report fixtures must be sorted by id")
+    for row in fixtures:
+        if not isinstance(row.get("surface"), str) or row["surface"] not in SURFACES:
+            raise ValueError(f"{row.get('id')}: invalid surface")
+        if not isinstance(row.get("source"), str) or not isinstance(row.get("source_sha256"), str) or len(row["source_sha256"]) != 64:
+            raise ValueError(f"{row.get('id')}: source identity is malformed")
+        for field in ("features", "expected_findings"):
+            values = row.get(field)
+            if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
+                raise ValueError(f"{row.get('id')}: {field} must be a string array")
+        if any(value not in FINDING_KINDS for value in row["expected_findings"]):
+            raise ValueError(f"{row.get('id')}: unknown expected finding")
+        for side in ("browser", "native"):
+            observation = row.get(side)
+            if not isinstance(observation, Mapping) or observation.get("status") not in {"pass", "fail", "not-run"}:
+                raise ValueError(f"{row.get('id')}: malformed {side} observation")
+            findings = observation.get("findings")
+            if not isinstance(findings, list):
+                raise ValueError(f"{row.get('id')}: malformed {side}.findings")
+            for finding in findings:
+                if not isinstance(finding, Mapping) or finding.get("kind") not in FINDING_KINDS or not isinstance(finding.get("message", ""), str):
+                    raise ValueError(f"{row.get('id')}: malformed {side} finding")
+            if observation["status"] == "pass":
+                evidence = observation.get("evidence")
+                if not isinstance(evidence, list) or not evidence or any(not isinstance(item, str) or not item for item in evidence):
+                    raise ValueError(f"{row.get('id')}: pass {side} observation lacks evidence")
