@@ -52,6 +52,7 @@ namespace detail {
 struct BakedParamMailbox;
 struct BakedParamNodeState;
 struct BakedCustomNodeRuntime;
+struct BakedSampleRegionRuntime;
 }  // namespace detail
 
 // Bake-layer parameter-injection binding captured at bake() for one param-
@@ -248,6 +249,15 @@ public:
                                std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
                                std::vector<SampleRegionDefinition> sample_regions);
 
+    // Own exact scalar descriptors independently of the source graph registry.
+    static LowerResult
+    create_with_sample_regions(std::vector<GraphNode> nodes, std::vector<Connection> connections,
+                               int input_channels, int output_channels, std::string name,
+                               std::string bundle_id,
+                               std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
+                               std::vector<SampleRegionDefinition> sample_regions,
+                               std::vector<SampleKernelDescriptor> sample_kernels);
+
     ~BakedGraphProcessor() override;
 
     pulp::format::PluginDescriptor descriptor() const override;
@@ -325,6 +335,7 @@ private:
   std::string bundle_id_;
   SampleRegionParameterContract sample_region_parameter_contract_;
   std::unique_ptr<SampleRegionParameterBinding> sample_region_parameter_binding_;
+  std::unique_ptr<detail::BakedSampleRegionRuntime> sample_region_runtime_;
   int input_channels_ = 2;
   int output_channels_ = 2;
   int prepared_max_block_ = 0;
@@ -356,7 +367,8 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
 // Exact block/scalar registration pair used by the bake-v2 preflight. This is
 // deliberately separate from CustomNodeType so v1 callers retain the original
 // source surface and a v2 artifact can never resolve sample code by block type
-// identity alone.
+// identity alone. Every supplied pair must be valid; an identity used only
+// by residual Custom nodes resolves through its block registration internally.
 struct BakedTypeRegistration {
     CustomNodeType block;
     SampleKernelDescriptor sample;
@@ -383,10 +395,9 @@ class BakedTypeRegistry {
     std::vector<BakedTypeRegistration> registrations_;
 };
 
-// B3's loader/proof boundary. It verifies a signed v2 artifact, reconstructs
-// its authored topology and region metadata in an isolated PreparedTopologyEdit,
-// and re-runs exact sample-region + ordinary graph proofs. It returns the
-// callback-free verified plan for the later I3 BakedGraphProcessor integration;
+// Verify a signed v2 artifact, reconstruct its authored topology and region
+// metadata in an isolated PreparedTopologyEdit, and re-run exact region and
+// ordinary graph proofs. Inspection returns the callback-free verified plan;
 // it does not publish or execute a runtime snapshot.
 struct BakedPlanLoadResult {
     std::optional<BakedPlan> plan;
@@ -400,11 +411,23 @@ struct BakedPlanLoadResult {
 BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
                                     const std::vector<BakedTypeRegistration>& registrations);
 
+namespace detail {
+LowerResult load_baked_registered(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                                  const BakedTypeRegistry& registry);
+}
+
+// Paired registrations admit executable signed sample regions with private
+// scalar state. Built-in kernels need no extra registrations. Call
+// define_parameters(store) before prepare(), including for an empty manifest;
+// the adapter store must outlive the processor. An empty brace argument still
+// selects the legacy v1-only vector overload. Residual Custom callbacks own
+// their block instances and authenticated state; a failed opaque state restore
+// on reprepare retains the legacy fail-silent behavior, not region-bank rollback.
 template <typename Registry>
     requires std::is_same_v<std::remove_cvref_t<Registry>, BakedTypeRegistry>
-BakedPlanLoadResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
-                               Registry&& registry) {
-    return load_baked_plan(bytes, trust, registry.registrations());
+LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                       Registry&& registry) {
+    return detail::load_baked_registered(bytes, trust, registry);
 }
 
 // Result of bake_to_plan(): `plan` is set iff `accepted`; on refusal the reason /

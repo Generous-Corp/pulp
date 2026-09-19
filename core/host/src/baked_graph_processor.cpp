@@ -1,5 +1,7 @@
 #include "baked_graph_processor_detail.hpp"
+#include <cmath>
 #include <pulp/host/baked_graph_processor.hpp>
+#include <pulp/host/sample_region_runtime.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 
 #include <algorithm>
@@ -12,6 +14,167 @@
 #include <vector>
 
 namespace pulp::host {
+
+namespace detail {
+
+// Scalar state and callbacks belong to this baked instance, never its source.
+struct BakedSampleRegionRuntime {
+    std::vector<SampleRegionDefinition> definitions;
+    std::vector<SampleKernelDescriptor> kernels;
+    std::shared_ptr<SampleRegionStateBank> bank;
+    std::unordered_map<NodeId, CustomNodeProcessFn> processes;
+    std::vector<GraphNode> nodes;
+    std::vector<Connection> connections;
+
+    bool prepare(std::span<const GraphNode> authored_nodes,
+                 std::span<const Connection> authored_connections,
+                 const SampleRegionParameterBinding* parameters, double sample_rate,
+                 int max_block) {
+        processes.clear();
+        bank.reset();
+        nodes.clear();
+        connections.clear();
+        if (!parameters || !std::isfinite(sample_rate) || sample_rate <= 0.0 || max_block <= 0)
+            return false;
+        std::vector<SampleRegionCandidate> candidates;
+        std::unordered_map<NodeId, const SampleRegionDefinition*> membership;
+        for (const auto& definition : definitions) {
+            if (definition.input_boundaries.empty() || definition.output_boundaries.empty())
+                return false;
+            const auto valid_boundaries = [&](const std::vector<NodeId>& boundaries,
+                                              std::string_view type_id) {
+                std::size_t count = 0;
+                for (const auto& member : definition.members) {
+                    if (member.type_id != type_id)
+                        continue;
+                    ++count;
+                    const auto index = member.config.boundary_index_or_parameter_id;
+                    if (member.config.kind != SampleKernelConfigKind::BoundaryIndex ||
+                        index >= boundaries.size() || boundaries[index] != member.node)
+                        return false;
+                }
+                return count == boundaries.size();
+            };
+            if (!valid_boundaries(definition.input_boundaries, "pulp.core.sample-region.input") ||
+                !valid_boundaries(definition.output_boundaries, "pulp.core.sample-region.output"))
+                return false;
+            SampleRegionCandidate candidate;
+            candidate.region_id = definition.region_id;
+            candidate.members = definition.members;
+            candidate.limits = definition.limits;
+            candidate.max_block_size = static_cast<std::uint32_t>(max_block);
+            candidate.registry = {
+                this,
+                [](const void* context, std::string_view id,
+                   int version) noexcept -> const SampleKernelDescriptor* {
+                    const auto& registry =
+                        static_cast<const BakedSampleRegionRuntime*>(context)->kernels;
+                    for (const auto& kernel : registry)
+                        if (kernel.type_id == id && kernel.version == version)
+                            return &kernel;
+                    return nullptr;
+                }};
+            for (const auto& member : definition.members) {
+                if (!membership.emplace(member.node, &definition).second)
+                    return false;
+                const auto found =
+                    std::find_if(authored_nodes.begin(), authored_nodes.end(),
+                                 [&](const auto& node) { return node.id == member.node; });
+                if (found == authored_nodes.end() || found->type != NodeType::Custom ||
+                    found->custom_type_id != member.type_id ||
+                    found->custom_type_version != member.version)
+                    return false;
+            }
+            for (const auto& parameter : definition.promoted_parameters)
+                candidate.promoted_parameters.push_back(parameter.param_id);
+            for (const auto& connection : authored_connections) {
+                const auto touches = [&](NodeId id) {
+                    return std::any_of(definition.members.begin(), definition.members.end(),
+                                       [&](const auto& member) { return member.node == id; });
+                };
+                if (!touches(connection.source_node) && !touches(connection.dest_node))
+                    continue;
+                if (connection.midi || connection.automation || connection.audio_rate_modulation ||
+                    connection.sidechain)
+                    return false;
+                candidate.connections.push_back({connection.source_node, connection.source_port,
+                                                 connection.dest_node, connection.dest_port,
+                                                 SampleRegionConnectionLane::PlainAudio,
+                                                 connection.feedback});
+            }
+            candidates.push_back(std::move(candidate));
+        }
+        if (!prove_sample_regions(candidates).accepted)
+            return false;
+        std::vector<PreparedSampleRegionPlan> plans;
+        for (const auto& candidate : candidates) {
+            auto prepared = build_sample_region_plan(candidate);
+            if (!prepared.proof.accepted || !prepared.plan)
+                return false;
+            plans.push_back(std::move(*prepared.plan));
+        }
+        auto fresh = SampleRegionStateBank::create_fresh(plans, sample_rate,
+                                                         static_cast<std::uint32_t>(max_block), 1);
+        if (!fresh)
+            return false;
+        for (std::size_t i = 0; i < plans.size(); ++i) {
+            auto region = PreparedSampleRegion::create(std::move(plans[i]), fresh, parameters);
+            if (!region)
+                return false;
+            processes.emplace(definitions[i].input_boundaries.front(),
+                              [region = std::move(region)](
+                                  audio::BufferView<float>& output,
+                                  const audio::BufferView<const float>& input,
+                                  int frames) { region->process(output, input, frames); });
+        }
+        for (const auto& authored : authored_nodes) {
+            const auto member = membership.find(authored.id);
+            if (member == membership.end()) {
+                nodes.push_back(authored);
+            } else if (authored.id == member->second->input_boundaries.front()) {
+                auto anchor = authored;
+                anchor.num_input_ports = static_cast<int>(member->second->input_boundaries.size());
+                anchor.num_output_ports =
+                    static_cast<int>(member->second->output_boundaries.size());
+                anchor.custom_instance.reset();
+                nodes.push_back(std::move(anchor));
+            }
+        }
+        const auto remap = [](NodeId& id, PortIndex& port, const SampleRegionDefinition& definition,
+                              bool input) {
+            const auto& boundaries =
+                input ? definition.input_boundaries : definition.output_boundaries;
+            if (std::find(boundaries.begin(), boundaries.end(), id) == boundaries.end())
+                return false;
+            const auto member = std::find_if(definition.members.begin(), definition.members.end(),
+                                             [&](const auto& value) { return value.node == id; });
+            if (member == definition.members.end() ||
+                member->config.kind != SampleKernelConfigKind::BoundaryIndex)
+                return false;
+            port = member->config.boundary_index_or_parameter_id;
+            id = definition.input_boundaries.front();
+            return true;
+        };
+        for (auto connection : authored_connections) {
+            const auto source = membership.find(connection.source_node);
+            const auto destination = membership.find(connection.dest_node);
+            if (source != membership.end() && destination != membership.end() &&
+                source->second == destination->second)
+                continue;
+            if (source != membership.end() &&
+                !remap(connection.source_node, connection.source_port, *source->second, false))
+                return false;
+            if (destination != membership.end() &&
+                !remap(connection.dest_node, connection.dest_port, *destination->second, true))
+                return false;
+            connections.push_back(std::move(connection));
+        }
+        bank = std::move(fresh);
+        return true;
+    }
+};
+
+} // namespace detail
 
 namespace {
 namespace fmt = pulp::format;
@@ -202,25 +365,52 @@ static LowerResult bake_impl(const SignalGraph& graph,
         return result;
     }
 
-    // Topology lowerability — the shared gate (see lowerability_of). bake()'s only
-    // extra precondition is is_prepared() above; the node-kind / lane / executor-
-    // eligibility proof is identical to what the on-disk load path will re-run.
-    if (const auto proof = lowerability_of(
-            graph.nodes(), graph.connections(),
-            [&graph](std::string_view type_id, int version) {
-                return graph.custom_node_type(type_id, version);
-            });
-        !proof.accepted) {
-        result.reason = proof.reason;
-        result.offending_node = proof.offending_node;
-        result.message = proof.message;
-        return result;
+    std::unordered_set<NodeId> region_members;
+    std::vector<SampleKernelDescriptor> sample_kernels;
+    for (const auto& region : graph.sample_regions()) {
+        for (const auto& member : region.members) {
+            region_members.insert(member.node);
+            const auto* kernel = graph.sample_kernel_type(member.type_id, member.version);
+            if (!kernel) {
+                result.reason = LowerRejectReason::CustomNotYetLowerable;
+                result.offending_node = member.node;
+                result.message = "sample region requires an exact scalar kernel";
+                return result;
+            }
+            if (std::none_of(sample_kernels.begin(), sample_kernels.end(), [&](const auto& value) {
+                    return value.type_id == kernel->type_id && value.version == kernel->version;
+                }))
+                sample_kernels.push_back(*kernel);
+        }
     }
-    if (const auto proof = prepared_custom_bindings_of(graph); !proof.accepted) {
-        result.reason = proof.reason;
-        result.offending_node = proof.offending_node;
-        result.message = proof.message;
-        return result;
+    if (!region_members.empty()) {
+        const auto proof = bake_to_plan(graph);
+        if (!proof.accepted) {
+            result.reason = proof.reason;
+            result.offending_node = proof.offending_node;
+            result.message = proof.message;
+            return result;
+        }
+    } else {
+        // Topology lowerability — the shared gate (see lowerability_of). bake()'s only
+        // extra precondition is is_prepared() above; the node-kind / lane / executor-
+        // eligibility proof is identical to what the on-disk load path will re-run.
+        if (const auto proof = lowerability_of(graph.nodes(), graph.connections(),
+                                               [&graph](std::string_view type_id, int version) {
+                                                   return graph.custom_node_type(type_id, version);
+                                               });
+            !proof.accepted) {
+            result.reason = proof.reason;
+            result.offending_node = proof.offending_node;
+            result.message = proof.message;
+            return result;
+        }
+        if (const auto proof = prepared_custom_bindings_of(graph); !proof.accepted) {
+            result.reason = proof.reason;
+            result.offending_node = proof.offending_node;
+            result.message = proof.message;
+            return result;
+        }
     }
 
     // Capture owned node specs, Gain values, connections, and bus arity for the
@@ -252,6 +442,12 @@ static LowerResult bake_impl(const SignalGraph& graph,
         if (src.type == NodeType::Gain) {
             n.gain = graph.node_gain(src.id);
         } else if (src.type == NodeType::Custom) {
+            n.custom_type_id = src.custom_type_id;
+            n.custom_type_version = src.custom_type_version;
+            if (region_members.contains(src.id)) {
+                nodes.push_back(std::move(n));
+                continue;
+            }
             const CustomNodeType* type = graph.custom_node_type(
                 src.custom_type_id, src.custom_type_version);
             if (const CustomNodeProcessFn* fn = graph.live_custom_processor(src.id)) {
@@ -321,7 +517,7 @@ static LowerResult bake_impl(const SignalGraph& graph,
     return BakedGraphProcessor::create_with_sample_regions(
         std::move(nodes), std::move(conns), input_channels > 0 ? input_channels : 2,
         output_channels > 0 ? output_channels : 2, "Baked Graph", "com.pulp.baked-graph",
-        std::move(custom_nodes), std::move(sample_regions));
+        std::move(custom_nodes), std::move(sample_regions), std::move(sample_kernels));
 }
 
 LowerResult bake(const SignalGraph& graph) {
@@ -387,10 +583,9 @@ BakePlanResult bake_to_plan(const SignalGraph& graph) {
         return result;
     }
     BakedPlan plan;
-    // Region-free artifacts retain the v1 wire contract. Region-bearing bake
-    // output is admitted by the v2 codec only after the runtime integration
-    // owns the sample-region lowering; this slice still emits v1 for the
-    // existing block-graph path.
+    // Region-free artifacts preserve the v1 wire representation. Sample-region
+    // graphs carry bounded authored definitions in v2; runtime state and
+    // callbacks are never serialized.
     plan.format_version =
         authored_regions.empty() ? kBakedPlanV1FormatVersion : kBakedMaxSupportedFormatVersion;
     for (const auto& descriptor : authored_regions) {
@@ -594,8 +789,10 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
     return bake_impl(graph, &restore_states);
 }
 
-BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
-                                    const std::vector<BakedTypeRegistration>& registrations) {
+static BakedPlanLoadResult
+load_baked_registered_impl(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                           const std::vector<BakedTypeRegistration>& registrations,
+                           LowerResult* executable) {
     BakedPlanLoadResult result;
     const auto plan = verify_and_extract_plan(bytes, trust);
     if (!plan) {
@@ -603,7 +800,7 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
         result.message = "signed .pulpbake envelope or bounded plan parse failed";
         return result;
     }
-    if (plan->format_version == kBakedPlanV1FormatVersion) {
+    if (plan->format_version == kBakedPlanV1FormatVersion && executable) {
         if (!plan->sample_regions.empty()) {
             result.reason = LowerRejectReason::CodecRejected;
             result.message = "v1 baked plan unexpectedly contains sample-region metadata";
@@ -613,19 +810,22 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
         legacy_types.reserve(registrations.size());
         for (const auto& registration : registrations)
             legacy_types.push_back(registration.block);
-        const auto legacy = load_baked(bytes, trust, legacy_types);
+        auto legacy = load_baked(bytes, trust, legacy_types);
         if (!legacy.accepted) {
             result.reason = legacy.reason;
             result.offending_node = legacy.offending_node;
             result.message = legacy.message;
             return result;
         }
+        if (executable)
+            *executable = std::move(legacy);
         result.plan = *plan;
         result.accepted = true;
         result.reason = LowerRejectReason::None;
         return result;
     }
-    if (plan->format_version != kBakedMaxSupportedFormatVersion || plan->sample_regions.empty()) {
+    if (plan->format_version != kBakedPlanV1FormatVersion &&
+        (plan->format_version != kBakedMaxSupportedFormatVersion || plan->sample_regions.empty())) {
         result.reason = LowerRejectReason::CodecRejected;
         result.message = "paired sample-kernel loading requires a non-empty v2 region table";
         return result;
@@ -719,6 +919,29 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
         }
     }
 
+    // Validate exact scalar callbacks even for pairs whose block side alone is
+    // used below. In particular, a substituted built-in descriptor is invalid
+    // regardless of whether that identity appears in this artifact's regions.
+    SignalGraph registration_validation;
+    if (!register_builtin_sample_region_types(registration_validation)) {
+        result.reason = LowerRejectReason::CodecRejected;
+        result.message = "built-in registration validation failed";
+        return result;
+    }
+    for (const auto& registration : registrations) {
+        if (!registration_validation.register_custom_node_type(registration.block,
+                                                               registration.sample)) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "exact paired registration validation failed";
+            return result;
+        }
+    }
+
+    std::unordered_set<std::string> scalar_identities;
+    for (const auto& region : plan->sample_regions)
+        for (const auto& member : region.members)
+            scalar_identities.insert(member.type_id + "\x1f" + std::to_string(member.version));
+
     SignalGraph owner;
     auto edit = owner.begin_prepared_topology_edit();
     if (!edit || !register_builtin_sample_region_types(*edit)) {
@@ -727,7 +950,11 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
         return result;
     }
     for (const auto& registration : registrations) {
-        if (!edit->register_custom_node_type(registration.block, registration.sample)) {
+        const auto key =
+            registration.block.type_id + "\x1f" + std::to_string(registration.block.version);
+        if (!(scalar_identities.contains(key)
+                  ? edit->register_custom_node_type(registration.block, registration.sample)
+                  : edit->register_custom_node_type(registration.block))) {
             result.reason = LowerRejectReason::CodecRejected;
             result.message = "paired sample-kernel registration was refused";
             return result;
@@ -768,23 +995,6 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
             result.offending_node = node.id;
             result.message = "could not reconstruct a unique v2 plan node";
             return result;
-        }
-        if (node.type == NodeType::Custom && !node.custom_state.empty()) {
-            const CustomNodeType* block_type = nullptr;
-            for (const auto& registration : registrations) {
-                if (registration.block.type_id == node.custom_type_id &&
-                    registration.block.version == node.custom_version) {
-                    block_type = &registration.block;
-                    break;
-                }
-            }
-            if (block_type == nullptr || !block_type->create || !block_type->load_state) {
-                result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
-                result.offending_node = node.id;
-                result.message =
-                    "stateful v2 Custom node requires paired create + load_state callbacks";
-                return result;
-            }
         }
     }
 
@@ -851,6 +1061,35 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
             return result;
         }
         remapped_regions.push_back(std::move(region));
+    }
+
+    for (const auto& node : plan->nodes) {
+        if (region_for_node.contains(id_map.at(node.id)) && !node.custom_state.empty()) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.offending_node = node.id;
+            result.message = "sample-region members cannot carry opaque block state";
+            return result;
+        }
+    }
+
+    for (const auto& node : plan->nodes) {
+        if (node.type == NodeType::Custom && !node.custom_state.empty()) {
+            const CustomNodeType* block_type = nullptr;
+            for (const auto& registration : registrations) {
+                if (registration.block.type_id == node.custom_type_id &&
+                    registration.block.version == node.custom_version) {
+                    block_type = &registration.block;
+                    break;
+                }
+            }
+            if (block_type == nullptr || !block_type->create || !block_type->load_state) {
+                result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
+                result.offending_node = node.id;
+                result.message =
+                    "stateful v2 Custom node requires paired create + load_state callbacks";
+                return result;
+            }
+        }
     }
 
     // Region-internal edges use the region-aware insertion path because a legal
@@ -939,9 +1178,147 @@ BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const B
         return result;
     }
 
+    if (executable) {
+        // Only authenticated, fully re-proved topology reaches lifecycle code.
+        // Region kernels own fresh scalar state independently of this
+        // temporary graph; no block lifecycle executes for a scalar member.
+        SignalGraph builtin_registry;
+        if (!register_builtin_sample_region_types(builtin_registry)) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "could not resolve built-in scalar descriptors";
+            return result;
+        }
+        std::vector<SampleKernelDescriptor> kernels;
+        for (const auto& region : remapped_regions) {
+            for (const auto& member : region.members) {
+                const SampleKernelDescriptor* sample = nullptr;
+                for (const auto& registration : registrations)
+                    if (registration.sample.type_id == member.type_id &&
+                        registration.sample.version == member.version)
+                        sample = &registration.sample;
+                if (!sample)
+                    sample = builtin_registry.sample_kernel_type(member.type_id, member.version);
+                if (!sample) {
+                    result.reason = LowerRejectReason::CodecRejected;
+                    result.message = "verified region lost its exact scalar registration";
+                    return result;
+                }
+                if (std::none_of(kernels.begin(), kernels.end(), [&](const auto& value) {
+                        return value.type_id == sample->type_id && value.version == sample->version;
+                    }))
+                    kernels.push_back(*sample);
+            }
+        }
+        std::unordered_map<NodeId, BakedCustomNodeBinding> custom_bindings;
+        for (const auto& node : plan->nodes) {
+            if (node.type != NodeType::Custom || region_for_node.contains(id_map.at(node.id)))
+                continue;
+            const auto registration =
+                std::find_if(registrations.begin(), registrations.end(), [&](const auto& value) {
+                    return value.block.type_id == node.custom_type_id &&
+                           value.block.version == node.custom_version;
+                });
+            if (registration == registrations.end()) {
+                result.reason = LowerRejectReason::CustomNotYetLowerable;
+                result.offending_node = node.id;
+                result.message = "residual Custom registration is missing";
+                return result;
+            }
+            const auto& type = registration->block;
+            BakedCustomNodeBinding binding;
+            binding.process = type.process;
+            if (type.create) {
+                auto instance = std::shared_ptr<void>(
+                    type.create(), [release = type.release, destroy = type.destroy](void* value) {
+                        if (!value)
+                            return;
+                        if (release)
+                            release(value);
+                        if (destroy)
+                            destroy(value);
+                    });
+                if (!instance) {
+                    result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
+                    result.offending_node = node.id;
+                    result.message = "residual Custom instance creation failed";
+                    return result;
+                }
+                if (type.process_instance)
+                    binding.process = [instance, fn = type.process_instance](
+                                          auto& out, const auto& in, int frames) {
+                        fn(instance.get(), out, in, frames);
+                    };
+                if (type.process_instance_baked_param) {
+                    binding.params.params = type.baked_params;
+                    binding.params.process = [instance, fn = type.process_instance_baked_param](
+                                                 auto& out, const auto& in, int frames,
+                                                 const BakedParamView& parameters) {
+                        fn(instance.get(), out, in, frames, parameters);
+                    };
+                }
+                if (type.prepare)
+                    binding.lifecycle.prepare = [instance, fn = type.prepare](double rate,
+                                                                              int block) {
+                        fn(instance.get(), rate, block);
+                    };
+                if (type.reset)
+                    binding.lifecycle.reset = [instance, fn = type.reset] { fn(instance.get()); };
+                if (type.load_state)
+                    binding.lifecycle.restore_state = [instance, fn = type.load_state,
+                                                       state = node.custom_state] {
+                        return fn(instance.get(), state);
+                    };
+                // Admit authenticated state before publishing a processor, as in
+                // the legacy loader. Host prepare repeats this after reset.
+                if (binding.lifecycle.prepare)
+                    binding.lifecycle.prepare(48000.0, 512);
+                if (binding.lifecycle.reset)
+                    binding.lifecycle.reset();
+                if (binding.lifecycle.restore_state && !binding.lifecycle.restore_state()) {
+                    result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
+                    result.offending_node = node.id;
+                    result.message = "residual Custom rejected authenticated state";
+                    return result;
+                }
+            }
+            if (binding.process || binding.params.process)
+                binding.latency_samples = type.latency_samples;
+            custom_bindings.emplace(id_map.at(node.id), std::move(binding));
+        }
+        *executable = BakedGraphProcessor::create_with_sample_regions(
+            edit->nodes(), edit->connections(), plan->input_channels, plan->output_channels,
+            "Baked Graph", "com.pulp.baked-graph", std::move(custom_bindings),
+            std::move(remapped_regions), std::move(kernels));
+        if (!executable->accepted) {
+            result.reason = executable->reason;
+            result.offending_node = executable->offending_node;
+            result.message = executable->message;
+            return result;
+        }
+    }
     result.plan = *plan;
     result.accepted = true;
     result.reason = LowerRejectReason::None;
+    return result;
+}
+
+BakedPlanLoadResult load_baked_plan(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
+                                    const std::vector<BakedTypeRegistration>& registrations) {
+    return load_baked_registered_impl(bytes, trust, registrations, nullptr);
+}
+
+LowerResult detail::load_baked_registered(std::span<const std::uint8_t> bytes,
+                                          const BakedTrust& trust,
+                                          const BakedTypeRegistry& registry) {
+    LowerResult result;
+    const auto proof = load_baked_registered_impl(bytes, trust, registry.registrations(), &result);
+    if (!proof.accepted) {
+        result.processor.reset();
+        result.accepted = false;
+        result.reason = proof.reason;
+        result.offending_node = proof.offending_node;
+        result.message = proof.message;
+    }
     return result;
 }
 
@@ -960,6 +1337,17 @@ LowerResult BakedGraphProcessor::create_with_sample_regions(
     int output_channels, std::string name, std::string bundle_id,
     std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
     std::vector<SampleRegionDefinition> sample_regions) {
+    return create_with_sample_regions(std::move(nodes), std::move(connections), input_channels,
+                                      output_channels, std::move(name), std::move(bundle_id),
+                                      std::move(custom_nodes), std::move(sample_regions), {});
+}
+
+LowerResult BakedGraphProcessor::create_with_sample_regions(
+    std::vector<GraphNode> nodes, std::vector<Connection> connections, int input_channels,
+    int output_channels, std::string name, std::string bundle_id,
+    std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes,
+    std::vector<SampleRegionDefinition> sample_regions,
+    std::vector<SampleKernelDescriptor> sample_kernels) {
     LowerResult result;
     auto contract = SampleRegionParameterContract::from_regions(sample_regions)
                         .freeze(std::span<const state::ParamInfo>{});
@@ -971,6 +1359,13 @@ LowerResult BakedGraphProcessor::create_with_sample_regions(
     result.processor = std::unique_ptr<BakedGraphProcessor>(new BakedGraphProcessor(
         std::move(nodes), std::move(connections), input_channels, output_channels, std::move(name),
         std::move(bundle_id), std::move(custom_nodes), std::move(contract)));
+    if (!sample_regions.empty()) {
+        auto runtime = std::make_unique<detail::BakedSampleRegionRuntime>();
+        runtime->definitions = std::move(sample_regions);
+        runtime->kernels = std::move(sample_kernels);
+        static_cast<BakedGraphProcessor*>(result.processor.get())->sample_region_runtime_ =
+            std::move(runtime);
+    }
     result.accepted = true;
     result.reason = LowerRejectReason::None;
     return result;
@@ -1020,7 +1415,7 @@ fmt::PluginDescriptor BakedGraphProcessor::descriptor() const {
 
 void BakedGraphProcessor::define_parameters(pulp::state::StateStore& store) {
     if (!sample_region_parameter_contract_.valid() || sample_region_parameter_binding_ != nullptr ||
-        sample_region_parameter_contract_.parameters().empty())
+        (sample_region_parameter_contract_.parameters().empty() && !sample_region_runtime_))
         return;
     // Validate an already-populated adapter store before attempting any
     // registration. StateStore has no rollback/remove operation, so adding
@@ -1036,104 +1431,139 @@ void BakedGraphProcessor::define_parameters(pulp::state::StateStore& store) {
 }
 
 void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
-    prepared_ = false;
-    prepared_latency_samples_.store(0, std::memory_order_relaxed);
-    snapshot_.clear();
-    pool_.clear();
-    gains_.clear();
-    gain_index_.clear();
+    // Region preparation is a candidate transaction. Keep the accepted bank and
+    // executor alive until every proof, binding and allocation has succeeded.
+    if (!sample_region_runtime_) {
+        prepared_ = false;
+        prepared_latency_samples_.store(0, std::memory_order_relaxed);
+        snapshot_.clear();
+        pool_.clear();
+    }
+    std::unique_ptr<detail::BakedSampleRegionRuntime> candidate_runtime;
+    if (sample_region_runtime_) {
+        candidate_runtime = std::make_unique<detail::BakedSampleRegionRuntime>();
+        candidate_runtime->definitions = sample_region_runtime_->definitions;
+        candidate_runtime->kernels = sample_region_runtime_->kernels;
+        if (!candidate_runtime->prepare(nodes_, conns_, sample_region_parameter_binding_.get(),
+                                        context.sample_rate, context.max_buffer_size))
+            return;
+    }
+    std::vector<std::unique_ptr<std::atomic<float>>> candidate_gains;
+    std::unordered_map<NodeId, std::size_t> candidate_gain_index;
+    fmt::GraphRuntimeSnapshot candidate_snapshot;
+    fmt::GraphRuntimeBufferPool candidate_pool;
+    std::vector<PluginBindingContext> candidate_plugin_ctx;
+    std::vector<CustomBindingContext> candidate_custom_ctx;
+    std::vector<float> candidate_alias_scratch;
+    std::vector<float*> candidate_alias_ptrs;
 
     // One heap-stable atomic per Gain node, seeded from the baked value. The
     // routed Gain binding reads this atomic by address, so the storage must
     // outlive the snapshot — hence unique_ptr-indirected, never a value vector.
     for (const auto& node : nodes_) {
         if (node.type != NodeType::Gain) continue;
-        gain_index_[node.id] = gains_.size();
-        gains_.push_back(std::make_unique<std::atomic<float>>(node.gain));
+        candidate_gain_index[node.id] = candidate_gains.size();
+        candidate_gains.push_back(std::make_unique<std::atomic<float>>(node.gain));
     }
 
     const int max_block = context.max_buffer_size;
     if (max_block <= 0) return;
-
-    // Re-init each stateful Custom instance BEFORE the snapshot goes live,
-    // mirroring SignalGraph::prepare()'s own instance step: re-run the type's
-    // prepare at the host's REAL rate/block (bake / load_baked may have prepared
-    // at a different or nominal rate), then reset so no stale DSP state — e.g. a
-    // delay line still holding the source graph's audio — leaks into the baked
-    // stream. A signed artifact may additionally carry authenticated initial
-    // state; restore it LAST so prepare/reset cannot erase it. In-memory bake
-    // has no restore hook and retains the fresh-stream contract. Control-thread
-    // only, never on the audio path.
-    // Runs BEFORE prepare_param_injection() so the injection state's reset of
-    // held params to declared defaults lands on a freshly re-inited instance —
-    // one coherent re-init boundary for both DSP state and injected params.
-    for (auto& [id, runtime] : custom_nodes_) {
-        auto& lc = runtime->lifecycle;
-        if (lc.prepare) lc.prepare(context.sample_rate, max_block);
-        if (lc.reset) lc.reset();
-        if (lc.restore_state && !lc.restore_state()) return;
-    }
-
-    // Build per-node injection state for every param-declaring custom node and
-    // install a draining wrapper into each Custom runtime so the routed executor
-    // invokes the injection path. This MUST run before build_executor_snapshot
-    // (which resolves each Custom node through custom_nodes_). All the sizing
-    // — StateStore registration, the fixed-capacity scratch queue, held-value
-    // storage — happens here, off the audio thread, so process() never allocates.
-    prepare_param_injection();
 
     // Build the canonical executor's serialized routing snapshot for the frozen
     // plan, resolving each Gain node to its owned atomic and each lowerable Custom
     // node to its captured process callback. No Plugin nodes exist in the lowerable
     // subset, so plugin_for always yields nullptr.
     const ExecutorSnapshotBinders binders{
-        .gain_for =
-            [this](NodeId id) -> std::atomic<float>* {
-                auto it = gain_index_.find(id);
-                return it == gain_index_.end() ? nullptr : gains_[it->second].get();
-            },
+        .gain_for = [&candidate_gain_index, &candidate_gains](NodeId id) -> std::atomic<float>* {
+            auto it = candidate_gain_index.find(id);
+            return it == candidate_gain_index.end() ? nullptr : candidate_gains[it->second].get();
+        },
         .plugin_for = [](NodeId) -> PluginSlot* { return nullptr; },
-        .custom_for =
-            [this](NodeId id) -> const CustomNodeProcessFn* {
-                auto it = custom_nodes_.find(id);
-                return it == custom_nodes_.end() ? nullptr : &it->second->process;
-            },
+        .custom_for = [this, &candidate_runtime](NodeId id) -> const CustomNodeProcessFn* {
+            if (candidate_runtime) {
+                const auto region = candidate_runtime->processes.find(id);
+                if (region != candidate_runtime->processes.end())
+                    return &region->second;
+            }
+            auto it = custom_nodes_.find(id);
+            return it == custom_nodes_.end() ? nullptr : &it->second->process;
+        },
         .custom_latency_for =
             [this, sample_rate = context.sample_rate](NodeId id) {
                 auto it = custom_nodes_.find(id);
                 return it == custom_nodes_.end() || !it->second->latency_samples
                            ? 0
-                           : std::max(0, it->second->latency_samples(sample_rate));
+                           : std::clamp(it->second->latency_samples(sample_rate), 0,
+                                        CustomNodeType::kMaxLatencySamples);
             },
     };
-    if (!build_executor_snapshot(nodes_, conns_, binders, plugin_ctx_,
-                                 plugin_scratch_, snapshot_,
-                                 /*parallel_safe=*/false, &custom_ctx_)) {
+    const auto& executable_nodes = candidate_runtime ? candidate_runtime->nodes : nodes_;
+    const auto& executable_connections =
+        candidate_runtime ? candidate_runtime->connections : conns_;
+    if (!build_executor_snapshot(executable_nodes, executable_connections, binders,
+                                 candidate_plugin_ctx, plugin_scratch_, candidate_snapshot,
+                                 /*parallel_safe=*/false, &candidate_custom_ctx)) {
         return;
     }
 
     // Size the scratch pool from the snapshot exactly as
     // build_signal_graph_executor_routing() does (slot count × max block, plus
     // per-connection PDC rings), so process_routed() is allocation-free.
-    if (!pool_.reset(snapshot_.buffer_slot_count(),
-                     static_cast<std::uint32_t>(max_block),
-                     snapshot_.buffer_assignment().connection_delay_samples)) {
+    if (!candidate_pool.reset(candidate_snapshot.buffer_slot_count(),
+                              static_cast<std::uint32_t>(max_block),
+                              candidate_snapshot.buffer_assignment().connection_delay_samples)) {
         return;
     }
     // Size the in-place-host input scratch (one contiguous block, per-channel
     // pointers into it) so process() can rescue an aliased input with only a
     // copy_n on the audio thread. Sized for the descriptor's input bus — the
     // AudioInput gather never reads channels beyond input_channels_.
-    input_alias_scratch_.assign(static_cast<std::size_t>(input_channels_) *
-                                    static_cast<std::size_t>(max_block),
-                                0.0f);
-    input_alias_ptrs_.resize(static_cast<std::size_t>(input_channels_));
+    candidate_alias_scratch.assign(
+        static_cast<std::size_t>(input_channels_) * static_cast<std::size_t>(max_block), 0.0f);
+    candidate_alias_ptrs.resize(static_cast<std::size_t>(input_channels_));
     for (int c = 0; c < input_channels_; ++c) {
-        input_alias_ptrs_[static_cast<std::size_t>(c)] =
-            input_alias_scratch_.data() +
+        candidate_alias_ptrs[static_cast<std::size_t>(c)] =
+            candidate_alias_scratch.data() +
             static_cast<std::size_t>(c) * static_cast<std::size_t>(max_block);
     }
 
+    // Delay ordinary custom lifecycle mutation until region proof and executor
+    // sizing have succeeded. Injection owns callback state, so refresh the
+    // candidate's copied bindings after rebuilding it and before publication.
+    for (auto& [id, runtime] : custom_nodes_) {
+        auto& lifecycle = runtime->lifecycle;
+        if (lifecycle.prepare)
+            lifecycle.prepare(context.sample_rate, max_block);
+        if (lifecycle.reset)
+            lifecycle.reset();
+        if (lifecycle.restore_state && !lifecycle.restore_state()) {
+            // Legacy opaque callbacks cannot roll back their external state.
+            prepared_ = false;
+            return;
+        }
+    }
+    prepare_param_injection();
+    std::size_t custom_index = 0;
+    for (const auto& node : candidate_snapshot.plan().nodes) {
+        const auto authored = std::find_if(executable_nodes.begin(), executable_nodes.end(),
+                                           [&](const auto& value) { return value.id == node.id; });
+        if (authored == executable_nodes.end() || authored->type != NodeType::Custom)
+            continue;
+        if (const auto runtime = custom_nodes_.find(node.id); runtime != custom_nodes_.end())
+            candidate_custom_ctx[custom_index].process = runtime->second->process;
+        ++custom_index;
+    }
+
+    gains_ = std::move(candidate_gains);
+    gain_index_ = std::move(candidate_gain_index);
+    snapshot_ = std::move(candidate_snapshot);
+    pool_ = std::move(candidate_pool);
+    plugin_ctx_ = std::move(candidate_plugin_ctx);
+    custom_ctx_ = std::move(candidate_custom_ctx);
+    input_alias_scratch_ = std::move(candidate_alias_scratch);
+    input_alias_ptrs_ = std::move(candidate_alias_ptrs);
+    if (candidate_runtime)
+        sample_region_runtime_ = std::move(candidate_runtime);
     prepared_max_block_ = max_block;
     const auto routed_latency = snapshot_.buffer_assignment().total_latency_samples;
     prepared_latency_samples_.store(
@@ -1158,6 +1588,22 @@ void BakedGraphProcessor::process(
     if (!prepared_ || static_cast<int>(frames) > prepared_max_block_) {
         audio_output.clear();
         return;
+    }
+
+    SampleRegionExecutionDomain::Admission admission;
+    if (sample_region_runtime_) {
+        const auto& bank = sample_region_runtime_->bank;
+        if (!bank) {
+            audio_output.clear();
+            return;
+        }
+        admission = bank->domain().try_admit(bank->binding_generation());
+        if (!admission) {
+            audio_output.clear();
+            return;
+        }
+        if (context.reset_requested)
+            bank->reset();
     }
 
     // In-place hosts (Logic AUv2, some AUv3) hand process() input and output
