@@ -171,6 +171,27 @@ such as `aligned_alloc`. The probe accepts the NDK host's `clang++` or
 path expands on both macOS and Windows. A passing probe is not APK or emulator
 acceptance; the following Gradle build and artifact checks remain required.
 
+## A green "Android Build" on a PR does not mean the APK compiles
+
+`android-build` declares `needs: resolve-runners`, and `resolve-runners` is
+gated on `github.event_name != 'pull_request' && github.event_name != 'merge_group'`.
+So on a pull request `resolve-runners`, `android-build` and
+`android-emulator-test` all report `skipped`, and the workflow's overall
+conclusion comes from `android-run-fixtures` alone. The check named
+"Android Build" therefore goes green on a PR that never built an APK.
+
+The APK build runs only on `push` to `main` (behind the `paths` filter), on the
+nightly `schedule`, and on `workflow_dispatch`. Consequences worth holding:
+
+- A compile break in `core/**` reaches `main` with every pre-merge signal green,
+  and only the post-merge push run turns red. That is how an API-26
+  `std::aligned_alloc` break sat on `main` from 2026-07-29 to 2026-09-19 with
+  nobody assigned to it.
+- To validate an Android fix BEFORE merging, dispatch the workflow on the branch
+  (`workflow_dispatch`) and read `android-build` there. A PR run cannot tell you.
+- When reading history, filter runs by `event` — mixing `pull_request` runs into
+  a health count inflates the pass rate with runs that skipped the build.
+
 ## Compiler coverage is asymmetric — GCC sees only `core/**`
 
 Before you read a green PR as "this compiles everywhere": every Linux lane in PR
