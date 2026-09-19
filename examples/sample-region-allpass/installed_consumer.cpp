@@ -1,5 +1,15 @@
 // Installed-SDK proof: only public headers and the shipped example are used.
 #include "allpass_processor.hpp"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <complex>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <numbers>
 #include <pulp/audio/analysis/audio_assertions.hpp>
 #include <pulp/audio/analysis/audio_doctor_artifacts.hpp>
 #include <pulp/audio/analysis/audio_spectrum.hpp>
@@ -9,17 +19,7 @@
 #include <pulp/host/baked_graph_processor.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/runtime/crypto.hpp>
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <complex>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <iomanip>
 #include <sstream>
-#include <memory>
-#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -37,7 +37,8 @@ std::unique_ptr<pulp::format::Processor> take_processor() {
     return std::move(pending_processor);
 }
 void require(bool value, const std::string& message) {
-    if (!value) throw std::runtime_error(message);
+    if (!value)
+        throw std::runtime_error(message);
 }
 std::unique_ptr<pulp::format::HeadlessHost>
 make_host(std::unique_ptr<pulp::format::Processor> processor) {
@@ -70,8 +71,8 @@ pulp::audio::Buffer<float> buffer(const std::vector<float>& samples) {
     std::copy(samples.begin(), samples.end(), result.channel(0).begin());
     return result;
 }
-std::vector<float> render(pulp::format::HeadlessHost& host,
-                          const std::vector<float>& input, bool irregular) {
+std::vector<float> render(pulp::format::HeadlessHost& host, const std::vector<float>& input,
+                          bool irregular) {
     pulp::audio::AudioFileData data;
     data.sample_rate = static_cast<std::uint32_t>(sample_rate);
     data.channels = {input};
@@ -96,7 +97,8 @@ double oracle(const std::vector<float>& input, const std::vector<float>& output)
     double previous_input = 0, previous_output = 0, maximum_error = 0;
     require(input.size() == output.size(), "oracle shape mismatch");
     for (std::size_t i = 0; i < input.size(); ++i) {
-        const double expected = coefficient * input[i] + previous_input - coefficient * previous_output;
+        const double expected =
+            coefficient * input[i] + previous_input - coefficient * previous_output;
         require(std::isfinite(output[i]), "non-finite rendered sample");
         maximum_error = std::max(maximum_error, std::abs(output[i] - expected));
         previous_input = input[i];
@@ -124,7 +126,8 @@ void measurement_sensitivity(const std::vector<float>& input,
         rejected = true;
     }
     require(rejected, "scalar oracle accepted a planted 0.01 sample error");
-    const auto check = pulp::test::audio::assert_null_near(buffer(accepted_render), buffer(changed), -180);
+    const auto check =
+        pulp::test::audio::assert_null_near(buffer(accepted_render), buffer(changed), -180);
     require(!check.passed, "null detector accepted a planted 0.01 sample error");
 }
 void reject_changed_contract(const std::string& graph_json) {
@@ -163,7 +166,8 @@ void lifecycle_recovery() {
         }
         host.release();
         host.prepare(sample_rate, maximum_block, 1, 1);
-        require(processor->ready(), "release-before-prepare recovery failed: " + processor->error());
+        require(processor->ready(),
+                "release-before-prepare recovery failed: " + processor->error());
         require(host.state().param_count() == 1, "recovery duplicated parameter registration");
         const auto first = render(host, {1.f, 0.f}, false);
         require(first[0] == 0.5f && first[1] == 0.75f, "recovered initial state differs");
@@ -183,11 +187,12 @@ void doctor(const std::filesystem::path& directory) {
     require(output[0] == 0.5f && output[1] == 0.75f, "first two analytic impulse terms differ");
     const auto in = buffer(impulse), out = buffer(output);
     constexpr std::array<double, 5> frequencies{50, 200, 1000, 5000, 18000};
-    const auto magnitude = pulp::test::audio::response_relative_to_input(
-        in.view(), out.view(), sample_rate, frequencies);
-    const auto phase = pulp::test::audio::measure_group_delay(
-        in.view(), out.view(), sample_rate, frequencies);
-    require(magnitude.checkpoints.size() == frequencies.size(), "Doctor omitted magnitude checkpoints");
+    const auto magnitude = pulp::test::audio::response_relative_to_input(in.view(), out.view(),
+                                                                         sample_rate, frequencies);
+    const auto phase =
+        pulp::test::audio::measure_group_delay(in.view(), out.view(), sample_rate, frequencies);
+    require(magnitude.checkpoints.size() == frequencies.size(),
+            "Doctor omitted magnitude checkpoints");
     require(phase.checkpoints.size() == frequencies.size(), "Doctor omitted phase checkpoints");
     for (const auto& point : magnitude.checkpoints)
         require(std::isfinite(point.magnitude_db) && std::abs(point.magnitude_db) <= 0.02,
@@ -198,9 +203,12 @@ void doctor(const std::filesystem::path& directory) {
         const auto delay = std::exp(std::complex<double>(0, -omega));
         const auto transfer = (coefficient + delay) / (1.0 + coefficient * delay);
         const double expected_phase = std::arg(transfer);
-        const double expected_delay = (1 - coefficient * coefficient) /
+        const double expected_delay =
+            (1 - coefficient * coefficient) /
             (1 + coefficient * coefficient + 2 * coefficient * std::cos(omega));
-        require(std::isfinite(point.phase_rad) && std::abs(std::remainder(point.phase_rad - expected_phase, 2 * std::numbers::pi)) <= 0.01,
+        require(std::isfinite(point.phase_rad) &&
+                    std::abs(std::remainder(point.phase_rad - expected_phase,
+                                            2 * std::numbers::pi)) <= 0.01,
                 "Doctor phase disagrees with analytic allpass");
         require(std::isfinite(point.group_delay_samples) &&
                     std::abs(point.group_delay_samples - expected_delay) <= 0.05,
@@ -254,53 +262,64 @@ int main(int argc, char** argv) {
         require(preflight.accepted && preflight.plan && *preflight.plan == *plan.plan,
                 "signed artifact preflight failed");
         const auto baked_factory = [&]() {
-            auto loaded = pulp::host::load_baked(bytes, trust, pulp::host::BakedTypeRegistry::from({}));
+            auto loaded =
+                pulp::host::load_baked(bytes, trust, pulp::host::BakedTypeRegistry::from({}));
             require(loaded.accepted && loaded.processor != nullptr, loaded.message);
             return make_host(std::move(loaded.processor));
         };
         auto baked = baked_factory();
         auto irregular_source = make_host(std::make_unique<SampleRegionAllpassProcessor>());
-        auto irregular_reload = make_host(std::make_unique<SampleRegionAllpassProcessor>(graph_json));
+        auto irregular_reload =
+            make_host(std::make_unique<SampleRegionAllpassProcessor>(graph_json));
         auto irregular_bake = baked_factory();
         std::vector<float> input(96000);
         for (std::size_t i = 0; i < input.size(); ++i)
-            input[i] = static_cast<float>(0.4 * std::sin(2 * std::numbers::pi * 440 * i / sample_rate));
+            input[i] =
+                static_cast<float>(0.4 * std::sin(2 * std::numbers::pi * 440 * i / sample_rate));
         const std::array<std::vector<float>, 6> renders{
-            render(*source, input, false), render(*irregular_source, input, true),
+            render(*source, input, false),   render(*irregular_source, input, true),
             render(*reloaded, input, false), render(*irregular_reload, input, true),
-            render(*baked, input, false), render(*irregular_bake, input, true)};
-        constexpr std::array<const char*, 6> names{
-            "source-regular.wav", "source-irregular.wav", "reload-regular.wav",
-            "reload-irregular.wav", "bake-regular.wav", "bake-irregular.wav"};
+            render(*baked, input, false),    render(*irregular_bake, input, true)};
+        constexpr std::array<const char*, 6> names{"source-regular.wav", "source-irregular.wav",
+                                                   "reload-regular.wav", "reload-irregular.wav",
+                                                   "bake-regular.wav",   "bake-irregular.wav"};
         double maximum_error = 0;
         for (std::size_t i = 0; i < renders.size(); ++i) {
             maximum_error = std::max(maximum_error, oracle(input, renders[i]));
-            const auto check = pulp::test::audio::assert_null_near(buffer(renders[0]), buffer(renders[i]), -180);
+            const auto check =
+                pulp::test::audio::assert_null_near(buffer(renders[0]), buffer(renders[i]), -180);
             require(check.passed, check.message);
             wav(directory / names[i], renders[i]);
         }
         measurement_sensitivity(input, renders[0]);
         auto tampered = bytes;
         tampered.back() ^= 1;
-        require(!pulp::host::load_baked(tampered, trust, pulp::host::BakedTypeRegistry::from({})).accepted,
+        require(!pulp::host::load_baked(tampered, trust, pulp::host::BakedTypeRegistry::from({}))
+                     .accepted,
                 "tampered signed bake accepted");
         require(!pulp::host::load_baked(bytes, pulp::host::BakedTrust{},
-                                      pulp::host::BakedTypeRegistry::from({})).accepted,
+                                        pulp::host::BakedTypeRegistry::from({}))
+                     .accepted,
                 "untrusted signed bake accepted");
         require(!pulp::host::load_baked(bytes, trust, {}).accepted,
                 "legacy v1 loader admitted v2 sample-region bake");
         write_text(directory / "allpass.pulpgraph", graph_json);
-        write_bytes(directory / "allpass.pulpbake", reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        write_bytes(directory / "allpass.pulpbake", reinterpret_cast<const char*>(bytes.data()),
+                    bytes.size());
         doctor(directory);
         std::ostringstream error_number;
         error_number << std::setprecision(17) << maximum_error;
-        write_text(directory / "consumer-receipt.json",
-                   "{\"schema\":\"pulp.sample-region-installed-consumer.v1\",\"accepted\":true,"
-                   "\"sample_rate\":48000,\"maximum_block\":257,\"renders\":6,"
-                   "\"oracle_tolerance\":1e-6,\"maximum_oracle_error\":" + error_number.str() +
-                   ",\"null_tolerance_dbfs\":-180,\"reported_latency\":0,"
-                   "\"signed_bake_negative_controls\":3,\"lifecycle_recovery_cases\":2,\"measurement_negative_controls\":2,\"constructor_negative_controls\":2}\n");
-        std::cout << "Installed allpass consumer passed: six renders, scalar/null/Doctor gates, signed artifact round trip\n";
+        write_text(
+            directory / "consumer-receipt.json",
+            "{\"schema\":\"pulp.sample-region-installed-consumer.v1\",\"accepted\":true,"
+            "\"sample_rate\":48000,\"maximum_block\":257,\"renders\":6,"
+            "\"oracle_tolerance\":1e-6,\"maximum_oracle_error\":" +
+                error_number.str() +
+                ",\"null_tolerance_dbfs\":-180,\"reported_latency\":0,"
+                "\"signed_bake_negative_controls\":3,\"lifecycle_recovery_cases\":2,\"measurement_"
+                "negative_controls\":2,\"constructor_negative_controls\":2}\n");
+        std::cout << "Installed allpass consumer passed: six renders, scalar/null/Doctor gates, "
+                     "signed artifact round trip\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "sample-region installed consumer: " << error.what() << '\n';
