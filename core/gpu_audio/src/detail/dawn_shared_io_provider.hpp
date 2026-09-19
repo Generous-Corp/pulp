@@ -68,6 +68,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         CompletionPolicy completion_policy = CompletionPolicy::ProcessEvents;
         // Used only by TimedWaitAny.  A zero value uses the provider's
         // dispatcher deadline for each wait; this is not an audio deadline.
+        // Values above std::chrono::nanoseconds::max().count() fail closed.
         std::uint64_t completion_wait_ns = 0;
     };
 

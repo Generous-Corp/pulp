@@ -34,6 +34,8 @@ namespace pulp::gpu_audio::detail {
 namespace {
 
 constexpr auto kDrainLimit = std::chrono::seconds(15);
+constexpr auto kMaxCompletionWaitNs =
+    static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
 
 std::string revision(const std::uint8_t* bytes) {
     if (bytes == nullptr)
@@ -816,6 +818,11 @@ DawnSharedIoProvider::~DawnSharedIoProvider() {
 
 DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& options) noexcept {
     CreateResult result;
+    if (options.completion_wait_ns > kMaxCompletionWaitNs) {
+        result.availability = Availability::Failed;
+        result.reason = "completion_wait_ns_out_of_range";
+        return result;
+    }
     try {
         auto impl = std::make_unique<Impl>(options);
         if (!impl->initialize(result.reason, result.availability))

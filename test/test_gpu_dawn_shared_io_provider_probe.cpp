@@ -23,6 +23,9 @@ using pulp::gpu_audio::detail::SharedIoArena;
 
 namespace {
 
+constexpr auto kMaxCompletionWaitNs =
+    static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
+
 using Clock = std::chrono::steady_clock;
 enum class TransferControl : std::uint8_t { None, WriteBuffer, CopyBuffer, MapAsync };
 
@@ -253,6 +256,7 @@ bool wait_for_output(SharedIoArena& arena, std::uint64_t sequence,
 
 int main(int argc, char** argv) {
     bool strict = false;
+    bool verify_completion_wait_bound = false;
     std::string_view scenario_name = "baseline";
     auto completion_policy = DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
     std::uint64_t completion_wait_ns = 0;
@@ -260,6 +264,8 @@ int main(int argc, char** argv) {
         const std::string_view argument = argv[index];
         if (argument == "--strict")
             strict = true;
+        else if (argument == "--verify-completion-wait-bound")
+            verify_completion_wait_bound = true;
         else if (argument.starts_with("--scenario="))
             scenario_name = argument.substr(std::string_view("--scenario=").size());
         else if (argument.starts_with("--completion-policy=")) {
@@ -278,6 +284,15 @@ int main(int argc, char** argv) {
         }
         else
             return 1;
+    }
+    if (verify_completion_wait_bound) {
+        const auto invalid_wait_ns = kMaxCompletionWaitNs + 1;
+        const auto rejected = DawnSharedIoProvider::create(
+            {.completion_wait_ns = invalid_wait_ns});
+        return !rejected.provider &&
+                       rejected.reason == "completion_wait_ns_out_of_range"
+                   ? 0
+                   : 1;
     }
     const auto scenario = parse_scenario(scenario_name);
     if (!scenario)
