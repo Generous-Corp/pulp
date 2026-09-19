@@ -30,6 +30,7 @@ from typing import Any
 
 
 FORMATS = ("au", "vst3", "clap")
+EXPECTED_BUNDLE_ID = "com.pulp.sample-region-allpass"
 INSTALL_DIRS = {
     "au": Path("Library/Audio/Plug-Ins/Components"),
     "vst3": Path("Library/Audio/Plug-Ins/VST3"),
@@ -120,6 +121,33 @@ def sign_bundle(bundle: Path, *, identity: str, required: bool) -> dict[str, Any
     return result
 
 
+def assert_bundle_identity(bundle: Path, fmt: str) -> dict[str, Any]:
+    """Prove the staged artifact carries the packet's stable bundle identity."""
+    expected = EXPECTED_BUNDLE_ID.encode("ascii")
+    matches = []
+    for child in bundle.rglob("*"):
+        if child.is_file() and not child.is_symlink():
+            try:
+                if expected in child.read_bytes():
+                    matches.append(child.relative_to(bundle).as_posix())
+            except OSError:
+                continue
+    if not matches:
+        raise ValueError(f"{fmt} bundle does not contain bundle id {EXPECTED_BUNDLE_ID}")
+    plist_ids = []
+    for plist_path in bundle.rglob("*.plist"):
+        try:
+            with plist_path.open("rb") as stream:
+                plist = plistlib.load(stream)
+            value = plist.get("CFBundleIdentifier")
+            if value is not None:
+                plist_ids.append(value)
+                if value != EXPECTED_BUNDLE_ID:
+                    raise ValueError(f"{fmt} plist has wrong CFBundleIdentifier: {value!r}")
+        except plistlib.InvalidFileException:
+            continue
+    return {"bundle_id": EXPECTED_BUNDLE_ID, "binary_matches": matches, "plist_ids": plist_ids}
+
 def au_identity(bundle: Path) -> tuple[str, str, str]:
     plist_path = bundle / "Contents" / "Info.plist"
     with plist_path.open("rb") as stream:
@@ -200,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
             copy_bundle(source, destination)
             installed[fmt] = destination
             evidence["bundles"][fmt]["installed"] = str(destination)
+            evidence["bundles"][fmt]["identity"] = assert_bundle_identity(destination, fmt)
             evidence["bundles"][fmt]["signing"] = sign_bundle(destination, identity=args.identity, required=not args.allow_unsigned)
         for fmt, bundle in installed.items():
             command = validator_command(fmt, bundle)
