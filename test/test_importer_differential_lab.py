@@ -199,9 +199,13 @@ class DifferentialLabTests(unittest.TestCase):
         report = {
             "observability": {
                 "ttfp": {"value_ms": None, "status": "unverified"},
-                "ttni": {"value_ms": 12, "status": "measured"},
+                "ttni": {"value_ms": None, "status": "unverified"},
+                "ttni_proxy": {"value_ms": 12, "status": "measured"},
                 "ifnf": {"value_ms": None, "status": "readback-only"},
-                "cache_state": {"identity": "cold"},
+                "cache_state": {
+                    "identity": "cold",
+                    "dimensions": {"dawn_device": "not-applicable"},
+                },
             },
             "promotion": {"classification": "browser-required"},
             "comparison": {name: {"score": 1.0} for name in
@@ -213,6 +217,8 @@ class DifferentialLabTests(unittest.TestCase):
         }
         aggregate = LAB.aggregate_reports([report])
         self.assertEqual(aggregate["observability"]["ttfp"]["status"], "unverified")
+        self.assertEqual(aggregate["observability"]["ttni"]["status"], "unverified")
+        self.assertEqual(aggregate["observability"]["ttni_proxy"]["p50_ms"], 12.0)
         self.assertEqual(aggregate["observability"]["ifnf"]["status"], "readback-only")
         self.assertEqual(aggregate["observability"]["cache_states"], ["cold"])
 
