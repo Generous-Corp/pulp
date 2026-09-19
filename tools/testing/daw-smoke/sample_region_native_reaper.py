@@ -7,6 +7,12 @@ FORMATS=('au','vst3','clap')
 ROOT=Path(__file__).resolve().parent
 LUA=ROOT/'sample_region_native_reaper.lua'
 
+def tree_sha(path):
+    h=hashlib.sha256()
+    for child in sorted(path.rglob('*')):
+        if child.is_file() and not child.is_symlink(): h.update(child.relative_to(path).as_posix().encode()+b'\0'+child.read_bytes())
+    return h.hexdigest()
+
 def run(fmt,bundle,out,timeout):
     out.mkdir(parents=True,exist_ok=True); receipt=out/f'{fmt}-receipt.log'; wav=out/f'{fmt}-impulse-output.wav'; project=out/f'{fmt}.rpp'
     state_before=out/f'{fmt}-state-before.bin'; state_after=out/f'{fmt}-state-after.bin'; input_wav=out/f'{fmt}-impulse-input.wav'
@@ -26,7 +32,7 @@ def run(fmt,bundle,out,timeout):
     rec['state_after_sha256']=hashlib.sha256(state_after.read_bytes()).hexdigest() if state_after.exists() else None
     rec['state_hash_equal']=rec['state_before_sha256'] is not None and rec['state_before_sha256']==rec['state_after_sha256']
     rec['wav_exists']=wav.exists(); rec['wav_sha256']=hashlib.sha256(wav.read_bytes()).hexdigest() if wav.exists() else None
-    rec['bundle_sha256']=hashlib.sha256(bundle.read_bytes()).hexdigest() if bundle.is_file() else None
+    rec['bundle_sha256']=tree_sha(bundle) if bundle.is_dir() else hashlib.sha256(bundle.read_bytes()).hexdigest()
     rec['audio_oracle_pass']=False
     receipt.write_text('[sample-region-f4] '+json.dumps(rec)+'\n')
     return rec
