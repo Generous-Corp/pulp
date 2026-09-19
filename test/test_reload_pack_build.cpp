@@ -67,7 +67,9 @@ TEST_CASE("build_signable_manifest rejects a symlinked bundle file",
     write(b / "real.js", "ctx;");
     std::error_code ec;
     fs::create_symlink(b / "real.js", b / "link.js", ec);
-    if (ec) { SUCCEED("platform has no symlinks; skipping"); return; }
+    if (ec) {
+        SKIP("platform has no symlinks; skipping");
+    }
     auto r = build_signable_manifest(b, "p", 1, "");
     REQUIRE_FALSE(r.ok);
     REQUIRE(r.error.find("symlink") != std::string::npos);

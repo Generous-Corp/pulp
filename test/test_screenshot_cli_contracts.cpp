@@ -598,8 +598,7 @@ TEST_CASE("pulp-screenshot --compare scores similarity and writes a diff image",
         "--backend", "default"
     });
     if (made != 0 || !std::filesystem::is_regular_file(img)) {
-        SUCCEED("no raster backend in this build — cannot produce a PNG to compare");
-        return;
+        SKIP("no raster backend in this build — cannot produce a PNG to compare");
     }
 
     // Identical inputs → similarity 1.0 ≥ threshold → exit 0 (PASS).

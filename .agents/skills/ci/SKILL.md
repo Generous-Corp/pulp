@@ -690,6 +690,37 @@ runner.environment == 'self-hosted'`. The second clause matters: when
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` is unset the leg falls back to hosted
 `macos-15`, which has no representative GPU and must not opt in.
 
+### Where to read what did NOT run
+
+`build.yml`'s ctest call passes `--output-junit`, and an `if: always()` step
+turns that report into a job-summary table of every `notrun`/`disabled` case.
+Read it before concluding a green `macos` check means the suite ran: ctest
+returns 0 whether every test passed or every skip-capable test declined, so the
+required check is green either way and the table is the only place the
+difference appears.
+
+Two traps in reading it:
+
+- The table's population is what ctest **attempted**. `ctest -N` is the control
+  for what is **registered**, and the step prints both. A gap between them is
+  real information rather than a fault: label exclusions, `--exclude-regex`, and
+  configure-time absence remove tests from the report entirely, and a test that
+  was never configured is not a skip at all.
+- ctest's `<skipped message=...>` is the mechanism, not the reason. It reads
+  `SKIP_RETURN_CODE=4` for every Catch2 skip in the suite. The author's reason
+  lives in the captured console output, under `<file>:<line>: SKIPPED:` /
+  `explicitly with message:`, which is where `tools/scripts/ctest_nonruns.py`
+  recovers it from. A row that shows the bare mechanism is a non-Catch2 skip,
+  typically a script exiting `SKIP_RETURN_CODE`.
+
+The step asserts nothing, deliberately. Skipping is frequently correct (no GPU,
+no device, no vendor SDK, wrong platform) and a rule that made skips fail has
+already caused an iOS-gate outage once; the defect being addressed is
+invisibility, not skipping. In test source the corresponding rule is that an
+unmet precondition uses Catch2's `SKIP()`, never `SUCCEED`/`WARN`/a bare
+`return;`, all of which leave the case passing and therefore invisible here.
+`tools/scripts/check_skip_not_pass.py` enforces that mechanically.
+
 ## A ctest SKIP is green, so a test that never ran reads as a passing one
 
 `SKIP_RETURN_CODE` is the right tool — a test needing a GPU, a device, an absent

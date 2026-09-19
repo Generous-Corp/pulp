@@ -98,8 +98,7 @@ TEST_CASE("the pump's nominal dt is seeded from a link that has never run",
     // no window-server display list, which is what a headless test runner is.
     if (CVDisplayLinkCreateWithCGDisplay(CGMainDisplayID(), &link) != kCVReturnSuccess ||
         !link) {
-        SUCCEED("no display attached to this process — nothing to seed from");
-        return;
+        SKIP("no display attached to this process — nothing to seed from");
     }
 
     const double measured = CVDisplayLinkGetActualOutputVideoRefreshPeriod(link);
@@ -150,8 +149,7 @@ TEST_CASE("an open display-link driver refuses to replace its own handle",
     // link and leave its callback firing at a host that thinks it owns one link.
     MacDisplayLinkDriver driver;
     if (!driver.open(&counting_link_callback, nullptr)) {
-        SUCCEED("no display list in this process — no link to open");
-        return;
+        SKIP("no display list in this process — no link to open");
     }
     REQUIRE(driver.is_open());
     REQUIRE_FALSE(driver.open(&counting_link_callback, nullptr));

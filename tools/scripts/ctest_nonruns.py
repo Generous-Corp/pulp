@@ -15,6 +15,9 @@ import xml.etree.ElementTree as ET
 
 MAX_BYTES = 64 * 1024 * 1024
 MAX_ROWS = 100
+# Bounds on the captured-output scan that recovers a Catch2 skip reason.
+MAX_SCAN_LINES = 400
+MAX_MESSAGE_LINES = 8
 STATUSES = ("run", "fail", "notrun", "disabled")
 
 
@@ -28,6 +31,43 @@ class CTestTree(ET.TreeBuilder):
 def bounded_text(value: str, limit: int = 512) -> str:
     value = "".join(c for c in value if c.isprintable() or c == "\n")
     return value[:limit] + ("…" if len(value) > limit else "")
+
+
+def catch2_skip(output: list[str]) -> tuple[str, str]:
+    """Recover the author's skip reason and source location from Catch2 output.
+
+    CTest's `<skipped message=...>` is the MECHANISM: the literal
+    `SKIP_RETURN_CODE=N`, identical for every Catch2 skip in a suite. A report
+    built from it names which tests did not run and never why, so every row
+    renders the same and the summary carries one fact repeated N times.
+
+    The author's reason is present, one level down -- Catch2 prints it into the
+    captured console output rather than into an attribute:
+
+        path/to/test.cpp:140: SKIPPED:
+        explicitly with message:
+          pulp binary not built for this test run; skipping
+
+    Returns ("", "") when no such block is present, which is the right answer
+    for a non-Catch2 skip: a script exiting SKIP_RETURN_CODE has no block, and
+    the caller then falls back to the mechanism rather than rendering a blank.
+    """
+    for index, line in enumerate(output[:MAX_SCAN_LINES]):
+        line = line.rstrip()
+        if not line.endswith(": SKIPPED:"):
+            continue
+        where = line[: -len(": SKIPPED:")].strip()
+        rest = output[index + 1 : index + 1 + MAX_MESSAGE_LINES]
+        if rest and rest[0].strip() == "explicitly with message:":
+            rest = rest[1:]
+        message = []
+        for entry in rest:
+            if not entry.strip():
+                break
+            message.append(entry.strip())
+        if message:
+            return " ".join(message), where
+    return "", ""
 
 
 def read_report(path: Path) -> bytes:
@@ -101,12 +141,17 @@ def observe_with_cases(path: Path, registered=None, raw_lines=None) -> tuple[dic
                 continue
             labels = [p.get("value", "") for p in case.iterfind("properties/property") if p.get("name") == "cmake_labels"]
             output = (case.findtext("system-out") or "").strip().splitlines()
+            # Prefer the author's reason and source location over the mechanism
+            # and the trailing output line, both of which are constants across
+            # every Catch2 skip in the suite.
+            message, where = catch2_skip(output)
+            mechanism = (skipped.get("message") if skipped is not None else None) or status
             rows.append({
                 "index": index + 1, "name": bounded_text(case.get("name", "")),
                 "status": status,
-                "reason": bounded_text((skipped.get("message") if skipped is not None else None) or status),
+                "reason": bounded_text(message or mechanism),
                 "labels": bounded_text(";".join(labels)),
-                "output": bounded_text(output[-1] if output else "", 160),
+                "output": bounded_text(where or (output[-1] if output else ""), 160),
             })
         report.update(counts=counts, nonruns=rows)
         for field, status in (("failures", "fail"), ("disabled", "disabled"), ("skipped", "notrun")):

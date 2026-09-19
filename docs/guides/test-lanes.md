@@ -192,8 +192,13 @@ Express this **in the test source**, not with a label:
 
 - Guard the affected `TEST_CASE`s on `PULP_TEST_WITH_SANITIZER`, which a target
   picks up via `$<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>`.
-- Skip with a stated reason (`SUCCEED("skipped under a sanitizer build: …")`), so
-  the lane records *why* rather than passing silently.
+- Skip with a stated reason: `SKIP("…")`, never `SUCCEED`, `WARN` or a bare
+  `return;`. Those three leave the Catch2 case **passing**, so the lane records
+  nothing and the suite's pass count is identical whether the case ran or its
+  precondition vanished. `SKIP()` is what ctest surfaces as `***Skipped`
+  (`tools/cmake/PulpCatch.cmake` sets `SKIP_RETURN_CODE 4` on every discovered
+  case) and what the required gate's non-run summary lists.
+  `tools/scripts/check_skip_not_pass.py` checks this mechanically.
 - Keep the explanation in one place — `test/support/control_runtime_closure_sanitizer.hpp`
   holds it for this case, including the measured dylib path.
 

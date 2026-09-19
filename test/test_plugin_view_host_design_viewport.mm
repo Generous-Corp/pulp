@@ -176,8 +176,7 @@ TEST_CASE("PluginViewHost (mac GPU) — set_design_viewport renders + inverse-ma
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — GPU design-viewport smoke skipped.");
-            return;
+            SKIP("No Cocoa window — GPU design-viewport smoke skipped.");
         }
 
         View root;

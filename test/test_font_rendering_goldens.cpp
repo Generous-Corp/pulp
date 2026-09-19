@@ -393,9 +393,8 @@ TEST_CASE("font rendering golden: Inter 14px CJK 日本語 on raster",
             .resolve_character_fallback(probe_opts, primary,
                                         /*U+65E5 日*/ 0x65E5);
         if (!cjk.has_typeface()) {
-            SUCCEED("CJK fallback unavailable on this host — "
-                    "golden skipped (resolver probe negative).");
-            return;
+            SKIP("CJK fallback unavailable on this host — "
+                 "golden skipped (resolver probe negative).");
         }
     }
 

@@ -79,8 +79,7 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_SHARED is implemented",
           "[audio][wasapi][share-mode][gap-doc][issue-302]") {
     WasapiSystem sys;
     if (!has_default_render(sys)) {
-        SUCCEED("no default render endpoint on this host; skipping");
-        return;
+        SKIP("no default render endpoint on this host; skipping");
     }
     auto device = sys.create_device("");
     REQUIRE(device != nullptr);
@@ -139,8 +138,7 @@ TEST_CASE("WASAPI mode coverage: shared low-latency open succeeds or honest-"
     // rate/buffer) or fully closed — never a half-initialized device.
     WasapiSystem sys;
     if (!has_default_render(sys)) {
-        SUCCEED("no default render endpoint on this host; skipping");
-        return;
+        SKIP("no default render endpoint on this host; skipping");
     }
     auto device = sys.create_device("");
     REQUIRE(device != nullptr);
@@ -170,8 +168,7 @@ TEST_CASE("WASAPI mode coverage: exclusive open succeeds or honest-fails "
     // fails (NOT is_open) — it never leaves a half-initialized device.
     WasapiSystem sys;
     if (!has_default_render(sys)) {
-        SUCCEED("no default render endpoint on this host; skipping");
-        return;
+        SKIP("no default render endpoint on this host; skipping");
     }
     auto device = sys.create_device("");
     REQUIRE(device != nullptr);
@@ -198,8 +195,7 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
           "[audio][wasapi][share-mode][gap-doc][issue-302]") {
     WasapiSystem sys;
     if (!has_default_render(sys)) {
-        SUCCEED("no default render endpoint on this host; skipping");
-        return;
+        SKIP("no default render endpoint on this host; skipping");
     }
 
     // Open the device in (the only path Pulp supports) shared mode, then
@@ -241,8 +237,7 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
         reinterpret_cast<void**>(&enumerator));
     if (FAILED(hr)) {
         device->close();
-        SUCCEED("MMDeviceEnumerator unavailable; skipping exclusive probe");
-        return;
+        SKIP("MMDeviceEnumerator unavailable; skipping exclusive probe");
     }
 
     IMMDevice* mm_device = nullptr;
@@ -250,8 +245,7 @@ TEST_CASE("WASAPI mode coverage: AUDCLNT_SHAREMODE_EXCLUSIVE on the same "
     if (FAILED(hr) || !mm_device) {
         enumerator->Release();
         device->close();
-        SUCCEED("no default endpoint for parallel probe; skipping");
-        return;
+        SKIP("no default endpoint for parallel probe; skipping");
     }
 
     IAudioClient* exclusive_client = nullptr;

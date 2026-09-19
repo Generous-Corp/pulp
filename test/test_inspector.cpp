@@ -6186,8 +6186,7 @@ TEST_CASE("InspectorOverlay T2: primary-select selects all, then paste replaces 
 
     // Seed the clipboard, then paste — replaces the full selection.
     if (!pulp::platform::Clipboard::set_text("WORLD")) {
-        SUCCEED("native clipboard unavailable on this platform");
-        return;
+        SKIP("native clipboard unavailable on this platform");
     }
     KeyEvent paste;
     paste.key = KeyCode::v;

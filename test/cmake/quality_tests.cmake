@@ -273,20 +273,26 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME canvas-path-flush-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_canvas_path_flush.py")
 
-    # GPU skip-not-pass lint: a GPU case that finds no adapter must report
+    # Skip-not-pass lint: a case that cannot meet its precondition must report
     # Catch2's SKIP(), which ctest surfaces as ***Skipped. SUCCEED(), WARN(),
     # and a bare `return;` all leave the case PASSING, so the suite's pass count
-    # is identical whether the GPU lane ran or the adapter vanished -- the day
-    # the hardware goes away, nothing changes colour. The selftest is the
-    # load-bearing half: it proves the rule tells `if (!gpu) return;` (skip
-    # because the device is missing) from `if (node.gpu_available()) return;`
-    # (skip because it is present), so the gate cannot force a conversion that
-    # would delete a real assertion.
-    add_test(NAME gpu-skip-not-pass-lint COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/tools/scripts/check_gpu_skip_not_pass.py"
+    # is identical whether the lane ran or the precondition vanished -- the day
+    # the hardware, the SDK or the built binary goes away, nothing changes
+    # colour. Scoped to the whole test tree: the defect is not GPU-specific and
+    # recurred in file families no GPU-shaped glob reaches.
+    #
+    # The selftest is the load-bearing half. It proves two discriminations the
+    # gate would otherwise get wrong in opposite directions: `if (!gpu) return;`
+    # (skip because the device is missing) versus `if (node.gpu_available())
+    # return;` (skip because it is present), so the gate cannot force a
+    # conversion that deletes a real assertion; and a message stating an
+    # observed outcome versus one stating that nothing was observed, without
+    # which a whole-tree scan reports every informational assertion in the tree.
+    add_test(NAME skip-not-pass-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/check_skip_not_pass.py"
         --root "${CMAKE_SOURCE_DIR}")
-    add_test(NAME gpu-skip-not-pass-lint-selftest COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_gpu_skip_not_pass.py")
+    add_test(NAME skip-not-pass-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_skip_not_pass.py")
 
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make

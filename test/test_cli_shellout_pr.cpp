@@ -13,7 +13,9 @@ using namespace pulp_test_cli;
 
 TEST_CASE("pulp pr validates workflow selection before shipping",
           "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar home_env("PULP_HOME");
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -59,7 +61,9 @@ TEST_CASE("pulp pr validates workflow selection before shipping",
 
 TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
           "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar home_env("PULP_HOME");
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -97,7 +101,9 @@ TEST_CASE("pulp pr manual and github workflows avoid Shipyard mutation",
 
 TEST_CASE("pulp pr github workflow requires gh for real PR creation",
           "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar home_env("PULP_HOME");
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -126,7 +132,9 @@ TEST_CASE("pulp pr github workflow requires gh for real PR creation",
 #if !defined(_WIN32)
 TEST_CASE("pulp pr delegates shipyard workflow when the pinned binary is present",
           "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar home_env("PULP_HOME");
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -157,7 +165,9 @@ TEST_CASE("pulp pr delegates shipyard workflow when the pinned binary is present
 
 TEST_CASE("pulp status reports shipyard version and pin health",
           "[cli][shellout][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar home_env("PULP_HOME");
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -191,7 +201,9 @@ TEST_CASE("pulp status reports shipyard version and pin health",
 
 TEST_CASE("pulp pr without shipyard prints install guidance",
           "[cli][shellout][pr][issue-643]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar path("PATH");
     path.set("");
@@ -208,7 +220,9 @@ TEST_CASE("pulp pr without shipyard prints install guidance",
 
 TEST_CASE("pulp pr github workflow requires gh instead of falling back from shipyard",
           "[cli][shellout][pr][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar path("PATH");
     ScopedEnvVar workflow("PULP_PR_WORKFLOW");
@@ -226,7 +240,9 @@ TEST_CASE("pulp pr github workflow requires gh instead of falling back from ship
 
 TEST_CASE("pulp pr manual workflow does not require shipyard",
           "[cli][shellout][pr][pr-workflow]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar path("PATH");
     path.set("");
@@ -240,7 +256,9 @@ TEST_CASE("pulp pr manual workflow does not require shipyard",
 
 TEST_CASE("pulp pr native help stays available without shipyard",
           "[cli][shellout][pr][issue-643]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar path("PATH");
     path.set("");
@@ -255,7 +273,9 @@ TEST_CASE("pulp pr native help stays available without shipyard",
 
 TEST_CASE("pulp pr native validates option values before checkout lookup",
           "[cli][shellout][pr]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     const auto bin = fs::absolute(pulp_binary());
     auto cwd_saver = fs::current_path();
@@ -279,7 +299,9 @@ TEST_CASE("pulp pr native validates option values before checkout lookup",
 
 TEST_CASE("pulp pr native mode refuses to run outside a project",
           "[cli][shellout][pr][issue-643]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     ScopedEnvVar path("PATH");
     path.set("");
@@ -298,7 +320,9 @@ TEST_CASE("pulp pr native mode refuses to run outside a project",
 #if !defined(_WIN32)
 TEST_CASE("pulp pr delegates to shipyard with forwarded arguments",
           "[cli][shellout][pr][issue-643]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto fake_dir = unique_temp_dir("pulp-pr-fake-shipyard");
     fs::create_directories(fake_dir);
