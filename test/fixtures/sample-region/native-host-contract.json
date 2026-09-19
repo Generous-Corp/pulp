@@ -58,9 +58,9 @@
       "SampleRegionAllpass_AU"
     ],
     "bundles": {
-      "au": "SampleRegionAllpass.component",
-      "vst3": "SampleRegionAllpass.vst3",
-      "clap": "SampleRegionAllpass.clap"
+      "au": "Sample Region Allpass.component",
+      "vst3": "Sample Region Allpass.vst3",
+      "clap": "Sample Region Allpass.clap"
     }
   }
 }
