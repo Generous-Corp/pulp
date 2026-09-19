@@ -3,9 +3,19 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, shutil, subprocess, tempfile, time
 from pathlib import Path
+import struct
+import sys
+import wave
 FORMATS=('au','vst3','clap')
 ROOT=Path(__file__).resolve().parent
 LUA=ROOT/'sample_region_native_reaper.lua'
+
+def receipt_verdict(receipt):
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('sample_region_native_smoke', ROOT/'sample_region_native_smoke.py')
+    mod=importlib.util.module_from_spec(spec); sys.modules[spec.name]=mod; spec.loader.exec_module(mod)
+    verdict=mod.validate_receipt(receipt, expected_format=receipt.get('format'))
+    return verdict.code, verdict.reason
 
 def tree_sha(path):
     h=hashlib.sha256()
@@ -16,7 +26,6 @@ def tree_sha(path):
 def run(fmt,bundle,out,timeout):
     out.mkdir(parents=True,exist_ok=True); receipt=out/f'{fmt}-receipt.log'; wav=out/f'{fmt}-impulse-output.wav'; project=out/f'{fmt}.rpp'
     state_before=out/f'{fmt}-state-before.bin'; state_after=out/f'{fmt}-state-after.bin'; input_wav=out/f'{fmt}-impulse-input.wav'
-    import wave, struct
     with wave.open(str(input_wav),'wb') as w:
         w.setnchannels(1); w.setsampwidth(4); w.setframerate(48000); samples=[1.0]+[0.0]*16383; w.writeframes(struct.pack('<16384f',*samples))
     env=os.environ.copy(); env.update(PULP_F4_FORMAT=fmt,PULP_F4_FX_NAME='Sample Region Allpass',PULP_F4_PLUGIN_PATH=str(bundle),PULP_F4_WAV=str(wav),PULP_F4_PROJECT=str(project),PULP_F4_RECEIPT=str(receipt),PULP_F4_STATE_BEFORE=str(state_before),PULP_F4_STATE_AFTER=str(state_after),PULP_F4_INPUT_WAV=str(input_wav))
@@ -32,6 +41,11 @@ def run(fmt,bundle,out,timeout):
     rec['state_after_sha256']=hashlib.sha256(state_after.read_bytes()).hexdigest() if state_after.exists() else None
     rec['state_hash_equal']=rec['state_before_sha256'] is not None and rec['state_before_sha256']==rec['state_after_sha256']
     rec['wav_exists']=wav.exists(); rec['wav_sha256']=hashlib.sha256(wav.read_bytes()).hexdigest() if wav.exists() else None
+    if rec['wav_exists']:
+        with wave.open(str(wav),'rb') as w:
+            raw=w.readframes(w.getnframes())
+            values=struct.unpack('<%df'%(len(raw)//4),raw) if raw else ()
+            rec['audio_peak']=max((abs(v) for v in values),default=0.0)
     rec['bundle_sha256']=tree_sha(bundle) if bundle.is_dir() else hashlib.sha256(bundle.read_bytes()).hexdigest()
     rec['audio_oracle_pass']=False
     receipt.write_text('[sample-region-f4] '+json.dumps(rec)+'\n')
@@ -50,7 +64,12 @@ def main(argv=None):
             q=subprocess.run(['python3',str(oracle),'--reference',str(a.reference),'--candidate',str(wav),'--pulp',a.pulp,'--evidence',str(ev)],check=False)
             rec['audio_oracle']=str(ev); rec['audio_oracle_returncode']=q.returncode; rec['audio_oracle_pass']=q.returncode==0
             receipt=a.out/f'{fmt}-receipt.log'; receipt.write_text('[sample-region-f4] '+json.dumps(rec)+'\n')
-        else: rec['audio_oracle_pass']=False
+        else:
+            rec['audio_oracle_pass']=False
+        code, reason = receipt_verdict(rec)
+        rec['status']='passed' if code == 0 else ('failed' if code == 1 else 'inconclusive')
+        rec['verdict_reason']=reason
+        receipt=a.out/f'{fmt}-receipt.log'; receipt.write_text('[sample-region-f4] '+json.dumps(rec)+'\n')
         results.append(rec)
     summary={'packet':'PKT-F4-01','acceptance':'PUB-04','results':results,'status':'passed' if all(r.get('status')=='passed' for r in results) else 'inconclusive'}
     a.out.mkdir(parents=True,exist_ok=True); (a.out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n'); print(json.dumps(summary,indent=2)); return 0 if summary['status']=='passed' else 3
