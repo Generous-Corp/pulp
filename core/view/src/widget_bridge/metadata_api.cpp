@@ -1,10 +1,10 @@
 // widget_bridge/metadata_api.cpp - metadata registrations for WidgetBridge.
 
-#include <pulp/view/widget_bridge.hpp>
+#include "api_registry.hpp"
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>
-#include "api_registry.hpp"
+#include <pulp/view/widget_bridge.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -57,8 +57,7 @@ bool is_ancestor_or_self(const View* ancestor, const View* view) noexcept {
 // use translation and scrolling here; transformed surfaces still pass through
 // the normal point_to_local path on the owner.
 Point point_to_root_translation(Point point, View* target, View* root) {
-    for (auto* current = target; current && current != root;
-         current = current->parent()) {
+    for (auto* current = target; current && current != root; current = current->parent()) {
         if (auto* scroll = dynamic_cast<ScrollView*>(current)) {
             point.x -= scroll->scroll_x();
             point.y -= scroll->scroll_y();
@@ -240,22 +239,27 @@ struct ContextMenuRelay {
     std::function<void(Point)> previous;
 
     void operator()(Point point) const {
-        if (!root || root_lifetime.expired()) return;
+        if (!root || root_lifetime.expired())
+            return;
         auto* live_target = target_capture.live_in(*root);
-        if (!live_target) return;
+        if (!live_target)
+            return;
         RelayDispatchScope dispatch_scope(live_target);
-        if (!dispatch_scope.entered()) return;
-        if (previous) previous(point);
-        if (!root || root_lifetime.expired()) return;
+        if (!dispatch_scope.entered())
+            return;
+        if (previous)
+            previous(point);
+        if (!root || root_lifetime.expired())
+            return;
         live_target = target_capture.live_in(*root);
-        if (!live_target) return;
+        if (!live_target)
+            return;
         auto* live_owner = owner_capture.live_in(*root);
-        if (!live_owner || is_ancestor_or_self(live_owner, live_target)) return;
+        if (!live_owner || is_ancestor_or_self(live_owner, live_target))
+            return;
         if (live_owner->on_context_menu) {
-            const auto root_point =
-                point_to_root_translation(point, live_target, root);
-            live_owner->on_context_menu(
-                point_to_local(root_point, live_owner, root));
+            const auto root_point = point_to_root_translation(point, live_target, root);
+            live_owner->on_context_menu(point_to_local(root_point, live_owner, root));
         }
     }
 };
@@ -282,8 +286,7 @@ std::function<void()> unwrap_click_relay(std::function<void()> callback) {
     return callback;
 }
 
-std::function<void(Point)> unwrap_context_menu_relay(
-    std::function<void(Point)> callback) {
+std::function<void(Point)> unwrap_context_menu_relay(std::function<void(Point)> callback) {
     while (auto* relay = callback.target<ContextMenuRelay>())
         callback = relay->previous;
     return callback;
@@ -368,9 +371,8 @@ ClickRelay make_click_relay(View& root, View* target, View* owner,
     return relay;
 }
 
-ContextMenuRelay make_context_menu_relay(
-    View& root, View* target, View* owner,
-    std::function<void(Point)> previous) {
+ContextMenuRelay make_context_menu_relay(View& root, View* target, View* owner,
+                                         std::function<void(Point)> previous) {
     ContextMenuRelay relay;
     relay.root = &root;
     relay.root_lifetime = root.import_binding_lifetime_token();
@@ -521,8 +523,7 @@ bool bind_canvas_program(View& root, std::string anchor, CanvasWidget* source,
         target_view->on_dom_pointer_move_event);
     auto previous_wheel = unwrap_dom_wheel_relay(target_view->on_dom_wheel_event);
     auto previous_click = unwrap_click_relay(target_view->on_click);
-    auto previous_context_menu = unwrap_context_menu_relay(
-        target_view->on_context_menu);
+    auto previous_context_menu = unwrap_context_menu_relay(target_view->on_context_menu);
     if (behavior_owner) {
         target_view->on_dom_pointer_event = make_dom_pointer_relay(
             root, target_view, source, behavior_owner, false,
@@ -538,8 +539,8 @@ bool bind_canvas_program(View& root, std::string anchor, CanvasWidget* source,
             root, target_view, behavior_owner, std::move(previous_wheel));
         target_view->on_click = make_click_relay(
             root, target_view, behavior_owner, std::move(previous_click));
-        target_view->on_context_menu = make_context_menu_relay(
-            root, target_view, behavior_owner, std::move(previous_context_menu));
+        target_view->on_context_menu = make_context_menu_relay(root, target_view, behavior_owner,
+                                                               std::move(previous_context_menu));
     } else {
         // No owner means this call only establishes the paint/input surface;
         // restore the target's pre-bind callbacks rather than clearing them.

@@ -417,8 +417,7 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
 
     int context_menus = 0;
     Point observed_context_position;
-    behavior_wrapper->on_context_menu = [&context_menus,
-                                          &observed_context_position](Point p) {
+    behavior_wrapper->on_context_menu = [&context_menus, &observed_context_position](Point p) {
         ++context_menus;
         observed_context_position = p;
     };
