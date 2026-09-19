@@ -1199,6 +1199,7 @@ TEST_CASE("Vite URL intake ignores lexical false positives and malformed calls",
           /* new URL('./block.png', import.meta.url) */
           const quoted = "new URL('./string.png', import.meta.url)";
           const escaped = 'skip\\\' quote';
+          new URL('./valid.png', import.meta.url);
           new Nope('./wrong-constructor.png', import.meta.url);
           new URL;
           new URL foo;
@@ -1207,7 +1208,6 @@ TEST_CASE("Vite URL intake ignores lexical false positives and malformed calls",
           new URL('./missing-comma.png' import.meta.url);
           new URL('./wrong-meta.png', other.url);
           new URL('./missing-close.png', import.meta.url;
-          new URL('./valid.png', import.meta.url);
         </script></body></html>
     )html");
 
