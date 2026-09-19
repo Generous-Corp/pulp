@@ -559,6 +559,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gate-common-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_common.py")
 
+    # The bypass trailers that withhold a release tag, classified through the
+    # same parse the pre-merge gates use. A tag that is withheld by a trailer
+    # nobody declared reports nothing at all, so this failure mode has no other
+    # observer; the shell half runs auto-release.yml's own step body.
+    add_test(NAME release-trailer-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_release_trailer_guard.py")
+
     # Runner-topology guard: pure reconciliation logic (label matching, the
     # black-hole / offline / ephemeral-idle distinction, contract drift) plus a
     # well-formedness check of the shipped routing contract. No network — the

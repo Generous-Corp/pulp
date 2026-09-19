@@ -14,7 +14,9 @@ from auto_release_decision import decide
 from gate_common import (
     git_commit_trailers,
     git_range_trailers,
+    release_skip_declared,
     repo_root as discover_repo_root,
+    version_bump_skip_reason,
 )
 from version_bump_surfaces import load_config, version_at_base
 
@@ -60,23 +62,16 @@ def _find_bump_commit(head: str, version_file, current: str | None) -> str:
 
 
 def _has_release_skip(sha: str) -> bool:
+    """Whether ``sha`` declares `Release: skip`, as auto-release.yml reads it.
+
+    This report exists to PREDICT the tags a merge will create, so it has to
+    classify a bypass exactly the way the tagger does — including recovering a
+    declaration a merge-queue squash buried mid-body without honouring one that
+    is merely quoted there. `git_commit_trailers` already does both.
+    """
     if not sha:
         return False
-    parsed_skip = any(
-        re.match(r"^\s*skip\b", value, re.IGNORECASE)
-        for value in git_commit_trailers(sha).get("release", [])
-    )
-    if parsed_skip:
-        return True
-    body = subprocess.run(
-        ["git", "show", "-s", "--format=%B", sha],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    return bool(
-        re.search(r"(?im)^[ \t]*release:[ \t]+skip(?:[ \t]|$)", body)
-    )
+    return release_skip_declared(git_commit_trailers(sha))
 
 
 def _resolve_commit(ref: str) -> str:
@@ -132,15 +127,10 @@ def _auto_release_guard_reason(
         subject = pr_title.strip()
         trailers = git_range_trailers(base_sha, sha)
 
-    if any(
-        re.match(r"^\s*skip\b", value, re.IGNORECASE)
-        for value in trailers.get("release", [])
-    ):
+    if release_skip_declared(trailers):
         return "squash message carries Release: skip"
-    for value in trailers.get("version-bump", []):
-        match = re.match(r"^\s*skip\b(.*)$", value, re.IGNORECASE)
-        if match and re.search(r'reason\s*=\s*"[^"]+"', match.group(1)):
-            return "squash message carries top-level Version-Bump: skip"
+    if version_bump_skip_reason(trailers) is not None:
+        return "squash message carries top-level Version-Bump: skip"
     if subject.lower().startswith("revert"):
         return "squash subject is a revert"
     for value in trailers.get("revert-of", []):

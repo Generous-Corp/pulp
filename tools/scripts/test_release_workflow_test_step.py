@@ -2095,20 +2095,22 @@ class StrandedReleaseTrackerWorkflow(unittest.TestCase):
         )
 
     def test_squash_guard_reads_embedded_source_skip_trailers(self) -> None:
-        self.assertIn("COMMIT_MESSAGES squash bodies", self.auto_release)
+        """A bypass a merge-queue squash buried mid-body must still count, and
+        one that is merely quoted there must not.
+
+        Both calls live in `release_trailer_guard.py`, over the same parse the
+        pre-merge gates use; `test_release_trailer_guard.py` exercises that
+        behaviour against the step body extracted from this workflow. What is
+        asserted here is the routing — that the step has not grown a pattern of
+        its own back, which is how it came to honour a quoted example.
+        """
+        self.assertIn("COMMIT_MESSAGES squash body", self.auto_release)
         self.assertIn(
-            "^[[:space:]]*release:[[:space:]]+skip",
-            self.auto_release,
+            "python3 tools/scripts/release_trailer_guard.py", self.auto_release
         )
-        self.assertIn(
-            "^[[:space:]]*version-bump:[[:space:]]+skip",
-            self.auto_release,
-        )
-        self.assertIn("bump_body=$(git log -1 --format=%B", self.auto_release)
-        self.assertIn(
-            'printf \'%s\\n\' "$bump_body" | grep -iqE',
-            self.auto_release,
-        )
+        self.assertIn("guard release-skip HEAD", self.auto_release)
+        self.assertIn("guard version-bump-skip HEAD", self.auto_release)
+        self.assertIn("--query release-skip --ref \"$sha\"", self.auto_release)
         self.assertIn(
             "Unresolved Revert-Of trailer; treating this as an ordinary change",
             self.auto_release,
