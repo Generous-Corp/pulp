@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the real REAPER PUB-04 journey and validate its host-bound receipt."""
 from __future__ import annotations
-import argparse, hashlib, json, os, shutil, subprocess, tempfile, time
+import argparse, hashlib, json, os, re, shutil, subprocess, tempfile, time
 from pathlib import Path
 import struct
 import sys
@@ -53,7 +53,7 @@ def normalized_state(data):
         if in_env:
             if line.strip()=='>': in_env=False
             continue
-        if any(line.lstrip().startswith(k) for k in ('GUID ','IGUID ','FXID ','EGUID ','TRACKID ')): continue
+        if any(line.lstrip().startswith(k) for k in ('GUID ','IGUID ','FXID ','EGUID ','TRACKID ','LANEREC ')): continue
         kept.append(line)
     return '\n'.join(kept).encode()
 
@@ -82,10 +82,10 @@ def run(fmt,bundle,out,timeout):
     if project.exists() and not wav.exists():
         if fmt in ('au','vst3'):
             # The format adapters declare one mono bus; REAPER's default new
-            # track is stereo.  Normalize the saved host project before its
-            # command-line render so AU/VST3 receive the declared mono layout.
+            # track is stereo. Normalize the saved project before command-line
+            # render so AU/VST3 receive the declared mono layout.
             text=project.read_text()
-            text=text.replace('    NCHAN 2\n','    NCHAN 1\n',1)
+            text=re.sub(r'(?m)^(\s*)NCHAN 2\s*$',r'\g<1>NCHAN 1',text,count=1)
             text=text.replace('<IN_PINS\n        >','<IN_PINS\n          PIN 0 0 1\n        >',1)
             project.write_text(text)
         render_cmd=[reaper,'-newinst','-new','-nosplash','-renderproject',str(project)]

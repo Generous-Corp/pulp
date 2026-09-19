@@ -33,6 +33,16 @@ end
 trace('after_add:'..tostring(fx))
 reaper.SetMediaTrackInfo_Value(tr,'I_NCHAN',1)
 if fx<0 then emit({packet='PKT-F4-01',format=fmt,host='REAPER',error='qualified FX not found: '..qualify()}); return end
+-- REAPER keeps VST3 pin activation separate from the track channel count.
+-- Bind the mono main input/output pins explicitly so the host cannot leave
+-- the component's declared bus inactive while still presenting a stereo
+-- ProcessData shape. TrackFX_SetPinMappings is a documented ReaScript API;
+-- record its return values as host evidence rather than assuming success.
+if fmt=='vst3' and reaper.TrackFX_SetPinMappings then
+  local in_ok=reaper.TrackFX_SetPinMappings(tr,fx,0,0,0,4294967295)
+  local out_ok=reaper.TrackFX_SetPinMappings(tr,fx,1,0,0,4294967295)
+  trace('pin_map:'..tostring(in_ok)..':'..tostring(out_ok))
+end
 local n=reaper.TrackFX_GetNumParams(tr,fx); local ids,names={},{}
 trace('param_count:'..tostring(n))
 for i=0,n-1 do local _,ident=reaper.TrackFX_GetParamIdent(tr,fx,i); local _,name=reaper.TrackFX_GetParamName(tr,fx,i); ids[#ids+1]=string.format('index:%d;ident:%s;name:%s',i,ident or '',name or ''); names[#names+1]=name or '' end
@@ -64,6 +74,25 @@ trace('before_delete'); reaper.TrackFX_Delete(tr,fx); trace('after_delete'); loc
 -- headless render loop.  The delete/reinsert instance is the reload boundary.
 trace('before_after_state'); local _,after=reaper.GetTrackStateChunk(tr,'',false); after=after or ''; write(state_after_path,after); trace('after_after_state:'..tostring(#after))
 if fx<0 then reloaded=-1 end
+-- Restore the exact saved track chunk onto the freshly inserted instance. This
+-- makes the reload receipt prove state persistence rather than only a delete /
+-- reinsert lifecycle event; SetTrackStateChunk is the documented REAPER API.
+if reloaded>=0 and before~='' and reaper.SetTrackStateChunk then
+  local restored=reaper.SetTrackStateChunk(tr,before,false)
+  trace('restore_state:'..tostring(restored))
+  local _,restored_chunk=reaper.GetTrackStateChunk(tr,'',false)
+  restored_chunk=restored_chunk or ''
+  write(state_after_path,restored_chunk)
+  after=restored_chunk
+  trace('after_restore_state:'..tostring(#after))
+end
+if fmt=='vst3' and reloaded>=0 and reaper.TrackFX_SetPinMappings then
+  local in_ok=reaper.TrackFX_SetPinMappings(tr,reloaded,0,0,0,4294967295)
+  local out_ok=reaper.TrackFX_SetPinMappings(tr,reloaded,1,0,0,4294967295)
+  local ir,ih,il=-1,-1,-1; local orr,oh,ol=-1,-1,-1
+  if reaper.TrackFX_GetPinMappings then ir,ih,il=reaper.TrackFX_GetPinMappings(tr,reloaded,0,0); orr,oh,ol=reaper.TrackFX_GetPinMappings(tr,reloaded,1,0) end
+  trace('reload_pin_map:'..tostring(in_ok)..':'..tostring(out_ok)..':'..tostring(ir)..':'..tostring(ih)..':'..tostring(il)..':'..tostring(orr)..':'..tostring(oh)..':'..tostring(ol))
+end
 env=fx>=0 and reaper.GetFXEnvelope(tr,fx,0,true) or nil
 if env then reaper.DeleteEnvelopePointRange(env,-math.huge,math.huge); reaper.Envelope_SortPoints(env) end
 if fx>=0 and reaper.TrackFX_SetParamNormalized then reaper.TrackFX_SetParamNormalized(tr,fx,0,(0.5+0.99)/1.98) end
