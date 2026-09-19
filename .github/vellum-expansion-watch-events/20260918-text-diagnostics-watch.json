@@ -10,10 +10,11 @@
     "design-output-and-packaging",
     "design-source-ingest"
   ],
-  "rationale": "Add offline Pulp browser-capture text diagnostic evidence and a comparison adapter. No generic rendering, canvas, Skia, Vellum, DesignIR payload, runtime capture instrumentation, or ownership boundary changes.",
+  "rationale": "Consume existing Label selection geometry in the Pulp DesignIR observer and add a bounded browser/native diagnostic adapter and sensitivity experiment. No generic rendering paths, DesignIR payload or source authority changes.",
   "tests": [
-    "node --test tools/import-design/browser_capture/text_diagnostics.test.mjs",
-    "Real Chromium retained-capture diagnostic report and controlled mismatch evidence"
+    "node --test tools/import-design/browser_capture/native_text_diagnostics.test.mjs tools/import-design/browser_capture/text_diagnostics.test.mjs",
+    "pulp-design-ir-observe compiler syntax check",
+    "text_diagnostics_native_proof.mjs requires a built observer; receipt only after real native renders"
   ],
   "disposition": "watch-only-no-authority",
   "authority_effect": "none"
