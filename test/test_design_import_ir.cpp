@@ -1125,6 +1125,26 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
         runtime_ir.root.children.push_back(std::move(runtime_link));
         CHECK(collect_design_ir_assets(runtime_ir, options).assets.empty());
     }
+
+    SECTION("literal Vite import.meta URL edges enter the asset manifest") {
+        TempDir tmp("pulp-design-ir-vite-assets");
+        write_text(tmp.path / "hero.png", "vite-image-bytes");
+        auto ir = parse_claude_html(R"html(
+            <html><body><script type="module">
+              const hero = new URL('./hero.png', import.meta.url);
+              const runtime = new URL(`./${name}.png`, import.meta.url);
+            </script></body></html>
+        )html");
+
+        DesignIrAssetOptions options;
+        options.base_directory = tmp.path;
+        refresh_design_ir_asset_manifest(ir, options);
+
+        REQUIRE(ir.asset_manifest.assets.size() == 1);
+        CHECK(ir.asset_manifest.assets.front().original_uri == "./hero.png");
+        CHECK(ir.asset_manifest.assets.front().diagnostics.empty());
+        CHECK_FALSE(ir.asset_manifest.assets.front().content_hash.empty());
+    }
 }
 
 TEST_CASE("DesignIR asset manifest preserves top-level asset refs and writes asset ids",
