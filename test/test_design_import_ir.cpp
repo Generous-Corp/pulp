@@ -1165,23 +1165,21 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
         write_text(relocated.path / "assets/hero.png", "portable-vite-asset");
         std::ifstream package_input;
 
-        DesignIR ir;
-        ir.root.type = "frame";
-        IRAssetRef asset;
-        asset.asset_id = "asset-portable-hero";
-        asset.original_uri = "./hero.png";
-        asset.local_path = "assets/hero.png";
-        asset.content_hash = pulp::runtime::sha256_hex(
-            reinterpret_cast<const uint8_t*>("portable-vite-asset"), 19);
-        ir.asset_manifest.assets.push_back(std::move(asset));
+        DesignIR ir = parse_claude_html(
+            R"html(<html><body><img src="./assets/hero.png"></body></html>)html");
+        DesignIrAssetOptions options;
+        options.base_directory = source.path;
+        refresh_design_ir_asset_manifest(ir, options);
+        REQUIRE(ir.asset_manifest.assets.size() == 1);
+        REQUIRE(ir.asset_manifest.assets.front().local_path ==
+                std::optional<std::string>("assets/hero.png"));
 
         const auto serialized = serialize_design_ir(ir);
         write_text(relocated.path / "scene.pulp.json", serialized);
         package_input.open(relocated.path / "scene.pulp.json", std::ios::binary);
         std::ostringstream package_bytes;
         package_bytes << package_input.rdbuf();
-        const auto reloaded = parse_design_ir_json(
-            package_bytes.str());
+        const auto reloaded = parse_design_ir_json(package_bytes.str());
         REQUIRE(reloaded.asset_manifest.assets.size() == 1);
         const auto resolved = resolve_asset_file(
             reloaded.asset_manifest.assets.front(), relocated.path);
