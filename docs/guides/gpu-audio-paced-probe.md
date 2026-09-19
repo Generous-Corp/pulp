@@ -33,7 +33,15 @@ Supported frames are 32, 64, and 128; lead is 1, 2, 4, or 8 blocks. The sample
 rate is 48 kHz and physical provider slots remain two. `--wake-on-write` enables
 the transport's existing semaphore notification instead of its default polling
 worker. Completion service remains the provider's default `ProcessEvents`
-policy. This command does not select the experimental timed-wait provider.
+policy. The lower-level provider probe can compare this with
+`--completion-policy=wait-any` or `--completion-policy=timed-wait-any`; those
+policies retain each submission's Dawn `Future` handles and wait on the
+serialized non-realtime dispatcher. `timed-wait-any` requests Dawn's
+`TimedWaitAny` instance feature and accepts `--completion-wait-ns=N` as a
+dispatcher wait bound. Pop-error-scope and device-lost callbacks still use
+`AllowProcessEvents` and are explicitly pumped before terminal completion is
+published. These policies keep Dawn calls off the audio callback and do not
+promise hard realtime behavior or GPU scheduling priority.
 The maximum is 20,000 measured blocks per invocation.
 
 `receipt.json` contains configuration, numerical failures, callback overruns,

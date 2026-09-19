@@ -128,8 +128,29 @@ std::optional<Scenario> parse_scenario(std::string_view value) {
     return std::nullopt;
 }
 
+std::optional<DawnSharedIoProvider::CompletionPolicy>
+parse_completion_policy(std::string_view value) {
+    if (value == "process-events")
+        return DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
+    if (value == "wait-any")
+        return DawnSharedIoProvider::CompletionPolicy::WaitAny;
+    if (value == "timed-wait-any")
+        return DawnSharedIoProvider::CompletionPolicy::TimedWaitAny;
+    return std::nullopt;
+}
+
+std::string_view completion_policy_name(DawnSharedIoProvider::CompletionPolicy policy) {
+    switch (policy) {
+        case DawnSharedIoProvider::CompletionPolicy::ProcessEvents: return "process-events";
+        case DawnSharedIoProvider::CompletionPolicy::WaitAny: return "wait-any";
+        case DawnSharedIoProvider::CompletionPolicy::TimedWaitAny: return "timed-wait-any";
+    }
+    return "unknown";
+}
+
 void emit(std::string_view scenario, std::string_view status, std::string_view reason,
-          std::optional<bool> oracle, std::uint32_t alignment, std::uint64_t installs,
+          DawnSharedIoProvider::CompletionPolicy completion_policy, std::optional<bool> oracle,
+          std::uint32_t alignment, std::uint64_t installs,
           const pulp::test::DawnTransferCallCounter::Snapshot& transfers, std::uint64_t submissions,
           const DawnSharedIoProvider::Stats& stats,
           const DawnSharedIoProvider::AdapterIdentity& adapter) {
@@ -137,7 +158,8 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
     const bool have_system_info = uname(&system_info) == 0;
     std::cout << "{\"schema\":\"pulp.gpu-dawn-shared-io-provider.v2\","
               << "\"scenario\":\"" << scenario << "\",\"status\":\"" << status << "\",\"reason\":\""
-              << reason << "\",\"oracle\":";
+              << reason << "\",\"completion_policy\":\""
+              << completion_policy_name(completion_policy) << "\",\"oracle\":";
     if (oracle)
         std::cout << (*oracle ? "true" : "false");
     else
@@ -163,6 +185,10 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
               << ",\"host_frees\":" << stats.host_frees << ",\"drain_calls\":" << stats.drain_calls
               << ",\"failed_drains\":" << stats.failed_drains
               << ",\"terminal_busy_retries\":" << stats.terminal_busy_retries
+              << ",\"process_events_calls\":" << stats.process_events_calls
+              << ",\"wait_any_calls\":" << stats.wait_any_calls
+              << ",\"wait_any_timeouts\":" << stats.wait_any_timeouts
+              << ",\"wait_any_unsupported\":" << stats.wait_any_unsupported
               << ",\"fault_injections\":" << stats.fault_injections << ",\"hardware_model\":\""
               << json_escape(hardware_model()) << "\""
               << ",\"os\":\"" << json_escape(have_system_info ? system_info.sysname : "unknown")
@@ -228,12 +254,28 @@ bool wait_for_output(SharedIoArena& arena, std::uint64_t sequence,
 int main(int argc, char** argv) {
     bool strict = false;
     std::string_view scenario_name = "baseline";
+    auto completion_policy = DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
+    std::uint64_t completion_wait_ns = 0;
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument = argv[index];
         if (argument == "--strict")
             strict = true;
         else if (argument.starts_with("--scenario="))
             scenario_name = argument.substr(std::string_view("--scenario=").size());
+        else if (argument.starts_with("--completion-policy=")) {
+            const auto parsed = parse_completion_policy(
+                argument.substr(std::string_view("--completion-policy=").size()));
+            if (!parsed)
+                return 1;
+            completion_policy = *parsed;
+        } else if (argument.starts_with("--completion-wait-ns=")) {
+            try {
+                completion_wait_ns = std::stoull(std::string(
+                    argument.substr(std::string_view("--completion-wait-ns=").size())));
+            } catch (...) {
+                return 1;
+            }
+        }
         else
             return 1;
     }
@@ -249,11 +291,15 @@ int main(int argc, char** argv) {
     auto created = DawnSharedIoProvider::create(
         {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
          .proc_table_override_for_testing = transfer_counter->deferred_proc_table(),
-         .fault = scenario->fault});
+         .fault = scenario->fault,
+         .completion_policy = completion_policy,
+         .completion_wait_ns = completion_wait_ns});
     if (!created.provider) {
         std::cout << "{\"schema\":\"pulp.gpu-dawn-shared-io-provider.v2\","
                   << "\"scenario\":\"" << scenario->name
-                  << "\",\"status\":\"unavailable\",\"reason\":\"" << created.reason << "\"}\n";
+                  << "\",\"status\":\"unavailable\",\"reason\":\"" << created.reason
+                  << "\",\"completion_policy\":\""
+                  << completion_policy_name(completion_policy) << "\"}\n";
         return strict ? 1 : 77;
     }
     transfer_counter->reset();
@@ -424,7 +470,9 @@ int main(int argc, char** argv) {
         created.provider.reset();
         created = DawnSharedIoProvider::create(
             {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
-             .proc_table_override_for_testing = transfer_counter->deferred_proc_table()});
+             .proc_table_override_for_testing = transfer_counter->deferred_proc_table(),
+             .completion_policy = completion_policy,
+             .completion_wait_ns = completion_wait_ns});
         if (!created.provider) {
             passed = false;
             reason = "same_process_provider_recreate_failed";
@@ -481,10 +529,25 @@ int main(int argc, char** argv) {
         stats.drain_calls += accumulated_stats.drain_calls;
         stats.failed_drains += accumulated_stats.failed_drains;
         stats.terminal_busy_retries += accumulated_stats.terminal_busy_retries;
+        stats.process_events_calls += accumulated_stats.process_events_calls;
+        stats.wait_any_calls += accumulated_stats.wait_any_calls;
+        stats.wait_any_timeouts += accumulated_stats.wait_any_timeouts;
+        stats.wait_any_unsupported += accumulated_stats.wait_any_unsupported;
         stats.fault_injections += accumulated_stats.fault_injections;
     }
+    if (completion_policy != DawnSharedIoProvider::CompletionPolicy::ProcessEvents &&
+        stats.wait_any_calls == 0) {
+        passed = false;
+        reason = "completion_policy_not_exercised";
+    }
+    if (completion_policy == DawnSharedIoProvider::CompletionPolicy::TimedWaitAny &&
+        stats.wait_any_unsupported != 0) {
+        passed = false;
+        reason = "timed_wait_any_unsupported";
+    }
     created.provider.reset();
-    emit(scenario->name, passed ? "passed" : "failed", reason, oracle, alignment, installs,
+    emit(scenario->name, passed ? "passed" : "failed", reason, completion_policy, oracle,
+         alignment, installs,
          transfers, submissions, stats, adapter);
     return passed ? 0 : 1;
 }

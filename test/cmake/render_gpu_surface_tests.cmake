@@ -341,10 +341,23 @@
                 TIMEOUT 60)
             add_test(NAME pulp-gpu-dawn-shared-io-provider-probe
                 COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-wait-any
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict
+                    --completion-policy=wait-any)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-timed-wait-any
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict
+                    --completion-policy=timed-wait-any --completion-wait-ns=1000000)
             set_tests_properties(pulp-gpu-dawn-shared-io-provider-probe PROPERTIES
                 FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                 RESOURCE_LOCK pulp_gpu
                 TIMEOUT 20)
+            set_tests_properties(
+                pulp-gpu-dawn-shared-io-provider-wait-any
+                pulp-gpu-dawn-shared-io-provider-timed-wait-any
+                PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 20)
 
             add_test(NAME pulp-gpu-dawn-shared-io-provider-lifecycle
                 COMMAND "${Python3_EXECUTABLE}"
