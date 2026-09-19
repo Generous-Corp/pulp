@@ -271,6 +271,10 @@ if [[ "${INVALID_PROFILE_SHARDS}" -gt 25 \
     exit 1
 fi
 echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
+# The individual profraw shards are no longer needed after the merged profile
+# is written. Remove them before the expensive object discovery/export pass;
+# a full run can otherwise retain many GB until the runner tears down.
+find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 
 # The merged profdata is now the complete coverage input. Raw shards are no
 # longer needed, and retaining thousands of them leaves too little room for
