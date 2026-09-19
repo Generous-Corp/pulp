@@ -7,9 +7,11 @@
 
 This is **not** "run your audio on the GPU." It's a runtime that lets a plugin
 selectively accelerate *computationally expensive* DSP on the GPU **while
-keeping the audio callback bounded and preserving seamless CPU
-compatibility**. The audio thread is never blocked on the GPU, and anything the
-GPU can't do (or can't finish before its prepared lead) falls back to the CPU.
+keeping the audio callback bounded and preserving seamless CPU compatibility
+where the node declares a fallback**. The audio thread is never blocked on the
+GPU. A node with a declared fallback can use it when the GPU cannot do the work
+or cannot finish before its prepared lead; nodes without one follow their
+declared miss policy.
 The callback contract is real-time-safe; GPU scheduling itself is not a hard
 real-time guarantee. This guide is the developer surface: the compute
 primitives, the real-time transport, and the ready-made processors.
@@ -134,7 +136,7 @@ block comes out silent, never as wrong audio.
 
 | Platform | Backend | GPUs |
 |---|---|---|
-| macOS — **Apple Silicon (M1–M5)** | Metal | integrated Apple GPU ✅ *(validated)* |
+| macOS — Apple Silicon | Metal | experimental; use only with an exact provider/machine receipt |
 | macOS — Intel | Metal | Intel / AMD GPUs |
 | Windows 10+ | D3D12 (or Vulkan) | NVIDIA, AMD, Intel |
 | Linux | Vulkan | NVIDIA, AMD, Intel |
@@ -142,16 +144,17 @@ block comes out silent, never as wrong audio.
 
 `capabilities().backend` reports the live backend at runtime ("Metal" / "D3D12" /
 "Vulkan"), plus limits and optional features (timestamp-query, f16). Audio paths
-are currently **validated on Apple Silicon / Metal**; the other backends are
-supported by the WebGPU layer but not yet audio-validated — treat them as
-experimental until benchmarked, and rely on the CPU fallback meanwhile.
+require exact provider/machine validation on Apple Silicon / Metal; the other
+backends are supported by the WebGPU layer but not yet audio-validated — treat
+them as experimental until benchmarked, and rely on the CPU fallback meanwhile.
 
 ## Layer 1 — compute primitives (`pulp::render::GpuCompute`)
 
 Create with `GpuCompute::create()` then `initialize_standalone()` (own device,
-headless) or `initialize_from_surface(GpuSurface&)` (share the UI device for
-zero-copy DSP↔UI buffers). `capabilities()` reports backend, limits, and optional
-features (timestamp-query, f16). All are validated against CPU references.
+headless) or `initialize_from_surface(GpuSurface&)` (share the UI device and
+queue for compute work). Device sharing does not by itself make audio/UI buffers
+zero-copy. `capabilities()` reports backend, limits, and optional features
+(timestamp-query, f16). All are validated against CPU references.
 
 | Primitive | Method | Use |
 |---|---|---|
