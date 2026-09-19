@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import sys
@@ -250,9 +251,13 @@ def main() -> int:
     for f in files:
         p, n = check_file(f)
         population += n
-        key = f.as_posix()
-        if key.startswith("./"):
-            key = key[2:]
+        # Ledger keys are repo-relative, so the scan key must be too. The
+        # ctest registration passes an ABSOLUTE --root (CMAKE_SOURCE_DIR),
+        # which makes root.glob() yield absolute paths; keying on those
+        # matches no ledger entry, so every frozen file reports its findings
+        # and every entry also reports as unscanned. Normalising here is what
+        # keeps a relative and an absolute --root the same measurement.
+        key = pathlib.PurePath(os.path.relpath(f, root)).as_posix()
         counts[key] = len(p)
         if key in ledger:
             continue

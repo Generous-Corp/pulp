@@ -22,6 +22,7 @@ gate stays green forever over zero coverage.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 import sys
@@ -90,6 +91,47 @@ def run(source: str, name: str = "test_gpu_selftest.cpp") -> subprocess.Complete
         )
 
 
+# A full scan plus a ledger, which `--file` deliberately cannot exercise: the
+# ledger is only consulted on a census. The ctest registration passes an
+# ABSOLUTE --root, so the two invocations below must be the same measurement.
+FROZEN_SOURCE = """
+TEST_CASE("frozen backlog case", "[cli]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    REQUIRE(1 == 1);
+}
+"""
+
+
+def run_tree(root_arg: str, cwd: str, tree: pathlib.Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-B", str(LINT), "--root", root_arg,
+         "--ledger", str(tree / "ledger.json")],
+        capture_output=True, text=True, cwd=cwd,
+    )
+
+
+def check_root_forms(failures: list) -> None:
+    with tempfile.TemporaryDirectory() as d:
+        tree = pathlib.Path(d)
+        (tree / "test").mkdir()
+        (tree / "test" / "test_frozen.cpp").write_text(FROZEN_SOURCE)
+        (tree / "ledger.json").write_text(json.dumps({
+            "schema_version": 1,
+            "allow": [{"file": "test/test_frozen.cpp", "sites": 1,
+                       "reason": "self-test fixture"}],
+        }))
+        absolute = run_tree(str(tree), d, tree)
+        relative = run_tree(".", d, tree)
+        for label, r in (("absolute", absolute), ("relative", relative)):
+            if r.returncode != 0:
+                failures.append(
+                    f"a ledgered file was reported under an {label} --root: the "
+                    "scan key is not repo-relative, so no ledger entry matches "
+                    "and every frozen file reports its findings and its entry "
+                    f"as unscanned: {r.stderr.strip()[:300]}"
+                )
+
+
 def main() -> int:
     failures = []
 
@@ -146,6 +188,8 @@ def main() -> int:
             "classifier only recognises the word `skip`, so the platform-only "
             "half of the population stays invisible"
         )
+
+    check_root_forms(failures)
 
     r = run(EMPTY)
     if r.returncode == 0:
