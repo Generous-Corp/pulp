@@ -589,7 +589,10 @@ jobs:
           # Coverage processes are memory-heavy. Keep the advisory producer
           # within hosted-runner limits so it reaches report/upload stages.
           PULP_COVERAGE_JOBS: '2'
-          PULP_COVERAGE_TEST_JOBS: '4'
+          # Linux hosted runners have less memory than the macOS arm64 image;
+          # two instrumented test workers avoid the runner-loss/OOM class seen
+          # after the full suite while keeping macOS throughput unchanged.
+          PULP_COVERAGE_TEST_JOBS: ${{ matrix.os == 'linux' && '2' || '4' }}
           # HTML drilldowns are useful locally but can consume several GB on
           # hosted runners; Codecov only needs the Cobertura/LCOV producers.
           PULP_COVERAGE_SKIP_HTML: '1'
