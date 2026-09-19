@@ -389,6 +389,50 @@ def git_commit_trailers(ref: str) -> dict[str, list[str]]:
     return _parse_trailer_block(body)
 
 
+# ── Bypass-trailer grammars ─────────────────────────────────────────────
+#
+# One predicate per bypass grammar, so the pre-merge gates, the post-merge
+# release tagger and the pre-merge tag predictor all rule on validity the same
+# way. A second implementation of a grammar is how a release comes to be
+# withheld by a trailer nobody declared: the duplicate matched a line the parse
+# above had already excluded, and a withheld tag reports nothing.
+
+
+_SKIP_VALUE_RE = re.compile(r"^\s*skip\b(?P<rest>.*)$", re.IGNORECASE)
+_SKIP_REASON_RE = re.compile(r'reason\s*=\s*"([^"]+)"')
+
+
+def release_skip_declared(trailers: dict[str, list[str]]) -> bool:
+    """True iff ``trailers`` carries a ``Release: skip`` bypass.
+
+    No reason is required — ``Release: skip`` alone is the documented grammar.
+    """
+    return any(
+        _SKIP_VALUE_RE.match(value) for value in trailers.get("release", [])
+    )
+
+
+def version_bump_skip_reason(trailers: dict[str, list[str]]) -> str | None:
+    """Reason from a top-level ``Version-Bump: skip reason="..."``, else None.
+
+    Two restrictions are load-bearing and shared by every consumer:
+
+    * Per-surface forms (``Version-Bump: sdk=skip``) do NOT count. Those are
+      scoped to the per-surface verdict pipeline and must not silently opt a
+      change out of the whole fix/feat-needs-a-release check.
+    * The reason must be non-empty. A bare ``Version-Bump: skip``, or
+      ``reason=""``, is rejected so the author has to record *why*.
+    """
+    for value in trailers.get("version-bump", []):
+        match = _SKIP_VALUE_RE.match(value.strip())
+        if match is None:
+            continue
+        reason = _SKIP_REASON_RE.search(match.group("rest"))
+        if reason and reason.group(1).strip():
+            return reason.group(1).strip()
+    return None
+
+
 # ── Config helpers ──────────────────────────────────────────────────────
 
 
