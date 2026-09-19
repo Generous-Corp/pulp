@@ -477,8 +477,11 @@ TEST_CASE("traced callback disposition is allocation free and rejects duplicate 
     const auto duplicate = fixture.session.consume_output(callback, output);
     const auto allocations = probe.allocation_count();
     REQUIRE(allocations == 0);
-    REQUIRE(first == Delivery::EpochChanged);
-    REQUIRE(fixture.session.recovery_reason() == SharedIoRecoveryReason::InputSaturated);
+    // The prepared fixture has three physical slots for a two-block lead, so
+    // this callback is accepted. Its delayed output is absent, and the bridge
+    // reports the ordinary deadline disposition rather than a saturation reset.
+    REQUIRE(first == Delivery::Missing);
+    REQUIRE(fixture.session.recovery_reason() == SharedIoRecoveryReason::None);
     REQUIRE(duplicate == Delivery::Invalid);
     const auto records = take_records(fixture.session);
     REQUIRE(records.size() == 2);
@@ -754,7 +757,7 @@ TEST_CASE("transport final disposition replaces bridge silence exactly once",
     CHECK(records[0].kind == SharedIoTraceKind::Eligible);
     CHECK(records[1].kind == SharedIoTraceKind::Delivery);
     CHECK(records[1].delivery == SharedIoDeliveryDisposition::CpuFallbackDelivered);
-    CHECK(records[1].delivery_reason == SharedIoFallbackReason::InputSaturated);
+    CHECK(records[1].delivery_reason == SharedIoFallbackReason::DeadlineExceeded);
     CHECK(fixture.session.trace_stats().invalid == 0);
     REQUIRE(fixture.session.release());
 }
