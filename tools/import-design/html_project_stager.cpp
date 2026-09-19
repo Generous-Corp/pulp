@@ -79,7 +79,7 @@ std::optional<DependencyReference> safe_relative_reference(
 
 std::vector<DependencyReference> referenced_paths(std::string_view content) {
     static const std::regex kReference{
-        R"((?:src|href|poster)\s*=\s*["']([^"']+)["']|url\(\s*["']?([^"')]+)|@import\s+(?:url\(\s*)?["']([^"']+)["']|(?:import|fetch)\s*\(\s*["']([^"']+)["']|import\s*["']([^"']+)["']|from\s*["']([^"']+)["'])",
+        R"((?:src|href|poster)\s*=\s*["']([^"']+)["']|url\(\s*["']?([^"')]+)|@import\s+(?:url\(\s*)?["']([^"']+)["']|(?:import|fetch)\s*\(\s*["']([^"']+)["']|new\s+URL\s*\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)|import\s*["']([^"']+)["']|from\s*["']([^"']+)["'])",
         std::regex::icase};
     // Extensionless scripts and styles still need transitive dependency scans.
     // Keep the generic reference matcher above for the complete copy graph, then
