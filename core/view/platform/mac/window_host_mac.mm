@@ -3130,21 +3130,20 @@ private:
                 pulp::view::needs_continuous_frames(&root_),
             std::memory_order_relaxed);
 
-        render::FrameOutcome outcome;
-        {
-            PULP_TRACE_SCOPE_NAMED("gpu", "gpu_submit");
-            outcome = skia_surface_->end_frame();  // submit Graphite recording
-        }
+        // No host-level span around either end_frame() below: the surfaces emit
+        // `gpu_submit` / `gpu_present` themselves, and they emit them on EVERY
+        // path — including the early return above, which presents without ever
+        // reaching this code. Bracketing here would add a second span per stage
+        // on this path only, so the per-frame count would depend on which path
+        // the frame took.
+        render::FrameOutcome outcome = skia_surface_->end_frame(); // submit Graphite recording
 
         bool captured = true;
         if (capture_pixels && capture_width && capture_height) {
             captured = skia_surface_->read_current_rgba(*capture_pixels, *capture_width, *capture_height);
         }
 
-        {
-            PULP_TRACE_SCOPE_NAMED("gpu", "gpu_present");
-            gpu_surface_->end_frame();    // present to Metal surface
-        }
+        gpu_surface_->end_frame(); // present to Metal surface
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);

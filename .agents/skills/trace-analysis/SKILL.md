@@ -503,11 +503,20 @@ set. Verified by span-site inspection:
 | Windows plug-in editor (`plugin_view_host_win.cpp`) | yes | yes (shared `PluginFrameRenderer`) |
 | Linux plug-in editor (`plugin_view_host_linux.cpp`) | **no** | yes (shared renderer) |
 | macOS plug-in editor (`plugin_view_host_mac.mm`) | **no** | **no** — it has its own `render_frame()` and no `PULP_TRACE` sites |
-| macOS standalone app (`window_host_mac.mm`) | yes | no |
+| macOS standalone app (`window_host_mac.mm`) | yes | yes (own span site) |
 
 `gpu_submit` comes from `core/render/src/skia_surface*.cpp` and `gpu_present`
 from `gpu_surface_dawn.cpp`, i.e. the render layer rather than the host, so they
 can appear where the host-level spans do not.
+
+That ownership is exclusive: a host must NOT bracket
+`skia_surface_->end_frame()` / `gpu_surface_->end_frame()` with a span of its
+own. The surface already opens one on every path, so a host-level wrapper emits
+the stage twice per frame — and only on the paths that reach it, since a
+bail-out that presents without submitting skips the wrapper entirely. The
+per-frame count then differs between paths, defeating any contract that counts
+one span per stage per frame. `gpu_acquire` is the one stage a host does own:
+Dawn's `begin_frame()` opens no span.
 
 The practical consequence: **do not read a missing `frame` span on a macOS
 plug-in editor as a regression** — that host has never emitted one. Instrument
