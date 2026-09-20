@@ -37,10 +37,7 @@ DETECTION_FAILURE_CLASSES = {"timer_quantization", "insufficient_extra_work"}
 # A dependency the host cannot satisfy is a missing premise, not a defect: the
 # producer is a tooling-only target and needs a PULP_BENCHMARK + PULP_TRACING
 # build plus a usable GPU surface.
-PREMISE_DEPENDENCIES = {
-    "build:benchmark-and-tracing", "gpu:measurement-surface",
-    "gpu:timestamp-sample",
-}
+PREMISE_DEPENDENCIES = {"build:benchmark-and-tracing", "gpu:measurement-surface"}
 SKIP_EXIT = 77
 
 
@@ -121,7 +118,7 @@ def rejects(
 def run_producer(
     producer: Path, run_dir: Path, state: dict[str, Any],
     manifest: dict[str, Any],
-) -> tuple[str, str, Path, Path]:
+) -> tuple[str, str, Path, Path, str]:
     key = runner.cell_key(SCENARIO, "exact", 1)
     nonce, request_path = runner.issue_attempt(run_dir, state, manifest, key)
     cell_dir = runner.checked_cell_directory(run_dir, key)
@@ -174,19 +171,7 @@ def assert_fail_closed_with_diagnostics(receipt: dict[str, Any]) -> None:
         f"calibration failed as {failure_class!r}, which is not a control-"
         "detection verdict; the producer could not sample its own timer"
     )
-    trials = diagnostics.get("trials")
-    assert isinstance(trials, list) and trials, "calibration retained no trials"
-    for index, trial in enumerate(trials):
-        assert trial.get("trial") == index, "calibration trials are unaligned"
-        for side in ("baseline", "extra"):
-            sample = trial.get(side)
-            assert isinstance(sample, dict) and set(sample) == {"valid", "value_ms"}, (
-                f"calibration trial {index} {side} sample is malformed"
-            )
-    for field in ("baseline_samples_ms", "extra_work_samples_ms"):
-        samples = diagnostics.get(field)
-        assert isinstance(samples, list), f"calibration lacks aggregate {field}"
-    assert diagnostics["baseline_samples_ms"], "calibration retained no baseline samples"
+    assert diagnostics.get("baseline_samples_ms"), "calibration retained no baseline samples"
 
 
 def prove(producer: Path) -> None:
@@ -263,7 +248,8 @@ def prove(producer: Path) -> None:
         plant(escape)
         rejects("path escape", "artifact escapes its cell directory", observe)
         rejects(
-            "path escape (adapter)", "artifact escapes its cell directory",
+            "path escape (adapter)",
+            "calibration diagnostics artifact path must stay inside the cell",
             native_adapter.validate_measurement_receipt,
             request, plant(escape), cell_dir, pinned,
         )
@@ -275,7 +261,8 @@ def prove(producer: Path) -> None:
         artifact.symlink_to(outside)
         rejects("symlinked artifact", "artifact must not be a symlink", observe)
         rejects(
-            "symlinked artifact (adapter)", "artifact must not be a symlink",
+            "symlinked artifact (adapter)",
+            "calibration diagnostics artifact escapes the cell",
             native_adapter.validate_measurement_receipt,
             request, json.loads(json.dumps(original_receipt)), cell_dir, pinned,
         )

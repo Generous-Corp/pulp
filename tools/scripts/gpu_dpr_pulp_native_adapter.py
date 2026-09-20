@@ -99,39 +99,17 @@ def checked_artifact(root: Path, value: Any, label: str) -> Path:
     return path
 
 
-def shared_evidence_helpers(source_root: Path) -> Any:
-    """Resolve the runner's own secure-artifact helpers for this adapter.
-
-    Containment and symlink rules for retained evidence belong to one
-    implementation. The runner snapshots this adapter on its own, so a plain
-    sibling import is unavailable once it is pinned; resolving the module from
-    the SHA-bound source root loads the exact file the ingesting runner uses.
-    """
-    candidates = [Path(__file__).resolve().parent, source_root / "tools" / "scripts"]
-    for directory in candidates:
-        module = directory / "gpu_dpr_evidence.py"
-        if not module.is_file() or module.is_symlink():
-            continue
-        if str(directory) not in sys.path:
-            sys.path.insert(0, str(directory))
-        import gpu_dpr_evidence
-
-        return gpu_dpr_evidence
-    raise ValueError("shared DPR evidence helpers are unavailable to the adapter")
-
-
 def validate_calibration_diagnostics_artifact(
-    receipt: dict[str, Any], cell_dir: Path, source_root: Path,
+    receipt: dict[str, Any], cell_dir: Path,
 ) -> None:
     """Bind calibration diagnostics to retained, contained, digest-exact bytes."""
-    evidence = shared_evidence_helpers(source_root)
     binding = receipt.get("diagnostics_artifact")
     if not isinstance(binding, dict) or binding.get("schema") != (
         DIAGNOSTICS_ARTIFACT_SCHEMA
     ):
         raise ValueError("timer-calibration receipt lacks diagnostics artifact binding")
-    path = evidence.safe_artifact(cell_dir, binding.get("path", ""))
-    payload = evidence.regular_file_bytes(path, "calibration diagnostics artifact")
+    path = checked_artifact(cell_dir, binding.get("path"), "calibration diagnostics")
+    payload = path.read_bytes()
     digest = binding.get("sha256")
     if (
         not isinstance(digest, str) or len(digest) != 64
@@ -254,7 +232,7 @@ def validate_measurement_receipt(
             failure_class = diagnostics.get("failure_class")
             if failure_class not in {
                 "producer_sample_invalid", "timer_quantization",
-                "insufficient_extra_work", "analyzer_rejection",
+                "insufficient_extra_work",
             }:
                 raise ValueError("incomplete measurement diagnostics failure class is invalid")
             if diagnostics.get("control_detected") is not False:
@@ -311,9 +289,7 @@ def validate_measurement_receipt(
                     elif value is not None:
                         raise ValueError("invalid calibration sample must have null value")
         if calibration:
-            validate_calibration_diagnostics_artifact(
-                receipt, cell_dir, source_root(request)
-            )
+            validate_calibration_diagnostics_artifact(receipt, cell_dir)
         return receipt
 
     scope = receipt.get("measurement_scope")

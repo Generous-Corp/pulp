@@ -662,17 +662,10 @@ configuration, support matrix, and authentic A1 evidence; the current canonical
 receipt is truthfully blocked on those two inputs.
 
 The DPR native adapter is **snapshot-executed**, so it must stay stdlib-only at
-module scope. `gpu_dpr_runner.run_cells` copies the adapter to
-`run_dir/tooling/adapters/<key>/<nonce>` and runs that lone copy, with no sibling
-module beside it. A module-scope `import gpu_dpr_evidence` therefore passes every
-in-tree test and still breaks the product path, because the snapshot has no such
-sibling to import. Load a shared helper lazily instead, resolving it from the
-adapter's own directory and falling back to `<pulp_source_root>/tools/scripts`, so
-the ingesting runner and the adapter agree on one implementation of containment
-and digest checking rather than duplicating it. Duplicating those checks is worse:
-two copies of a path-escape or symlink rule drift silently. The trade-off is that a
-lazily loaded helper's bytes are not digest-pinned the way the snapshotted adapter's
-are; prefer the lazy load and state the gap rather than forking the security logic.
+module scope. `gpu_dpr_runner.run_cells` copies the adapter alone to
+`run_dir/tooling/adapters/<key>/<nonce>` and executes that lone copy, so a
+module-scope sibling import such as `import gpu_dpr_evidence` passes every in-tree
+test and still breaks the product path.
 
 The product health-transition spans are real runtime producers even though the
 macros compile out with `PULP_TRACING=OFF`. Terminal A3 separately requires the

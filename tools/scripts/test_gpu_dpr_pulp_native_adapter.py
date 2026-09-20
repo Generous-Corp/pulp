@@ -375,18 +375,6 @@ def main() -> int:
             pass
         else:
             raise AssertionError("calibration artifact path escape passed")
-        planted = json.loads(json.dumps(diagnostics_receipt))
-        planted["diagnostics"]["failure_class"] = "analyzer_rejection"
-        planted["diagnostics_artifact"]["sha256"] = hashlib.sha256(
-            (json.dumps(planted["diagnostics"]) + "\n").encode("utf-8")
-        ).hexdigest()
-        diagnostics_file.write_text(
-            json.dumps(planted["diagnostics"]) + "\n", encoding="utf-8"
-        )
-        native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
-        diagnostics_file.write_text(
-            json.dumps(calibration_diagnostics) + "\n", encoding="utf-8"
-        )
         def rebind(planted: dict) -> dict:
             """Keep a planted receipt's retained bytes consistent with its object."""
             payload = json.dumps(planted["diagnostics"]) + "\n"
