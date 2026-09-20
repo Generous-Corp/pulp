@@ -36,6 +36,17 @@ class ControlShippingNativeWorkflowTest(unittest.TestCase):
         self.assertNotIn("cmake --build build-sdk --config Release --parallel", self.workflow)
         self.assertNotIn("cmake --build smoke/build --config Release --parallel", self.workflow)
 
+    def test_gpu_audio_lifecycle_probe_executes_and_retains_receipt(self) -> None:
+        self.assertIn("PulpSDKSmokeGpuAudioLifecycleProbe", self.workflow)
+        self.assertIn("Execute installed-SDK GPU-audio lifecycle probe", self.workflow)
+        self.assertIn("gpu-audio-lifecycle-receipt.json", self.workflow)
+        self.assertIn('"dev.pulp.control/gpu-audio-lifecycle@1"', self.workflow)
+        self.assertIn('"exit_code": status', self.workflow)
+        self.assertIn('"source_head_sha": os.environ.get("PULP_SOURCE_HEAD_SHA", "")', self.workflow)
+        self.assertIn('PULP_SOURCE_HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"', self.workflow)
+        self.assertIn("Upload installed-SDK GPU-audio lifecycle receipt", self.workflow)
+        self.assertIn("if: always()", self.workflow)
+
     def test_linked_control_implementation_paths_trigger_the_matrix(self) -> None:
         for path in (
             "core/events/**",

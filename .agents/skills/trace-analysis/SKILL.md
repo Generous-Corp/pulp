@@ -661,6 +661,12 @@ protected product policy binds all role thresholds and the constrained adapter,
 configuration, support matrix, and authentic A1 evidence; the current canonical
 receipt is truthfully blocked on those two inputs.
 
+The DPR native adapter is **snapshot-executed**, so it must stay stdlib-only at
+module scope. `gpu_dpr_runner.run_cells` copies the adapter alone to
+`run_dir/tooling/adapters/<key>/<nonce>` and executes that lone copy, so a
+module-scope sibling import such as `import gpu_dpr_evidence` passes every in-tree
+test and still breaks the product path.
+
 The product health-transition spans are real runtime producers even though the
 macros compile out with `PULP_TRACING=OFF`. Terminal A3 separately requires the
 four-state pre-change/compile-out/compiled-in-idle/active control documented in
