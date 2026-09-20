@@ -21,8 +21,9 @@
 ///      single mapper writes the `ProcessContext` transport fields, derives the
 ///      bar when the host did not supply one, and diffs the change-flags. The
 ///      per-format decode (CLAP fixed-point beattime, VST3 `barPositionMusic`,
-///      AU seconds, …) stays in the adapter. Consumed by `clap_adapter.cpp`;
-///      VST3 and AU drive `detail::playhead_diff` directly.
+///      AU seconds, LV2 `time:Position` atom properties, …) stays in the
+///      adapter. Consumed by `clap_adapter.cpp` and `lv2_entry.hpp`; VST3 and
+///      AU drive `detail::playhead_diff` directly.
 ///   3. **latency-compensated bypass** — `LatencyCompensatedBypass` is the
 ///      per-channel dry delay line that keeps a bypassed signal sample-aligned
 ///      with the host's plugin-delay-compensation. CLAP and VST3 feed it inline
