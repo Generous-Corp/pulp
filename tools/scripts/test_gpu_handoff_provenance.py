@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -49,6 +50,42 @@ def build_row(path: str, identity: provenance.Identity | None = None) -> dict[st
         else {"revision": "0" * 40, "object_id": "0" * 40, "object_type": "blob"}
     )
     return row
+
+
+def stale_pin_remedy(check_report: str) -> str:
+    """Render what an author needs when `check` reports the ledger is stale.
+
+    A drift report is a list of fields, which is the right shape for a machine
+    and the wrong one for the person who caused it: the rows that go stale sit
+    far from the edit, and nothing in a field list says the repair is
+    regeneration rather than a hand edit. Returns "" when the report names no
+    drift, so a failure with another cause never acquires a remedy that does
+    not apply to it.
+    """
+
+    try:
+        report = json.loads(check_report)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(report, dict):
+        return ""
+    drifted = sorted(
+        str(drift["path"]) for drift in report.get("drifts", ()) if "path" in drift
+    )
+    command = report.get("repair_command")
+    if not drifted or not command:
+        return ""
+    return "\n".join(
+        [
+            "",
+            "the GPU handoff ledger is stale: this commit changed a path the "
+            "ledger pins, so the row pinning it no longer describes HEAD. "
+            "Regenerate the ledger and its receipt, and commit both:",
+            f"  {command}",
+            "pinned paths that moved:",
+            *(f"  {path}" for path in sorted(set(drifted))),
+        ]
+    )
 
 
 class FixtureRepository(unittest.TestCase):
@@ -323,11 +360,27 @@ class FixtureRepository(unittest.TestCase):
 
         handoff = self.write_fixture_handoff([build_row("leaf.txt")])
         before = handoff.read_text(encoding="utf-8")
-        exit_code = provenance.main(
-            ["--root", str(self.root), "--handoff", str(handoff), "write"]
-        )
+        exit_code, refusal = self.run_refusal("--handoff", str(handoff), "write")
         self.assertEqual(exit_code, 1)
+        self.assertIn("still fails the handoff validator", refusal)
         self.assertEqual(handoff.read_text(encoding="utf-8"), before)
+
+    def run_refusal(self, *arguments: str) -> tuple[int, str]:
+        """Drive a refusal path and keep its text out of the suite's stderr.
+
+        These cases exercise the refusals deliberately, so the output is
+        expected -- but left on the real stderr it is indistinguishable from a
+        failure, and it reads like one: a null source commit reaching Git, and
+        an unclean-checkout refusal naming `leaf.txt`, which is this fixture's
+        file and not the reader's. Authors debugging a red run have chased that
+        text instead of the one assertion that actually failed. Capturing it
+        and asserting it keeps the evidence and drops the decoy.
+        """
+
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):
+            exit_code = provenance.main(["--root", str(self.root), *arguments])
+        return exit_code, stream.getvalue()
 
     def run_cli(self, handoff: pathlib.Path, *arguments: str) -> tuple[int, str]:
         stream = io.StringIO()
@@ -377,6 +430,46 @@ class FixtureRepository(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertIn("STALE", text)
         self.assertIn("leaf.txt", text)
+
+    def test_a_stale_pin_failure_names_the_regenerate_command(self) -> None:
+        """What an author reads has to carry the repair, not a verdict word.
+
+        A pinned row goes stale whenever a commit edits the path it pins, which
+        is an ordinary thing for a branch to do. The two facts that let the
+        author act are the path that moved and the exact invocation that
+        re-pins it; a drift field list carries neither, and sends them looking
+        for a hand edit that does not exist.
+        """
+
+        handoff = self.write_fixture_handoff([build_row("leaf.txt")])
+        exit_code, report = self.run_cli(handoff, "check", "--json")
+        self.assertEqual(exit_code, 1)
+
+        remedy = stale_pin_remedy(report)
+        self.assertIn(
+            "leaf.txt", remedy, "the remedy does not name the path that moved"
+        )
+        self.assertRegex(
+            remedy,
+            r"gpu_handoff_provenance\.py .*write --source-commit [0-9a-f]{40} "
+            r"--receipt",
+            "the remedy does not carry the exact regenerate invocation",
+        )
+        self.assertIn("Regenerate the ledger and its receipt", remedy)
+
+        # Negative controls: nothing else may acquire a remedy. A report with
+        # no drift is not stale, and an unreadable one is not evidence.
+        self.assertEqual(
+            stale_pin_remedy(json.dumps({"drifts": [], "repair_command": "cmd"})),
+            "",
+            "a report naming no drift was decorated with a regenerate command",
+        )
+        self.assertEqual(stale_pin_remedy("not json"), "")
+        self.assertEqual(
+            stale_pin_remedy(json.dumps({"drifts": [{"path": "leaf.txt"}]})),
+            "",
+            "a remedy was rendered without the command it is supposed to give",
+        )
 
     def test_the_printed_repair_command_actually_parses(self) -> None:
         """A repair command that argparse rejects is worse than none."""
@@ -469,20 +562,15 @@ class FixtureRepository(unittest.TestCase):
 
     def test_an_unresolvable_source_commit_is_an_environment_error(self) -> None:
         handoff = self.write_fixture_handoff([build_row("leaf.txt")])
-        self.assertEqual(
-            provenance.main(
-                [
-                    "--root",
-                    str(self.root),
-                    "--handoff",
-                    str(handoff),
-                    "check",
-                    "--source-commit",
-                    "0" * 40,
-                ]
-            ),
-            2,
+        exit_code, refusal = self.run_refusal(
+            "--handoff",
+            str(handoff),
+            "check",
+            "--source-commit",
+            "0" * 40,
         )
+        self.assertEqual(exit_code, 2)
+        self.assertIn("does not resolve to a commit", refusal)
 
     def test_write_refuses_an_unclean_checkout(self) -> None:
         handoff = self.root / "handoff.json"
@@ -491,16 +579,10 @@ class FixtureRepository(unittest.TestCase):
             encoding="utf-8",
         )
         (self.root / "leaf.txt").write_text("modified\n", encoding="utf-8")
-        exit_code = provenance.main(
-            [
-                "--root",
-                str(self.root),
-                "--handoff",
-                str(handoff),
-                "write",
-            ]
-        )
+        exit_code, refusal = self.run_refusal("--handoff", str(handoff), "write")
         self.assertEqual(exit_code, 2)
+        self.assertIn("refusing to generate from an unclean checkout", refusal)
+        self.assertIn("leaf.txt", refusal)
         self.assertIn('"revision": "' + "0" * 40, handoff.read_text(encoding="utf-8"))
 
 
@@ -1447,6 +1529,29 @@ class MergeResolution(unittest.TestCase):
         self.assertIn('read_revision_text(args.root, "HEAD", ledger_name)', source)
         self.assertNotIn("args.baseline", source)
 
+    def test_the_independent_probe_is_read_before_resolve_writes(self) -> None:
+        """A cross-check taken after `resolve` measures resolve's own output.
+
+        `resolve` writes the repaired ledger and receipt into the same two
+        files `check` reads. Run afterwards, `check` reports the repair and
+        never the state that produced the verdict, so it agrees with any
+        verdict at all. On a tree that edits one pinned path without
+        regenerating it exits 1 naming two drifts beforehand and 0 naming none
+        afterwards -- which is how a correct `moved` came to be asserted
+        against `churn` on the required gate. The cross-check is only a
+        cross-check while it runs first.
+        """
+
+        source = inspect.getsource(self.test_resolve_leaves_the_checked_in_pair_bound)
+        probe = source.index('"check", "--json"')
+        resolves = source.index('"resolve", "--json"')
+        self.assertLess(
+            probe,
+            resolves,
+            "the check probe runs after resolve, so it reads the files resolve "
+            "just wrote rather than the state resolve judged",
+        )
+
     def test_resolve_leaves_the_checked_in_pair_bound(self) -> None:
         """End to end on the real ledger: whatever it decides, the pair binds.
 
@@ -1467,6 +1572,23 @@ class MergeResolution(unittest.TestCase):
             self.skipTest("the checked-in ledger pair is modified locally")
         self.addCleanup(lambda: git(self.root, "checkout", "--", *names))
 
+        # `check` is the independent answer, so it has to be read BEFORE
+        # `resolve` runs. `resolve` WRITES its repair into the same two files
+        # `check` reads, so a probe taken afterwards reports the repair and
+        # never the state that produced the verdict. Measured on a tree that
+        # edits one pinned path without regenerating: check exits 1 naming two
+        # drifts before resolve and 0 naming none after, so the later probe
+        # called a stale ledger current and demanded `churn` from a correct
+        # `moved`.
+        probe = io.StringIO()
+        with contextlib.redirect_stdout(probe), contextlib.redirect_stderr(probe):
+            current = provenance.main(["--root", str(self.root), "check", "--json"])
+        # A branch that edited a pinned path leaves the ledger stale, which is
+        # an ordinary state and not this suite's to reject. If an assertion
+        # below still fires, the reader needs the repair rather than the
+        # verdict vocabulary, so carry it into every message.
+        remedy = stale_pin_remedy(probe.getvalue()) or None
+
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
             status = provenance.main(["--root", str(self.root), "resolve", "--json"])
@@ -1475,15 +1597,12 @@ class MergeResolution(unittest.TestCase):
 
         summary = json.loads(buffer.getvalue())
 
-        # Pin the verdict, do not merely accept one. `check` already answers,
+        # Pin the verdict, do not merely accept one. `check` answers,
         # independently, whether every identity is current AND the receipt binds
         # -- which is exactly the state in which regeneration can change nothing.
         # So when it exits 0 the only admissible verdict is churn, and resolve
         # owes no commit. Accepting a set here lets the discriminator invert
         # without a test noticing.
-        probe = io.StringIO()
-        with contextlib.redirect_stdout(probe), contextlib.redirect_stderr(probe):
-            current = provenance.main(["--root", str(self.root), "check", "--json"])
         if current == 0:
             self.assertEqual(
                 summary["verdict"],
@@ -1492,7 +1611,7 @@ class MergeResolution(unittest.TestCase):
             )
             self.assertFalse(summary["pending"], "churn left a commit pending")
         else:
-            self.assertIn(summary["verdict"], {"moved", "rebind"})
+            self.assertIn(summary["verdict"], {"moved", "rebind"}, remedy)
         self.assertTrue(summary["binds"], "resolve reported success on an unbound pair")
         self.assertFalse(
             summary["binding_control_binds"],
