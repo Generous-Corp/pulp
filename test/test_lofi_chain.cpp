@@ -7,6 +7,7 @@
 // spectral images that hold creates, the dead zone for the silence it imposes
 // on small signals, and the whole chain for stage ordering and determinism.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
@@ -372,4 +373,107 @@ TEST_CASE("The lo-fi chain allocates nothing on the audio thread",
 
     REQUIRE(std::isfinite(sink));
     REQUIRE(allocations == 0);
+}
+
+// The floor shaper is checked for the geometry that distinguishes it from the
+// dead-zone saturator — silence below the threshold, full scale restored above
+// it — and for the property that makes the curve choice worth offering: only
+// smoothstep leaves the threshold with zero slope. The last case pins the
+// arithmetic a caller sees when it supplies its own dry/wet mix, because that
+// mix deliberately lives outside this function.
+
+TEST_CASE("The floor shaper silences everything under its threshold",
+          "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    for (const auto curve : {FloorCurve::linear, FloorCurve::smoothstep}) {
+        REQUIRE(floor_shape(0.05, 0.1, curve) == 0.0);
+        REQUIRE(floor_shape(-0.05, 0.1, curve) == 0.0);
+        REQUIRE(floor_shape(0.1, 0.1, curve) == 0.0);
+        REQUIRE(floor_shape(0.0, 0.1, curve) == 0.0);
+    }
+}
+
+TEST_CASE("The floor shaper rescales the surviving region to full scale",
+          "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // Just above the threshold the output leaves silence, and at full scale it
+    // arrives at full scale, for either curve.
+    REQUIRE(floor_shape(0.1 + 1e-9, 0.1, FloorCurve::linear) > 0.0);
+    REQUIRE(floor_shape(1.0, 0.1, FloorCurve::linear) == Catch::Approx(1.0));
+    REQUIRE(floor_shape(1.0, 0.1, FloorCurve::smoothstep) == Catch::Approx(1.0));
+
+    // A half-way input maps to the midpoint of the rescaled range under the
+    // linear curve.
+    REQUIRE(floor_shape(0.55, 0.1, FloorCurve::linear) == Catch::Approx(0.5));
+}
+
+TEST_CASE("The floor shaper preserves sign", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    for (const auto curve : {FloorCurve::linear, FloorCurve::smoothstep}) {
+        const double positive = floor_shape(0.7, 0.2, curve);
+        const double negative = floor_shape(-0.7, 0.2, curve);
+        REQUIRE(positive > 0.0);
+        REQUIRE(negative < 0.0);
+        REQUIRE(negative == Catch::Approx(-positive));
+    }
+}
+
+TEST_CASE("Only the smoothstep curve leaves the threshold with zero slope",
+          "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // This is the whole reason the curve is selectable: measured just above the
+    // threshold, the linear ramp already has the slope it will keep, while
+    // smoothstep is still nearly flat.
+    const double threshold = 0.1;
+    const double delta = 1e-4;
+    const double linear_rise =
+        floor_shape(threshold + delta, threshold, FloorCurve::linear);
+    const double smooth_rise =
+        floor_shape(threshold + delta, threshold, FloorCurve::smoothstep);
+
+    REQUIRE(smooth_rise < linear_rise);
+    REQUIRE(smooth_rise < linear_rise * 0.01);
+}
+
+TEST_CASE("The floor shaper clamps its threshold into the usable range",
+          "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // A negative threshold behaves as zero, so nothing is discarded.
+    REQUIRE(floor_shape(0.5, -1.0, FloorCurve::linear) == Catch::Approx(0.5));
+
+    // A threshold past the ceiling is held at 0.9, which keeps the rescale
+    // divisor away from zero and the output finite.
+    const double clamped = floor_shape(1.0, 5.0, FloorCurve::linear);
+    REQUIRE(std::isfinite(clamped));
+    REQUIRE(clamped == Catch::Approx(1.0));
+}
+
+TEST_CASE("A caller-supplied dry/wet mix composes with the floor shaper",
+          "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // The mix is deliberately not part of floor_shape. A caller that wants one
+    // crossfades toward the shaped value, and these are the numbers that comes
+    // out to — including the case where the input is silenced but the mix only
+    // moves the output part of the way there.
+    const auto mixed = [](double x, double threshold, FloorCurve curve,
+                          double amount) {
+        return x + amount * (floor_shape(x, threshold, curve) - x);
+    };
+
+    REQUIRE(mixed(0.05, 0.1, FloorCurve::linear, 1.0) == Catch::Approx(0.0));
+    REQUIRE(mixed(0.55, 0.1, FloorCurve::linear, 1.0) == Catch::Approx(0.5));
+    REQUIRE(mixed(0.05, 0.1, FloorCurve::linear, 0.5) == Catch::Approx(0.025));
+    REQUIRE(mixed(0.55, 0.1, FloorCurve::linear, 0.0) == Catch::Approx(0.55));
 }

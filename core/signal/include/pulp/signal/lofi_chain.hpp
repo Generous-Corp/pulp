@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 
 namespace pulp::signal {
 
@@ -41,6 +42,45 @@ inline double dead_zone_saturate(double x, double dead_zone) {
     if (magnitude <= dz) return 0.0;
     const double rescaled = (magnitude - dz) / (1.0 - dz);
     return std::copysign(std::tanh(1.5 * rescaled), x);
+}
+
+/// The curve applied above a floor threshold by `floor_shape`.
+enum class FloorCurve {
+    /// A straight ramp from silence at the threshold to full scale.
+    linear,
+    /// Smoothstep, which leaves the threshold with zero slope so the onset of
+    /// audibility is gradual rather than a corner.
+    smoothstep,
+};
+
+/// A noise-floor shaper: silence below `threshold`, rescaled above it.
+///
+/// This is the dead-zone geometry of `dead_zone_saturate` without the tanh.
+/// Where that function exists to truncate a decaying tail the way an early
+/// converter did, this one exists to lift a floor: everything under the
+/// threshold is discarded and what remains is stretched back to full scale, so
+/// a source's noise bed disappears while its body keeps its level.
+///
+/// The curve choice is audible at the threshold itself. `linear` arrives with a
+/// non-zero slope, which makes material hovering near the threshold chatter as
+/// it crosses; `smoothstep` leaves with zero slope and fades that crossing in.
+///
+/// Returns the shaped sample only. Deciding how much of it to use is the
+/// caller's: a dry/wet mix toward this value belongs at the call site, because
+/// the amount is usually a product-level control rather than a property of the
+/// transfer function.
+template <typename Sample = double>
+inline Sample floor_shape(Sample x, Sample threshold, FloorCurve curve) {
+    static_assert(std::is_floating_point_v<Sample>);
+    const Sample limit = std::clamp(threshold, Sample{0}, Sample{0.9});
+    const Sample magnitude = std::fabs(x);
+    if (magnitude <= limit) return Sample{0};
+    const Sample normalized = (magnitude - limit) / (Sample{1} - limit);
+    const Sample shaped = curve == FloorCurve::smoothstep
+                              ? normalized * normalized *
+                                    (Sample{3} - Sample{2} * normalized)
+                              : normalized;
+    return std::copysign(shaped, x);
 }
 
 /// Sample-and-hold rate reducer with clock jitter and a reconstruction filter.
