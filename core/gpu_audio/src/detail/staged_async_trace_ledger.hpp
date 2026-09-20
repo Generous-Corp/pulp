@@ -2,6 +2,8 @@
 
 #include "shared_io_trace.hpp"
 
+#include <pulp/render/gpu_compute.hpp>
+
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -160,5 +162,18 @@ class StagedAsyncPendingState {
     std::vector<bool> slots_;
     std::unordered_map<std::uint64_t, Pending> pending_;
 };
+
+inline StagedAsyncPendingState::CallbackStatus
+staged_async_callback_status(render::GpuCompute::ReadbackStatus status) noexcept {
+    switch (status) {
+    case render::GpuCompute::ReadbackStatus::Success:
+        return StagedAsyncPendingState::CallbackStatus::Success;
+    case render::GpuCompute::ReadbackStatus::Expired:
+        return StagedAsyncPendingState::CallbackStatus::Expired;
+    case render::GpuCompute::ReadbackStatus::Failed:
+        return StagedAsyncPendingState::CallbackStatus::Failed;
+    }
+    return StagedAsyncPendingState::CallbackStatus::Failed;
+}
 
 } // namespace pulp::gpu_audio::detail
