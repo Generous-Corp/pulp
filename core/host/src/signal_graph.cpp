@@ -1592,10 +1592,10 @@ bool SignalGraph::inject_parameter_events_into_snapshot_(
     auto runtime_it = snapshot.runtime.find(id);
     if (runtime_it == snapshot.runtime.end()) return false;
     const auto shape_it = snapshot.shapes.find(id);
-    if (shape_it == snapshot.shapes.end()
-        || shape_it->second.type != NodeType::Plugin
-        || snapshot.plugins.find(id) == snapshot.plugins.end()
-        || !runtime_it->second.parameter_input_mailbox) {
+    if (shape_it == snapshot.shapes.end() || shape_it->second.type != NodeType::Plugin ||
+        (snapshot.plugins.find(id) == snapshot.plugins.end() &&
+         snapshot.processors.find(id) == snapshot.processors.end()) ||
+        !runtime_it->second.parameter_input_mailbox) {
         return false;
     }
 
@@ -1614,11 +1614,11 @@ bool SignalGraph::inject_exact_parameter_events_into_snapshot_(
     auto runtime_it = snapshot.runtime.find(id);
     if (runtime_it == snapshot.runtime.end()) return false;
     const auto shape_it = snapshot.shapes.find(id);
-    if (shape_it == snapshot.shapes.end()
-        || shape_it->second.type != NodeType::Plugin
-        || snapshot.plugins.find(id) == snapshot.plugins.end()
-        || !runtime_it->second.exact_parameter_input_mailbox
-        || runtime_it->second.exact_parameter_event_owner.expired()) {
+    if (shape_it == snapshot.shapes.end() || shape_it->second.type != NodeType::Plugin ||
+        (snapshot.plugins.find(id) == snapshot.plugins.end() &&
+         snapshot.processors.find(id) == snapshot.processors.end()) ||
+        !runtime_it->second.exact_parameter_input_mailbox ||
+        runtime_it->second.exact_parameter_event_owner.expired()) {
         return false;
     }
 
@@ -2406,6 +2406,9 @@ bool SignalGraph::build_routing_snapshot_locked_(
         if (processor == cg.processors.end() || !processor->second)
             continue;
         auto replacement = processor->second->instance->binding(binding.node_id);
+        const auto exact_claim = exact_parameter_event_claims_.find(binding.node_id);
+        replacement.preserve_parameter_events =
+            exact_claim != exact_parameter_event_claims_.end() && !exact_claim->second.expired();
         replacement.load = binding.load;
         binding = replacement;
     }
@@ -2601,7 +2604,8 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             runtime_it->second.midi_output_mailbox =
                 std::make_unique<MidiOutputMailbox>();
         }
-        if (n.type == NodeType::Plugin && n.plugin) {
+        if (n.type == NodeType::Plugin &&
+            (n.plugin != nullptr || processor_nodes_.contains(n.id))) {
             const auto exact_claim = exact_parameter_event_claims_.find(n.id);
             const bool exact_claimed =
                 exact_claim != exact_parameter_event_claims_.end()
@@ -2864,6 +2868,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         // routed plan carries MIDI nodes, so audio-only graphs allocate none.
         cg->routed.midi_inputs.clear();
         cg->routed.midi_outputs.clear();
+        cg->routed.processor_parameter_inputs.clear();
         if (cg->routed.serial.valid) {
             const auto& plan = cg->routed.serial.snapshot.plan();
             bool plan_has_midi = false;
@@ -2889,6 +2894,18 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             bool plan_has_automation = false;
             for (const auto& conn : plan.connections) {
                 if (graph::is_automation_conn(conn)) { plan_has_automation = true; break; }
+            }
+            if (cg->routed.serial.valid) {
+                for (std::uint32_t i = 0; i < plan.nodes.size(); ++i) {
+                    const auto id = plan.nodes[i].id;
+                    if (!processor_nodes_.contains(id))
+                        continue;
+                    const auto claim = exact_parameter_event_claims_.find(id);
+                    if (claim == exact_parameter_event_claims_.end() || claim->second.expired())
+                        continue;
+                    cg->routed.processor_parameter_inputs.push_back({i, id, 0});
+                    plan_has_automation = true;
+                }
             }
             if (cg->routed.serial.valid && plan_has_automation && max_block_size > 0) {
                 cg->routed.serial.valid =
@@ -3788,6 +3805,17 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                 reset_plugin_parameter_event_sequences(cg->routed.serial.plugin_ctx);
                 reset_plugin_parameter_event_sequences(
                     cg->routed.parallel.plugin_ctx);
+                for (auto& processor : cg->routed.processor_parameter_inputs) {
+                    processor.pending_seq = 0;
+                    auto* queue = cg->routed.automation.events(processor.plan_index);
+                    auto runtime_it = cg->runtime.find(processor.id);
+                    if (queue == nullptr || runtime_it == cg->runtime.end())
+                        continue;
+                    queue->clear();
+                    const auto pending =
+                        append_parameter_mailbox_events_(&runtime_it->second, *queue);
+                    processor.pending_seq = pending.exact;
+                }
                 if (has_midi) {
                     for (auto& mi : cg->routed.midi_inputs) {
                         mi.pending_seq = 0;
@@ -3817,6 +3845,16 @@ void SignalGraph::process_snapshot_impl(audio::BufferView<float>& output,
                 commit_plugin_parameter_event_sequences(cg->routed.serial.plugin_ctx);
                 commit_plugin_parameter_event_sequences(
                     cg->routed.parallel.plugin_ctx);
+                for (const auto& processor : cg->routed.processor_parameter_inputs) {
+                    if (processor.pending_seq == 0)
+                        continue;
+                    auto runtime_it = cg->runtime.find(processor.id);
+                    if (runtime_it != cg->runtime.end() &&
+                        runtime_it->second.exact_parameter_input_mailbox) {
+                        runtime_it->second.exact_parameter_input_mailbox->sequence_seen.store(
+                            processor.pending_seq, std::memory_order_relaxed);
+                    }
+                }
                 if (has_midi) {
                     for (const auto& mi : cg->routed.midi_inputs) {
                         if (mi.pending_seq == 0) continue;

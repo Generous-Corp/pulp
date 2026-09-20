@@ -1108,6 +1108,11 @@ private:
         // committed to the shared mailbox's sequence_seen only after routed dispatch
         // succeeds (so a fallback to the legacy walk re-consumes the same block).
         struct RoutedMidiNode { std::uint32_t plan_index; NodeId id; std::uint64_t pending_seq = 0; };
+        struct RoutedProcessorNode {
+            std::uint32_t plan_index;
+            NodeId id;
+            std::uint64_t pending_seq = 0;
+        };
 
         // Immutable canonical-executor routing for this snapshot, built in
         // compile_() when the topology is executor-eligible (see
@@ -1142,6 +1147,7 @@ private:
             format::GraphRuntimeMidiScratch midi;
             std::vector<RoutedMidiNode> midi_inputs;
             std::vector<RoutedMidiNode> midi_outputs;
+            std::vector<RoutedProcessorNode> processor_parameter_inputs;
             // Per-node parameter-event queues + per-connection slew state for
             // routed sparse automation. Empty (node_count 0) for graphs with no
             // sparse automation.
