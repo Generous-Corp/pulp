@@ -14,6 +14,8 @@ on:
       - 'tools/deps/manifest.json'
       - 'tools/cmake/PulpAndroid.cmake'
       - 'tools/cmake/PulpDependencies.cmake'
+      - 'tools/scripts/test_android_aligned_buffer.py'
+      - '.github/workflows/android.yml'
       - 'CMakeLists.txt'
 
   schedule:
@@ -89,6 +91,10 @@ jobs:
 
       - name: Install NDK
         run: sdkmanager "ndk;30.0.14904198"
+
+      - name: Compile DSP buffers at the supported Android API floor
+        shell: bash
+        run: python3 tools/scripts/test_android_aligned_buffer.py --ndk "$ANDROID_HOME/ndk/30.0.14904198"
 
       - name: Cache Gradle
         uses: actions/cache@v5

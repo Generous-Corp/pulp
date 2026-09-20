@@ -178,6 +178,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/simd_buffer.hpp",
+        "fingerprint": "sha256:7780d3b9a8e734dbacd9b2d7d06c5d07328fe167da4d8d3ea88938c71ae5a973",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "SIMD-width-aligned sample storage and its aligned allocate/free pair, used "
+            "for composition inside DSP kernels rather than advertised as a capability of "
+            "its own. Its allocator branches per platform because the C11 aligned_alloc "
+            "it wraps is unavailable below Android API 28, which is a portability detail "
+            "of the primitive and not a change to the surface it presents."
+        ),
+    },
+    {
         "include": "pulp/signal/tempo_delay.hpp",
         "fingerprint": "sha256:3ae02d16e00b3463e563d55be1ee0e7abc79db03173e7e1bae2d024ff3a4c059",
         "disposition": "infrastructure",
