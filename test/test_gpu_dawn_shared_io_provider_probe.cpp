@@ -2,6 +2,7 @@
 #include "detail/shared_io_arena.hpp"
 #include "support/dawn_transfer_call_counter.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -10,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <sys/sysctl.h>
 #include <sys/utsname.h>
@@ -22,6 +24,9 @@ using pulp::gpu_audio::detail::DawnSharedIoProvider;
 using pulp::gpu_audio::detail::SharedIoArena;
 
 namespace {
+
+constexpr auto kMaxCompletionWaitNs =
+    static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
 
 using Clock = std::chrono::steady_clock;
 enum class TransferControl : std::uint8_t { None, WriteBuffer, CopyBuffer, MapAsync };
@@ -36,6 +41,7 @@ struct Scenario {
     bool expect_oracle_mismatch = false;
     bool watchdog_hang = false;
     TransferControl transfer_control = TransferControl::None;
+    bool batched_slots = false;
 };
 
 std::string json_escape(std::string_view value) {
@@ -107,6 +113,15 @@ std::optional<Scenario> parse_scenario(std::string_view value) {
     if (value == "synthetic-queue-cancel")
         return Scenario{value, DawnSharedIoProvider::Fault::SyntheticQueueCancelled, false, false,
                         true};
+    if (value == "wait-any-timeout")
+        return Scenario{value, DawnSharedIoProvider::Fault::SyntheticWaitAnyTimeout};
+    if (value == "wait-any-error")
+        return Scenario{value, DawnSharedIoProvider::Fault::SyntheticWaitAnyError};
+    if (value == "wait-any-batch") {
+        Scenario result{value};
+        result.batched_slots = true;
+        return result;
+    }
     if (value == "force-loss-before-submit")
         return Scenario{value, DawnSharedIoProvider::Fault::ForceLossBeforeSubmit, false, false,
                         true};
@@ -128,8 +143,32 @@ std::optional<Scenario> parse_scenario(std::string_view value) {
     return std::nullopt;
 }
 
+std::optional<DawnSharedIoProvider::CompletionPolicy>
+parse_completion_policy(std::string_view value) {
+    if (value == "process-events")
+        return DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
+    if (value == "wait-any")
+        return DawnSharedIoProvider::CompletionPolicy::WaitAny;
+    if (value == "timed-wait-any")
+        return DawnSharedIoProvider::CompletionPolicy::TimedWaitAny;
+    return std::nullopt;
+}
+
+std::string_view completion_policy_name(DawnSharedIoProvider::CompletionPolicy policy) {
+    switch (policy) {
+    case DawnSharedIoProvider::CompletionPolicy::ProcessEvents:
+        return "process-events";
+    case DawnSharedIoProvider::CompletionPolicy::WaitAny:
+        return "wait-any";
+    case DawnSharedIoProvider::CompletionPolicy::TimedWaitAny:
+        return "timed-wait-any";
+    }
+    return "unknown";
+}
+
 void emit(std::string_view scenario, std::string_view status, std::string_view reason,
-          std::optional<bool> oracle, std::uint32_t alignment, std::uint64_t installs,
+          DawnSharedIoProvider::CompletionPolicy completion_policy, std::optional<bool> oracle,
+          std::uint32_t alignment, std::uint64_t installs,
           const pulp::test::DawnTransferCallCounter::Snapshot& transfers, std::uint64_t submissions,
           const DawnSharedIoProvider::Stats& stats,
           const DawnSharedIoProvider::AdapterIdentity& adapter) {
@@ -137,7 +176,8 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
     const bool have_system_info = uname(&system_info) == 0;
     std::cout << "{\"schema\":\"pulp.gpu-dawn-shared-io-provider.v2\","
               << "\"scenario\":\"" << scenario << "\",\"status\":\"" << status << "\",\"reason\":\""
-              << reason << "\",\"oracle\":";
+              << reason << "\",\"completion_policy\":\""
+              << completion_policy_name(completion_policy) << "\",\"oracle\":";
     if (oracle)
         std::cout << (*oracle ? "true" : "false");
     else
@@ -163,6 +203,14 @@ void emit(std::string_view scenario, std::string_view status, std::string_view r
               << ",\"host_frees\":" << stats.host_frees << ",\"drain_calls\":" << stats.drain_calls
               << ",\"failed_drains\":" << stats.failed_drains
               << ",\"terminal_busy_retries\":" << stats.terminal_busy_retries
+              << ",\"process_events_calls\":" << stats.process_events_calls
+              << ",\"wait_any_calls\":" << stats.wait_any_calls
+              << ",\"wait_any_timed_calls\":" << stats.wait_any_timed_calls
+              << ",\"wait_any_timeouts\":" << stats.wait_any_timeouts
+              << ",\"wait_any_errors\":" << stats.wait_any_errors
+              << ",\"wait_any_unsupported\":" << stats.wait_any_unsupported
+              << ",\"wait_any_max_futures\":" << stats.wait_any_max_futures
+              << ",\"wait_any_max_timeout_ns\":" << stats.wait_any_max_timeout_ns
               << ",\"fault_injections\":" << stats.fault_injections << ",\"hardware_model\":\""
               << json_escape(hardware_model()) << "\""
               << ",\"os\":\"" << json_escape(have_system_info ? system_info.sysname : "unknown")
@@ -227,15 +275,38 @@ bool wait_for_output(SharedIoArena& arena, std::uint64_t sequence,
 
 int main(int argc, char** argv) {
     bool strict = false;
+    bool verify_completion_wait_bound = false;
     std::string_view scenario_name = "baseline";
+    auto completion_policy = DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
+    std::uint64_t completion_wait_ns = 0;
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument = argv[index];
         if (argument == "--strict")
             strict = true;
+        else if (argument == "--verify-completion-wait-bound")
+            verify_completion_wait_bound = true;
         else if (argument.starts_with("--scenario="))
             scenario_name = argument.substr(std::string_view("--scenario=").size());
-        else
+        else if (argument.starts_with("--completion-policy=")) {
+            const auto parsed = parse_completion_policy(
+                argument.substr(std::string_view("--completion-policy=").size()));
+            if (!parsed)
+                return 1;
+            completion_policy = *parsed;
+        } else if (argument.starts_with("--completion-wait-ns=")) {
+            try {
+                completion_wait_ns = std::stoull(
+                    std::string(argument.substr(std::string_view("--completion-wait-ns=").size())));
+            } catch (...) {
+                return 1;
+            }
+        } else
             return 1;
+    }
+    if (verify_completion_wait_bound) {
+        const auto invalid_wait_ns = kMaxCompletionWaitNs + 1;
+        const auto rejected = DawnSharedIoProvider::create({.completion_wait_ns = invalid_wait_ns});
+        return !rejected.provider && rejected.reason == "completion_wait_ns_out_of_range" ? 0 : 1;
     }
     const auto scenario = parse_scenario(scenario_name);
     if (!scenario)
@@ -249,11 +320,15 @@ int main(int argc, char** argv) {
     auto created = DawnSharedIoProvider::create(
         {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
          .proc_table_override_for_testing = transfer_counter->deferred_proc_table(),
-         .fault = scenario->fault});
+         .fault = scenario->fault,
+         .completion_policy = completion_policy,
+         .completion_wait_ns = completion_wait_ns});
     if (!created.provider) {
         std::cout << "{\"schema\":\"pulp.gpu-dawn-shared-io-provider.v2\","
                   << "\"scenario\":\"" << scenario->name
-                  << "\",\"status\":\"unavailable\",\"reason\":\"" << created.reason << "\"}\n";
+                  << "\",\"status\":\"unavailable\",\"reason\":\"" << created.reason
+                  << "\",\"completion_policy\":\"" << completion_policy_name(completion_policy)
+                  << "\"}\n";
         return strict ? 1 : 77;
     }
     transfer_counter->reset();
@@ -270,9 +345,61 @@ int main(int argc, char** argv) {
         std::size_t output;
     };
     const BufferSizes sizes[] = {{4, 4}, {256, 256}, {4096, 4096}, {4, 4096}, {4096, 4}};
-    const std::size_t size_count = scenario->name == "baseline"                 ? std::size(sizes)
-                                   : scenario->name == "real-device-repetition" ? 64
-                                                                                : 1;
+    std::size_t size_count = scenario->name == "baseline"                 ? std::size(sizes)
+                             : scenario->name == "real-device-repetition" ? 64
+                                                                          : 1;
+
+    if (scenario->batched_slots) {
+        constexpr std::uint32_t kBatchedSlots = 65;
+        SharedIoArena arena;
+        passed = arena.prepare(*created.provider, {.slots = kBatchedSlots,
+                                                   .input_bytes_per_slot = sizeof(float),
+                                                   .output_bytes_per_slot = sizeof(float)});
+        std::vector<std::uint64_t> sequences;
+        sequences.reserve(kBatchedSlots);
+        for (std::uint32_t slot = 0; passed && slot < kBatchedSlots; ++slot) {
+            const auto sequence = static_cast<std::uint64_t>(slot + 1);
+            auto write = arena.grant_write(sequence);
+            if (!write) {
+                passed = false;
+                reason = "batch_grant_failed";
+                break;
+            }
+            *reinterpret_cast<float*>(write->bytes.data()) = static_cast<float>(slot);
+            passed = arena.publish_written({write->token}) && arena.submit(write->token);
+            if (!passed) {
+                reason = "batch_submit_failed";
+                break;
+            }
+            sequences.push_back(sequence);
+            ++submissions;
+        }
+        for (const auto sequence : sequences) {
+            if (!passed)
+                break;
+            std::optional<SharedIoArena::OutputLease> output;
+            if (!wait_for_output(arena, sequence, output, std::chrono::seconds(15))) {
+                passed = false;
+                reason = "batch_completion_timeout";
+                break;
+            }
+            const float expected = static_cast<float>(sequence - 1) * 1.75f + 0.25f;
+            passed = std::abs(*reinterpret_cast<const float*>(output->bytes.data()) - expected) <=
+                     1.0e-6f;
+            const auto token = output->token;
+            output.reset();
+            if (!arena.release_output({token})) {
+                passed = false;
+                reason = "batch_output_release_failed";
+                break;
+            }
+        }
+        passed = arena.release() && passed;
+        oracle = passed;
+        if (passed)
+            reason = "wait_any_batched_round_robin";
+        size_count = 0;
+    }
 
     for (std::size_t size_index = 0; passed && size_index < size_count; ++size_index) {
         const auto& buffer_size = sizes[size_index % std::size(sizes)];
@@ -424,7 +551,9 @@ int main(int argc, char** argv) {
         created.provider.reset();
         created = DawnSharedIoProvider::create(
             {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
-             .proc_table_override_for_testing = transfer_counter->deferred_proc_table()});
+             .proc_table_override_for_testing = transfer_counter->deferred_proc_table(),
+             .completion_policy = completion_policy,
+             .completion_wait_ns = completion_wait_ns});
         if (!created.provider) {
             passed = false;
             reason = "same_process_provider_recreate_failed";
@@ -481,10 +610,47 @@ int main(int argc, char** argv) {
         stats.drain_calls += accumulated_stats.drain_calls;
         stats.failed_drains += accumulated_stats.failed_drains;
         stats.terminal_busy_retries += accumulated_stats.terminal_busy_retries;
+        stats.process_events_calls += accumulated_stats.process_events_calls;
+        stats.wait_any_calls += accumulated_stats.wait_any_calls;
+        stats.wait_any_timed_calls += accumulated_stats.wait_any_timed_calls;
+        stats.wait_any_timeouts += accumulated_stats.wait_any_timeouts;
+        stats.wait_any_errors += accumulated_stats.wait_any_errors;
+        stats.wait_any_unsupported += accumulated_stats.wait_any_unsupported;
+        stats.wait_any_max_futures =
+            std::max(stats.wait_any_max_futures, accumulated_stats.wait_any_max_futures);
+        stats.wait_any_max_timeout_ns =
+            std::max(stats.wait_any_max_timeout_ns, accumulated_stats.wait_any_max_timeout_ns);
         stats.fault_injections += accumulated_stats.fault_injections;
     }
+    if (completion_policy != DawnSharedIoProvider::CompletionPolicy::ProcessEvents &&
+        stats.wait_any_calls == 0) {
+        passed = false;
+        reason = "completion_policy_not_exercised";
+    }
+    if (completion_policy == DawnSharedIoProvider::CompletionPolicy::TimedWaitAny &&
+        stats.wait_any_unsupported != 0) {
+        passed = false;
+        reason = "timed_wait_any_unsupported";
+    }
+    if (scenario->name == "wait-any-timeout" && stats.wait_any_timeouts == 0) {
+        passed = false;
+        reason = "wait_any_timeout_not_observed";
+    }
+    if (scenario->name == "wait-any-error" && stats.wait_any_errors == 0) {
+        passed = false;
+        reason = "wait_any_error_not_observed";
+    }
+    if (scenario->batched_slots && stats.wait_any_max_futures != 64) {
+        passed = false;
+        reason = "wait_any_batch_limit_not_exercised";
+    }
+    if (completion_policy == DawnSharedIoProvider::CompletionPolicy::TimedWaitAny &&
+        stats.wait_any_max_timeout_ns > 1'000'000) {
+        passed = false;
+        reason = "timed_wait_any_bound_exceeded";
+    }
     created.provider.reset();
-    emit(scenario->name, passed ? "passed" : "failed", reason, oracle, alignment, installs,
-         transfers, submissions, stats, adapter);
+    emit(scenario->name, passed ? "passed" : "failed", reason, completion_policy, oracle, alignment,
+         installs, transfers, submissions, stats, adapter);
     return passed ? 0 : 1;
 }
