@@ -74,6 +74,17 @@ class StagedAsyncTraceLedger {
         return true;
     }
 
+    // Roll back an admission that could not be attached to a provider slot.
+    // No terminal record is emitted for work that was never submitted.
+    bool cancel_admission(std::uint64_t request_id) noexcept {
+        auto it = entries_.find(request_id);
+        if (it == entries_.end() || it->second.submitted)
+            return false;
+        sequences_.erase(it->second.record.sequence);
+        entries_.erase(it);
+        return true;
+    }
+
     std::vector<SharedIoTraceRecord> take_completed() {
         std::vector<SharedIoTraceRecord> result;
         result.swap(completed_);
@@ -142,6 +153,15 @@ class StagedAsyncPendingState {
         return true;
     }
 
+    bool cancel(std::uint64_t request_id) noexcept {
+        auto it = pending_.find(request_id);
+        if (it == pending_.end() || it->second.submitted)
+            return false;
+        slots_[it->second.slot] = false;
+        pending_.erase(it);
+        return true;
+    }
+
     // Adapter boundary for GpuCompute::ReadbackCallback. The callback owner
     // maps ReadbackStatus to this enum, then releases the slot exactly once.
     bool on_callback(std::uint64_t request_id, CallbackStatus status) {
@@ -174,6 +194,58 @@ class StagedAsyncPendingState {
   private:
     std::vector<bool> slots_;
     std::unordered_map<std::uint64_t, Pending> pending_;
+};
+
+// Private trial boundary shared by the staged provider adapter and the future
+// GpuConvolver trial path. It owns request/sequence/slot admission as one
+// transaction, while keeping terminal records in the authenticated ledger.
+// This is deliberately unused by the default blocking path.
+class StagedAsyncTrialState {
+  public:
+    explicit StagedAsyncTrialState(std::size_t slots) : pending_(slots) {}
+
+    bool admit(std::uint64_t request_id, std::uint64_t sequence, std::uint32_t slot,
+               std::uint64_t deadline_ns, std::uint64_t now_ns) {
+        if (!ledger_.admit(request_id, sequence, slot, now_ns))
+            return false;
+        if (!pending_.admit(request_id, sequence, slot, deadline_ns)) {
+            (void)ledger_.cancel_admission(request_id);
+            return false;
+        }
+        return true;
+    }
+
+    bool submitted(std::uint64_t request_id, std::uint64_t now_ns) {
+        if (!pending_.mark_submitted(request_id))
+            return false;
+        if (!ledger_.submitted(request_id, now_ns)) {
+            (void)pending_.cancel(request_id);
+            return false;
+        }
+        return true;
+    }
+
+    bool complete(std::uint64_t request_id, StagedAsyncTraceLedger::CompletionStatus status,
+                  std::uint64_t now_ns) {
+        if (!pending_.on_callback(request_id,
+                                  status == StagedAsyncTraceLedger::CompletionStatus::Success
+                                      ? StagedAsyncPendingState::CallbackStatus::Success
+                                  : status == StagedAsyncTraceLedger::CompletionStatus::Expired
+                                      ? StagedAsyncPendingState::CallbackStatus::Expired
+                                      : StagedAsyncPendingState::CallbackStatus::Failed))
+            return false;
+        return ledger_.complete(request_id, status, now_ns);
+    }
+
+    bool slot_occupied(std::uint32_t slot) const noexcept {
+        return pending_.slot_occupied(slot);
+    }
+    std::size_t pending_count() const noexcept { return pending_.size(); }
+    std::vector<SharedIoTraceRecord> take_completed() { return ledger_.take_completed(); }
+
+  private:
+    StagedAsyncTraceLedger ledger_;
+    StagedAsyncPendingState pending_;
 };
 
 inline StagedAsyncPendingState::CallbackStatus
