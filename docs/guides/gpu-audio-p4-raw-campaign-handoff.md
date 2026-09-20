@@ -91,3 +91,22 @@ reconciling them with the current merged P5/P6 implementation.
 Until the seam and benchmark exist, the honest status is **screening only**:
 shared-memory correctness and lifecycle/Perfetto diagnostics are available;
 strict staged-vs-shared P4 latency or realtime suitability is not yet measured.
+
+## Raw-writer contract gap
+
+The new quiescent drain returns authenticated `SharedIoTraceRecord` values, but
+it is intentionally not a P4 writer. A trace record can provide the engine,
+generation, sequence, CPU stage timestamps, GPU terminal, and delivery
+disposition. It does not carry the raw schema's trial metadata (`trial_id`,
+`pair_id`, path, load, block geometry, deadline/watchdog), transfer counters,
+or a direct/correlated timestamp provenance for callback and result-visible
+boundaries. It also cannot identify the staged provider, because that provider
+does not emit these records.
+
+Consequently a pure writer that serialized these records as
+`pulp.gpu-audio.p4.raw.v1` would either invent fields or mark required verdict
+timings as direct when they are not. The next safe writer task must accept an
+explicit trial context and transfer/timing provenance from the benchmark, then
+reject records whose required fields are unavailable. Until that context is
+defined, keep the drain as the authenticated intermediate representation and
+do not add a relabelling serializer.
