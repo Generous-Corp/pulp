@@ -20,6 +20,7 @@ struct RealtimeGpuNodePath;
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
 struct GpuConvolverTrialConfig;
 struct SharedIoTraceRecord;
+class StagedAsyncTrialState;
 bool configure_gpu_convolver_trial(GpuConvolver&, const GpuConvolverTrialConfig&) noexcept;
 bool drain_gpu_convolver_trial_records(GpuConvolver&, std::vector<SharedIoTraceRecord>&) noexcept;
 } // namespace detail
@@ -239,6 +240,8 @@ class GpuConvolver : public GpuAudioNode {
 
     std::unique_ptr<render::GpuCompute> gpu_;
     std::unique_ptr<SharedIoState> shared_io_;
+    std::unique_ptr<detail::StagedAsyncTrialState> staged_trial_;
+    std::uint64_t staged_sequence_ = 0;
     std::vector<float> ir_spec_;            // 2*fft_size interleaved IR spectrum
     std::vector<std::vector<float>> carry_; // per-channel OLA accumulator (fft_size)
 

@@ -5,6 +5,7 @@
 
 #include "detail/gpu_convolver_trial_config.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/staged_async_trace_ledger.hpp"
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #include "detail/dawn_shared_io_convolution_session.hpp"
@@ -13,6 +14,7 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
@@ -127,6 +129,8 @@ bool GpuConvolver::prepare() {
         return false;
 #endif
     shared_io_.reset();
+    staged_trial_.reset();
+    staged_sequence_ = 0;
     if (channels_ == 0 || block_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
         latency_blocks_ > kMaxLatencyBlocks)
         return false;
@@ -159,14 +163,11 @@ bool GpuConvolver::prepare() {
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     const auto requested_path = static_cast<detail::SharedIoRequest>(trial_requested_path_);
-    // The legacy staged provider has no authenticated SharedIoTraceRecord
-    // bridge yet. Fail closed rather than silently running a different path.
-    if (trial_configured_ && requested_path == detail::SharedIoRequest::RequireStaged)
-        return false;
 #endif
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    if (expected_dawn_revision_available()) {
+    if (expected_dawn_revision_available() &&
+        requested_path != detail::SharedIoRequest::RequireStaged) {
         try {
             constexpr uint32_t kSharedIoCapacity = 8;
             constexpr uint32_t kSharedIoSlots = 2;
@@ -251,6 +252,11 @@ bool GpuConvolver::prepare() {
     } else {
         gpu_.reset();
     }
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (trial_configured_ && requested_path == detail::SharedIoRequest::RequireStaged && gpu_)
+        staged_trial_ = std::make_unique<detail::StagedAsyncTrialState>(2);
+#endif
 
     prepared_ = true;
     return true;
@@ -383,6 +389,72 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
     }
 
     const uint32_t cplx = fft_size_ * 2u;
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    // Private P4 adapter path. It intentionally waits on the worker thread,
+    // preserving the existing blocking process_block contract while attaching
+    // one request to an authenticated request/slot/sequence ledger. The public
+    // default path never constructs staged_trial_.
+    if (staged_trial_) {
+        std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
+        for (uint32_t ch = 0; ch < channels_; ++ch) {
+            const float* x = input.channel_ptr(ch);
+            float* slot = in_pad_.data() + static_cast<std::size_t>(ch) * cplx;
+            for (uint32_t i = 0; i < n; ++i)
+                slot[2u * i] = x[i];
+        }
+
+        const auto sequence = staged_sequence_++;
+        const auto slot = static_cast<std::uint32_t>(sequence % 2u);
+        const auto now = std::chrono::steady_clock::now();
+        const auto now_ns = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
+        const auto deadline_ns = std::max<std::uint64_t>(
+            1'000'000ull,
+            static_cast<std::uint64_t>(block_) * 1'000'000'000ull / sample_rate_);
+        const auto deadline = std::chrono::microseconds(deadline_ns / 1000ull);
+        bool complete = false;
+        render::GpuCompute::ReadbackStatus status = render::GpuCompute::ReadbackStatus::Failed;
+        std::uint64_t completion_id = 0;
+        const auto request = gpu_->convolve_batch_async(
+            in_pad_.data(), time_.data(), fft_size_, channels_, deadline,
+            [&](const render::GpuCompute::ReadbackResult& result) {
+                status = result.status;
+                completion_id = result.id;
+                complete = true;
+            });
+        if (request == 0 || !staged_trial_->admit(request, sequence, slot,
+                                                   now_ns + deadline_ns, now_ns) ||
+            !staged_trial_->submitted(request, now_ns)) {
+            output.clear();
+            return;
+        }
+        // GpuCompute guarantees that poll_readbacks() resolves every request at
+        // success or at its deadline, so this worker loop is bounded by the
+        // provider deadline rather than an unbounded wait on GPU progress.
+        while (!complete)
+            (void)gpu_->poll_readbacks();
+        (void)staged_trial_->complete(
+            completion_id,
+            status == render::GpuCompute::ReadbackStatus::Success
+                ? detail::StagedAsyncTraceLedger::CompletionStatus::Success
+            : status == render::GpuCompute::ReadbackStatus::Expired
+                ? detail::StagedAsyncTraceLedger::CompletionStatus::Expired
+                : detail::StagedAsyncTraceLedger::CompletionStatus::Failed,
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now().time_since_epoch())
+                                           .count()));
+        if (status != render::GpuCompute::ReadbackStatus::Success) {
+            output.clear();
+            return;
+        }
+        for (uint32_t ch = 0; ch < channels_; ++ch)
+            detail::overlap_add_block(carry_[ch].data(),
+                                      time_.data() + static_cast<std::size_t>(ch) * cplx,
+                                      /*src_stride=*/2, output.channel_ptr(ch), fft_size_, n);
+        return;
+    }
+#endif
 
     // Pack every channel's zero-padded complex block back to back.
     std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
