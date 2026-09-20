@@ -183,6 +183,29 @@ OSStatus fill_parameter_clump_property_info(const state::StateStore& store,
     return noErr;
 }
 
+OSStatus fill_supports_mpe_property_info(bool supports_mpe,
+                                         AudioUnitScope scope,
+                                         UInt32& out_size,
+                                         bool& out_writable)
+{
+    if (scope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+    if (!supports_mpe) return kAudioUnitErr_InvalidProperty;
+    out_size = sizeof(UInt32);
+    out_writable = false;
+    return noErr;
+}
+
+OSStatus fill_supports_mpe(bool supports_mpe,
+                           AudioUnitScope scope,
+                           void* out_data)
+{
+    if (scope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+    if (!supports_mpe) return kAudioUnitErr_InvalidProperty;
+    if (!out_data) return kAudioUnitErr_InvalidProperty;
+    *static_cast<UInt32*>(out_data) = 1;
+    return noErr;
+}
+
 OSStatus fill_parameter_clump_name(const state::StateStore& store,
                                    AudioUnitScope scope,
                                    void* out_data)

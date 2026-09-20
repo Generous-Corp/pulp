@@ -364,6 +364,22 @@ OSStatus fill_parameter_clump_property_info(const state::StateStore& store,
                                             UInt32& out_size,
                                             bool& out_writable);
 
+/// `kAudioUnitProperty_SupportsMPE` (the v2 bridge of AUv3's `supportsMPE`).
+/// An MPE-aware host reads it to decide whether to route an MPE zone's
+/// per-member-channel stream to this unit at all, so a plug-in with MPE
+/// handling wired but this property unanswered is simply never offered MPE
+/// input. Report `kAudioUnitErr_InvalidProperty` when the plug-in did not opt
+/// in, which is what a host reads as "no" and matches leaving the property
+/// unimplemented.
+OSStatus fill_supports_mpe_property_info(bool supports_mpe,
+                                         AudioUnitScope scope,
+                                         UInt32& out_size,
+                                         bool& out_writable);
+
+OSStatus fill_supports_mpe(bool supports_mpe,
+                           AudioUnitScope scope,
+                           void* out_data);
+
 OSStatus fill_parameter_clump_name(const state::StateStore& store,
                                    AudioUnitScope scope,
                                    void* out_data);

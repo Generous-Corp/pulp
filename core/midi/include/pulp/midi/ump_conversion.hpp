@@ -172,9 +172,27 @@ inline bool ump_to_midi1_event(const UmpPacket& p, MidiEvent& out) {
             out = MidiEvent::note_on(ch, p.note_number(), v7);
             return true;
         }
+        case 0xA0:
+            // Poly key pressure: note in word 0 bits 8-15, 32-bit value in
+            // word 1 (same >> 25 narrowing the CC case uses).
+            out = {choc::midi::ShortMessage(
+                       static_cast<uint8_t>(0xA0 | (ch & 0x0F)),
+                       p.note_number(),
+                       static_cast<uint8_t>(p.data_32() >> 25)), 0, 0.0};
+            return true;
         case 0xB0:
             out = MidiEvent::cc(ch, static_cast<uint8_t>((p.words[0] >> 8) & 0x7F),
                                 static_cast<uint8_t>(p.data_32() >> 25));
+            return true;
+        case 0xD0:
+            // Channel pressure carries no note byte; the 32-bit value in word 1
+            // narrows to the single MIDI 1.0 data byte. This is the MPE
+            // pressure axis, so dropping it leaves an MPE plug-in reading a
+            // stream with no pressure the moment a host speaks MIDI 2.0.
+            out = {choc::midi::ShortMessage(
+                       static_cast<uint8_t>(0xD0 | (ch & 0x0F)),
+                       static_cast<uint8_t>(p.data_32() >> 25),
+                       0), 0, 0.0};
             return true;
         case 0xE0:
             out = MidiEvent::pitch_bend(ch, scale_32_to_14(p.data_32()));

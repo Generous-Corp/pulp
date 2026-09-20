@@ -13,6 +13,8 @@
 #include <pulp/format/processor.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
+#include <pulp/midi/ump.hpp>
+#include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 
 #import "../core/format/src/au_audio_unit.h"
@@ -31,10 +33,12 @@ namespace {
 class TestAUEffectProcessor;
 class TestAUInstrumentProcessor;
 class TestAUMpeInstrumentProcessor;
+class TestAUUmpInstrumentProcessor;
 
 TestAUEffectProcessor* g_last_effect_processor = nullptr;
 TestAUInstrumentProcessor* g_last_instrument_processor = nullptr;
 TestAUMpeInstrumentProcessor* g_last_mpe_processor = nullptr;
+TestAUUmpInstrumentProcessor* g_last_ump_processor = nullptr;
 int g_pending_au_latency_samples = 0;
 int g_pending_au_tail_samples = 0;
 // Toggles whether TestAUMpeInstrumentProcessor declares supports_mpe. Lets one
@@ -298,6 +302,87 @@ public:
     std::vector<CapturedMpeEvent> captured;
 };
 
+// Captured UMP packet, copied out of the processor's ump_input() before the
+// owning unit (and the buffer the adapter lends it) goes away.
+struct CapturedUmpPacket {
+    uint8_t message_type = 0;
+    uint8_t status = 0;
+    uint8_t channel = 0;
+    uint8_t note = 0;
+    uint16_t velocity_16 = 0;
+    uint32_t data_32 = 0;
+    int32_t sample_offset = 0;
+};
+
+// Toggles whether TestAUUmpInstrumentProcessor declares supports_ump, so one
+// capture processor covers both the opt-in (native MIDI 2.0) and the
+// legacy (no protocol negotiation, null ump_input) paths.
+bool g_au_ump_declare = true;
+
+// UMP-declaring instrument. Snapshots both transports the adapter hands it —
+// the native UMP stream via ump_input() and the MIDI 1.0 projection in the
+// MidiBuffer — so a test can assert MIDI 2.0 resolution survives AND that the
+// legacy buffer still carries the same notes.
+class TestAUUmpInstrumentProcessor : public pulp::format::Processor {
+public:
+    TestAUUmpInstrumentProcessor() { g_last_ump_processor = this; }
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        pulp::format::PluginDescriptor d{
+            .name = "AUUmpInstrumentTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-ump-instrument",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Instrument,
+            .input_buses = {},
+            .output_buses = {{"Audio Out", 2}},
+            .accepts_midi = true,
+        };
+        d.supports_ump = g_au_ump_declare;
+        return d;
+    }
+
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {}
+
+    void process(pulp::format::ProcessBuffers&,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        ++process_count;
+        captured_ump.clear();
+        captured_midi1.clear();
+        const pulp::midi::UmpBuffer* ump = ump_input();
+        ump_input_present = (ump != nullptr);
+        if (ump) {
+            for (const auto& e : *ump) {
+                const auto& pk = e.packet;
+                captured_ump.push_back({
+                    static_cast<uint8_t>(pk.message_type()),
+                    pk.status(),
+                    pk.channel(),
+                    pk.note_number(),
+                    pk.velocity_16(),
+                    pk.data_32(),
+                    e.sample_offset,
+                });
+            }
+        }
+        for (const auto& e : midi_in) captured_midi1.push_back(e);
+    }
+
+    int process_count = 0;
+    bool ump_input_present = false;
+    std::vector<CapturedUmpPacket> captured_ump;
+    std::vector<pulp::midi::MidiEvent> captured_midi1;
+};
+
 class TestAUWideEditorProcessor : public TestAUEffectProcessor {
 public:
     pulp::format::ViewSize view_size() const override {
@@ -382,6 +467,10 @@ std::unique_ptr<pulp::format::Processor> create_wide_editor_processor() {
 
 std::unique_ptr<pulp::format::Processor> create_mpe_instrument_processor() {
     return std::make_unique<TestAUMpeInstrumentProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> create_ump_instrument_processor() {
+    return std::make_unique<TestAUUmpInstrumentProcessor>();
 }
 
 std::unique_ptr<pulp::format::Processor> create_sidechain_effect_processor() {
@@ -1063,6 +1152,262 @@ TEST_CASE("AU v3 routes channel-wide MIDI into per-note MPE expression",
         }
     }
     g_au_mpe_declare = true;
+}
+
+TEST_CASE("AU v3 negotiates MIDI 2.0 and delivers UMP channel voice at full resolution",
+          "[au][auv3][ump][midi2]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_MusicDevice;
+        desc.componentSubType = 'TstU';
+        desc.componentManufacturer = 'Plup';
+
+        // 16-bit velocity whose low 9 bits are non-zero: a 7-bit transport
+        // cannot represent it, so seeing it intact proves the value never went
+        // through a MIDI 1.0 narrowing on the way in.
+        constexpr uint16_t kVelocity16 = 0xABCD;
+        constexpr uint32_t kPressure32 = 0x2468ACE0u;
+        constexpr uint8_t kChannel = 3;
+        constexpr uint8_t kNote = 60;
+
+        struct DriveResult {
+            MIDIProtocolID protocol = kMIDIProtocol_1_0;
+            bool ump_input_present = false;
+            int process_count = 0;
+            std::vector<CapturedUmpPacket> ump;
+            std::vector<pulp::midi::MidiEvent> midi1;
+        };
+
+        auto drive_block = [&](bool declare_ump) -> DriveResult {
+            g_au_ump_declare = declare_ump;
+            ScopedFactoryRegistration registration(create_ump_instrument_processor);
+
+            NSError* error = nil;
+            PulpAudioUnit* unit =
+                [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                           options:0
+                                                             error:&error];
+            REQUIRE(unit != nil);
+            REQUIRE(error == nil);
+
+            auto* processor = g_last_ump_processor;
+            REQUIRE(processor != nullptr);
+
+            DriveResult result;
+            result.protocol = unit.AudioUnitMIDIProtocol;
+
+            NSError* allocate_error = nil;
+            REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+            REQUIRE(allocate_error == nil);
+
+            constexpr UInt32 kFrames = 16;
+            float left[kFrames] = {};
+            float right[kFrames] = {};
+            struct StereoBufferList {
+                AudioBufferList list;
+                AudioBuffer extra[1];
+            } output{};
+            output.list.mNumberBuffers = 2;
+            output.list.mBuffers[0].mNumberChannels = 1;
+            output.list.mBuffers[0].mDataByteSize = kFrames * sizeof(float);
+            output.list.mBuffers[0].mData = left;
+            output.list.mBuffers[1].mNumberChannels = 1;
+            output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
+            output.list.mBuffers[1].mData = right;
+
+            // One MIDIEventList packet carrying three MIDI 2.0 channel-voice
+            // (type 0x4) messages back to back — the shape a host that has
+            // accepted kMIDIProtocol_2_0 delivers.
+            const auto note_on = pulp::midi::UmpPacket::note_on_2(
+                /*group=*/0, kChannel, kNote, kVelocity16);
+            // Channel pressure has no factory; build it by hand. This is the
+            // MPE pressure axis, and the message type whose MIDI 1.0
+            // projection the conversion layer previously had no case for.
+            pulp::midi::UmpPacket pressure;
+            pressure.word_count = 2;
+            pressure.words[0] = (0x4u << 28) |
+                                (uint32_t(0xD0u | (kChannel & 0x0F)) << 16);
+            pressure.words[1] = kPressure32;
+            // Per-note pitch bend has NO MIDI 1.0 equivalent, so it can only
+            // arrive through the native UMP stream.
+            const auto per_note_bend = pulp::midi::UmpPacket::per_note_pitch_bend(
+                /*group=*/0, kChannel, kNote, 0xC0000000u);
+
+            AURenderEvent event{};
+            event.MIDIEventsList.next = nullptr;
+            event.MIDIEventsList.eventSampleTime = 0;
+            event.MIDIEventsList.eventType = AURenderEventMIDIEventList;
+            event.MIDIEventsList.reserved = 0;
+            event.MIDIEventsList.cable = 0;
+            MIDIEventList& list = event.MIDIEventsList.eventList;
+            list.protocol = kMIDIProtocol_2_0;
+            list.numPackets = 1;
+            list.packet[0].timeStamp = 0;
+            UInt32 w = 0;
+            const std::array<pulp::midi::UmpPacket, 3> packets{
+                note_on, pressure, per_note_bend};
+            for (const auto& packet : packets) {
+                for (int i = 0; i < packet.word_count; ++i)
+                    list.packet[0].words[w++] = packet.words[i];
+            }
+            list.packet[0].wordCount = w;
+
+            AudioUnitRenderActionFlags flags = 0;
+            AudioTimeStamp timestamp{};
+            timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+            timestamp.mSampleTime = 0;
+
+            AUInternalRenderBlock block = [unit internalRenderBlock];
+            REQUIRE(block != nil);
+            auto status = block(&flags, &timestamp, kFrames, 0, &output.list,
+                                &event, nil);
+            REQUIRE(status == noErr);
+
+            result.ump_input_present = processor->ump_input_present;
+            result.process_count = processor->process_count;
+            result.ump = processor->captured_ump;
+            result.midi1 = processor->captured_midi1;
+
+            [unit deallocateRenderResources];
+            [unit release];
+            return result;
+        };
+
+        SECTION("opted-in instrument receives native MIDI 2.0 resolution") {
+            const DriveResult r = drive_block(/*declare_ump=*/true);
+            REQUIRE(r.process_count == 1);
+
+            // The unit tells the host it wants MIDI 2.0; without this the host
+            // narrows everything to 7 bits before the adapter ever runs.
+            REQUIRE(r.protocol == kMIDIProtocol_2_0);
+            REQUIRE(r.ump_input_present);
+            REQUIRE(r.ump.size() == 3);
+
+            const auto& on = r.ump[0];
+            REQUIRE(on.message_type == 0x4);
+            REQUIRE(on.status == (0x90 | kChannel));
+            REQUIRE(on.channel == kChannel);
+            REQUIRE(on.note == kNote);
+            // The whole point: 16 bits in, 16 bits out.
+            REQUIRE(on.velocity_16 == kVelocity16);
+
+            const auto& press = r.ump[1];
+            REQUIRE(press.message_type == 0x4);
+            REQUIRE(press.status == (0xD0 | kChannel));
+            REQUIRE(press.data_32 == kPressure32);
+
+            // Per-note pitch bend reaches the processor only because the native
+            // stream is published — it has no MIDI 1.0 representation at all.
+            const auto& bend = r.ump[2];
+            REQUIRE(bend.message_type == 0x4);
+            REQUIRE(bend.status == (0x60 | kChannel));
+            REQUIRE(bend.note == kNote);
+            REQUIRE(bend.data_32 == 0xC0000000u);
+
+            // The MIDI 1.0 projection runs alongside, so a processor that also
+            // reads the plain MidiBuffer (and the MPE sidecar that runs off it)
+            // still sees the note and the pressure.
+            REQUIRE(r.midi1.size() == 2);
+            REQUIRE(r.midi1[0].is_note_on());
+            REQUIRE(r.midi1[0].note() == kNote);
+            REQUIRE(r.midi1[0].channel() == kChannel);
+            REQUIRE(r.midi1[1].data()[0] == (0xD0 | kChannel));
+            REQUIRE(r.midi1[1].data()[1] ==
+                    static_cast<uint8_t>(kPressure32 >> 25));
+        }
+
+        SECTION("instrument without supports_ump keeps legacy delivery") {
+            const DriveResult r = drive_block(/*declare_ump=*/false);
+            REQUIRE(r.process_count == 1);
+
+            // No protocol negotiation: the unit defers to the base class, so
+            // the host keeps sending legacy MIDI exactly as it does today.
+            REQUIRE(r.protocol != kMIDIProtocol_2_0);
+            REQUIRE_FALSE(r.ump_input_present);
+            REQUIRE(r.ump.empty());
+
+            // Channel voice still reaches the MidiBuffer — decoding an event
+            // list is a fix for silently discarded notes, not an opt-in.
+            REQUIRE(r.midi1.size() == 2);
+            REQUIRE(r.midi1[0].is_note_on());
+            REQUIRE(r.midi1[0].note() == kNote);
+        }
+    }
+    g_au_ump_declare = true;
+}
+
+TEST_CASE("AU adapters advertise descriptor-declared MPE support to the host",
+          "[au][auv2][auv3][mpe][negotiation]") {
+    SECTION("AU v3 supportsMPE follows the descriptor") {
+        @autoreleasepool {
+            AudioComponentDescription desc{};
+            desc.componentType = kAudioUnitType_MusicDevice;
+            desc.componentSubType = 'TstM';
+            desc.componentManufacturer = 'Plup';
+
+            auto supports = [&](bool declare_mpe) -> BOOL {
+                g_au_mpe_declare = declare_mpe;
+                ScopedFactoryRegistration registration(
+                    create_mpe_instrument_processor);
+                NSError* error = nil;
+                PulpAudioUnit* unit =
+                    [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                               options:0
+                                                                 error:&error];
+                REQUIRE(unit != nil);
+                const BOOL value = unit.supportsMPE;
+                [unit release];
+                return value;
+            };
+
+            REQUIRE(supports(/*declare_mpe=*/true) == YES);
+            REQUIRE(supports(/*declare_mpe=*/false) == NO);
+        }
+        g_au_mpe_declare = true;
+    }
+
+    SECTION("AU v2 answers kAudioUnitProperty_SupportsMPE") {
+        // The v2 bridge of the same property. An MPE-aware host reads it to
+        // decide whether to route an MPE zone here at all.
+        {
+            g_au_mpe_declare = true;
+            ScopedFactoryRegistration registration(
+                create_mpe_instrument_processor);
+            pulp::format::au::PulpAUInstrument unit(nullptr);
+
+            UInt32 size = 0;
+            bool writable = true;
+            REQUIRE(unit.GetPropertyInfo(kAudioUnitProperty_SupportsMPE,
+                                         kAudioUnitScope_Global, 0, size,
+                                         writable) == noErr);
+            REQUIRE(size == sizeof(UInt32));
+            REQUIRE_FALSE(writable);
+
+            UInt32 value = 0;
+            REQUIRE(unit.GetProperty(kAudioUnitProperty_SupportsMPE,
+                                     kAudioUnitScope_Global, 0, &value) == noErr);
+            REQUIRE(value == 1);
+        }
+        {
+            g_au_mpe_declare = false;
+            ScopedFactoryRegistration registration(
+                create_mpe_instrument_processor);
+            pulp::format::au::PulpAUInstrument unit(nullptr);
+
+            UInt32 size = 0;
+            bool writable = true;
+            REQUIRE(unit.GetPropertyInfo(kAudioUnitProperty_SupportsMPE,
+                                         kAudioUnitScope_Global, 0, size,
+                                         writable) ==
+                    kAudioUnitErr_InvalidProperty);
+
+            UInt32 value = 0;
+            REQUIRE(unit.GetProperty(kAudioUnitProperty_SupportsMPE,
+                                     kAudioUnitScope_Global, 0, &value) ==
+                    kAudioUnitErr_InvalidProperty);
+        }
+        g_au_mpe_declare = true;
+    }
 }
 
 TEST_CASE("AU v3 channel capabilities expose only descriptor-declared layouts",
