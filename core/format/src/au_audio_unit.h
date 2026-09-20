@@ -21,6 +21,9 @@ class Processor;
 namespace state {
 class StateStore;
 }
+namespace format::au {
+class FactoryPresetTable;
+}
 }
 
 @interface PulpAudioUnit : AUAudioUnit
@@ -39,6 +42,12 @@ class StateStore;
 // AUAudioUnit's bypass AUValue is tracked in an internal atomic).
 // Used by tests that pin the AUv3 dual-tracked bypass contract.
 - (uint32_t)pulpBypassParameterId;
+
+// Factory-preset table accessor. Main-thread, read-only. A plug-in whose
+// bundled presets live outside the default `Resources/Presets` folder
+// re-points discovery through this before the host scans; tests use it to
+// stage a fixture directory.
+- (pulp::format::au::FactoryPresetTable*)pulpFactoryPresetTable;
 
 // Parameter-event introspection. Used by `test_au_plugin_state.mm` to
 // assert ramp-event payload survives the AUParameterTree → ParameterEventQueue
