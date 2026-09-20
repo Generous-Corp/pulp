@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 80,
+  "inventory_version": 86,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -3471,13 +3471,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/lofi_chain.hpp",
-      "fingerprint": "sha256:8c3ed2535478714195f46f13591c90b3b7c63affc6a6e8a7407ebedbf9f1799b",
+      "fingerprint": "sha256:1b4def5ba6eb434e0ec7b46a350990f5356a54dc4215d5e21d262a4d55594024",
       "include": "pulp/signal/lofi_chain.hpp",
       "disposition": "capability_support",
       "capability_keys": [
         "signal.dither-quantizer"
       ],
-      "rationale": "Existing processor now consumes the deterministic dither and noise-shaping primitive while preserving its established default processing contract."
+      "rationale": "Publishes floor_shape, the dead-zone geometry the header's saturator already used, as a reusable transfer curve so a caller no longer has to reimplement it to get the same shape without the tanh."
     },
     {
       "domain": "signal",

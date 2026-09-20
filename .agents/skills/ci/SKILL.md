@@ -171,6 +171,17 @@ such as `aligned_alloc`. The probe accepts the NDK host's `clang++` or
 path expands on both macOS and Windows. A passing probe is not APK or emulator
 acceptance; the following Gradle build and artifact checks remain required.
 
+`android-run-fixtures` runs the same probe on the NDK it already installs, so
+the API floor is one of the few Android facts a pull request actually proves.
+That job's cross-compiled fixture runners are **not** a substitute: their target
+closure is narrower than the APK's, so they compiled clean throughout the
+API-26 `aligned_alloc` outage. Anything that keeps a core header out of the
+fixture runners' closure keeps it out of the pre-merge signal too, and the probe
+covers only `simd_buffer.hpp`. `tools/scripts/test_android_premerge_probe.py`
+(run from `workflow-lint.yml`) fails if the probe step, its `affected` gate, or
+the dependency closure that reaches it is dropped, or if the job stops running
+on `pull_request`.
+
 ## A green "Android Build" on a PR does not mean the APK compiles
 
 `android-build` declares `needs: resolve-runners`, and `resolve-runners` is
@@ -183,10 +194,12 @@ conclusion comes from `android-run-fixtures` alone. The check named
 The APK build runs only on `push` to `main` (behind the `paths` filter), on the
 nightly `schedule`, and on `workflow_dispatch`. Consequences worth holding:
 
-- A compile break in `core/**` reaches `main` with every pre-merge signal green,
-  and only the post-merge push run turns red. That is how an API-26
-  `std::aligned_alloc` break sat on `main` from 2026-07-29 to 2026-09-19 with
-  nobody assigned to it.
+- A compile break in `core/**` can still reach `main` with every pre-merge
+  signal green, and only the post-merge push run turns red. That is how an
+  API-26 `std::aligned_alloc` break sat on `main` from 2026-07-29 to 2026-09-19
+  with nobody assigned to it. The API-floor probe now runs pre-merge in
+  `android-run-fixtures`, which closes that specific class; a general Android
+  compile break still has no pre-merge gate.
 - To validate an Android fix BEFORE merging, dispatch the workflow on the branch
   (`workflow_dispatch`) and read `android-build` there. A PR run cannot tell you.
 - When reading history, filter runs by `event` — mixing `pull_request` runs into
@@ -1659,6 +1672,43 @@ in the validation build, and committing moves HEAD underneath it. Run mutation
 controls in a throwaway worktree, or wait for the lane to finish. Note that a
 `shipyard` process sitting in the worktree is usually just waiting on GitHub;
 confirm an actual compiler is running before concluding a build is in flight.
+
+## The gate VM's build parallelism is bounded by its RAM, not its vCPUs
+
+tartci sizes a macOS gate VM's cores from its lane lease (`vm_cores` — 12 for
+Pulp's gate lane on the Studio, 6 on a slot2 clone) but **never sets the VM's
+memory**: `tart set --memory` appears only in the Linux provider, so every macOS
+gate VM boots at the golden image's **8 GiB** regardless of how many cores it
+leased.
+
+`tools/ci/governed-build.sh` bounds a build by `min(cores, RAM x 0.75 / 1.5 GiB)`
+when no tartci store is reachable — which is always, inside the VM, because
+tartci is not installed in the guest. At 8 GiB the memory axis wins:
+
+| VM shape | derived `-j` |
+|---|---|
+| 12 vCPU / 8 GiB (Studio gate) | **4** |
+| 6 vCPU / 8 GiB (slot2) | **4** |
+| 4 vCPU / 8 GiB (golden base) | **4** |
+
+So **raising `vm_cores` alone cannot speed up the Build step.** The extra cores
+are unusable by any memory-safe bound, and the resulting no-op reads as "more
+cores did not help" rather than "the build was never asked to use them". If the
+Build step's wall time is the target, the VM's RAM has to move with its cores —
+a tartci profile change, not a Pulp one.
+
+Two practical consequences:
+
+- **Never read a leg's parallelism off the lease.** Read the `[governed-build]`
+  line in the job log; it prints the branch taken and the chosen `-j`. A lease
+  of 12 cores and a build at `-j4` is the expected, correct pairing today.
+- **Never bound a workflow build with a literal `--parallel N`.** It is a silent
+  ceiling: it keeps its value across a VM resize, so the fix above would land and
+  buy nothing. `build.yml`'s `Build` step carried `--parallel 4` fleet-wide on
+  exactly this reasoning until it was routed through the governor. The
+  `build_parallelism_guard.py` gate deliberately does **not** scan
+  `.github/workflows/**` (a `runs-on` resolves dynamically), so nothing catches
+  this for you — it is the workflow author's job.
 
 ## Host-vitals preflight — back off before a saturating CI host reboots
 

@@ -144,6 +144,23 @@ For an existing capability change:
   fingerprint would silently launder every unreviewed header edit. Paste the
   measured digest over the declared one in `agent_capability_registry.py`, bump
   `SURFACE_INVENTORY_VERSION` in `agent_capability_manifest.py`, then `--write`.
+- Before choosing the next `SURFACE_INVENTORY_VERSION`, check whether an open
+  branch already claimed it. Two branches that both bump 79 to 80 do not
+  conflict — the edits are identical, so git merges them silently and the
+  surface ends up recorded under a version that describes two different
+  inventories. Nothing downstream catches that, because each side passes
+  `--check` on its own.
+
+  ```sh
+  for p in $(ghapp api "repos/Generous-Corp/pulp/pulls?state=open&per_page=100" --jq '.[].number'); do
+      ghapp api "repos/Generous-Corp/pulp/pulls/$p/files?per_page=100" \
+          --jq '.[] | select(.filename=="tools/scripts/agent_capability_manifest.py") | .patch' 2>/dev/null \
+          | grep -q "^+SURFACE_INVENTORY_VERSION" && echo "PR #$p claims a version"
+  done
+  ```
+
+  Skip past any claimed integer rather than racing for it; the values only have
+  to be distinct and increasing, not contiguous.
 - `--write` also appends a full snapshot to
   `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
   that dwarf the change that caused them. `--check` does not require it, so for
