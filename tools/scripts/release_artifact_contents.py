@@ -72,6 +72,7 @@ CONTROL_STANDALONE_HOST_SDK_MEMBER = (
 CONTROL_STANDALONE_HOST_SDK_MANIFEST = (
     "pulp-sdk/libexec/pulp/pulp-control-standalone-host.inspector-capabilities.json"
 )
+VELLUM_D15_DEVELOPMENT_RUNTIME_MEMBER = "pulp-sdk/lib/libvellum-gpu.dylib"
 CONTROL_MANIFEST_PERMISSION_TERMS = (
     "implemented",
     "built",
@@ -965,6 +966,11 @@ def verify_sdk_archive(
 ) -> None:
     with Archive(path) as archive:
         names = set(archive.members)
+        if VELLUM_D15_DEVELOPMENT_RUNTIME_MEMBER in names:
+            raise ContentError(
+                f"{path.name}: development-only Vellum D15 runtime is in a "
+                "production SDK release archive"
+            )
         required = required_sdk_members(platform, matrix, version)
         missing = sorted(required - names)
         if missing:

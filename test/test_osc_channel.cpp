@@ -110,8 +110,7 @@ std::unique_ptr<OscChannel> open_loopback_endpoint(OscChannelOptions options = {
 TEST_CASE("OscChannel round-trips an OSC message over UDP loopback", "[osc_channel]") {
     auto pair = open_loopback_pair();
     if (!pair) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
     auto& a = pair.first;
     auto& b = pair.second;
@@ -152,8 +151,7 @@ TEST_CASE("OscChannel round-trips an OSC message over UDP loopback", "[osc_chann
 TEST_CASE("OscChannel send empty payload is rejected", "[osc_channel][lifecycle]") {
     auto a = open_loopback_endpoint();
     if (!a) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
     REQUIRE(a->is_open());
     REQUIRE_FALSE(a->send(nullptr, 0));
@@ -187,8 +185,7 @@ TEST_CASE("OscChannel open fails cleanly when requested local port is occupied",
 TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]") {
     auto a = open_loopback_endpoint();
     if (!a) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
     REQUIRE(a->is_open());
     a->close();
@@ -206,8 +203,7 @@ TEST_CASE("OscChannel accepts error callback replacement without changing state"
           "[osc_channel][lifecycle]") {
     auto a = open_loopback_endpoint();
     if (!a) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
 
     int first_count = 0;
@@ -227,8 +223,7 @@ TEST_CASE("OscChannel close is idempotent and on_closed fires exactly once",
           "[osc_channel][lifecycle]") {
     auto a = open_loopback_endpoint();
     if (!a) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
 
     std::atomic<int> closed_count{0};
@@ -250,8 +245,7 @@ TEST_CASE("OscChannel close uses the latest registered closed callback",
           "[osc_channel][lifecycle]") {
     auto a = open_loopback_endpoint();
     if (!a) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
 
     int first_count = 0;
@@ -277,8 +271,7 @@ TEST_CASE("OscChannel routes close callbacks through custom executor",
 
     auto a = open_loopback_endpoint(options);
     if (!a) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
 
     int closed_count = 0;
@@ -295,8 +288,7 @@ TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
           "[osc_channel][raw]") {
     auto pair = open_loopback_pair();
     if (!pair) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
     auto& a = pair.first;
     auto& b = pair.second;
@@ -336,8 +328,7 @@ TEST_CASE("OscChannel leaves unhandled incoming messages as no-op deliveries",
           "[osc_channel][raw]") {
     auto pair = open_loopback_pair();
     if (!pair) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
     auto& a = pair.first;
     auto& b = pair.second;
@@ -361,8 +352,7 @@ TEST_CASE("OscChannel message callback replacement uses latest callback",
           "[osc_channel][raw]") {
     auto pair = open_loopback_pair();
     if (!pair) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
     auto& a = pair.first;
     auto& b = pair.second;
@@ -412,8 +402,7 @@ TEST_CASE("OscChannel routes received messages through custom executor",
 
     auto pair = open_loopback_pair({}, options);
     if (!pair) {
-        SUCCEED("could not open loopback UDP pair; skipping");
-        return;
+        SKIP("could not open loopback UDP pair; skipping");
     }
     auto& a = pair.first;
     auto& b = pair.second;

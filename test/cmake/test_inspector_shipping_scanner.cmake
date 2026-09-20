@@ -50,6 +50,40 @@ if(_public_control_diagnostic LESS 0)
         "${_public_control_output}${_public_control_error}")
 endif()
 
+# Mutating sequencer transport control requires the controller lease even when
+# it is declared without any other controller-gated capability.
+set(_transport_control_source "${FIXTURE_DIR}/transport-control-source")
+set(_transport_control_build "${FIXTURE_DIR}/transport-control-build")
+file(REMOVE_RECURSE "${_transport_control_source}" "${_transport_control_build}")
+file(MAKE_DIRECTORY "${_transport_control_source}")
+file(WRITE "${_transport_control_source}/CMakeLists.txt"
+    "cmake_minimum_required(VERSION 3.24)\n"
+    "project(TransportControlDeclaration NONE)\n"
+    "include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpControlShipping.cmake\")\n"
+    "set(PULP_TransportTarget_CONTROL_PROFILE developer-local)\n"
+    "set(PULP_TransportTarget_CONTROL_CAPABILITIES dev.pulp.sequencer/transport.loop.write@1)\n"
+    "_pulp_configure_control_shipping(TransportTarget dev.pulp.transport TransportTarget)\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_transport_control_source}"
+    -B "${_transport_control_build}"
+    RESULT_VARIABLE _transport_control_result
+    OUTPUT_VARIABLE _transport_control_output ERROR_VARIABLE _transport_control_error)
+if(_transport_control_result EQUAL 0)
+    message(FATAL_ERROR
+        "transport loop write declaration bypassed controller authority")
+endif()
+set(_transport_control_combined
+    "${_transport_control_output}${_transport_control_error}")
+string(REGEX REPLACE "[ \t\r\n]+" " " _transport_control_combined
+    "${_transport_control_combined}")
+string(FIND "${_transport_control_combined}"
+    "requires dev.pulp.session/control@1"
+    _transport_control_diagnostic)
+if(_transport_control_diagnostic LESS 0)
+    message(FATAL_ERROR
+        "transport loop write declaration did not fail with the controller diagnostic: "
+        "${_transport_control_output}${_transport_control_error}")
+endif()
+
 # Reconfigure the same build directory after withdrawing critical authority.
 # Cache-backed declarations must reflect the current CMakeLists on every run.
 set(_reconfigure_source "${FIXTURE_DIR}/control-reconfigure-source")

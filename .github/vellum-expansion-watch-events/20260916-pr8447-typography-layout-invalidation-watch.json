@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260916-pr8447-typography-layout-invalidation-watch",
+  "created_at": "2026-09-16T17:18:42Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Make an inheritable typography change move the layout generation. View's inheritable font-size, letter-spacing, font-weight and font-family setters assigned the value without invalidating layout, so every descendant Label that inherited the value kept the measured box it computed under the old typography and the cascade silently disagreed with what was painted. Each setter now invalidates layout for the same reason Label's own typography setters already do, guarded on a real change so replaying an identical style stays clean and does not churn the generation. This is a Pulp view measurement-correctness fix and its focused Label tests only: no renderer backend, asset pipeline, visual-proof acceptance boundary, or Vellum source authority moves, so the disposition is watch-only.",
+  "tests": [
+    "ctest --test-dir build -R 'Label|label|typography|inheritable' --output-on-failure",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

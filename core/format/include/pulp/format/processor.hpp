@@ -348,10 +348,23 @@ public:
     /// EQ flipping between FIR taps, a reverb extending its decay).
     /// The Processor sets an `std::atomic<bool>` pending-flag; the
     /// format adapter polls the flag on the host / main thread and
-    /// pushes the notification to the host (`restartComponent` for
-    /// VST3, `kAudioUnitProperty_LatencySamples` for AU,
-    /// `clap_host_latency->changed()` for CLAP, `SetSignalLatency` for
-    /// AAX).
+    /// republishes in whatever way that format sanctions. This is NOT
+    /// the same call in each:
+    ///
+    ///   * VST3 — `restartComponent(kLatencyChanged)`, which per
+    ///     `ivsteditcontroller.h` is itself a request that the host
+    ///     "deactivate and reactivate the plug-in".
+    ///   * AU v2 / v3 — `kAudioUnitProperty_Latency` PropertyChanged /
+    ///     KVO on `latency`. Latency is an observable property there
+    ///     with no restart precondition.
+    ///   * CLAP — `clap_host->request_restart()` when the plugin is
+    ///     ACTIVE, and `clap_host_latency->changed()` only from inside
+    ///     the resulting `clap_activate()`. `clap/ext/latency.h` allows
+    ///     the reported latency to move during activate and nowhere
+    ///     else, so `changed()` alone on an active plugin announces a
+    ///     value the host may not act on. An inactive CLAP plugin
+    ///     reports directly.
+    ///   * AAX — `SetSignalLatency`.
     ///
     /// **Audio-thread-safe.** Never call a host API from `process()`.
     ///
@@ -364,8 +377,10 @@ public:
 
     /// Adapter-side polling helper. Returns true exactly once per
     /// `flag_*_changed()` call. The adapter calls this on the
-    /// host / main thread; on `true` it must republish the latest
-    /// `latency_samples()` / `tail_samples` to the host.
+    /// host / main thread; on `true` it must get the latest
+    /// `latency_samples()` / `tail_samples` to the host by that
+    /// format's sanctioned route (see `flag_latency_changed` above —
+    /// for CLAP that is a restart request, not a direct push).
     bool consume_latency_changed_flag() noexcept {
         return latency_changed_.exchange(false, std::memory_order_acq_rel);
     }
@@ -960,6 +975,13 @@ public:
     /// supports_in_place_scripted_ui_reload() returns true.
     /// Appended to preserve additive-only vtable ordering (node_abi_gate).
     virtual bool reload_active_scripted_ui_in_place(std::string* /*error*/) {
+        return false;
+    }
+
+    /// Process the additive block contract directly. In-process graph nodes use
+    /// this only when the descriptor opts into dense audio-rate modulation.
+    /// Appended to preserve every existing virtual slot.
+    virtual bool process_block(ProcessBlock&) {
         return false;
     }
 

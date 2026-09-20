@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260917-pr8529-ios-gpu-compile-gate-watch",
+  "created_at": "2026-09-17T23:15:30Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Add the first CI leg that compiles the iOS GPU (PULP_HAS_SKIA) code path: one iphonesimulator configure+compile leg in the existing iOS compile gate that fetches the manifest-pinned ios-simulator Skia slice, configures PULP_ENABLE_GPU=ON with PULP_REQUIRE_GPU_FOR_SDK=ON, and builds the ios-auv3-gpu-smoke AUv3 and HostApp targets. The new leg immediately surfaced latent drift in the Pulp-owned iOS plugin view host: its PULP_HAS_SKIA half was never compiled by any gate and referenced pointer-dispatch helpers without including pointer_dispatch.hpp, and captured the Metal view with __weak in a file that compiles under manual reference counting. The fix adds the missing include and switches to the __block non-retaining capture the mac hosts already use. No render surface abstraction, no Skia or Dawn backend, no asset pipeline, and no captured or serialized output changes; the iOS host is a Pulp-owned platform adapter, so this touches no accepted expansion boundary and no Vellum source authority, and the disposition is watch-only.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch",
+    "bash test/cmake/test_ios_compile_gate.sh <pulp-src> <build-dir>",
+    "bash test/cmake/test_ios_auv3_configure.sh <pulp-src>"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

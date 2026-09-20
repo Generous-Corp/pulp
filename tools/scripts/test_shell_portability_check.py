@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+import tempfile
+import unittest
+from pathlib import Path
+import json
+import os
+import subprocess
+
+import shell_portability_check as check
+
+
+class ShellPortabilityTests(unittest.TestCase):
+    def assert_findings(self, text: str, expected: bool) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fixture.sh"
+            path.write_text(text, encoding="utf-8")
+            self.assertEqual(bool(check.check_file(path)), expected)
+
+    def test_braced_colon_is_safe(self) -> None:
+        self.assert_findings('#!/bin/zsh\nprint -- "${root}:test/file.cpp"\n', False)
+
+    def test_unbraced_colon_is_rejected(self) -> None:
+        self.assert_findings('#!/bin/zsh\nprint -- "$root:test/file.cpp"\n', True)
+
+    def test_pipestatus_requires_bash_boundary(self) -> None:
+        self.assert_findings('#!/bin/zsh\nprint -- "${PIPESTATUS[1]}"\n', True)
+
+    def test_bash_pipestatus_is_allowed(self) -> None:
+        self.assert_findings('#!/usr/bin/env bash\nprint -- "${PIPESTATUS[0]}"\n', False)
+
+    def test_bare_pipestatus_is_rejected_in_zsh(self) -> None:
+        self.assert_findings('#!/bin/zsh\nprint -- "$PIPESTATUS"\n', True)
+
+    def test_ad_hoc_command_mode_catches_zsh_colon_modifier(self) -> None:
+        self.assertEqual(
+            bool(check.check_text('git show "$base:core/file.cpp"', "<command>", bash=False)),
+            True,
+        )
+
+    def test_ad_hoc_command_mode_catches_bash_status_in_zsh(self) -> None:
+        self.assertEqual(
+            bool(check.check_text('test ${PIPESTATUS[0]} -eq 0', "<command>", bash=False)),
+            True,
+        )
+
+    def test_ad_hoc_bash_command_allows_pipestatus(self) -> None:
+        self.assertEqual(
+            bool(check.check_text('test ${PIPESTATUS[0]} -eq 0', "<command>", bash=True)),
+            False,
+        )
+
+    def test_single_quoted_query_data_is_not_shell_expansion(self) -> None:
+        self.assertEqual(
+            bool(check.check_text("gh api --raw 'query($owner:String!)'", "<command>")),
+            False,
+        )
+
+    def test_bash_command_boundary_allows_pipestatus(self) -> None:
+        self.assertEqual(
+            bool(check.check_text("bash -lc 'test ${PIPESTATUS[0]} -eq 0'", "<command>")),
+            False,
+        )
+
+    def test_outer_zsh_status_is_still_checked_after_inner_bash(self) -> None:
+        self.assertEqual(
+            bool(
+                check.check_text(
+                    "bash -lc 'test ${PIPESTATUS[0]} -eq 0'; test ${PIPESTATUS[0]} -eq 0",
+                    "<command>",
+                    bash=False,
+                )
+            ),
+            True,
+        )
+
+    def test_env_variable_is_not_confused_with_zsh_colon_modifier(self) -> None:
+        self.assertEqual(
+            bool(check.check_text('print "$env:HOME"', "<command>")),
+            False,
+        )
+
+    def test_advisory_hook_warns_without_blocking(self) -> None:
+        hook = Path(__file__).parents[2] / "hooks/scripts/shell-portability-hint.sh"
+        payload = json.dumps({"tool_input": {"command": "test ${PIPESTATUS[0]} -eq 0"}})
+        env = os.environ.copy()
+        env["TOOL_INPUT"] = payload
+        env["PULP_AGENT_SHELL"] = "zsh"
+        result = subprocess.run(
+            ["bash", str(hook)],
+            cwd=Path(__file__).parents[2],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Bash-only PIPESTATUS", result.stdout)
+
+    def test_advisory_hook_accepts_codex_exec_cmd_key(self) -> None:
+        hook = Path(__file__).parents[2] / "hooks/scripts/shell-portability-hint.sh"
+        payload = json.dumps({"tool_input": {"cmd": "test ${PIPESTATUS[0]} -eq 0"}})
+        env = os.environ.copy()
+        env["TOOL_INPUT"] = payload
+        env["PULP_AGENT_SHELL"] = "zsh"
+        result = subprocess.run(
+            ["bash", str(hook)],
+            cwd=Path(__file__).parents[2],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Bash-only PIPESTATUS", result.stdout)
+
+    def test_advisory_hook_does_not_warn_for_bash_shell(self) -> None:
+        hook = Path(__file__).parents[2] / "hooks/scripts/shell-portability-hint.sh"
+        payload = json.dumps({"tool_input": {"command": "test ${PIPESTATUS[0]} -eq 0"}})
+        env = os.environ.copy()
+        env["TOOL_INPUT"] = payload
+        env["SHELL"] = "/bin/bash"
+        result = subprocess.run(
+            ["bash", str(hook)],
+            cwd=Path(__file__).parents[2],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Bash-only PIPESTATUS", result.stdout)
+
+    def test_manifest_is_valid(self) -> None:
+        import json
+        manifest = json.loads((Path(__file__).with_name("shell_portability_rules.json")).read_text())
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertTrue(all(rule["owner"] and rule["review_after"] for rule in manifest["rules"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

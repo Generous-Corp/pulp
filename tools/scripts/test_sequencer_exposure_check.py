@@ -11,13 +11,25 @@ import tempfile
 from pathlib import Path
 
 from sequencer_exposure_check import (
+    LEDGER_HEADER_PATH,
+    LEDGER_PATH,
+    LEDGER_ROWS_DIR,
+    LEDGER_TOMBSTONES_DIR,
     _ancestry_problem,
+    _exclusively_owned_paths,
     _load_base_transition,
     _load_base_transition_with_receipt,
     _load_sequencer_trailers,
+    _read_ledger_at_anchor,
+    _mechanical_version_paths,
     _semantic_added_paths,
+    assemble_ledger,
+    is_ledger_path,
     is_sequencer_owned_path,
+    load_ledger_from_worktree,
+    resolve_git_comparison,
     validate_document,
+    validate_dependency_references,
     validate_git_provenance,
     validate_release_evidence,
     validate_schema_contract,
@@ -28,6 +40,13 @@ from sequencer_exposure_check import (
 
 SHA_A = "1" * 40
 SHA_B = "2" * 40
+
+# Manifests the repository compels unrelated slices to append to: registering a
+# skill's paths is the Skill Maintenance Rule, not a sequencer delivery. A row
+# that owns one whole turns a routine registration into a required-gate failure.
+SHARED_REGISTRATION_MANIFESTS = {
+    "tools/scripts/skill_path_map.json",
+}
 
 _CHECK_TALLY = {"clean": 0, "calibrated": 0}
 
@@ -234,6 +253,31 @@ def fixture(root: Path, accepted_head: str, merge_sha: str) -> dict:
     }
 
 
+def same_ledger(left: dict | None, right: dict | None) -> bool:
+    """Compare two ledgers by identity rather than by row position.
+
+    A directory of row files has no inherent order, so the assembled row list is
+    sorted by ID while a single document keeps the order it was written in. That
+    difference is not a difference in what the ledger says.
+    """
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+
+    def keyed(document: dict) -> dict:
+        normalised = {
+            key: value for key, value in document.items()
+            if key not in {"rows", "tombstones"}
+        }
+        for key in ("rows", "tombstones"):
+            normalised[key] = {
+                item.get("id"): item for item in document.get(key, [])
+                if isinstance(item, dict)
+            }
+        return normalised
+
+    return keyed(left) == keyed(right)
+
+
 def expect_red(name: str, document: dict, root: Path, expected: str) -> None:
     errors = validate_document(document, root)
     if not errors:
@@ -311,6 +355,18 @@ def main() -> int:
         errors = validate_document(valid, root)
         if errors:
             raise AssertionError("valid fixture failed:\n" + "\n".join(errors))
+        strict_valid = copy.deepcopy(valid)
+        strict_valid["rows"][0]["delivery_state"] = "pending"
+        strict_valid["rows"][0].pop("release", None)
+        strict_valid["rows"][0]["surfaces"]["installed_sdk"]["dependencies"] = [
+            "missing-owner"
+        ]
+        strict_errors = validate_dependency_references(strict_valid)
+        if not any("missing-owner" in error for error in strict_errors):
+            raise AssertionError("strict dependency mode accepted an unresolved active dependency")
+        strict_valid["rows"][0]["surfaces"]["installed_sdk"]["dependencies"] = []
+        if validate_dependency_references(strict_valid):
+            raise AssertionError("strict dependency mode rejected a dependency-free active row")
 
         # An exposed surface must declare the authority it admits a caller under.
         # The rejection is the assertion that matters, so it is stated first and
@@ -915,6 +971,7 @@ def main() -> int:
             "owned_paths": [
                 "docs/status/gpu-vellum-handoff.yaml",
                 "docs/validation/gpu-handoff-provenance/receipt.json",
+                "tools/agent-capabilities/contract-history.json",
                 "inspect/src/control_generated_sibling.cpp",
             ],
         })
@@ -922,6 +979,7 @@ def main() -> int:
         for regenerated_path in (
             "docs/status/gpu-vellum-handoff.yaml",
             "docs/validation/gpu-handoff-provenance/receipt.json",
+            "tools/agent-capabilities/contract-history.json",
         ):
             transition_errors = validate_transition(
                 generated_base, generated_base, [regenerated_path]
@@ -1149,6 +1207,373 @@ def main() -> int:
             raise AssertionError(
                 f"published tombstone rewrite unexpectedly passed: {transition_errors}"
             )
+
+    # The shipped ledger must not annex a shared registration manifest. Every
+    # slice that registers a skill appends to skill_path_map.json, so a row that
+    # owns it whole makes the gate reject unrelated work; a row that only proves
+    # its own lines there lists it as evidence, which is how these manifests are
+    # already governed. The control is the real ledger rather than a fixture,
+    # because the failure mode is a row landing in the checked-in file.
+    shipped_ledger = json.loads(
+        (Path(__file__).resolve().parents[2] / "docs/status/sequencer-exposure.json")
+        .read_text(encoding="utf-8")
+    )
+    watched = _exclusively_owned_paths(shipped_ledger, shipped_ledger)
+    if not watched:
+        raise AssertionError(
+            "shipped ledger watched no path at all; the annexation control is blind"
+        )
+    annexed_registries = sorted(SHARED_REGISTRATION_MANIFESTS & watched)
+    if annexed_registries:
+        raise AssertionError(
+            "shipped ledger annexes a shared registration manifest, so every "
+            "unrelated PR touching it fails this gate; list it as evidence "
+            f"instead of owned_paths: {annexed_registries}"
+        )
+    unwatched_registries = sorted(SHARED_REGISTRATION_MANIFESTS - watched)
+    if unwatched_registries != sorted(SHARED_REGISTRATION_MANIFESTS):
+        raise AssertionError(
+            "shared registration manifest control is inconsistent: "
+            f"{unwatched_registries}"
+        )
+
+    # ── The ledger is carried as one file per row ────────────────────────────
+    # A single document has one append point, so two branches that each add a
+    # row rewrite the same bytes and conflict with EACH OTHER while each merges
+    # cleanly against main. These controls prove the split layout removes that,
+    # and prove the assembler refuses every way two files could disagree about
+    # what the ledger says.
+    with tempfile.TemporaryDirectory() as split_directory:
+        split_root = Path(split_directory)
+        document = fixture(split_root, SHA_A, SHA_B)
+        header = {key: document[key] for key in ("schema_version", "ledger_id", "audit")}
+        rows = document["rows"]
+        row_id = rows[0]["id"]
+
+        whole = json.dumps(document)
+        assembled, origins, assembly_errors = assemble_ledger([(LEDGER_PATH, whole)])
+        if assembly_errors or assembled != document:
+            raise AssertionError(f"single-document assembly drifted: {assembly_errors}")
+        if origins.get("document") != LEDGER_PATH:
+            raise AssertionError(f"single-document origin lost: {origins}")
+
+        split_fragments = [
+            (LEDGER_HEADER_PATH, json.dumps(header)),
+            *((f"{LEDGER_ROWS_DIR}/{row['id']}.json", json.dumps(row)) for row in rows),
+            *(
+                (f"{LEDGER_TOMBSTONES_DIR}/{stone['id']}.json", json.dumps(stone))
+                for stone in document["tombstones"]
+            ),
+        ]
+        split, split_origins, split_errors = assemble_ledger(split_fragments)
+        if split_errors:
+            raise AssertionError(f"split assembly failed: {split_errors}")
+        # A directory has no inherent order, so equivalence is by identity, not
+        # by position: the same header and the same set of rows and tombstones.
+        if not same_ledger(split, document):
+            raise AssertionError("split layout did not assemble to the same ledger")
+        split_row_positions = {
+            position for position, source in split_origins.items()
+            if source == f"{LEDGER_ROWS_DIR}/{row_id}.json"
+        }
+        if len(split_row_positions) != 1:
+            raise AssertionError(f"split origin lost: {split_origins}")
+        split_document_errors = validate_document(split, split_root)
+        if split_document_errors:
+            raise AssertionError(f"assembled split ledger failed schema: {split_document_errors}")
+
+        def assembly_red(name: str, fragments: list[tuple[str, str]], expected: str) -> None:
+            _, _, errors = assemble_ledger(fragments)
+            if not errors:
+                raise AssertionError(f"{name}: assembly unexpectedly passed")
+            if expected not in "\n".join(errors):
+                raise AssertionError(f"{name}: expected {expected!r}, got {errors}")
+            _CHECK_TALLY["calibrated"] += 1
+
+        assembly_red(
+            "a row file named for a different row was rejected",
+            [
+                (LEDGER_HEADER_PATH, json.dumps(header)),
+                (f"{LEDGER_ROWS_DIR}/not-that-row.json", json.dumps(rows[0])),
+            ],
+            "a ledger file is named for the row it carries",
+        )
+        assembly_red(
+            "the same row carried by both forms was rejected",
+            [(LEDGER_PATH, whole), (f"{LEDGER_ROWS_DIR}/{row_id}.json", json.dumps(rows[0]))],
+            f"{row_id!r} is carried by both",
+        )
+        assembly_red(
+            "two ledger headers were rejected",
+            [(LEDGER_PATH, whole), (LEDGER_HEADER_PATH, json.dumps(header))],
+            "both carry the ledger header",
+        )
+        assembly_red(
+            "a header carrying rows was rejected",
+            [
+                (LEDGER_HEADER_PATH, json.dumps({**header, "rows": rows})),
+                (f"{LEDGER_ROWS_DIR}/{row_id}.json", json.dumps(rows[0])),
+            ],
+            "must not carry rows",
+        )
+        assembly_red(
+            "a stray file under the ledger directory was rejected",
+            [
+                (LEDGER_HEADER_PATH, json.dumps(header)),
+                (f"{LEDGER_ROWS_DIR}/{row_id}.json", json.dumps(rows[0])),
+                ("docs/status/sequencer-exposure/notes.json", "{}"),
+            ],
+            "is not a ledger file",
+        )
+        assembly_red(
+            "a row file that is not an object was rejected",
+            [
+                (LEDGER_HEADER_PATH, json.dumps(header)),
+                (f"{LEDGER_ROWS_DIR}/{row_id}.json", "[]"),
+            ],
+            "must contain a JSON object",
+        )
+        assembly_red(
+            "an unreadable row file was rejected",
+            [
+                (LEDGER_HEADER_PATH, json.dumps(header)),
+                (f"{LEDGER_ROWS_DIR}/{row_id}.json", "{not json"),
+            ],
+            "is invalid JSON",
+        )
+        assembly_red("a ledger with no files at all was rejected", [], "neither")
+
+        # The ledger records what a change exposes; it is never itself a
+        # sequencer surface, in either form.
+        for ledger_path in (
+            LEDGER_PATH, LEDGER_HEADER_PATH,
+            f"{LEDGER_ROWS_DIR}/{row_id}.json",
+            f"{LEDGER_TOMBSTONES_DIR}/{row_id}.json",
+        ):
+            if not is_ledger_path(ledger_path):
+                raise AssertionError(f"ledger path not recognised: {ledger_path}")
+        # Control: a neighbouring status document is NOT the ledger, so the
+        # predicate is discriminating rather than always true.
+        for foreign in ("docs/status/sequencer-exposure-notes.json", "docs/status/other.json"):
+            if is_ledger_path(foreign):
+                raise AssertionError(f"ledger predicate swallowed {foreign}")
+
+        # Adding a row as its own file does not itself demand a row covering it.
+        added_row = copy.deepcopy(rows[0])
+        added_row["id"] = "freshly-split-row"
+        widened = copy.deepcopy(document)
+        widened["rows"].append(added_row)
+        ledger_only = validate_transition(
+            document, widened,
+            [f"{LEDGER_ROWS_DIR}/freshly-split-row.json", LEDGER_HEADER_PATH],
+        )
+        if ledger_only:
+            raise AssertionError(f"ledger files demanded their own coverage: {ledger_only}")
+        # Control: a real sequencer path in the same transition still does.
+        uncovered = validate_transition(
+            document, widened,
+            [f"{LEDGER_ROWS_DIR}/freshly-split-row.json", "core/timeline/src/unowned.cpp"],
+        )
+        if not any("not covered by an added or materially changed" in error
+                   for error in uncovered):
+            raise AssertionError(f"coverage control did not fire: {uncovered}")
+
+    # ── Two branches adding different rows must not conflict ─────────────────
+    with tempfile.TemporaryDirectory() as conflict_directory:
+        conflict_root = Path(conflict_directory)
+        base_document = fixture(conflict_root, SHA_A, SHA_B)
+        base_header = {
+            key: base_document[key] for key in ("schema_version", "ledger_id", "audit")
+        }
+        base_rows = base_document["rows"]
+
+        def branch_row(source_row: dict, new_id: str) -> dict:
+            clone = copy.deepcopy(source_row)
+            clone["id"] = new_id
+            clone["claim_id"] = f"claim-{new_id}"
+            return clone
+
+        alpha = branch_row(base_rows[0], "branch-alpha-row")
+        beta = branch_row(base_rows[0], "branch-beta-row")
+
+        def merge_conflicts(root: Path, left: str, right: str) -> bool:
+            merged = subprocess.run(
+                ["git", "-C", str(root), "merge-tree", "--write-tree", left, right],
+                check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            return merged.returncode != 0
+
+        def build_lane(root: Path, seed: dict) -> None:
+            write(root, "seed.txt", "lane seed")
+            for path, text in seed.items():
+                write(root, path, text)
+            git(root, "init", "-q", "-b", "main")
+            git(root, "config", "user.name", "Pulp Checker")
+            git(root, "config", "user.email", "checker@pulp.invalid")
+            git(root, "add", ".")
+            git(root, "commit", "-q", "-m", "lane base")
+
+        # The split lane: each branch adds its own file.
+        split_lane = conflict_root / "split-lane"
+        split_lane.mkdir()
+        build_lane(split_lane, {
+            LEDGER_HEADER_PATH: json.dumps(base_header, indent=2) + "\n",
+            **{
+                f"{LEDGER_ROWS_DIR}/{row['id']}.json": json.dumps(row, indent=2) + "\n"
+                for row in base_rows
+            },
+        })
+        for branch, row in (("alpha", alpha), ("beta", beta)):
+            git(split_lane, "checkout", "-q", "-b", branch, "main")
+            write(
+                split_lane, f"{LEDGER_ROWS_DIR}/{row['id']}.json",
+                json.dumps(row, indent=2) + "\n",
+            )
+            git(split_lane, "add", f"{LEDGER_ROWS_DIR}/{row['id']}.json")
+            git(split_lane, "commit", "-q", "-m", f"add {row['id']}")
+        for branch in ("alpha", "beta"):
+            if merge_conflicts(split_lane, branch, "main"):
+                raise AssertionError(f"{branch} unexpectedly conflicted with main")
+        if merge_conflicts(split_lane, "alpha", "beta"):
+            raise AssertionError(
+                "two branches adding different rows still conflicted with each other"
+            )
+        _CHECK_TALLY["clean"] += 1  # two branches adding different rows merge without conflict
+
+        # Control: the identical pair of rows appended to ONE document. If this
+        # does not conflict the instrument is measuring nothing and the clean
+        # result above proves nothing either.
+        whole_lane = conflict_root / "whole-lane"
+        whole_lane.mkdir()
+        build_lane(whole_lane, {LEDGER_PATH: json.dumps(base_document, indent=2) + "\n"})
+        for branch, row in (("alpha", alpha), ("beta", beta)):
+            git(whole_lane, "checkout", "-q", "-b", branch, "main")
+            appended = copy.deepcopy(base_document)
+            appended["rows"].append(row)
+            write(whole_lane, LEDGER_PATH, json.dumps(appended, indent=2) + "\n")
+            git(whole_lane, "add", LEDGER_PATH)
+            git(whole_lane, "commit", "-q", "-m", f"append {row['id']}")
+        for branch in ("alpha", "beta"):
+            if merge_conflicts(whole_lane, branch, "main"):
+                raise AssertionError(f"{branch} unexpectedly conflicted with main in the control")
+        if not merge_conflicts(whole_lane, "alpha", "beta"):
+            raise AssertionError(
+                "control: the same two rows appended to one document did NOT conflict, so "
+                "the conflict-free result above measures nothing"
+            )
+        _CHECK_TALLY["calibrated"] += 1  # control: the same two rows appended to one document conflicted
+
+        # History is immutable, so the checker reads both forms at a revision
+        # forever, not only during the migration.
+        git(split_lane, "checkout", "-q", "main")
+        comparison = resolve_git_comparison(split_lane, "main", "main", source="selftest")
+        historical, _, historical_errors, receipt = _read_ledger_at_anchor(
+            split_lane, comparison
+        )
+        if historical_errors or receipt.status != "available":
+            raise AssertionError(
+                f"split layout unreadable from history: {historical_errors} {receipt}"
+            )
+        if not same_ledger(historical, base_document):
+            raise AssertionError("split layout assembled differently out of git history")
+        worktree, _, worktree_errors = load_ledger_from_worktree(split_lane)
+        if worktree_errors or not same_ledger(worktree, base_document):
+            raise AssertionError(f"worktree read drifted from history: {worktree_errors}")
+
+    # A mechanical version rewrite of a declared artifact is not an exposure
+    # decision, so it must not demand a ledger row -- but the exemption is
+    # scoped to the DIFF, not the path, and the controls below are what prove
+    # that. Without the second and third, this would be indistinguishable from
+    # quietly un-watching the file.
+    with tempfile.TemporaryDirectory() as mechanical_tmp:
+        mech_root = Path(mechanical_tmp)
+        git(mech_root, "init", "-q")
+        git(mech_root, "config", "user.email", "selftest@example.com")
+        git(mech_root, "config", "user.name", "selftest")
+        mech_path = "docs/status/pulp-tooling-disposition.json"
+        write(mech_root, mech_path, json.dumps(
+            {"entries": {"plugin_registrations": [
+                {"name": "claude-plugin:pulp", "disposition": "pulp-owned",
+                 "version": "0.457.3", "catalog_version": "0.457.3"}]}},
+            indent=2) + "\n")
+        git(mech_root, "add", mech_path)
+        git(mech_root, "commit", "-q", "-m", "seed disposition map")
+        mech_base = git(mech_root, "rev-parse", "HEAD").strip()
+
+        # 1. version-only rewrite -> recognised as mechanical
+        write(mech_root, mech_path, json.dumps(
+            {"entries": {"plugin_registrations": [
+                {"name": "claude-plugin:pulp", "disposition": "pulp-owned",
+                 "version": "0.457.4", "catalog_version": "0.457.4"}]}},
+            indent=2) + "\n")
+        git(mech_root, "add", mech_path)
+        git(mech_root, "commit", "-q", "-m", "bump versions")
+        mech_paths, mech_errors = _mechanical_version_paths(
+            mech_root, mech_base, [mech_path], "HEAD"
+        )
+        if mech_errors or mech_path not in mech_paths:
+            raise AssertionError(
+                f"version-only rewrite not recognised as mechanical: {mech_paths}, {mech_errors}"
+            )
+        _CHECK_TALLY["clean"] += 1
+
+        # 2. CONTROL: a non-version edit to the SAME file must NOT be mechanical.
+        #    Without this, test 1 would also pass if the path were simply
+        #    exempted outright, which is the bug this design avoids.
+        nonver_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, mech_path, json.dumps(
+            {"entries": {"plugin_registrations": [
+                {"name": "claude-plugin:pulp", "disposition": "candidate-shared-later",
+                 "version": "0.457.4", "catalog_version": "0.457.4"}]}},
+            indent=2) + "\n")
+        git(mech_root, "add", mech_path)
+        git(mech_root, "commit", "-q", "-m", "change a disposition")
+        nonver_paths, nonver_errors = _mechanical_version_paths(
+            mech_root, nonver_base, [mech_path], "HEAD"
+        )
+        if nonver_errors or mech_path in nonver_paths:
+            raise AssertionError(
+                "control: a disposition change was treated as a mechanical version "
+                f"rewrite, so the exemption is not diff-scoped: {nonver_paths}"
+            )
+        _CHECK_TALLY["calibrated"] += 1
+
+        # 3. CONTROL: an undeclared path is never mechanical, however it changes.
+        other = "docs/status/some-other-artifact.json"
+        other_base = git(mech_root, "rev-parse", "HEAD").strip()
+        write(mech_root, other, '{\n  "version": "1.0.1"\n}\n')
+        git(mech_root, "add", other)
+        git(mech_root, "commit", "-q", "-m", "undeclared artifact")
+        other_paths, _ = _mechanical_version_paths(
+            mech_root, other_base, [other], "HEAD"
+        )
+        if other in other_paths:
+            raise AssertionError(
+                "control: an undeclared path was exempted, so the map is not consulted"
+            )
+        _CHECK_TALLY["calibrated"] += 1
+
+    # The watch itself: a watched path stays red unless the transition is
+    # mechanical, and goes green when it is.
+    mech_current = copy.deepcopy(valid)
+    watched_path = "docs/status/pulp-tooling-disposition.json"
+    mech_current["rows"][0]["owned_paths"] = [watched_path]
+    mech_base_doc = copy.deepcopy(mech_current)
+    red = validate_transition(
+        mech_base_doc, mech_current, [watched_path], mechanical_version_paths=set()
+    )
+    if not any(watched_path in error for error in red):
+        raise AssertionError(
+            f"control: a watched path changed with no covering row passed: {red}"
+        )
+    green = validate_transition(
+        mech_base_doc, mech_current, [watched_path],
+        mechanical_version_paths={watched_path},
+    )
+    if any(watched_path in error for error in green):
+        raise AssertionError(
+            f"a mechanical version rewrite still demanded a ledger row: {green}"
+        )
 
     print(
         "sequencer exposure checker selftest: OK "

@@ -11,6 +11,7 @@ requires:
   - .agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql
   - .agents/skills/trace-sql/pulp_gpu_health_transitions.sql
   - .agents/skills/trace-sql/pulp_gpu_probe_correlation.sql
+  - .agents/skills/trace-sql/pulp_gpu_audio_blocks.sql
 ---
 
 # trace-sql — querying Pulp traces with `trace_processor`
@@ -250,8 +251,11 @@ semantics and folds unrelated spans in. Use `GLOB` for name patterns.
 flushed (or an unterminated `PULP_TRACE_BEGIN`) has `dur = -1`. It is *not* a
 zero-length event. Every duration query filters `WHERE dur >= 0` (or
 `dur != -1`). A negative duration leaking into a `SUM`/`ORDER BY` corrupts the
-result. Instant events (xruns) genuinely have `dur = 0` — key those off the
-name, not the duration.
+result. Instant events genuinely have `dur = 0` — key those off the name, not
+the duration. Xruns are not the only ones: GPU diagnostics arrive as
+`dur = 0` slices named `gpu.diagnostic` on category `gpu`, carrying their
+severity and message as `debug.` args
+(`EXTRACT_ARG(arg_set_id, 'debug.severity')`).
 
 **`EXTRACT_ARG` for span arguments — mind the `debug.` prefix.** Typed args
 (frame index, block index, `motion.trace_id`, sample position) live in the arg
@@ -401,6 +405,7 @@ GROUP BY name ORDER BY avg_all_us DESC;
 - `.agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql`
 - `.agents/skills/trace-sql/pulp_gpu_health_transitions.sql`
 - `.agents/skills/trace-sql/pulp_gpu_probe_correlation.sql`
+- `.agents/skills/trace-sql/pulp_gpu_audio_blocks.sql` — independent admission/terminal and eligibility/delivery identities; see `docs/guides/gpu-audio-tracing.md` for its explicit-load validator.
 - `core/runtime/include/pulp/runtime/trace.hpp` — the macro surface + category taxonomy
 - `docs/guides/tracing.md` — the guide, tiers, and worked use cases
 

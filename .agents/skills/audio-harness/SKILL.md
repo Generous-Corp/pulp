@@ -90,6 +90,19 @@ Read `test/support/README.md` for the authoritative layering contract.
 
 ## Run the proofs
 
+### Shared-memory GPU timing evidence
+
+Use `tools/scripts/gpu_audio_p4_evidence.py` for paired shared/staged timing
+captures. Its [evidence contract](../../../docs/validation/gpu-audio-p4-evidence.md)
+defines provenance, complete trials, transfer counters, and CPU accounting.
+Keep raw JSONL and the exact benchmark binary with every summary. Supply
+expanded direct compiler flags; response/configuration files and forwarded
+frontend options cannot prove the effective Release settings. Output-name
+validation uses hidden probes and must never publish empty final artifacts.
+Run `python3 tools/scripts/test_gpu_audio_p4_evidence.py` when changing this
+tool. A valid capture or passing schema test is not a physical performance
+verdict, and one paired row cannot authorize a product default.
+
 ```bash
 # Build + run the whole harness (Release — Debug is meaningless for DSP timing/levels)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -674,6 +687,24 @@ harness or `ctest`.
   BS.1387 ODG), AQUA-Tk (`PULP_AQUATK_BIN`, GPL-3.0, ODG). Results land under
   `report["perceptual"]`, ADVISORY ONLY. Deliberately excludes speech/telephony (PESQ,
   POLQA) and no-reference neural speech (DNSMOS, NISQA) metrics — wrong domain/contract.
+  Three non-obvious facts about the ViSQOL lane, each of which silently breaks a run:
+  - **ViSQOL reads 16-bit PCM WAV only.** Its own `src/wav_reader.cc` accepts format tags
+    PCM/extensible and rejects any other bit depth with "Error parsing WAV Header -
+    Expected 16bit samples." The lab writes **float32** (`audio_io.save_wav`), so the
+    pipeline's own exports are unreadable by ViSQOL as written; `prepare_for_visqol()`
+    transcodes to 16-bit PCM first. Do not "simplify" that away.
+  - **ViSQOL exits 0 when a comparison FAILS.** `main.cc` logs the error and continues the
+    file-pair loop, returning 0 regardless; only argument-parse and init failures return
+    -1. So the exit code cannot distinguish scored from unscored, and the score line is
+    the only evidence a comparison happened.
+  - **Parse stdout ONLY.** ViSQOL prints `MOS-LQO:\t\t<value>` to stdout (outside the
+    `--verbose` block — `--verbose` adds paths and per-band tables, it does not gate the
+    score) and routes diagnostics to stderr. A bare-float fallback applied across stderr
+    turns an incidental number — a duration, a version, a path segment — into a
+    confident, fabricated MOS for a run that produced no score.
+  - **Reachability:** the perceptual layer runs only from `pipeline.run_and_export()`.
+    `compare` and `regression_net` never touch it, which is where most readers look
+    first.
 - **MIR structural oracle** (`mir.py`, opt-in, license-fenced): aubio (`PULP_AUBIO_BIN`,
   GPL-3.0) — a *feature extractor*, NOT a quality metric, so it is a SEPARATE layer from
   `perceptual.py`. Gives an independent onset-count cross-check under

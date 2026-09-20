@@ -187,6 +187,29 @@ set_tests_properties(cmake-runtime-staging-call-sites PROPERTIES
     LABELS "cmake;sdk;runtime;lint"
     TIMEOUT 30)
 
+# Behavioral unit proof for non-wgpu runtime sidecars registered by target.
+# A tiny Standalone app and plug-in module each receive and verify the same
+# imported runtime file through PulpRuntimeStaging's shared registry.
+add_test(NAME cmake-registered-runtime-staging
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_registered_runtime_staging.cmake)
+set_tests_properties(cmake-registered-runtime-staging PROPERTIES
+    LABELS "cmake;sdk;runtime;bundle"
+    TIMEOUT 120)
+
+if(APPLE)
+    add_test(NAME cmake-macho-linked-runtime-staging
+        COMMAND ${CMAKE_COMMAND}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_macho_linked_runtime_staging.cmake)
+    set_tests_properties(cmake-macho-linked-runtime-staging PROPERTIES
+        LABELS "cmake;sdk;runtime;bundle;macos"
+        TIMEOUT 120)
+endif()
+
 # SOURCE LINT: every macOS plug-in bundle helper writes Contents/PkgInfo, so a
 # produced bundle is declared a package rather than a browsable folder. Needed
 # because the omission is invisible from inside the build — a bundle missing
@@ -237,6 +260,11 @@ add_test(NAME cmake-installed-sdk-runtime-staging
         "-DPULP_PARENT_SHARED_LINKER_FLAGS=${CMAKE_SHARED_LINKER_FLAGS}"
         "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
         "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+        "-DPULP_PARENT_GPU_AUDIO_HAS_VELLUM_D15=${PULP_GPU_AUDIO_HAS_VELLUM_D15}"
+        -DPULP_PARENT_GPU_AUDIO_AVAILABLE=$<BOOL:$<TARGET_EXISTS:pulp-gpu-audio>>
+        "-DPULP_PARENT_GPU_AUDIO_VELLUM_RUNTIME_NAME=${PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME}"
+        "-DPULP_PARENT_GPU_AUDIO_VELLUM_NOTICE_DIR=${PULP_GPU_AUDIO_VELLUM_NOTICE_DIR}"
+        "-DPULP_PARENT_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE=${PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE}"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_sdk_runtime_staging.cmake)
 set_tests_properties(cmake-installed-sdk-runtime-staging PROPERTIES
     LABELS "cmake;sdk;skia;windows;runtime;slow"
@@ -472,6 +500,16 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-gate-supervisor PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 30)
+        # The advisory diff-scoped clang-format gate must never report a missing
+        # binary as a formatting failure. Asserts the pre-push, gates.sh and CI
+        # wiring keep exit 3 (infrastructure) apart from exit 1 (verdict) and pin
+        # the CI binary to the measured-identical clang-format 21.
+        add_test(NAME prepush-format-gate-wiring
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_format_gate.py)
+        set_tests_properties(prepush-format-gate-wiring PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 30)
     endif()
     add_test(NAME wasm-skia-slice-invariants
         COMMAND ${PULP_PYTHON3_FOR_TESTS}
@@ -542,6 +580,21 @@ if(UNIX)
     add_test(NAME contributor-check
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_contributor_check.sh)
     set_tests_properties(contributor-check PROPERTIES TIMEOUT 120)
+    # format_changed.sh is the only formatter invocation that does not rewrite
+    # untouched lines (the tree does not round-trip under .clang-format), so
+    # its hunk-to---lines plumbing is what must not rot. Drives a fake
+    # clang-format in throwaway repos; no real formatter, no dependency on
+    # this checkout's state.
+    add_test(NAME format-changed-selftest
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_format_changed.sh)
+    set_tests_properties(format-changed-selftest PROPERTIES TIMEOUT 120)
+    # codex_review_signal.sh decides whether a pull request was reviewed at all,
+    # and the two states it separates look identical from outside: a clean
+    # review leaves only a reaction, and an unreachable API returns nothing.
+    # Drives a stubbed `gh` in throwaway dirs; no network, no build.
+    add_test(NAME codex-review-signal-selftest
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_codex_review_signal.sh)
+    set_tests_properties(codex-review-signal-selftest PROPERTIES TIMEOUT 120)
     # worktree_lineage.sh is how every agent discovers whether a checkout is
     # safe to remove, so a wrong row is a deletion hazard. Builds a throwaway
     # repo and asserts each emitted column against the config it renders.
@@ -570,6 +623,27 @@ if(UNIX)
         TIMEOUT 30)
 endif()
 if(Python3_Interpreter_FOUND)
+    # The frozen C0 ABI receipt was captured on darwin-arm64. Register its
+    # governed nested build on the matching platform; the portable verifier
+    # selftests remain part of every Python-enabled test manifest.
+    if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+        add_test(NAME sample-region-compat-baseline
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/sample_region_compat_baseline.py"
+                --repo "${CMAKE_SOURCE_DIR}"
+                --build-dir "${CMAKE_BINARY_DIR}/sample-region-compat-baseline-build"
+                --negative-controls)
+        set_tests_properties(sample-region-compat-baseline PROPERTIES
+            LABELS "compatibility;sample-region"
+            TIMEOUT 3600)
+    endif()
+    add_test(NAME sample-region-compat-baseline-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_sample_region_compat_baseline.py")
+    set_tests_properties(sample-region-compat-baseline-selftest PROPERTIES
+        LABELS "compatibility;sample-region"
+        TIMEOUT 120)
+
     # tools/mcp is added after test/, so TARGET is necessarily false here even
     # in the normal build. Mirror its platform/top-level admission instead.
     if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)

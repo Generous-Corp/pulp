@@ -68,8 +68,17 @@ versa.** Say in the report which toolchain you actually found.
 rg -i "why|rationale|deliberate|on purpose|do not|never" docs/guides/ CLAUDE.md
 git log -S"<the mechanism>" --oneline           # the commit that introduced it
 git log --format='%B' -1 <that commit>          # and WHY, in its message
-ls planning/friction/ planning/decisions/       # has this been decided before?
+git -C planning fetch -q origin main             # NEVER read the pinned checkout
+git -C planning log origin/main --oneline -- friction/   # has this been decided before?
+git -C planning show origin/main:friction/<file>.md      # read a report at origin/main
 ```
+
+**Read the corpus at `origin/main`, never at the submodule pin.** Pulp's `main`
+pins `planning` at a commit that runs weeks behind: measured 2026-09-19, the pin
+was **1,672 planning commits and 373 friction-file changes** stale. A fresh
+worktree follows `git submodule update --init planning` and therefore reads a
+three-week-old corpus by construction, in which reports closed days ago still say
+`OPEN`. Every check below is worthless against that ref.
 
 If a comment says **"DO NOT FIX IT"** or a doc explains a design, **that is the answer** —
 not an obstacle to route around.
@@ -237,6 +246,9 @@ with the cost of each. Say plainly if the good fix is blocked on something else.
 ## Routing
 - [ ] Fix now, by me
 - [ ] Hand off — needs <what>: <why I am not doing it>
+      <!-- Filing a "Fix now" you will land later? Put the PR number here NOW.
+           The merge lands after your session ends and nobody will be present
+           to fill Resolution. -->
 
 ## Resolution   ← the fixing agent MUST fill this in
 **Outcome:** <what was actually done>
@@ -246,6 +258,28 @@ with the cost of each. Say plainly if the good fix is blocked on something else.
 ```
 
 ---
+
+## Before you ACT on a report, or put one in front of a human
+
+**A report's `Status:` is the filer's claim at filing time, not a fact about now.**
+Verify it against code on `origin/main` before routing it to Daniel or starting
+work on it. Measured 2026-09-19: **~20% of the corpus read OPEN while the fix was
+already on main**, and two such reports were put in front of Daniel as live
+decisions that no longer existed.
+
+This costs one grep per report and only fires where staleness is expensive — the
+~23 reports that are OPEN or IN PROGRESS *and* routed to a human. It is cheap
+precisely because it is not run over the whole corpus.
+
+The failure is not that filers are careless. A fix is often authored within
+minutes of its report by an agent holding that report — but it lands
+asynchronously through the merge queue after that session has ended, and `Status`
+is only honestly flippable once it lands. Nobody is present at that moment. So the
+check belongs where someone IS present: at the point of use.
+
+Do not reach for a heuristic screen instead. Three have been tested against this
+corpus (unfilled Resolution, names-a-merged-PR, Fix-now-checked) and none beat the
+base rate; one caught 0 of 4 known-stale reports.
 
 ## Routing: fix now, or hand off?
 

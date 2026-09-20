@@ -94,6 +94,11 @@ docs:
     kind: guide
     summary: HeadlessHost API, golden-file testing, sanitizer builds, format validation
 
+  - slug: measurement-harnesses
+    path: guides/measurement-harnesses.md
+    kind: guide
+    summary: The command-line measurement loop — offline plugin render, audio analysis (C++ lane and Python quality lab), headless screenshot capture, headless UI interaction — and the stated blind spot of each instrument
+
   - slug: host-matrix
     path: guides/host-matrix.md
     kind: guide
@@ -113,6 +118,11 @@ docs:
     path: guides/webview.md
     kind: guide
     summary: Optional WebView runtime, asset serving, messaging, and debug workflow
+
+  - slug: tracing
+    path: guides/tracing.md
+    kind: guide
+    summary: Off-by-default Perfetto tracing — capture paths, analysis tiers and skills, category taxonomy, instant events, GPU diagnostics bridge, RT-safety rules
 
   - slug: claude-code-plugin
     path: guides/claude-code-plugin.md

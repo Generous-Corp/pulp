@@ -1,0 +1,209 @@
+{
+  "id": "event-humaniser-unified-parameters",
+  "title": "The built-in event humaniser exposes stable timing and velocity depth parameters",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "b3d25274-6933-4a0b-ac8c-2feb733a5940",
+  "owned_paths": [
+    "core/host/include/pulp/host/timeline_device_resolver.hpp",
+    "core/host/src/timeline_device_resolver.cpp",
+    "core/midi/include/pulp/midi/humanize.hpp",
+    "tools/timeline/include/pulp/tools/timeline/device_catalog.hpp",
+    "tools/timeline/src/device_catalog.cpp",
+    "test/test_midi_performance_kernels.cpp",
+    "test/test_timeline_event_device_chain.cpp",
+    "test/test_cli_timeline.cpp",
+    "test/test_mcp_timeline_sessions.cpp",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/reference/cli.md",
+    "docs/status/cli-commands.yaml",
+    "tools/mcp/mcp_timeline_tools.cpp",
+    ".github/vellum-expansion-watch-events/20260918-sequencer-humaniser-cli-catalog.json",
+    "docs/status/sequencer-exposure/rows/event-humaniser-unified-parameters.json",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
+    "test/test_agent_capability_compile.cpp",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/scripts/agent_capability_catalog_performance.py",
+    "tools/scripts/agent_capability_manifest.py",
+    ".agents/skills/agent-capabilities/SKILL.md"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/timeline_device_resolver.hpp",
+      "needles": [
+        "kEventHumaniserTimingDepthParamId",
+        "kEventHumaniserVelocityDepthParamId"
+      ]
+    },
+    {
+      "path": "core/host/src/timeline_device_resolver.cpp",
+      "needles": [
+        "Timing Depth",
+        "Velocity Depth",
+        "update_spec_for_future_attacks"
+      ]
+    },
+    {
+      "path": "tools/timeline/src/device_catalog.cpp",
+      "needles": [
+        "entry.parameters",
+        "parameter.flags.automatable",
+        "parameter.flags.stepped"
+      ]
+    },
+    {
+      "path": "test/test_timeline_event_device_chain.cpp",
+      "needles": [
+        "timeline humaniser depth reaches the compiled device through host controls",
+        "zero.audio != default_depth.audio"
+      ]
+    },
+    {
+      "path": "test/test_midi_performance_kernels.cpp",
+      "needles": [
+        "humanize depth updates preserve attacks already in flight"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The built-in event humaniser now publishes stable timing-depth and velocity-depth IDs through PluginSlot::parameters(), accepts bounded values through the shared get/set parameter path, and retains its fixed 512-sample latency. Each direct runtime control has an independent audible efficacy proof. Both are non-automatable and non-persistent. Timing depth changes the attack-jitter span inside that fixed compensated window; zero depth is a deterministic control setting rather than whole-device bypass or render identity, while already queued attacks keep their materialized schedule across a control change.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/timeline_device_resolver.hpp",
+          "needles": [
+            "kEventHumaniserTimingDepthParamId",
+            "kEventHumaniserVelocityDepthParamId"
+          ]
+        },
+        {
+          "kind": "other",
+          "path": "core/host/src/timeline_device_resolver.cpp",
+          "needles": [
+            "parameters() const override",
+            "get_parameter",
+            "set_parameter"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_timeline_event_device_chain.cpp",
+          "needles": [
+            "timeline humaniser depth reaches the compiled device through host controls",
+            "zero.audio != default_depth.audio"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "exposed",
+      "rationale": "The existing no-argument `pulp seq capabilities` device catalog now includes every built-in parameter's stable ID, name, unit, range, default, and automatable and stepped flags. The CLI test proves both humaniser controls are discoverable without adding a second catalog authority.",
+      "evidence": [
+        {
+          "kind": "cli_definition",
+          "path": "docs/status/cli-commands.yaml",
+          "needles": [
+            "stable parameter metadata and behavior flags"
+          ]
+        },
+        {
+          "kind": "cli_handler",
+          "path": "tools/cli/cmd_seq.cpp",
+          "needles": [
+            "device_catalog_json"
+          ]
+        },
+        {
+          "kind": "cli_projection",
+          "path": "tools/timeline/src/device_catalog.cpp",
+          "needles": [
+            "entry.parameters",
+            "parameter.default_value"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_cli_timeline.cpp",
+          "needles": [
+            "Timing Depth",
+            "Velocity Depth"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_mcp": {
+      "disposition": "exposed",
+      "rationale": "The existing `pulp_timeline_device_catalog` response uses the same encoder as the CLI, so an agent discovers both humaniser parameter IDs and metadata through the already published MCP tool. The MCP test parses the response and binds IDs 1 and 2 to Timing Depth and Velocity Depth.",
+      "evidence": [
+        {
+          "kind": "mcp_definition",
+          "path": "tools/mcp/mcp_timeline_tools.cpp",
+          "needles": [
+            "stable parameter IDs, plain ranges, defaults, units and behavior flags"
+          ]
+        },
+        {
+          "kind": "mcp_handler",
+          "path": "tools/mcp/mcp_tools.hpp",
+          "needles": [
+            "handle_timeline_device_catalog"
+          ]
+        },
+        {
+          "kind": "mcp_projection",
+          "path": "tools/timeline/include/pulp/tools/timeline/device_catalog.hpp",
+          "needles": [
+            "DeviceParameterCatalogEntry",
+            "std::vector<DeviceParameterCatalogEntry> parameters"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_mcp_timeline_sessions.cpp",
+          "needles": [
+            "parameters->array.size() == 2",
+            "Velocity Depth"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "read_only",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "live_product_control": {
+      "disposition": "gap",
+      "rationale": "PluginSlot parameter reachability gives Forge and graph hosts a unified runtime control but does not create a Product A operation, executor binding, grant, or profile policy for setting a placed device parameter. Product A must expose a document-backed device-parameter operation before this surface can be claimed.",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "product-a-timeline-document-session",
+        "event-to-event-device-and-catalog"
+      ]
+    },
+    "design_time_agent_manifest": {
+      "disposition": "gap",
+      "rationale": "The CLI and MCP catalogs make the two controls discoverable at runtime, but the installed design-time capability manifest still has no row advertising event-humaniser authoring or its parameter contract. That registration remains a separate sequencer-control closure task.",
+      "owner": "sequencer-control-closure",
+      "dependencies": [
+        "event-to-event-device-and-catalog"
+      ]
+    }
+  }
+}

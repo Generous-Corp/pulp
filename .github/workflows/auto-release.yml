@@ -65,19 +65,45 @@ jobs:
           # / Revert subject.
           echo "tracker_opt_out=0" >> "$GITHUB_OUTPUT"
           subject=$(git log -1 --format=%s HEAD)
-          body=$(git log -1 --format=%B HEAD)
-          trailers=$(printf '%s\n' "$body" | git interpret-trailers --parse)
+          # Only the Revert-Of lookup below reads this; the bypass trailers are
+          # classified by release_trailer_guard.py, which reads the whole body.
+          trailers=$(git log -1 --format=%B HEAD | git interpret-trailers --parse)
 
-          # COMMIT_MESSAGES squash bodies append a separator and GitHub footer
-          # after the source commits. interpret-trailers then sees only the
-          # footer, so also recognize an exact embedded source-trailer line.
-          if printf '%s\n' "$trailers" | grep -iq '^release: skip' || \
-              printf '%s\n' "$body" | grep -iqE '^[[:space:]]*release:[[:space:]]+skip([[:space:]]|$)'; then
-              echo "Release: skip trailer present — no tagging."
-              echo "skip=1" >> "$GITHUB_OUTPUT"
-              echo "tracker_opt_out=1" >> "$GITHUB_OUTPUT"
-              exit 0
-          fi
+          # Classify a bypass declaration through the same parse the pre-merge
+          # gates use, never a second pattern of this step's own. Two reasons
+          # it cannot be a plain grep here:
+          #
+          #   * A COMMIT_MESSAGES squash body appends a separator and a GitHub
+          #     footer after the source commits, so `git interpret-trailers`
+          #     sees only the footer and a real declaration mid-body is
+          #     invisible to it. The whole body has to be scanned.
+          #   * Scanning the whole body then picks up trailers that are only
+          #     being QUOTED. Indentation and `>` move a quoted line off
+          #     column zero, but a fenced code block does not, so a fence has
+          #     to be masked — which a line-anchored pattern cannot do.
+          #
+          # An undecidable verdict fails this step. Guessing "no bypass" would
+          # publish an unwanted tag and guessing "bypass" would withhold a
+          # wanted one; the second is silent, which is the failure this guard
+          # exists to prevent, so neither guess is acceptable.
+          guard() {
+              python3 tools/scripts/release_trailer_guard.py \
+                  --query "$1" --ref "${2:-HEAD}" || echo "undecidable"
+          }
+          release_verdict=$(guard release-skip HEAD)
+          case "$release_verdict" in
+              skip)
+                  echo "Release: skip trailer present — no tagging."
+                  echo "skip=1" >> "$GITHUB_OUTPUT"
+                  echo "tracker_opt_out=1" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+              no-skip) ;;
+              *)
+                  echo "::error::release trailer guard could not classify HEAD: $release_verdict"
+                  exit 1
+                  ;;
+          esac
           # Honor `Version-Bump: skip reason="..."` the same way
           # `Release: skip` is honored. Authors use this
           # trailer for fix/feat changes that genuinely don't bump the
@@ -100,24 +126,32 @@ jobs:
           # Per-surface forms like `Version-Bump: sdk=skip` mean "skip
           # this surface's bump" but don't opt out of the whole release
           # gate (they're handled by the per-surface verdict pipeline
-          # in version_bump_check.py). Mirrors the same matching shape
-          # as `_range_has_version_bump_skip_trailer()` in
-          # tools/scripts/version_bump_check.py — including the
-          # requirement that the reason be NON-EMPTY. The Python gate
-          # rejects bare `reason=` with no value; this shell guard must
-          # stay in lockstep.
-          # If the two layers disagreed on validity, an author could
-          # write `reason=""` that passes here but fails at PR time
-          # (or vice-versa) — making the bypass inconsistent.
-          if printf '%s\n' "$trailers" | \
-              grep -iE '^version-bump:[[:space:]]+skip([[:space:]]|$).*reason[[:space:]]*=[[:space:]]*"[^"]+"' || \
-              printf '%s\n' "$body" | \
-              grep -iE '^[[:space:]]*version-bump:[[:space:]]+skip([[:space:]]|$).*reason[[:space:]]*=[[:space:]]*"[^"]+"'; then
-              echo "Version-Bump: skip trailer present — no tagging."
-              echo "skip=1" >> "$GITHUB_OUTPUT"
-              echo "tracker_opt_out=1" >> "$GITHUB_OUTPUT"
-              exit 0
-          fi
+          # in version_bump_check.py).
+          #
+          # LOCKSTEP: this post-merge guard and the PR-time gate
+          # (`_range_has_version_bump_skip_trailer()` in
+          # tools/scripts/version_bump_check.py) must agree on exactly which
+          # values are valid — including the requirement that the reason be
+          # NON-EMPTY, since a bare `reason=` is rejected at PR time. If the
+          # two layers disagreed, an author could write `reason=""` that
+          # passes here but fails at PR time (or vice-versa), making the
+          # bypass inconsistent. Both now call
+          # `gate_common.version_bump_skip_reason()`, so the agreement is
+          # structural rather than a pair of patterns kept aligned by hand.
+          bump_verdict=$(guard version-bump-skip HEAD)
+          case "$bump_verdict" in
+              skip)
+                  echo "Version-Bump: skip trailer present — no tagging."
+                  echo "skip=1" >> "$GITHUB_OUTPUT"
+                  echo "tracker_opt_out=1" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+              no-skip) ;;
+              *)
+                  echo "::error::version-bump trailer guard could not classify HEAD: $bump_verdict"
+                  exit 1
+                  ;;
+          esac
           if [[ "$subject" =~ ^[Rr]evert ]]; then
               echo "Revert commit — no tagging."
               echo "skip=1" >> "$GITHUB_OUTPUT"
@@ -271,14 +305,23 @@ jobs:
               done
               return 1
           }
+          # Same parse as the tip-commit guard above (see its comment for why a
+          # grep cannot make this call) — a `Release: skip` on the bump commit
+          # is sticky, so misreading a quoted example here withholds every
+          # future tag of that version, not just one push.
           bump_has_skip() {
-              local sha="$1"
+              local sha="$1" verdict
               [ -z "$sha" ] && return 1
-              local bump_body bump_trailers
-              bump_body=$(git log -1 --format=%B "$sha")
-              bump_trailers=$(printf '%s\n' "$bump_body" | git interpret-trailers --parse)
-              printf '%s\n' "$bump_trailers" | grep -iq '^release: skip' || \
-                  printf '%s\n' "$bump_body" | grep -iqE '^[[:space:]]*release:[[:space:]]+skip([[:space:]]|$)'
+              verdict=$(python3 tools/scripts/release_trailer_guard.py \
+                  --query release-skip --ref "$sha" || echo "undecidable")
+              case "$verdict" in
+                  skip) return 0 ;;
+                  no-skip) return 1 ;;
+                  *)
+                      echo "::error::release trailer guard could not classify $sha: $verdict"
+                      exit 1
+                      ;;
+              esac
           }
           # Wrap extractors to take (ref, file) for find_bump_commit's API.
           extract_sdk_version_at() {

@@ -346,6 +346,21 @@ void clap_destroy(const clap_plugin_t* plugin) {
     delete self;
 }
 
+// Push `clap_host_latency->changed()`, if the host offers the extension.
+//
+// Deliberately the ONLY place that call is made, because *when* it is made is
+// the whole contract: `clap/ext/latency.h` annotates it `[main-thread &
+// being-activated]`, so the two callers are clap_activate() (republishing a
+// change the host restarted us for) and the inactive branch of
+// clap_on_main_thread(). An active plugin must never reach here — it gets a
+// restart request instead.
+static void publish_latency_changed(PulpClapPlugin* self) {
+    if (!self->host || !self->host->get_extension) return;
+    auto* ext = static_cast<const clap_host_latency_t*>(
+        self->host->get_extension(self->host, CLAP_EXT_LATENCY));
+    if (ext && ext->changed) ext->changed(self->host);
+}
+
 bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t max_frames) {
     auto* self = get_self(plugin);
     self->sample_rate = sr;
@@ -459,11 +474,32 @@ bool clap_activate(const clap_plugin_t* plugin, double sr, uint32_t, uint32_t ma
     self->playhead_prev = {};
     self->reset_requested = false;
     self->sidecar_reconcile_requested = false;
+
+    // This activate IS the window the latency is allowed to move in, and the
+    // only one `clap_host_latency->changed()` may be called from
+    // (`[main-thread & being-activated]`). If an earlier latency change asked
+    // the host to restart us, publish it HERE — after the processor has been
+    // prepared, so the `clap_plugin_latency->get()` the host makes in response
+    // returns the NEW value, and after reactivation rather than before it.
+    if (self->latency_restart_pending) {
+        // Cleared BEFORE the push: a host that re-enters on_main_thread from
+        // inside its own changed() handler must not see a live latch and
+        // re-request a restart for a change already being delivered.
+        self->latency_restart_pending = false;
+        publish_latency_changed(self);
+    }
+
+    self->is_active = true;
     return true;
 }
 
 void clap_deactivate(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    // Cleared before anything else: a latency change raised from here on is
+    // seen by an INACTIVE plugin, which needs no restart. Note that
+    // `latency_restart_pending` deliberately survives deactivation — the
+    // deactivate/reactivate cycle it is waiting for is the one it asked for.
+    self->is_active = false;
     // Processor owns its downstream DSP/voice state; release it before the
     // adapter drops the corresponding tracker identities.
     self->processor->release();
@@ -499,20 +535,22 @@ bool clap_param_modulation_lane(const PulpClapPlugin& self,
     }
 
     lane = state::ModulationLane{
-        .source = {
-            .id = kClapHostModulationSourceId,
-            .scope = state::ModulationScope::Global,
-            .rate = state::ModulationRate::Control,
-            .units = "CLAP PARAM_MOD",
-        },
-        .target = {
-            .param_id = param_id,
-            .scope = state::ModulationScope::Global,
-            .param_rate = info->rate,
-            .modulatable = info->range.step <= 0.0f,
-            .writable = true,
-            .units = info->unit,
-        },
+        .source =
+            {
+                .id = kClapHostModulationSourceId,
+                .scope = state::ModulationScope::Global,
+                .rate = state::ModulationRate::Control,
+                .units = "CLAP PARAM_MOD",
+            },
+        .target =
+            {
+                .param_id = param_id,
+                .scope = state::ModulationScope::Global,
+                .param_rate = info->rate,
+                .modulatable = state::is_modulatable_param(*info),
+                .writable = true,
+                .units = info->unit,
+            },
         .mix = state::ModulationMixMode::Add,
         .depth = static_cast<float>(event.amount),
     };
@@ -2073,9 +2111,29 @@ void clap_on_main_thread(const clap_plugin_t* plugin) {
         self->processor->consume_tail_changed_flag();
 
     if (latency_changed) {
-        auto* ext = static_cast<const clap_host_latency_t*>(
-            self->host->get_extension(self->host, CLAP_EXT_LATENCY));
-        if (ext && ext->changed) ext->changed(self->host);
+        // `clap/ext/latency.h`: "The latency is only allowed to change during
+        // plugin->activate. If the plugin is activated, call
+        // host->request_restart()". So the branch is on activation state, not
+        // on the size of the change.
+        if (self->is_active) {
+            // ACTIVE. We are outside the window in which the reported latency
+            // may move, so `changed()` here would tell the host a value it is
+            // not sanctioned to act on. Ask for the deactivate/reactivate
+            // cycle instead and defer the push to the activate it produces.
+            // Coalesced: one outstanding request covers any number of further
+            // latency edges, so a host that is slow to honour it (or declines)
+            // never sees a storm.
+            if (!self->latency_restart_pending) {
+                self->latency_restart_pending = true;
+                if (self->host->request_restart)
+                    self->host->request_restart(self->host);
+            }
+        } else {
+            // INACTIVE. Nothing is rendering and no compensation is in force,
+            // so the value is free to move and no restart is warranted. Report
+            // it; the next activate re-reads `get()` regardless.
+            publish_latency_changed(self);
+        }
     }
     if (tail_changed) {
         auto* ext = static_cast<const clap_host_tail_t*>(

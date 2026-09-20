@@ -85,8 +85,7 @@ TEST_CASE("ColorFont: Auto mode delegates to font capability",
     opts.color_font_mode = ColorFontMode::Auto;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.has_typeface()) {
-        SUCCEED("Inter not resolved; skipped");
-        return;
+        SKIP("Inter not resolved; skipped");
     }
     // Inter has no color tables → Auto means inactive.
     REQUIRE_FALSE(resolved.color_font_active());
@@ -119,8 +118,7 @@ TEST_CASE("ColorFont: explicit COLR mode rejects font without COLR table",
     opts.color_font_mode = ColorFontMode::COLR;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.has_typeface()) {
-        SUCCEED("Apple Color Emoji not resolvable on this host; skipped");
-        return;
+        SKIP("Apple Color Emoji not resolvable on this host; skipped");
     }
     // Apple Color Emoji uses sbix bitmaps, not COLR → supports_color_font
     // is still true (any color table) but color_font_active under an
@@ -144,8 +142,7 @@ TEST_CASE("ColorFont: explicit Bitmap mode accepts sbix-strikes font",
     opts.color_font_mode = ColorFontMode::Bitmap;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.has_typeface()) {
-        SUCCEED("Apple Color Emoji not resolvable on this host; skipped");
-        return;
+        SKIP("Apple Color Emoji not resolvable on this host; skipped");
     }
     REQUIRE(resolved.supports_color_font());
     REQUIRE(resolved.color_font_active());
@@ -165,8 +162,7 @@ TEST_CASE("ColorFont: explicit SVG mode rejects font without SVG table",
     opts.color_font_mode = ColorFontMode::SVG;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.has_typeface()) {
-        SUCCEED("Apple Color Emoji not resolvable on this host; skipped");
-        return;
+        SKIP("Apple Color Emoji not resolvable on this host; skipped");
     }
     REQUIRE(resolved.supports_color_font());
     REQUIRE_FALSE(resolved.color_font_active());

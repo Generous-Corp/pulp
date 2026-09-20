@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260917-pr8498-vellum-d15-runtime-staging-watch",
+  "created_at": "2026-09-17T11:57:12Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record Pulp-owned runtime staging and release-safety work for the development-only Vellum D15 GPU-audio provider. The family is crossed by exactly one selector: test/cmake/test_installed_sdk_runtime_staging.cmake, which verifies that an installed Pulp SDK stages the provider only for a final Mach-O image that loads its exact LC_ID and leaves an unrelated consumer clean. The remaining changes implement or test Pulp's private GPU-audio provider, SDK runtime delivery, attribution, and fail-closed shipping guards. No design importer, generated output, generic renderer contract, Vellum source, accepted expansion boundary, or implementation authority changes.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --repo . --base <merge-base-sha> --head <head-sha>",
+    "cmake installed-SDK runtime staging proof",
+    "pulp-gpu-dawn-shared-io-provider lifecycle and topology proofs",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

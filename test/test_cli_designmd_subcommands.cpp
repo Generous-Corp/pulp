@@ -57,8 +57,7 @@ void require_parse_error(const pulp::platform::ProcessResult& result) {
 TEST_CASE("pulp design lint and diff reject DESIGN.md parse errors before analysis",
           "[cli][designmd][parse-error][shellout]") {
     if (!cli_available()) {
-        SUCCEED("skipped: pulp CLI not built");
-        return;
+        SKIP("pulp CLI not built");
     }
 
     TempDir temp;
@@ -91,8 +90,7 @@ TEST_CASE("pulp design lint and diff reject DESIGN.md parse errors before analys
 TEST_CASE("pulp design manifest consumers reject partial DESIGN.md parse results",
           "[cli][designmd][parse-error][shellout]") {
     if (!cli_available()) {
-        SUCCEED("skipped: pulp CLI not built");
-        return;
+        SKIP("pulp CLI not built");
     }
 
     TempDir temp;

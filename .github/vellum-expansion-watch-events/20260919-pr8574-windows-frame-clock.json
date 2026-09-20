@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260919-pr8574-windows-frame-clock",
+  "created_at": "2026-09-19T22:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record the Windows embedded-host frame-clock scheduling change for the watched render family. The change is confined to Pulp-owned host cadence in core/view/platform/win/plugin_view_host_win.cpp: it advances FrameClock and HostFramePump from an attached HWND WM_TIMER while preserving dirty/continuous/scripted-idle gating. It does not change transferred renderer, canvas, Skia, Graphite, Dawn, or resource implementation authority, and it does not prescribe Graphite threading. Linux scheduling (#8448), production capture (#8457), and P0-A observability (#8458) remain separate packets.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD",
+    "pulp-test-host-frame-pump: 201 assertions across 17 cases",
+    "governed Release GPU-off build",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

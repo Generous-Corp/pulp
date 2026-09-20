@@ -167,6 +167,7 @@ registered_worktrees() {
 
 case "${command_name}" in
     reconcile)
+        reconcile_branch="${branch}"
         git show-ref --verify --quiet refs/remotes/origin/main ||
             die "reconcile needs origin/main; fetch it first"
         [[ -n "${repo_slug}" ]] || repo_slug="$(github_slug_from_origin || true)"
@@ -178,7 +179,9 @@ case "${command_name}" in
         printf 'RESULT\tBRANCH\tHEAD\tDETAIL\n'
         while IFS=$'\t' read -r wt_path wt_head wt_branch; do
             [[ -n "${wt_branch}" ]] || continue
-            if [[ -n "${branch}" && "${wt_branch}" != "${branch}" ]]; then continue; fi
+            if [[ -n "${reconcile_branch}" && "${wt_branch}" != "${reconcile_branch}" ]]; then
+                continue
+            fi
             branch="${wt_branch}"
             current_status="$(get_value Status)"
             current_pr="$(get_value Pr)"

@@ -12,6 +12,8 @@ import {
   MATERIALIZED_STATE_ATLAS_Z,
   MATERIALIZED_BEHAVIOR_Z,
 } from './materialized_layer_contract.mjs';
+import { materializedDynamicLayoutScope, restoreMaterializedLayout }
+  from './materialized_dynamic_layout.mjs';
 
 export function buildMaterializedRuntimeEntry({
   capturedCssVariables,
@@ -46,6 +48,8 @@ ${materializedRuntimeFontStack.toString()}
 ${materializedTextTargetGeometry.toString()}
 ${materializedAbsoluteInsets.toString()}
 ${materializedSvgRectGeometry.toString()}
+${materializedDynamicLayoutScope.toString()}
+${restoreMaterializedLayout.toString()}
 // Executable React styles retain authored var(--name) expressions. Restore the
 // exact computed custom-property values Chromium captured before React mounts,
 // so font families, colours, lengths and other string-valued props reach the
@@ -187,6 +191,8 @@ let activeCapturedState = '';
 // later modal/menu subtree commit converges its newly-registered descendants
 // instead of accidentally reapplying the home document.
 let activeMaterializedMetadata = capturedHomeMetadata;
+let activeMaterializedMatch = null;
+const capturedGeometryNodes = new WeakSet();
 // Filled after the generated canvas binding table is declared. Keeping this
 // callback in the same post-commit hook as captured layout/text evidence lets
 // React replace conditional behavior subtrees without leaving the visible
@@ -243,12 +249,24 @@ function applyMaterializedImportMetadata(metadata) {
     ? metadata.text_bindings : [];
   const activePaintBindings = Array.isArray(metadata && metadata.paint_bindings)
     ? metadata.paint_bindings : [];
+  const scope = activeMaterializedMatch
+    ? g.__pulpFindMaterializedElement__(activeMaterializedMatch.selector,
+        activeMaterializedMatch.ancestor) : null;
+  const dynamicNodes = materializedDynamicLayoutScope(scope, activeLayoutBindings,
+    values, pathIndex, materializedNodeAtPath, materializedElementChildren,
+    materializedNodeTag);
+  for (const node of dynamicNodes) {
+    if (!capturedGeometryNodes.has(node)) continue;
+    restoreMaterializedLayout(node, g);
+    capturedGeometryNodes.delete(node);
+  }
   let applied = 0;
   const diagnostics = {
     state_id: typeof activeCapturedState === 'string' ? activeCapturedState : '',
     layout_expected: activeLayoutBindings.length,
     layout_applied: 0,
     layout_node_miss: 0,
+    layout_dynamic_nodes: dynamicNodes.size,
     text_expected: activeTextBindings.filter(binding =>
       !binding.runtime_optional).length,
     text_applied: 0,
@@ -272,6 +290,7 @@ function applyMaterializedImportMetadata(metadata) {
   if (typeof g.setPosition === 'function' && typeof g.setFlex === 'function') {
     for (const binding of activeLayoutBindings) {
       const node = materializedNodeAtPath(binding, values, pathIndex);
+      if (dynamicNodes.has(node)) continue;
       const id = node && (node.__pulpId || node.id);
       if (!id) {
         ++diagnostics.layout_node_miss;
@@ -297,6 +316,7 @@ function applyMaterializedImportMetadata(metadata) {
       g.setTop(String(id), top);
       g.setFlex(String(id), 'width', binding.box.width);
       g.setFlex(String(id), 'height', binding.box.height);
+      capturedGeometryNodes.add(node);
       ++applied;
       ++diagnostics.layout_applied;
     }
@@ -306,6 +326,7 @@ function applyMaterializedImportMetadata(metadata) {
   // tokens: the frozen computed value is the visual authority for this state.
   for (const binding of activePaintBindings) {
     const node = materializedNodeAtPath(binding, values, pathIndex);
+    if (dynamicNodes.has(node)) continue;
     const id = node && (node.__pulpId || node.id);
     if (!id) {
       ++diagnostics.paint_node_miss;
@@ -350,6 +371,7 @@ function applyMaterializedImportMetadata(metadata) {
     const optional = binding.runtime_optional === true;
     const node = materializedNodeAtPath(binding, values, pathIndex)
       || (optional ? materializedOptionalTextNode(binding, values) : null);
+    if (dynamicNodes.has(node)) continue;
     if (!node) {
       if (optional) ++diagnostics.text_optional_miss;
       else ++diagnostics.text_node_miss;
@@ -434,6 +456,7 @@ function applyMaterializedImportMetadata(metadata) {
     }
     g.setCapturedLineBoxes(String(id), targetBoxes, targetBasisWidth,
       binding.basis.resolved_face, false);
+    capturedGeometryNodes.add(node);
     ++applied;
     if (optional) ++diagnostics.text_optional_applied;
     else ++diagnostics.text_applied;
@@ -933,6 +956,7 @@ g.__pulpRefreshMaterializedState__ = function () {
     const state = capturedStates.find(candidate => candidate.id === next);
     activeMaterializedMetadata = state && state.metadata
       ? state.metadata : capturedHomeMetadata;
+    activeMaterializedMatch = state && state.match || null;
     applyMaterializedImportMetadata(activeMaterializedMetadata);
   }
   return activeCapturedState;

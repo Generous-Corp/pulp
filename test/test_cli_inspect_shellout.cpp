@@ -55,8 +55,7 @@ TEST_CASE("control operation deadline spends one deterministic wall-clock budget
 TEST_CASE("pulp control capabilities reads the frozen registry with no live instance",
           "[cli][shellout][inspect][control][capabilities]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -119,8 +118,7 @@ TEST_CASE("pulp control capabilities reads the frozen registry with no live inst
 TEST_CASE("pulp control profiles is canonical and inspect profiles is a dated alias",
           "[cli][shellout][inspect][control][profiles]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -167,8 +165,7 @@ TEST_CASE("pulp control profiles is canonical and inspect profiles is a dated al
 TEST_CASE("pulp inspect rejects retired authority and arbitrary commands",
           "[cli][shellout][inspect][authority]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -220,8 +217,7 @@ TEST_CASE("pulp inspect rejects retired authority and arbitrary commands",
 TEST_CASE("pulp control validates bounded operation deadlines before connecting",
           "[cli][shellout][inspect][control][timeout]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -250,8 +246,7 @@ TEST_CASE("pulp control validates bounded operation deadlines before connecting"
 TEST_CASE("pulp inspect canonical Trace bridge is narrow and default denied",
           "[cli][shellout][inspect][trace][control]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -278,8 +273,7 @@ TEST_CASE("pulp inspect canonical Trace bridge is narrow and default denied",
 TEST_CASE("pulp inspect audit is read only and fails closed before activation",
           "[cli][shellout][inspect][audit]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");

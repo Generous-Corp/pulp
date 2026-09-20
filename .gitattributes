@@ -1,7 +1,11 @@
-external/skia-build/build/mac-gpu/lib/Release/*.a filter=lfs diff=lfs merge=lfs -text
-external/skia-build/build/include/** filter=lfs diff=lfs merge=lfs -text
-external/skia-build/build/win-gpu/lib/Release/*.lib filter=lfs diff=lfs merge=lfs -text
-external/skia-build/build/linux-gpu/lib/Release/*.a filter=lfs diff=lfs merge=lfs -text
-external/skia-build/build/ios-gpu/lib/Release/*.a filter=lfs diff=lfs merge=lfs -text
-external/skia-build/build/wasm-gpu/lib/Release/*.a filter=lfs diff=lfs merge=lfs -text
 *.patch whitespace=-blank-at-eol
+
+# Generated identity ledger + its receipt. Both are regenerated from one exact
+# commit by tools/scripts/gpu_handoff_provenance.py, so every branch that lives
+# longer than a main move collides on them. The driver resolves the collision to
+# a deliberately invalid value that gates.sh rejects, turning a hand-resolved
+# conflict into one mechanical regeneration. Install it with setup.sh (or
+# tools/scripts/install-githooks.sh); a checkout without it gets today's text
+# conflict, which is the status quo rather than a worse outcome.
+docs/status/gpu-vellum-handoff.yaml merge=pulp-gpu-ledger
+docs/validation/gpu-handoff-provenance/receipt.json merge=pulp-gpu-ledger

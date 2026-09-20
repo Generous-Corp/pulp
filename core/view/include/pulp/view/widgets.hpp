@@ -1,31 +1,32 @@
 #pragma once
 
 #include <algorithm>
-#include <pulp/view/view.hpp>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <pulp/canvas/attributed_string.hpp>
+#include <pulp/canvas/text_shaper.hpp> // canvas::ShapedLayout for Label's shaped-layout cache
 #include <pulp/view/accessibility.hpp>
+#include <pulp/view/animation.hpp>
+#include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/caret.hpp>
 #include <pulp/view/custom_shader_host.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/hit_metrics.hpp>
-#include <pulp/canvas/attributed_string.hpp>
-#include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
-#include <pulp/view/audio_bridge.hpp>
-#include <pulp/view/animation.hpp>
+#include <pulp/view/selectable_text.hpp>
 #include <pulp/view/slider_core.hpp>
 #include <pulp/view/sprite_strip.hpp>
-#include <pulp/view/widget_painter.hpp>
 #include <pulp/view/value_source.hpp>
-#include <pulp/view/visualizers.hpp>  // SpectrogramView/MultiMeter/CorrelationMeter — include directly in new code
+#include <pulp/view/view.hpp>
+#include <pulp/view/visualizers.hpp> // SpectrogramView/MultiMeter/CorrelationMeter — include directly in new code
+#include <pulp/view/widget_painter.hpp>
 #include <string>
 #include <string_view>
-#include <cstddef>
-#include <cstdint>
-#include <cmath>
-#include <functional>
-#include <array>
-#include <memory>
 #include <vector>
-#include <optional>
 
 namespace pulp::view {
 
@@ -51,8 +52,8 @@ class TextEditor;   // pulp/view/text_editor.hpp — the Label's inline edit fie
 /// from the parent's *computed* (not specified) value.
 enum class LabelAlign { left, center, right, auto_, justify, match_parent };
 
-class Label : public View {
-public:
+class Label : public View, public SelectableText {
+  public:
     Label() { set_access_role(AccessRole::label); }
     explicit Label(std::string text) : text_(std::move(text)) {
         set_access_role(AccessRole::label);
@@ -139,6 +140,11 @@ public:
             ((has_explicit_height && !baseline_aligned) ||
              (probe_height && intrinsic_height() == height_before));
         if (!text_geometry_is_fixed) invalidate_layout();
+        // selectable_text() already exposes the new source bytes, so geometry
+        // from the previous paint can no longer describe it honestly. Keep
+        // the capability unmeasured until the repaint records the new run.
+        selection_layout_ = {};
+        selection_layout_pending_ = {};
         request_repaint();
     }
     const std::string& text() const { return text_; }
@@ -168,27 +174,76 @@ public:
     // Each setter marks the corresponding has_own_* flag so
     // paint() can distinguish "default value" from "explicitly set" and
     // fall through to inheritable_*() for unset properties.
-    void set_font_size(float size) { font_size_ = size; has_own_font_size_ = true; }
+    // Typography that feeds the shaper's cache key — size, family, weight,
+    // style, letter spacing, line height, wrap mode, case transform — decides
+    // this Label's measured box, so changing it is a geometry mutation and has
+    // to advance the layout generation. Both layout gates
+    // (View::layout_children_if_needed and WidgetBridge::ensure_layout) elide
+    // the pass while the applied generation matches the tree's, so a setter
+    // that stays silent here leaves the Label painting at the box its PREVIOUS
+    // typography solved to, and leaves every ancestor sized for it.
+    //
+    // Each setter is guarded on an actual change. A materialized React commit
+    // replays an element's complete style object when only paint state moved;
+    // dirtying the tree for an identical write would make every following
+    // geometry read pay for a full Yoga pass, which is the same contract
+    // flex_styles_equal keeps on the flex path.
+    void set_font_size(float size) {
+        if (has_own_font_size_ && font_size_ == size)
+            return;
+        font_size_ = size;
+        has_own_font_size_ = true;
+        invalidate_layout();
+    }
     float font_size() const { return font_size_; }
     bool has_own_font_size() const { return has_own_font_size_; }
 
     /// CSS font-family string (e.g. "Inter", "JetBrains Mono"). Empty means
     /// the widget falls back to the default theme family ("Inter").
-    void set_font_family(std::string family) { font_family_ = std::move(family); }
+    void set_font_family(std::string family) {
+        if (font_family_ == family)
+            return;
+        font_family_ = std::move(family);
+        invalidate_layout();
+    }
     const std::string& font_family() const { return font_family_; }
 
-    void set_font_weight(int weight) { font_weight_ = weight; has_own_font_weight_ = true; }  // 100-900, 400=normal, 700=bold
+    // 100-900, 400=normal, 700=bold
+    void set_font_weight(int weight) {
+        if (has_own_font_weight_ && font_weight_ == weight)
+            return;
+        font_weight_ = weight;
+        has_own_font_weight_ = true;
+        invalidate_layout();
+    }
     int font_weight() const { return font_weight_; }
     bool has_own_font_weight() const { return has_own_font_weight_; }
 
-    void set_font_style(int style) { font_style_ = style; }  // 0=normal, 1=italic, 2=oblique
+    // 0=normal, 1=italic, 2=oblique
+    void set_font_style(int style) {
+        if (font_style_ == style)
+            return;
+        font_style_ = style;
+        invalidate_layout();
+    }
     int font_style() const { return font_style_; }
 
-    void set_letter_spacing(float sp) { letter_spacing_ = sp; has_own_letter_spacing_ = true; }
+    void set_letter_spacing(float sp) {
+        if (has_own_letter_spacing_ && letter_spacing_ == sp)
+            return;
+        letter_spacing_ = sp;
+        has_own_letter_spacing_ = true;
+        invalidate_layout();
+    }
     float letter_spacing() const { return letter_spacing_; }
     bool has_own_letter_spacing() const { return has_own_letter_spacing_; }
 
-    void set_line_height(float lh) { line_height_ = lh; }
+    void set_line_height(float lh) {
+        if (line_height_ == lh)
+            return;
+        line_height_ = lh;
+        invalidate_layout();
+    }
     float line_height() const { return line_height_; }
 
     void set_text_align(LabelAlign align) { text_align_ = align; has_own_text_align_ = true; }
@@ -201,7 +256,12 @@ public:
     bool has_own_text_color() const { return has_own_text_color_; }
     canvas::Color text_color() const { return text_color_; }
 
-    void set_multi_line(bool ml) { multi_line_ = ml; }
+    void set_multi_line(bool ml) {
+        if (multi_line_ == ml)
+            return;
+        multi_line_ = ml;
+        invalidate_layout();
+    }
     bool multi_line() const { return multi_line_; }
 
     /// CSS `line-clamp` / `-webkit-line-clamp`. Maximum number of visible
@@ -218,7 +278,12 @@ public:
 
     /// CSS text-transform: uppercase, lowercase, capitalize, none
     enum class TextTransform { none, uppercase, lowercase, capitalize };
-    void set_text_transform(TextTransform t) { text_transform_ = t; }
+    void set_text_transform(TextTransform t) {
+        if (text_transform_ == t)
+            return;
+        text_transform_ = t;
+        invalidate_layout();
+    }
     TextTransform text_transform() const { return text_transform_; }
 
     /// CSS text-decoration: none, underline, line-through, overline
@@ -490,28 +555,116 @@ public:
     void on_mouse_down(Point pos) override;
     bool wants_mouse_input() const override { return edit_trigger_ != EditTrigger::none; }
 
-private:
-    EditTrigger edit_trigger_ = EditTrigger::none;
-    TextEditor* editor_ = nullptr;      ///< non-owning; the child vector owns it
-    int click_count_ = 0;
-    double last_click_time_ = 0.0;
+    // ── SelectableText ──────────────────────────────────────────────────
+    // A Label joins a document-level selection (pulp/view/selectable_text.hpp)
+    // using the line geometry its own paint already computes. The geometry is
+    // recorded during paint rather than re-derived, so the band a selection
+    // draws sits on the glyphs that were actually emitted — including after
+    // text-transform, soft wrap, line-clamp and ellipsis truncation, none of
+    // which a re-measurement from `text_` would reproduce.
 
-    /// Resolved typography + origin shared by paint() and
-    /// text_edit_metrics(). Factoring this out is the WYSIWYG invariant:
-    /// the caret overlay and the painter resolve the SAME inherited
-    /// size/weight/letter-spacing, family fallback, slant, alignment, and
-    /// vertical band so a letter-spaced or center/right-aligned label can't
-    /// drift between the two. `apply_text_transform()` mirrors paint()'s
-    /// transform so the measured run matches the rendered run.
-    struct ResolvedTextStyle {
-        std::string family;
-        float font_size = 14.0f;
-        int font_weight = 400;
-        int font_slant = 0;
-        float letter_spacing = 0.0f;
-        LabelAlign text_align = LabelAlign::left;
-        float baseline_y = 0.0f;   ///< first-line baseline in local space
-    };
+    SelectableText* as_selectable_text() override {
+        return is_selectable() ? this : nullptr;
+    }
+
+    /// Whether this Label takes part in text selection.
+    ///
+    /// `inherit` (the default) means "selectable exactly when an enclosing
+    /// `View::set_text_selection_region()` says this is content" — so an author
+    /// declares one region around their prose and every Label in it is
+    /// selectable, with no per-widget wiring. `never` opts one Label back out
+    /// inside a region (a live value readout in a prose panel is not prose);
+    /// `always` opts one in outside every region.
+    ///
+    /// Deliberately NOT globally on. A drag that starts on text in a plugin
+    /// editor is frequently a control gesture, and a tree-wide default would
+    /// break those everywhere to fix selection in one place.
+    enum class SelectionPolicy { inherit, always, never };
+    void set_selection_policy(SelectionPolicy policy) {
+        if (selection_policy_ == policy)
+            return;
+        selection_policy_ = policy;
+        if (!is_selectable())
+            set_selection_highlight(0, 0);
+        request_repaint();
+    }
+    SelectionPolicy selection_policy() const {
+        return selection_policy_;
+    }
+
+    /// Resolved answer for this Label right now. Walks to the nearest
+    /// enclosing content region, so it changes when the Label is reparented
+    /// without anything having to notify it.
+    ///
+    /// The cursor deliberately does NOT change over selectable text. The text
+    /// is not editable, so an I-beam would promise an insertion point that
+    /// does not exist; a pointer that merely permits highlighting is the
+    /// honest affordance, and it keeps every region out of the cursor
+    /// hit-testing path.
+    bool is_selectable() const {
+        if (selection_policy_ == SelectionPolicy::always)
+            return true;
+        if (selection_policy_ == SelectionPolicy::never)
+            return false;
+        return enclosing_text_selection_region(*const_cast<Label*>(this)) != nullptr;
+    }
+
+    std::string_view selectable_text() const override {
+        return text_;
+    }
+    SelectableLayout selectable_layout() const override {
+        return selection_layout_;
+    }
+    void set_selection_highlight(int start_utf8, int end_utf8) override;
+    bool selection_highlight(int& start_utf8, int& end_utf8) const override;
+    View* selectable_view() override {
+        return this;
+    }
+
+private:
+  SelectionPolicy selection_policy_ = SelectionPolicy::inherit;
+  int selection_start_utf8_ = 0;
+  int selection_end_utf8_ = 0;
+  /// Line geometry captured by the last paint. `measured` stays false for
+  /// the paint paths this capability does not model (attributed runs and
+  /// rotated vertical text), so a caller can tell "not supported" from
+  /// "no text" — the distinction `PaintedTextExtents::measured` exists for.
+  mutable SelectableLayout selection_layout_;
+  mutable SelectableLayout selection_layout_pending_;
+
+  /// Record one painted line into `selection_layout_pending_` and, when the
+  /// live highlight touches it, fill its selection band. Called immediately
+  /// before the line's own `fill_text` so the band lands under the glyphs it
+  /// describes, in one paint pass.
+  ///
+  /// `line` is the text as PAINTED (post-transform); `source_start` is where
+  /// that line begins in `text_`. Returns the band this line is selected
+  /// over, or a zero-width rect when none of it is selected.
+  void paint_selection_line_(canvas::Canvas& canvas, const std::string& line, float x, float top,
+                             float line_height, int source_start, const canvas::Color& text_color,
+                             bool vertical);
+
+  EditTrigger edit_trigger_ = EditTrigger::none;
+  TextEditor* editor_ = nullptr; ///< non-owning; the child vector owns it
+  int click_count_ = 0;
+  double last_click_time_ = 0.0;
+
+  /// Resolved typography + origin shared by paint() and
+  /// text_edit_metrics(). Factoring this out is the WYSIWYG invariant:
+  /// the caret overlay and the painter resolve the SAME inherited
+  /// size/weight/letter-spacing, family fallback, slant, alignment, and
+  /// vertical band so a letter-spaced or center/right-aligned label can't
+  /// drift between the two. `apply_text_transform()` mirrors paint()'s
+  /// transform so the measured run matches the rendered run.
+  struct ResolvedTextStyle {
+      std::string family;
+      float font_size = 14.0f;
+      int font_weight = 400;
+      int font_slant = 0;
+      float letter_spacing = 0.0f;
+      LabelAlign text_align = LabelAlign::left;
+      float baseline_y = 0.0f; ///< first-line baseline in local space
+  };
     ResolvedTextStyle resolve_text_style() const;
     std::string apply_text_transform(const std::string& in) const;
     /// Translate the CSS `font-variant` CSV (View::font_variant_) into SkShaper

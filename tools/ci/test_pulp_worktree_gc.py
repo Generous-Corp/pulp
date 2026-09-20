@@ -169,6 +169,33 @@ class GcContractTests(unittest.TestCase):
             LOCAL_GATES.read_text(encoding="utf-8"),
         )
 
+    def test_fleet_worktrees_root_alias_is_honored(self) -> None:
+        env = dict(os.environ)
+        env.update(
+            PATH=f"{self.bin}:{env['PATH']}",
+            PULP_WORKTREES_ROOT=str(self.worktree_root),
+            PULP_TEST_GIT_LOG=str(self.git_log),
+            PULP_TEST_GONE_WORKTREE=str(self.gone_worktree),
+            PULP_TEST_SLASH_WORKTREE=str(self.slash_worktree),
+        )
+        env.pop("PULP_WT_ROOT", None)
+        result = subprocess.run(
+            ["bash", str(SCRIPT), "gc", "--max-age-days", "1"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(self.slash_worktree / "build"), result.stderr)
+
+    def test_canonical_root_wins_over_fleet_alias(self) -> None:
+        text = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            'WT_ROOT="${PULP_WT_ROOT:-${PULP_WORKTREES_ROOT:-',
+            text,
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

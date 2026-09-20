@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -202,6 +203,7 @@ public:
     bool opts_node_ump = false;
     bool declares_bypass = false;
     bool declares_sidechain = false;
+    std::uint32_t declared_voice_count = 0;
 
     // Mutable state captured each time process() runs.
     mutable midi::MidiBuffer captured_midi;
@@ -241,6 +243,7 @@ public:
         d.supports_ump = opts_ump;
         d.node_capabilities.supports_mpe = opts_node_mpe;
         d.node_capabilities.supports_ump = opts_node_ump;
+        d.voice_count = declared_voice_count;
         if (declares_sidechain) {
             d.input_buses.push_back({"Sidechain", 2, true});
         }
@@ -963,6 +966,7 @@ bool g_pending_opts_node_mpe = false;
 bool g_pending_opts_node_ump = false;
 bool g_pending_capturing_bypass = false;
 bool g_pending_capturing_sidechain = false;
+std::uint32_t g_pending_capturing_voice_count = 0;
 bool g_pending_overflow_sysex = false;
 std::vector<midi::MidiEvent> g_pending_emit;
 std::vector<midi::MidiBuffer::SysexEvent> g_pending_sysex;
@@ -976,12 +980,14 @@ std::unique_ptr<Processor> make_capturing() {
     if (g_pending_opts_node_ump) up->opts_node_ump = true;
     up->declares_bypass = g_pending_capturing_bypass;
     up->declares_sidechain = g_pending_capturing_sidechain;
+    up->declared_voice_count = g_pending_capturing_voice_count;
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
     g_pending_opts_node_mpe = false;
     g_pending_opts_node_ump = false;
     g_pending_capturing_bypass = false;
     g_pending_capturing_sidechain = false;
+    g_pending_capturing_voice_count = 0;
     return up;
 }
 
@@ -1736,6 +1742,120 @@ TEST_CASE("CLAP parameter modulation projects to the typed global lane",
 
     mod.param_id = CapturingProcessor::kParamId + 1;
     REQUIRE_FALSE(clap_adapter::clap_param_modulation_lane(h.plugin, mod, lane));
+}
+
+TEST_CASE("CLAP modulation the host is invited to send reaches the processor",
+          "[clap][params][modulation][reachability]") {
+    // A host only emits CLAP_EVENT_PARAM_MOD for a parameter the params
+    // extension flagged modulatable. This walks the whole lane in the order a
+    // host walks it — read the advertisement, then send the event it licenses,
+    // then observe the processor's modulated value from inside process().
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    auto* params = static_cast<const clap_plugin_params_t*>(
+        clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_PARAMS));
+    REQUIRE(params != nullptr);
+
+    std::optional<clap_param_info_t> gain;
+    for (uint32_t i = 0; i < params->count(&h.plugin.plugin); ++i) {
+        clap_param_info_t info{};
+        REQUIRE(params->get_info(&h.plugin.plugin, i, &info));
+        if (info.id == CapturingProcessor::kParamId)
+            gain = info;
+    }
+    REQUIRE(gain.has_value());
+    REQUIRE((gain->flags & CLAP_PARAM_IS_MODULATABLE) != 0);
+
+    InputEventList mod_events;
+    clap_event_param_mod_t mod{};
+    mod.header = make_header(sizeof(mod), CLAP_EVENT_PARAM_MOD, 0);
+    mod.param_id = gain->id;
+    mod.amount = 0.25;
+    mod_events.push(mod);
+
+    REQUIRE(h.run(mod_events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_modulated_value == 0.25f);
+}
+
+TEST_CASE("CLAP note ports advertise only the dialects the adapter decodes",
+          "[clap][note-ports][dialects]") {
+    const auto input_dialects = [](Harness& h) {
+        auto* note_ports = static_cast<const clap_plugin_note_ports_t*>(
+            clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_NOTE_PORTS));
+        REQUIRE(note_ports != nullptr);
+        clap_note_port_info_t info{};
+        REQUIRE(note_ports->get(&h.plugin.plugin, 0, true, &info));
+        return info.supported_dialects;
+    };
+
+    SECTION("a plain MIDI 1.0 plugin claims neither MPE nor MIDI 2.0") {
+        g_pending_opts_mpe = false;
+        g_pending_opts_ump = false;
+        Harness h(make_capturing);
+        const auto dialects = input_dialects(h);
+        // Positive control: the two dialects every Pulp plugin decodes.
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_CLAP) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI_MPE) == 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI2) == 0);
+    }
+
+    SECTION("declaring MPE claims the MPE dialect and nothing more") {
+        g_pending_opts_mpe = true;
+        g_pending_opts_ump = false;
+        Harness h(make_capturing);
+        const auto dialects = input_dialects(h);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI_MPE) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI2) == 0);
+    }
+
+    SECTION("declaring UMP claims the MIDI 2.0 dialect and nothing more") {
+        g_pending_opts_mpe = false;
+        g_pending_opts_ump = true;
+        Harness h(make_capturing);
+        const auto dialects = input_dialects(h);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI2) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI_MPE) == 0);
+    }
+
+    SECTION("the node capability sidecar carries the same claim") {
+        g_pending_opts_node_mpe = true;
+        g_pending_opts_node_ump = true;
+        Harness h(make_capturing);
+        const auto dialects = input_dialects(h);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI_MPE) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI2) != 0);
+    }
+}
+
+TEST_CASE("CLAP voice-info publishes the descriptor voice count", "[clap][voice-info]") {
+    SECTION("a plugin that declares no voice count exposes no extension") {
+        g_pending_capturing_voice_count = 0;
+        Harness h(make_capturing);
+        // Positive control: the dispatch table is alive for this instance.
+        REQUIRE(clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_NOTE_PORTS) !=
+                nullptr);
+        REQUIRE(clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_VOICE_INFO) ==
+                nullptr);
+    }
+
+    SECTION("a declared voice count is published as count and capacity") {
+        g_pending_capturing_voice_count = 8;
+        Harness h(make_capturing);
+        auto* voice_info = static_cast<const clap_plugin_voice_info_t*>(
+            clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_VOICE_INFO));
+        REQUIRE(voice_info != nullptr);
+        clap_voice_info_t info{};
+        REQUIRE(voice_info->get(&h.plugin.plugin, &info));
+        REQUIRE(info.voice_count == 8);
+        REQUIRE(info.voice_capacity == 8);
+        // The adapter lowers CLAP note events to MIDI 1.0 keyed on channel and
+        // key, discarding note_id, so it must not claim it can separate
+        // overlapping notes by note_id.
+        REQUIRE((info.flags & CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES) == 0);
+    }
 }
 
 TEST_CASE("CLAP gesture events forward through StateStore callbacks",
@@ -4595,7 +4715,8 @@ std::unique_ptr<Processor> make_tick() { return std::make_unique<TickProcessor>(
 
 int g_request_callback_count = 0;
 void host_request_callback(const clap_host_t*) { ++g_request_callback_count; }
-void host_request_restart(const clap_host_t*) {}
+int g_request_restart_count = 0;
+void host_request_restart(const clap_host_t*) { ++g_request_restart_count; }
 void host_request_process(const clap_host_t*) {}
 const void* host_get_extension(const clap_host_t*, const char*) { return nullptr; }
 
@@ -4668,6 +4789,22 @@ LatencyTailTrigger g_lat_trigger;
 int g_host_latency_changed = 0;
 int g_host_tail_changed = 0;
 
+// The two latencies of a real render-mode switch (Spectr's spectral vs direct
+// path), so the round-trip proves a value the host can actually act on and not
+// just a non-zero integer.
+constexpr int kDirectLatency = 64;
+constexpr int kSpectralLatency = 10240;
+
+// What LatencyProcessor::latency_samples() currently reports.
+int g_lat_reported = kDirectLatency;
+
+// Set so the host-side `changed()` callback can do what a real host does in
+// response: call back into `clap_plugin_latency->get()`. Recording the value
+// AT THAT MOMENT is the point — publishing the notification at the wrong end
+// of the restart shows up here as the stale latency, and nowhere else.
+const clap_plugin_t* g_lat_plugin = nullptr;
+int g_lat_seen_by_host = -1;
+
 class LatencyProcessor : public Processor {
 public:
     PluginDescriptor descriptor() const override {
@@ -4680,6 +4817,10 @@ public:
     }
     void define_parameters(state::StateStore&) override {}
     void prepare(const PrepareContext&) override {}
+    // Reported latency is a test-settable global rather than a member so a
+    // test can move it at the same instant it raises the flag, the way a
+    // render-mode switch flips FIR taps and its reported delay together.
+    int latency_samples() const override { return g_lat_reported; }
     void process(audio::BufferView<float>&,
                  const audio::BufferView<const float>&,
                  midi::MidiBuffer&,
@@ -4691,7 +4832,14 @@ public:
 };
 std::unique_ptr<Processor> make_latency() { return std::make_unique<LatencyProcessor>(); }
 
-void host_latency_changed(const clap_host_t*) { ++g_host_latency_changed; }
+void host_latency_changed(const clap_host_t*) {
+    ++g_host_latency_changed;
+    // A host told "latency changed" re-reads it. `clap_plugin_latency->get()`
+    // is `[main-thread & (being-activated | active)]` and both call sites
+    // below are inside one of those windows.
+    if (g_lat_plugin) g_lat_seen_by_host = static_cast<int>(
+        clap_generic::latency_get(g_lat_plugin));
+}
 void host_tail_changed(const clap_host_t*) { ++g_host_tail_changed; }
 const clap_host_latency_t g_host_latency_ext{host_latency_changed};
 const clap_host_tail_t g_host_tail_ext{host_tail_changed};
@@ -4715,6 +4863,9 @@ TEST_CASE("CLAP delivers latency/tail changed() to the host on the main thread",
     g_host_latency_changed = 0;
     g_host_tail_changed = 0;
     g_request_callback_count = 0;
+    g_request_restart_count = 0;
+    g_lat_plugin = nullptr;
+    g_lat_reported = kDirectLatency;
 
     Harness h(make_latency);
     clap_host_t host = make_fake_host();
@@ -4723,13 +4874,18 @@ TEST_CASE("CLAP delivers latency/tail changed() to the host on the main thread",
 
     InputEventList empty;
 
-    SECTION("latency change requests a callback then delivers changed() once") {
+    SECTION("latency change requests a callback, then a restart from the main thread") {
         g_lat_trigger.latency = true;
         REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
         REQUIRE(g_request_callback_count == 1);  // asked for the main thread
         REQUIRE(g_host_latency_changed == 0);    // but not from process()
+        REQUIRE(g_request_restart_count == 0);
         clap_adapter::clap_on_main_thread(&h.plugin.plugin);
-        REQUIRE(g_host_latency_changed == 1);    // delivered exactly once
+        // ACTIVE plugin: the spec's remedy is a restart, not a changed() push
+        // the host may not act on. The push happens in the resulting activate
+        // and is covered by the round-trip test below.
+        REQUIRE(g_request_restart_count == 1);
+        REQUIRE(g_host_latency_changed == 0);
         REQUIRE(g_host_tail_changed == 0);
     }
 
@@ -4741,4 +4897,185 @@ TEST_CASE("CLAP delivers latency/tail changed() to the host on the main thread",
         REQUIRE(g_host_tail_changed == 1);
         REQUIRE(g_host_latency_changed == 0);
     }
+}
+
+// ── clap.latency: an ACTIVE plugin must request a restart ───────────────────
+//
+// `clap/ext/latency.h` on the pinned SDK:
+//
+//     // Tell the host that the latency changed.
+//     // The latency is only allowed to change during plugin->activate.
+//     // If the plugin is activated, call host->request_restart()
+//     // [main-thread & being-activated]
+//     void(CLAP_ABI *changed)(const clap_host_t *host);
+//
+// Two requirements, and the adapter used to honour only the first half of the
+// first one. `changed()` alone tells an active host a number it is not
+// sanctioned to act on: the value may only move during activate, so a host
+// that believes the notification and re-compensates mid-session is compensating
+// against a latency the plugin is not allowed to have yet, and a host that
+// obeys the spec ignores it and stays on the stale value forever. Either way a
+// user-switchable render mode whose two settings differ by thousands of samples
+// silently misaligns plugin-delay compensation. The remedy the spec names is
+// the deactivate/reactivate cycle, and `request_restart()` is how to ask.
+TEST_CASE("CLAP latency change on an active plugin requests a restart and "
+          "publishes the new value at reactivation",
+          "[clap][latency][restart][conformance]") {
+    g_lat_trigger = {};
+    g_host_latency_changed = 0;
+    g_host_tail_changed = 0;
+    g_request_callback_count = 0;
+    g_request_restart_count = 0;
+    g_lat_seen_by_host = -1;
+    g_lat_reported = kDirectLatency;
+
+    Harness h(make_latency);
+    clap_host_t host = make_fake_host();
+    host.get_extension = host_get_extension_caps;
+    h.plugin.host = &host;
+    g_lat_plugin = &h.plugin.plugin;
+
+    InputEventList empty;
+
+    // The plugin is active (the Harness activated it) and reports the direct
+    // path's latency.
+    REQUIRE(h.active);
+    REQUIRE(clap_generic::latency_get(&h.plugin.plugin) ==
+            static_cast<uint32_t>(kDirectLatency));
+
+    // A render-mode switch moves the latency mid-session and flags it.
+    g_lat_reported = kSpectralLatency;
+    g_lat_trigger.latency = true;
+    REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+    REQUIRE(g_request_callback_count == 1);
+
+    clap_adapter::clap_on_main_thread(&h.plugin.plugin);
+
+    // The restart is requested exactly once, and NOTHING is published yet:
+    // publishing here would hand the host the new value BEFORE the cycle in
+    // which it is allowed to change.
+    REQUIRE(g_request_restart_count == 1);
+    REQUIRE(g_host_latency_changed == 0);
+    REQUIRE(g_lat_seen_by_host == -1);
+
+    // The host honours the restart.
+    h.deactivate();
+    REQUIRE(g_host_latency_changed == 0);  // still nothing across the gap
+    h.reactivate();
+
+    // Now it is published — once, inside the activate, which is the only
+    // window `changed()` is annotated for — and the value the host reads back
+    // in response is the NEW one.
+    REQUIRE(g_host_latency_changed == 1);
+    REQUIRE(g_lat_seen_by_host == kSpectralLatency);
+    REQUIRE(clap_generic::latency_get(&h.plugin.plugin) ==
+            static_cast<uint32_t>(kSpectralLatency));
+
+    // The latch is spent: a further activate must not re-announce a change
+    // that already landed.
+    g_host_latency_changed = 0;
+    h.deactivate();
+    h.reactivate();
+    REQUIRE(g_host_latency_changed == 0);
+
+    g_lat_plugin = nullptr;
+}
+
+// A host may take arbitrarily long to honour a restart, or decline it outright.
+// Latency can move many times meanwhile — a mode switcher the user is scrubbing
+// through moves it on every click. One outstanding request is the entire
+// contract; re-asking per edge is a request storm that buys nothing.
+TEST_CASE("CLAP coalesces repeated latency changes into one restart request",
+          "[clap][latency][restart][conformance]") {
+    g_lat_trigger = {};
+    g_host_latency_changed = 0;
+    g_request_callback_count = 0;
+    g_request_restart_count = 0;
+    g_lat_seen_by_host = -1;
+    g_lat_reported = kDirectLatency;
+
+    Harness h(make_latency);
+    clap_host_t host = make_fake_host();
+    host.get_extension = host_get_extension_caps;
+    h.plugin.host = &host;
+    g_lat_plugin = &h.plugin.plugin;
+
+    InputEventList empty;
+
+    // Five latency edges before the host gets around to restarting us.
+    const int kEdges = 5;
+    for (int i = 0; i < kEdges; ++i) {
+        g_lat_reported = (i % 2 == 0) ? kSpectralLatency : kDirectLatency;
+        g_lat_trigger.latency = true;
+        REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+        clap_adapter::clap_on_main_thread(&h.plugin.plugin);
+    }
+    // Every edge drained (the control: the flag mechanism really did fire five
+    // times, so a lone restart is coalescing and not a dead trigger).
+    REQUIRE(g_request_callback_count == kEdges);
+    REQUIRE(g_request_restart_count == 1);
+    REQUIRE(g_host_latency_changed == 0);
+
+    // One publish on reactivation, carrying the LAST value — not five.
+    h.deactivate();
+    h.reactivate();
+    REQUIRE(g_host_latency_changed == 1);
+    // The LAST value, not the first and not an intermediate one.
+    REQUIRE(g_lat_reported == kSpectralLatency);
+    REQUIRE(g_lat_seen_by_host == kSpectralLatency);
+
+    // Having been honoured, the latch re-arms for the next change.
+    g_lat_reported = kSpectralLatency;
+    g_lat_trigger.latency = true;
+    REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+    clap_adapter::clap_on_main_thread(&h.plugin.plugin);
+    REQUIRE(g_request_restart_count == 2);
+
+    g_lat_plugin = nullptr;
+}
+
+// The restart requirement is scoped to an ACTIVE plugin: "If the plugin is
+// activated, call host->request_restart()". An inactive plugin is rendering
+// nothing and no delay compensation is in force, so the value is free to move
+// and asking a host to restart a plugin that is already stopped is noise.
+TEST_CASE("CLAP latency change on an inactive plugin reports without a restart",
+          "[clap][latency][restart][conformance]") {
+    g_lat_trigger = {};
+    g_host_latency_changed = 0;
+    g_request_callback_count = 0;
+    g_request_restart_count = 0;
+    g_lat_seen_by_host = -1;
+    g_lat_reported = kDirectLatency;
+
+    Harness h(make_latency);
+    clap_host_t host = make_fake_host();
+    host.get_extension = host_get_extension_caps;
+    h.plugin.host = &host;
+    g_lat_plugin = &h.plugin.plugin;
+
+    InputEventList empty;
+
+    // Raise the edge while active, then stop before draining it, so the drain
+    // below happens with the plugin genuinely deactivated.
+    g_lat_trigger.latency = true;
+    REQUIRE(h.run(empty) != CLAP_PROCESS_ERROR);
+    g_lat_reported = kSpectralLatency;
+    h.deactivate();
+    REQUIRE_FALSE(h.active);
+
+    clap_adapter::clap_on_main_thread(&h.plugin.plugin);
+
+    // Reported, not restarted.
+    REQUIRE(g_host_latency_changed == 1);
+    REQUIRE(g_request_restart_count == 0);
+    REQUIRE(g_lat_seen_by_host == kSpectralLatency);
+
+    // And no deferred publish is left armed: reactivating announces nothing,
+    // because nothing was withheld.
+    g_host_latency_changed = 0;
+    h.reactivate();
+    REQUIRE(g_host_latency_changed == 0);
+    REQUIRE(g_request_restart_count == 0);
+
+    g_lat_plugin = nullptr;
 }

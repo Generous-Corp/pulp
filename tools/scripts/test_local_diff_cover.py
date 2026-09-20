@@ -129,6 +129,33 @@ class DependencyPreflightTests(unittest.TestCase):
         self.assertIn('-DPython3_EXECUTABLE="${CI_PYTHON}"', text)
 
 
+class BuildIdentityTests(unittest.TestCase):
+    """A stale coverage build must never be mistaken for current evidence."""
+
+    def test_identity_guard_reclaims_unproven_or_changed_build_cov(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn('BUILD_ID_FILE="${BUILD_DIR}/.pulp-diff-cover-build-id"', text)
+        self.assertIn("coverage_build_identity()", text)
+        self.assertIn("COVERAGE_BUILD_IDENTITY_START", text)
+        self.assertIn("worktree changed during coverage; refusing to publish mixed evidence", text)
+        self.assertIn("evidence invalidated by a worktree", text)
+        self.assertIn('final_identity="$(coverage_build_identity)"', text)
+        self.assertIn("printf '%s\\n' \"${final_identity}\"", text)
+        self.assertIn("prepare_coverage_build_identity()", text)
+        self.assertIn("no successful-run identity; removing it before rebuild", text)
+        self.assertIn("identity differs from the current worktree; removing stale coverage state", text)
+        self.assertIn("git -C \"${REPO_ROOT}\" rev-parse HEAD", text)
+        self.assertIn("git -C \"${REPO_ROOT}\" diff --binary HEAD", text)
+        self.assertIn("git -C \"${REPO_ROOT}\" ls-files --others --exclude-standard -z", text)
+        self.assertIn("git -C \"${REPO_ROOT}\" hash-object --", text)
+        self.assertIn('printf \'%s\\n\' "${final_identity}" > "${identity_tmp}"', text)
+        self.assertLess(
+            text.index("prepare_coverage_build_identity"),
+            text.index("cmake -S \"${REPO_ROOT}\" -B \"${BUILD_DIR}\""),
+            "stale build-cov state must be removed before configure",
+        )
+
+
 class WorkflowSourceOfTruthTests(unittest.TestCase):
     """coverage.yml reads --fail-under from coverage_config.json (anti-drift)."""
 

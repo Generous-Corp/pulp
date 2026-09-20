@@ -29,8 +29,10 @@ configurations without that `node_modules/esbuild` installation still register
 the dependency-free suites, but they do not claim the canonicalization proof.
 
 The macOS runner is chosen by the resolver in `build.yml`, which normally honors
-`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the fast M3/M5 VM pool. For a pull
-request whose head branch lives in **another repository**,
+`PULP_LOCAL_MACOS_RUNS_ON_JSON` and routes to the M1/M3/M5 event-class JIT VM
+pool. All three hosts serve the required gate on equal terms — M1 waits 10
+minutes before taking Pulp work, which is latency policy, not an inability to
+serve it. For a pull request whose head branch lives in **another repository**,
 both self-hosted selectors are ignored and the leg falls through to the
 GitHub-hosted `macos-15` label.
 
@@ -897,6 +899,81 @@ between the remote HEAD and the target SHA. Typical cycles drop from
 full bundle automatically when the delta would be larger than the full
 pack.
 
+## Codex does not auto-review App-authored PRs
+
+Codex's automatic code review fires on PR open only when the pull request's
+author is a GitHub *User*. A PR opened by a GitHub App is skipped. Because
+`shipyard pr` opens PRs as `shipyard-local[bot]`, and that is the mandated path
+for agents, the default outcome is that agent-opened PRs merge with no review
+while human-opened ones are reviewed.
+
+Codex reports the distinction itself. Its review-summary comment carries a
+"Review trigger" cell that reads `PR opened` on a User-authored PR and
+`Manual request` on an App-authored one — the App-authored PRs that were
+reviewed at all had been reviewed because somebody asked.
+
+**Only the automatic trigger is restricted; asking still works.** A `@codex
+review` comment gets a real review on an App-authored PR, and it does so even
+when the comment itself comes from an App. (Codex replies to a bot commenter
+with "To use Codex here, create a Codex account and connect to github", which
+looks like a refusal and is not — the review runs anyway.) The skip is Codex-side
+and cannot be configured from this repository; there is no workflow trigger or
+`github.actor` guard here involved. What this repository can do is ask.
+
+`.github/workflows/codex-review-request.yml` is that ask. On a PR opened by
+`shipyard-local[bot]` it posts the same `@codex review` comment a human would,
+using `GITHUB_TOKEN` and no privileged secret at all, then verifies a review
+actually completed and fails if none did.
+
+The absence of a user PAT there is deliberate. A same-repository
+`pull_request` evaluates the workflow file from the PR's own revision, so any
+secret exposed to this job is readable by a PR that edits this file — and the
+PRs it runs on are exactly the unreviewed ones. An App identity is sufficient:
+a `@codex review` from one does produce a completed review.
+
+It runs on `synchronize` as well as `opened` and `ready_for_review`. That is
+load-bearing rather than thorough: under this repo's up-to-date branch
+protection a PR is pushed to repeatedly, and on `opened` alone the commit that
+was reviewed and the commit that merges are different ones. Superseded runs are
+cancelled, because during a burst of pushes only the final head can merge.
+
+The verification is the point. A mitigation that posts a comment and never
+checks whether anything came back can no-op in silence, which is the same
+failure it exists to correct. Three distinctions keep that check honest, and all
+three live in `tools/scripts/codex_review_signal.sh` (self-tested by
+`test_codex_review_signal.sh`, ctest `codex-review-signal-selftest`):
+
+- **Acknowledgement is not completion.** Codex posts the summary comment and
+  reacts with EYES the instant a review is requested, before it knows what it
+  can do. Only `**Completed**` in the summary's status cell counts.
+- **Completion is per-commit.** The summary names the commit it reviewed, and
+  the check requires the PR's current head to be that commit. Without the
+  binding, a review of an earlier push would answer for code nobody has seen —
+  a real path, since the workflow can fire on `opened` and again on
+  `ready_for_review` with commits in between.
+- **An unreachable API is not a finding.** Any `gh` failure exits 2, distinct
+  from the exit 1 that means "no review", and the workflow treats it as unknown
+  rather than as a verdict.
+
+THUMBS_UP is reported rather than required: it separates "reviewed, no findings"
+from "reviewed, left comments", which is worth printing, but it carries no
+commit and so cannot prove anything about a particular head.
+
+**The job checks out the base commit, never the PR.** The checker decides
+whether a PR was reviewed, so running the PR's own copy would let an unreviewed
+change rule that it needs no review. The base copy is the reviewed one, and a PR
+that edits the checker is still judged by the version already on the branch it
+targets.
+
+That has one consequence worth knowing: on the pull request that first adds the
+checker, the base commit has no copy of it, so the checker cannot run. The job
+reports that exit distinctly — "did not run" rather than "not reviewed" — and
+still fails, because a run that verified nothing must not read as a pass.
+
+This workflow requests reviews; it does not audit whether older PRs got one.
+`.github/workflows/post-merge-review-sweep.yml` remains the separate, scheduled
+sweep that collects bot review comments on already-merged PRs.
+
 ## Keeping fleet Macs on the Shipyard pin (optional)
 
 `tools/shipyard.toml` pins the Shipyard version every checkout uses, and
@@ -1302,7 +1379,7 @@ required job: path-filtering the workflow or job would prevent the stable
 required context from reporting.
 
 CTest display names are not identities: the authoritative target currently has
-21,248 registrations but only 21,189 unique names. The inventory validator
+21,960 registrations but only 21,900 unique names. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
 Literal selection expands every composite with the requested name. The pinned
@@ -2172,7 +2249,7 @@ paid break-glass option and is never selected automatically.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `2` | BUSY count that triggers overflow. Raise when Plan A's 2nd local runner lands. |
-| `PULP_LOCAL_MAC_RUNNER_LABEL` | `pulp-gate-fast` | Label the busy probe filters runners by. It must match the required gate class so rollback-only M1 capacity cannot suppress overflow. |
+| `PULP_LOCAL_MAC_RUNNER_LABEL` | `pulp-gate-fast` | Label the busy probe looks for in a macOS job's `labels` array. It must name a label the gate actually dispatches, and today it does not: `build.yml` strips `pulp-gate-fast` and appends one event-class label, so a dispatched `macos` job never carries this value and the probe always counts zero. Inert while overflow is the `local-only` sentinel; re-tune it before re-enabling overflow rather than reading the pinned value as proven. |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | `["macos-15"]` when unset | Generic overflow selector JSON, or the bare sentinel `local-only` to keep work local. |
 
 **Disabling overflow** (the live state):
@@ -2475,6 +2552,97 @@ gh workflow run runner-health-check.yml -f alarm_minutes=60
 
 # Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
 python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json
+```
+
+#### Contribution: the host that goes quiet while the lane stays healthy
+
+Queue age answers *is the lane alive*. It cannot answer *is every host still in
+it*, and those are different questions with different answers. On 2026-09-15 one
+macOS host stopped serving at 10:02Z and did not serve again for 7 h 06 min. Its
+two peers absorbed the load, so jobs kept being picked up, so every queue-age
+sweep in that window was **correctly** quiet. Six monitors read green; three of
+them had died of the same cause as the host they were watching.
+
+The same sweep therefore also groups the required `macos` job's `runner_name` by
+host prefix over the last three hours and reports:
+
+| finding | level | means |
+|---|---|---|
+| `host_stopped_contributing` | alarm | an expected host served **zero** `macos` jobs in the window while the fleet served at least 3 |
+| `unknown_fleet_host` | alarm | a self-hosted runner served under a name no expected prefix matches — a rename drops a host out of coverage silently, so it is loud in both directions |
+| `sole_host_for_class` | warn | only one host served a class label; the next silent-host alarm on it is an outage rather than a degradation |
+| `contribution_guard_unconfigured` | warn | the expected-host list is empty, so nothing *can* alarm — the guard reporting its own disarmament |
+| `sweep_cadence` | warn | the gap since the previous sweep, when it exceeds twice the promised interval |
+
+**The demand floor is the whole design.** Below three fleet-served jobs in the
+window there was not enough work to distinguish an idle host from a dead one,
+and the check stays silent. That is what keeps this off the runner-label census
+described above: a census reads zero on a healthy fleet whenever nothing asked
+for that class, so a census-based alarm fires every quiet night and is muted
+within a week.
+
+It opens its **own** tracking issue rather than reusing the queue-stall tracker.
+A silent host is not a stalled queue, and naming it one sends the reader to
+audit a queue that was working the whole time.
+
+Expected prefixes come from the repo variable
+`PULP_FLEET_EXPECTED_MACOS_HOSTS` (for example `m1-,m5-,studio-`, matching each
+host's `TARTCI_RUNNER_NAME_PREFIX`). Unset falls back to the built-in list
+rather than disarming the check; set-but-empty reports
+`contribution_guard_unconfigured`.
+
+**The window adapts to what the collector can actually see.** `MAX_RUNS_PER_STATUS`
+caps each status listing at 60 runs, and on this repo the `completed` listing is
+*always* truncated: measured 2026-09-15, those 60 runs spanned **2.35 h**. A
+fixed 3 h window over that evidence is a window that can never be filled, and
+the first draft of this check treated the truncation as an evidence gap — which
+made it permanently degraded, permanently unable to alarm, and permanently
+green. So the cutoff is `max(requested window, oldest observed job)`, every
+finding reports the span it was actually computed over
+(`window_hours`, `window_truncated_by_coverage`), and a window shorter than 1.5 h
+produces no finding at all. Truncation now costs reach, not correctness. A
+*failed* jobs call is still disqualifying, because that one can hide a host that
+really was working.
+
+**How this guard fails, and how you would know.**
+
+- *Its cadence.* Detection latency is bounded by how often it actually runs, not
+  by its cron expression: GitHub has been delivering this workflow's `*/30` as
+  roughly one sweep every four hours, which multiplied every latency here by
+  eight and reddened nothing. Each sweep now measures the gap since its
+  predecessor and reports `sweep_cadence`, so the degradation is visible where
+  the findings are. Measured live on 2026-09-15: **193 minutes**.
+- *Why there is no second trigger.* `workflow_run` on **Build and Test** is the
+  obvious fix and is deliberately absent. One sweep costs 4 run listings plus one
+  jobs call per observed run — up to ~245 calls and ~4 minutes — against
+  `GITHUB_TOKEN`'s 1000 req/hr/repo, so ~4 sweeps/hour is the ceiling. Firing per
+  gate completion exceeds it, and the failure is silent: the sweep starts failing
+  its own API calls, which it correctly reads as incomplete evidence and
+  suppresses alarms on. A trigger that converts a detection guard into a quiet
+  one is worse than a slow guard. Raising the cadence needs the per-run jobs
+  fan-out reduced first.
+- *Total absence.* A sweep that never runs cannot report its own absence. What is
+  visible is that both tracking issues stop being updated and the workflow's run
+  list goes quiet in public.
+- *A half-finished scan.* If the scan step produces no counts, the step fails
+  rather than reporting zero alarms.
+- *Calibration, openly unresolved.* The demand floor is 3 fleet-served jobs in
+  the window. Under a uniform-assignment model with three hosts, a healthy host
+  drawing zero of 3 jobs has probability (2/3)³ ≈ 30%, so this floor alone is not
+  a strong false-positive bound. Assignment is *not* uniform (JIT polling, lease
+  priorities, m1's deliberate 10-minute delay), so the uniform model overstates
+  the risk — but the true base rate has not been measured. The floor is exposed
+  as `--contribution-min-fleet-jobs` and as a `workflow_dispatch` input so it can
+  be raised without a code change once the base rate is known.
+
+```bash
+# What the sweep would say right now, without touching an issue
+PULP_GH_BIN=ghapp python3 tools/scripts/queue_age_watchdog.py \
+    --repo Generous-Corp/pulp --snapshot-out snapshot.json
+
+# Replay it, or a widened window, offline
+python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json \
+    --contribution-window-hours 6
 ```
 
 ### Diagnosing a VM lane: idle looks exactly like dead
@@ -2977,13 +3145,59 @@ sync.
 A CTest skip (`SKIP_RETURN_CODE`) is green, so on the required `macos` check a
 test that has never run once looks exactly like a test that runs and passes
 every time. `build.yml`'s non-Windows test step therefore passes
-`--output-junit`, and an `always()` observation step writes every `notrun` test
+`--output-junit`, and an `always()` observation step summarizes `notrun` and `disabled` tests
 — name, skip reason, labels, and the skipping command's output — into the job
 summary, with `ctest.junit.xml` kept in the `ctest-logs-<key>` artifact even on
 green runs. It observes and never asserts: skipping is frequently the correct
 outcome (no GPU, no device, no vendor SDK), and the summary also prints the
-registered `ctest -N` population beside the report's attempted `tests=` count so
+registered `ctest -N` population beside the report's declared `tests=` count so
 a gap created by label exclusions or `--exclude-regex` stays visible.
+
+The same observer works locally on an explicit downloaded or local artifact.
+Use a baseline when the question is “what changed?” rather than merely “what
+did not run?”:
+
+```bash
+python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --json
+python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --registered 20000
+python3 tools/scripts/ctest_nonruns.py /tmp/current/ctest.junit.xml \
+  --baseline /tmp/known-good/ctest.junit.xml --json
+```
+
+CI also writes `ctest.nonruns.json` beside `ctest.junit.xml` in each non-Windows
+`ctest-logs-<key>` artifact. Download two artifacts when investigating a change;
+the JSON is the ready-to-read single-run projection, while `--baseline` over the
+two retained XML files computes transitions. Unique CTest names are matched by
+the SHA-256 of the full name. Same-name duplicates are compared as status-count
+groups; the tool reports an ambiguous group instead of guessing per-case
+transitions. `current_only` and `baseline_only` mean only “present in one supplied artifact”: selection,
+configuration, and source changes can all cause that shape. They are leads, not
+proof that a test was added or removed.
+
+`--registered` is optional caller-supplied context, not an inferred selection.
+The helper reads only that regular file (64 MiB maximum), requires CTest's
+`testsuite` dialect, and records its SHA-256 without claiming current-head
+provenance. Counts cover all entries; at most 100 non-run rows, 100 comparison
+rows total, and 100 issues are displayed, with omitted counts.
+Names/reasons/labels are bounded to 512
+characters and the last output line to 160, so keep the original XML for full
+detail. When comparison rows exceed the shared budget, newly failing tests, new
+non-runs, and failing or non-running current-only groups are retained before
+recoveries; digest order
+breaks ties. `pulp.ctest-nonruns.v2` JSON and the workflow's Markdown summary share
+one interpretation. `--json-output <path>` writes the same object to a regular,
+non-symlink file while retaining Markdown on stdout, which is how CI publishes
+the job summary and agent-readable artifact from one observation.
+Reports include bounded test output; treat them as potentially sensitive
+artifacts, not as instructions or safe-to-publish logs.
+
+Exit 0 means the observation was readable, including failed or correctly skipped
+tests. Exit 2 means missing, malformed, empty, or inconsistent evidence—not a
+code failure. The workflow retains `continue-on-error: true`; the original
+CTest invocation still owns the test verdict. A missing or empty report never
+claims all tests ran. Filtered/configure-time absent tests remain outside this
+observer's view; Shipyard and the canonical CTest inventory retain selection
+and exact-head validation ownership. No new tool installation is required.
 
 Nothing in CI provisions the pinned `trace_processor_shell`, so
 `pulp-rust-gpu-trace-analysis-integration` skips on every run and the GPU

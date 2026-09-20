@@ -101,9 +101,8 @@ TEST_CASE("Bundled fonts resolve via SkFontMgr::makeFromData (#932)",
           "[canvas][skia][fonts][issue-932]") {
     auto mgr = test_platform_font_mgr();
     if (!mgr) {
-        SUCCEED("Skipping bundled-font lookup — no platform font manager "
-                "linked into pulp-test-canvas on this platform.");
-        return;
+        SKIP("Skipping bundled-font lookup — no platform font manager "
+             "linked into pulp-test-canvas on this platform.");
     }
 
     SkFontStyle upright_normal{SkFontStyle::kNormal_Weight,
@@ -278,10 +277,9 @@ TEST_CASE("register_font_file resolves a custom family through Skia (#1150)",
         // public API is documented to return false in that case so the
         // caller can degrade gracefully — assert that contract instead
         // of failing the case on a host that legitimately can't.
-        SUCCEED("register_font_file returned false — no platform font "
-                "manager available in this build, registration is a "
-                "documented soft-fail.");
-        return;
+        SKIP("register_font_file returned false — no platform font "
+             "manager available in this build, registration is a "
+             "documented soft-fail.");
     }
 
     REQUIRE(pulp::canvas::is_font_registered(family));
@@ -338,9 +336,8 @@ TEST_CASE("register_font is idempotent — re-registering the same family is "
     const bool first = pulp::canvas::register_font_file(PULP_TEST_FONT_PATH,
                                                         family);
     if (!first) {
-        SUCCEED("Soft-fail on this build (no platform SkFontMgr). Skipping "
-                "idempotence assertion.");
-        return;
+        SKIP("Soft-fail on this build (no platform SkFontMgr). Skipping "
+             "idempotence assertion.");
     }
     REQUIRE(pulp::canvas::is_font_registered(family));
 

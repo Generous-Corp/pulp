@@ -84,6 +84,14 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/shell_portability_check.py'
+      - 'tools/scripts/test_shell_portability_check.py'
+      - 'tools/scripts/shell_portability_rules.json'
+      - 'docs/guides/agent-efficiency-audits.md'
+      - 'tools/ci/**'
+      - 'scripts/**'
+      - 'tools/scripts/ctest_nonruns.py'
+      - 'tools/scripts/test_ctest_nonruns.py'
       - 'tools/scripts/test_ios_gate_skip_contract.py'
       - 'tools/scripts/test_shipyard_merge_steward_workflow.py'
       - 'tools/scripts/shipyard_provenance_label_plan.py'
@@ -187,6 +195,14 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/shell_portability_check.py'
+      - 'tools/scripts/test_shell_portability_check.py'
+      - 'tools/scripts/shell_portability_rules.json'
+      - 'docs/guides/agent-efficiency-audits.md'
+      - 'tools/ci/**'
+      - 'scripts/**'
+      - 'tools/scripts/ctest_nonruns.py'
+      - 'tools/scripts/test_ctest_nonruns.py'
       - 'tools/scripts/test_ios_gate_skip_contract.py'
       - 'tools/scripts/test_shipyard_merge_steward_workflow.py'
       - 'tools/scripts/shipyard_provenance_label_plan.py'
@@ -311,6 +327,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_workflow_lint.py
+          python3 tools/scripts/test_shell_portability_check.py
+          python3 tools/scripts/shell_portability_check.py tools/ci scripts tools/scripts
           python3 tools/scripts/test_ios_gate_skip_contract.py
           python3 tools/scripts/test_api_contracts_workflow.py
           python3 tools/scripts/test_queue_age_watchdog.py
@@ -354,6 +372,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_release_workflow_test_step.py
+          # auto-release.yml's bypass-trailer guard, run as the step body
+          # extracted from the workflow: a quoted trailer must not
+          # withhold a release tag, a declared one must.
+          python3 tools/scripts/test_release_trailer_guard.py
           python3 tools/scripts/test_release_checksum_manifest.py
           python3 tools/scripts/test_release_artifact_contents.py
           # The active_platforms shipping knob: matrix-leg derivation and the
@@ -367,6 +389,7 @@ jobs:
           python3 tools/scripts/test_release_breakage_watchdog_wiring.py
           python3 tools/scripts/test_resign_macos_release_tree.py
           python3 tools/scripts/test_workflow_build_dirs.py
+          python3 tools/scripts/test_ctest_nonruns.py
           # The interrupted-build sentinel and its Shipyard wiring. `arm`
           # and `clear` are a matched pair split across two stages; a lane
           # that arms without clearing wipes its build dir every run.

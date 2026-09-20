@@ -139,7 +139,18 @@ For an existing capability change:
 
 - Update the reviewed header fingerprint for every public-header byte change,
   even when the consumer contract is unchanged. Increase the surface inventory
-  version.
+  version. `--write` cannot do the first of those for you: it reports the
+  measured digest and exits nonzero, because a generator free to restamp a
+  fingerprint would silently launder every unreviewed header edit. Paste the
+  measured digest over the declared one in `agent_capability_registry.py`, bump
+  `SURFACE_INVENTORY_VERSION` in `agent_capability_manifest.py`, then `--write`.
+- `--write` also appends a full snapshot to
+  `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
+  that dwarf the change that caused them. `--check` does not require it, so for
+  a byte-level fingerprint refresh, revert that file and keep the three-file
+  change; `--check` still reports `fresh`. Reverting it is not free of meaning,
+  so keep the snapshot when the change is a real contract movement whose history
+  someone will read back.
 - Increase the capability minor version for compatible additive contract
   changes.
 - Increase the capability major version when a binding is removed, renamed, or
@@ -358,6 +369,30 @@ worth not hand-rolling: **over-bumping is not the safe direction.** Advancing a
 counter whose material is identical fails the opposite rule,
 `... changed without a manifest change`, so "bump both to be safe" trades one
 red gate for another.
+
+**A taken counter does not always announce itself as a conflict.** Re-read both
+counters after *every* merge of the protected base, not only after git reports
+one. When two lanes reserve the same next integer, the two sides hold
+character-identical constant lines, so the merge is clean and silent — and the
+*increase* is what gets annihilated: the surface has changed (your fingerprint)
+while the counter equals the base again. That surfaces much later as
+`STALE: public surface changed without an inventory_version increase`, on every
+platform at once, naming generated files the diff appears not to touch.
+
+Recovery needs the surface document reset **first**. `--write` derives from the
+on-disk artifact, which already carries your fingerprint at the taken counter,
+so raising the counter alone fails the opposite rule instead:
+
+```bash
+git checkout origin/main -- docs/status/agent-capability-surface.json
+python3 tools/scripts/agent_capability_rederive.py
+```
+
+Reset that one document and nothing else. The same digest also lives in
+`REVIEWED_HEADERS` in `tools/scripts/agent_capability_registry.py`, and that copy
+must keep the NEW value — resetting it too restores the stale digest and
+reproduces the original failure. No integer is picked by hand: `rederive.py`
+resolves the protected tip, so it lands on whatever is free.
 
 It refuses rather than guesses when the surface has unresolved problems — a
 changed header with a stale fingerprint has no stable material to derive from,
@@ -610,24 +645,63 @@ it by updating the fingerprint in
 through explicit reviewed classifications`. That is deliberate. The frozen set is
 content-pinned so headers in it cannot be edited silently.
 
-The sanctioned path is to classify the header OUT of the bucket, which means all
-of these in one change:
+The sanctioned path is to classify the header OUT of the bucket. That takes two
+edits, and **the baseline file is not one of them**:
 
 1. add it to `REVIEWED_HEADERS` in `tools/scripts/agent_capability_registry.py`
-   with its NEW fingerprint, a disposition, and a rationale;
-2. delete its entry from the baseline, decrement `frozen_count`, and recompute
-   `entries_digest` with `agent_capability_surface.canonical_digest(entries)`;
-3. update BOTH `FROZEN_LEGACY_COUNT` and `FROZEN_LEGACY_DIGEST` in
-   `tools/scripts/agent_capability_surface.py` to match; and
-4. run `python3 tools/scripts/agent_capability_rederive.py`, not a hand-edit, to
+   with its NEW fingerprint, a disposition, and a rationale; then
+2. run `python3 tools/scripts/agent_capability_rederive.py`, not a hand-edit, to
    move the counters. Editing `manifest_revision` / `inventory_version` directly
    in the generated JSON does nothing: they are projected from
    `MANIFEST_REVISION` / `SURFACE_INVENTORY_VERSION` constants, so `--write`
    regenerates them and still reports `changed without a revision increase`.
 
+**Do NOT delete the entry from the baseline, decrement `frozen_count`, recompute
+`entries_digest`, or touch `FROZEN_LEGACY_COUNT` / `FROZEN_LEGACY_DIGEST`.** The
+declaration alone satisfies the fingerprint check; the surface document derives
+each header's disposition from `REVIEWED_HEADERS` first, so a declared header
+stops being counted as legacy without the snapshot changing at all. Editing those
+pinned constants to make a PR pass removes the deliberate guard — see "A header
+in the frozen legacy baseline does NOT require unfreezing anything" below, which
+is the authoritative statement. Afterwards confirm the baseline file has no diff
+and its entry count is unchanged; `--check` should report `fresh`, and the
+surface's `legacy_unreviewed` count should have dropped by exactly the number of
+headers you declared.
+
 Only classify a header when the classification is already defensible from a
-written decision. Inventing one to unblock an edit converts a safety gate into
-paperwork.
+written decision, and only when the edit that tripped the gate is load-bearing
+for the change (the triage in that later section). Inventing a classification to
+unblock an incidental edit converts a safety gate into paperwork.
+
+## A portability fix to a frozen header classifies as `infrastructure`, not a capability
+
+The triage above asks whether your capability actually needs the header to
+change. Sometimes the header change *is* the whole change: a public header can
+be unbuildable on a platform and the fix has to land in it. `simd_buffer.hpp`
+wrapped C11 `aligned_alloc`, which Bionic does not provide below Android API 26,
+so every Android build of anything including it failed to compile.
+
+That still trips the frozen-baseline gate, and it still resolves by declaring
+the header in `REVIEWED_HEADERS` — but declare it honestly:
+
+- `"disposition": "infrastructure"` with `"capability_keys": []`. The edit
+  changed no consumer contract, so there is no capability to claim. Inventing
+  one to look tidier would assert a binding nothing offers.
+- Say in the rationale that the branch is a portability detail of the primitive
+  rather than a change to the surface it presents, so a later reader is not left
+  guessing whether the allocator's behavior moved.
+- It is a byte-level fingerprint refresh, so revert the `contract-history.json`
+  snapshot per the guidance above and keep the three-file change.
+
+Confirm the same post-conditions as any classification: the baseline file has no
+diff, its entry count is unchanged, `--check` reports `fresh`, and the surface's
+`legacy_unreviewed` count dropped by exactly one.
+
+**Measure `--write`'s exit status unpiped.** On a frozen header it prints
+`INVALID: public header fingerprint changed` and exits 1, exactly as documented
+above — but `--write | tail` reports `tail`'s status instead, which reads as a
+silent success and invites the wrong conclusion that the generator accepted the
+edit.
 
 ## The rederive self-test dirties the checkout for its whole run
 
@@ -1039,3 +1113,40 @@ suite roughly 1.5x slower than M3. A selftest measured at ~62 s on an idle M3 �
 class — is already over the 120 s default once that factor and a loaded host are
 applied, even though the local number looks like comfortable headroom. Scale the
 local measurement before deciding a test needs no explicit `TIMEOUT`.
+
+## An installed `inspect/` control header is not a design-time capability row
+
+`tools/cmake/PulpInstallRules.cmake` installs the capability-control executor
+headers (`control_state_write_executor.hpp`,
+`control_timeline_document_session_executor.hpp`, and their siblings) into the
+same SDK that carries the design-time agent-capability contracts. Sharing an
+install list is not sharing a registry, and the resemblance is the trap: the
+headers declare typed request/outcome structs and a resolver, which reads like a
+binding, so the reflex is to add a manifest row "for consistency".
+
+Do not. Runtime operation metadata — operations, grants, instances, receipts —
+is broker authority and stays outside the design-time manifest by construction.
+A control operation is declared once in `inspect/src/control_manifest.cpp` and
+its capability once in `capability_definitions.inc`; the CLI and MCP surfaces
+then project it from `control_operation_registry()`. Nothing in that path reads
+the agent-capabilities manifest, so a row added there would advertise a contract
+no consumer resolves and no gate re-derives.
+
+The practical consequence is a disposition, not a code change: a sequencer
+exposure row covering a live control operation records
+`design_time_agent_manifest: not_applicable` with that boundary as its
+rationale, and never `gap` — `gap` claims someone owes the row, and nobody does.
+
+What the install entry *does* buy is honesty on a different surface. Adding the
+header to the install list is exactly what lets the same exposure row claim
+`installed_sdk: exposed`, because an embedding host then links the typed source
+seam rather than re-declaring it. Omit the install entry and that claim is
+false, while the manifest row would still have been wrong.
+
+## Humaniser kernel versus placed-device controls
+
+`midi.humanize` 1.1 advertises the compatible future-attack spec update method
+and supports a nonnegative timing floor. Its operational binding constructs a
+kernel and invokes the update with a bounded spec. This design-time kernel
+registration does not advertise placed-device parameter operations or grants;
+the event-humaniser exposure ledger keeps those product-control gaps explicit.

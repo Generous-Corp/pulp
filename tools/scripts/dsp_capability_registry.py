@@ -123,6 +123,28 @@ def catalog_files(root: pathlib.Path) -> list[pathlib.Path]:
     return seen
 
 
+def sample_region_rows(root: pathlib.Path) -> list[dict]:
+    source = root / "core/host/include/pulp/host/forge_catalog_export.hpp"
+    # The CLI write test runs this script from a disposable fixture that owns
+    # only its synthetic catalog header.  A fixture must still exercise the
+    # generic catalog extraction path without having to copy the production
+    # sample-region export header into its isolated tree.
+    if not source.exists():
+        return []
+    pattern = re.compile(r'\{"([^"\n]+)",\s*"([^"\n]+)",\s*"([^"\n]+)",\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*"([^"\n]+)",\s*"([^"\n]+)"\}')
+    rows = []
+    for role, type_id, label, tv, kv, inputs, outputs, state_bytes, alignment, config, placement in pattern.findall(source.read_text()):
+        rows.append({"key": type_id, "type_id": type_id, "type_version": int(tv),
+                     "sample_kernel_version": int(kv), "factory": "register_builtin_sample_region_types",
+                     "baked_params": [], "sample_region_v1": {
+                         "type_version": int(tv), "sample_kernel_version": int(kv), "role": role,
+                         "inputs": int(inputs), "outputs": int(outputs), "state_bytes": int(state_bytes),
+                         "state_alignment": int(alignment), "config_kind": config}})
+    if len(rows) != 7:
+        raise RuntimeError("sample-region static registry requires seven exact reviewed routes")
+    return rows
+
+
 def extract(root: pathlib.Path) -> dict:
     catalogs = []
     for path in catalog_files(root):
@@ -236,6 +258,14 @@ def extract(root: pathlib.Path) -> dict:
                     }
                 )
         catalogs.append(catalog)
+
+    region_rows = sample_region_rows(root)
+    if region_rows:
+        region_catalog = next(catalog for catalog in catalogs
+                              if catalog["header"] == "core/host/include/pulp/host/forge_catalog_export.hpp")
+        region_catalog["type_ids"] = [{"constant": row["sample_region_v1"]["role"],
+                                       "value": row["type_id"]} for row in region_rows]
+        region_catalog["nodes"] = region_rows
 
     total_params = sum(
         len(n["baked_params"]) for c in catalogs for n in c["nodes"]

@@ -1,10 +1,13 @@
 #include "timeline_nesting_test_support.hpp"
 #include <pulp/playback/program_wire.hpp>
+#include <pulp/playback/realtime_stretch_renderer.hpp>
 #include "../core/playback/src/sequence_content_lowerer.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <utility>
 
@@ -629,54 +632,391 @@ TEST_CASE("Nested trimming shortens an audio leaf's own fade to the new edge") {
     }
 }
 
-TEST_CASE("Nested conforming audio refuses partial source windows") {
-    std::vector<float> source(24'000, 1.0f);
-    const auto data = audio_data({source});
-    const auto assets = pool({{{50}, data}});
+namespace {
+
+// A quarter note of 12'000 source frames at 48 kHz is a genuine conform: the
+// placement is 24'000 timeline frames long, so source and timeline advance at
+// different rates and a mapping that confuses them is visible rather than
+// coincidentally right.
+constexpr std::uint64_t kConformSourceFrames = 12'000;
+
+std::vector<float> conform_ramp() {
+    std::vector<float> source(kConformSourceFrames);
+    for (std::size_t frame = 0; frame < source.size(); ++frame)
+        source[frame] = static_cast<float>(frame) / static_cast<float>(kConformSourceFrames);
+    return source;
+}
+
+// `placement_source_start` doubles as the root tick so the retained window
+// covers the same root ticks it would have covered untrimmed. Anything else
+// would compare two different pieces of the child.
+std::shared_ptr<const Project> resampled_nesting(std::int64_t placement_source_start,
+                                                 std::int64_t placement_duration) {
     const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, kConformSourceFrames, {},
+                                          TimeConform::Resample);
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {track(11, {child_media})}));
+    auto root = take(Sequence::create(
+        {2}, "root", std::nullopt,
+        {track(3, {nested_clip(4, 10, placement_source_start, placement_duration,
+                               placement_source_start)})}));
+    return shared(take(Project::create(ProjectInput{
+        {1}, "resampled nesting", 100, {2},
+        {{50, "ramp", kConformSourceFrames, {48'000, 1}, hash}}, {root, child}})));
+}
 
-    // Spelled rather than deduced: `std::int64_t` is `long` on LP64 Linux and
-    // `long long` on Darwin, so a bare `0LL` sibling deduces a different
-    // `std::pair` there and class-template argument deduction for the array
-    // fails on one platform only.
-    using TrimWindow = std::pair<std::int64_t, std::int64_t>;
-    const std::array<TrimWindow, 3> windows{
-        TrimWindow{kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4}, // left trim only
-        TrimWindow{0, 3 * kTicksPerQuarter / 4},                    // right trim only
-        TrimWindow{kTicksPerQuarter / 4, kTicksPerQuarter / 2},     // both sides
+} // namespace
+
+TEST_CASE("Trimmed nested resampling media reads the conformed sub-span") {
+    const auto ramp = conform_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+
+    struct Geometry {
+        const char* label;
+        std::int64_t source_start;
+        std::int64_t duration;
+        double expected_offset;
+        double expected_phase_end;
+        std::int64_t render_sample;
     };
-    for (const auto conform : {TimeConform::Resample, TimeConform::Stretch}) {
-        for (const auto [source_start, duration] : windows) {
-            auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, source.size(), {},
-                                                   conform);
-            auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
-                                               {track(11, {child_media})}));
-            auto root = take(Sequence::create(
-                {2}, "root", std::nullopt,
-                {track(3, {nested_clip(4, 10, 0, duration, source_start)})}));
-            auto project = shared(take(Project::create(
-                ProjectInput{{1}, "partial nested conform", 100, {2},
-                             {{50, "source", source.size(), {48'000, 1}, hash}}, {root, child}})));
+    const std::array geometries{
+        Geometry{"left and right trim", kTicksPerQuarter / 4, kTicksPerQuarter / 2, 3'000.0,
+                 9'000.0, 8'000},
+        Geometry{"right trim only", 0, 3 * kTicksPerQuarter / 4, 0.0, 9'000.0, 8'000},
+        Geometry{"left trim only", kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4, 3'000.0,
+                 12'000.0, 8'000},
+    };
 
-            PlaybackProgramStore store;
-            InlineExecutor executor;
-            PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
-            ProgramCompileRequest request;
-            request.project = std::move(project);
-            request.sequence_id = {2};
-            request.tempo_map = map_120();
-            request.sample_rate = request.tempo_map->sample_rate();
-            request.document_revision = 1;
-            request.dirty.all = true;
-            request.audio_assets = assets;
-            REQUIRE(compiler.submit(std::move(request)));
-            REQUIRE(compiler.status().has_error);
-            REQUIRE(compiler.status().last_error.code ==
-                    CompileErrorCode::NestedConformedTrimUnsupported);
-            REQUIRE(compiler.status().last_error.item == ItemId{12});
-            REQUIRE_FALSE(store.has_value());
+    for (const auto& geometry : geometries) {
+        INFO(geometry.label);
+        auto project = resampled_nesting(geometry.source_start, geometry.duration);
+
+        // The retained window's own fractions of the authored tick span name
+        // the source frames it reads. These are read off the geometry, not off
+        // the lowerer.
+        const auto tempo = map_120();
+        SequenceContentLowerer lowerer(*project, *tempo, 100, 100);
+        std::vector<LoweredClip> lowered;
+        REQUIRE_FALSE(
+            lowerer.begin_track(*project->find_sequence({2})->find_track({3}), lowered).error);
+        for (;;) {
+            const auto step = lowerer.step();
+            REQUIRE_FALSE(step.error);
+            if (step.complete)
+                break;
         }
+        const auto leaf = std::find_if(lowered.begin(), lowered.end(), [](const LoweredClip& item) {
+            return std::holds_alternative<MediaRef>(item.clip.content());
+        });
+        REQUIRE(leaf != lowered.end());
+        REQUIRE(leaf->clip.time_conform() == TimeConform::Resample);
+        REQUIRE(leaf->source_frame_offset == geometry.expected_offset);
+        REQUIRE(leaf->source_frame_phase_end == geometry.expected_phase_end);
+
+        // The retained window renders exactly what the untrimmed nesting
+        // renders over the same root ticks — the conform function restricted to
+        // a sub-span is the same function.
+        CompiledFixture trimmed(project, map_120(), assets);
+        CompiledFixture whole(resampled_nesting(0, kTicksPerQuarter), map_120(), assets);
+        auto trimmed_program = trimmed.store.read();
+        auto whole_program = whole.store.read();
+        REQUIRE(trimmed_program);
+        REQUIRE(whole_program);
+
+        Output trimmed_output(1, 256);
+        Output whole_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *trimmed_program, snapshot(*trimmed_program, 256, geometry.render_sample),
+                    trimmed_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *whole_program, snapshot(*whole_program, 256, geometry.render_sample),
+                    whole_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(trimmed_output.storage == whole_output.storage);
+        // An independent reading of the same claim, derived from the geometry
+        // rather than from either render: at 120 BPM and 48 kHz the placement
+        // is 24'000 frames long, so sample 8'000 sits a third of the way
+        // through it and a conform that maps the whole source across the whole
+        // placement is reading source frame 4'000 of 12'000. The ramp carries
+        // frame/12'000, so the sample reads about a third. An elapsed-samples
+        // mapping would be reading past frame 7'000 here, which this band
+        // excludes; the band is wide because a variable-rate converter filters
+        // the ramp rather than sampling it.
+        REQUIRE(trimmed_output.storage[0][0] > 0.30f);
+        REQUIRE(trimmed_output.storage[0][0] < 0.37f);
+        // Positive control: the equality above is about two buffers that carry
+        // audio, and the ramp is strictly increasing so the window it came from
+        // is identifiable rather than merely non-silent.
+        REQUIRE(trimmed_output.storage[0][0] != 0.0f);
+        REQUIRE(trimmed_output.storage[0][255] > trimmed_output.storage[0][0]);
+
+        // Negative control: the same comparison at a different point in the
+        // ramp fails, so equality is a statement about the mapping and not
+        // about a buffer that matches everything.
+        Output displaced_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *whole_program, snapshot(*whole_program, 256, geometry.render_sample + 1'024),
+                    displaced_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(displaced_output.storage != whole_output.storage);
     }
+}
+
+TEST_CASE("Trimmed nested resampling media rejects elapsed-sample source offsets") {
+    // The retained window of the first geometry above starts a quarter of the
+    // way into a placement that is 24'000 timeline frames long, so an elapsed
+    // -samples mapping would offset by 6'000 source frames where the conform
+    // asks for 3'000. Stating both numbers keeps the case a claim about the
+    // conform rather than a restatement of whatever the lowerer computed.
+    const auto ramp = conform_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    auto project = resampled_nesting(kTicksPerQuarter / 4, kTicksPerQuarter / 2);
+    const auto tempo = map_120();
+    SequenceContentLowerer lowerer(*project, *tempo, 100, 100);
+    std::vector<LoweredClip> lowered;
+    REQUIRE_FALSE(
+        lowerer.begin_track(*project->find_sequence({2})->find_track({3}), lowered).error);
+    for (;;) {
+        const auto step = lowerer.step();
+        REQUIRE_FALSE(step.error);
+        if (step.complete)
+            break;
+    }
+    const auto leaf = std::find_if(lowered.begin(), lowered.end(), [](const LoweredClip& item) {
+        return std::holds_alternative<MediaRef>(item.clip.content());
+    });
+    REQUIRE(leaf != lowered.end());
+    REQUIRE(leaf->source_frame_offset == 3'000.0);
+    REQUIRE(leaf->source_frame_offset != 6'000.0);
+    // A conformed window also ends early. Reading to the end of the reference
+    // is the other half of the elapsed-samples answer, and it is equally wrong.
+    REQUIRE(leaf->source_frame_phase_end == 9'000.0);
+    REQUIRE(leaf->source_frame_phase_end != static_cast<double>(kConformSourceFrames));
+}
+
+namespace {
+
+// 12'000 source frames under a quarter note is a genuine stretch: at 120 BPM
+// and 48 kHz the placement is 24'000 timeline frames long, so the artifact is
+// twice the source and a window that confused artifact frames with source
+// frames would land in the wrong half of it.
+constexpr std::uint64_t kStretchSourceFrames = 12'000;
+
+// A tone under a strictly rising envelope. The tone gives the stretch something
+// to resolve; the envelope is what makes a position in the render identifiable,
+// because a plain periodic source repeats every few hundred frames and a window
+// reading the wrong period of it looks exactly like one reading the right one.
+std::vector<float> stretch_ramp() {
+    std::vector<float> source(kStretchSourceFrames);
+    for (std::size_t frame = 0; frame < source.size(); ++frame) {
+        const auto phase = static_cast<float>(frame) / static_cast<float>(kStretchSourceFrames);
+        source[frame] = (0.1f + 0.9f * phase) * std::sin(static_cast<float>(frame) * 0.031f);
+    }
+    return source;
+}
+
+std::shared_ptr<const DecodedAudioAssetPool> stretch_assets() {
+    // The stretch path checks the decoded asset against the project's declared
+    // content hash, so the pool cannot be left with the default one.
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    return pool({DecodedAudioAsset{{50}, audio_data({stretch_ramp()}), hash, {}}});
+}
+
+// `placement_source_start` doubles as the root tick, so a retained window
+// covers the same root ticks and reads the same child ticks it would have
+// untrimmed. `shift` instead places the child earlier than the offset it reads,
+// which puts the authored origin before the root's own.
+std::shared_ptr<const Project> stretched_nesting(std::int64_t placement_source_start,
+                                                 std::int64_t placement_duration,
+                                                 std::int64_t placement_start = -1) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    auto child_media = musical_media_clip(12, 0, kTicksPerQuarter, 50, kStretchSourceFrames, {},
+                                          TimeConform::Stretch);
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {track(11, {child_media})}));
+    auto root = take(Sequence::create(
+        {2}, "root", std::nullopt,
+        {track(3, {nested_clip(4, 10,
+                               placement_start < 0 ? placement_source_start : placement_start,
+                               placement_duration, placement_source_start)})}));
+    return shared(take(Project::create(
+        ProjectInput{{1},
+                     "stretched nesting",
+                     100,
+                     {2},
+                     {{50, "ramp", kStretchSourceFrames, {48'000, 1}, hash}},
+                     {root, child}})));
+}
+
+const AudioClipRendererProgram& only_audio_clip(const PlaybackProgram& program) {
+    const auto* found = program.find_track({3});
+    REQUIRE(found);
+    REQUIRE(found->audio_program());
+    REQUIRE(found->audio_program()->clips().size() == 1);
+    return found->audio_program()->clips().front();
+}
+
+LoweredClip lower_only_media_leaf(const Project& project) {
+    const auto tempo = map_120();
+    SequenceContentLowerer lowerer(project, *tempo, 100, 100);
+    std::vector<LoweredClip> lowered;
+    REQUIRE_FALSE(lowerer.begin_track(*project.find_sequence({2})->find_track({3}), lowered).error);
+    for (;;) {
+        const auto step = lowerer.step();
+        REQUIRE_FALSE(step.error);
+        if (step.complete)
+            break;
+    }
+    const auto leaf = std::find_if(lowered.begin(), lowered.end(), [](const LoweredClip& item) {
+        return std::holds_alternative<MediaRef>(item.clip.content());
+    });
+    REQUIRE(leaf != lowered.end());
+    return *leaf;
+}
+
+} // namespace
+
+TEST_CASE("Trimmed nested stretched media reads a window of the authored artifact") {
+    const auto assets = stretch_assets();
+
+    struct Geometry {
+        const char* label;
+        std::int64_t source_start;
+        std::int64_t duration;
+        std::uint64_t expected_artifact_frame_start;
+        std::uint64_t expected_window_frames;
+    };
+    const std::array geometries{
+        Geometry{"left and right trim", kTicksPerQuarter / 4, kTicksPerQuarter / 2, 6'000, 12'000},
+        Geometry{"right trim only", 0, 3 * kTicksPerQuarter / 4, 0, 18'000},
+        Geometry{"left trim only", kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4, 6'000, 18'000},
+        // The three rows above all trim on a frame boundary: a quarter of a
+        // quarter note is exactly 6'000 frames here. Ticks resolve far finer
+        // than that. One tick is about 1/29.4 of a frame at 120 BPM and 48 kHz,
+        // so trimming seven of them moves no frame edge, and the window that
+        // correctly results reads the whole artifact while the clip covers less
+        // than the whole authored range. Both edges are spelled because each is
+        // a separate comparison between the artifact's key and the clip.
+        Geometry{"sub-frame left trim", 7, kTicksPerQuarter - 7, 0, 24'000},
+        Geometry{"sub-frame right trim", 0, kTicksPerQuarter - 7, 0, 24'000},
+    };
+
+    for (const auto& geometry : geometries) {
+        INFO(geometry.label);
+        auto project = stretched_nesting(geometry.source_start, geometry.duration);
+
+        // The leaf keeps its whole media reference and asks for no source
+        // range. Everything about the window is expressed in the authored tick
+        // range instead, which is what the artifact is keyed to.
+        const auto leaf = lower_only_media_leaf(*project);
+        REQUIRE(leaf.clip.time_conform() == TimeConform::Stretch);
+        REQUIRE(leaf.authored_window_start == geometry.source_start);
+        REQUIRE(leaf.authored_duration.value == kTicksPerQuarter);
+        REQUIRE(leaf.source_frame_offset == 0.0);
+        REQUIRE(leaf.source_frame_phase_end == 0.0);
+        const auto* reference = std::get_if<MediaRef>(&leaf.clip.content());
+        REQUIRE(reference);
+        REQUIRE(reference->source_start.value == 0);
+        REQUIRE(reference->frame_count == kStretchSourceFrames);
+
+        CompiledFixture trimmed(project, map_120(), assets);
+        CompiledFixture whole(stretched_nesting(0, kTicksPerQuarter), map_120(), assets);
+        auto trimmed_program = trimmed.store.read();
+        auto whole_program = whole.store.read();
+        REQUIRE(trimmed_program);
+        REQUIRE(whole_program);
+
+        const auto& compiled = only_audio_clip(*trimmed_program);
+        REQUIRE(compiled.source_time_mapping ==
+                AudioClipRendererProgram::SourceTimeMapping::OfflineStretchArtifact);
+        REQUIRE(compiled.offline_stretch_artifact);
+        // The artifact still spans the authored quarter note and still holds
+        // all 24'000 of its frames. A re-keyed artifact would hold only the
+        // retained window's worth and would have stretched the whole source
+        // into it.
+        REQUIRE(compiled.offline_stretch_artifact->key.musical_tick_start == TickPosition{0});
+        REQUIRE(compiled.offline_stretch_artifact->key.musical_tick_end ==
+                TickPosition{kTicksPerQuarter});
+        REQUIRE(compiled.offline_stretch_artifact->key.target_frame_count == 24'000);
+        REQUIRE(compiled.audio->num_frames() == 24'000);
+        REQUIRE(compiled.source_start == geometry.expected_artifact_frame_start);
+        REQUIRE(compiled.source_frame_count == geometry.expected_window_frames);
+        REQUIRE(compiled.timeline_frame_count == geometry.expected_window_frames);
+        // The clip also has to satisfy the linker, which is where the SDK
+        // states the relationship between the frames a window reads and the
+        // ticks it covers. A window trimmed by less than a frame is the shape
+        // that relationship is easiest to state as an equivalence it does not
+        // have, and stating it that way rejects a clip that is correct.
+        REQUIRE(link_audio_track_program({3}, {compiled}, {}));
+        // The untrimmed nesting reaches the same artifact, so the two renders
+        // below differ only in which frames of it each leaf reads.
+        REQUIRE(only_audio_clip(*whole_program).offline_stretch_artifact->key ==
+                compiled.offline_stretch_artifact->key);
+
+        // Root sample 8'000 is inside every geometry's retained window and
+        // inside the untrimmed placement, so both programs have audio there.
+        constexpr std::int64_t kRenderSample = 8'000;
+        Output trimmed_output(1, 256);
+        Output whole_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *trimmed_program, snapshot(*trimmed_program, 256, kRenderSample),
+                    trimmed_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *whole_program, snapshot(*whole_program, 256, kRenderSample),
+                    whole_output.view()) == AudioRenderStatus::Rendered);
+        // Bit-identity, not a tolerance: the retained window renders exactly
+        // what the untrimmed nesting renders over the same root ticks.
+        REQUIRE(trimmed_output.storage == whole_output.storage);
+
+        // Positive control: the equality above is about buffers that carry
+        // audio. A window reading the wrong frames of a silent artifact would
+        // satisfy it too, so the render has to be non-silent and non-constant.
+        REQUIRE(std::any_of(trimmed_output.storage[0].begin(), trimmed_output.storage[0].end(),
+                            [](float sample) { return sample != 0.0f; }));
+        REQUIRE(std::adjacent_find(trimmed_output.storage[0].begin(),
+                                   trimmed_output.storage[0].end(),
+                                   std::not_equal_to<>()) != trimmed_output.storage[0].end());
+
+        // Negative control: the same comparison against a different point in
+        // the same artifact fails, so the equality is a statement about which
+        // frames the window selected and not about a buffer that matches
+        // everything.
+        Output displaced_output(1, 256);
+        REQUIRE(ArrangementAudioRenderer::process(
+                    *whole_program, snapshot(*whole_program, 256, kRenderSample + 1'024),
+                    displaced_output.view()) == AudioRenderStatus::Rendered);
+        REQUIRE(displaced_output.storage != whole_output.storage);
+    }
+}
+
+TEST_CASE("Nested stretched media placed before its authored origin still windows the artifact") {
+    // The root places the child at tick zero but reads it from a quarter of the
+    // way in, so the authored quarter note begins before the root's own origin.
+    // No document clip can say that, which is why the authored range travels
+    // beside the leaf rather than being recovered from the placement.
+    const auto assets = stretch_assets();
+    auto project = stretched_nesting(kTicksPerQuarter / 4, 3 * kTicksPerQuarter / 4, 0);
+    const auto leaf = lower_only_media_leaf(*project);
+    REQUIRE(leaf.authored_window_start == kTicksPerQuarter / 4);
+    REQUIRE(leaf.clip.start() == TickPosition{0});
+
+    CompiledFixture compiled_fixture(project, map_120(), assets);
+    auto program = compiled_fixture.store.read();
+    REQUIRE(program);
+    const auto& compiled = only_audio_clip(*program);
+    REQUIRE(compiled.offline_stretch_artifact);
+    REQUIRE(compiled.offline_stretch_artifact->key.musical_tick_start.value ==
+            -kTicksPerQuarter / 4);
+    REQUIRE(compiled.offline_stretch_artifact->key.musical_tick_end.value ==
+            3 * kTicksPerQuarter / 4);
+    REQUIRE(compiled.audio->num_frames() == 24'000);
+    REQUIRE(compiled.source_start == 6'000);
+    REQUIRE(compiled.source_frame_count == 18'000);
+
+    Output output(1, 256);
+    REQUIRE(ArrangementAudioRenderer::process(*program, snapshot(*program, 256, 2'000),
+                                              output.view()) == AudioRenderStatus::Rendered);
+    REQUIRE(std::any_of(output.storage[0].begin(), output.storage[0].end(),
+                        [](float sample) { return sample != 0.0f; }));
 }
 
 TEST_CASE("Complete nested media preserves authored time conform intent") {
@@ -1947,23 +2287,25 @@ TEST_CASE("Nested child processing names the construct that blocks flattening") 
         return compiler.status().last_error;
     };
 
-    const auto device = refusal({.device_chain = true, .automation_lane = false});
+    const auto device = refusal({.device_chain = true, .gain_automation = false});
     REQUIRE(device.code == CompileErrorCode::NestedDeviceChainUnsupported);
     // The child track, not the clip: the chain is the track's, and an author
     // fixing this moves or removes processing on that track.
     REQUIRE(device.item == ItemId{11});
 
-    const auto automation = refusal({.device_chain = false, .automation_lane = true});
-    REQUIRE(automation.code == CompileErrorCode::NestedAutomationLaneUnsupported);
-    REQUIRE(automation.item == ItemId{11});
+    const auto automation = refusal({.device_chain = false, .gain_automation = true});
+    REQUIRE(automation.code == CompileErrorCode::NestedAutomationGainEventLeafUnsupported);
+    // The leaf, not the child track: which leaf the curve reached is what chose
+    // this code over the media one, so that is the item an author looks at.
+    REQUIRE(automation.item == ItemId{12});
 
     REQUIRE(device.code != automation.code);
 
     // A document carrying both is still refused, and reports one of the two
     // rather than a third code standing for the pair.
-    const auto both = refusal({.device_chain = true, .automation_lane = true});
+    const auto both = refusal({.device_chain = true, .gain_automation = true});
     REQUIRE((both.code == CompileErrorCode::NestedDeviceChainUnsupported ||
-             both.code == CompileErrorCode::NestedAutomationLaneUnsupported));
+             both.code == CompileErrorCode::NestedAutomationGainEventLeafUnsupported));
 
     // Neither construct present compiles, so the refusals above are caused by
     // the construct under test and not by the shape of the fixture. The child's
@@ -1975,6 +2317,61 @@ TEST_CASE("Nested child processing names the construct that blocks flattening") 
     REQUIRE(events.size() == 2);
     REQUIRE(events[0].tick == TickPosition{600});
     REQUIRE(events[1].tick == TickPosition{840});
+}
+
+TEST_CASE("Automated child pan and child gain are refused by separate codes") {
+    const auto refusal = [](NestedChildProcessing processing) {
+        auto store = PlaybackProgramStore{};
+        InlineExecutor executor;
+        PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+        ProgramCompileRequest request;
+        request.project = shared(nested_child_processing_project(processing));
+        request.sequence_id = {2};
+        request.tempo_map = map_120();
+        request.sample_rate = request.tempo_map->sample_rate();
+        request.document_revision = 1;
+        request.dirty.all = true;
+        request.max_expanded_note_events = 1'000'000;
+        REQUIRE(compiler.submit(std::move(request)));
+        REQUIRE(compiler.status().has_error);
+        return compiler.status().last_error;
+    };
+
+    // Pan is decided on entry to the child track, before any leaf is read: no
+    // leaf carries a stereo placement at any level, so no leaf kind could
+    // change the answer. The child track is the item because the lane is its.
+    const auto pan = refusal({.pan_automation = true});
+    REQUIRE(pan.code == CompileErrorCode::NestedAutomationPanUnsupported);
+    REQUIRE(pan.item == ItemId{11});
+
+    // The same authored gain curve splits by the leaf it reaches. A note leaf
+    // compiles to events no renderer scales by clip gain, so it would need a
+    // renderer change before an envelope meant anything; an empty leaf already
+    // consumes clip gain, and needs only that the scalar field become a curve.
+    const auto event_leaf = refusal({.gain_automation = true});
+    const auto gain_consuming = refusal({.gain_automation = true, .gain_consuming_leaf = true});
+    REQUIRE(event_leaf.code == CompileErrorCode::NestedAutomationGainEventLeafUnsupported);
+    REQUIRE(gain_consuming.code == CompileErrorCode::NestedAutomationGainMediaUnsupported);
+    REQUIRE(event_leaf.code != gain_consuming.code);
+    REQUIRE(pan.code != event_leaf.code);
+    REQUIRE(pan.code != gain_consuming.code);
+
+    // Pan outranks gain when a track carries both, and it is reported without
+    // descending: a document with both lanes still names one construct.
+    const auto both = refusal({.gain_automation = true, .pan_automation = true});
+    REQUIRE(both.code == CompileErrorCode::NestedAutomationPanUnsupported);
+}
+
+TEST_CASE("A child track with no automation lane lowers both leaf kinds") {
+    // The control for the refusals above. Each leaf kind compiles when no curve
+    // is authored over it, so the codes are caused by the lane and not by the
+    // leaf the fixture happens to carry.
+    auto notes = compile(shared(nested_child_processing_project({})));
+    const auto events = notes->find_track({3})->arrangement_note_events();
+    REQUIRE(events.size() == 2);
+
+    auto empty = compile(shared(nested_child_processing_project({.gain_consuming_leaf = true})));
+    REQUIRE(empty->find_track({3})->arrangement_note_events().empty());
 }
 
 // A leaf whose position is defined in samples cannot be placed on the musical
@@ -2011,4 +2408,1010 @@ TEST_CASE("Nested absolute leaf is refused by its own code") {
             CompileErrorCode::NestedAbsoluteChildUnsupported);
     REQUIRE(compiler.status().last_error.item == ItemId{12});
     REQUIRE_FALSE(store.has_value());
+}
+
+TEST_CASE("Host-mapped nested stretched media reads the artifact window live") {
+    // The live lane reads the artifact directly rather than through the offline
+    // program's sampler, so it has its own chance to start at frame zero. The
+    // envelope on the source is what makes that visible: the window this leaf
+    // reads is half a quarter note into a rising envelope, and the artifact's
+    // own first frames are effectively silent.
+    const auto assets = stretch_assets();
+    auto project = stretched_nesting(kTicksPerQuarter / 4, kTicksPerQuarter / 2);
+    CompiledFixture fixture(project, map_120(), assets);
+    auto program = fixture.store.read();
+    REQUIRE(program);
+    const auto& compiled = only_audio_clip(*program);
+    REQUIRE(compiled.source_start == 6'000);
+    const auto& artifact = compiled.offline_stretch_artifact->audio->channels[0];
+
+    constexpr std::uint32_t kBlock = 128;
+    auto host_mapped = [&](std::int64_t sample_start) {
+        auto state = snapshot(*program, kBlock, sample_start);
+        auto& range = state.ranges[0];
+        range.timeline_tick_start = program->tempo_map().samples_to_ticks({sample_start});
+        range.timeline_tick_end = program->tempo_map().samples_to_ticks(
+            {sample_start + static_cast<std::int64_t>(kBlock)});
+        range.host_beat_mapping = true;
+        range.has_precise_host_ticks = true;
+        range.host_tick_start = static_cast<double>(range.timeline_tick_start.value);
+        range.host_tick_end = static_cast<double>(range.timeline_tick_end.value);
+        return state;
+    };
+
+    ArrangementAudioTrackRenderer live_renderer({3});
+    PlaybackProgramBlock block(program.get());
+    RealtimeStretchProgramRuntime runtime;
+    REQUIRE(runtime.prepare(*program, 48'000.0, kBlock, 1, program->audio_limits()));
+    // The producer's output lags its input by the declared latency. Blocks are
+    // whole, so the first one carrying steady-state audio is the one after the
+    // block that straddles that boundary.
+    const auto latency_blocks = runtime.latency_samples() / kBlock;
+    const auto settled_block = latency_blocks + 4;
+
+    float rendered_peak = 0.0f;
+    for (std::uint64_t index = 0; index <= settled_block; ++index) {
+        Output out(1, kBlock);
+        out.view().clear();
+        const auto start =
+            compiled.timeline_start + static_cast<std::int64_t>(index * kBlock);
+        const auto status =
+            live_renderer.process(block, host_mapped(start), out.view(), {}, &runtime);
+        if (index != settled_block) {
+            // The producer fills behind the consumer for one latency, so the
+            // pre-roll legitimately reports a gap. Nothing else is legitimate.
+            REQUIRE((status == AudioRenderStatus::Rendered ||
+                     status == AudioRenderStatus::RealtimeStretchGap));
+            continue;
+        }
+        REQUIRE(status == AudioRenderStatus::Rendered);
+        for (const auto sample : out.storage[0])
+            rendered_peak = std::max(rendered_peak, std::abs(sample));
+    }
+
+    // The artifact frames this block's audio came from, and the frames it would
+    // have come from reading the artifact from its own start instead.
+    const auto elapsed = static_cast<std::size_t>((settled_block - latency_blocks) * kBlock);
+    auto peak_over = [&](std::size_t first) {
+        float peak = 0.0f;
+        for (std::size_t frame = 0; frame < kBlock; ++frame)
+            peak = std::max(peak, std::abs(artifact[first + frame]));
+        return peak;
+    };
+    const auto window_peak = peak_over(compiled.source_start + elapsed);
+    const auto origin_peak = peak_over(elapsed);
+
+    // Negative control first, because the comparison below is only meaningful
+    // if the two candidate read positions are distinguishable at all. This is
+    // the same measurement with the defect present: it is what the peak would
+    // read if the lane started at the artifact's own first frame. The reading
+    // collapses by more than an order of magnitude — measured about fifty
+    // times — which is what makes the band below able to reject it.
+    REQUIRE(origin_peak < window_peak / 10.0f);
+    REQUIRE(window_peak > 0.3f);
+    // The live render tracks the window it names. The band is 10%, against a
+    // measured agreement near 2% and a frame-zero read that the control above
+    // shows would miss by more than 99% — so the gate sits an order of
+    // magnitude clear of the defect it is aimed at and five times clear of the
+    // producer's own settling.
+    REQUIRE(rendered_peak > window_peak * 0.9f);
+    REQUIRE(rendered_peak < window_peak * 1.1f);
+}
+
+namespace {
+
+// Where the sealed artifact sits in absolute samples. It matches the window
+// every render below reads, so a freeze that fails to reach the output shows up
+// as silence rather than as a buffer nobody looked at.
+constexpr std::int64_t kFreezePlacementSamples = 24'000;
+
+// One knob per transformation the lowerer's transparency predicate answers for.
+// Each is authored alone, so a case differs from the permitting base by exactly
+// the transformation it names — which is what makes "remove it and the same
+// document compiles" evidence about that transformation rather than about the
+// fixture.
+struct FreezeNesting {
+    // Off only for the control that proves the child's arrangement is real:
+    // an unfrozen twin must produce the note events the freeze suppresses.
+    bool frozen = true;
+    std::int64_t placement_start = 0;
+    std::int64_t placement_duration = kTicksPerQuarter;
+    std::int64_t source_start = 0;
+    ClipPlaybackProperties placement{};
+    TimeConform placement_conform = TimeConform::None;
+    TrackMixer mixer{};
+    bool device_chain = false;
+    // Authors a gain lane. The gain refusal is deferred to the leaf, so this
+    // knob cannot name its own construct under a freeze -- see pan_automation.
+    bool automation_lane = false;
+    // Authors a pan lane. Pan needs no leaf to decide it, so it is refused on
+    // entry and does name its construct.
+    bool pan_automation = false;
+    bool modulator = false;
+    bool macro = false;
+    bool modulation_route = false;
+    bool tuning = false;
+    bool groove = false;
+    bool dynamics = false;
+    bool chord_scale = false;
+    // The artifact's own rate. The document requires it to equal the asset's,
+    // so the two move together and the only reachable mismatch is against the
+    // timeline — which is exactly the one that breaks bit identity.
+    timebase::RationalRate freeze_rate{48'000, 1};
+};
+
+// A child track that is frozen AND still holds the arrangement the freeze
+// replaced, nested under one placement. The arrangement is deliberately real:
+// if the walk ever descends into it instead of honouring the freeze, the note
+// clip is the material that would wrongly sound.
+Project nested_freeze_project(FreezeNesting nesting, std::size_t frame_count) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "frozen";
+    child_input.clips.push_back(
+        take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    if (nesting.frozen)
+        child_input.freeze = TrackFreeze{MediaRef{{50}, {0}, frame_count},
+                                         {kFreezePlacementSamples}, nesting.freeze_rate, hash};
+    child_input.mixer = nesting.mixer;
+    if (nesting.device_chain)
+        child_input.device_chain.push_back(DevicePlacement{{14}});
+    if (nesting.automation_lane) {
+        auto curve = take(AutomationCurve::create(
+            {AutomationPoint{{16}, {0}, 1.0f, AutomationInterpolation::Continuous, 0.0f},
+             AutomationPoint{{17}, {kTicksPerQuarter}, 0.5f, AutomationInterpolation::Continuous,
+                             0.0f}}));
+        child_input.automation_lanes.push_back(take(AutomationLane::create(
+            {15}, TrackMixerTarget{TrackMixerParameter::Gain}, std::move(curve))));
+    }
+    if (nesting.pan_automation) {
+        auto curve = take(AutomationCurve::create(
+            {AutomationPoint{{18}, {0}, 1.0f, AutomationInterpolation::Continuous, 0.0f},
+             AutomationPoint{{19}, {kTicksPerQuarter}, 0.5f, AutomationInterpolation::Continuous,
+                             0.0f}}));
+        child_input.automation_lanes.push_back(take(AutomationLane::create(
+            {20}, TrackMixerTarget{TrackMixerParameter::Pan}, std::move(curve))));
+    }
+    if (nesting.modulator || nesting.modulation_route)
+        child_input.modulators.push_back(Modulator{{30}, ModulatorKind::Lfo, "lfo"});
+    if (nesting.macro)
+        child_input.macros.push_back(MacroControl{{31}, "macro", 0.5f});
+    if (nesting.modulation_route)
+        child_input.modulation_routes.push_back(
+            ModulationRoute{{32},
+                            ModulationSourceRef{{30}, ModulationSourceKind::Modulator},
+                            TrackMixerTarget{TrackMixerParameter::Gain},
+                            0.5f,
+                            true});
+    if (nesting.tuning)
+        child_input.tuning = TuningReference{};
+
+    SequenceInput child_input_sequence;
+    child_input_sequence.id = {10};
+    child_input_sequence.name = "child";
+    child_input_sequence.musical_duration = TickDuration{kTicksPerQuarter};
+    child_input_sequence.tracks = {take(Track::create(std::move(child_input)))};
+    if (nesting.groove)
+        child_input_sequence.groove = one_step_groove(20, kGrooveUnitScale);
+    if (nesting.dynamics)
+        child_input_sequence.dynamics_lane = take(DynamicsLane::create({DynamicsEvent{{0}, 0.5f}}));
+    if (nesting.chord_scale)
+        child_input_sequence.chord_scale_lane = take(ChordScaleLane::create(
+            {ChordScaleEvent{{0}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9}}));
+    auto child = take(Sequence::create(std::move(child_input_sequence)));
+
+    auto placement = take(Clip::create({4}, {nesting.placement_start},
+                                       {nesting.placement_duration},
+                                       SequenceRef{{10}, {nesting.source_start}},
+                                       nesting.placement, nesting.placement_conform));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested freeze";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {{50, "ramp", frame_count, nesting.freeze_rate, hash}};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+// The same frozen track sitting directly on the root, at the same root ticks
+// and the same absolute samples. This is what a transparent nesting has to
+// sound exactly like — and it reaches the renderer by the entirely different
+// begin_track/step_track_freeze path, which is why bit identity is a claim
+// worth making rather than a tautology.
+Project unnested_freeze_project(std::size_t frame_count) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    TrackInput root_track;
+    root_track.id = {3};
+    root_track.name = "frozen";
+    root_track.clips.push_back(
+        take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    root_track.freeze = TrackFreeze{
+        MediaRef{{50}, {0}, frame_count}, {kFreezePlacementSamples}, {48'000, 1}, hash};
+    auto root = take(Sequence::create({2}, "root", std::nullopt,
+                                      {take(Track::create(std::move(root_track)))}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "unnested freeze";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {{50, "ramp", frame_count, {48'000, 1}, hash}};
+    input.sequences = {root};
+    return take(Project::create(std::move(input)));
+}
+
+std::vector<float> render_freeze(const Project& project,
+                                 const std::shared_ptr<const DecodedAudioAssetPool>& assets) {
+    CompiledFixture compiled(shared(project), map_120(), assets);
+    auto program = compiled.store.read();
+    REQUIRE(program);
+    Output output(1, kPlacementFrames);
+    REQUIRE(ArrangementAudioRenderer::process(
+                *program, snapshot(*program, kPlacementFrames, kFreezePlacementSamples),
+                output.view()) == AudioRenderStatus::Rendered);
+    return output.storage[0];
+}
+
+} // namespace
+
+TEST_CASE("A transparently nested freeze renders exactly like the same freeze unnested") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+
+    const auto nested = render_freeze(nested_freeze_project({}, ramp.size()), assets);
+    const auto unnested = render_freeze(unnested_freeze_project(ramp.size()), assets);
+
+    // Bit identity, not tolerance: a sealed artifact that survives nesting has
+    // no room for a "close enough", and there is no detection floor to state
+    // because the comparison is of exact float bit patterns.
+    REQUIRE(nested == unnested);
+    // Without this the equality above would pass on two silent buffers, which
+    // is exactly what a freeze that never reached the output would produce.
+    REQUIRE(nested.front() != 0.0f);
+    REQUIRE(nested.back() != 0.0f);
+}
+
+TEST_CASE("A transparently nested freeze substitutes the arrangement it replaced") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    CompiledFixture compiled(shared(nested_freeze_project({}, ramp.size())), map_120(), assets);
+    auto program = compiled.store.read();
+    REQUIRE(program);
+
+    // One audio clip, from the freeze. The child's note clip is the material
+    // the author replaced, so a walk that descended into the arrangement would
+    // show up here as note events rather than as none.
+    const auto* audio = program->find_track({3})->audio_program();
+    REQUIRE(audio != nullptr);
+    REQUIRE(audio->clips().size() == 1);
+    REQUIRE(program->find_track({3})->arrangement_note_events().empty());
+
+    // The control. Emptiness above means the freeze substituted the
+    // arrangement only if the arrangement would otherwise have sounded, so the
+    // same document without the freeze has to produce the note events this one
+    // does not. Without this, a child whose clip compiled to nothing at all
+    // would read as a successful substitution.
+    CompiledFixture unfrozen(shared(nested_freeze_project({.frozen = false}, ramp.size())),
+                             map_120(), assets);
+    auto unfrozen_program = unfrozen.store.read();
+    REQUIRE(unfrozen_program);
+    REQUIRE_FALSE(unfrozen_program->find_track({3})->arrangement_note_events().empty());
+    REQUIRE(unfrozen_program->find_track({3})->audio_program() == nullptr);
+}
+
+TEST_CASE("Each transformation a nesting can impose refuses the freeze it would re-time") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+
+    // The base permits. Every case below is this document plus exactly one
+    // transformation, so a refusal is attributable to that transformation and
+    // not to the fixture being unable to compile at all.
+    {
+        CompiledFixture permitted(shared(nested_freeze_project({}, ramp.size())), map_120(),
+                                  assets);
+        REQUIRE(permitted.store.read());
+    }
+
+    const auto refuses = [&](const char* named, FreezeNesting nesting) {
+        INFO(named);
+        const auto error = compile_error_with_assets(nested_freeze_project(nesting, ramp.size()),
+                                                     assets);
+        REQUIRE(error.code == CompileErrorCode::NestedFrozenTrackUnsupported);
+        REQUIRE(error.item == ItemId{11});
+    };
+
+    // Placement geometry. Each moves or cuts child ticks; the artifact carries
+    // no tick position and cannot follow either.
+    refuses(".placement_start = 480", {.placement_start = 480});
+    refuses(".placement_start = 240, .source_start = 240", {.placement_start = 240, .source_start = 240});
+    refuses(".placement_duration = kTicksPerQuarter / 2", {.placement_duration = kTicksPerQuarter / 2});
+    refuses(".placement = {.gain_linear = 0.5f}", {.placement = {.gain_linear = 0.5f}});
+    refuses(".placement = fade_properties(240, 0)", {.placement = fade_properties(240, 0)});
+
+    // Child-track state. The fader and pan change level; the three modulation
+    // entries are read by neither this walk nor begin_track, so without the
+    // predicate a modulated fader under a sealed artifact would be permitted
+    // with nothing reporting the loss.
+    refuses(".mixer = TrackMixer{0.5f, 0.0f}", {.mixer = TrackMixer{0.5f, 0.0f}});
+    refuses(".mixer = TrackMixer{1.0f, 0.5f}", {.mixer = TrackMixer{1.0f, 0.5f}});
+    refuses(".modulator = true", {.modulator = true});
+    refuses(".macro = true", {.macro = true});
+    refuses(".tuning = true", {.tuning = true});
+    // A route needs a source object to be a valid document, so this case
+    // carries the modulator above as well and is evidence about the pair
+    // rather than about the route alone. It is asserted anyway: a document
+    // that routes modulation into the child's fader must not compile as a
+    // transparent nesting, whichever of the two is the entry that catches it.
+    refuses(".modulator = true, .modulation_route = true", {.modulator = true, .modulation_route = true});
+
+    // Owning-sequence lanes.
+    refuses(".groove = true", {.groove = true});
+    refuses(".dynamics = true", {.dynamics = true});
+    refuses(".chord_scale = true", {.chord_scale = true});
+
+    // The reason bit identity holds at all: the unnested freeze path takes the
+    // artifact's projected timeline span as its renderable length, the lowered
+    // leaf's generic path takes the source length scaled and rounded up, and
+    // those agree only when no rate conversion happens.
+    // It needs its own decoded
+    // pool because the document ties the artifact's rate to its asset's.
+    const timebase::RationalRate off_rate{44'100, 1};
+    const auto off_rate_assets = pool({{{50}, audio_data({ramp}, 44'100)}});
+    const auto rate_error = compile_error_with_assets(
+        nested_freeze_project({.freeze_rate = off_rate}, ramp.size()), off_rate_assets);
+    REQUIRE(rate_error.code == CompileErrorCode::NestedFrozenTrackUnsupported);
+    REQUIRE(rate_error.item == ItemId{11});
+}
+
+TEST_CASE("A placement can never carry a conform so the predicate entry is a backstop") {
+    // The predicate answers for PlacementConform because nothing else in the
+    // walk reads a placement's conform. It is unreachable through a valid
+    // document, and this is the proof rather than an assumption: the model
+    // rejects the clip outright, so no refusal test can exercise the entry and
+    // none should pretend to.
+    REQUIRE_FALSE(Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}, {},
+                               TimeConform::Stretch));
+    // The control. The same clip without the conform is a document the model
+    // accepts, so the rejection above is about the conform and not the clip.
+    REQUIRE(Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}));
+}
+
+TEST_CASE("A nested freeze under a device chain or automation lane keeps naming that construct") {
+    // The predicate answers for each of these, and where a construct has a code
+    // that is decidable on entry that code is raised first. Asserting the codes
+    // here is what keeps a later reordering from silently degrading a specific
+    // diagnostic into the generic freeze refusal -- and, for the one refusal
+    // that is decided at the leaf instead, from claiming a specificity the walk
+    // cannot actually deliver under a freeze.
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+    REQUIRE(compile_error_with_assets(nested_freeze_project({.device_chain = true}, ramp.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedDeviceChainUnsupported);
+    // Pan is decided on entry to the child track, so it still names its own
+    // construct ahead of the freeze.
+    REQUIRE(compile_error_with_assets(nested_freeze_project({.pan_automation = true}, ramp.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedAutomationPanUnsupported);
+    // An automated *gain* is the one automation that cannot name itself here,
+    // and that is a property of the refusal rather than a lost diagnostic: the
+    // gain codes are chosen by the leaf's kind, so naming one means reaching a
+    // leaf, and a freeze refuses before any leaf is reached. The freeze code is
+    // therefore the honest answer, and pinning it keeps a later change from
+    // quietly reordering the two.
+    REQUIRE(compile_error_with_assets(nested_freeze_project({.automation_lane = true}, ramp.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedFrozenTrackUnsupported);
+}
+
+namespace {
+
+// The same frozen track two levels down, so the walk passes through an
+// intermediate track on the way to it. `intermediate_modulator` is authored on
+// that middle track and on nothing else.
+Project doubly_nested_freeze_project(bool intermediate_modulator, std::size_t frame_count) {
+    const auto hash = *ContentHash::from_hex(std::string(64, 'a'));
+    TrackInput leaf_input;
+    leaf_input.id = {11};
+    leaf_input.name = "frozen";
+    leaf_input.clips.push_back(take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    leaf_input.freeze = TrackFreeze{
+        MediaRef{{50}, {0}, frame_count}, {kFreezePlacementSamples}, {48'000, 1}, hash};
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {take(Track::create(std::move(leaf_input)))}));
+
+    TrackInput middle_input;
+    middle_input.id = {21};
+    middle_input.name = "middle";
+    middle_input.clips.push_back(
+        take(Clip::create({22}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}})));
+    if (intermediate_modulator)
+        middle_input.modulators.push_back(Modulator{{30}, ModulatorKind::Lfo, "lfo"});
+    auto middle = take(Sequence::create({20}, "middle", TickDuration{kTicksPerQuarter},
+                                        {take(Track::create(std::move(middle_input)))}));
+
+    auto placement =
+        take(Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{20}, {0}}));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "doubly nested freeze";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = {{50, "ramp", frame_count, {48'000, 1}, hash}};
+    input.sequences = {root, middle, child};
+    return take(Project::create(std::move(input)));
+}
+
+} // namespace
+
+TEST_CASE("A transformation on an intermediate track refuses the freeze beneath it") {
+    const auto ramp = unit_ramp();
+    const auto assets = pool({{{50}, audio_data({ramp})}});
+
+    // Two levels of transparent nesting still render as the unnested freeze,
+    // so depth by itself is not a transformation.
+    REQUIRE(render_freeze(doubly_nested_freeze_project(false, ramp.size()), assets) ==
+            render_freeze(unnested_freeze_project(ramp.size()), assets));
+
+    // The modulator sits on the middle track, which the walk passes through
+    // rather than lands on. A predicate that only asked about the track holding
+    // the freeze would permit this — and a modulated fader two levels up
+    // changes the artifact's level exactly as much as one directly above it.
+    const auto error = compile_error_with_assets(
+        doubly_nested_freeze_project(true, ramp.size()), assets);
+    REQUIRE(error.code == CompileErrorCode::NestedFrozenTrackUnsupported);
+    REQUIRE(error.item == ItemId{11});
+}
+
+namespace {
+
+// Where the comp's sealed windows sit in absolute samples. It matches the
+// window every render below reads, so a segment that fails to reach the output
+// shows up as silence rather than as a buffer nobody looked at.
+constexpr std::int64_t kTakeCompPlacementSamples = 24'000;
+// A third of that window, so the three-segment comp tiles it exactly and every
+// rendered frame belongs to a segment somebody named.
+constexpr std::size_t kTakeCompSegmentFrames = 8'000;
+
+// A source no ramp can be mistaken for: every frame is negative. A render that
+// resolves a segment to the wrong take says so by its sign, rather than by a
+// magnitude somebody has to compare against a reference nobody wrote down.
+std::vector<float> falling_ramp() {
+    std::vector<float> ramp(24'000);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame)
+        ramp[frame] = -static_cast<float>(frame + 1) / static_cast<float>(ramp.size());
+    return ramp;
+}
+
+// One knob per transformation the lowerer's transparency predicate answers for,
+// authored exactly as the freeze cases above are. Each case below is the
+// permitting base plus one knob, so a refusal is evidence about that
+// transformation rather than about a fixture that cannot compile at all.
+struct TakeCompNesting {
+    // Off only for the control that proves the child's arrangement is real: an
+    // uncomped twin must produce the note events the comp suppresses.
+    bool comped = true;
+    std::int64_t placement_start = 0;
+    std::int64_t placement_duration = kTicksPerQuarter;
+    std::int64_t source_start = 0;
+    ClipPlaybackProperties placement{};
+    TimeConform placement_conform = TimeConform::None;
+    TrackMixer mixer{};
+    bool device_chain = false;
+    // Authors a gain lane. The gain codes are chosen by the leaf's kind, so
+    // naming one means reaching a leaf, and a sealed comp refuses before any
+    // leaf is reached -- see pan_automation for the one that does name itself.
+    bool automation_lane = false;
+    // Authors a pan lane. Pan needs no leaf to decide it, so it is refused on
+    // entry and does name its construct.
+    bool pan_automation = false;
+    bool modulator = false;
+    bool macro = false;
+    bool modulation_route = false;
+    bool tuning = false;
+    bool groove = false;
+    bool dynamics = false;
+    bool chord_scale = false;
+    // The takes' own rate. canonical_comp refuses a comp whose segment rate is
+    // not its take's, so segment and take move together and the only reachable
+    // mismatch is against the timeline — which is the one that breaks bit
+    // identity.
+    timebase::RationalRate take_rate{48'000, 1};
+};
+
+// The comp both documents carry: three adjacent windows tiling the render,
+// drawn from two takes, with take 41 appearing twice at two different offsets
+// into itself. A single-segment comp would be indistinguishable from a freeze;
+// this one cannot lower correctly unless every segment resolves its own take
+// and its own offset into that take's media.
+std::vector<TakeCompSegment> take_comp_segments(timebase::RationalRate rate) {
+    const auto window = [&](std::size_t index) {
+        return AbsoluteTimeRange{{kTakeCompPlacementSamples +
+                                  static_cast<std::int64_t>(index * kTakeCompSegmentFrames)},
+                                 kTakeCompSegmentFrames, rate};
+    };
+    return {TakeCompSegment{{41}, window(0)}, TakeCompSegment{{42}, window(1)},
+            TakeCompSegment{{41}, window(2)}};
+}
+
+std::vector<Take> take_comp_takes(timebase::RationalRate rate, std::uint64_t frame_count) {
+    return {take(Take::create({41}, MediaRef{{50}, {0}, frame_count},
+                              {kTakeCompPlacementSamples}, rate)),
+            take(Take::create({42}, MediaRef{{51}, {0}, frame_count},
+                              {kTakeCompPlacementSamples}, rate))};
+}
+
+TakeLane take_comp_lane(timebase::RationalRate rate, std::uint64_t frame_count) {
+    return take(TakeLane::create({40}, "comp", take_comp_takes(rate, frame_count),
+                                 take_comp_segments(rate)));
+}
+
+std::vector<MediaAsset> take_comp_assets(timebase::RationalRate rate, std::uint64_t frame_count) {
+    const auto rising_hash = *ContentHash::from_hex(std::string(64, 'a'));
+    const auto falling_hash = *ContentHash::from_hex(std::string(64, 'c'));
+    return {MediaAsset{.id = {50},
+                       .name = "rising",
+                       .frame_count = frame_count,
+                       .sample_rate = rate,
+                       .content_hash = rising_hash},
+            MediaAsset{.id = {51},
+                       .name = "falling",
+                       .frame_count = frame_count,
+                       .sample_rate = rate,
+                       .content_hash = falling_hash}};
+}
+
+// A child track carrying a selected comp AND still holding the arrangement the
+// comp replaced, nested under one placement. The arrangement is deliberately
+// real: if the walk ever descends into it instead of honouring the selection,
+// the note clip is the material that would wrongly sound.
+Project nested_take_comp_project(TakeCompNesting nesting, std::uint64_t frame_count) {
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "comped";
+    child_input.clips.push_back(take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    if (nesting.comped) {
+        child_input.take_lanes.push_back(take_comp_lane(nesting.take_rate, frame_count));
+        child_input.active_take_lane_id = {40};
+    }
+    child_input.mixer = nesting.mixer;
+    if (nesting.device_chain)
+        child_input.device_chain.push_back(DevicePlacement{{14}});
+    if (nesting.automation_lane) {
+        auto curve = take(AutomationCurve::create(
+            {AutomationPoint{{16}, {0}, 1.0f, AutomationInterpolation::Continuous, 0.0f},
+             AutomationPoint{{17}, {kTicksPerQuarter}, 0.5f, AutomationInterpolation::Continuous,
+                             0.0f}}));
+        child_input.automation_lanes.push_back(take(AutomationLane::create(
+            {15}, TrackMixerTarget{TrackMixerParameter::Gain}, std::move(curve))));
+    }
+    if (nesting.pan_automation) {
+        auto curve = take(AutomationCurve::create(
+            {AutomationPoint{{18}, {0}, 1.0f, AutomationInterpolation::Continuous, 0.0f},
+             AutomationPoint{{19}, {kTicksPerQuarter}, 0.5f, AutomationInterpolation::Continuous,
+                             0.0f}}));
+        child_input.automation_lanes.push_back(take(AutomationLane::create(
+            {20}, TrackMixerTarget{TrackMixerParameter::Pan}, std::move(curve))));
+    }
+    if (nesting.modulator || nesting.modulation_route)
+        child_input.modulators.push_back(Modulator{{30}, ModulatorKind::Lfo, "lfo"});
+    if (nesting.macro)
+        child_input.macros.push_back(MacroControl{{31}, "macro", 0.5f});
+    if (nesting.modulation_route)
+        child_input.modulation_routes.push_back(
+            ModulationRoute{{32},
+                            ModulationSourceRef{{30}, ModulationSourceKind::Modulator},
+                            TrackMixerTarget{TrackMixerParameter::Gain},
+                            0.5f,
+                            true});
+    if (nesting.tuning)
+        child_input.tuning = TuningReference{};
+
+    SequenceInput child_sequence;
+    child_sequence.id = {10};
+    child_sequence.name = "child";
+    child_sequence.musical_duration = TickDuration{kTicksPerQuarter};
+    child_sequence.tracks = {take(Track::create(std::move(child_input)))};
+    if (nesting.groove)
+        child_sequence.groove = one_step_groove(20, kGrooveUnitScale);
+    if (nesting.dynamics)
+        child_sequence.dynamics_lane = take(DynamicsLane::create({DynamicsEvent{{0}, 0.5f}}));
+    if (nesting.chord_scale)
+        child_sequence.chord_scale_lane = take(ChordScaleLane::create(
+            {ChordScaleEvent{{0}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9}}));
+    auto child = take(Sequence::create(std::move(child_sequence)));
+
+    auto placement = take(Clip::create({4}, {nesting.placement_start},
+                                       {nesting.placement_duration},
+                                       SequenceRef{{10}, {nesting.source_start}},
+                                       nesting.placement, nesting.placement_conform));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested take comp";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = take_comp_assets(nesting.take_rate, frame_count);
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+// The same comped track sitting directly on the root, at the same root ticks
+// and the same absolute samples. This is what a transparent nesting has to
+// sound exactly like — and it reaches the renderer by the entirely different
+// begin_track/step_take_comp path, one renderer program per segment, which is
+// why bit identity is a claim worth making rather than a tautology.
+Project unnested_take_comp_project(std::uint64_t frame_count) {
+    const timebase::RationalRate rate{48'000, 1};
+    TrackInput root_track;
+    root_track.id = {3};
+    root_track.name = "comped";
+    root_track.clips.push_back(take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    root_track.take_lanes.push_back(take_comp_lane(rate, frame_count));
+    root_track.active_take_lane_id = {40};
+    auto root = take(Sequence::create({2}, "root", std::nullopt,
+                                      {take(Track::create(std::move(root_track)))}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "unnested take comp";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = take_comp_assets(rate, frame_count);
+    input.sequences = {root};
+    return take(Project::create(std::move(input)));
+}
+
+std::vector<float> render_take_comp(const Project& project,
+                                    const std::shared_ptr<const DecodedAudioAssetPool>& assets) {
+    CompiledFixture compiled(shared(project), map_120(), assets);
+    auto program = compiled.store.read();
+    REQUIRE(program);
+    Output output(1, kPlacementFrames);
+    REQUIRE(ArrangementAudioRenderer::process(
+                *program, snapshot(*program, kPlacementFrames, kTakeCompPlacementSamples),
+                output.view()) == AudioRenderStatus::Rendered);
+    return output.storage[0];
+}
+
+std::shared_ptr<const DecodedAudioAssetPool>
+take_comp_pool(const std::vector<float>& rising, const std::vector<float>& falling,
+               std::uint32_t rate = 48'000) {
+    return pool({{{50}, audio_data({rising}, rate)}, {{51}, audio_data({falling}, rate)}});
+}
+
+} // namespace
+
+TEST_CASE("A transparently nested active take renders exactly like the same comp unnested") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+
+    const auto nested = render_take_comp(nested_take_comp_project({}, rising.size()), assets);
+    const auto unnested = render_take_comp(unnested_take_comp_project(rising.size()), assets);
+
+    // Bit identity, not tolerance: a sealed artifact that survives nesting has
+    // no room for a "close enough", and there is no detection floor to state
+    // because the comparison is of exact float bit patterns.
+    REQUIRE(nested == unnested);
+
+    // Without the next two the equality would pass on two silent buffers,
+    // which is exactly what a comp that never reached the output produces.
+    REQUIRE(nested.front() != 0.0f);
+    REQUIRE(nested.back() != 0.0f);
+    // And without these two it would pass on two buffers that are neither
+    // silent nor plural: a lowering that resolved every segment to the first
+    // take renders a perfectly respectable non-silent ramp, and only the
+    // second take can put a negative sample in this buffer.
+    REQUIRE(*std::min_element(nested.begin(), nested.end()) < 0.0f);
+    REQUIRE(*std::max_element(nested.begin(), nested.end()) > 0.0f);
+
+    // Each segment landed in its own window, from its own take, at its own
+    // offset into that take. Sign pins the take — 41 rises through positive
+    // values, 42 falls through negative ones. Magnitude pins the offset:
+    // segment 2 reads take 41 two thirds of the way in, where segment 0 reads
+    // the same take from its very start, so an offset this walk computed as
+    // zero for both would read near zero twice.
+    REQUIRE(nested[0] > 0.0f);
+    REQUIRE(nested[0] < 0.05f);
+    REQUIRE(nested[kTakeCompSegmentFrames] < -0.3f);
+    REQUIRE(nested[2 * kTakeCompSegmentFrames] > 0.5f);
+}
+
+TEST_CASE("A transparently nested active take substitutes the arrangement it replaced") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+    CompiledFixture compiled(shared(nested_take_comp_project({}, rising.size())), map_120(),
+                             assets);
+    auto program = compiled.store.read();
+    REQUIRE(program);
+
+    // One audio clip per comp segment, and no note events. The child's note
+    // clip is the material the author replaced, so a walk that descended into
+    // the arrangement would show up here as note events rather than as none —
+    // and a payload that emitted the comp as a single leaf, the way the freeze
+    // does, would show up as a count of one.
+    const auto* audio = program->find_track({3})->audio_program();
+    REQUIRE(audio != nullptr);
+    REQUIRE(audio->clips().size() == 3);
+    REQUIRE(program->find_track({3})->arrangement_note_events().empty());
+
+    // The control. Emptiness above means the comp substituted the arrangement
+    // only if the arrangement would otherwise have sounded, so the same
+    // document without the comp has to produce the note events this one does
+    // not. Without it, a child whose clip compiled to nothing at all would read
+    // as a successful substitution.
+    CompiledFixture uncomped(shared(nested_take_comp_project({.comped = false}, rising.size())),
+                             map_120(), assets);
+    auto uncomped_program = uncomped.store.read();
+    REQUIRE(uncomped_program);
+    REQUIRE_FALSE(uncomped_program->find_track({3})->arrangement_note_events().empty());
+    REQUIRE(uncomped_program->find_track({3})->audio_program() == nullptr);
+}
+
+TEST_CASE("Each transformation a nesting can impose refuses the active take it would re-time") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+
+    // The base permits. Every case below is this document plus exactly one
+    // transformation, so a refusal is attributable to that transformation and
+    // not to the fixture being unable to compile at all.
+    {
+        CompiledFixture permitted(shared(nested_take_comp_project({}, rising.size())), map_120(),
+                                  assets);
+        REQUIRE(permitted.store.read());
+    }
+
+    const auto refuses = [&](const char* named, TakeCompNesting nesting) {
+        INFO(named);
+        const auto error = compile_error_with_assets(nested_take_comp_project(nesting,
+                                                                              rising.size()),
+                                                     assets);
+        REQUIRE(error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+        REQUIRE(error.item == ItemId{11});
+    };
+
+    // Placement geometry. Each moves or cuts child ticks; the comp's windows
+    // carry no tick position and cannot follow either.
+    refuses(".placement_start = 480", {.placement_start = 480});
+    refuses(".placement_start = 240, .source_start = 240", {.placement_start = 240, .source_start = 240});
+    refuses(".placement_duration = kTicksPerQuarter / 2", {.placement_duration = kTicksPerQuarter / 2});
+    refuses(".placement = {.gain_linear = 0.5f}", {.placement = {.gain_linear = 0.5f}});
+    refuses(".placement = fade_properties(240, 0)", {.placement = fade_properties(240, 0)});
+
+    // Child-track state. The fader and pan change level; the three modulation
+    // entries are read by neither this walk nor begin_track, so without the
+    // predicate a modulated fader over a sealed comp would be permitted with
+    // nothing reporting the loss.
+    refuses(".mixer = TrackMixer{0.5f, 0.0f}", {.mixer = TrackMixer{0.5f, 0.0f}});
+    refuses(".mixer = TrackMixer{1.0f, 0.5f}", {.mixer = TrackMixer{1.0f, 0.5f}});
+    refuses(".modulator = true", {.modulator = true});
+    refuses(".macro = true", {.macro = true});
+    refuses(".tuning = true", {.tuning = true});
+    // A route needs a source object to be a valid document, so this case
+    // carries the modulator above as well and is evidence about the pair rather
+    // than about the route alone. It is asserted anyway: a document that routes
+    // modulation into the child's fader must not compile as a transparent
+    // nesting, whichever of the two entries catches it.
+    refuses(".modulator = true, .modulation_route = true", {.modulator = true, .modulation_route = true});
+
+    // Owning-sequence lanes.
+    refuses(".groove = true", {.groove = true});
+    refuses(".dynamics = true", {.dynamics = true});
+    refuses(".chord_scale = true", {.chord_scale = true});
+
+    // The reason bit identity holds at all: compile_take_comp_segment_program
+    // takes each window's projected timeline span as its renderable length, the
+    // lowered leaf's generic path takes the source length scaled and rounded
+    // up, and those agree only when no rate conversion happens. It needs its
+    // own decoded pool because the document ties every take's rate to its
+    // asset's.
+    const timebase::RationalRate off_rate{44'100, 1};
+    const auto off_rate_assets = take_comp_pool(rising, falling, 44'100);
+    const auto rate_error = compile_error_with_assets(
+        nested_take_comp_project({.take_rate = off_rate}, rising.size()), off_rate_assets);
+    REQUIRE(rate_error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+    REQUIRE(rate_error.item == ItemId{11});
+}
+
+TEST_CASE("A nested active take under a device chain or automation lane keeps naming that construct") {
+    // The predicate answers for each of these, and where a construct has a code
+    // that is decidable on entry that code is raised first. Asserting the codes
+    // here is what keeps a later reordering from silently degrading a specific
+    // diagnostic into the generic active-take refusal -- and, for the one
+    // refusal that is decided at the leaf instead, from claiming a specificity
+    // the walk cannot actually deliver under a comp.
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+    REQUIRE(compile_error_with_assets(nested_take_comp_project({.device_chain = true},
+                                                               rising.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedDeviceChainUnsupported);
+    // Pan is decided on entry to the child track, so it still names its own
+    // construct ahead of the comp.
+    REQUIRE(compile_error_with_assets(nested_take_comp_project({.pan_automation = true},
+                                                               rising.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedAutomationPanUnsupported);
+    // An automated *gain* is the one automation that cannot name itself here.
+    // The two gain codes are chosen by the leaf's kind, so naming one means
+    // reaching a leaf, and a sealed comp refuses before any leaf is reached.
+    // The active-take code is therefore the honest answer, and pinning it keeps
+    // a later change from quietly reordering the two.
+    REQUIRE(compile_error_with_assets(nested_take_comp_project({.automation_lane = true},
+                                                               rising.size()),
+                                      assets)
+                .code == CompileErrorCode::NestedActiveTakeUnsupported);
+}
+
+namespace {
+
+// The same comped track two levels down, so the walk passes through an
+// intermediate track on the way to it. `intermediate_macro` is authored on that
+// middle track and on nothing else.
+Project doubly_nested_take_comp_project(bool intermediate_macro, std::uint64_t frame_count) {
+    const timebase::RationalRate rate{48'000, 1};
+    TrackInput leaf_input;
+    leaf_input.id = {11};
+    leaf_input.name = "comped";
+    leaf_input.clips.push_back(take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    leaf_input.take_lanes.push_back(take_comp_lane(rate, frame_count));
+    leaf_input.active_take_lane_id = {40};
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {take(Track::create(std::move(leaf_input)))}));
+
+    TrackInput middle_input;
+    middle_input.id = {21};
+    middle_input.name = "middle";
+    middle_input.clips.push_back(
+        take(Clip::create({22}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}})));
+    if (intermediate_macro)
+        middle_input.macros.push_back(MacroControl{{31}, "macro", 0.5f});
+    auto middle = take(Sequence::create({20}, "middle", TickDuration{kTicksPerQuarter},
+                                        {take(Track::create(std::move(middle_input)))}));
+
+    auto placement = take(Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{20}, {0}}));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {placement})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "doubly nested take comp";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = take_comp_assets(rate, frame_count);
+    input.sequences = {root, middle, child};
+    return take(Project::create(std::move(input)));
+}
+
+} // namespace
+
+TEST_CASE("A transparently nested active take survives a second level of nesting") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+
+    // Two levels of transparent nesting still render as the unnested comp, so
+    // depth by itself is not a transformation. The same non-silence and
+    // two-take controls as at depth 1, because an equality between two silent
+    // or two single-take buffers would be just as vacuous here.
+    const auto nested = render_take_comp(doubly_nested_take_comp_project(false, rising.size()),
+                                         assets);
+    REQUIRE(nested == render_take_comp(unnested_take_comp_project(rising.size()), assets));
+    REQUIRE(nested.front() != 0.0f);
+    REQUIRE(nested.back() != 0.0f);
+    REQUIRE(*std::min_element(nested.begin(), nested.end()) < 0.0f);
+    REQUIRE(*std::max_element(nested.begin(), nested.end()) > 0.0f);
+
+    // The macro sits on the middle track, which the walk passes through rather
+    // than lands on. A predicate that only asked about the track holding the
+    // comp would permit this — and a macro two levels up reaches the artifact
+    // exactly as much as one directly above it.
+    const auto error = compile_error_with_assets(
+        doubly_nested_take_comp_project(true, rising.size()), assets);
+    REQUIRE(error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+    REQUIRE(error.item == ItemId{11});
+}
+
+namespace {
+
+// The same comped child placed twice. `second_track` decides whether the second
+// placement sits on its own root track or beside the first, and `second_start`
+// where it begins. The two knobs are what separate the three reachable shapes
+// of "one comped child, two placements" from each other.
+Project twice_placed_take_comp_project(bool second_track, std::int64_t second_start,
+                                       std::uint64_t frame_count) {
+    const timebase::RationalRate rate{48'000, 1};
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "comped";
+    child_input.clips.push_back(take(Clip::create({12}, {0}, {kTicksPerQuarter}, note_content(13))));
+    child_input.take_lanes.push_back(take_comp_lane(rate, frame_count));
+    child_input.active_take_lane_id = {40};
+    auto child = take(Sequence::create({10}, "child", TickDuration{kTicksPerQuarter},
+                                       {take(Track::create(std::move(child_input)))}));
+
+    auto first = take(Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}));
+    auto second =
+        take(Clip::create({6}, {second_start}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}));
+    std::vector<Track> root_tracks;
+    if (second_track) {
+        root_tracks.push_back(track(3, {first}));
+        root_tracks.push_back(track(5, {second}));
+    } else {
+        root_tracks.push_back(track(3, {first, second}));
+    }
+    auto root = take(Sequence::create({2}, "root", std::nullopt, std::move(root_tracks)));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "twice placed take comp";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.assets = take_comp_assets(rate, frame_count);
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+} // namespace
+
+TEST_CASE("One comped child placed twice never reaches the collision its ordinals would cause") {
+    const auto rising = unit_ramp();
+    const auto falling = falling_ramp();
+    const auto assets = take_comp_pool(rising, falling);
+
+    // link_audio_track_program identifies a TakeCompSegment program by a bare
+    // ordinal — segment index plus one — so two copies of one comp on one track
+    // would collide and be rejected as a duplicate identity. That tripwire
+    // belongs to the unnested path and is untouched. What the three cases below
+    // establish is that this lane cannot deliver it a colliding pair, by
+    // reaching none of the shapes that would.
+
+    // Two placements on one track cannot BOTH be transparent. Transparency
+    // pins a placement to its child's own origin, so a second transparent
+    // placement would have to start where the first does — and the model
+    // rejects the overlap rather than producing the pair.
+    auto overlapping = Clip::create({6}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}});
+    REQUIRE(overlapping);
+    auto first = take(Clip::create({4}, {0}, {kTicksPerQuarter}, SequenceRef{{10}, {0}}));
+    REQUIRE_FALSE(Track::create({3}, "root", {first, std::move(overlapping).value()}));
+    // The control: the same two clips are a track the model accepts as soon as
+    // they do not overlap, so the rejection above is about the overlap and not
+    // about the clips or the track.
+    REQUIRE(Track::create(
+        {3}, "root",
+        {first, take(Clip::create({6}, {kTicksPerQuarter}, {kTicksPerQuarter},
+                                  SequenceRef{{10}, {0}}))}));
+
+    // So a second placement on the same track has to be displaced, and a
+    // displaced placement is a transformation the predicate already refuses —
+    // one level before any ordinal is ever assigned.
+    const auto error = compile_error_with_assets(
+        twice_placed_take_comp_project(false, kTicksPerQuarter, rising.size()), assets);
+    REQUIRE(error.code == CompileErrorCode::NestedActiveTakeUnsupported);
+    REQUIRE(error.item == ItemId{11});
+
+    // Two transparent placements on two different tracks do compile, and must:
+    // a placement is how a document asks for a copy, and the flattener answers
+    // the same way here as it does for ordinary child content. No ordinal is
+    // involved — a lowered comp becomes absolute leaves carrying generated
+    // document identities, so the two tracks' leaves are distinct by
+    // construction and each track sounds its own copy of the comp.
+    CompiledFixture twice(shared(twice_placed_take_comp_project(true, 0, rising.size())),
+                          map_120(), assets);
+    auto program = twice.store.read();
+    REQUIRE(program);
+    const auto* left = program->find_track({3})->audio_program();
+    const auto* right = program->find_track({5})->audio_program();
+    REQUIRE(left != nullptr);
+    REQUIRE(right != nullptr);
+    REQUIRE(left->clips().size() == 3);
+    REQUIRE(right->clips().size() == 3);
+    // Distinct identities, which is the whole reason the ordinal collision is
+    // out of reach: had the walk reused one identity per segment the way the
+    // unnested path reuses an ordinal, these would match.
+    for (std::size_t index = 0; index < left->clips().size(); ++index)
+        REQUIRE(left->clips()[index].id != right->clips()[index].id);
 }

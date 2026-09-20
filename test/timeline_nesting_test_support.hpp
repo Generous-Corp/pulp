@@ -56,33 +56,54 @@ Project nested_note_project(bool child_has_device = false, std::size_t root_refe
 
 // Child-track processing a SequenceRef then nests. Named for the same reason
 // NestedChildState is: a call site reads as the document it authors, and the
-// two constructs stay separable. They must be, because they are refused by
-// different codes and a document that carries both would only ever report the
-// first.
+// constructs stay separable. They must be, because each is refused by its own
+// code and a document carrying two would only ever report the first.
 struct NestedChildProcessing {
     bool device_chain = false;
-    bool automation_lane = false;
+    // A lane over the child track's own mixer gain.
+    bool gain_automation = false;
+    // A lane over the child track's own mixer pan.
+    bool pan_automation = false;
+    // Swaps the child's note leaf for an empty one. Both are leaf kinds, but
+    // only the empty one consumes clip gain, and that difference is what
+    // selects between the two gain-automation refusals for one authored curve.
+    bool gain_consuming_leaf = false;
 };
 
+// A two-point ramp over one of the child track's own mixer controls. Targeting
+// the track mixer rather than a device parameter is what lets an automation
+// case be authored with no device placement: Track::create rejects a lane whose
+// device placement is absent from the chain, so a device-parameter lane could
+// never stand alone.
+AutomationLane mixer_lane(std::uint64_t lane_id, std::uint64_t first_point,
+                          std::uint64_t second_point, TrackMixerParameter parameter, float from,
+                          float to) {
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{first_point}, {0}, from, AutomationInterpolation::Continuous, 0.0f},
+         AutomationPoint{{second_point}, {960}, to, AutomationInterpolation::Continuous, 0.0f}}));
+    return take(AutomationLane::create({lane_id}, TrackMixerTarget{parameter}, std::move(curve)));
+}
+
 // One child track carrying `processing`, nested by a root exactly as
-// nested_note_project nests its own. The lane targets the track's own mixer
-// gain rather than a device parameter so the automation case needs no device
-// placement to be valid, which is what lets the two constructs be authored
-// independently.
+// nested_note_project nests its own. Every construct is independently
+// selectable because each is refused by its own code, and a document carrying
+// two would only ever report the first.
 Project nested_child_processing_project(NestedChildProcessing processing) {
     TrackInput child_input;
     child_input.id = {11};
     child_input.name = "track";
-    child_input.clips.push_back(take(Clip::create({12}, {0}, {960}, note_content(13))));
+    ClipContent leaf = note_content(13);
+    if (processing.gain_consuming_leaf)
+        leaf = EmptyContent{};
+    child_input.clips.push_back(take(Clip::create({12}, {0}, {960}, std::move(leaf))));
     if (processing.device_chain)
         child_input.device_chain.push_back(DevicePlacement{{14}});
-    if (processing.automation_lane) {
-        auto curve = take(AutomationCurve::create(
-            {AutomationPoint{{16}, {0}, 1.0f, AutomationInterpolation::Continuous, 0.0f},
-             AutomationPoint{{17}, {960}, 0.5f, AutomationInterpolation::Continuous, 0.0f}}));
-        child_input.automation_lanes.push_back(take(AutomationLane::create(
-            {15}, TrackMixerTarget{TrackMixerParameter::Gain}, std::move(curve))));
-    }
+    if (processing.gain_automation)
+        child_input.automation_lanes.push_back(
+            mixer_lane(15, 16, 17, TrackMixerParameter::Gain, 1.0f, 0.5f));
+    if (processing.pan_automation)
+        child_input.automation_lanes.push_back(
+            mixer_lane(18, 19, 20, TrackMixerParameter::Pan, 0.0f, 0.5f));
 
     auto child = take(Sequence::create({10}, "child", TickDuration{960},
                                        {take(Track::create(std::move(child_input)))}));

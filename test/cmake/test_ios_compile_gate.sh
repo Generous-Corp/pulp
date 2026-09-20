@@ -129,6 +129,60 @@ for sdk in iphonesimulator iphoneos; do
     fi
 done
 
+# GPU leg: compile examples/ios-auv3-gpu-smoke with PULP_ENABLE_GPU=ON.
+# The SDK loops above configure GPU OFF, and the example is added under
+# if(IOS) with a documented GPU-ON configure, so without this leg nothing
+# in CI compiles its Skia/Dawn code path. The simulator slice is enough for
+# a compile gate — no device rendering. The slice is fetched into the build
+# tree (never the source checkout); FindSkia.cmake then selects the
+# simulator-arm64 subdir from the SDK + arch settings.
+gpu_sdk=iphonesimulator
+gpu_build_dir="$build_root/$gpu_sdk-gpu"
+gpu_skia_dir="$build_root/skia-build-ios-simulator"
+
+run_logged "iOS simulator Skia GPU slice fetch" 900 "$build_root/fetch-skia-ios-simulator.log" \
+    python3 "$root/tools/scripts/fetch_skia_for_release.py" \
+    ios-simulator-arm64-x86_64 --dest "$gpu_skia_dir"
+
+gpu_skia_lib="$gpu_skia_dir/build/ios-gpu/lib/Release/simulator-arm64/libskia.a"
+if [[ ! -f "$gpu_skia_lib" ]]; then
+    echo "ERROR: iOS simulator Skia slice missing at $gpu_skia_lib" >&2
+    exit 1
+fi
+
+run_logged "$gpu_sdk GPU configure" 1200 "$build_root/configure-$gpu_sdk-gpu.log" \
+    cmake -S "$root" -B "$gpu_build_dir" -G Xcode \
+    -DCMAKE_SYSTEM_NAME=iOS \
+    -DCMAKE_OSX_SYSROOT="$gpu_sdk" \
+    -DCMAKE_OSX_ARCHITECTURES=arm64 \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 \
+    -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPULP_BUILD_TESTS=OFF \
+    -DPULP_BUILD_EXAMPLES=ON \
+    -DPULP_ENABLE_GPU=ON \
+    -DPULP_REQUIRE_GPU_FOR_SDK=ON \
+    -DSKIA_DIR="$gpu_skia_dir"
+
+if ! grep -q '^PULP_HAS_SKIA:INTERNAL=TRUE' "$gpu_build_dir/CMakeCache.txt"; then
+    echo "ERROR: $gpu_sdk GPU configure did not resolve Skia (PULP_HAS_SKIA != TRUE)" >&2
+    grep -i 'skia' "$build_root/configure-$gpu_sdk-gpu.log" >&2 || true
+    exit 1
+fi
+
+run_logged "$gpu_sdk GPU example build" 1800 "$build_root/build-$gpu_sdk-gpu.log" \
+    "$root/tools/ci/governed-build.sh" \
+    cmake --build "$gpu_build_dir" --config Release \
+    --target PulpGpuSmoke_AUv3 --target PulpGpuSmoke_HostApp_Embed \
+    -- -sdk "$gpu_sdk" CODE_SIGNING_ALLOWED=NO
+
+if ! find "$gpu_build_dir" -type d -name "PulpGpuSmoke.appex" -print -quit \
+    | grep -q .; then
+    echo "ERROR: $gpu_sdk GPU leg did not produce PulpGpuSmoke.appex" >&2
+    exit 1
+fi
+echo "OK: iOS GPU smoke example compiled with PULP_ENABLE_GPU=ON (simulator Skia slice)"
+
 simulator_udid=$(xcrun simctl list devices available -j | python3 -c '
 import json, re, sys
 data = json.load(sys.stdin)

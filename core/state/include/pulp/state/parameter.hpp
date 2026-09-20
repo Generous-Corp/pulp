@@ -323,6 +323,19 @@ struct ParamInfo {
     /// when the legacy range omitted a step), and so on.
     std::vector<std::string> value_labels;
 
+    /// Whether a host may apply a modulation offset to this parameter.
+    ///
+    /// Modulation is an additive, host-owned offset on top of the automated
+    /// value (`StateStore::get_modulated()`), distinct from automation. It
+    /// defaults to true so an ordinary control is reachable by a host's
+    /// modulators without every author opting in; declare false for a control
+    /// where a continuously applied offset would be meaningless or unsafe.
+    ///
+    /// `is_modulatable_param()` additionally refuses modulation for a bypass
+    /// control, a discrete parameter, and one that auto-resets each block —
+    /// rules this field cannot override.
+    bool modulatable = true;
+
     /// True when this parameter should auto-reset to its default after each
     /// process block — i.e. it is an explicit trigger or carries the `Reset`
     /// designation (which is defined to behave as a trigger).
@@ -395,6 +408,32 @@ inline bool is_bypass_param(const ParamInfo& info) {
     if (info.designation != ParamDesignation::None) return false;
     return info.name == "Bypass" && info.range.step >= 1.0f &&
            info.range.min == 0.0f && info.range.max == 1.0f;
+}
+
+/// Decide whether a host may apply a modulation offset to @p info.
+///
+/// Author intent first (`ParamInfo::modulatable`, default true), then three
+/// rules an author cannot override:
+///   * a bypass control is a host-owned discrete switch, and an additive
+///     offset on it has no defined meaning;
+///   * an auto-resetting trigger is cleared at the end of every process block,
+///     so a persistent offset would hold it raised forever;
+///   * a discrete parameter is an indexed choice, not a magnitude; an additive
+///     offset between two indices names no value the author defined. Kind, not
+///     `range.step`: a continuous parameter may quantize its plain value for
+///     display and still be a magnitude a host can offset.
+///
+/// This is the single predicate both the host-facing advertisement and the
+/// inbound modulation decode consult, so a host can never be told a parameter
+/// accepts modulation that the adapter then silently drops.
+inline bool is_modulatable_param(const ParamInfo& info) {
+    if (!info.modulatable)
+        return false;
+    if (is_bypass_param(info))
+        return false;
+    if (is_discrete_param(info))
+        return false;
+    return !info.auto_resets();
 }
 
 /// Thread-safe atomic parameter value for lock-free audio/UI communication.

@@ -179,13 +179,18 @@ validate_clip_program(const AudioClipRendererProgram& clip,
         return error(AudioRendererErrorCode::InvalidClipRange);
     switch (clip.source_time_mapping) {
     case AudioClipRendererProgram::SourceTimeMapping::NativeRate:
-        if (clip.offline_stretch_artifact || clip.offline_stretch_provenance)
+        if (clip.offline_stretch_artifact || clip.offline_stretch_provenance ||
+            clip.source_frame_phase_end != 0.0)
             return error(AudioRendererErrorCode::InvalidAsset);
         break;
     case AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample:
         if (clip.time_domain != AudioClipRendererProgram::TimeDomain::Musical ||
             clip.renderable_timeline_frames != clip.timeline_frame_count ||
-            clip.offline_stretch_artifact || clip.offline_stretch_provenance)
+            clip.offline_stretch_artifact || clip.offline_stretch_provenance ||
+            (clip.source_frame_phase_end != 0.0 &&
+             (!std::isfinite(clip.source_frame_phase_end) ||
+              clip.source_frame_phase_end <= clip.source_frame_offset ||
+              clip.source_frame_phase_end > static_cast<double>(clip.source_frame_count))))
             return error(AudioRendererErrorCode::InvalidClipRange);
         break;
     case AudioClipRendererProgram::SourceTimeMapping::OfflineStretchArtifact:
@@ -193,20 +198,40 @@ validate_clip_program(const AudioClipRendererProgram& clip,
             !clip.offline_stretch_artifact || clip.audio != clip.offline_stretch_artifact->audio ||
             !clip.offline_stretch_provenance ||
             clip.offline_stretch_provenance->clip_id != clip.id ||
-            clip.source_start != 0 || clip.source_frame_count != clip.timeline_frame_count ||
+            clip.source_frame_count != clip.timeline_frame_count ||
             clip.renderable_timeline_frames != clip.timeline_frame_count ||
-            clip.source_frame_offset != 0.0 || clip.source_frames_per_timeline_frame != 1.0 ||
-            clip.offline_stretch_artifact->key.target_frame_count != clip.timeline_frame_count ||
+            clip.source_frame_offset != 0.0 || clip.source_frame_phase_end != 0.0 ||
+            clip.source_frames_per_timeline_frame != 1.0 ||
+            clip.offline_stretch_artifact->key.target_frame_count != clip.audio->num_frames() ||
             clip.offline_stretch_artifact->key.channel_count != clip.audio->num_channels() ||
-            clip.offline_stretch_artifact->key.musical_tick_start != clip.musical_tick_start ||
-            clip.offline_stretch_artifact->key.musical_tick_end != clip.musical_tick_end ||
+            // The artifact is keyed to the authored range; this clip may be a
+            // window onto part of it, so the two agree by containment. Covering
+            // the whole authored range then has to mean reading the whole
+            // artifact: a program claiming the full tick range while pointing at
+            // a sub-span of frames would play frames that describe other ticks.
+            //
+            // The converse is deliberately not asserted, because it is not true.
+            // Ticks resolve far finer than frames, so a window may correctly
+            // read the whole artifact while covering less than the whole
+            // authored range: a trim of a few ticks is a trim of no frames at
+            // all, and there is no sub-frame edge for the window to move to.
+            // The slack that leaves is bounded to exactly that much. The
+            // source_frame_count check above ties the window's length to the
+            // clip's own timeline length, so a tick window short enough to carry
+            // audible material is short in frames too and fails there instead.
+            clip.offline_stretch_artifact->key.musical_tick_start.value >
+                clip.musical_tick_start.value ||
+            clip.offline_stretch_artifact->key.musical_tick_end.value <
+                clip.musical_tick_end.value ||
+            (clip.offline_stretch_artifact->key.musical_tick_start == clip.musical_tick_start &&
+             clip.offline_stretch_artifact->key.musical_tick_end == clip.musical_tick_end &&
+             (clip.source_start != 0 || clip.source_frame_count != clip.audio->num_frames())) ||
             clip.offline_stretch_artifact->key.timeline_sample_rate.denominator != 1 ||
             clip.offline_stretch_artifact->key.algorithm !=
                 OfflineStretchAlgorithmConfig{limits.offline_stretch_algorithm_version,
                                               limits.offline_stretch_max_time_ratio} ||
             clip.audio->sample_rate !=
                 clip.offline_stretch_artifact->key.timeline_sample_rate.numerator ||
-            clip.audio->num_frames() != clip.timeline_frame_count ||
             clip.uses_sample_rate_conversion())
             return error(AudioRendererErrorCode::InvalidAsset);
         break;
@@ -418,6 +443,49 @@ const DecodedAudioAsset* DecodedAudioAssetPool::find(timeline::ItemId id) const 
     return found != assets_.end() && found->id == id ? &*found : nullptr;
 }
 
+std::optional<detail::OfflineStretchArtifactWindow>
+detail::offline_stretch_artifact_window(const timeline::Clip& clip,
+                                        const timebase::CompiledTempoMap& tempo_map,
+                                        std::int64_t authored_window_start,
+                                        timebase::TickDuration authored_duration) noexcept {
+    if (authored_window_start < 0 || clip.end() <= clip.start())
+        return std::nullopt;
+    const auto duration =
+        authored_duration.value > 0 ? authored_duration.value : clip.duration().value;
+    if (duration <= 0 || clip.start().value < std::numeric_limits<std::int64_t>::min() +
+                                                  authored_window_start)
+        return std::nullopt;
+    const timebase::TickPosition authored_start{clip.start().value - authored_window_start};
+    if (authored_start.value > std::numeric_limits<std::int64_t>::max() - duration)
+        return std::nullopt;
+    const timebase::TickPosition authored_end{authored_start.value + duration};
+    // The retained window has to lie inside the range the artifact is keyed to.
+    // Anything else is a lowering that lost track of which clip this is a
+    // window onto, and reading the artifact under it would be reading frames
+    // that describe other ticks.
+    if (clip.end().value > authored_end.value)
+        return std::nullopt;
+    const auto base = tempo_map.ticks_to_samples(authored_start).value;
+    const auto window_start = tempo_map.ticks_to_samples(clip.start()).value;
+    const auto window_end = tempo_map.ticks_to_samples(clip.end()).value;
+    const auto authored_end_sample = tempo_map.ticks_to_samples(authored_end).value;
+    if (window_start < base || window_end < window_start || authored_end_sample < window_end)
+        return std::nullopt;
+    detail::OfflineStretchArtifactWindow window;
+    window.authored_start = authored_start;
+    window.authored_end = authored_end;
+    // A leaf nothing trimmed starts at the artifact's own first frame, which is
+    // a distance of zero and so not a span the distance helper will measure.
+    if (!detail::offline_stretch_frame_distance(base, authored_end_sample, window.artifact_frames) ||
+        !detail::offline_stretch_frame_distance(window_start, window_end, window.frame_count) ||
+        (window_start != base &&
+         !detail::offline_stretch_frame_distance(base, window_start, window.frame_start)))
+        return std::nullopt;
+    if (window.frame_count == 0 || window.frame_start > window.artifact_frames - window.frame_count)
+        return std::nullopt;
+    return window;
+}
+
 std::int64_t AudioClipRendererProgram::timeline_end() const noexcept {
     return timeline_start + static_cast<std::int64_t>(timeline_frame_count);
 }
@@ -437,10 +505,11 @@ detail::compile_audio_clip_program_cached(
     const timeline::Clip& clip, const timeline::Project& project,
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache,
-    double source_frame_offset, const std::vector<LoweredPlacementFade>& placement_fades) {
+    double source_frame_offset, const std::vector<LoweredPlacementFade>& placement_fades,
+    double source_frame_phase_end) {
     return detail::compile_audio_clip_program_cached(clip, project, tempo_map, assets, limits,
                                                      cache, source_frame_offset, nullptr,
-                                                     placement_fades);
+                                                     placement_fades, source_frame_phase_end);
 }
 
 runtime::Result<AudioClipRendererProgram, AudioRendererError>
@@ -449,12 +518,19 @@ detail::compile_audio_clip_program_cached(
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache,
     double source_frame_offset, std::shared_ptr<const OfflineStretchArtifact> stretch_artifact,
-    const std::vector<LoweredPlacementFade>& placement_fades) {
+    const std::vector<LoweredPlacementFade>& placement_fades, double source_frame_phase_end,
+    std::int64_t authored_window_start, timebase::TickDuration authored_duration) {
     const auto* media = std::get_if<timeline::MediaRef>(&clip.content());
     if (!media)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
     if (!std::isfinite(source_frame_offset) || source_frame_offset < 0.0 ||
         source_frame_offset >= static_cast<double>(media->frame_count))
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
+    // Zero is the whole reference; anything else must be a real span ending
+    // inside the media, or the phase map would read past the source it names.
+    if (source_frame_phase_end != 0.0 &&
+        (!std::isfinite(source_frame_phase_end) || source_frame_phase_end <= source_frame_offset ||
+         source_frame_phase_end > static_cast<double>(media->frame_count)))
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
     auto resolved = resolve_audio_media(clip.id(), *media, project, assets, limits);
     if (!resolved)
@@ -569,6 +645,15 @@ detail::compile_audio_clip_program_cached(
         if (!stretch_artifact)
             return fail<AudioClipRendererProgram>(AudioRendererErrorCode::OfflineStretchRequired,
                                                   clip.id(), media->asset_id);
+        // The artifact stays keyed to the clip this leaf is a window onto, so a
+        // nesting that trimmed the leaf reads a frame span of the same render
+        // rather than a render of the trimmed range. Untrimmed, the window is
+        // the whole artifact and every field below reads as it always did.
+        const auto window = detail::offline_stretch_artifact_window(
+            clip, tempo_map, authored_window_start, authored_duration);
+        if (!window)
+            return fail<AudioClipRendererProgram>(AudioRendererErrorCode::OfflineStretchFailed,
+                                                  clip.id(), media->asset_id);
         const auto* metadata = project.find_asset(media->asset_id);
         const auto& key = stretch_artifact->key;
         const auto scaled_input = static_cast<long double>(media->frame_count) *
@@ -593,15 +678,18 @@ detail::compile_audio_clip_program_cached(
                                                            limits.offline_stretch_max_time_ratio} ||
             key.tempo_points.size() != tempo_points.size() ||
             !std::equal(key.tempo_points.begin(), key.tempo_points.end(), tempo_points.begin()) ||
-            key.musical_tick_start != clip.start() || key.musical_tick_end != clip.end() ||
+            key.musical_tick_start != window->authored_start ||
+            key.musical_tick_end != window->authored_end ||
             key.timeline_sample_rate != timeline_rate ||
-            key.target_frame_count != timeline_frames ||
+            key.target_frame_count != window->artifact_frames ||
+            window->frame_count != timeline_frames ||
             stretch_artifact->audio->sample_rate != timeline_rate.numerator ||
-            stretch_artifact->audio->num_frames() != timeline_frames)
+            stretch_artifact->audio->num_frames() != window->artifact_frames)
             return fail<AudioClipRendererProgram>(AudioRendererErrorCode::OfflineStretchFailed,
                                                   clip.id(), media->asset_id);
-        auto host_rate_converter = cache.get_host(stretch_artifact->audio, 0, timeline_frames,
-                                                  clip.id(), media->asset_id, limits);
+        auto host_rate_converter =
+            cache.get_host(stretch_artifact->audio, window->frame_start, timeline_frames,
+                           clip.id(), media->asset_id, limits);
         if (!host_rate_converter)
             return runtime::Err(host_rate_converter.error());
         return runtime::Ok(AudioClipRendererProgram{
@@ -610,13 +698,14 @@ detail::compile_audio_clip_program_cached(
             stretch_artifact->audio,
             timeline_start,
             timeline_frames,
-            0,
+            window->frame_start,
             timeline_frames,
             0.0,
             timeline_frames,
             1.0,
-            std::make_shared<AudioClipConversionArtifact>(stretch_artifact->audio, 0,
-                                                          timeline_frames, 1.0, nullptr,
+            std::make_shared<AudioClipConversionArtifact>(stretch_artifact->audio,
+                                                          window->frame_start, timeline_frames, 1.0,
+                                                          nullptr,
                                                           std::move(host_rate_converter).value()),
             playback.gain_linear,
             fade_in_frames,
@@ -642,7 +731,9 @@ detail::compile_audio_clip_program_cached(
     if (source_time_mapping == AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample) {
         const auto tick_span = static_cast<long double>(clip.end().value) -
                                static_cast<long double>(clip.start().value);
-        const auto source_span = static_cast<long double>(media->frame_count) -
+        const auto source_span = (source_frame_phase_end != 0.0
+                                      ? static_cast<long double>(source_frame_phase_end)
+                                      : static_cast<long double>(media->frame_count)) -
                                  static_cast<long double>(source_frame_offset);
         const auto maximum_tempo = tempo_map.maximum_tempo_between(clip.start(), clip.end());
         const auto maximum_ticks_per_sample = static_cast<long double>(maximum_tempo) *
@@ -699,7 +790,10 @@ detail::compile_audio_clip_program_cached(
         source_time_mapping,
         nullptr,
         nullptr,
-        std::move(placement_fade)});
+        std::move(placement_fade),
+        source_time_mapping == AudioClipRendererProgram::SourceTimeMapping::MusicalPhaseResample
+            ? source_frame_phase_end
+            : 0.0});
 }
 
 runtime::Result<bool, AudioRendererError> detail::prepare_audio_clip_sample_rate_converters(

@@ -352,8 +352,7 @@ void require_generated_swift_compiles(const DesignIR& ir, const std::string& tag
     auto gate = swiftc_typecheck({view_swift.string(), theme_swift.string()});
     if (!gate.runnable) {
         WARN("swiftc gate skipped (" << tag << "): " << gate.diagnostics);
-        SUCCEED("skipped: Swift toolchain/SDK unavailable");
-        return;
+        SKIP("Swift toolchain/SDK unavailable");
     }
     INFO("generated view:\n" << result.view_source);
     INFO("generated theme:\n" << result.theme_source);

@@ -72,6 +72,72 @@ class TriageTest(unittest.TestCase):
         out = mod.format_rows(rows)
         self.assertIn("No required check was regressed", out)
 
+    # ── cancelled / timed out: absence of evidence, not failure ─────────────
+
+    def test_cancelled_is_no_evidence_not_regressed(self):
+        # Green on main, cancelled here. Reading that as a regression sends
+        # someone to debug a run that never produced a verdict.
+        rows = by_name(triage(
+            {"macos": "CANCELLED"}, {"macos": "SUCCESS"}, required={"macos"}))
+        self.assertEqual(rows["macos"].verdict, "NO-EVIDENCE")
+        self.assertEqual(rows["macos"].pr_state, "CANCELLED")
+
+    def test_cancelled_is_no_evidence_not_pre_existing(self):
+        rows = by_name(triage(
+            {"UBSan": "CANCELLED"}, {"UBSan": "FAILURE"}, required=set()))
+        self.assertEqual(rows["UBSan"].verdict, "NO-EVIDENCE")
+
+    def test_timed_out_is_no_evidence(self):
+        rows = by_name(triage(
+            {"linux": "TIMED_OUT"}, {"linux": "SUCCESS"}, required=set()))
+        self.assertEqual(rows["linux"].verdict, "NO-EVIDENCE")
+
+    def test_genuine_failures_stay_red(self):
+        # The control for the two tests above: real verdicts must not drift
+        # into NO-EVIDENCE when the cancelled states leave RED.
+        rows = by_name(triage(
+            {"macos": "FAILURE", "ubsan": "FAILURE", "acted": "ACTION_REQUIRED",
+             "errd": "ERROR"},
+            {"macos": "SUCCESS", "ubsan": "FAILURE", "acted": "SUCCESS",
+             "errd": "SUCCESS"},
+            required={"macos"}))
+        self.assertEqual(rows["macos"].verdict, "REGRESSED")
+        self.assertEqual(rows["ubsan"].verdict, "PRE-EXISTING")
+        self.assertEqual(rows["acted"].verdict, "REGRESSED")
+        self.assertEqual(rows["errd"].verdict, "REGRESSED")
+
+    def test_cancelled_main_run_is_not_a_baseline(self):
+        # Main's run was cancelled, so it cannot establish "also red on main".
+        rows = by_name(triage(
+            {"macos": "FAILURE"}, {"macos": "CANCELLED"}, required={"macos"}))
+        self.assertEqual(rows["macos"].verdict, "NEW")
+        self.assertNotEqual(rows["macos"].verdict, "PRE-EXISTING")
+
+    def test_no_evidence_sorts_above_pending_and_pre_existing(self):
+        rows = triage(
+            {"cancelled": "CANCELLED", "queued": "QUEUED", "old": "FAILURE"},
+            {"cancelled": "SUCCESS", "queued": "SUCCESS", "old": "FAILURE"},
+            required=set())
+        self.assertEqual([r.verdict for r in rows],
+                         ["NO-EVIDENCE", "PENDING", "PRE-EXISTING"])
+
+    def test_format_flags_no_evidence_and_withholds_the_all_clear(self):
+        rows = triage({"macos": "CANCELLED"}, {"macos": "SUCCESS"}, {"macos"})
+        out = mod.format_rows(rows)
+        self.assertIn("NO-EVIDENCE", out)
+        self.assertIn("rerun", out)
+        self.assertIn("not an all-clear", out)
+        self.assertNotIn("REQUIRED check(s) regressed", out)
+
+    def test_format_all_clear_survives_an_advisory_no_evidence(self):
+        # An advisory lane with no verdict is still reported, but it does not
+        # withdraw the all-clear about required checks.
+        rows = triage({"adv": "CANCELLED"}, {"adv": "SUCCESS"}, set())
+        out = mod.format_rows(rows)
+        self.assertIn("No required check was regressed", out)
+        self.assertNotIn("not an all-clear", out)
+        self.assertIn("produced NO evidence", out)
+
 
 class CheckRunDecodeTest(unittest.TestCase):
     def test_checks_for_sha_slurps_more_than_one_hundred_runs(self):

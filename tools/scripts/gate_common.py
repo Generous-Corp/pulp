@@ -254,10 +254,45 @@ def git_diff_names(base: str, head: str) -> list[str]:
 # can ever be silently voided by the squash again. The `^`-anchor + a mandatory
 # space after the colon means only genuine trailer lines match: not `http://…`
 # URLs, not `## Heading`, not mid-sentence prose.
+#
+# The scan is matched per line rather than with `re.MULTILINE`, so that lines
+# inside a fenced code block can be masked out first (see _fenced_line_indices).
 _TRAILER_LINE_RE = re.compile(
-    r"^(?P<key>[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*):[ \t]+(?P<val>\S.*?)[ \t]*$",
-    re.MULTILINE,
+    r"^(?P<key>[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*):[ \t]+(?P<val>\S.*?)[ \t]*$"
 )
+
+# A fence opener may carry an info string (```python); a closer is the same
+# character, at least as long, and blank after the marker.
+_FENCE_RE = re.compile(r"^(?P<marker>`{3,}|~{3,})(?P<rest>.*)$")
+
+
+def _fenced_line_indices(lines: list[str]) -> set[int]:
+    """Line indices enclosed by a CLOSED fenced code block.
+
+    A trailer inside a fence is documentation *about* the trailer syntax, not a
+    declaration — a friction report or a guide that shows `Version-Bump: skip`
+    in a sample must not grant the bypass it describes.
+
+    An UNCLOSED fence masks nothing. That direction is deliberate: swallowing
+    the rest of a body would drop a real bypass trailer, which is exactly the
+    silent merge-queue eviction this scan exists to prevent. A missed mask
+    costs a prose false positive that still had to be written at column zero;
+    a wrong mask costs a PR that can never merge and reports no reason.
+    """
+    masked: set[int] = set()
+    opener: str | None = None
+    start = 0
+    for index, line in enumerate(lines):
+        found = _FENCE_RE.match(line)
+        if found is None:
+            continue
+        marker = found.group("marker")
+        if opener is None:
+            opener, start = marker, index
+        elif marker[0] == opener[0] and len(marker) >= len(opener) and not found.group("rest").strip():
+            masked.update(range(start, index + 1))
+            opener = None
+    return masked
 
 
 def _parse_trailer_block(body: str) -> dict[str, list[str]]:
@@ -274,7 +309,18 @@ def _parse_trailer_block(body: str) -> dict[str, list[str]]:
     # Rescue trailer-shaped lines a merge-queue squash buried mid-body (see
     # _TRAILER_LINE_RE). Only add values interpret-trailers didn't already
     # capture, so a trailer in the final block isn't double-counted.
-    for match in _TRAILER_LINE_RE.finditer(body):
+    #
+    # Indented and `>`-quoted lines never match: the pattern anchors a letter at
+    # column zero, so prose that offsets the trailer is already excluded. Fenced
+    # blocks are the one quoting form that keeps column zero, so they are masked.
+    lines = body.splitlines()
+    fenced = _fenced_line_indices(lines)
+    for index, line in enumerate(lines):
+        if index in fenced:
+            continue
+        match = _TRAILER_LINE_RE.match(line)
+        if match is None:
+            continue
         key = match.group("key").strip().lower()
         value = match.group("val").strip()
         values = result.setdefault(key, [])
@@ -341,6 +387,50 @@ def git_commit_trailers(ref: str) -> dict[str, list[str]]:
     except subprocess.CalledProcessError:
         return {}
     return _parse_trailer_block(body)
+
+
+# ── Bypass-trailer grammars ─────────────────────────────────────────────
+#
+# One predicate per bypass grammar, so the pre-merge gates, the post-merge
+# release tagger and the pre-merge tag predictor all rule on validity the same
+# way. A second implementation of a grammar is how a release comes to be
+# withheld by a trailer nobody declared: the duplicate matched a line the parse
+# above had already excluded, and a withheld tag reports nothing.
+
+
+_SKIP_VALUE_RE = re.compile(r"^\s*skip\b(?P<rest>.*)$", re.IGNORECASE)
+_SKIP_REASON_RE = re.compile(r'reason\s*=\s*"([^"]+)"')
+
+
+def release_skip_declared(trailers: dict[str, list[str]]) -> bool:
+    """True iff ``trailers`` carries a ``Release: skip`` bypass.
+
+    No reason is required — ``Release: skip`` alone is the documented grammar.
+    """
+    return any(
+        _SKIP_VALUE_RE.match(value) for value in trailers.get("release", [])
+    )
+
+
+def version_bump_skip_reason(trailers: dict[str, list[str]]) -> str | None:
+    """Reason from a top-level ``Version-Bump: skip reason="..."``, else None.
+
+    Two restrictions are load-bearing and shared by every consumer:
+
+    * Per-surface forms (``Version-Bump: sdk=skip``) do NOT count. Those are
+      scoped to the per-surface verdict pipeline and must not silently opt a
+      change out of the whole fix/feat-needs-a-release check.
+    * The reason must be non-empty. A bare ``Version-Bump: skip``, or
+      ``reason=""``, is rejected so the author has to record *why*.
+    """
+    for value in trailers.get("version-bump", []):
+        match = _SKIP_VALUE_RE.match(value.strip())
+        if match is None:
+            continue
+        reason = _SKIP_REASON_RE.search(match.group("rest"))
+        if reason and reason.group(1).strip():
+            return reason.group(1).strip()
+    return None
 
 
 # ── Config helpers ──────────────────────────────────────────────────────

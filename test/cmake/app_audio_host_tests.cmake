@@ -586,6 +586,52 @@ target_sources(pulp-test-host-signal-graph PRIVATE
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-signal-graph)
 
+add_executable(pulp-test-custom-node-enumeration test_custom_node_enumeration.cpp)
+target_link_libraries(pulp-test-custom-node-enumeration
+    PRIVATE pulp::host Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-custom-node-enumeration)
+
+add_executable(pulp-test-sample-kernel-registry test_sample_kernel_registry.cpp)
+target_link_libraries(pulp-test-sample-kernel-registry
+    PRIVATE pulp::host Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sample-kernel-registry)
+
+add_executable(pulp-test-sample-region-planner
+    test_sample_region_plan.cpp
+    test_sample_region_proof.cpp)
+target_link_libraries(pulp-test-sample-region-planner
+    PRIVATE pulp::host Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sample-region-planner)
+
+# Exercise the same public API from an installed SDK, outside the source tree.
+add_test(NAME cmake-custom-node-enumeration-sdk-consumer
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+        "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+        "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+        "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+        "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+        "-DPULP_PARENT_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_custom_node_enumeration_sdk_consumer.cmake)
+set_tests_properties(cmake-custom-node-enumeration-sdk-consumer PROPERTIES
+    LABELS "cmake;sdk;host;custom-node;slow"
+    TIMEOUT 300)
+
+add_test(NAME cmake-sample-kernel-sdk-consumer
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        "-DPULP_PARENT_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+        "-DPULP_PARENT_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+        "-DPULP_PARENT_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+        "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
+        "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
+        "-DPULP_PARENT_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_sample_kernel_sdk_consumer.cmake)
+set_tests_properties(cmake-sample-kernel-sdk-consumer PROPERTIES
+    LABELS "cmake;sdk;host;sample-kernel;slow"
+    TIMEOUT 300)
+
 # Each public SignalGraph contract must compile from a clean translation unit.
 # This catches accidental transitive-include dependencies without adding a
 # runtime test binary.

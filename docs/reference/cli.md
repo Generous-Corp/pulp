@@ -1823,8 +1823,12 @@ the `latency_samples` the device reports — so a caller can add the chain's
 latencies and predict both the scheduling-window shift and a refusal past
 `latency_ceiling_samples` without authoring anything. `max_chain_length` is the
 longest chain the host binding lowers; a longer one is refused rather than
-truncated. The `pulp_timeline_device_catalog` MCP tool returns the same object
-from the same encoder, so the CLI and MCP answers are identical by construction.
+truncated. A device's `parameters` list publishes each stable ID, plain value
+range, default, unit, and behavior flags. The built-in humaniser's Timing Depth
+and Velocity Depth are direct runtime controls: both are non-automatable,
+non-rampable, non-modulatable, and are not persisted in Timeline placement
+state. The `pulp_timeline_device_catalog` MCP tool returns the same object from
+the same encoder, so the CLI and MCP answers are identical by construction.
 
 `export` first plans conversion against the selected format and stops unless
 every reported lossy concept has its own repeated `--accept-loss <concept-id>`
@@ -1895,8 +1899,16 @@ Render the root arrangement of a canonical timeline project to a Float32 WAV
 without opening an audio device.
 
 ```bash
-pulp render song.pulpseq.json --out song.wav [--sample-rate 48000]
+pulp render song.pulpseq.json --out song.wav [--sample-rate 48000] [--tail-frames 24000]
 ```
+
+`--tail-frames` renders that many extra frames after the sequence ends, so a
+delay, reverb, or release envelope still ringing past the last event is captured
+rather than cut at it. It defaults to `0`, which ends the file exactly at the
+sequence end — the length an unflagged render has always produced. The tail is
+counted against the same in-memory render budget as the sequence itself, and a
+tail that overruns that budget is refused rather than truncated. The emitted
+JSON reports the requested tail alongside the frames actually written.
 
 The renderer resolves local asset locators, compiles the immutable playback
 program, and processes it in bounded blocks. It currently renders arrangement

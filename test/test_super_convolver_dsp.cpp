@@ -1541,14 +1541,15 @@ TEST_CASE("SuperConvolver: toggling Bypass ramps instead of stepping", "[super-c
 
 // ── Dragging Size must not CRACKLE ───────────────────────────────────────────────
 //
-// A live Size change rebuilds the IR and swaps it into the convolver. On the crossfade path
-// ConvolverIrSwapper does NOT carry the input delay line into the incoming IR (the displaced
-// one is still rendering from it in parallel), so the new convolver starts COLD: its output
-// must build up from silence over the IR's own length.
+// A live Size change rebuilds the IR and swaps it into the convolver, crossfaded. Both sides
+// of that fade render from the convolver's single shared input delay line, so the incoming IR
+// is warm from its first block and the swap carries no build-up-from-silence of its own.
 //
-// The fade used to be 512 samples (~11 ms). Fading a full old tail into a cold new one that
-// fast is not a transition, it is a DIP — the wet drops out and climbs back — and one of those
-// per rebuild is what a Size drag sounds like. The fade is now ~150 ms.
+// This is the gate that says so. It once failed for a real reason: the incoming IR used to
+// start COLD, and fading a full old tail into a cold new one punched a hole in the wet — one
+// per rebuild, which is what a Size drag sounded like. Lengthening the fade only made the
+// hole shallower, never absent, so the gate is written against the envelope rather than
+// against any particular fade length.
 //
 // This asserts the thing the ear objects to: the ENVELOPE must not collapse across the swap.
 // A steady tone in means steady energy out; a dip shows up as a block whose RMS falls far

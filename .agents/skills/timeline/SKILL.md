@@ -61,6 +61,17 @@ Apply edits as one expected-revision transaction, validate the result, use
 `explain` to inspect playback lowering/PDC, then render only when an audio
 artifact is needed. Never modify canonical project JSON text directly.
 
+A render ends at the sequence end unless you ask for more. `pulp render`'s
+`--tail-frames <n>` and `pulp_timeline_render`'s `tail_frames` render n frames
+after the transport stops; both default to zero, which is the length every
+render produced before the option existed. The default is the trap, not the
+option: a program whose last event feeds a delay, reverb, or release envelope
+renders with that tail cut at the last note, and nothing reports it — the file
+is well-formed and the JSON says `ok`. If a bounce sounds like it ends abruptly,
+suspect the missing tail before suspecting the DSP. The tail is charged against
+the same in-memory render budget as the sequence and is refused with its own
+message when it does not fit, so a tail is never silently truncated to make one.
+
 `command_apply` carries both halves of that sentence as optional arguments,
 and both are session-only — a stateless apply opens its own document and
 keeps no retry record, so it refuses them rather than accepting and ignoring
@@ -83,13 +94,15 @@ different request with an earlier result.
 
 A running host's step grid is reachable through the same unified control
 platform as every other Pulp capability -- no bespoke sequencer verb, no new
-transport. Two typed operations are registered, both gated on their own
-capability and both bound to the host-main executor:
+transport. Four typed operations are registered, each gated on its own
+capability and all bound to the host-main executor:
 
 | Operation | Capability | Result | Profiles |
 |---|---|---|---|
 | `dev.pulp.sequencer/state.read@1` | `sequencer.state.read` | `response` | observe, develop |
 | `dev.pulp.sequencer/state.edit@1` | `sequencer.state.edit` | `receipt` | develop |
+| `dev.pulp.sequencer/transport.loop.read@1` | `sequencer.transport.loop.read` | `response` | observe, develop |
+| `dev.pulp.sequencer/transport.loop.write@1` | `sequencer.transport.loop.write` | `receipt` | develop |
 
 `state.read` copies the UI-side published snapshot and the seqlock playhead out
 of the channel; `pattern`, `include_snapshot`, and `include_playhead` bound what
@@ -100,6 +113,16 @@ comes back, and the response carries `epoch`, `engine_sequence`, and
 or `switch-pattern` -- and submits it to the single-producer command FIFO,
 returning `receipt_id`, `applied`, and `client_sequence`. `gesture_phase` groups
 a drag into one undoable gesture the way a parameter gesture does.
+
+`transport.loop.read@1` takes no parameters and returns the whole loop cell at
+once -- `enabled`, `start_tick`, `end_tick`, `playing`, and the monotonic
+`sequence` that stamps it. `transport.loop.write@1` carries exactly one
+`action`: `set-range` moves the boundaries, `set-enabled` toggles the loop and
+requires an `expected_sequence` so a toggle raced against another writer is
+refused rather than applied to a cell the caller never saw. Both actions require
+an `idempotency_key`, and the receipt echoes the resulting cell alongside
+`receipt_id` and `applied`, so a replayed key is answerable without a second
+read.
 
 Three things about these operations are not obvious from their schemas:
 
@@ -123,9 +146,11 @@ prints the frozen registry offline, and `--json` emits the canonical
 `dev.pulp.control/registry@1` projection with both JSON Schema bodies. Listing
 an operation is never a grant. To call one, use `pulp control call --instance ID
 dev.pulp.sequencer/state.read@1 --params JSON`; through MCP the registry derives
-the tools `pulp_control_sequencer_state_read` and
-`pulp_control_sequencer_state_edit` from the same rows, so Forge Sequencer and
-Forge Modular reach the grid with no bespoke surface. Grants and consent are
+one tool per row -- `pulp_control_sequencer_state_read`,
+`pulp_control_sequencer_state_edit`,
+`pulp_control_sequencer_transport_loop_read`, and
+`pulp_control_sequencer_transport_loop_write` -- so Forge Sequencer and
+Forge Modular reach the grid and its loop with no bespoke surface. Grants and consent are
 broker authority.
 
 Adding a sequencer control operation means updating this section too:
@@ -225,12 +250,18 @@ missing here or carries the wrong result kind.
   leaves flattening cut it into and multiplies with each leaf's own fade. It
   refuses only when a ramp actually reaches a leaf whose content no renderer
   scales by clip gain, because dropping that ramp would be silently wrong. A complete
-  nested media clip preserves its `TimeConform` intent, but a source window
-  that trims a conforming clip fails with `NestedConformedTrimUnsupported`
-  until playback has a conform-aware source-range mapping, and a trimmed
-  `Stretch` clip additionally needs a windowed artifact. A nested child track
-  carrying a device chain or an automation lane fails with
-  `NestedDeviceChainUnsupported` or `NestedAutomationLaneUnsupported`, and an
+  nested media clip preserves its `TimeConform` intent. A source window that
+  trims a `Resample` clip maps onto the matching sub-span of the source under
+  the same conform function, so it lowers; one that trims a `Stretch` clip
+  lowers as well, by keeping the artifact keyed to the authored tick range and
+  reading back only the frames of that render the window covers. Nothing
+  refuses a trimmed conforming leaf any more, so `NestedConformedTrimUnsupported`
+  is no longer raised. A nested child track
+  carrying a device chain fails with `NestedDeviceChainUnsupported`; one
+  automating its pan fails with `NestedAutomationPanUnsupported`, and one
+  automating its gain with `NestedAutomationGainEventLeafUnsupported` or
+  `NestedAutomationGainMediaUnsupported` according to whether the leaf that
+  curve reaches consumes clip gain. An
   absolute-anchored leaf inside a nested sequence fails with
   `NestedAbsoluteChildUnsupported`; each names its own cause rather than
   sharing one umbrella code. Expansion
@@ -806,18 +837,17 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
 
 ## Editing contracts
 
-- `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
-  `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
-  `ReplaceNoteContent`, `SetNoteEvents`, `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
-  `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
-  `SetActiveTakeLane`, `SetTakeComp`, `SetTrackFreeze`, `InsertMarker`,
-  `RemoveMarker`, `InsertRegion`, `RemoveRegion`, `SetChordScaleLane`,
-  `SetGroove`, and `SetTrackMixer` are the bounded mutation
-  vocabulary. Automation commands attach or tombstone complete Track-owned
-  lanes; map commands carry exact expected/replacement document values and
-  participate in the same transaction, journal, undo, and replay machinery.
-  `reduce_transaction()` is pure: it returns a new snapshot, exact canonical
-  dirty set, and reverse-ordered inverse commands.
+- The bounded mutation vocabulary is exactly the `Command`-domain verbs of
+  `core/timeline/schema/timeline_cli_verbs.json` — 64 of them, catalogued in
+  full under **Command catalog** below with the wire `type` each one carries. A
+  hand-kept subset drifts from the model as soon as a command lands, so the
+  catalog is derived from that artifact and the `timeline-command-doc-coverage`
+  ctest fails when a declared command is missing from it. Automation commands
+  attach or tombstone complete Track-owned lanes; map commands carry exact
+  expected/replacement document values and participate in the same transaction,
+  journal, undo, and replay machinery. `reduce_transaction()` is pure: it
+  returns a new snapshot, exact canonical dirty set, and reverse-ordered inverse
+  commands.
 - `NoteTransformRegistry` is the control-thread apply-time extension point for
   pure `(note span, canonical params JSON, seed) -> note array` functions.
   `ApplyNoteTransform` is a typed preparation request, not a durable `Command`:
@@ -906,6 +936,163 @@ but the decoder's `if`-chain silently returns a failure for the unknown name.
   checkpoint snapshot/revision mismatch or cross-entry writer-ID reuse.
 - Undo and redo submit fresh ordinary transactions. They append to the journal;
   they do not delete or rewrite history.
+
+### Command catalog
+
+Every durable mutation the document model accepts, with the exact `type` string
+a caller writes. The wire type is the operative half: the C++ spelling is what
+an agent guesses from the model, while the wire type is what
+`pulp seq apply`, the `pulp_timeline_command_apply` MCP tool, and
+`DocumentSession` actually decode, and a type the manifest does not carry is
+refused before it reaches a reducer.
+
+Rows are derived from `core/timeline/schema/timeline_cli_verbs.json` and their
+descriptions from the declarations in
+`core/timeline/include/pulp/timeline/command.hpp`. Regenerate the artifact after
+a manifest change, then add the row here — `timeline-command-doc-coverage`
+fails a command that exists in the artifact and not in this table.
+
+| Command | Wire `type` | What it does |
+|---|---|---|
+| `CloneSequence` | `pulp.timeline.command.clone_sequence` | Clones a sequence using an explicit, complete owned-identity mapping. |
+| `CreateAsset` | `pulp.timeline.command.create_asset` | Adds one sealed recorded or imported media asset. |
+| `InsertAutomationLane` | `pulp.timeline.command.insert_automation_lane` | Inserts an automation lane into a track. |
+| `InsertClip` | `pulp.timeline.command.insert_clip` | Inserts an identity-bearing clip into a track. |
+| `InsertDevice` | `pulp.timeline.command.insert_device` | Inserts a typed device declaration into a track's authored chain. |
+| `InsertMacro` | `pulp.timeline.command.insert_macro` | Inserts a track-owned macro control. |
+| `InsertMarker` | `pulp.timeline.command.insert_marker` | Inserts a sequence-owned marker identity. |
+| `InsertMidiExpressionLane` | `pulp.timeline.command.insert_midi_expression_lane` | Inserts a controller/expression lane into a MIDI clip. |
+| `InsertModulationRoute` | `pulp.timeline.command.insert_modulation_route` | Inserts one authored source-to-parameter connection. |
+| `InsertModulator` | `pulp.timeline.command.insert_modulator` | Inserts a track-owned modulation source. |
+| `InsertNotes` | `pulp.timeline.command.insert_notes` | Inserts a set of identity-bearing notes into one MIDI clip. |
+| `InsertRegion` | `pulp.timeline.command.insert_region` | Inserts a sequence-owned region identity. |
+| `InsertScene` | `pulp.timeline.command.insert_scene` | Inserts a scene at an authored position in a sequence. |
+| `InsertSequence` | `pulp.timeline.command.insert_sequence` | Inserts a complete sequence and its owned identity subtree. |
+| `InsertSlot` | `pulp.timeline.command.insert_slot` | Inserts a slot at an authored position in a scene. |
+| `InsertTake` | `pulp.timeline.command.insert_take` | Inserts one take into an existing take lane. |
+| `InsertTakeLane` | `pulp.timeline.command.insert_take_lane` | Inserts one take lane and its owned take-identity subtree. |
+| `InsertTrack` | `pulp.timeline.command.insert_track` | Inserts a track and its complete owned identity subtree at an authored position. |
+| `MoveClip` | `pulp.timeline.command.move_clip` | Replaces a clip's time range under an exact optimistic-value gate. |
+| `MoveDevice` | `pulp.timeline.command.move_device` | Moves a device under an exact optimistic authored-position gate. |
+| `MoveTrack` | `pulp.timeline.command.move_track` | Moves a track in authored order under an exact optimistic-position gate. |
+| `RemoveAsset` | `pulp.timeline.command.remove_asset` | Removes a project-owned media asset by identity. |
+| `RemoveAutomationLane` | `pulp.timeline.command.remove_automation_lane` | Removes an automation lane by identity. |
+| `RemoveClip` | `pulp.timeline.command.remove_clip` | Removes a clip by its owning coordinates and identity. |
+| `RemoveDevice` | `pulp.timeline.command.remove_device` | Removes a device declaration by identity. |
+| `RemoveMacro` | `pulp.timeline.command.remove_macro` | Removes a track-owned macro control by identity. |
+| `RemoveMarker` | `pulp.timeline.command.remove_marker` | Removes a sequence-owned marker by identity. |
+| `RemoveMidiExpressionLane` | `pulp.timeline.command.remove_midi_expression_lane` | Removes a controller/expression lane from a MIDI clip by identity. |
+| `RemoveModulationRoute` | `pulp.timeline.command.remove_modulation_route` | Removes one authored connection by identity. |
+| `RemoveModulator` | `pulp.timeline.command.remove_modulator` | Removes a track-owned modulation source by identity. |
+| `RemoveNotes` | `pulp.timeline.command.remove_notes` | Removes a named set of notes under an exact optimistic-value gate. |
+| `RemoveRegion` | `pulp.timeline.command.remove_region` | Removes a sequence-owned region by identity. |
+| `RemoveScene` | `pulp.timeline.command.remove_scene` | Removes a scene and its owned slots by identity. |
+| `RemoveSequence` | `pulp.timeline.command.remove_sequence` | Removes a sequence and its owned identity subtree. |
+| `RemoveSlot` | `pulp.timeline.command.remove_slot` | Removes a slot from a scene by identity. |
+| `RemoveTake` | `pulp.timeline.command.remove_take` | Removes one take from an existing take lane. |
+| `RemoveTakeLane` | `pulp.timeline.command.remove_take_lane` | Removes a take lane and its owned take identities. |
+| `RemoveTrack` | `pulp.timeline.command.remove_track` | Removes a track and its complete owned identity subtree by identity. |
+| `ReplaceNoteContent` | `pulp.timeline.command.replace_note_content` | Replaces the complete note event set of one note clip. |
+| `RetargetDevice` | `pulp.timeline.command.retarget_device` | Replaces device kind, binding, slot, stage, bypass, and wet/dry atomically. |
+| `SetActiveTakeLane` | `pulp.timeline.command.set_active_take_lane` | Selects the arrangement or an existing take lane under an exact value gate. |
+| `SetChordScaleLane` | `pulp.timeline.command.set_chord_scale_lane` | Replaces a sequence's complete chord/scale lane under an exact value gate. |
+| `SetClipPlaybackProperties` | `pulp.timeline.command.set_clip_playback_properties` | Replaces clip-level gain and fade controls under an exact value gate. |
+| `SetClipSequenceRef` | `pulp.timeline.command.set_clip_sequence_ref` | Retargets a sequence-reference clip under an exact optimistic-value gate. |
+| `SetDeviceState` | `pulp.timeline.command.set_device_state` | Replaces the optional content-addressed opaque state reference. |
+| `SetDynamicsLane` | `pulp.timeline.command.set_dynamics_lane` | Replaces a sequence's complete dynamics lane under an exact value gate. |
+| `SetGroove` | `pulp.timeline.command.set_groove` | Replaces a sequence's complete groove under an exact value gate. |
+| `SetMacro` | `pulp.timeline.command.set_macro` | Replaces a macro control's declaration under an exact value gate. |
+| `SetMacroValue` | `pulp.timeline.command.set_macro_value` | Replaces only a macro's authored position under an exact value gate. |
+| `SetMeterMap` | `pulp.timeline.command.set_meter_map` | Replaces the complete project meter map under an exact value gate. |
+| `SetMidiExpressionLanePoints` | `pulp.timeline.command.set_midi_expression_lane_points` | Replaces one lane's authored points under an exact optimistic-value gate. |
+| `SetModulationRoute` | `pulp.timeline.command.set_modulation_route` | Replaces a route's source, target, depth, and bypass under an exact gate. |
+| `SetModulator` | `pulp.timeline.command.set_modulator` | Replaces a modulation source's declaration under an exact value gate. |
+| `SetNoteEvents` | `pulp.timeline.command.set_note_events` | Replaces the values of a named subset of one note clip's notes. |
+| `SetNoteVelocity` | `pulp.timeline.command.set_note_velocity` | Replaces one note velocity under an exact optimistic-value gate. |
+| `SetProjectTuning` | `pulp.timeline.command.set_project_tuning` | Replaces the project-wide tuning statement under an exact value gate. |
+| `SetRecordArm` | `pulp.timeline.command.set_record_arm` | Replaces record-arm document intent under an exact optimistic-value gate. |
+| `SetRegion` | `pulp.timeline.command.set_region` | Replaces one sequence-owned region under an exact value gate. |
+| `SetTakeComp` | `pulp.timeline.command.set_take_comp` | Replaces a take lane's canonical comp segments under an exact value gate. |
+| `SetTempoMap` | `pulp.timeline.command.set_tempo_map` | Replaces the complete project tempo map under an exact value gate. |
+| `SetTrackFreeze` | `pulp.timeline.command.set_track_freeze` | Publishes or clears a pre-rendered track artifact under an exact value gate. |
+| `SetTrackMixer` | `pulp.timeline.command.set_track_mixer` | Replaces track gain and pan under an exact optimistic-value gate. |
+| `SetTrackName` | `pulp.timeline.command.set_track_name` | Replaces a track's authored name under an exact optimistic-value gate. |
+| `SetTrackTuning` | `pulp.timeline.command.set_track_tuning` | Replaces one track's tuning override under an exact value gate. |
+
+#### Modulation sources, macros, and routes are track-owned and caller-identified
+
+A track carries three modulation members, and they are inserted rather than
+minted: `InsertModulator`
+(`pulp.timeline.command.insert_modulator`), `InsertMacro`
+(`pulp.timeline.command.insert_macro`), and `InsertModulationRoute`
+(`pulp.timeline.command.insert_modulation_route`) each carry a complete
+declaration bearing its own identity, so a source and the route that reads it
+can be stated in one transaction instead of requiring a round trip to learn
+what identity the model chose.
+
+Removal is refused by the model rather than by the command. A source a route
+still reads cannot leave: `RemoveModulator`
+(`pulp.timeline.command.remove_modulator`) and `RemoveMacro`
+(`pulp.timeline.command.remove_macro`) produce a track whose routes name a
+member it does not hold, and the model refuses that track — so the failure
+arrives as a rejected transaction, not as a document that quietly loses its
+routing. `RemoveModulationRoute`
+(`pulp.timeline.command.remove_modulation_route`) is the one modulation removal
+nothing can refuse, because no other member reads a route.
+
+The three `Set` forms pin identity. `SetModulator`
+(`pulp.timeline.command.set_modulator`), `SetMacro`
+(`pulp.timeline.command.set_macro`), and `SetModulationRoute`
+(`pulp.timeline.command.set_modulation_route`) each require the addressed id,
+`expected.id`, and `replacement.id` to be equal. An unpinned identity would let
+a Modify swap one member for another — a removal and a creation wearing a
+signature that declares neither — which hands a writer holding only Modify the
+operation its capability mask refuses. `SetModulationRoute` gates the whole
+route including `enabled`, because a bypassed route keeps its depth and target
+so re-enabling restores what was there.
+
+`SetMacroValue` (`pulp.timeline.command.set_macro_value`) is the narrow command
+beside the broad one, the same shape `SetNoteVelocity` has beside
+`SetNoteEvents`. It gates the normalized position alone, so a performer moving
+a macro need not also supply its current name and a concurrent rename cannot
+abort an edit that did not conflict with it. The float compares exactly rather
+than within a tolerance, which is safe because the persisted spelling is the
+IEEE-754 bit pattern. The overlap with `SetMacro` is deliberate: an edit that
+rewrites the whole macro should gate on the whole macro.
+
+#### A MIDI expression lane is addressed, not note-keyed
+
+`InsertMidiExpressionLane` (`pulp.timeline.command.insert_midi_expression_lane`)
+delivers a lane whole — identity, `MidiLaneAddress`, and every authored point —
+and `MidiContent::create` is the single authority on whether it may join the
+clip, enforcing identity distinctness across notes, points, and lanes plus one
+lane per address. `RemoveMidiExpressionLane`
+(`pulp.timeline.command.remove_midi_expression_lane`) is separate because
+abandoning a stream is the destructive intent a capability mask denies by
+default: a writer that may edit a lane's values does not thereby gain the right
+to discard it.
+
+`SetMidiExpressionLanePoints`
+(`pulp.timeline.command.set_midi_expression_lane_points`) changes what a stream
+says, never which stream it is — the lane keeps both its identity and its
+address, and the gate compares the full point array in canonical order.
+Re-addressing a lane is a remove and an insert, because the two things a caller
+means by it carry different authority.
+
+#### Whole-sequence and region commands
+
+`InsertSequence` (`pulp.timeline.command.insert_sequence`) and `RemoveSequence`
+(`pulp.timeline.command.remove_sequence`) carry a complete sequence and its
+owned identity subtree, the sequence-level pair beside `InsertTrack` /
+`RemoveTrack`. `CloneSequence` is the third member and the one that needs an
+explicit complete old-to-new id mapping.
+
+`SetRegion` (`pulp.timeline.command.set_region`) completes the region trio
+beside `InsertRegion` and `RemoveRegion`, and pins identity the way the
+modulation `Set` commands do: `expected.id` and `replacement.id` must be equal
+and must name a region the sequence owns. That pinning is what makes correcting
+a region's `SectionRole` reachable for a writer profile that may modify but may
+not remove.
 
 ### Rebuilding a `MidiContent` from its notes alone silently drops everything else
 
@@ -1137,6 +1324,23 @@ at the original onset, and is inherited unchanged by ratchets. Nested MIDI reads
 the child groove exactly once rather than composing it with the parent. A
 trimmed nested MIDI leaf with authored groove is currently refused because the
 source-window chase rule for displaced notes is intentionally undefined.
+
+### A tick edit finer than a frame is authorable and real, but renders as nothing
+
+Ticks resolve far finer than frames. `kTicksPerQuarter` is 705'600, which at
+120 BPM and 48 kHz is about 29.4 ticks to a frame, so a document can author a
+placement trim that the frame grid cannot represent: the clip's tick window
+genuinely narrows while the frames it selects do not move at all. Both readings
+are correct at their own resolution, and nothing downstream is entitled to treat
+the disagreement as a contradiction.
+
+That matters whenever a document edit is checked against something measured in
+frames. Write the check as an implication in the direction that survives the gap
+-- a narrowed frame window implies a narrowed tick window, never the reverse --
+and pick fixture numbers deliberately: every trim expressed as a fraction of a
+quarter note lands exactly on a frame boundary at that tempo and rate, so a
+table built from them is blind to the case entirely. The playback skill carries
+the render-side statement of the same fact.
 
 ### Downgrade refusals: refuse on *authored* data, not just audible data
 
@@ -1443,6 +1647,17 @@ is `pending` *and* materially changed. Material is exactly `delivery_state`,
 nothing. There is no doc-only carve-out and no skip trailer, so `shipyard pr`
 reports skill-sync and version-bump green and the PR still goes red.
 
+**Write a new row as its own file: `docs/status/sequencer-exposure/rows/<row-id>.json`,
+containing just that row object, named for its `id`.** The checker assembles the
+ledger from `docs/status/sequencer-exposure.json` plus every file in that
+directory, so both forms are one ledger and a row lives in exactly one of them.
+The directory exists because the single document has one append point: two
+branches that each append a row rewrite the same bytes and conflict *with each
+other* even when each merges cleanly against `main` — which is also why the merge
+queue cannot batch them. Two row files conflict with nothing. Edit a row that is
+still in the single document in place; do not move it while amending it, because
+a move plus an edit reads as neither.
+
 Amending the existing pending row is the honest move when that row already claims
 the path and its delivery is unfinished — `validate_transition`'s contract is
 omission prevention, its own wording is "an added **or materially changed**
@@ -1735,11 +1950,14 @@ at the model layer, and keep a separate standalone-shape assertion for the host
 refusal so narrowing the model's reach does not silently retire it.
 
 The device catalog (`tools/timeline/src/device_catalog.cpp`) publishes what a
-chain may name — binding key, domain, reported latency, and the two bounds
-admission enforces. It lives in `tools/timeline` rather than in either
-boundary because `pulp-cli` and `pulp-mcp-core` link `pulp::tool-timeline`
-publicly but not `pulp::host`; putting the encoder anywhere else widens a
-target's link surface to pull the host in.
+chain may name — binding key, domain, reported latency, stable parameter IDs,
+plain ranges, defaults, units and behavior flags, and the two bounds admission
+enforces. Built-in humaniser controls are direct runtime controls; the catalog
+marks them non-automatable, non-rampable and non-modulatable, and Timeline
+placement state does not persist them. The catalog lives in `tools/timeline`
+rather than in either boundary because `pulp-cli` and `pulp-mcp-core` link
+`pulp::tool-timeline` publicly but not `pulp::host`; putting the encoder anywhere
+else widens a target's link surface to pull the host in.
 
 ### `Track::create` moves its input partway through, so late validation reads an empty collection
 
@@ -3154,10 +3372,31 @@ A capability reachable only by granting the destructive axis is not reachable.
 
 Clip expression lanes take the third shape for this reason: `Insert`/`Create`,
 `Remove`/`Remove`, and a separate point-edit command at `Modify` whose payload
-names the lane by identity and carries no address. The test that earns it is the
-profile test — a proposal writer inserts a lane, edits its points, and is
-refused the removal — and it is worth writing before the reducers, because it is
-the only assertion that fails under either of the wrong shapes.
+names the lane by identity and carries no address.
+
+**Splitting the command is half the job — the split protects the lane's
+identity, not its contents.** The point-edit command is itself an
+`{expected, replacement}` pair that admits an empty replacement, so it carries
+the very defect the first paragraph names one level down: the lane survives, and
+every point in it is retired. A declared intent describes the *command*; the
+authority a *payload* needs has to be read off the payload. So any command whose
+reducer calls `plan_identity_deactivate` while declaring `Modify` must widen its
+requirement in `required_authorities`, by set-differencing the identities in
+`expected` against those in `replacement` — `ReplaceNoteContent` and
+`SetMidiExpressionLanePoints` both do. The general rule: **a reducer that retires
+an identity belongs to a `Remove`-declared command, or its arm in
+`required_authorities` earns the `Remove` bit from its payload. There is no third
+option**, and a `Modify` command that replaces a collection of identified items
+is exactly where the miss hides.
+
+The test that earns this cannot be a mask comparison. `allows(proposal, edit)`
+is *true* by construction — that is the whole point of the third shape — so
+asserting it proves the split and says nothing about what a payload may do.
+Submit the command through a real `DocumentSession` under
+`non_destructive_capabilities()` and assert `ConflictCode::CapabilityDenied`,
+with an in-place value edit on the same lane as the control that the writer is
+still admitted. Write it before the reducers: it is the only assertion that
+fails under any of the wrong shapes.
 
 ## `chased` is a derivation receipt, and only the command layer can refuse one
 
@@ -3194,6 +3433,192 @@ is the document correctly refusing to reissue an identity. Compare the clip's
 lane vector instead — it is stricter than a count on every axis that matters
 (identity, address, order, per-point value) and blind to bookkeeping that is
 supposed to change.
+
+## A Create/Remove pair with no Modify is unreachable, not merely awkward
+
+`CommandIntent::Remove` is the destructive axis a capability mask denies by
+default, and the MCP default proposal profile holds every class with no
+destructive intent. So a vocabulary that ships only Insert and Remove is not
+"a bit inconvenient" for that profile — the only way to change a value is
+remove-then-insert, and the remove is refused, so the capability is **write-once
+for the writer class it exists for**. Regions had exactly this shape: a
+proposal-profile writer could author a region carrying a `SectionRole` and never
+correct it.
+
+The fix is a third command at `Modify` whose payload pins identity. Two things
+make it a real Modify rather than a laundered pair:
+
+- `expected` and `replacement` must carry the same identity, refused in the
+  reducer *and* in the decoder. A Modify that can swap identity is a removal and
+  a creation wearing a signature that declares neither, which is a way around the
+  denial the profile is built on.
+- Nothing is retired, so the command plans no identity mutation and its inverse
+  reduces through the public `reduce_transaction` unchanged — unlike a lane or
+  point removal, whose undo needs a real `DocumentSession`.
+
+`InsertMarker`/`RemoveMarker` and `Class::Automation` still have the defective
+shape. Three instances is a pattern: **any lane or annotation vocabulary shipping
+Create and Remove without Modify is unreachable for the untrusted writer profile
+Forge uses.**
+
+## A collection the model validates end to end needs no second validator in its commands
+
+`TrackInput`'s three modulation collections arrived complete on every axis but
+mutation: registered document schemas, an encoder, a decoder, and
+`validate_attached_modulation`, which already refuses an out-of-range macro
+position, an undeclared modulator kind, a route whose depth leaves
+`[-kMaximumModulationDepth, +kMaximumModulationDepth]`, a route naming a source
+the track does not hold, and a source removal that would orphan one.
+
+A command family over such a collection should reach that validator rather than
+restate any part of it. The cheap way is a whole-collection replace that revalidates
+through `Track::create`, exactly as `Track::with_device_chain` already did:
+
+```cpp
+auto input = detail::track_input_of(*this);
+input.modulators = std::move(modulators);
+auto validated = Track::create(std::move(input));   // the only validator
+// ... then copy only the replaced storage into a copy of *data_
+```
+
+Copying only the one field back is the load-bearing half. `Track::create` rebuilds
+the persistent clip index from scratch, so returning its result directly would
+discard every shared index subtree and silently turn an O(log n) edit into an O(n)
+one. Reach `create` for its refusal; keep your own snapshot for everything it did
+not change.
+
+The payoff is that "removing a modulation source a route still reads is refused"
+needed no code in the command layer at all — the model was already the authority,
+and the reducer surfaces its `ModelError` as `ConflictCode::ModelInvariant`.
+
+## An exact float gate is safe when the wire spells the float in bits
+
+An optimistic gate that compares a `float` with `==` is normally a trap: a value
+that round-trips through a decimal encoding need not compare equal to itself, so
+the gate refuses an edit nobody conflicted on.
+
+It is not a trap when the persisted spelling is the IEEE-754 bit pattern.
+`macro_control.value_bits` and `modulation_route.depth_bits` are `U32`, so a round
+trip is bit-exact by construction and `operator==` holds across it. The naive
+mitigation — gate with a tolerance — would have *softened* every modulation gate
+for a hazard that does not exist, so a command gating one of those floats spells
+its own operands the same way (`expected_bits` / `replacement_bits`), never as a
+decimal.
+
+Prove it rather than reasoning about it, and prove it with a negative control:
+gate on a decoded `0.1f` (a value no decimal spelling at float width preserves)
+and show the **neighbouring bit pattern** is refused. Acceptance without the
+neighbour test is a gate that might accept anything close.
+
+One consequence for idempotency: `equivalent()` compares those operands as bit
+patterns, not with `==`. Idempotency asks whether the same authored command
+arrived twice, which is a question about the bytes — and `==` answers "no" to two
+identical NaN payloads.
+
+## A referencing collection is the one whose removal nothing can refuse
+
+The three modulation collections look symmetric and are not. A `Modulator` and a
+`MacroControl` are *referenced* — `validate_attached_modulation` refuses a track
+whose routes name a source it does not hold, so removing one while a route reads
+it fails as a model invariant. A `ModulationRoute` is referenced by nothing, so
+its removal always succeeds and takes only the connection with it.
+
+That asymmetry is worth knowing before writing the tests, because the
+"a source a route still reads cannot be removed" shape has no route equivalent,
+and looking for one wastes a cycle. What a route command owes instead is the
+opposite proof: that removing a route leaves both of its sources standing.
+
+Two further route-only refusals have no analogue on the source side, and both
+live in the model rather than the command layer:
+
+- A route may name a source identity the track does not hold.
+- A route may name an identity the track *does* hold, of the **other kind** —
+  `ModulationSourceRef` carries `kind` explicitly so a macro can never quietly
+  stand in for a modulator that shared its ID. A `{id}`-only reference would
+  have made this unrepresentable rather than refused.
+
+Both must be tested on `Insert` **and** on the `Set`, because the two reach the
+model through different accessors and a reducer could refuse one and not the
+other.
+
+## A bypass is a gated value, not a state an edit may drop
+
+`ModulationRoute::enabled` is an authored bypass, and `modulation.hpp` is
+explicit that a disabled route keeps its identity, depth, and target so that
+re-enabling restores what was there. Two obligations follow, and both are easy
+to miss because a bypass reads like presentation rather than content:
+
+- A `Remove`'s inverse must carry the route **whole**, bypass included. An
+  inverse that reconstructed a default would bring a silenced route back live.
+- A whole-value gate must compare `enabled` along with the rest, so an edit that
+  believed a route was live cannot land on one an author had disabled.
+
+Neither is visible in a test that only varies `depth`. Vary every member of the
+gated struct in turn — for a route that is source, target, depth, and bypass —
+or the gate is only proved for the field the test author happened to think of.
+
+## A second route from one source to one parameter is its own refusal
+
+Several routes may reach one parameter and their offsets sum, which is exactly
+what separates a route from an automation lane. What the model refuses is the
+*same source* reaching the *same parameter* twice, because that is one
+connection stated twice with two depths and no rule for which wins.
+
+This matters for test construction rather than for the command vocabulary: a
+control that inserts a second route from the seeded source to the seeded
+parameter is refused for that reason, which makes a depth-range or
+source-reference test pass for the wrong cause. Point the control's route at a
+different parameter (`Pan` rather than `Gain`) so the only variable left is the
+one under test.
+
+## A hand-written field-by-field comparison is where a member goes missing
+
+`equal_region` in `command.cpp` named five of `SequenceRegion`'s six members and
+omitted `role` — so two regions differing only in the member a generator
+dispatches on compared equal, in command idempotency *and* in whole-document
+equivalence. Nothing failed, because nothing asked.
+
+Every member of that struct is exactly comparable, so the comparison is now
+`operator<=>(…) = default` on the type and `equal_region` forwards to it. Prefer
+that wherever the members allow it: a partial restatement of "are these the same"
+is a second authority that can silently disagree with the first, and the way it
+fails is by admitting an edit it should have refused.
+
+The exception is real — `equal_marker` and the clip/track comparisons stay
+hand-written because they must skip derived or float members — but "the members
+are all exactly comparable and I wrote it out anyway" is not that exception.
+
+## `Class::Timing` governs pitch as well as time, deliberately
+
+`SetProjectTuning` and `SetTrackTuning` are both `{Timing, Modify}`, which makes
+`Timing` the only class spanning project and track scope. That is the accepted
+cost of two alternatives that were worse:
+
+- A new `CommandClass` renumbers `capability_bit` and silently repurposes every
+  persisted and transmitted writer mask. Never add one; `kCommandClassCount` is
+  11 and the bit literals are asserted in
+  `test_timeline_tuning_region_commands.cpp` so an inserted class fails loudly.
+- Putting the track command on `Class::Track` would mean a grant issued to rename
+  and reorder tracks silently becomes authority to retune them, and it splits the
+  retuning grant across two bits so no mask can say "may not retune" without also
+  forbidding renames.
+
+The class doc comment states what it governs, because a class whose doc does not
+is how the next author picks the wrong one.
+
+## Clearing an optional value is `Modify`, not `Remove`
+
+`std::optional<TuningReference>` absence is a claim — "this document names no
+tuning" — and it is a *different* claim from naming equal temperament. Clearing
+it removes nothing the document owns; the project or track persists unchanged in
+identity, exactly as `SetChordScaleLane`, `SetGroove`, `SetTempoMap`, and
+`SetMeterMap` all replace a whole value including an empty one under `Modify`.
+
+Routing the clear through `Remove` would be the hardening mistake: it is denied
+by default, so a proposal-profile writer could set a tuning it could never
+retract. And the gate compares absence as a value — expecting absence where a
+value stands is refused rather than treated as "no opinion", or a writer would
+overwrite an override it never saw.
 
 ## Every "rebuild a Sequence from its parts" site must carry a new lane
 
@@ -3487,9 +3912,18 @@ emits the sealed artifact or the comp instead. `record_armed` and the
 `take_lanes` list do not — arm is document intent the capture engine reads and
 never acts on during lowering, and an unselected lane is inert document data.
 So a nested child carrying arm or a dormant lane lowers to exactly the clips a
-child without them lowers to, while a nested frozen or comped child refuses
-(`NestedFrozenTrackUnsupported`, `NestedActiveTakeUnsupported`). If you add a
-fifth state, the question to answer is "does anything substitute on this?"
+child without them lowers to, while a nested comped child refuses
+(`NestedActiveTakeUnsupported`) and a nested frozen child refuses
+(`NestedFrozenTrackUnsupported`) unless the nesting transforms nothing at all —
+no tick offset, no trimmed window, no gain, fade, fader, pan, modulation,
+tuning, groove, dynamics or chord lane, and no sample-rate conversion. Both are
+anchored in absolute samples and cannot follow a nesting that moves or cuts the
+child, so a transformation-free embedding is the only case where the sealed
+artifact is provably still in the right place. The two refusals are narrowed by
+one shared predicate and differ only in payload: a freeze lowers to a single
+absolute leaf, a comp to one leaf per segment, each resolved against the take
+that segment names. If you add a fifth state, the
+question to answer is "does anything substitute on this?"
 
 The fixture trap is in the other direction. `TakeLane::create` imposes **no**
 non-empty-takes requirement, so a lane holding zero takes constructs happily —
@@ -3543,3 +3977,47 @@ later round measures a warmed cache.
 The growth cases run each operation at two sizes for several rounds, so the
 suite costs several times a single-size pass — `timeline_tests.cmake` gives
 `pulp-test-timeline-scale` a correspondingly long `TIMEOUT`.
+
+## The live broker surface projects `ConflictCode`; it must never re-decide it
+
+`dev.pulp.timeline/document-session@1` exposes a mutable `DocumentSession`
+through the Pulp control broker, and the whole design rests on one rule: the
+broker reads the authority verdict the session already reached and never reaches
+its own. `control_timeline_conflict_result_code` is a total, one-directional
+switch from `timeline::ConflictCode` onto `ControlResultCode` —
+`CapabilityDenied` (the `CommandAuthority` axis) lands on `PolicyDenied`,
+`StaleRevision` on `StateConflict`, the quota codes on `ResourceExhausted`. A
+`WriterCapabilityMask` refusal therefore arrives at the live surface under the
+same name the offline CLI and MCP boundaries use, and a test can assert one
+verdict from both sides.
+
+The failure mode this forbids is quiet: a broker that consults the mask itself,
+or maps a conflict by category rather than by member, becomes a second authority
+model. It will agree with the session for a while and then drift on exactly the
+case that matters — a newly added `ConflictCode`, which is a wire ordinal the
+session owns. Because the switch is total over the enum, adding a member breaks
+the build at the projection rather than silently defaulting; keep it that way
+and never add a `default:` arm to `control_timeline_conflict_result_code`.
+
+Two more constraints that are not obvious from the session API:
+
+- **The broker never escalates a caller into `trusted`.**
+  `control_timeline_admissible_writer_profile` admits `proposal` and `editor`
+  and refuses everything else, *including* `trusted`, and an unnamed profile
+  resolves *down* to `proposal` rather than to whatever authority the host
+  itself happens to hold. Selecting the unquotaed profile on a caller's behalf
+  is the escalation the seam exists to prevent, so this is policy, not a default
+  worth tidying.
+- **A `registered_writer` exposure row must state that profile's exact
+  quotas.** `tools/scripts/sequencer_exposure_check.py` parses
+  `tools/timeline/src/writer_profile.cpp` rather than trusting the ledger, so
+  `authority.bounds` has to equal the profile's real
+  `max_transaction_retained_bytes` / `max_session_retained_bytes`, and every
+  `refusal_codes` entry has to be a name `conflict_code_name` emits. Transcribe
+  neither from memory; read them out of that source.
+
+The live operation reaches Forge Sequencer and Forge Modular without any
+Forge-side change, because `tools/cli/cmd_control.cpp` and
+`tools/mcp/mcp_control_tool_catalog.cpp` both walk the registry rather than
+enumerating operations by hand — declaring the capability grantable is what
+projects it to both surfaces.

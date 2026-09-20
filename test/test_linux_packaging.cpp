@@ -523,8 +523,7 @@ TEST_CASE("Linux AppImage packaging builds a real AppImage when appimagetool is 
         REQUIRE_FALSE(pulp::ship::create_appimage("Demo", "1.0.0", exe.string(), out.string()));
         REQUIRE_FALSE(fs::exists(out));
         REQUIRE_FALSE(fs::exists(dir.path / "Demo.AppDir"));  // staging cleaned up
-        SUCCEED("appimagetool not installed — honest-fail path verified");
-        return;
+        SKIP("appimagetool not installed — honest-fail path verified");
     }
 
     TempDir dir("appimage-ok");

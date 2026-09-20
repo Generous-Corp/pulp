@@ -33,7 +33,8 @@ def command_compare(args: argparse.Namespace) -> int:
         report = compare_one(
             args.importer.resolve(), args.observer.resolve(),
             args.file.resolve(), args.output.resolve(), args.timeout_seconds,
-            args.from_source, args.browser.resolve() if args.browser else None)
+            args.from_source, args.browser.resolve() if args.browser else None,
+            cache_state=args.cache_state)
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -79,7 +80,8 @@ def command_corpus(args: argparse.Namespace) -> int:
                 args.importer.resolve(), args.observer.resolve(), source,
                 fixture_output, args.timeout_seconds,
                 metadata.get("from", args.from_source) if metadata else args.from_source,
-                args.browser.resolve() if args.browser else None, metadata))
+                args.browser.resolve() if args.browser else None, metadata,
+                metadata.get("cache_state", args.cache_state) if metadata else args.cache_state))
         except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
             failures.append({
                 "fixture_id": fixture_id,
@@ -121,7 +123,8 @@ def command_benchmark(args: argparse.Namespace) -> int:
                 args.importer.resolve(), args.observer.resolve(),
                 args.file.resolve(), output / "runs" / str(index + 1),
                 args.timeout_seconds, args.from_source,
-                args.browser.resolve() if args.browser else None))
+                args.browser.resolve() if args.browser else None,
+                cache_state="cold" if index == 0 else "warm"))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -144,6 +147,17 @@ def command_benchmark(args: argparse.Namespace) -> int:
             "p50_ms_saved": round(
                 statistics.median(browser) - statistics.median(native), 1),
         },
+        "observability": {
+            "ttfp": {"value_ms": None, "status": "unverified"},
+            "ttni": {"p50_ms": None, "p95_ms": None, "status": "unverified"},
+            "ttni_proxy": {"p50_ms": round(statistics.median(
+                [report["observability"]["ttni_proxy"]["value_ms"] for report in warm]), 1),
+                     "p95_ms": percentile(
+                         [report["observability"]["ttni_proxy"]["value_ms"] for report in warm], 0.95),
+                     "status": "measured"},
+            "ifnf": {"value_ms": None, "status": "readback-only"},
+            "cache_states": [report["observability"]["cache_state"]["identity"] for report in reports],
+        },
     }
     write_json(output / "benchmark.json", benchmark)
     print(json.dumps(benchmark, indent=2))
@@ -163,6 +177,9 @@ def build_parser() -> argparse.ArgumentParser:
             "--from", dest="from_source", default="claude",
             choices=("claude", "html", "stitch"))
         subparser.add_argument("--timeout-seconds", type=positive_int, default=60)
+        subparser.add_argument(
+            "--cache-state", choices=("cold", "warm", "unknown"), default="unknown",
+            help="caller-declared cache state; never inferred from timing")
 
     compare = subparsers.add_parser("compare")
     shared(compare)

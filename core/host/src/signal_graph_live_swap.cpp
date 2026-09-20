@@ -943,11 +943,18 @@ bool SignalGraph::snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& ol
         if (c.feedback) return false;
     }
     // (5) Identical node SET (no node added / removed / re-typed since this
-    // snapshot compiled; cg->shapes holds every node id) plus per-node plugin /
+    // snapshot compiled; authored_shapes holds every node id before any private
+    // sample-region quotienting) plus per-node plugin /
     // custom instance identity, and (6) release-mode cache coverage.
-    if (nodes_.size() != old_cg.shapes.size()) return false;
+    if (nodes_.size() != old_cg.authored_shapes.size())
+        return false;
     for (const auto& n : nodes_) {
-        if (old_cg.shapes.find(n.id) == old_cg.shapes.end()) return false;
+        const auto shape = old_cg.authored_shapes.find(n.id);
+        if (shape == old_cg.authored_shapes.end() || shape->second.type != n.type ||
+            shape->second.num_input_ports != n.num_input_ports ||
+            shape->second.num_output_ports != n.num_output_ports) {
+            return false;
+        }
         if (n.type == NodeType::Plugin) {
             const auto it = old_cg.plugins.find(n.id);
             const bool was_resolved = (it != old_cg.plugins.end());

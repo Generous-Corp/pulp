@@ -9,6 +9,16 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    "pulp/host/signal_graph.hpp": "Pulp::host",
+    "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
+    "pulp/host/signal_graph_prepared_topology_edit.hpp": "Pulp::host",
+    "pulp/host/custom_node_type.hpp": "Pulp::host",
+    "pulp/host/sample_region_authoring.hpp": "Pulp::host",
+    "pulp/host/sample_region_proof.hpp": "Pulp::host",
+    "pulp/host/sample_region_parameters.hpp": "Pulp::host",
+
+    "pulp/format/processor.hpp": "Pulp::format",
+    "pulp/format/processor_node_adapter.hpp": "Pulp::format",
     "pulp/audio/instrument_voice_allocator.hpp": "Pulp::audio",
     "pulp/audio/midi_voice_modulation_adapter.hpp": "Pulp::audio",
     "pulp/audio/onset_detector.hpp": "Pulp::audio",
@@ -102,6 +112,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/supersaw.hpp": "Pulp::signal",
     "pulp/signal/true_peak_limiter.hpp": "Pulp::signal",
     "pulp/signal/transient_designer.hpp": "Pulp::signal",
+    "pulp/signal/unit_delay.hpp": "Pulp::signal",
     "pulp/signal/unison.hpp": "Pulp::signal",
     "pulp/signal/velvet_noise.hpp": "Pulp::signal",
     "pulp/signal/wavetable.hpp": "Pulp::signal",
@@ -164,6 +175,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "shaping and a finite tail; it is a bounded buffering primitive intended for "
             "composition inside effects rather than an advertised generator DSP claim. "
             "It has no in-tree consumer today beyond the signal umbrella header."
+        ),
+    },
+    {
+        "include": "pulp/signal/simd_buffer.hpp",
+        "fingerprint": "sha256:7780d3b9a8e734dbacd9b2d7d06c5d07328fe167da4d8d3ea88938c71ae5a973",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "SIMD-width-aligned sample storage and its aligned allocate/free pair, used "
+            "for composition inside DSP kernels rather than advertised as a capability of "
+            "its own. Its allocator branches per platform because the C11 aligned_alloc "
+            "it wraps is unavailable below Android API 28, which is a portability detail "
+            "of the primitive and not a change to the surface it presents."
         ),
     },
     {
@@ -654,7 +678,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/playback/audio_renderer.hpp",
-        "fingerprint": "sha256:4cbd6e13feb8f2020ebea81c7987db226aa01c4f207c4cfe1544512a217f751c",
+        "fingerprint": "sha256:6050c1569f5e90b404fc4dc8a95498964a796a418a1fe62a9ec4929bb8e57e2f",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -906,7 +930,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/playback/program_compiler.hpp",
-        "fingerprint": "sha256:33a618bdbd376918f992f842abb25c536c3e3374d25763a7febe8917572416ff",
+        "fingerprint": "sha256:ff4c9febf95f0752b9c77e3ac113fce02cb3bff99c2cdc5e1a870b0135bb6412",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1070,7 +1094,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/playback/transport.hpp",
-        "fingerprint": "sha256:13685c53c2e82e28bff6b56edf5a82e94e78cbedb73539c6a0046d5dd0c7a1be",
+        "fingerprint": "sha256:fd25dfd0e69c3355cce4802bc9bb40771218d35cb4d7c2fd529749b25fceb993",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1080,6 +1104,32 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "aliased identity. It is the playback engine's own control object; its "
             "agent-facing exposure is claimed by the capability rows that bind a "
             "transport surface, not by this header."
+        ),
+    },
+    {
+        "include": "pulp/signal/convolver.hpp",
+        "fingerprint": "sha256:7b6f5cc6d4bd8a3c71c07149958db256d08aa0f264544df0abfa07eb3a4b5825",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Uniform partitioned convolution engine with a lock-free live IR swap and an "
+            "opt-in swap crossfade. docs/reference/modules.md documents it as a bounded DSP "
+            "primitive a plugin drives from its own process() at a fixed block size, and its "
+            "generator-facing shape is already published through the signal compatibility "
+            "vocabulary, so it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/convolver_messages.hpp",
+        "fingerprint": "sha256:2d4d3361cfa9099d4cd549fc250de196c1053c9c5448fa15b540089433e74e29",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Audio-thread hand-off plumbing behind PartitionedConvolver: the per-IR state, "
+            "the convolver's shared input history, and the lock-free swapper that shuttles "
+            "them between a worker thread and the audio thread over runtime::Handoff. "
+            "Real-time ownership-transfer infrastructure for that engine rather than an "
+            "advertised generator surface; it carries no capability claim of its own."
         ),
     },
 ]

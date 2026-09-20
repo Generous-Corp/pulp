@@ -297,6 +297,17 @@ if(PULP_ENABLE_PROJECT_PACKAGE)
         SOURCES test_timeline_cli_offline_render.cpp
         LIBRARIES pulp::tool-timeline pulp::host pulp::playback pulp::audio pulp::timeline
             pulp::runtime)
+    if(PULP_ENABLE_INSPECTOR)
+        # The live mutable-document control surface driven end to end over a real
+        # DocumentSession. It links the offline writer-profile library as well as
+        # the broker so each refusal is asserted from both sides in one vocabulary:
+        # the session's own ConflictCode and the broker's projection of it.
+        pulp_add_test_suite(pulp-test-control-timeline-document-session
+            SOURCES test_control_timeline_document_session.cpp
+            LIBRARIES pulp::inspect-runtime pulp::inspect-control pulp::tool-timeline
+                pulp::timeline
+            LABELS "inspect;control;timeline;document-session")
+    endif()
 endif()
 # The chord/scale context lane plus the compile-context subscription contract
 # it carries: the document type, its schema migrations, and the read side that
@@ -315,6 +326,24 @@ pulp_add_test_suite(pulp-test-timeline-dynamics-lane
 # author and edit a stream without being able to abandon one.
 pulp_add_test_suite(pulp-test-timeline-midi-expression-commands
     SOURCES test_timeline_midi_expression_commands.cpp
+    LIBRARIES pulp::timeline)
+# Document tuning on both its owners, and the region edit that makes a section
+# role correctable by the writer profile that authored it.
+pulp_add_test_suite(pulp-test-timeline-tuning-region-commands
+    SOURCES test_timeline_tuning_region_commands.cpp
+    LIBRARIES pulp::timeline)
+# Track-owned modulation sources and macros: the insert/remove pair, the whole
+# value gate, the narrow position gate beside it, and the identity pinning that
+# keeps a Modify from performing the removal a proposal writer is denied.
+pulp_add_test_suite(pulp-test-timeline-modulation-commands
+    SOURCES test_timeline_modulation_commands.cpp
+    LIBRARIES pulp::timeline)
+# The connections those sources drive: the insert/remove pair, the whole-route
+# gate that covers the bypass as well as the depth, the source reference a route
+# may not dangle or mistype, and the identity pinning that keeps a Modify from
+# performing the removal a proposal writer is denied.
+pulp_add_test_suite(pulp-test-timeline-modulation-route-commands
+    SOURCES test_timeline_modulation_route_commands.cpp
     LIBRARIES pulp::timeline)
 # The groove a sequence plays with, carried on the same contract: the swing and
 # step-table transform, the document type and its migrations, and the read side
@@ -678,9 +707,28 @@ endif()
 # derives every `dev.pulp.sequencer/` operation from the frozen control registry
 # and fails when the skill omits one or records the wrong result kind, so a
 # live sequencer capability cannot ship agent-invisible.
+# Registered unconditionally, as the other Python-driven tests in this tree
+# are. Wrapping the registration in `if(Python3_EXECUTABLE)` deletes the gate
+# on a host without an interpreter instead of failing it, and `ctest -R` on a
+# name nothing registered exits 0 -- so the lane that can least afford to skip
+# this check is the one that silently would.
+add_test(NAME sequencer-control-skill-coverage COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_SOURCE_DIR}/tools/scripts/sequencer_control_skill_check.py")
+
+# Calibrated controls for the gate above: each proves the checker returns
+# non-zero on a registry/skill pair it must reject.
+add_test(NAME sequencer-control-skill-coverage-selftest COMMAND ${Python3_EXECUTABLE}
+    "${CMAKE_SOURCE_DIR}/tools/scripts/test_sequencer_control_skill_check.py")
+
+# The same surface, for the durable command vocabulary. The schema drift gate
+# proves `timeline_cli_verbs.json` still matches the manifest, but nothing
+# requires anyone to be told a command exists. This derives every
+# `Command`-domain verb from that artifact and fails when the skill omits one or
+# names it without the wire type a caller writes, so a reachable mutation cannot
+# ship agent-invisible.
 if(Python3_EXECUTABLE)
-    add_test(NAME sequencer-control-skill-coverage COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/tools/scripts/sequencer_control_skill_check.py")
+    add_test(NAME timeline-command-doc-coverage COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/timeline_command_doc_check.py")
 endif()
 
 # Keep focused Timeline submodule registrations beneath this owner hub.

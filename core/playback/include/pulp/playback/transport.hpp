@@ -139,7 +139,22 @@ struct TransportPlayhead {
     constexpr bool operator==(const TransportPlayhead&) const = default;
 };
 
+/// The transport's accepted loop control state.
+///
+/// Unlike TransportPlayhead::sequence, this sequence changes only when the
+/// loop authority changes (prepare, reset, or an accepted set_loop()). Audio
+/// blocks therefore cannot create false optimistic-concurrency conflicts for a
+/// control client editing the same loop it just read.
+struct TransportLoopState {
+    std::uint64_t sequence = 0;
+    LoopRegion loop{};
+    bool prepared = false;
+
+    constexpr bool operator==(const TransportLoopState&) const = default;
+};
+
 static_assert(std::is_trivially_copyable_v<TransportPlayhead>);
+static_assert(std::is_trivially_copyable_v<TransportLoopState>);
 
 /// Validates the shared structural contract consumed by every block renderer.
 bool valid_transport_ranges(const TransportSnapshot& transport) noexcept;
@@ -239,6 +254,16 @@ class MasterTransport {
     /// playback is now, not where it was.
     TransportPlayhead playhead() const noexcept { return playhead_.read(); }
 
+    /// The latest accepted loop state, including edits not yet consumed by an
+    /// audio block. A reset or failed prepare publishes prepared=false while
+    /// retaining a monotonic sequence, so stale lifecycle state cannot look
+    /// prepared merely because an older playhead had a nonzero sequence.
+    TransportLoopState loop_state() const noexcept {
+        const auto desired = desired_.read();
+        return {
+            .sequence = desired.loop_sequence, .loop = desired.loop, .prepared = desired.prepared};
+    }
+
     void reset() noexcept;
 
   private:
@@ -252,6 +277,8 @@ class MasterTransport {
         std::uint32_t scrub_window_frames = 0;
         bool playing = false;
         bool scrubbing = false;
+        bool prepared = false;
+        std::uint64_t loop_sequence = 0;
         std::uint64_t seek_generation = 0;
         std::uint64_t scrub_generation = 0;
         std::uint64_t playing_generation = 0;
@@ -282,6 +309,7 @@ class MasterTransport {
 
     runtime::SeqLock<DesiredState> desired_{};
     runtime::SeqLock<TransportPlayhead> playhead_{};
+    std::uint64_t loop_sequence_ = 0;
     std::uint64_t playhead_sequence_ = 0;
     DesiredState control_state_{};
     const timebase::CompiledTempoMap* tempo_map_ = nullptr;

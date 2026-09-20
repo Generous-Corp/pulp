@@ -4,41 +4,47 @@
 // focused node, connection, or custom-node header when runtime access is not
 // required.
 
-#include <pulp/host/custom_node_type.hpp>
-#include <pulp/host/signal_graph_connection.hpp>
-#include <pulp/host/signal_graph_node.hpp>
-#include <pulp/host/anticipation_lane.hpp>
-#include <pulp/host/graph_types.hpp>
-#include <pulp/host/plugin_slot.hpp>
-#include <pulp/host/signal_graph_executor_routing.hpp>
+#include <atomic>
+#include <cassert>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/live_dsp_telemetry.hpp>
 #include <pulp/audio/load_measurer.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
-#include <pulp/runtime/slot.hpp>
+#include <pulp/format/processor_node_adapter.hpp>
+#include <pulp/host/anticipation_lane.hpp>
+#include <pulp/host/custom_node_type.hpp>
+#include <pulp/host/graph_types.hpp>
+#include <pulp/host/plugin_slot.hpp>
+#include <pulp/host/sample_region_authoring.hpp>
+#include <pulp/host/sample_region_runtime.hpp>
+#include <pulp/host/signal_graph_connection.hpp>
+#include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/host/signal_graph_node.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
+#include <pulp/runtime/slot.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/state/modulation_lane.hpp>
-#include <atomic>
-#include <cassert>
-#include <thread>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <vector>
-#include <unordered_map>
-#include <unordered_set>
 #include <string>
 #include <string_view>
-#include <cmath>
-#include <cstdint>
-#include <cstddef>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace pulp::host {
+
+class GraphSerializer;
 
 namespace detail {
 struct ExactParameterIngressOwner;
@@ -49,6 +55,7 @@ std::shared_ptr<ExactParameterIngressOwner> make_exact_parameter_ingress_owner()
 }
 
 class TimelineGraphPlaybackBinding;
+class SampleRegionParameterBinding;
 
 // ── Signal Graph ────────────────────────────────────────────────────────
 
@@ -135,6 +142,14 @@ public:
     NodeId add_plugin_node(std::unique_ptr<PluginSlot> slot,
                            int num_inputs, int num_outputs,
                            const std::string& name = "Plugin");
+    /// Add an owned in-process Processor. The main-bus channel counts and default
+    /// name come from its frozen descriptor. Processor nodes are runtime-only:
+    /// graph serialization and baking refuse them explicitly.
+    NodeId add_processor_node(std::shared_ptr<format::ProcessorNodeInstance> processor,
+                              const std::string& name = {});
+    NodeId add_processor_node(std::unique_ptr<format::Processor> processor,
+                              const std::string& name = {});
+    bool is_processor_node(NodeId id) const;
     NodeId add_gain_node(const std::string& name = "Gain");
     NodeId add_midi_input_node(const std::string& name = "MIDI In");
     NodeId add_midi_output_node(const std::string& name = "MIDI Out");
@@ -143,9 +158,21 @@ public:
     // can rebuild with the matching process callback. Shape mismatches keep
     // placeholder passthrough semantics instead of attaching the callback.
     bool register_custom_node_type(CustomNodeType type);
+    bool register_custom_node_type(CustomNodeType type, SampleKernelDescriptor sample_kernel);
+    // Returns a callback-free, value-owned snapshot sorted lexicographically by
+    // (type_id, version). The snapshot remains valid across later registrations
+    // and after this graph is destroyed.
+    std::vector<CustomNodeTypeMetadata> custom_node_types() const;
     const CustomNodeType* custom_node_type(std::string_view type_id) const;
     const CustomNodeType* custom_node_type(std::string_view type_id,
                                            int version) const;
+    const SampleKernelDescriptor* sample_kernel_type(std::string_view type_id, int version) const;
+    SampleRegionProof prove_sample_region(SampleRegionId id) const;
+    std::optional<SampleRegionDescriptor> sample_region(SampleRegionId id) const;
+    std::vector<SampleRegionDescriptor> sample_regions() const;
+    const SampleRegionParameterBinding* sample_region_parameter_binding() const noexcept {
+        return sample_region_parameter_binding_;
+    }
     NodeId add_custom_node(std::string_view type_id,
                            const std::string& name = {});
     NodeId add_custom_node(std::string_view type_id,
@@ -367,6 +394,8 @@ public:
     std::size_t estimate_generated_graph_work_units(int max_block_size) const;
     GeneratedGraphValidation validate_generated_graph(int max_block_size) const;
     PreparedStats prepared_stats() const;
+    std::uint64_t sample_region_binding_generation() const noexcept;
+    std::vector<SampleRegionRuntimeReceipt> sample_region_runtime_receipts() const;
 
     // Per-node CPU-load telemetry, accumulated by process() and read from the
     // control/UI thread. process() wraps each node's work in an
@@ -722,12 +751,14 @@ public:
     std::size_t custom_node_type_count() const;
 
 private:
-    friend class ExecutionSnapshot;
-    struct PrepareLifecycleObserver {
-        void* context = nullptr;
-        void (*plugin_will_prepare)(void*, PluginSlot*) noexcept = nullptr;
-        void (*custom_will_prepare)(void*, void*) noexcept = nullptr;
-    };
+  friend class GraphSerializer;
+  friend bool register_builtin_sample_region_types(SignalGraph& graph);
+  friend class ExecutionSnapshot;
+  struct PrepareLifecycleObserver {
+      void* context = nullptr;
+      void (*plugin_will_prepare)(void*, PluginSlot*) noexcept = nullptr;
+      void (*custom_will_prepare)(void*, void*) noexcept = nullptr;
+  };
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
         MidiBlockSnapshot(const MidiBlockSnapshot& other);
@@ -934,7 +965,28 @@ private:
         RoutedParallel,
     };
 
+    // Private graph-ownership token. Public shared ProcessorNodeInstance handles
+    // may outlive node removal, but they do not extend its prepared lifecycle.
+    // Authoring state and every executable snapshot share this token, so its
+    // final destruction releases only after both ownership domains are gone.
+    struct ProcessorNodeLifetime {
+        explicit ProcessorNodeLifetime(
+            std::shared_ptr<format::ProcessorNodeInstance> value) noexcept
+            : instance(std::move(value)) {}
+
+        ~ProcessorNodeLifetime() {
+            if (instance)
+                (void)instance->release();
+        }
+
+        std::shared_ptr<format::ProcessorNodeInstance> instance;
+    };
+
     struct CompiledGraph {
+        // Private executable topology. For ordinary graphs this is a copy of
+        // nodes_; region-bearing graphs replace each admitted region with one
+        // synthetic Custom anchor while leaving public authoring state intact.
+        std::vector<GraphNode> executable_nodes;
         std::vector<NodeId> order;
         std::vector<Connection> connections;
         std::vector<std::uint64_t> connection_identities;
@@ -944,6 +996,10 @@ private:
         // pointers into an outer container.
         std::unordered_map<NodeId, NodeRuntime> runtime;
         std::unordered_map<NodeId, std::shared_ptr<PluginSlot>> plugins;
+        // Runtime-only authored processors. The shared ownership is part of the
+        // compiled snapshot so a retired graph keeps every binding alive until
+        // its last audio-thread reader leaves.
+        std::unordered_map<NodeId, std::shared_ptr<ProcessorNodeLifetime>> processors;
         std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
         // Prepare-stable intrinsic latency for each resolved, shape-matched
         // Custom node, resolved once from the registered type at THIS snapshot's
@@ -971,6 +1027,10 @@ private:
             NodeShape shape{};
             NodeRuntime* runtime = nullptr;
         };
+        // The authored node identities captured before sample-region quotienting.
+        // Live-swap eligibility compares against this map; `shapes` below is the
+        // executable topology and intentionally omits region interior nodes.
+        std::unordered_map<NodeId, NodeShape> authored_shapes;
         std::unordered_map<NodeId, NodeShape> shapes;
         std::vector<OrderedRuntime> ordered_runtime;
         // Per-node live-DSP timing, prepared at compile in ordered_runtime order
@@ -997,6 +1057,13 @@ private:
         //    instances built by the old factory → not reinit-free).
         std::unordered_map<NodeId, const void*> custom_instances;
         std::uint64_t custom_registry_generation = 0;
+
+        // Sample-region state and callbacks ride the same RCU lifetime as the
+        // executable topology. Snapshots produced by a reinit-free edit own a
+        // distinct bank view whose exact-key cells and execution domain are
+        // shared with the preceding generation.
+        std::shared_ptr<SampleRegionStateBank> sample_region_bank;
+        std::vector<std::shared_ptr<PreparedSampleRegion>> sample_regions;
 
         // ONE routed-executor path: the plan snapshot, the scratch pool sized for
         // exactly that snapshot, the stable binding storage its bindings' user_data
@@ -1101,6 +1168,10 @@ private:
     };
 
     std::vector<GraphNode> nodes_;
+    // Processor nodes deliberately reuse the existing Plugin node topology kind
+    // so the graph/runtime plan ABI does not grow. Presence in this map is the
+    // unambiguous runtime-only discriminator used by routing and serialization.
+    std::unordered_map<NodeId, std::shared_ptr<ProcessorNodeLifetime>> processor_nodes_;
     std::vector<Connection> connections_;
     // Private authoring identity parallel to connections_. Public Connection
     // stays a value-only routing description; disconnect+reconnect mints a new
@@ -1108,6 +1179,15 @@ private:
     std::vector<std::uint64_t> connection_identities_;
     std::uint64_t next_connection_identity_{1};
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
+    std::unordered_map<std::string, SampleKernelDescriptor> sample_kernel_types_;
+    std::vector<SampleRegionDefinition> sample_region_definitions_;
+    const SampleRegionParameterBinding* sample_region_parameter_binding_ = nullptr;
+    std::uint32_t sample_region_proof_block_size_ = 16384;
+    // Control-thread staging consumed by compile_(). These objects are built
+    // only after the complete region proof succeeds and are copied into the
+    // resulting CompiledGraph snapshot.
+    std::shared_ptr<SampleRegionStateBank> prepared_sample_region_bank_;
+    std::vector<std::shared_ptr<PreparedSampleRegion>> prepared_sample_regions_;
     // Bumped on every register_custom_node_type; captured into each CompiledGraph
     // so the 2.2b reinit-free-swap predicate can reject a candidate compiled after
     // the custom registry changed (M6 — prevents binding new callbacks to
@@ -1391,6 +1471,14 @@ private:
     // topology's constness is shed, so the mutators do not each hand-roll a
     // const_cast. Caller holds graph_mutation_mutex_ (same contract as node()).
     GraphNode* node_mut_locked_(NodeId id);
+    SampleRegionId sample_region_for_node_locked_(NodeId id) const;
+    SampleRegionCandidate
+    sample_region_candidate_locked_(const SampleRegionDefinition& definition) const;
+    SampleRegionProof sample_region_proof_locked_(SampleRegionId id) const;
+    SampleRegionProof sample_region_metadata_proof_locked_(const SampleRegionDefinition& definition,
+                                                           bool complete = true) const;
+    SampleRegionProof sample_region_exterior_proof_locked_() const;
+    bool has_sample_kernel_nodes_locked_() const;
     void append_connection_locked_(Connection connection);
     void erase_connection_at_locked_(std::size_t index);
 
@@ -1551,5 +1639,10 @@ LiveSwapAdmission evaluate_live_swap_admission(
     const audio::AudioProcessLoadSnapshot& graph,
     const std::vector<audio::AudioProcessLoadSnapshot>& staged_nodes,
     float headroom_threshold, std::uint64_t min_callbacks);
+
+// Explicitly registers the closed framework-owned v1 scalar cohort. There are
+// no process-global registries or static-initializer side effects.
+bool register_builtin_sample_region_types(SignalGraph& graph);
+bool register_builtin_sample_region_types(SignalGraph::PreparedTopologyEdit& edit);
 
 } // namespace pulp::host

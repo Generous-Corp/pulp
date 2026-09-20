@@ -33,8 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from inspector_truth_check import (  # noqa: E402
     CAPABILITY_DEFINITIONS_PATH,
     CONTROL_MANIFEST_PATH,
-    parse_capability_definitions,
-    parse_control_operations,
+    load_capability_definitions,
+    load_control_operations,
 )
 
 SKILL_PATH = ".agents/skills/timeline/SKILL.md"
@@ -52,28 +52,37 @@ def sequencer_operations(root: Path):
     operation that reads sequencer state through some other contract is that
     contract's business, and a sequencer contract that grew a second operation
     is caught here without editing this list.
+
+    The shared loaders also report whether the registry parse saw every entry
+    the registry spells, so a capability this reader cannot see is surfaced
+    rather than quietly narrowing the set that must be documented.
     """
-    definitions = parse_capability_definitions(
-        (root / CAPABILITY_DEFINITIONS_PATH).read_text(encoding="utf-8")
-    )
+    definitions, parse_errors = load_capability_definitions(root)
+    operations, operation_parse_errors = load_control_operations(root)
+    parse_errors = parse_errors + operation_parse_errors
     sequencer_symbols = {
         definition.symbol: definition
         for definition in definitions
         if definition.contract_id.startswith(SEQUENCER_CONTRACT_PREFIX)
     }
-    operations = parse_control_operations(
-        (root / CONTROL_MANIFEST_PATH).read_text(encoding="utf-8")
-    )
     return [
         (operation, sequencer_symbols[operation.capability_symbol])
         for operation in operations
         if operation.capability_symbol in sequencer_symbols
-    ], sequencer_symbols
+    ], sequencer_symbols, parse_errors
 
 
 def check(root: Path) -> list[str]:
     errors: list[str] = []
-    paired, sequencer_symbols = sequencer_operations(root)
+    paired, sequencer_symbols, parse_errors = sequencer_operations(root)
+
+    # A partial parse is the failure this gate is least able to survive: it
+    # narrows the set of operations that must be documented, so every
+    # assertion below still passes while covering less. Report it and stop --
+    # any verdict reached from an incomplete registry describes the parser,
+    # not the skill.
+    if parse_errors:
+        return parse_errors
 
     # A zero here would pass every assertion below while proving nothing, so it
     # is itself the failure: the registry is the control, and an empty one
