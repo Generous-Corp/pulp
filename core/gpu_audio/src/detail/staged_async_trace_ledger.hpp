@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace pulp::gpu_audio::detail {
@@ -22,7 +23,7 @@ class StagedAsyncTraceLedger {
     enum class CompletionStatus : std::uint8_t { Success, Expired, Failed };
     bool admit(std::uint64_t request_id, std::uint64_t sequence, std::uint32_t slot,
                std::uint64_t now_ns) {
-        if (request_id == 0 || entries_.contains(request_id))
+        if (request_id == 0 || entries_.contains(request_id) || sequences_.contains(sequence))
             return false;
         Entry entry;
         entry.record.kind = SharedIoTraceKind::Terminal;
@@ -32,6 +33,7 @@ class StagedAsyncTraceLedger {
         entry.record.set(SharedIoTraceStage::WorkerEntry, now_ns);
         entry.slot = slot;
         entries_.emplace(request_id, entry);
+        sequences_.insert(sequence);
         return true;
     }
 
@@ -54,6 +56,7 @@ class StagedAsyncTraceLedger {
             return false;
         auto entry = it->second;
         entries_.erase(it);
+        sequences_.erase(entry.record.sequence);
         entry.record.set(SharedIoTraceStage::CompletionObserved, now_ns);
         if (status == CompletionStatus::Success) {
             entry.record.gpu_terminal = SharedIoGpuTerminalDisposition::CompletedAccepted;
@@ -88,6 +91,10 @@ class StagedAsyncTraceLedger {
         bool submitted = false;
     };
     std::unordered_map<std::uint64_t, Entry> entries_;
+    // A sequence identifies one admitted audio block. Rejecting duplicate
+    // sequence admission makes the terminal-accounting invariant explicit and
+    // prevents a producer from emitting two dispositions for one block.
+    std::unordered_set<std::uint64_t> sequences_;
     std::vector<SharedIoTraceRecord> completed_;
 };
 

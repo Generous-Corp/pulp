@@ -863,6 +863,7 @@ TEST_CASE("staged async ledger emits one authenticated terminal record per reque
 
     REQUIRE(ledger.admit(request, sequence, 2, 1000));
     CHECK_FALSE(ledger.admit(request, sequence + 1, 3, 1001));
+    CHECK_FALSE(ledger.admit(request + 1, sequence, 3, 1001));
     REQUIRE(ledger.submitted(request, 1100));
     CHECK_FALSE(ledger.submitted(request, 1101));
     REQUIRE(ledger.complete(request, StagedAsyncTraceLedger::CompletionStatus::Success, 1200));
@@ -886,4 +887,10 @@ TEST_CASE("staged async ledger emits one authenticated terminal record per reque
                                     SharedIoTraceStage::CompletionObserved)
               .available);
     CHECK(ledger.take_completed().empty());
+
+    // Retirement releases the sequence identity so a later generation may
+    // reuse the numeric sequence without colliding with a live request.
+    REQUIRE(ledger.admit(request + 1, sequence, 3, 2000));
+    REQUIRE(ledger.submitted(request + 1, 2100));
+    REQUIRE(ledger.complete(request + 1, StagedAsyncTraceLedger::CompletionStatus::Failed, 2200));
 }
