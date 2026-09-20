@@ -1673,6 +1673,43 @@ controls in a throwaway worktree, or wait for the lane to finish. Note that a
 `shipyard` process sitting in the worktree is usually just waiting on GitHub;
 confirm an actual compiler is running before concluding a build is in flight.
 
+## The gate VM's build parallelism is bounded by its RAM, not its vCPUs
+
+tartci sizes a macOS gate VM's cores from its lane lease (`vm_cores` — 12 for
+Pulp's gate lane on the Studio, 6 on a slot2 clone) but **never sets the VM's
+memory**: `tart set --memory` appears only in the Linux provider, so every macOS
+gate VM boots at the golden image's **8 GiB** regardless of how many cores it
+leased.
+
+`tools/ci/governed-build.sh` bounds a build by `min(cores, RAM x 0.75 / 1.5 GiB)`
+when no tartci store is reachable — which is always, inside the VM, because
+tartci is not installed in the guest. At 8 GiB the memory axis wins:
+
+| VM shape | derived `-j` |
+|---|---|
+| 12 vCPU / 8 GiB (Studio gate) | **4** |
+| 6 vCPU / 8 GiB (slot2) | **4** |
+| 4 vCPU / 8 GiB (golden base) | **4** |
+
+So **raising `vm_cores` alone cannot speed up the Build step.** The extra cores
+are unusable by any memory-safe bound, and the resulting no-op reads as "more
+cores did not help" rather than "the build was never asked to use them". If the
+Build step's wall time is the target, the VM's RAM has to move with its cores —
+a tartci profile change, not a Pulp one.
+
+Two practical consequences:
+
+- **Never read a leg's parallelism off the lease.** Read the `[governed-build]`
+  line in the job log; it prints the branch taken and the chosen `-j`. A lease
+  of 12 cores and a build at `-j4` is the expected, correct pairing today.
+- **Never bound a workflow build with a literal `--parallel N`.** It is a silent
+  ceiling: it keeps its value across a VM resize, so the fix above would land and
+  buy nothing. `build.yml`'s `Build` step carried `--parallel 4` fleet-wide on
+  exactly this reasoning until it was routed through the governor. The
+  `build_parallelism_guard.py` gate deliberately does **not** scan
+  `.github/workflows/**` (a `runs-on` resolves dynamically), so nothing catches
+  this for you — it is the workflow author's job.
+
 ## Host-vitals preflight — back off before a saturating CI host reboots
 
 The self-hosted Mac Studio that runs the required `macos` gate ALSO hosts the
