@@ -93,6 +93,7 @@ class StagedAsyncTraceLedger {
 // ready to preserve the existing blocking behavior.
 class StagedAsyncPendingState {
   public:
+    enum class CallbackStatus : std::uint8_t { Success, Expired, Failed };
     struct Pending {
         std::uint64_t request_id = 0;
         std::uint64_t sequence = 0;
@@ -128,6 +129,13 @@ class StagedAsyncPendingState {
         slots_[it->second.slot] = false;
         pending_.erase(it);
         return true;
+    }
+
+    // Adapter boundary for GpuCompute::ReadbackCallback. The callback owner
+    // maps ReadbackStatus to this enum, then releases the slot exactly once.
+    bool on_callback(std::uint64_t request_id, CallbackStatus status) {
+        (void)status; // disposition mapping is owned by the trace ledger
+        return complete(request_id);
     }
 
     std::vector<Pending> expire(std::uint64_t now_ns) {
