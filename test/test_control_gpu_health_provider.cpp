@@ -57,8 +57,7 @@ pulp::inspect::ControlGpuHealthProvider::FrameObservation frame(bool content) {
 }
 
 /// Minimal host that answers the submission-evidence queries the standalone
-/// inspector asks of its window. Everything else is the base-class default, so
-/// the stub also exercises the "host that cannot answer" path.
+/// inspector asks of its window, with the answer fixed at construction.
 class SubmissionEvidenceHost final : public pulp::view::WindowHost {
   public:
     explicit SubmissionEvidenceHost(bool observed) : observed_(observed) {}

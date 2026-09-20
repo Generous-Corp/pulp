@@ -3044,6 +3044,12 @@ private:
 
         if (!gpu_surface_ || !skia_surface_) return false;
 
+        // Clear before the attempt, so the three early returns below cannot
+        // leave a PREVIOUS frame's verdict standing as this frame's evidence.
+        // Each of them returns false, and one of them presents an undrawn
+        // drawable, so none of them produced output worth claiming.
+        last_submission_observed_.store(false, std::memory_order_relaxed);
+
         // Emit the per-frame dirty-rect decision the host would use for
         // clipping. The actual paint path is unchanged; this is a wiring
         // trace only. Gated on env so production CI logs stay quiet.
