@@ -1,0 +1,85 @@
+{
+  "id": "timeline-design-time-capability-rows",
+  "title": "The generator-facing timeline surface is discoverable through the design-time capability manifest",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "63012e0f-e6c4-4234-86a4-0c0c187fc831",
+  "owned_paths": [
+    "tools/scripts/agent_capability_catalog_timing.py"
+  ],
+  "evidence": [
+    {
+      "path": "core/timeline/include/pulp/timeline/model.hpp",
+      "needles": [
+        "class GrooveTemplate {"
+      ]
+    },
+    {
+      "path": "docs/status/agent-capabilities.json",
+      "needles": [
+        "\"key\": \"timeline.groove-template\"",
+        "\"key\": \"timeline.compile-context-subscription\"",
+        "\"key\": \"timeline.note-modifier\""
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The bound headers already install: PulpInstallRules.cmake lists timeline in the per-subsystem install(DIRECTORY ...) loop over _pulp_sdk_header_subsystems, so an embedding host includes the typed source seam rather than re-declaring it. The delivery stays pending its installed-consumer proof.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "platform runtime music timebase timeline"
+          ]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/timeline/include/pulp/timeline/model.hpp",
+          "needles": [
+            "class GrooveTemplate {"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "Publishing capability rows adds no Timeline CLI operation; the CLI surface is unchanged by this packet."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "Publishing capability rows adds no offline Timeline MCP operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Runtime operation metadata is broker authority and stays outside the design-time manifest by construction, so nobody owes a control row for these keys."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The generated manifest publishes five timeline keys with typed bindings and operational probes: the authored groove model, the harmonic and intensity context lanes, the compile-context subscription vocabulary, and the seeded per-note gate. The domain reports not_inventoried because the editing, persistence, schema and interchange headers are deliberately unclassified rather than claimed.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "\"key\": \"timeline.groove-template\""
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}

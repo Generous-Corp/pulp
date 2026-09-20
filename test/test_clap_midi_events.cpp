@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -202,6 +203,7 @@ public:
     bool opts_node_ump = false;
     bool declares_bypass = false;
     bool declares_sidechain = false;
+    std::uint32_t declared_voice_count = 0;
 
     // Mutable state captured each time process() runs.
     mutable midi::MidiBuffer captured_midi;
@@ -241,6 +243,7 @@ public:
         d.supports_ump = opts_ump;
         d.node_capabilities.supports_mpe = opts_node_mpe;
         d.node_capabilities.supports_ump = opts_node_ump;
+        d.voice_count = declared_voice_count;
         if (declares_sidechain) {
             d.input_buses.push_back({"Sidechain", 2, true});
         }
@@ -963,6 +966,7 @@ bool g_pending_opts_node_mpe = false;
 bool g_pending_opts_node_ump = false;
 bool g_pending_capturing_bypass = false;
 bool g_pending_capturing_sidechain = false;
+std::uint32_t g_pending_capturing_voice_count = 0;
 bool g_pending_overflow_sysex = false;
 std::vector<midi::MidiEvent> g_pending_emit;
 std::vector<midi::MidiBuffer::SysexEvent> g_pending_sysex;
@@ -976,12 +980,14 @@ std::unique_ptr<Processor> make_capturing() {
     if (g_pending_opts_node_ump) up->opts_node_ump = true;
     up->declares_bypass = g_pending_capturing_bypass;
     up->declares_sidechain = g_pending_capturing_sidechain;
+    up->declared_voice_count = g_pending_capturing_voice_count;
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
     g_pending_opts_node_mpe = false;
     g_pending_opts_node_ump = false;
     g_pending_capturing_bypass = false;
     g_pending_capturing_sidechain = false;
+    g_pending_capturing_voice_count = 0;
     return up;
 }
 
@@ -1736,6 +1742,120 @@ TEST_CASE("CLAP parameter modulation projects to the typed global lane",
 
     mod.param_id = CapturingProcessor::kParamId + 1;
     REQUIRE_FALSE(clap_adapter::clap_param_modulation_lane(h.plugin, mod, lane));
+}
+
+TEST_CASE("CLAP modulation the host is invited to send reaches the processor",
+          "[clap][params][modulation][reachability]") {
+    // A host only emits CLAP_EVENT_PARAM_MOD for a parameter the params
+    // extension flagged modulatable. This walks the whole lane in the order a
+    // host walks it — read the advertisement, then send the event it licenses,
+    // then observe the processor's modulated value from inside process().
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    auto* params = static_cast<const clap_plugin_params_t*>(
+        clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_PARAMS));
+    REQUIRE(params != nullptr);
+
+    std::optional<clap_param_info_t> gain;
+    for (uint32_t i = 0; i < params->count(&h.plugin.plugin); ++i) {
+        clap_param_info_t info{};
+        REQUIRE(params->get_info(&h.plugin.plugin, i, &info));
+        if (info.id == CapturingProcessor::kParamId)
+            gain = info;
+    }
+    REQUIRE(gain.has_value());
+    REQUIRE((gain->flags & CLAP_PARAM_IS_MODULATABLE) != 0);
+
+    InputEventList mod_events;
+    clap_event_param_mod_t mod{};
+    mod.header = make_header(sizeof(mod), CLAP_EVENT_PARAM_MOD, 0);
+    mod.param_id = gain->id;
+    mod.amount = 0.25;
+    mod_events.push(mod);
+
+    REQUIRE(h.run(mod_events) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_capturing->captured_modulated_value == 0.25f);
+}
+
+TEST_CASE("CLAP note ports advertise only the dialects the adapter decodes",
+          "[clap][note-ports][dialects]") {
+    const auto input_dialects = [](Harness& h) {
+        auto* note_ports = static_cast<const clap_plugin_note_ports_t*>(
+            clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_NOTE_PORTS));
+        REQUIRE(note_ports != nullptr);
+        clap_note_port_info_t info{};
+        REQUIRE(note_ports->get(&h.plugin.plugin, 0, true, &info));
+        return info.supported_dialects;
+    };
+
+    SECTION("a plain MIDI 1.0 plugin claims neither MPE nor MIDI 2.0") {
+        g_pending_opts_mpe = false;
+        g_pending_opts_ump = false;
+        Harness h(make_capturing);
+        const auto dialects = input_dialects(h);
+        // Positive control: the two dialects every Pulp plugin decodes.
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_CLAP) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI_MPE) == 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI2) == 0);
+    }
+
+    SECTION("declaring MPE claims the MPE dialect and nothing more") {
+        g_pending_opts_mpe = true;
+        g_pending_opts_ump = false;
+        Harness h(make_capturing);
+        const auto dialects = input_dialects(h);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI_MPE) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI2) == 0);
+    }
+
+    SECTION("declaring UMP claims the MIDI 2.0 dialect and nothing more") {
+        g_pending_opts_mpe = false;
+        g_pending_opts_ump = true;
+        Harness h(make_capturing);
+        const auto dialects = input_dialects(h);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI2) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI_MPE) == 0);
+    }
+
+    SECTION("the node capability sidecar carries the same claim") {
+        g_pending_opts_node_mpe = true;
+        g_pending_opts_node_ump = true;
+        Harness h(make_capturing);
+        const auto dialects = input_dialects(h);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI_MPE) != 0);
+        REQUIRE((dialects & CLAP_NOTE_DIALECT_MIDI2) != 0);
+    }
+}
+
+TEST_CASE("CLAP voice-info publishes the descriptor voice count", "[clap][voice-info]") {
+    SECTION("a plugin that declares no voice count exposes no extension") {
+        g_pending_capturing_voice_count = 0;
+        Harness h(make_capturing);
+        // Positive control: the dispatch table is alive for this instance.
+        REQUIRE(clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_NOTE_PORTS) !=
+                nullptr);
+        REQUIRE(clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_VOICE_INFO) ==
+                nullptr);
+    }
+
+    SECTION("a declared voice count is published as count and capacity") {
+        g_pending_capturing_voice_count = 8;
+        Harness h(make_capturing);
+        auto* voice_info = static_cast<const clap_plugin_voice_info_t*>(
+            clap_generic::get_static_extension(&h.plugin.plugin, CLAP_EXT_VOICE_INFO));
+        REQUIRE(voice_info != nullptr);
+        clap_voice_info_t info{};
+        REQUIRE(voice_info->get(&h.plugin.plugin, &info));
+        REQUIRE(info.voice_count == 8);
+        REQUIRE(info.voice_capacity == 8);
+        // The adapter lowers CLAP note events to MIDI 1.0 keyed on channel and
+        // key, discarding note_id, so it must not claim it can separate
+        // overlapping notes by note_id.
+        REQUIRE((info.flags & CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES) == 0);
+    }
 }
 
 TEST_CASE("CLAP gesture events forward through StateStore callbacks",

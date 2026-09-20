@@ -34,6 +34,8 @@ OUTPUT_CAP_BYTES = 1024 * 1024
 MEASUREMENT_SCOPE_SCHEMA = "pulp.gpu-dpr-native-measurement-scope.v1"
 MEASUREMENT_ATTESTATION_SCHEMA = "pulp.gpu-dpr-native-measurement-attestation.v1"
 FIRST_FRAME_TRIAL_SCHEMA = "pulp.gpu-dpr-first-frame-trial.v1"
+DIAGNOSTICS_ARTIFACT_SCHEMA = "pulp.gpu-dpr-diagnostics-artifact.v1"
+CALIBRATION_DEPENDENCY = "gpu:timer-calibration"
 ARTIFACT_KINDS = {
     "capture", "reference_capture", "trace", "raw_samples", "input_receipt"
 }
@@ -95,6 +97,32 @@ def checked_artifact(root: Path, value: Any, label: str) -> Path:
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"{label} artifact is not a regular file")
     return path
+
+
+def validate_calibration_diagnostics_artifact(
+    receipt: dict[str, Any], cell_dir: Path,
+) -> None:
+    """Bind calibration diagnostics to retained, contained, digest-exact bytes."""
+    binding = receipt.get("diagnostics_artifact")
+    if not isinstance(binding, dict) or binding.get("schema") != (
+        DIAGNOSTICS_ARTIFACT_SCHEMA
+    ):
+        raise ValueError("timer-calibration receipt lacks diagnostics artifact binding")
+    path = checked_artifact(cell_dir, binding.get("path"), "calibration diagnostics")
+    payload = path.read_bytes()
+    digest = binding.get("sha256")
+    if (
+        not isinstance(digest, str) or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+        or hashlib.sha256(payload).hexdigest() != digest
+    ):
+        raise ValueError("calibration diagnostics artifact digest does not match")
+    try:
+        retained = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("calibration diagnostics artifact is not valid JSON") from error
+    if retained != receipt.get("diagnostics"):
+        raise ValueError("receipt diagnostics differ from retained artifact")
 
 
 def validate_fresh_process_ledger(
@@ -180,6 +208,95 @@ def validate_measurement_receipt(
             or not isinstance(dependencies, list) or not dependencies
         ):
             raise ValueError("incomplete measurement receipt lacks reason/dependencies")
+        diagnostics = receipt.get("diagnostics")
+        # A calibration dependency is the producer claiming it measured and
+        # failed. The outer runner treats that receipt's diagnostics as
+        # mandatory evidence, so this layer requires the same thing rather than
+        # letting an unsupported claim reach ingestion.
+        calibration = CALIBRATION_DEPENDENCY in dependencies
+        if calibration and diagnostics is None:
+            raise ValueError("timer-calibration receipt lacks calibration diagnostics")
+        if calibration and receipt.get("producer_sha256") != sha256(pinned_producer):
+            raise ValueError("timer-calibration receipt is not bound to the pinned producer")
+        if diagnostics is not None:
+            if not isinstance(diagnostics, dict) or diagnostics.get("schema") != (
+                "pulp.gpu-dpr-calibration-diagnostics.v1"
+            ):
+                raise ValueError("incomplete measurement diagnostics schema is invalid")
+            if diagnostics.get("stage") != "calibration" or diagnostics.get("clock") != (
+                "dawn-gpu-timestamp"
+            ):
+                raise ValueError("incomplete measurement diagnostics stage/clock is invalid")
+            if diagnostics.get("attempt_nonce") != request["attempt_nonce"]:
+                raise ValueError("incomplete measurement diagnostics nonce is unbound")
+            failure_class = diagnostics.get("failure_class")
+            if failure_class not in {
+                "producer_sample_invalid", "timer_quantization",
+                "insufficient_extra_work",
+            }:
+                raise ValueError("incomplete measurement diagnostics failure class is invalid")
+            if diagnostics.get("control_detected") is not False:
+                raise ValueError("incomplete measurement diagnostics control state is invalid")
+            if not isinstance(diagnostics.get("reason"), str) or not diagnostics["reason"]:
+                raise ValueError("incomplete measurement diagnostics reason is invalid")
+            # delta_ms is a signed difference and is legitimately negative when the
+            # extra-work median lands below the baseline median: after a baseline
+            # sample succeeds but every extra sample fails the extra median is zero,
+            # and ordinary quantization noise can invert the two by a fraction of a
+            # resolution step. Its value is already pinned by the equality check
+            # below, so requiring a sign here would reject honest failure receipts.
+            non_negative_fields = (
+                "resolution_ms", "baseline_median_ms", "extra_work_median_ms",
+                "detection_threshold_ms",
+            )
+            for field in non_negative_fields + ("delta_ms",):
+                value = diagnostics.get(field)
+                if (
+                    isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value))
+                    or (float(value) < 0 and field in non_negative_fields)
+                ):
+                    raise ValueError(f"incomplete measurement diagnostics {field} is invalid")
+            expected_delta = (
+                float(diagnostics["extra_work_median_ms"])
+                - float(diagnostics["baseline_median_ms"])
+            )
+            expected_threshold = max(
+                float(diagnostics["resolution_ms"]) * 2.0,
+                float(diagnostics["baseline_median_ms"]) * 0.10,
+            )
+            if not math.isclose(float(diagnostics["delta_ms"]), expected_delta,
+                                rel_tol=1e-12, abs_tol=1e-12):
+                raise ValueError("incomplete measurement diagnostics delta is inconsistent")
+            if not math.isclose(
+                float(diagnostics["detection_threshold_ms"]), expected_threshold,
+                rel_tol=1e-12, abs_tol=1e-12,
+            ):
+                raise ValueError("incomplete measurement diagnostics threshold is inconsistent")
+            trials = diagnostics.get("trials")
+            if not isinstance(trials, list) or not trials:
+                raise ValueError("incomplete measurement diagnostics lack trials")
+            for index, trial in enumerate(trials):
+                if not isinstance(trial, dict) or trial.get("trial") != index:
+                    raise ValueError("incomplete measurement diagnostics trials are unaligned")
+                for side in ("baseline", "extra"):
+                    sample = trial.get(side)
+                    if not isinstance(sample, dict) or set(sample) != {"valid", "value_ms"}:
+                        raise ValueError("incomplete measurement diagnostics sample is malformed")
+                    if not isinstance(sample["valid"], bool):
+                        raise ValueError("incomplete measurement diagnostics validity is malformed")
+                    value = sample["value_ms"]
+                    if sample["valid"]:
+                        if (
+                            value is None or isinstance(value, bool)
+                            or not isinstance(value, (int, float))
+                            or not math.isfinite(float(value)) or float(value) <= 0
+                        ):
+                            raise ValueError("valid calibration sample value is malformed")
+                    elif value is not None:
+                        raise ValueError("invalid calibration sample must have null value")
+        if calibration:
+            validate_calibration_diagnostics_artifact(receipt, cell_dir)
         return receipt
 
     scope = receipt.get("measurement_scope")

@@ -51,7 +51,7 @@ from agent_capability_transaction import recover_transaction, write_transaction
 
 SCHEMA = "pulp.agent-capabilities.v1"
 SCHEMA_MINOR = 1
-MANIFEST_REVISION = 53
+MANIFEST_REVISION = 54
 SURFACE_INVENTORY_VERSION = 79
 WRITE_TRANSACTION_FILE = pathlib.Path(
     "tools/agent-capabilities/.capability-write-transaction.json"
@@ -60,7 +60,7 @@ MANIFEST_SCHEMA_FILE = pathlib.Path(
     "docs/status/agent-capabilities.schema.json"
 )
 COMPILE_FIXTURE = pathlib.Path("test/test_agent_capability_compile.cpp")
-DOMAINS = {"signal", "music", "midi", "audio", "timebase", "sequence", "offline"}
+DOMAINS = {"signal", "music", "midi", "audio", "timebase", "timeline", "sequence", "offline"}
 ROOT_DOMAINS = {item["domain"] for item in surface.PUBLIC_ROOTS}
 RT_CLASSES = {"audio", "control", "any", "offline", "mixed"}
 STATUSES = {

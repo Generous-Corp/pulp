@@ -541,18 +541,59 @@ richer surface can inspect the VST3 bus set directly.
 
 ### Transport context
 
-`ProcessContext` is populated from `data.processContext`:
+`ProcessContext` is populated from `data.processContext`. Apart from
+`position_samples` (from `projectTimeSamples`, an unconditional member) and
+the transport booleans, every field is gated on its `kXxxValid` bit:
 
-- `is_playing` from `state & kPlaying`.
-- `tempo_bpm` always read.
+- `is_playing` / `is_recording` from `state & kPlaying` / `kRecording`,
+  `is_looping` from `kCycleActive`.
 - `position_samples` always read.
-- `time_sig_numerator/denominator` only when
-  `state & kTimeSigValid`.
+- `tempo_bpm` only when `state & kTempoValid`.
+- `position_beats` only when `kProjectTimeMusicValid`.
+- `time_sig_numerator/denominator` only when `kTimeSigValid`.
+- `loop_start_beats` / `loop_end_beats` only when `kCycleValid`.
+- `host_time_ns` only when `kSystemTimeValid`.
+- `frame_rate` only when `kSmpteValid`.
+- `bar` is *derived* from beats + time signature, not read from
+  `barPositionMusic`.
 
-No `processContextRequirements` flag is currently requested — if a
-host needs opt-in declaration of which fields Pulp reads, we will add
-`IProcessContextRequirements`. Today every supported host delivers all
-required fields by default.
+#### You must ask for those fields, and the omission is invisible
+
+Since VST3 3.7 the host only supplies the `ProcessContext` fields the plug-in
+requests through `IProcessContextRequirements`. The SDK does not treat this as
+optional: *"If you do not implement this interface, you may not get any
+information at all of the process function!"*
+
+**The trap:** `SingleComponentEffect` already inherits
+`IProcessContextRequirements`, and its `getProcessContextRequirements()`
+returns `processContextRequirements.flags`, which default-constructs to `0`.
+So the interface is advertised to the host whether or not the mask is ever
+assigned. An unrequested field is therefore **not** a compile error, **not** a
+missing-override warning, and **not** a failed `queryInterface` — it is a
+silently empty request, which a host that honours it literally answers by
+sending no tempo, no time signature and no transport state. The symptom is
+tempo-synced DSP that is simply wrong in Cubase/Nuendo while every unit test
+passes, because nothing in the build can see it.
+
+`PulpVst3Processor`'s constructor therefore assigns
+`kProcessContextRequirements` (declared in `vst3_adapter.hpp`), covering exactly
+the bits the decoder reads: `kNeedTempo`, `kNeedTimeSignature`,
+`kNeedTransportState`, `kNeedProjectTimeMusic`, `kNeedCycleMusic`,
+`kNeedSystemTime`, `kNeedFrameRate`. It is assigned in the constructor rather
+than `initialize()` because the host latches the answer once before
+`setActive()` and, per the SDK, it "cannot be changed afterwards".
+
+Fields the decoder ignores stay unrequested on purpose — `kNeedChord`,
+`kNeedSamplesToNextClock`, `kNeedContinousTimeSamples`, and
+`kNeedBarPositionMusic` (the bar is derived) — because the point of the mask is
+to let the host skip work nobody consumes.
+
+**If you teach `build_process_context` a new `kXxxValid` bit, add its
+`kNeed*` flag in the same change.** The test *VST3 requests every
+process-context field its decoder consumes* in `test_vst3_plugin_state.cpp`
+enforces this: it drives one block with every valid bit set, observes which
+`TransportField`s the decoder actually populated, and fails if the advertised
+mask does not cover one of them.
 
 ### `process()` phase order is the contract
 
