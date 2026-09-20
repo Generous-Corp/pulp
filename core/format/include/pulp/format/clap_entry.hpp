@@ -360,6 +360,11 @@ inline uint32_t params_flags(const state::ParamInfo& parameter) {
     if (state::is_discrete_param(parameter) || is_bypass)
         flags |= CLAP_PARAM_IS_STEPPED;
     if (is_bypass) flags |= CLAP_PARAM_IS_BYPASS;
+    // A host only sends CLAP_EVENT_PARAM_MOD to a parameter it was told is
+    // modulatable, so the adapter's PARAM_MOD decode and
+    // StateStore::get_modulated() are unreachable without this flag.
+    if (state::is_modulatable_param(parameter))
+        flags |= CLAP_PARAM_IS_MODULATABLE;
     return flags;
 }
 
@@ -445,6 +450,16 @@ inline bool note_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_
     info->id = is_input ? 0 : 1;
     runtime::copy_c_string(info->name, is_input ? "Note In" : "Note Out");
     info->supported_dialects = CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
+    if (is_input) {
+        // Input-only: these advertise what the adapter can *decode*. The
+        // outbound path emits CLAP_EVENT_MIDI exclusively, so claiming them
+        // on the output port would promise packets Pulp never sends.
+        const auto caps = desc.effective_capabilities();
+        if (caps.supports_mpe)
+            info->supported_dialects |= CLAP_NOTE_DIALECT_MIDI_MPE;
+        if (caps.supports_ump)
+            info->supported_dialects |= CLAP_NOTE_DIALECT_MIDI2;
+    }
     info->preferred_dialect = CLAP_NOTE_DIALECT_CLAP;
     return true;
 }
@@ -452,6 +467,28 @@ inline bool note_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_
 inline const clap_plugin_note_ports_t note_ports_ext = {
     .count = note_ports_count, .get = note_ports_get,
 };
+
+// ── Voice info extension (for voice-based instruments) ─────────────────
+inline uint32_t declared_voice_count(const clap_plugin_t* plugin) {
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    const auto& desc = self->processor ? self->processor->descriptor() : self->descriptor_snapshot;
+    return desc.voice_count;
+}
+
+inline bool voice_info_get(const clap_plugin_t* plugin, clap_voice_info_t* info) {
+    const uint32_t count = declared_voice_count(plugin);
+    if (count == 0)
+        return false;
+    info->voice_count = count;
+    info->voice_capacity = count;
+    // Not CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES: that bit promises the
+    // plugin separates overlapping notes by note_id, and the adapter lowers
+    // CLAP note events to MIDI 1.0 keyed on channel + key, discarding note_id.
+    info->flags = 0;
+    return true;
+}
+
+inline const clap_plugin_voice_info_t voice_info_ext = {.get = voice_info_get};
 
 // ── Latency extension ───────────────────────────────────────────────────
 inline uint32_t latency_get(const clap_plugin_t* plugin) {
@@ -865,6 +902,8 @@ inline const void* get_static_extension(const clap_plugin_t* plugin, const char*
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) == 0)
         return audio_ports_config_count(plugin) > 0 ? &audio_ports_config_ext : nullptr;
     if (strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &note_ports_ext;
+    if (strcmp(id, CLAP_EXT_VOICE_INFO) == 0)
+        return declared_voice_count(plugin) > 0 ? &voice_info_ext : nullptr;
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &params_ext;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &state_ext;
     if (strcmp(id, CLAP_EXT_LATENCY) == 0) return &latency_ext;

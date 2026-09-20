@@ -76,6 +76,36 @@ Steinberg::IPlugView* make_plug_view(Processor& processor,
                                      state::StateStore& store,
                                      runtime::AliveToken::Handle owner_alive);
 
+// The process-context fields this adapter's decoder actually consumes,
+// as an IProcessContextRequirements flag mask.
+//
+// VST3 3.7+ makes this a *request*: the host supplies only the
+// ProcessContext fields the plug-in asks for here. The SDK is blunt about
+// the consequence of staying silent -- "If you do not implement this
+// interface, you may not get any information at all of the process
+// function!" -- and the trap is that SingleComponentEffect already
+// inherits IProcessContextRequirements and answers with
+// `processContextRequirements.flags`, which defaults to 0. So the
+// interface is advertised whether or not this mask is assigned: leaving it
+// unset is not a compile error and not a missing override, it is a
+// silently empty request that a strict host honours literally by sending
+// no tempo, no time signature and no transport state.
+//
+// Each flag below is here because build_process_context() reads the
+// matching kXxxValid bit; fields the decoder ignores (continuous time
+// samples, bar position -- derived from beats + time signature instead --
+// samples-to-next-clock, chord) are deliberately NOT requested, because
+// the point of the mask is to let the host skip work nobody consumes.
+// The host latches this once between initialize() and setActive().
+inline constexpr Steinberg::uint32 kProcessContextRequirements =
+    Steinberg::Vst::IProcessContextRequirements::kNeedTempo |
+    Steinberg::Vst::IProcessContextRequirements::kNeedTimeSignature |
+    Steinberg::Vst::IProcessContextRequirements::kNeedTransportState |
+    Steinberg::Vst::IProcessContextRequirements::kNeedProjectTimeMusic |
+    Steinberg::Vst::IProcessContextRequirements::kNeedCycleMusic |
+    Steinberg::Vst::IProcessContextRequirements::kNeedSystemTime |
+    Steinberg::Vst::IProcessContextRequirements::kNeedFrameRate;
+
 // The VST3 combined processor + controller
 // Wraps a pulp::format::Processor for the VST3 host
 //
