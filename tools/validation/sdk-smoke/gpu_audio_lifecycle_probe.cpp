@@ -72,6 +72,20 @@ int main() {
     if (!check(transport.prepare(&node, {.ring_blocks = 8})))
         return 11;
 
+    // An installed consumer must be able to make an explicit engine choice
+    // without reaching into private provider handles.  This generic node has
+    // no authenticated shared-memory provider, so the report must honestly
+    // describe the staged path and its prepared lead/fallback contract.
+    const auto prepared_report = transport.capability_report();
+    if (prepared_report.path != pulp::gpu_audio::GpuAudioExecutionPath::Staged ||
+        prepared_report.provider != pulp::gpu_audio::GpuAudioProvider::Unknown ||
+        prepared_report.eligibility != pulp::gpu_audio::GpuAudioEligibility::Eligible ||
+        prepared_report.fallback_policy != MissPolicy::CpuFallback ||
+        prepared_report.prepared_lead_blocks != LifecycleNode::kLatency ||
+        !prepared_report.prepared || !prepared_report.fallback_available ||
+        !prepared_report.diagnostics_available)
+        return 111;
+
     // Normal lifecycle: process, service the worker, then observe the fixed
     // latency. This is the installed consumer's public API path.
     for (std::uint32_t block = 1; block <= 4; ++block) {
@@ -92,6 +106,13 @@ int main() {
     transport.release();
     if (transport.is_prepared())
         return 14;
+    const auto released_report = transport.capability_report();
+    if (released_report.path != pulp::gpu_audio::GpuAudioExecutionPath::Unavailable ||
+        released_report.provider != pulp::gpu_audio::GpuAudioProvider::Unknown ||
+        released_report.eligibility != pulp::gpu_audio::GpuAudioEligibility::Unavailable ||
+        released_report.prepared || released_report.fallback_available ||
+        released_report.diagnostics_available)
+        return 141;
     if (!check(transport.prepare(&node, {.ring_blocks = 8})))
         return 15;
 

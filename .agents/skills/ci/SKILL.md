@@ -1011,6 +1011,81 @@ therefore holds only for whoever remembered to run it — which is why
 `gpu_handoff_pin_freshness.py` (gate 6b2), wired that way, does not actually gate
 a push today.
 
+## Gate: gpu-provenance reachability (`hydrate_gpu_provenance_commits.py --verify-only`)
+
+Rejects a push whose GPU provenance ledger pins a commit that will not exist on
+the remote. It reads the same two surfaces `gpu-ledger-sentinel` guards —
+`docs/status/gpu-vellum-handoff.yaml` and the handoff receipt — and asks a
+different question of them: not whether the recorded sha is a real object in
+this store, but whether that object is reachable from `HEAD` or from any
+remote-tracking branch.
+
+**Presence cannot answer that, and the gap is the whole reason the gate
+exists.** The failure shape is an amend or rebase that rewrites the commit
+*carrying* the ledger, after the ledger already named a sha. The named commit is
+orphaned by that rewrite, yet it is still in the local object store, so
+`is_commit()` answers yes, `cat-file -e` answers yes, and every existing
+provenance check is satisfied. Nothing on the remote will ever reference it, so
+it is gone the moment the push lands. The rewrite happens *after* authoring,
+which is why no authoring-time regeneration or `--check` can catch it: the push
+is the only place downstream of the rewrite.
+
+**Reachability, not ancestry.** `hydrate()`'s own HEAD-ancestry test is correct
+in CI and is deliberately untouched — `--verify-only` is an additive arm, not a
+refactor of it. Ancestry is the wrong question for a push: a developer on a
+branch cut before a pin landed is not a descendant of that pin, which is
+ordinary work rather than a defect. Measured on this repo's primary checkout, a
+plain `git rev-list HEAD` ancestry test reports 61 of the 67 required pins as
+failures. `HEAD` covers what is being pushed, the remote-tracking refs cover
+what is already published, and a commit rewritten away before its first push is
+reachable from neither — so `git rev-list HEAD --remotes` is the reference set,
+and it reports zero failures on a healthy checkout.
+
+**A truncated clone refuses rather than inventing a finding.** The primary
+checkout is shallow, so "this pin is unreachable" and "this clone never fetched
+that history" look identical here. When a graft boundary exists, a pin whose
+committer date is older than the boundary is reported as `SKIP` rather than a
+failure; only a pin dated *past* the horizon — which truncation cannot explain —
+is reported broken. That allowance is what keeps the gate from failing every
+push on a shallow clone, and the discriminating case (two unreachable pins in
+one shallow checkout, one skipped and one reported) is covered by
+`tools/scripts/test_hydrate_real_git.py` so the allowance cannot quietly swallow
+every real defect.
+
+**It must not repair what it was asked to judge, and on a partial clone that
+takes an env var.** This checkout is `blob:none` with `promisor = true`, so an
+ordinary presence probe *fetches* the missing object through the promisor with
+no `fetch` anywhere in its argv — the check would silently heal the orphan and
+pass. Every object-reading call therefore runs with `GIT_NO_LAZY_FETCH=1`, which
+also makes a missing-object probe about 145x faster (4.34s to 0.03s here). The
+whole verification is two git reads, no network, and measured at 0.373s
+end-to-end.
+
+```sh
+python3 tools/scripts/hydrate_gpu_provenance_commits.py --root . --verify-only
+# 0 clean (or only undecidable rows, printed as SKIP)  ·  1 a pin is unreachable
+```
+
+The repair is to regenerate the ledger against the commit that replaced the
+rewritten one:
+
+```sh
+python3 tools/scripts/gpu_handoff_provenance.py resolve
+```
+
+**Hosted at both push surfaces**, for the reason the sentinel section above
+gives: `gates.sh` alone gates only whoever remembered to run it. It is gate 6b4
+in `tools/scripts/gates.sh` and a `run_gate_captured` block in
+`.githooks/pre-push`. It is deliberately *not* in `[validation.gates]` or CI: a
+fresh CI clone never fetched the orphan in the first place, so every row there
+is undecidable and the check would be a no-op that reads like coverage.
+
+**Residual risk, stated rather than hidden.** A remote-tracking ref that still
+points at a force-pushed-away commit — between the force-push and the next
+`git fetch --prune` — keeps that commit reachable, so the gate would pass it.
+That window is narrow and does not touch the shape the gate is for: a commit
+amended before its first push was never on any remote ref.
+
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 
 Codex's automatic review fires on PR open only for PRs whose author is a GitHub
@@ -1111,6 +1186,36 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    filling the concurrency group.
 
    After a new push the head SHA changes — re-read the runs on the **new** SHA.
+
+   **1b. The run EXISTS but never becomes jobs — a queued predecessor is holding
+   the concurrency group.** Read the run's `status` as a *word*, not as a synonym
+   for "busy": `queued` means admitted and waiting for a runner, `pending` means
+   it was never expanded at all. A run stuck at `pending` with `jobs.total_count`
+   of **0** has no jobs to schedule, so the required check is never *created* —
+   `macos` reads as `NOT REPORTED` rather than red, and free runner capacity does
+   nothing for it.
+   ```bash
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>" --jq '.status'
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>/jobs?per_page=1" --jq '.total_count'
+   ```
+   The usual cause is a superseded run for the same PR still sitting `queued`.
+   `build.yml` groups on `build-${{ github.ref }}`, which is `refs/pull/N/merge`
+   for every run of that PR, and its `cancel-in-progress` cancels only runs that
+   are **in progress** — a `queued` predecessor holds the group indefinitely and
+   the newer run waits behind it forever. Pushing a fix while the first run is
+   still queued behind congestion is all it takes to reach this state.
+
+   `POST actions/runs/{id}/cancel` returns `{}` and does nothing to a run that was
+   never assigned. Use **force-cancel**, then confirm the successor expands:
+   ```bash
+   ghapp api -X POST "repos/Generous-Corp/pulp/actions/runs/<old-id>/force-cancel"
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<new-id>/jobs?per_page=1" --jq '.total_count'
+   ```
+   The symptom is indistinguishable from ordinary queue congestion from the
+   outside, which is the trap: on 2026-09-20 pulp#8611 and #8613 each sat two
+   hours behind a queued predecessor while capacity was demonstrably draining
+   (in-flight runs fell 16 to 10 and other PRs merged). Before blaming the pool,
+   check whether **this PR** has more than one live run.
 2. **Is it a version-bump race?** The other concurrent agent re-bumping `main`'s
    `CMakeLists.txt VERSION` makes the PR `DIRTY` (conflict on the VERSION line).
    Merge `origin/main` in, re-resolve the VERSION to one above main, push,

@@ -289,10 +289,183 @@ def main() -> int:
         )
         assert producer_log.stat().st_size == 1024 * 1024
 
+        calibration_diagnostics = {
+            "schema": "pulp.gpu-dpr-calibration-diagnostics.v1",
+            "stage": "calibration",
+            "clock": "dawn-gpu-timestamp",
+            "attempt_nonce": document["attempt_nonce"],
+            "failure_class": "timer_quantization",
+            "control_detected": False,
+            "reason": "GPU timer did not detect the known-extra-work control",
+            "resolution_ms": 0.1,
+            "baseline_median_ms": 1.05,
+            "extra_work_median_ms": 1.1,
+            "delta_ms": 0.05,
+            "detection_threshold_ms": 0.20,
+            "trials": [
+                {"trial": 0,
+                 "baseline": {"valid": True, "value_ms": 1.0},
+                 "extra": {"valid": True, "value_ms": 1.1}},
+                {"trial": 1,
+                 "baseline": {"valid": True, "value_ms": 1.0},
+                 "extra": {"valid": False, "value_ms": None}},
+            ],
+        }
+        diagnostics_name = (
+            f"gpu-timer-calibration-diagnostics-{document['attempt_nonce']}.json"
+        )
+        diagnostics_file = tmp / diagnostics_name
+        diagnostics_file.write_text(
+            json.dumps(calibration_diagnostics) + "\n", encoding="utf-8"
+        )
+        diagnostics_receipt = {
+            "schema": "pulp.gpu-dpr-cell-receipt.v1", "version": 1,
+            "attempt_nonce": document["attempt_nonce"],
+            "attempt_number": document["attempt_number"],
+            "scenario_id": document["scenario"]["id"],
+            "scenario_kind": document["scenario"]["kind"],
+            "mode": document["mode"],
+            "requested_dpr": document["requested_dpr"],
+            "outcome": "inconclusive",
+            "reason": "GPU timer did not detect the known-extra-work control",
+            "dependencies": ["gpu:timer-calibration"],
+            "producer_sha256": digest(producer),
+            "diagnostics": calibration_diagnostics,
+            "diagnostics_artifact": {
+                "schema": "pulp.gpu-dpr-diagnostics-artifact.v1",
+                "path": diagnostics_name,
+                "sha256": digest(diagnostics_file),
+            },
+        }
+        native_adapter.validate_measurement_receipt(
+            document, diagnostics_receipt, tmp, producer
+        )
+
+        # A calibration dependency now carries the same mandatory evidence the
+        # outer runner requires: an embedded diagnostics object, retained bytes
+        # bound by path and digest, and the pinned producer identity.
+        for label, drop in (
+            ("diagnostics", "diagnostics"),
+            ("artifact binding", "diagnostics_artifact"),
+            ("producer digest", "producer_sha256"),
+        ):
+            planted = json.loads(json.dumps(diagnostics_receipt))
+            del planted[drop]
+            try:
+                native_adapter.validate_measurement_receipt(
+                    document, planted, tmp, producer
+                )
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"calibration receipt without {label} passed")
+        planted = json.loads(json.dumps(diagnostics_receipt))
+        planted["diagnostics_artifact"]["sha256"] = "0" * 64
+        try:
+            native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("calibration artifact digest drift passed")
+        planted = json.loads(json.dumps(diagnostics_receipt))
+        planted["diagnostics_artifact"]["path"] = "../escape.json"
+        try:
+            native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("calibration artifact path escape passed")
+        # A signed difference is legitimately negative. After a baseline sample
+        # succeeds but every extra sample fails, the extra median is zero and the
+        # delta is the negated baseline; ordinary quantization noise can also
+        # invert the two medians. Rejecting those would discard exactly the honest
+        # failure receipts this evidence path exists to retain.
+        def with_medians(baseline: float, extra: float) -> dict:
+            planted = json.loads(json.dumps(diagnostics_receipt))
+            diag = planted["diagnostics"]
+            diag["baseline_median_ms"] = baseline
+            diag["extra_work_median_ms"] = extra
+            diag["delta_ms"] = extra - baseline
+            diag["detection_threshold_ms"] = max(
+                float(diag["resolution_ms"]) * 2.0, baseline * 0.10
+            )
+            payload = json.dumps(diag) + "\n"
+            diagnostics_file.write_text(payload, encoding="utf-8")
+            planted["diagnostics_artifact"]["sha256"] = hashlib.sha256(
+                payload.encode("utf-8")
+            ).hexdigest()
+            return planted
+
+        for label, baseline, extra in (
+            ("quantization noise inverted the medians", 1.0, 0.95),
+            ("every extra sample failed after a good baseline", 1.0, 0.0),
+        ):
+            native_adapter.validate_measurement_receipt(
+                document, with_medians(baseline, extra), tmp, producer
+            )
+
+        # The unsigned magnitudes keep their sign requirement, so the relaxation
+        # above is scoped to the difference rather than disabling the check.
+        planted = with_medians(1.0, 0.95)
+        planted["diagnostics"]["resolution_ms"] = -0.065536
+        payload = json.dumps(planted["diagnostics"]) + "\n"
+        diagnostics_file.write_text(payload, encoding="utf-8")
+        planted["diagnostics_artifact"]["sha256"] = hashlib.sha256(
+            payload.encode("utf-8")
+        ).hexdigest()
+        try:
+            native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("negative resolution passed")
+
+        def rebind(planted: dict) -> dict:
+            """Keep a planted receipt's retained bytes consistent with its object."""
+            payload = json.dumps(planted["diagnostics"]) + "\n"
+            diagnostics_file.write_text(payload, encoding="utf-8")
+            planted["diagnostics_artifact"]["sha256"] = hashlib.sha256(
+                payload.encode("utf-8")
+            ).hexdigest()
+            return planted
+
+        planted = rebind(json.loads(json.dumps(diagnostics_receipt)))
+        planted["diagnostics"]["attempt_nonce"] = "0" * 32
+        try:
+            native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("unbound calibration diagnostics passed")
+        for field, value in (
+            ("failure_class", "unknown"),
+            ("delta_ms", 0.0),
+            ("control_detected", True),
+        ):
+            planted = json.loads(json.dumps(diagnostics_receipt))
+            planted["diagnostics"][field] = value
+            rebind(planted)
+            try:
+                native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"invalid diagnostics {field} passed")
+        planted = json.loads(json.dumps(diagnostics_receipt))
+        planted["diagnostics"]["trials"][0]["baseline"]["valid"] = False
+        planted["diagnostics"]["trials"][0]["baseline"]["value_ms"] = 1.0
+        rebind(planted)
+        try:
+            native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid calibration sample passed")
+
     print(
         "gpu_dpr_pulp_native_adapter_selftest=true real_capture_protocol=pass "
         "measured_producer_protocol=pass planted_digest_drift=pass "
-        "planted_partial_scope=pass"
+        "planted_partial_scope=pass mandatory_calibration_evidence=pass"
     )
     return 0
 
