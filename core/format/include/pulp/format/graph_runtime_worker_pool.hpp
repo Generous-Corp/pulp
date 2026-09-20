@@ -100,6 +100,28 @@ public:
     bool configured_audio_workgroup_uses_fallback_for_test() const noexcept {
         return current_audio_workgroup_publication().fallback_when_null;
     }
+    // Install before start(). Invoked on the worker thread once per cold-idle
+    // episode, immediately after that worker has published the park, so an
+    // observer can block on the transition itself instead of polling for it.
+    // Polling competes for the cores the workers need to reach the transition.
+    void set_worker_park_hook_for_test(void (*hook)(void*) noexcept,
+                                       void* context) noexcept {
+        assert(!running_.load(std::memory_order_acquire));
+        worker_park_hook_ = hook;
+        worker_park_context_ = context;
+    }
+    // Claim the cold-transition gate from the control thread. While it is held
+    // no worker can park (each park CAS fails and the worker keeps spinning),
+    // which is how a test builds a pool that provably never idles. run() and
+    // prepare_audio_workgroup_for_render() must not be called while it is held.
+    bool try_hold_cold_transition_gate_for_test() noexcept {
+        bool expected = false;
+        return cold_transition_gate_.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel, std::memory_order_acquire);
+    }
+    void release_cold_transition_gate_for_test() noexcept {
+        cold_transition_gate_.store(false, std::memory_order_release);
+    }
 #ifndef NDEBUG
     void pause_workgroup_transition_for_test() noexcept {
         transition_pause_released_for_test_.store(false, std::memory_order_release);
@@ -176,6 +198,8 @@ private:
     // layout cannot differ between the library and its consumer.
     bool (*fallback_join_hook_for_test_)(void*) noexcept = nullptr;
     void* fallback_join_context_for_test_ = nullptr;
+    void (*worker_park_hook_)(void*) noexcept = nullptr;
+    void* worker_park_context_ = nullptr;
 
     // Published batch (valid for the current epoch). Written by run() before the
     // epoch bump (release), read by workers after observing the new epoch
