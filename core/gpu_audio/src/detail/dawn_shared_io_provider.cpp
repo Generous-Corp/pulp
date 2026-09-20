@@ -14,6 +14,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -33,6 +34,10 @@ namespace pulp::gpu_audio::detail {
 namespace {
 
 constexpr auto kDrainLimit = std::chrono::seconds(15);
+constexpr auto kMaxCompletionWaitNs =
+    static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
+constexpr std::size_t kWaitAnyBatchSize = 64;
+constexpr std::uint64_t kDefaultCompletionWaitNs = 1'000'000;
 
 std::string revision(const std::uint8_t* bytes) {
     if (bytes == nullptr)
@@ -266,13 +271,26 @@ struct DawnSharedIoProvider::Impl {
         std::atomic<bool> observed{false};
     };
     struct Submission {
+        struct ScopeCallback {
+            Submission* submission = nullptr;
+            unsigned index = 0;
+        };
+
         std::atomic<int> queue{0};
         std::atomic<int> scope{0};
         std::atomic<unsigned> scopes_pending{0};
         std::atomic<bool> scope_error{false};
+        std::array<std::atomic<bool>, 3> scope_completed{};
         DawnSubmissionTracker tracker;
         SlotToken token;
         std::shared_ptr<SharedIoTerminalInbox> inbox;
+        // Future ids are retained until their callbacks have been consumed.
+        // Dawn callbacks may be delivered by WaitAny or ProcessEvents, and a
+        // stack-local Future would otherwise leave the dispatcher with no
+        // safe way to wait for the exact submission it owns.
+        wgpu::Future queue_future{};
+        std::array<wgpu::Future, 3> scope_futures{};
+        std::array<ScopeCallback, 3> scope_callbacks{};
         std::optional<SharedIoTerminalStatus> pending_terminal;
         std::uint64_t generation = 0;
         bool queue_consumed = false;
@@ -319,12 +337,136 @@ struct DawnSharedIoProvider::Impl {
         std::vector<SlotGroups> slots;
     };
     std::unique_ptr<ConvolutionPlan> convolution;
+    CompletionPolicy completion_policy = CompletionPolicy::ProcessEvents;
+    std::uint64_t completion_wait_ns = 0;
+    std::size_t wait_any_batch_cursor = 0;
+    bool wait_any_disabled = false;
+    bool wait_any_fault_consumed = false;
 
-    explicit Impl(Options value) : options(std::move(value)) {}
+    explicit Impl(Options value) : options(std::move(value)) {
+        completion_policy = options.completion_policy;
+        completion_wait_ns = options.completion_wait_ns;
+    }
 
     bool pump_until(const auto& done, std::chrono::steady_clock::time_point deadline) noexcept {
         while (!done() && std::chrono::steady_clock::now() < deadline) {
             instance.ProcessEvents();
+            ++stats.process_events_calls;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return done();
+    }
+
+    static wgpu::CallbackMode callback_mode() noexcept {
+        // AllowProcessEvents is deliberate.  Dawn native providers still
+        // deliver these callbacks from ProcessEvents; WaitAny is an additional
+        // wake-up policy, not a license to use arbitrary-thread callbacks.
+        return wgpu::CallbackMode::AllowProcessEvents;
+    }
+
+    void process_events() noexcept {
+        instance.ProcessEvents();
+        ++stats.process_events_calls;
+    }
+
+    wgpu::WaitStatus invoke_wait_any(std::size_t count, std::uint64_t timeout_ns) noexcept {
+        if (!wait_any_fault_consumed && (options.fault == Fault::SyntheticWaitAnyTimeout ||
+                                         options.fault == Fault::SyntheticWaitAnyError)) {
+            wait_any_fault_consumed = true;
+            ++stats.fault_injections;
+            return options.fault == Fault::SyntheticWaitAnyTimeout ? wgpu::WaitStatus::TimedOut
+                                                                   : wgpu::WaitStatus::Error;
+        }
+        return instance.WaitAny(count, wait_infos.data(), timeout_ns);
+    }
+
+    bool wait_for_queue_callbacks(std::chrono::steady_clock::time_point deadline) noexcept {
+        if (completion_policy == CompletionPolicy::ProcessEvents) {
+            process_events();
+            return true;
+        }
+        if (wait_any_disabled) {
+            process_events();
+            return true;
+        }
+
+        const auto batch_count =
+            std::max<std::size_t>(1, (slots.size() + kWaitAnyBatchSize - 1) / kWaitAnyBatchSize);
+        const auto starting_batch = wait_any_batch_cursor % batch_count;
+        std::size_t selected_batch = starting_batch;
+        std::size_t wait_count = 0;
+        for (std::size_t offset = 0; offset < batch_count; ++offset) {
+            const auto batch = (starting_batch + offset) % batch_count;
+            const auto first_slot = batch * kWaitAnyBatchSize;
+            const auto last_slot = std::min(slots.size(), first_slot + kWaitAnyBatchSize);
+            wait_count = 0;
+            for (auto slot_index = first_slot; slot_index < last_slot; ++slot_index) {
+                const auto* slot = slots[slot_index];
+                if (slot == nullptr || !slot->submission.accepted ||
+                    slot->submission.queue.load(std::memory_order_acquire) != 0 ||
+                    slot->submission.queue_future.id == 0)
+                    continue;
+                wait_infos[wait_count++] = {slot->submission.queue_future, false};
+            }
+            if (wait_count != 0) {
+                selected_batch = batch;
+                break;
+            }
+        }
+        // A device-loss callback remains AllowProcessEvents and is flushed
+        // below.  It is intentionally not included in the wait set: keeping
+        // queue futures homogeneous avoids Dawn's mixed-source timed-wait
+        // restriction, while the explicit ProcessEvents call still accounts
+        // for loss delivery before terminal state is observed.
+        if (wait_count != 0) {
+            std::uint64_t timeout_ns = 0;
+            if (completion_policy == CompletionPolicy::TimedWaitAny) {
+                const auto now = std::chrono::steady_clock::now();
+                // Dawn interprets timeoutNS == 0 as an explicit nonblocking
+                // poll. A dispatcher poll therefore remains bounded.
+                if (now < deadline) {
+                    timeout_ns = static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now)
+                            .count());
+                    const auto configured =
+                        completion_wait_ns == 0 ? kDefaultCompletionWaitNs : completion_wait_ns;
+                    timeout_ns =
+                        std::min(timeout_ns, std::min(configured, kDefaultCompletionWaitNs));
+                }
+            }
+            ++stats.wait_any_calls;
+            stats.wait_any_timed_calls += static_cast<std::uint64_t>(timeout_ns != 0);
+            stats.wait_any_max_futures =
+                std::max(stats.wait_any_max_futures, static_cast<std::uint64_t>(wait_count));
+            stats.wait_any_max_timeout_ns = std::max(stats.wait_any_max_timeout_ns, timeout_ns);
+            const auto status = invoke_wait_any(wait_count, timeout_ns);
+            if (status == wgpu::WaitStatus::TimedOut) {
+                ++stats.wait_any_timeouts;
+            } else if (status == wgpu::WaitStatus::Error) {
+                // Error is distinct from unsupported/count failure. Keep
+                // servicing callbacks so a transient dispatcher error cannot
+                // strand an otherwise recoverable submission.
+                ++stats.wait_any_errors;
+            } else if (status != wgpu::WaitStatus::Success) {
+                ++stats.wait_any_unsupported;
+                wait_any_disabled = true;
+            }
+            wait_any_batch_cursor = (selected_batch + 1) % batch_count;
+        }
+
+        // PopErrorScope and device-lost callbacks use AllowProcessEvents too.
+        // Always pump once after WaitAny so a queue wake cannot be mistaken for
+        // a clean submission while its validation scopes or loss callback are
+        // still pending.
+        process_events();
+        return true;
+    }
+
+    bool pump_until_completion(const auto& done,
+                               std::chrono::steady_clock::time_point deadline) noexcept {
+        while (!done() && std::chrono::steady_clock::now() < deadline) {
+            if (!wait_for_queue_callbacks(deadline))
+                return false;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         return done();
@@ -368,6 +510,13 @@ struct DawnSharedIoProvider::Impl {
         }
 
         wgpu::InstanceDescriptor instance_descriptor{};
+        wgpu::InstanceFeatureName instance_features[] = {
+            wgpu::InstanceFeatureName::TimedWaitAny,
+        };
+        if (completion_policy == CompletionPolicy::TimedWaitAny) {
+            instance_descriptor.requiredFeatureCount = 1;
+            instance_descriptor.requiredFeatures = instance_features;
+        }
         native_instance = std::make_unique<dawn::native::Instance>(
             reinterpret_cast<const WGPUInstanceDescriptor*>(&instance_descriptor));
         instance = wgpu::Instance(native_instance->Get());
@@ -522,6 +671,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
                                                    : DawnSubmissionTracker::QueueResult::Error;
             submission.tracker.record_queue(submission.generation, result);
             submission.queue_consumed = true;
+            submission.queue_future = {};
         }
         const auto scope_value = submission.scope.load(std::memory_order_acquire);
         if (!submission.scope_consumed && scope_value != 0) {
@@ -530,6 +680,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
                                                 ? DawnSubmissionTracker::ScopeResult::Clean
                                                 : DawnSubmissionTracker::ScopeResult::Error);
             submission.scope_consumed = true;
+            for (auto& future : submission.scope_futures)
+                future = {};
         }
         if (!submission.pending_terminal) {
             // Every provider operation is enclosed by validation, OOM, and
@@ -603,6 +755,9 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     wgpu::ComputePipeline pipeline;
     std::uint32_t alignment = 0;
     std::vector<Slot*> slots;
+    // Keep the dispatcher wait path allocation-free. Dawn's timed wait limit
+    // is 64 futures, so larger arenas are serviced in bounded batches.
+    std::array<wgpu::FutureWaitInfo, kWaitAnyBatchSize> wait_infos{};
     bool accepting = false;
     bool reusable = true;
     bool device_destroyed = false;
@@ -707,6 +862,11 @@ DawnSharedIoProvider::~DawnSharedIoProvider() {
 
 DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& options) noexcept {
     CreateResult result;
+    if (options.completion_wait_ns > kMaxCompletionWaitNs) {
+        result.availability = Availability::Failed;
+        result.reason = "completion_wait_ns_out_of_range";
+        return result;
+    }
     try {
         auto impl = std::make_unique<Impl>(options);
         if (!impl->initialize(result.reason, result.availability))
@@ -1295,6 +1455,12 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
     submission.scope_error.store(false, std::memory_order_release);
     submission.queue_consumed = false;
     submission.scope_consumed = false;
+    for (auto& completed : submission.scope_completed)
+        completed.store(false, std::memory_order_release);
+    for (auto& future : submission.scope_futures)
+        future = {};
+    for (unsigned index = 0; index < submission.scope_callbacks.size(); ++index)
+        submission.scope_callbacks[index] = {&submission, index};
     submission.token = token;
     submission.inbox = std::move(terminal_inbox);
     submission.pending_terminal.reset();
@@ -1309,8 +1475,8 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
     if (impl_->options.fault == Fault::ForceLossBetweenSubmitAndCompletionRegistration)
         impl_->device.ForceLoss(wgpu::DeviceLostReason::Unknown,
                                 "P1 loss before completion registration");
-    impl_->queue.OnSubmittedWorkDone(
-        wgpu::CallbackMode::AllowProcessEvents,
+    submission.queue_future = impl_->queue.OnSubmittedWorkDone(
+        Impl::callback_mode(),
         [](wgpu::QueueWorkDoneStatus status, wgpu::StringView, Impl::Submission* state) {
             const int value = state->forced_queue_result != 0 ? state->forced_queue_result
                               : status == wgpu::QueueWorkDoneStatus::Success           ? 1
@@ -1323,20 +1489,22 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         impl_->device.ForceLoss(wgpu::DeviceLostReason::Unknown,
                                 "P1 loss after completion registration");
     for (unsigned index = 0; index < 3; ++index) {
-        impl_->device.PopErrorScope(
-            wgpu::CallbackMode::AllowProcessEvents,
+        submission.scope_futures[index] = impl_->device.PopErrorScope(
+            Impl::callback_mode(),
             [](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type, wgpu::StringView,
-               Impl::Submission* state) {
+               Impl::Submission::ScopeCallback* callback) {
+                auto* state = callback->submission;
                 const bool clean = status == wgpu::PopErrorScopeStatus::Success &&
                                    type == wgpu::ErrorType::NoError;
                 if (!clean)
                     state->scope_error.store(true, std::memory_order_release);
+                state->scope_completed[callback->index].store(true, std::memory_order_release);
                 if (state->scopes_pending.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                     state->scope.store(state->scope_error.load(std::memory_order_acquire) ? 2 : 1,
                                        std::memory_order_release);
                 }
             },
-            &submission);
+            &submission.scope_callbacks[index]);
     }
     if (impl_->options.fault == Fault::PoisonAfterSubmit &&
         impl_->options.fault_slot == slot->index) {
@@ -1348,7 +1516,11 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
 void DawnSharedIoProvider::poll() noexcept {
     if (!impl_)
         return;
-    impl_->instance.ProcessEvents();
+    // poll() is the nonblocking dispatcher hook. Timed waits are reserved for
+    // the serialized drain barrier; WaitAny(0) is Dawn's explicit nonblocking
+    // path and TimedWaitAny sees an expired deadline here.
+    const auto deadline = std::chrono::steady_clock::now();
+    (void)impl_->wait_for_queue_callbacks(deadline);
     for (auto* slot : impl_->slots) {
         if (impl_->options.fault == Fault::DelayCompletion &&
             impl_->options.fault_slot == slot->index) {
@@ -1364,7 +1536,7 @@ bool DawnSharedIoProvider::drain() noexcept {
     impl_->accepting = false;
     ++impl_->stats.drain_calls;
     const auto deadline = std::chrono::steady_clock::now() + kDrainLimit;
-    const bool physically_drained = impl_->pump_until(
+    const bool physically_drained = impl_->pump_until_completion(
         [&] {
             for (const auto* slot : impl_->slots) {
                 if (slot->submission.accepted &&
@@ -1399,7 +1571,7 @@ bool DawnSharedIoProvider::drain() noexcept {
         return false;
     }
 
-    const bool terminals_published = impl_->pump_until(
+    const bool terminals_published = impl_->pump_until_completion(
         [&] {
             bool complete = true;
             for (auto* slot : impl_->slots) {
@@ -1459,6 +1631,10 @@ std::uint64_t DawnSharedIoProvider::proc_table_install_count() const noexcept {
 
 DawnSharedIoProvider::Stats DawnSharedIoProvider::stats() const noexcept {
     return impl_ ? impl_->stats : Stats{};
+}
+
+DawnSharedIoProvider::CompletionPolicy DawnSharedIoProvider::completion_policy() const noexcept {
+    return impl_ ? impl_->completion_policy : CompletionPolicy::ProcessEvents;
 }
 
 DawnSharedIoProvider::AdapterIdentity DawnSharedIoProvider::adapter_identity() const {
