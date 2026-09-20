@@ -308,6 +308,20 @@ struct PluginDescriptor {
     /// Empty preserves legacy flexible mono/stereo negotiation.
     std::vector<BusLayoutConfiguration> supported_bus_layouts;
 
+    /// Number of simultaneously sounding voices this plugin allocates.
+    ///
+    /// 0 (the default) means "not voice-based": the plugin does not publish a
+    /// voice count and a host applies its own default. Declare the real count
+    /// for a polyphonic instrument so a host can size its own voice pool to
+    /// match and route per-voice modulation; declare 1 for a monophonic one,
+    /// which tells a host to use global modulation mapping instead. A host
+    /// that is told nothing assumes mono, so leaving this at 0 silently
+    /// downgrades per-voice modulation on a polyphonic instrument.
+    ///
+    /// Appended after supported_bus_layouts to keep every pre-existing
+    /// positional aggregate initializer's meaning.
+    std::uint32_t voice_count = 0;
+
     NodeCapabilities effective_capabilities() const {
         return {
             .supports_mpe = supports_mpe || node_capabilities.supports_mpe,

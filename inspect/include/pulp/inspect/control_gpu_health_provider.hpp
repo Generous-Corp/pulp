@@ -109,6 +109,19 @@ class ControlGpuHealthProvider final {
         /// Timestamp supplied by the trusted native compositor/presentation
         /// producer. A capture/readback completion timestamp cannot substitute
         /// for this endpoint.
+        ///
+        /// Returning from a present CALL is not presentation either. On the
+        /// macOS GPU host both candidates land EARLY, so both under-report
+        /// first-visible latency -- the direction that turns a budget miss into
+        /// a pass. `GpuSurface::end_frame()` only hands the drawable to the
+        /// compositor and waits for nothing, so returning from it precedes
+        /// display by up to a refresh interval; and the back-buffer readback
+        /// runs earlier still, BEFORE that call, so capture completion precedes
+        /// display by even more. Only a
+        /// producer that observes actual display -- a presented-drawable
+        /// callback carrying the instant the frame reached the screen -- may
+        /// write here. No such producer exists on any Pulp backend today, which
+        /// is why `native_present_timing` stays in missing_trace_categories.
         std::optional<std::chrono::steady_clock::time_point> native_presented_at;
         std::optional<double> interaction_hitch_ms;
         std::optional<double> shader_compile_ms;

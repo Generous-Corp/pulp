@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 54,
+  "manifest_revision": 55,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -42,6 +42,10 @@
       "timebase": {
         "state": "partial",
         "capabilities": 10
+      },
+      "timeline": {
+        "state": "not_inventoried",
+        "capabilities": 5
       }
     }
   },
@@ -8065,11 +8069,420 @@
         }
       },
       "contract_digest": "sha256:18ca1597c847380882db716ae395102158a9d3e665a78a4a18eb34c02ec872bb"
+    },
+    {
+      "key": "timeline.chord-scale-lane",
+      "domain": "timeline",
+      "summary": "Immutable sequence-owned harmonic context lane with ordered events and allocation-free lookup.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "factory-validation-on-control",
+        "process": "audio-while-the-caller-pins-the-owning-snapshot",
+        "reset": "replace-immutable-value",
+        "release": "control-when-the-last-handle-drops"
+      },
+      "state_model": "One immutable strictly ordered event vector behind a shared handle. Construction allocates, orders, and validates on the control thread; lookup reads it without allocating.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "authored chord and scale events at canonical tick positions",
+      "output_domain": "the harmony in force at a position, or absent before the first event because no default harmony is invented",
+      "units": [
+        "ticks",
+        "pitch class",
+        "chord-extension bitmask"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "event-synchronous",
+      "bindings": [
+        {
+          "role": "validated-factory",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/model.hpp",
+          "qualified_name": "pulp::timeline::ChordScaleLane::create",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "harmony-lookup",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/model.hpp",
+          "qualified_name": "pulp::timeline::ChordScaleLane::at",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:54e878927a3b75b5e179752c99e20cea3cea55df711da2e2067d42ea0df310ca"
+    },
+    {
+      "key": "timeline.compile-context-subscription",
+      "domain": "timeline",
+      "summary": "Declared vocabulary for the sequence-owned context a content renderer may read beyond its own clip.",
+      "rt_class": "any",
+      "lifecycle": {
+        "construction": "any",
+        "prepare": "none",
+        "process": "any",
+        "reset": "value-initialization",
+        "release": "none"
+      },
+      "state_model": "Constexpr bitset value, one bit per context kind, declared at renderer registration. The compiler keeps the reverse index from kind to declared readers and constructs the matching read-side view, so the view is received rather than authored by a consumer.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "not_applicable",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "context kinds a renderer declares it reads",
+      "output_domain": "a declared-kind set that both dirties exactly its readers on a lane edit and narrows the read side, so an undeclared kind reads as absent",
+      "units": [
+        "context kind"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "pure",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/timeline/compile_context.hpp",
+          "qualified_name": "pulp::timeline::CompileContextSubscriptions",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "context-kind",
+          "kind": "cpp_type",
+          "include": "pulp/timeline/compile_context.hpp",
+          "qualified_name": "pulp::timeline::CompileContextKind",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:4c94963f10338343a4c0c79c7ffcb2b0342e0dcf5270b33aefe0e478d4adcf3b"
+    },
+    {
+      "key": "timeline.dynamics-lane",
+      "domain": "timeline",
+      "summary": "Immutable sequence-owned intensity context lane with interpolated, allocation-free lookup.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "factory-validation-on-control",
+        "process": "audio-while-the-caller-pins-the-owning-snapshot",
+        "reset": "replace-immutable-value",
+        "release": "control-when-the-last-handle-drops"
+      },
+      "state_model": "One immutable strictly ordered event vector behind a shared handle. Construction allocates, orders, and validates on the control thread; lookup reads it without allocating.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "authored normalized intensity events at canonical tick positions, each stating how the segment leaving it reaches the next",
+      "output_domain": "the interpolated intensity at a position, or absent before the first event because not-yet-stated is not silence",
+      "units": [
+        "ticks",
+        "normalized intensity"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "event-synchronous",
+      "bindings": [
+        {
+          "role": "validated-factory",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/model.hpp",
+          "qualified_name": "pulp::timeline::DynamicsLane::create",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "intensity-lookup",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/model.hpp",
+          "qualified_name": "pulp::timeline::DynamicsLane::value_at",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:364ad6374659a23b8b0494ae6ef3674b0ce2e48d0e5a63625f6411e0153c2323"
+    },
+    {
+      "key": "timeline.groove-template",
+      "domain": "timeline",
+      "summary": "Immutable sequence-owned authored feel: rational swing over a subdivision grid plus a repeating timing and accent table, each attenuated by its own strength.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "factory-validation-on-control",
+        "process": "audio-while-the-caller-pins-the-owning-snapshot",
+        "reset": "replace-immutable-value",
+        "release": "control-when-the-last-handle-drops"
+      },
+      "state_model": "One immutable groove record behind a shared handle. Construction allocates and validates on the control thread; timing and accent lookup read the record without allocating and never mutate it. This is the canonical authored model and it may reorder events; timebase.groove-kernel is the fixed-capacity non-reordering subset for a realtime path, and the two are not interchangeable.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "authored event ticks, rational swing over a subdivision grid, and a bounded repeating table of per-step timing offsets and per-mille accents",
+      "output_domain": "sounding event ticks, which the table half may reorder because step offsets are bounded to under one step rather than to monotonicity, and a per-mille velocity scale",
+      "units": [
+        "ticks",
+        "rational ratio",
+        "per-thousand scale"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "event-synchronous",
+      "bindings": [
+        {
+          "role": "validated-factory",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/model.hpp",
+          "qualified_name": "pulp::timeline::GrooveTemplate::create",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "timing-projection",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/model.hpp",
+          "qualified_name": "pulp::timeline::GrooveTemplate::apply_timing",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "accent-lookup",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/model.hpp",
+          "qualified_name": "pulp::timeline::GrooveTemplate::velocity_scale_at",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:daab584197c1f8789bf965db38f3344c42cc2a5335406ae2990f813dd6e8447a"
+    },
+    {
+      "key": "timeline.note-modifier",
+      "domain": "timeline",
+      "summary": "Pure per-note probability, pass condition, and ratchet gate with a replayable authored seed.",
+      "rt_class": "any",
+      "lifecycle": {
+        "construction": "any",
+        "prepare": "none",
+        "process": "any",
+        "reset": "value-initialization",
+        "release": "none"
+      },
+      "state_model": "Stateless constexpr value algebra over an authored modifier record. A note with no record plays unconditionally and once, so absence is a stated default rather than an unknown.",
+      "seed_model": "caller supplies one authored 64-bit content seed; the draw key is a pure mix of that seed and the note identity, and the ratchet count is authored rather than drawn, so it does not move with the seed",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "an authored note modifier, a seed-and-identity draw key, and a loop pass index",
+      "output_domain": "whether the note sounds on that pass, and whether the authored record is structurally well formed",
+      "units": [
+        "probability out of 65535",
+        "pass index",
+        "retrigger count"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "pure",
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/timeline/note_modifier.hpp",
+          "qualified_name": "pulp::timeline::NoteModifier",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "draw-key",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/note_modifier.hpp",
+          "qualified_name": "pulp::timeline::note_modifier_draw_key",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "sounding-gate",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/note_modifier.hpp",
+          "qualified_name": "pulp::timeline::note_modifier_sounds",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "structural-validity",
+          "kind": "cpp_function",
+          "include": "pulp/timeline/note_modifier.hpp",
+          "qualified_name": "pulp::timeline::note_modifier_well_formed",
+          "target": "Pulp::timeline",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:5d480671b97f876bea52fbabc7af07c80fb655672fd3fe184680b5083e2e0982"
     }
   ],
   "tombstones": [],
   "counts": {
-    "total": 106,
+    "total": 111,
     "by_domain": {
       "audio": 9,
       "midi": 16,
@@ -8077,7 +8490,8 @@
       "offline": 0,
       "sequence": 2,
       "signal": 62,
-      "timebase": 10
+      "timebase": 10,
+      "timeline": 5
     }
   },
   "compatibility": {

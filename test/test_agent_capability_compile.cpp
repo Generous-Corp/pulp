@@ -121,6 +121,9 @@
 #include <pulp/timebase/ratchet.hpp>
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timebase/trigger_grid.hpp>
+#include <pulp/timeline/compile_context.hpp>
+#include <pulp/timeline/model.hpp>
+#include <pulp/timeline/note_modifier.hpp>
 
 int main() {
     {
@@ -950,6 +953,57 @@ int main() {
         // timebase.trigger-grid
         static_assert(sizeof(pulp::timebase::TriggerGrid<>) > 0);
         pulp::timebase::TriggerGrid<> probe_value_0{}; (void)probe_value_0.configure(1, 1, pulp::timebase::TickDuration{1});
+    }
+    {
+        // timeline.chord-scale-lane
+        auto volatile binding_218 = static_cast<pulp::runtime::Result<pulp::timeline::ChordScaleLane, pulp::timeline::ModelError> (*)(std::vector<pulp::timeline::ChordScaleEvent>)>(&pulp::timeline::ChordScaleLane::create);
+        (void)binding_218;
+        auto volatile binding_219 = static_cast<const pulp::timeline::ChordScaleEvent* (pulp::timeline::ChordScaleLane::*)(pulp::timebase::TickPosition) const noexcept>(&pulp::timeline::ChordScaleLane::at);
+        (void)binding_219;
+        (void)pulp::timeline::ChordScaleLane::create(std::vector<pulp::timeline::ChordScaleEvent>{});
+        (void)(pulp::timeline::ChordScaleLane::create(std::vector<pulp::timeline::ChordScaleEvent>{}).value()).at(pulp::timebase::TickPosition{0});
+    }
+    {
+        // timeline.compile-context-subscription
+        static_assert(sizeof(pulp::timeline::CompileContextSubscriptions) > 0);
+        static_assert(sizeof(pulp::timeline::CompileContextKind) > 0);
+        pulp::timeline::CompileContextSubscriptions probe_value_0{}; (void)probe_value_0.subscribe(pulp::timeline::CompileContextKind::Groove);
+        pulp::timeline::CompileContextKind probe_value_1{}; (void)probe_value_1;
+    }
+    {
+        // timeline.dynamics-lane
+        auto volatile binding_222 = static_cast<pulp::runtime::Result<pulp::timeline::DynamicsLane, pulp::timeline::ModelError> (*)(std::vector<pulp::timeline::DynamicsEvent>)>(&pulp::timeline::DynamicsLane::create);
+        (void)binding_222;
+        auto volatile binding_223 = static_cast<std::optional<float> (pulp::timeline::DynamicsLane::*)(pulp::timebase::TickPosition) const noexcept>(&pulp::timeline::DynamicsLane::value_at);
+        (void)binding_223;
+        (void)pulp::timeline::DynamicsLane::create(std::vector<pulp::timeline::DynamicsEvent>{});
+        (void)(pulp::timeline::DynamicsLane::create(std::vector<pulp::timeline::DynamicsEvent>{}).value()).value_at(pulp::timebase::TickPosition{0});
+    }
+    {
+        // timeline.groove-template
+        auto volatile binding_224 = static_cast<pulp::runtime::Result<pulp::timeline::GrooveTemplate, pulp::timeline::ModelError> (*)(pulp::timeline::GrooveTemplateInput)>(&pulp::timeline::GrooveTemplate::create);
+        (void)binding_224;
+        auto volatile binding_225 = static_cast<pulp::timebase::TickPosition (pulp::timeline::GrooveTemplate::*)(pulp::timebase::TickPosition) const noexcept>(&pulp::timeline::GrooveTemplate::apply_timing);
+        (void)binding_225;
+        auto volatile binding_226 = static_cast<std::int32_t (pulp::timeline::GrooveTemplate::*)(pulp::timebase::TickPosition) const noexcept>(&pulp::timeline::GrooveTemplate::velocity_scale_at);
+        (void)binding_226;
+        (void)pulp::timeline::GrooveTemplate::create(pulp::timeline::GrooveTemplateInput{});
+        (void)(pulp::timeline::GrooveTemplate::create(pulp::timeline::GrooveTemplateInput{}).value()).apply_timing(pulp::timebase::TickPosition{0});
+        (void)(pulp::timeline::GrooveTemplate::create(pulp::timeline::GrooveTemplateInput{}).value()).velocity_scale_at(pulp::timebase::TickPosition{0});
+    }
+    {
+        // timeline.note-modifier
+        static_assert(sizeof(pulp::timeline::NoteModifier) > 0);
+        auto volatile binding_228 = static_cast<std::uint64_t (*)(std::uint64_t, pulp::timeline::ItemId) noexcept>(&pulp::timeline::note_modifier_draw_key);
+        (void)binding_228;
+        auto volatile binding_229 = static_cast<bool (*)(const pulp::timeline::NoteModifier&, std::uint64_t, std::uint64_t) noexcept>(&pulp::timeline::note_modifier_sounds);
+        (void)binding_229;
+        auto volatile binding_230 = static_cast<bool (*)(const pulp::timeline::NoteModifier&) noexcept>(&pulp::timeline::note_modifier_well_formed);
+        (void)binding_230;
+        pulp::timeline::NoteModifier probe_value_0{}; (void)probe_value_0;
+        (void)pulp::timeline::note_modifier_draw_key(0, pulp::timeline::ItemId{1});
+        (void)pulp::timeline::note_modifier_sounds(pulp::timeline::NoteModifier{}, 0, 0);
+        (void)pulp::timeline::note_modifier_well_formed(pulp::timeline::NoteModifier{});
     }
     return 0;
 }
