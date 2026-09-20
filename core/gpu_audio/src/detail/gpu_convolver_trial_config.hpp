@@ -13,6 +13,42 @@ class GpuConvolver;
 
 namespace pulp::gpu_audio::detail {
 
+enum class GpuConvolverTrialPath : std::uint8_t { StagedAsync, SharedAsync };
+enum class GpuConvolverTrialLoad : std::uint8_t {
+    Quiet,
+    GraphiteUi,
+    GpuContention,
+    Overload,
+};
+
+// Metadata owned by the benchmark, not inferred from a trace record. A raw
+// writer must receive this context explicitly and reject a trial that cannot
+// prove its geometry, deadline, transfer counters, and timing provenance.
+struct GpuConvolverTrialContext {
+    std::uint64_t trial_id = 0;
+    std::uint64_t pair_id = 0;
+    GpuConvolverTrialPath path = GpuConvolverTrialPath::SharedAsync;
+    GpuConvolverTrialLoad load = GpuConvolverTrialLoad::Quiet;
+    std::uint32_t block_frames = 0;
+    std::uint32_t sample_rate_hz = 0;
+    std::uint32_t channels = 0;
+    std::uint32_t ir_frames = 0;
+    std::uint32_t inflight_depth = 0;
+    std::uint32_t lead_blocks = 0;
+    std::uint64_t deadline_ns = 0;
+    std::uint64_t watchdog_ns = 0;
+    bool transfer_counters_direct = false;
+    bool timing_provenance_direct = false;
+};
+
+constexpr bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext& context) noexcept {
+    return context.trial_id != 0 && context.pair_id != 0 && context.block_frames != 0 &&
+           context.sample_rate_hz != 0 && context.channels != 0 && context.ir_frames != 0 &&
+           context.inflight_depth != 0 && context.lead_blocks != 0 && context.deadline_ns != 0 &&
+           context.watchdog_ns > context.deadline_ns && context.transfer_counters_direct &&
+           context.timing_provenance_direct;
+}
+
 // Host-only configuration for a single diagnostic preparation. This is private
 // until the paired P4 provider contract is complete. It is consumed exactly
 // once by GpuConvolver::prepare() and is never read by the callback.
