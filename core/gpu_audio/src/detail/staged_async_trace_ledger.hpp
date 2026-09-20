@@ -85,6 +85,22 @@ class StagedAsyncTraceLedger {
         return true;
     }
 
+    // Close an admitted request that cannot reach its normal callback. This
+    // preserves exactly-once terminal accounting for provider-side failures.
+    bool abandon(std::uint64_t request_id, std::uint64_t now_ns) {
+        auto it = entries_.find(request_id);
+        if (it == entries_.end())
+            return false;
+        auto entry = it->second;
+        entries_.erase(it);
+        sequences_.erase(entry.record.sequence);
+        entry.record.set(SharedIoTraceStage::CompletionObserved, now_ns);
+        entry.record.gpu_terminal = SharedIoGpuTerminalDisposition::CancelledTeardown;
+        entry.record.outcome = SharedIoTraceOutcome::Cancelled;
+        completed_.push_back(entry.record);
+        return true;
+    }
+
     std::vector<SharedIoTraceRecord> take_completed() {
         std::vector<SharedIoTraceRecord> result;
         result.swap(completed_);
@@ -162,6 +178,15 @@ class StagedAsyncPendingState {
         return true;
     }
 
+    bool abandon(std::uint64_t request_id) noexcept {
+        auto it = pending_.find(request_id);
+        if (it == pending_.end())
+            return false;
+        slots_[it->second.slot] = false;
+        pending_.erase(it);
+        return true;
+    }
+
     // Adapter boundary for GpuCompute::ReadbackCallback. The callback owner
     // maps ReadbackStatus to this enum, then releases the slot exactly once.
     bool on_callback(std::uint64_t request_id, CallbackStatus status) {
@@ -219,7 +244,8 @@ class StagedAsyncTrialState {
         if (!pending_.mark_submitted(request_id))
             return false;
         if (!ledger_.submitted(request_id, now_ns)) {
-            (void)pending_.cancel(request_id);
+            (void)pending_.abandon(request_id);
+            (void)ledger_.cancel_admission(request_id);
             return false;
         }
         return true;
@@ -227,14 +253,20 @@ class StagedAsyncTrialState {
 
     bool complete(std::uint64_t request_id, StagedAsyncTraceLedger::CompletionStatus status,
                   std::uint64_t now_ns) {
-        if (!pending_.on_callback(request_id,
-                                  status == StagedAsyncTraceLedger::CompletionStatus::Success
-                                      ? StagedAsyncPendingState::CallbackStatus::Success
-                                  : status == StagedAsyncTraceLedger::CompletionStatus::Expired
-                                      ? StagedAsyncPendingState::CallbackStatus::Expired
-                                      : StagedAsyncPendingState::CallbackStatus::Failed))
+        if (!ledger_.complete(request_id, status, now_ns)) {
+            // If the provider callback arrived after local ownership was lost,
+            // close any remaining slot without fabricating a second record.
+            (void)pending_.abandon(request_id);
             return false;
-        return ledger_.complete(request_id, status, now_ns);
+        }
+        (void)pending_.abandon(request_id);
+        return true;
+    }
+
+    bool abandon(std::uint64_t request_id, std::uint64_t now_ns) {
+        const auto closed = ledger_.abandon(request_id, now_ns);
+        (void)pending_.abandon(request_id);
+        return closed;
     }
 
     bool slot_occupied(std::uint32_t slot) const noexcept {
