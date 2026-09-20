@@ -1,5 +1,6 @@
 #include "detail/shared_io_convolution_session.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/staged_async_trace_ledger.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/runtime/trace.hpp>
@@ -852,4 +853,37 @@ TEST_CASE("recovery atomically closes future worker reservations without reclaim
     REQUIRE(bridge.activate_epoch(2));
     REQUIRE(bridge.begin_worker_admission());
     bridge.end_worker_admission();
+}
+
+TEST_CASE("staged async ledger emits one authenticated terminal record per request",
+          "[gpu_audio][trace][staged_async]") {
+    StagedAsyncTraceLedger ledger;
+    constexpr std::uint64_t request = 41;
+    constexpr std::uint64_t sequence = 17;
+
+    REQUIRE(ledger.admit(request, sequence, 2, 1000));
+    CHECK_FALSE(ledger.admit(request, sequence + 1, 3, 1001));
+    REQUIRE(ledger.submitted(request, 1100));
+    CHECK_FALSE(ledger.submitted(request, 1101));
+    REQUIRE(ledger.complete(request, StagedAsyncTraceLedger::CompletionStatus::Success, 1200));
+    CHECK(ledger.empty());
+
+    const auto records = ledger.take_completed();
+    REQUIRE(records.size() == 1);
+    const auto& record = records.front();
+    CHECK(record.sequence == sequence);
+    CHECK(record.gpu_work_admitted);
+    CHECK(record.gpu_terminal == SharedIoGpuTerminalDisposition::CompletedAccepted);
+    CHECK(record.outcome == SharedIoTraceOutcome::Success);
+    CHECK(record.has(SharedIoTraceStage::Scheduled));
+    CHECK(record.has(SharedIoTraceStage::WorkerEntry));
+    CHECK(record.has(SharedIoTraceStage::EncodeBegin));
+    CHECK(record.has(SharedIoTraceStage::EncodeEnd));
+    CHECK(record.has(SharedIoTraceStage::SubmitBegin));
+    CHECK(record.has(SharedIoTraceStage::SubmitEnd));
+    CHECK(record.has(SharedIoTraceStage::CompletionObserved));
+    CHECK(shared_io_trace_duration(record, SharedIoTraceStage::SubmitBegin,
+                                    SharedIoTraceStage::CompletionObserved)
+              .available);
+    CHECK(ledger.take_completed().empty());
 }
