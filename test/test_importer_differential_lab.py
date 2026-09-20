@@ -222,6 +222,49 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(aggregate["observability"]["ifnf"]["status"], "readback-only")
         self.assertEqual(aggregate["observability"]["cache_states"], ["cold"])
 
+    def test_timing_budget_is_opt_in_and_fail_closed(self) -> None:
+        timings = {
+            "browser_import_ms": 120,
+            "native_import_ms": 20,
+            "native_render_ms": 8,
+            "native_total_ms": 28,
+            "browser_to_native_import_speedup": 6.0,
+        }
+        self.assertEqual(
+            LAB.timing_budget_result(timings, None)["status"], "not-requested")
+        passed = LAB.timing_budget_result(
+            timings, {"native_total_ms": 30})
+        self.assertEqual(passed["status"], "pass")
+        failed = LAB.timing_budget_result(
+            timings, {"native_total_ms": 10, "browser_import_ms": 100})
+        self.assertEqual(failed["status"], "fail")
+        self.assertEqual(
+            {row["metric"] for row in failed["violations"]},
+            {"native_total_ms", "browser_import_ms"})
+        report = {
+            "timing_budget": failed,
+            "promotion": {"classification": "browser-required"},
+            "comparison": {name: {"score": 1.0} for name in
+                            ("structural", "geometry", "typography", "visual")},
+            "timings": timings,
+            "classifications": [],
+        }
+        aggregate = LAB.aggregate_reports([report])
+        self.assertEqual(aggregate["timing_budget"]["status"], "fail")
+        self.assertEqual(aggregate["timing_budget"]["budgets_ms"], failed["budgets_ms"])
+
+    def test_timing_budget_file_parser_rejects_unknown_or_empty_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            unknown = root / "unknown.json"
+            unknown.write_text(json.dumps({"ttfp_ms": 10}))
+            with self.assertRaisesRegex(ValueError, "unknown metric"):
+                LAB_CLI.read_timing_budgets(unknown)
+            empty = root / "empty.json"
+            empty.write_text("{}")
+            with self.assertRaisesRegex(ValueError, "at least one"):
+                LAB_CLI.read_timing_budgets(empty)
+
     def test_missing_corpus_fixture_is_counted_in_report(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
