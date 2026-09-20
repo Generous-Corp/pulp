@@ -19,7 +19,9 @@ namespace detail {
 struct RealtimeGpuNodePath;
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
 struct GpuConvolverTrialConfig;
+struct SharedIoTraceRecord;
 bool configure_gpu_convolver_trial(GpuConvolver&, const GpuConvolverTrialConfig&) noexcept;
+bool drain_gpu_convolver_trial_records(GpuConvolver&, std::vector<SharedIoTraceRecord>&) noexcept;
 } // namespace detail
 
 /// First real GPU audio node: FFT-based (overlap-add) convolution of the input
@@ -213,6 +215,9 @@ class GpuConvolver : public GpuAudioNode {
     friend bool
     detail::configure_gpu_convolver_trial(GpuConvolver&,
                                           const detail::GpuConvolverTrialConfig&) noexcept;
+    friend bool
+    detail::drain_gpu_convolver_trial_records(GpuConvolver&,
+                                              std::vector<detail::SharedIoTraceRecord>&) noexcept;
 
     struct SharedIoState;
 
@@ -228,6 +233,7 @@ class GpuConvolver : public GpuAudioNode {
     bool trial_configured_ = false;
     bool trial_enable_trace_ = false;
     bool trial_capture_admissions_ = false;
+    std::uint32_t trial_success_stride_ = 1;
     std::uint8_t trial_completion_policy_ = 0; // Dawn completion policy enum
     std::uint64_t trial_completion_wait_ns_ = 0;
 
