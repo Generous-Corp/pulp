@@ -1205,6 +1205,51 @@ jobs:
 
           echo "Watchdog window elapsed (${MAX_POLLS} polls) with no native coverage leg past the ${QUEUED_GRACE_MINUTES}-min grace — nothing reaped."
 
+  coverage_publish_barrier:
+    # Do not let a fast ancillary producer (Android or React) become the
+    # first report Codecov sees for a main SHA.  Codecov aggregates uploads
+    # incrementally, so those producers can otherwise publish a tiny
+    # 4k-line report while the native legs are still running (or after they
+    # wedge).  Downloading the two canonical native artifacts is cheap and
+    # makes the publish order explicit: if either native surface is absent,
+    # the ancillary uploads stay skipped and Codecov keeps the prior broad
+    # report/carryforward instead of replacing it with partial data.
+    name: Coverage publish barrier (native reports complete)
+    needs: [classify, coverage]
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true' && needs.coverage.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download Linux native coverage artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: coverage-cobertura-${{ github.sha }}
+          path: native-coverage/linux
+
+      - name: Download macOS native coverage artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: coverage-cobertura-macos-${{ github.sha }}
+          path: native-coverage/macos
+
+      - name: Require Linux and macOS native reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for report in \
+            native-coverage/linux/coverage.cobertura.xml \
+            native-coverage/macos/coverage.cobertura.xml; do
+            if [ ! -s "${report}" ]; then
+              echo "::error::Missing native coverage artifact: ${report}"
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Native coverage publish barrier satisfied (Linux + macOS reports)."
+
   android-kotlin-coverage:
     # Keep Android JVM coverage on the always-on Coverage workflow so
     # Codecov's main-branch head never drops back to `android: null`
@@ -1212,12 +1257,12 @@ jobs:
     # This lane measures Kotlin unit-testable source only; APK build and
     # emulator/device smoke remain in android.yml.
     name: Coverage report (Android, Kotlin)
-    needs: [resolve-runners, classify, coverage]
+    needs: [resolve-runners, classify, coverage_publish_barrier]
     # PR coverage is macOS-only; Linux / Windows / Android coverage is
     # supplied by the nightly cross-platform lane. Keep this Kotlin upload
     # for canonical main/manual runs only so PRs do not allocate an Android
     # coverage runner after the native matrix has already been narrowed.
-    if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true' && needs.coverage.result == 'success'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true' && needs.coverage_publish_barrier.result == 'success'
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.android_kotlin_runs_on) }}
     timeout-minutes: 30
     steps:
@@ -1329,8 +1374,8 @@ jobs:
     # validates PRs, but it must not be the only main upload for a SHA whose
     # native Coverage run was superseded before any OS legs uploaded.
     name: Coverage report (@pulp/react, Vitest)
-    needs: [classify, coverage]
-    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && (github.event_name != 'pull_request') && needs.classify.outputs.native_build_required == 'true' && needs.coverage.result == 'success'
+    needs: [classify, coverage_publish_barrier]
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && (github.event_name != 'pull_request') && needs.classify.outputs.native_build_required == 'true' && needs.coverage_publish_barrier.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

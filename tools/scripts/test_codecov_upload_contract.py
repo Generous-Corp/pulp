@@ -98,14 +98,17 @@ class CoverageWorkflowTests(unittest.TestCase):
         # React and Android used to upload independently while a native leg had
         # failed or Codecov transport had returned no receipt. That made main's
         # tree look current while containing only a subset of the codebase.
+        self.assertIn("coverage_publish_barrier:", self.coverage)
         self.assertIn(
-            "needs: [resolve-runners, classify, coverage]",
+            "needs: [resolve-runners, classify, coverage_publish_barrier]",
             self.coverage,
         )
         self.assertIn(
-            "needs.coverage.result == 'success'",
+            "needs.coverage_publish_barrier.result == 'success'",
             self.coverage,
         )
+        self.assertIn("coverage-cobertura-macos-${{ github.sha }}", self.coverage)
+        self.assertIn("Native coverage publish barrier satisfied (Linux + macOS reports)", self.coverage)
         self.assertIn(
             "required: ${{ matrix.os != 'windows' }}",
             self.coverage,
