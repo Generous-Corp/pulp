@@ -1129,8 +1129,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/gpu_dpr_pulp_native_adapter.py",
           "state": "pulp-owned-retained",
-          "revision": "22a9fdff8e51ba0c45e4203bdc3286f0bd01eadf",
-          "object_id": "8e5bfdbdf988466a9f651e86658a4225434f7406",
+          "revision": "e76104df184f04d215e38bd4d7b67395614e63b1",
+          "object_id": "798b981a6f49632820d6c48c6e46742f04f99ec4",
           "object_type": "blob"
         },
         {
