@@ -23,9 +23,10 @@ This guard therefore no longer asks "did you forget the refresh?". It asks the
 two questions that are still live:
 
 1. **An identity-only re-pin in a PR.** The ledger or the receipt moved, but
-   the *inventory* — which paths are pinned, in which repo, in which state —
-   did not. That is precisely the work the bot now does, and doing it in a PR
-   re-creates the collision class on a file the bot is about to rewrite anyway.
+   every byte of the ledger a human writes stayed put — only the three derived
+   identity fields moved. That is precisely the work the bot now does, and
+   doing it in a PR re-creates the collision class on a file the bot is about
+   to rewrite anyway.
 
 2. **A pinned path deleted or renamed away while the inventory still lists
    it.** Staleness is survivable — a stale pin is still ancestral, so the
@@ -35,9 +36,16 @@ two questions that are still live:
    fix in the PR, because the bot's regenerator cannot invent an inventory
    decision about a path somebody deliberately removed.
 
-An inventory change is still a legitimate in-PR ledger edit, and it still owes
-``gpu_handoff_provenance.py write --receipt`` so the identities and the receipt
-binding match the new row set.
+Any **editorial** ledger edit is still a legitimate in-PR change, and it still
+owes ``gpu_handoff_provenance.py write --receipt`` so the identities and the
+receipt binding match the edited document. Editorial is deliberately the whole
+document minus the three derived fields, not just the pinned row set: the
+ledger also carries ``authorities``, ``upstream``, ``cutover_trigger``,
+``self_binding``, ``stop_rules`` and per-entry ``vellum_paths``,
+``terminal_evidence``, ``input_receipts`` and ``accepted_dispositions``, none
+of which a regenerator writes. Judging by the row set alone would reject those
+edits as re-pins: across 25 days of ``main``, seven ledger commits moved an
+editorial field while leaving the row set untouched.
 
 Diff-scoped and sub-second by construction: two ``git show`` reads of the
 ledger and one ``git diff --name-status``. It does not re-verify identity
@@ -54,6 +62,9 @@ from pathlib import Path
 
 HANDOFF = Path("docs/status/gpu-vellum-handoff.yaml")
 RECEIPT = Path("docs/validation/gpu-handoff-provenance/receipt.json")
+# The three fields `gpu_handoff_provenance.py write` derives from the tree.
+# Everything else in the document is editorial, and a PR may change it freely.
+IDENTITY_FIELDS = ("revision", "object_id", "object_type")
 # --receipt is not optional in practice: the published receipt binds itself to
 # the ledger's exact bytes, so regenerating one without the other leaves the
 # receipt claiming a source that no longer exists.
@@ -68,14 +79,26 @@ def _git(root: Path, *args: str) -> tuple[int, str]:
     return proc.returncode, proc.stdout
 
 
-def _inventory_from_text(text: str) -> set[tuple[str, str, str]] | None:
-    """The set of ``(repo, path, state)`` rows the ledger declares.
+def _inventory_from_text(text: str) -> str | None:
+    """The ledger's editorial content, normalised for comparison.
 
-    This is the ledger's *editorial* content — which paths are pinned at all —
-    as opposed to the identity fields (``revision`` / ``object_id`` /
-    ``object_type``) a regenerator derives from the tree. Returns ``None`` when
-    the document cannot be read, so callers can decline to judge rather than
-    report an empty inventory as a real one.
+    Editorial means everything a regenerator does not write: the whole
+    document minus the three identity fields (``revision``, ``object_id``,
+    ``object_type``) that ``gpu_handoff_provenance.py write`` derives from the
+    tree. Keyed that way, two ledgers compare equal exactly when a human
+    changed nothing and only a re-pin moved — which is the question this guard
+    asks.
+
+    The narrower key it replaced — the set of ``(repo, path, state)`` rows —
+    was wrong in a shape that happens: the ledger also carries top-level
+    ``authorities`` / ``upstream`` / ``cutover_trigger`` / ``self_binding`` /
+    ``stop_rules`` and per-entry ``vellum_paths`` / ``terminal_evidence`` /
+    ``input_receipts`` / ``accepted_dispositions``. Editing any of those leaves
+    the row set identical, so the row-set key read a real editorial commit as
+    an identity-only re-pin and rejected it.
+
+    Returns ``None`` when the document cannot be read, so callers can decline
+    to judge rather than report an empty inventory as a real one.
 
     The file carries a ``.yaml`` extension but its contents are JSON, so it
     parses with the stdlib and needs no PyYAML — which matters because the repo
@@ -87,7 +110,34 @@ def _inventory_from_text(text: str) -> set[tuple[str, str, str]] | None:
         return None
     if not isinstance(data, dict):
         return None
-    rows: set[tuple[str, str, str]] = set()
+    for entry in data.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        for row in entry.get("pulp_paths") or []:
+            if not isinstance(row, dict):
+                continue
+            for field in IDENTITY_FIELDS:
+                row.pop(field, None)
+    # Sorted keys so a pure key-order change in the generator's output cannot
+    # masquerade as an editorial edit, and a compact separator so whitespace
+    # cannot either.
+    return json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+
+def _pinned_paths_from_text(text: str) -> set[str] | None:
+    """Every ``entries[*].pulp_paths[*].path`` the ledger declares.
+
+    Separate from the editorial form above because the two answer different
+    questions: this one is the list of paths whose disappearance turns the
+    required gate red, and it must stay a set of paths rather than a document.
+    """
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    paths: set[str] = set()
     for entry in data.get("entries") or []:
         if not isinstance(entry, dict):
             continue
@@ -96,19 +146,13 @@ def _inventory_from_text(text: str) -> set[tuple[str, str, str]] | None:
                 continue
             path = row.get("path")
             if isinstance(path, str) and path:
-                rows.add((
-                    str(row.get("repo") or ""),
-                    path,
-                    str(row.get("state") or ""),
-                ))
-    return rows
+                paths.add(path)
+    return paths
 
 
-def _inventory_at(root: Path, rev: str) -> set[tuple[str, str, str]] | None:
+def _ledger_text_at(root: Path, rev: str) -> str | None:
     code, out = _git(root, "show", f"{rev}:{HANDOFF}")
-    if code != 0:
-        return None
-    return _inventory_from_text(out)
+    return out if code == 0 else None
 
 
 def pinned_paths(root: Path, rev: str | None = None) -> set[str]:
@@ -118,12 +162,14 @@ def pinned_paths(root: Path, rev: str | None = None) -> set[str]:
         if not doc.is_file():
             return set()
         try:
-            rows = _inventory_from_text(doc.read_text())
+            text = doc.read_text()
         except OSError:
             return set()
     else:
-        rows = _inventory_at(root, rev)
-    return {path for _, path, _ in rows or ()}
+        text = _ledger_text_at(root, rev)
+        if text is None:
+            return set()
+    return _pinned_paths_from_text(text) or set()
 
 
 def name_status(base: str, root: Path) -> list[tuple[str, str]]:
@@ -154,8 +200,10 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     root = Path(args.root).resolve()
 
-    before = _inventory_at(root, args.base)
-    after = _inventory_at(root, "HEAD")
+    before_text = _ledger_text_at(root, args.base)
+    after_text = _ledger_text_at(root, "HEAD")
+    before = _inventory_from_text(before_text) if before_text is not None else None
+    after = _inventory_from_text(after_text) if after_text is not None else None
     if before is None or after is None:
         # No ledger on one side of the range, or a shape this guard cannot
         # read. Say so rather than passing silently, because a guard that
@@ -166,28 +214,34 @@ def main(argv: list[str] | None = None) -> int:
 
     rows = name_status(args.base, root)
     touched = {path for _, path in rows}
-    inventory_changed = before != after
+    editorial_changed = before != after
     failed = False
 
-    # (i) An identity-only re-pin. The generated bytes moved but the row set
-    #     did not, which is exactly the work the bump commit now carries.
+    # (i) An identity-only re-pin. The generated bytes moved but the ledger's
+    #     editorial content did not, which is exactly the work the bump commit
+    #     now carries.
     repinned = sorted({str(p) for p in (HANDOFF, RECEIPT)} & touched)
-    if repinned and not inventory_changed:
+    if repinned and not editorial_changed:
         failed = True
         print("", file=sys.stderr)
         print("gpu-handoff-pin: this PR re-pins the generated ledger:", file=sys.stderr)
         for path in repinned:
             print(f"    {path}", file=sys.stderr)
-        print("  The pinned paths themselves are unchanged, so this is an identity-only", file=sys.stderr)
-        print("  refresh — which the version bot's bump commit now performs on main", file=sys.stderr)
+        print("  Nothing a human writes in that ledger changed — only the derived", file=sys.stderr)
+        print(f"  identity fields ({', '.join(IDENTITY_FIELDS)}) — so this is an", file=sys.stderr)
+        print("  identity-only refresh, which the version bot's bump commit now", file=sys.stderr)
+        print("  performs on main", file=sys.stderr)
         print("  (version_at_land._refresh_derived). Doing it here re-creates the", file=sys.stderr)
         print("  collision this moved: the pulp-gpu-ledger merge driver cannot run on", file=sys.stderr)
         print("  github.com, so two PRs that both re-pin go DIRTY against each other.", file=sys.stderr)
         print("  Drop the re-pin commit:", file=sys.stderr)
         print(f"      git checkout {args.base} -- {HANDOFF} {RECEIPT}", file=sys.stderr)
-        print("  A ledger edit is still expected when you change the INVENTORY (adding,", file=sys.stderr)
-        print("  removing or re-stating a pinned path). That edit does owe the", file=sys.stderr)
-        print(f"  regeneration:  {REPAIR}", file=sys.stderr)
+        print("  An EDITORIAL ledger edit is still expected and still passes: adding,", file=sys.stderr)
+        print("  removing or re-stating a pinned row, and equally a change to", file=sys.stderr)
+        print("  authorities, upstream, cutover_trigger, self_binding, stop_rules,", file=sys.stderr)
+        print("  vellum_paths, terminal_evidence, input_receipts or", file=sys.stderr)
+        print("  accepted_dispositions. That edit does owe the regeneration:", file=sys.stderr)
+        print(f"      {REPAIR}", file=sys.stderr)
 
     # (ii) A pinned path removed while the inventory still lists it. Unlike
     #      staleness, this is not survivable: the row names a path that is not
@@ -195,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     gone = sorted({
         path for status, path in rows
         if status.startswith(("D", "R"))
-    } & {path for _, path, _ in after})
+    } & (_pinned_paths_from_text(after_text) or set()))
     if gone:
         failed = True
         print("", file=sys.stderr)

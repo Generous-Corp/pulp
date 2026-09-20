@@ -22,6 +22,7 @@ concurrent post-merge drains must not lose or duplicate a version (the
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -924,6 +925,92 @@ class RefreshDerivedTest(unittest.TestCase):
                       edited)
         self.assertIn("REPINNED", ledger.read_text())
         self.assertIn("REPINNED", receipt.read_text())
+
+    # ── receipt churn ──────────────────────────────────────────────────────
+    #
+    # `write --receipt` restamps `source_commit` unconditionally, so on a bump
+    # that re-pins nothing it produces a receipt-only diff claiming a re-pin
+    # that did not happen. At ~4 bumps a day that diff is also what makes the
+    # bot's bump PR go DIRTY against any open PR touching the receipt — the
+    # collision moving the re-pin onto the bump was meant to end.
+
+    def _seed_bound_pair(self, ledger_text: str = "LEDGER\n") -> tuple[Path, Path]:
+        """A committed ledger and a receipt that binds it, as main carries them."""
+        ledger = self.repo / "docs/status/gpu-vellum-handoff.yaml"
+        receipt = self.repo / "docs/validation/gpu-handoff-provenance/receipt.json"
+        for f in (ledger, receipt):
+            f.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text(ledger_text)
+        receipt.write_text(json.dumps({
+            "handoff_sha256": hashlib.sha256(ledger_text.encode()).hexdigest(),
+            "source_commit": "0" * 40,
+        }, indent=2) + "\n")
+        self.r.commit("seed a bound ledger pair")
+        return ledger, receipt
+
+    def _install_restamping_regenerator(self, ledger_text: str | None = None) -> None:
+        """A stub that restamps `source_commit`, as the real `write --receipt`
+        does — optionally moving the ledger too."""
+        body = (
+            "import hashlib, json, pathlib\n"
+            "r = pathlib.Path('docs/validation/gpu-handoff-provenance/receipt.json')\n"
+            "l = pathlib.Path('docs/status/gpu-vellum-handoff.yaml')\n"
+        )
+        if ledger_text is not None:
+            body += f"l.write_text({ledger_text!r})\n"
+        body += (
+            "r.write_text(json.dumps({\n"
+            "    'handoff_sha256': hashlib.sha256(l.read_text().encode()).hexdigest(),\n"
+            "    'source_commit': 'f' * 40,\n"
+            "}, indent=2) + '\\n')\n"
+        )
+        self._install_ledger_regenerator(body)
+
+    def _bump(self) -> list[str]:
+        self._install_regenerator("pass\n")
+        return val._write_plan(self.repo, CONFIG, [val.Assignment(
+            surface="plugin", level="patch", current="0.5.0", assigned="0.5.1")])
+
+    def test_a_source_commit_only_receipt_rewrite_is_not_carried(self):
+        ledger, receipt = self._seed_bound_pair()
+        before = receipt.read_text()
+        self._install_restamping_regenerator()
+        edited = self._bump()
+        self.assertNotIn("docs/validation/gpu-handoff-provenance/receipt.json",
+                         edited,
+                         "a source_commit-only rewrite would put a churn diff "
+                         "in every bump commit")
+        self.assertEqual(receipt.read_text(), before,
+                         "HEAD's receipt bytes must be restored")
+        self.assertIn(".claude-plugin/plugin.json", edited,
+                      "the version write itself must still be reported")
+
+    def test_a_real_re_pin_still_carries_its_receipt(self):
+        """POSITIVE CONTROL: without this the guard could restore every
+        receipt and the test above would still pass, leaving the bump
+        committing a ledger whose receipt names the previous bytes."""
+        ledger, receipt = self._seed_bound_pair()
+        self._install_restamping_regenerator(ledger_text="LEDGER MOVED\n")
+        edited = self._bump()
+        self.assertIn("docs/status/gpu-vellum-handoff.yaml", edited)
+        self.assertIn("docs/validation/gpu-handoff-provenance/receipt.json",
+                      edited)
+        self.assertIn("f" * 40, receipt.read_text())
+
+    def test_an_unbound_committed_receipt_is_still_rewritten(self):
+        """The guard's second condition, controlled: an unmoved ledger whose
+        committed receipt does NOT bind it is the shape `resolve` calls REBIND.
+        Restoring there would re-commit a receipt describing other bytes."""
+        ledger, receipt = self._seed_bound_pair()
+        receipt.write_text(json.dumps({
+            "handoff_sha256": "deadbeef", "source_commit": "0" * 40,
+        }, indent=2) + "\n")
+        self.r.commit("break the binding")
+        self._install_restamping_regenerator()
+        edited = self._bump()
+        self.assertIn("docs/validation/gpu-handoff-provenance/receipt.json",
+                      edited)
+        self.assertIn("f" * 40, receipt.read_text())
 
     def test_absent_ledger_is_not_an_error(self):
         # Most fixture repos carry no ledger at all. An entry whose subject is

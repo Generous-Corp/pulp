@@ -33,18 +33,59 @@ class PinFreshnessTests(unittest.TestCase):
         self.assertGreater(len(pins), 50, "parser found no rows; the gate is inert")
         self.assertIn("docs/status/gpu-vellum-handoff.yaml", str(guard.HANDOFF))
 
-    def test_the_real_ledger_inventory_carries_repo_and_state(self) -> None:
-        """The inventory key is (repo, path, state); if the shipped ledger does
-        not actually carry `repo`/`state`, an inventory change that only moves
-        one of those fields would read as identity-only and be rejected."""
-        rows = guard._inventory_from_text(
-            (REPO / guard.HANDOFF).read_text(encoding="utf-8"))
-        self.assertIsNotNone(rows)
-        self.assertGreater(len(rows), 50)
-        self.assertTrue(any(repo for repo, _, _ in rows),
-                        "no row carries a repo; the inventory key is degenerate")
-        self.assertTrue(any(state for _, _, state in rows),
-                        "no row carries a state; the inventory key is degenerate")
+    def test_the_real_ledgers_editorial_key_strips_identity_and_nothing_else(self) -> None:
+        """The editorial key must be blind to the three derived fields and
+        sensitive to everything else, measured on the SHIPPED ledger.
+
+        Both halves are load-bearing and each is the other's control. If the
+        strip missed a field, an identity-only re-pin would read as editorial
+        and the gate would be inert; if the strip took too much, a real
+        editorial edit would read as a re-pin and be rejected — which is the
+        bug this key replaced.
+        """
+        text = (REPO / guard.HANDOFF).read_text(encoding="utf-8")
+        baseline = guard._inventory_from_text(text)
+        self.assertIsNotNone(baseline, "the shipped ledger does not parse")
+
+        doc = json.loads(text)
+        rows = [row for entry in doc["entries"]
+                for row in (entry.get("pulp_paths") or [])]
+        self.assertGreater(len(rows), 50, "no pinned rows; the gate is inert")
+        for field in guard.IDENTITY_FIELDS:
+            self.assertTrue(any(field in row for row in rows),
+                            f"no row carries {field}; the strip is vacuous")
+
+        # Blind to identity: rewrite every derived field and the key must not move.
+        repinned = json.loads(text)
+        for entry in repinned["entries"]:
+            for row in entry.get("pulp_paths") or []:
+                for field in guard.IDENTITY_FIELDS:
+                    if field in row:
+                        row[field] = "0" * 40
+        self.assertEqual(
+            guard._inventory_from_text(json.dumps(repinned)), baseline,
+            "the key moved on an identity-only rewrite; the gate would be inert")
+
+        # Sensitive to editorial: each of these must move the key. They are the
+        # fields the row-set key could not see.
+        for mutate in (
+            lambda d: d.__setitem__("authorities", {"probe": "added"}),
+            lambda d: d.__setitem__("upstream", {"probe": "added"}),
+            lambda d: d.__setitem__("cutover_trigger", "probe"),
+            lambda d: d.__setitem__("self_binding", {"probe": "added"}),
+            lambda d: d.__setitem__("stop_rules", ["probe"]),
+            lambda d: d["entries"][0].__setitem__("vellum_paths", ["probe"]),
+            lambda d: d["entries"][0].__setitem__("terminal_evidence", "probe"),
+            lambda d: d["entries"][0].__setitem__("input_receipts", ["probe"]),
+            lambda d: d["entries"][0].__setitem__("accepted_dispositions", ["probe"]),
+            lambda d: d["entries"][0]["pulp_paths"][0].__setitem__("state", "probe"),
+            lambda d: d["entries"][0]["pulp_paths"][0].__setitem__("repo", "probe"),
+        ):
+            edited = json.loads(text)
+            mutate(edited)
+            self.assertNotEqual(
+                guard._inventory_from_text(json.dumps(edited)), baseline,
+                f"an editorial edit left the key unmoved: {mutate}")
 
     # ── fixture ────────────────────────────────────────────────────────────
 
@@ -53,12 +94,16 @@ class PinFreshnessTests(unittest.TestCase):
         {"repo": "pulp", "path": "tools/scripts/pinned_tool.py", "state": "shared"},
     ]
 
-    def _write_ledger(self, root: Path, rows: list[dict], identity: str) -> None:
+    def _write_ledger(self, root: Path, rows: list[dict], identity: str,
+                      **editorial: object) -> None:
         doc = root / guard.HANDOFF
         doc.parent.mkdir(parents=True, exist_ok=True)
-        doc.write_text(json.dumps({
-            "entries": [{"pulp_paths": [dict(r, revision=identity) for r in rows]}]
-        }, indent=2) + "\n")
+        body: dict = {
+            "authorities": {"vellum": "unchanged"},
+            "entries": [{"pulp_paths": [dict(r, revision=identity) for r in rows]}],
+        }
+        body.update(editorial)
+        doc.write_text(json.dumps(body, indent=2) + "\n")
         receipt = root / guard.RECEIPT
         receipt.parent.mkdir(parents=True, exist_ok=True)
         receipt.write_text(json.dumps({"source_commit": identity}) + "\n")
@@ -125,6 +170,42 @@ class PinFreshnessTests(unittest.TestCase):
             ]
             self._write_ledger(root, rows, "bbbbbbb")
             git("add", "-A", cwd=root); git("commit", "-qm", "add pinned path", cwd=root)
+            proc = self.run_guard(root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_an_authorities_only_edit_passes(self) -> None:
+        """The ledger carries editorial content no regenerator writes, and the
+        row set cannot see it.
+
+        Keying on `(repo, path, state)` rows called this shape an identity-only
+        re-pin and rejected it. Seven commits on `main` in 25 days have it —
+        `docs(gpu): bind current Vellum adoption authority` among them — so it
+        is a live PR shape, not a hypothetical.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+            self._write_ledger(root, self.LEDGER_ROWS, "bbbbbbb",
+                               authorities={"vellum": "rebound"})
+            git("add", "-A", cwd=root)
+            git("commit", "-qm", "rebind the authority", cwd=root)
+            proc = self.run_guard(root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_a_per_entry_editorial_edit_passes(self) -> None:
+        """POSITIVE CONTROL for the case above at the other nesting level: the
+        editorial fields the row set cannot see are not all top-level —
+        `vellum_paths`, `terminal_evidence`, `input_receipts` and
+        `accepted_dispositions` live inside an entry, beside `pulp_paths`."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+            doc = root / guard.HANDOFF
+            body = json.loads(doc.read_text())
+            body["entries"][0]["terminal_evidence"] = "recorded"
+            for row in body["entries"][0]["pulp_paths"]:
+                row["revision"] = "bbbbbbb"
+            doc.write_text(json.dumps(body, indent=2) + "\n")
+            git("add", "-A", cwd=root)
+            git("commit", "-qm", "record terminal evidence", cwd=root)
             proc = self.run_guard(root)
             self.assertEqual(proc.returncode, 0, proc.stderr)
 

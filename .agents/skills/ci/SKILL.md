@@ -440,11 +440,27 @@ advances `main` by itself, so a re-pin there costs nobody a rebase.
 stale is survivable — provenance is ancestral, and currency is opt-in behind
 `PULP_GPU_HANDOFF_REQUIRE_CURRENT`, which nothing in `.github` sets.
 
+"Survivable" is about gates, not about truth. `gpu_handoff_provenance.py check`
+is the strong currency claim — the one that asserts every pinned row names the
+blob HEAD actually holds — and between a merge that touches a pinned path and
+the next `chore: bump versions` commit it is **expected to be red on `main`**.
+That is the designed steady state, not a defect and not something to repair by
+hand: the bot's next bump regenerates the pair. No gate runs `check` (nothing in
+`.github/`, `.shipyard/config.toml` or a ctest command invokes it; the
+`gpu-handoff-provenance-selftest` ctest carries the currency assertion but skips
+it unless `PULP_GPU_HANDOFF_REQUIRE_CURRENT=1`), so a red `check` blocks nothing
+— it just means the ledger is between refreshes. Run it when you want the
+stronger claim, and read a red one against the clock rather than as a bug.
+
 Two things still belong to the PR:
 
-- **An inventory change** — adding, removing, or re-stating a pinned path. The
-  bot regenerates identities; it cannot make that editorial decision. This is
-  the only in-PR ledger edit, and it still owes the regeneration:
+- **An editorial ledger change** — adding, removing or re-stating a pinned
+  path, and equally an edit to `authorities`, `upstream`, `cutover_trigger`,
+  `self_binding`, `stop_rules`, or an entry's `vellum_paths`,
+  `terminal_evidence`, `input_receipts` or `accepted_dispositions`. The bot
+  regenerates identities; it cannot make any of those decisions. Editorial is
+  the whole document minus the three derived identity fields, and all of it is
+  a legitimate in-PR ledger edit that still owes the regeneration:
 
   ```bash
   python3 tools/scripts/gpu_handoff_provenance.py write --receipt   # regenerate both
@@ -462,8 +478,8 @@ Two things still belong to the PR:
 
 `gpu_handoff_pin_freshness.py` enforces exactly those two shapes, from both
 `gates.sh` and the pre-push hook: it fails an identity-only re-pin (ledger or
-receipt moved, inventory did not) and a pinned path deleted or renamed while
-the inventory still lists it. Diff-scoped and sub-second — two `git show` reads
+receipt moved, the ledger's editorial content did not) and a pinned path
+deleted or renamed while the inventory still lists it. Diff-scoped and sub-second — two `git show` reads
 and one `git diff --name-status`. It does not re-verify the identity fields;
 the `check` command above is what proves those.
 

@@ -172,9 +172,24 @@ Staleness is survivable while you wait for the bot: provenance is ancestral, so
 the always-on tier accepts a stale-but-real pin, and currency at HEAD is opt-in
 behind `PULP_GPU_HANDOFF_REQUIRE_CURRENT`, which nothing in `.github` sets.
 
+Survivable means no gate goes red, not that the pins are right.
+`gpu_handoff_provenance.py check` is the strong currency claim, and on `main` it
+is **expected to be red between a merge that touched a pinned path and the next
+`chore: bump versions` commit** — that window is the designed steady state now
+that the bot owns the refresh. Nothing runs `check` for you (the
+`gpu-handoff-provenance-selftest` ctest holds the currency assertion but skips
+it without `PULP_GPU_HANDOFF_REQUIRE_CURRENT=1`), so a red `check` is a reading
+of where `main` sits in that cycle, not a task. Do not hand-regenerate to clear
+it; that is the re-pin the guard rejects.
+
 **Two shapes still belong to the PR**, because no regenerator can decide them:
 
-- **An inventory change** — adding, removing, or re-stating a pinned path.
+- **An editorial ledger change** — adding, removing or re-stating a pinned
+  path, and equally an edit to `authorities`, `upstream`, `cutover_trigger`,
+  `self_binding`, `stop_rules`, or an entry's `vellum_paths`,
+  `terminal_evidence`, `input_receipts` or `accepted_dispositions`. The guard
+  keys on the whole document minus the three derived identity fields, so any
+  of these passes; only a move confined to those three fields is a re-pin.
 - **A pinned path you deleted or renamed.** Unlike staleness this is *not*
   survivable: the ledger names a path that is not there and the required gate
   goes red. Drop or move the row in the same PR.

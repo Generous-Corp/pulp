@@ -92,10 +92,22 @@ plan would sweep unrelated working-tree drift into a bump). Two entries today:
   subject spellings, and they collided on github.com where the local
   `pulp-gpu-ledger` merge driver cannot run. The bump commit advances `main` by
   itself, so a re-pin there costs nobody a rebase. PRs consequently do not
-  re-pin at all; `gpu_handoff_pin_freshness.py` rejects one that tries. The
-  residual case a PR still owns is an *inventory* change — adding, removing or
-  re-stating a pinned path — which no regenerator can decide and which still
-  runs `write --receipt` in the PR.
+  re-pin at all; `gpu_handoff_pin_freshness.py` rejects one that tries. What a
+  PR still owns is any *editorial* change — the whole document minus the three
+  derived identity fields, so a pinned row added/removed/re-stated and equally
+  an `authorities` / `upstream` / `vellum_paths` / `terminal_evidence` edit.
+  None of those is a decision a regenerator can make, and each still runs
+  `write --receipt` in the PR.
+
+  `write --receipt` restamps the receipt's `source_commit` unconditionally, so
+  on a bump that re-pins nothing it would put a receipt-only diff in every bump
+  commit — and the bot's bump PR would then go DIRTY against any open PR
+  touching the receipt, which is the collision this move exists to end.
+  `_drop_receipt_churn` restores the committed receipt when the regenerated
+  ledger is byte-identical to `HEAD`'s and `HEAD`'s receipt already binds it:
+  the same two conditions `gpu_handoff_provenance.py resolve` calls CHURN. It
+  changes nothing about `write`'s own semantics — only this caller declines to
+  carry the restamp.
 
 Both ledger paths are listed in `versioning.json`'s `generated_globs`, or the
 bot's own bump PR would fail the required `Enforce version & skill sync` check

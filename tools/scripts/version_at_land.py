@@ -274,6 +274,13 @@ def plan_for_range(repo: Path, config: Config, base: str, head: str) -> list[Ass
     return assignments
 
 
+# The GPU/Vellum handoff ledger and the receipt that binds itself to that
+# ledger's exact bytes. Named once because both the regenerator entry below and
+# the churn guard beside it address this pair specifically.
+_GPU_LEDGER = "docs/status/gpu-vellum-handoff.yaml"
+_GPU_RECEIPT = "docs/validation/gpu-handoff-provenance/receipt.json"
+_GPU_LEDGER_PAIR = (_GPU_LEDGER, _GPU_RECEIPT)
+
 # Derived files that embed a version this bot writes, and so go stale the
 # instant it writes one. Each entry regenerates itself from the tree, so the
 # bot refreshes them rather than leaving a human to notice the breakage.
@@ -298,13 +305,75 @@ _DERIVED_REGENERATORS: list[tuple[tuple[str, ...], list[str]]] = [
     # without the other leaves the receipt naming a source that no longer
     # exists.
     (
-        (
-            "docs/status/gpu-vellum-handoff.yaml",
-            "docs/validation/gpu-handoff-provenance/receipt.json",
-        ),
+        _GPU_LEDGER_PAIR,
         ["python3", "tools/scripts/gpu_handoff_provenance.py", "write", "--receipt"],
     ),
 ]
+
+
+def _drop_receipt_churn(repo: Path) -> None:
+    """Undo a receipt rewrite that only restamps `source_commit`.
+
+    `gpu_handoff_provenance.py write --receipt` always rewrites the receipt's
+    `source_commit` to the commit it regenerated from, even when it reports
+    that the ledger's rows did not move. On the bump path that means every bump
+    commit — roughly four a day — would carry a receipt-only diff describing a
+    re-pin that did not happen, and the bot's bump PR would then go DIRTY on
+    github.com against any open PR that touched the receipt: exactly the
+    collision moving the re-pin here was meant to end.
+
+    `gpu_handoff_provenance.py resolve` already classifies this shape as CHURN
+    and keeps HEAD's bytes rather than committing it. This mirrors that
+    verdict's two conditions — the regenerated ledger is byte-identical to the
+    committed one, and the committed receipt already binds it — and restores
+    the receipt when both hold. It deliberately does not change the
+    regenerator's own semantics: `write --receipt` keeps restamping, and only
+    this caller declines to carry the result.
+
+    Best-effort like its caller: this runs inside a bump the bot must be able
+    to finish, so any failure leaves the regenerated receipt in place (a churn
+    diff, which is the pre-existing behaviour) rather than aborting.
+    """
+    try:
+        # Imported here, not at module scope, so a missing or broken provenance
+        # module degrades to the churn diff instead of breaking every bump. The
+        # import is also what keeps the binding rule in ONE place: duplicating
+        # the sha256 comparison here would be a second copy free to drift from
+        # the one `resolve` decides by.
+        from gpu_handoff_provenance import LEDGER_SENTINEL, binding_proof
+
+        # Condition 1: regeneration left the ledger exactly as HEAD has it.
+        # (The index equals HEAD for this path — the caller has staged nothing
+        # yet — so a clean `status` is a byte-identity claim about HEAD.)
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", _GPU_LEDGER],
+            cwd=repo, capture_output=True, text=True, check=True,
+        )
+        if status.stdout.strip():
+            return
+
+        # Condition 2: the receipt HEAD already carries binds that ledger, so
+        # rewriting it would move nothing but `source_commit`.
+        head_receipt = subprocess.run(
+            ["git", "show", f"HEAD:{_GPU_RECEIPT}"],
+            cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout
+        ledger_text = (repo / _GPU_LEDGER).read_text(encoding="utf-8")
+        if LEDGER_SENTINEL in head_receipt:
+            return
+        binds, _, _ = binding_proof(ledger_text, head_receipt)
+        # A True that cannot be False is not evidence: prove the comparison
+        # discriminates on this exact input before acting on it.
+        control, _, _ = binding_proof(ledger_text + "\n", head_receipt)
+        if not binds or control:
+            return
+
+        subprocess.run(
+            ["git", "checkout", "--", _GPU_RECEIPT],
+            cwd=repo, capture_output=True, check=True,
+        )
+    except Exception:  # noqa: BLE001 - best-effort; a bump must still finish
+        return
 
 
 def _refresh_derived(repo: Path) -> list[str]:
@@ -337,6 +406,9 @@ def _refresh_derived(repo: Path) -> list[str]:
                 file=sys.stderr,
             )
             continue
+        if paths == _GPU_LEDGER_PAIR:
+            _drop_receipt_churn(repo)
+
         # Only report a path as edited when its content actually moved; these
         # regenerators are idempotent, so an unchanged file is the norm. Asked
         # per path rather than for the group, because one regenerator can move
