@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260920-pr8610-gpu-trace-scope-dedupe-watch",
+  "created_at": "2026-09-20T00:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Remove two redundant host-level trace scopes in the macOS window host so each GPU frame stage emits exactly one span per frame. The surfaces already emit gpu_submit and gpu_present themselves on every path, including the early return that presents without submitting, so the host brackets produced a per-frame count that depended on which path the frame took. This restores the count the acceptance document already requires, adds no producer, changes no rendering behavior, and touches no transferred slice.",
+  "tests": [
+    "gpu-handoff-provenance-selftest",
+    "gpu-recipe-catalog-selftest",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
