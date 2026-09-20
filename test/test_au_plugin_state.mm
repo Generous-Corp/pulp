@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/format/au_factory_presets.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/au_v2_instrument.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
@@ -21,10 +22,13 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
-#include <string>
-#include <vector>
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <unistd.h>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
 
@@ -2853,7 +2857,10 @@ TEST_CASE("AU v3 per-method audit invariants",
         // update. Pinning them prevents a future edit from silently
         // flipping the bus model or preset support, which would change
         // what hosts assume about Pulp plugins at scan time.
-        REQUIRE([unit supportsUserPresets] == NO);
+        // YES since the adapter restores a negative (user) preset number in
+        // setCurrentPreset: through the base class's own preset store. Hosts
+        // read this at scan time to decide whether to offer "Save Preset".
+        REQUIRE([unit supportsUserPresets] == YES);
         REQUIRE([unit canProcessInPlace] == YES);
         REQUIRE(unit.renderContextObserver != nil);
 
@@ -3142,6 +3149,148 @@ TEST_CASE("AU v3 editor parameter edit + gesture reach the host for automation",
         CHECK(sawRelease);
 
         [tree removeParameterObserver:obs];
+        [unit release];
+    }
+}
+
+// ===========================================================================
+// AU v3 presets.
+//
+// iOS hosts — AUM, Loopy Pro, Cubasis — drive presets exclusively through this
+// API, so an AUv3 that answers nothing here has no preset UX at all on the
+// platform Pulp targets first. The factory half reads the plug-in's bundled
+// bank; the user half rides on AUAudioUnit's own preset store, which is why
+// `supportsUserPresets` can be YES without Pulp owning a writable location.
+// ===========================================================================
+namespace {
+
+// Same fixture shape `PresetManager::save` writes, staged in a temp folder.
+class ScopedAuV3PresetDirectory {
+  public:
+    ScopedAuV3PresetDirectory() {
+        dir_ = std::filesystem::temp_directory_path() /
+               ("pulp-auv3-presets-" + std::to_string(::getpid()) + "-" +
+                std::to_string(reinterpret_cast<std::uintptr_t>(this)));
+        std::filesystem::create_directories(dir_);
+    }
+    ~ScopedAuV3PresetDirectory() {
+        std::error_code ec;
+        std::filesystem::remove_all(dir_, ec);
+    }
+
+    ScopedAuV3PresetDirectory(const ScopedAuV3PresetDirectory&) = delete;
+    ScopedAuV3PresetDirectory& operator=(const ScopedAuV3PresetDirectory&) = delete;
+
+    void write(const std::string& name, float gain) const {
+        std::ofstream f(dir_ / (name + ".json"));
+        f << "{\n  \"name\": \"" << name << "\",\n"
+          << "  \"manufacturer\": \"PulpTest\",\n"
+          << "  \"plugin\": \"AUEffectPluginStateTest\",\n"
+          << "  \"version\": 1,\n"
+          << "  \"parameters\": {\n"
+          << "    \"Gain\": " << gain << "\n"
+          << "  }\n}\n";
+    }
+
+    const std::filesystem::path& path() const {
+        return dir_;
+    }
+
+  private:
+    std::filesystem::path dir_;
+};
+
+} // namespace
+
+TEST_CASE("AU v3 advertises bundled factory presets and selecting one moves state",
+          "[au][auv3][presets]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* err = nil;
+        PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                          options:0
+                                                                            error:&err];
+        REQUIRE(unit != nil);
+        REQUIRE(err == nil);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        // A test binary is not inside a bundle, so nothing is discovered. nil —
+        // not an empty array — is what makes a host hide the preset menu.
+        REQUIRE([unit factoryPresets] == nil);
+
+        ScopedAuV3PresetDirectory presets;
+        // Written out of alphabetical order: the table sorts by name, so
+        // "Bright" is index 0. A host stores that index in its session.
+        presets.write("Warm", 6.0f);
+        presets.write("Bright", -9.0f);
+        [unit pulpFactoryPresetTable]->set_directory(presets.path());
+
+        NSArray<AUAudioUnitPreset*>* bank = [unit factoryPresets];
+        REQUIRE(bank != nil);
+        REQUIRE(bank.count == 2u);
+        REQUIRE(bank[0].number == 0);
+        REQUIRE(std::string(bank[0].name.UTF8String) == "Bright");
+        REQUIRE(bank[1].number == 1);
+        REQUIRE(std::string(bank[1].name.UTF8String) == "Warm");
+
+        // Park the parameter away from either preset so a no-op cannot pass.
+        processor->state().set_value(1, 0.0f);
+
+        AUAudioUnitPreset* warm = [[AUAudioUnitPreset alloc] init];
+        warm.number = 1;
+        warm.name = @"Warm";
+        unit.currentPreset = warm;
+
+        // The point of the feature: the host's selection changed the plug-in.
+        REQUIRE_THAT(processor->state().get_value(1), WithinAbs(6.0, 0.01));
+        REQUIRE(unit.currentPreset != nil);
+        REQUIRE(unit.currentPreset.number == 1);
+
+        // Selecting the other entry moves state again — one successful load is
+        // not proof the index is honoured.
+        AUAudioUnitPreset* bright = [[AUAudioUnitPreset alloc] init];
+        bright.number = 0;
+        bright.name = @"Bright";
+        unit.currentPreset = bright;
+        REQUIRE_THAT(processor->state().get_value(1), WithinAbs(-9.0, 0.01));
+        REQUIRE(unit.currentPreset.number == 0);
+
+        // An out-of-range factory number is refused and changes nothing —
+        // neither the parameters nor the host-visible selection.
+        AUAudioUnitPreset* bogus = [[AUAudioUnitPreset alloc] init];
+        bogus.number = 7;
+        bogus.name = @"Nope";
+        unit.currentPreset = bogus;
+        REQUIRE_THAT(processor->state().get_value(1), WithinAbs(-9.0, 0.01));
+        REQUIRE(unit.currentPreset.number == 0);
+
+        // A user preset (negative number) routes to the base class's own store
+        // instead of the factory table. Nothing was ever saved here, so the
+        // lookup fails and the adapter must fail closed rather than fall
+        // through to the factory path and index with a negative number.
+        AUAudioUnitPreset* user = [[AUAudioUnitPreset alloc] init];
+        user.number = -1;
+        user.name = @"NeverSaved";
+        unit.currentPreset = user;
+        REQUIRE_THAT(processor->state().get_value(1), WithinAbs(-9.0, 0.01));
+        REQUIRE(unit.currentPreset.number == 0);
+
+        // Clearing the selection is legal and must not disturb the plug-in.
+        unit.currentPreset = nil;
+        REQUIRE(unit.currentPreset == nil);
+        REQUIRE_THAT(processor->state().get_value(1), WithinAbs(-9.0, 0.01));
+
+        [bogus release];
+        [bright release];
+        [warm release];
+        [user release];
         [unit release];
     }
 }

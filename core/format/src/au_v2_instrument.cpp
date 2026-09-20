@@ -70,6 +70,10 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory f
             // bus-name strings without copying it per block (which would allocate
             // on the audio thread).
             descriptor_ = processor_->descriptor();
+            // Discover the plug-in's bundled factory presets. Empty for a
+            // plug-in that ships none, and for any build not loaded from a
+            // bundle (a unit-test binary, a standalone host).
+            factory_presets_.bind(store_, descriptor_.manufacturer, descriptor_.name);
 
             // Materialise the output elements now (guarded/idempotent — DoInitialize
             // calls CreateElements() again later as a no-op) so each declared bus's
@@ -408,6 +412,34 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
 void PulpAUInstrument::publish_parameter_display_changes()
 {
     parameter_display_names_.poll_main_thread();
+}
+
+// ── Factory presets ──────────────────────────────────────────────────────
+
+OSStatus PulpAUInstrument::GetPresets(CFArrayRef* outData) const {
+    return factory_presets_.copy_presets(outData);
+}
+
+OSStatus PulpAUInstrument::NewFactoryPresetSet(const AUPreset& inNewFactoryPreset) {
+    if (inNewFactoryPreset.presetNumber < 0)
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    const auto index = static_cast<std::size_t>(inNewFactoryPreset.presetNumber);
+    const AUPreset* canonical = factory_presets_.preset_at(index);
+    if (canonical == nullptr)
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    // Load first: the base class only records the selection, so without this
+    // the host relabels its menu and the plug-in keeps its old parameters.
+    // The store's host bridge notifies the host of every value that moved.
+    if (!factory_presets_.load(index))
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    // Make OUR record current rather than the host's copy. The host may pass a
+    // name that never came from this table, and SetAFactoryPresetAsCurrent
+    // retains whatever string it is handed.
+    SetAFactoryPresetAsCurrent(*canonical);
+    return noErr;
 }
 
 OSStatus PulpAUInstrument::SaveState(CFPropertyListRef* outData)

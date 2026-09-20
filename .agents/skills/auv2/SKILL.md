@@ -177,7 +177,9 @@ need a specific base lives in `core/format/include/pulp/format/au_v2_common.hpp`
 `fill_parameter_value_strings` / `parameter_string_from_value` /
 `parameter_value_from_string`), the editor→host parameter bridge
 (`wire_host_parameter_bridge` + the `ScopedHostParamWrite` echo guard), preset
-state (`save_pulp_state` / `restore_pulp_state`), the MIDI-output callback
+state (`save_pulp_state` / `restore_pulp_state`), factory presets
+(`FactoryPresetTable`, in the separate `au_factory_presets.hpp` so the AU v3
+unit shares it without pulling AudioUnitSDK), the MIDI-output callback
 handoff (`MidiOutputCallbackPublisher`, `make_midi_output_names`), the Cocoa-view
 hook, `decode_midi_event`, the render `ProcessContext` builders, and
 `MidiOutputPacketBuilder`. Add a fourth adapter by calling these, not by copying
@@ -227,6 +229,49 @@ which is what a host reads as "no" and matches leaving it unimplemented.
 Add the property to **all three** classes when touching this. A helper wired
 into only the instrument leaves an `aumf`/`aumi` MPE plug-in silently
 unreachable, and no test that exercises one class catches it.
+## Factory presets
+
+All three adapters override `AUBase::GetPresets` and
+`AUBase::NewFactoryPresetSet`, which is all the SDK needs: `AUBase` already
+plumbs `kAudioUnitProperty_FactoryPresets` (get) and
+`kAudioUnitProperty_PresentPreset` (get + set) on top of those two, and routes a
+set with `presetNumber >= 0` into `NewFactoryPresetSet`. Do **not** hand-roll
+either property in `GetProperty` / `SetProperty` — the base class gets the
+`CFRetain` conventions and the `PropertyChanged` notification right.
+
+Both overrides forward to a `FactoryPresetTable` member
+(`core/format/include/pulp/format/au_factory_presets.hpp`), bound in the
+constructor. The table owns a `PresetManager` and the `AUPreset` records, and
+sorts by name so a preset **index is stable across sessions** — the host stores
+that number, not the name.
+
+Things that bite:
+
+- **`PresetManager` cannot find a bundle on its own.** Its `factory_dir_` is
+  empty until something calls `set_factory_presets_dir`, so `factory_presets()`
+  returned nothing for every plug-in on every platform before that setter
+  existed. `FactoryPresetTable::bind` resolves it via
+  `factory_presets_dir_for_binary(dladdr(...))` —
+  `Foo.component/Contents/MacOS/Foo` → `Foo.component/Contents/Resources/Presets`.
+  Outside a bundle (any unit-test binary) it resolves to nothing, which is why
+  a preset test must stage a directory through `factory_preset_table()`.
+- **Loading is the point; listing is not.** `NewFactoryPresetSet` must actually
+  call `FactoryPresetTable::load` before `SetAFactoryPresetAsCurrent`. Without
+  the load the host relabels its menu and the plug-in keeps its old parameters,
+  and every "does it list presets?" assertion still passes.
+- **Hand `SetAFactoryPresetAsCurrent` OUR record, not the host's copy.** It
+  `CFRetain`s whatever `CFStringRef` it is given, and the host may pass a name
+  that never came from the table. Look the canonical `AUPreset` up by number.
+- **Report `kAudioUnitErr_InvalidProperty` when the plug-in ships no presets.**
+  An empty `CFArray` makes a host draw an empty preset menu.
+- **The array holds `AUPreset*`, not CF objects** — `CFArrayCreateMutable` with
+  null callbacks, values pointing into the table's own storage, which therefore
+  must outlive every array the host is holding. The table rebuilds only when a
+  caller re-points it, never on a host read.
+- The preset load writes the `StateStore` outside `ScopedHostParamWrite`, so the
+  `wire_host_parameter_bridge` listener fires and the host learns every value
+  that moved. That is deliberate — suppressing it would leave the host's
+  parameter cache stale.
 
 ## Multi-plugin bundles — one binary, many plugins (Silent Way style)
 

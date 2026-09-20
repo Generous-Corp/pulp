@@ -48,6 +48,10 @@ PulpAUMidiProcessor::PulpAUMidiProcessor(AudioComponentInstance ci,
     // Cache the immutable descriptor once: descriptor() returns by value and
     // allocates its std::string members, so the render path must never call it.
     descriptor_ = processor_->descriptor();
+    // Discover the plug-in's bundled factory presets. Empty for a
+    // plug-in that ships none, and for any build not loaded from a
+    // bundle (a unit-test binary, a standalone host).
+    factory_presets_.bind(store_, descriptor_.manufacturer, descriptor_.name);
 
     const auto host_info = detect_host_info();
     host_quirks_ = resolved_quirks(host_info.type, host_info.version);
@@ -486,6 +490,34 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
     // flag does not stay latched forever.
     (void)processor_->consume_tail_changed_flag();
 
+    return noErr;
+}
+
+// ── Factory presets ──────────────────────────────────────────────────────
+
+OSStatus PulpAUMidiProcessor::GetPresets(CFArrayRef* outData) const {
+    return factory_presets_.copy_presets(outData);
+}
+
+OSStatus PulpAUMidiProcessor::NewFactoryPresetSet(const AUPreset& inNewFactoryPreset) {
+    if (inNewFactoryPreset.presetNumber < 0)
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    const auto index = static_cast<std::size_t>(inNewFactoryPreset.presetNumber);
+    const AUPreset* canonical = factory_presets_.preset_at(index);
+    if (canonical == nullptr)
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    // Load first: the base class only records the selection, so without this
+    // the host relabels its menu and the plug-in keeps its old parameters.
+    // The store's host bridge notifies the host of every value that moved.
+    if (!factory_presets_.load(index))
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    // Make OUR record current rather than the host's copy. The host may pass a
+    // name that never came from this table, and SetAFactoryPresetAsCurrent
+    // retains whatever string it is handed.
+    SetAFactoryPresetAsCurrent(*canonical);
     return noErr;
 }
 

@@ -934,10 +934,13 @@ fn run_verify_build(project_path: &Path) -> Result<()> {
         let _ = std::fs::remove_dir_all(&verify_dir);
         return Err(CliError::Other("cmake configure failed".to_owned()));
     }
-    let build_status = Command::new("cmake")
-        .arg("--build")
-        .arg(&verify_dir)
-        .status();
+    let plan = crate::build_parallelism::plan(&[]);
+    let mut build = Command::new("cmake");
+    build.arg("--build").arg(&verify_dir);
+    if let Some(jobs) = plan.jobs {
+        build.arg("--parallel").arg(jobs.to_string());
+    }
+    let build_status = build.status();
     let build_ok = build_status.map(|s| s.success()).unwrap_or(false);
     let _ = std::fs::remove_dir_all(&verify_dir);
     if build_ok {
