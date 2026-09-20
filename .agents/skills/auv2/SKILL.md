@@ -206,6 +206,28 @@ from the cause. The shared helpers sit directly in `pulp::format::au`.
 
 `AUMIDIBase::HandleSysEx(data, length)` does not carry a per-event sample offset at this SDK layer. We enqueue the payload with `sample_offset == 0` so it is delivered at the leading edge of the current `ProcessBufferLists()` block.
 
+### MPE capability: `kAudioUnitProperty_SupportsMPE`
+
+MPE is a **negotiated** capability, not something a plug-in can just handle.
+Logic (and every other MPE-aware host) reads `kAudioUnitProperty_SupportsMPE`
+(property ID 58, the v2 bridge of AUv3's `supportsMPE`) to decide whether to
+route an MPE zone's per-member-channel stream to this unit at all. A unit that
+leaves the property unimplemented is simply never offered MPE input, however
+complete its handling — so an MPE plug-in looks broken in Logic's MPE mode with
+nothing in the adapter to point at.
+
+All three AU v2 classes (`PulpAUEffect`, `PulpAUInstrument`,
+`PulpAUMidiProcessor`) answer it through the shared helpers
+`fill_supports_mpe_property_info` / `fill_supports_mpe` in
+`au_v2_common.hpp`, reading `descriptor_.effective_capabilities().supports_mpe`
+— the same opt-in the AUv3 adapter's `-supportsMPE` returns, so the two cannot
+disagree. A plug-in that did not opt in gets `kAudioUnitErr_InvalidProperty`,
+which is what a host reads as "no" and matches leaving it unimplemented.
+
+Add the property to **all three** classes when touching this. A helper wired
+into only the instrument leaves an `aumf`/`aumi` MPE plug-in silently
+unreachable, and no test that exercises one class catches it.
+
 ## Multi-plugin bundles — one binary, many plugins (Silent Way style)
 
 The single-plugin macros (`PULP_AU_PLUGIN` / `PULP_AU_MIDI_PLUGIN` / `PULP_AU_INSTRUMENT`) set one global `registered_factory()` slot, so one binary = one plugin. To host **many** plugins in ONE `.component` (like Expert Sleepers Silent Way — one bundle, N AudioComponents), use the bundle variants in the same headers:
