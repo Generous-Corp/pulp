@@ -9,6 +9,7 @@
     "docs/status/docs-index.yaml",
     ".agents/skills/timeline/SKILL.md",
     "test/test_timeline_event_device_chain.cpp",
+    "test/test_playback_note_renderer.cpp",
     "docs/status/sequencer-exposure/rows/event-stream-timing-transform-contract.json"
   ],
   "evidence": [
@@ -39,6 +40,12 @@
       "needles": [
         "Timing transforms are two halves, and zero depth is not bypass",
         "Zero depth is a"
+      ]
+    },
+    {
+      "path": "test/test_playback_note_renderer.cpp",
+      "needles": [
+        "each lane's authored groove lands that lane on its own exact samples"
       ]
     }
   ],
