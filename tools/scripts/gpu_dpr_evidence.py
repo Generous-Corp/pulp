@@ -466,6 +466,34 @@ def safe_artifact(root_dir: Path, relative: str) -> Path:
     return candidate
 
 
+def validate_incomplete_diagnostics_artifact(
+    receipt: dict[str, Any], cell_dir: Path,
+) -> None:
+    """Require calibration diagnostics to remain bound to retained bytes."""
+    binding = receipt.get("diagnostics_artifact")
+    if not isinstance(binding, dict) or binding.get("schema") != (
+        "pulp.gpu-dpr-diagnostics-artifact.v1"
+    ):
+        raise EvidenceError("timer-calibration receipt lacks diagnostics artifact binding")
+    path = safe_artifact(cell_dir, binding.get("path", ""))
+    payload = regular_file_bytes(path, "calibration diagnostics artifact")
+    digest = binding.get("sha256")
+    if (
+        not isinstance(digest, str) or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+        or hashlib.sha256(payload).hexdigest() != digest
+    ):
+        raise EvidenceError("calibration diagnostics artifact digest does not match")
+    try:
+        diagnostics = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise EvidenceError("calibration diagnostics artifact is not valid JSON") from error
+    if diagnostics != receipt.get("diagnostics"):
+        raise EvidenceError("receipt diagnostics differ from retained artifact")
+    if diagnostics.get("schema") != "pulp.gpu-dpr-calibration-diagnostics.v1":
+        raise EvidenceError("unsupported calibration diagnostics schema")
+
+
 def new_frozen_evidence_directory(run_dir: Path, key: str, nonce: str) -> Path:
     frozen_root = run_dir / "frozen-evidence"
     if frozen_root.is_symlink():
@@ -1126,6 +1154,10 @@ def receipt_observation(
             or any(not isinstance(item, str) or not item for item in dependencies)
         ):
             raise EvidenceError(f"{outcome} receipt requires explicit dependencies")
+        if "gpu:timer-calibration" in dependencies:
+            validate_incomplete_diagnostics_artifact(
+                receipt, checked_cell_directory(run_dir, key)
+            )
         return key, None, dependencies
 
     validate_identity(receipt, scenario, state["plan"])
