@@ -50,6 +50,9 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/music/voicing.hpp": "Pulp::music",
     "pulp/playback/program.hpp": "Pulp::playback",
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
+    "pulp/timeline/compile_context.hpp": "Pulp::timeline",
+    "pulp/timeline/model.hpp": "Pulp::timeline",
+    "pulp/timeline/note_modifier.hpp": "Pulp::timeline",
     "pulp/signal/saturator.hpp": "Pulp::signal",
     "pulp/signal/analysis_frontends.hpp": "Pulp::signal",
     "pulp/signal/additive_bank.hpp": "Pulp::signal",
@@ -175,6 +178,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "shaping and a finite tail; it is a bounded buffering primitive intended for "
             "composition inside effects rather than an advertised generator DSP claim. "
             "It has no in-tree consumer today beyond the signal umbrella header."
+        ),
+    },
+    {
+        "include": "pulp/signal/simd_buffer.hpp",
+        "fingerprint": "sha256:7780d3b9a8e734dbacd9b2d7d06c5d07328fe167da4d8d3ea88938c71ae5a973",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "SIMD-width-aligned sample storage and its aligned allocate/free pair, used "
+            "for composition inside DSP kernels rather than advertised as a capability of "
+            "its own. Its allocator branches per platform because the C11 aligned_alloc "
+            "it wraps is unavailable below Android API 28, which is a portability detail "
+            "of the primitive and not a change to the surface it presents."
         ),
     },
     {

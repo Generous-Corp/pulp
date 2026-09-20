@@ -25,13 +25,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <optional>
 #include <string>
-#include <utility>
-#include <atomic>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -1738,6 +1739,180 @@ TEST_CASE("VST3 transport jumps request processor reset through ProcessContext",
     const auto jumped = run_at(4096);
     REQUIRE(jumped.transport_jump);
     REQUIRE(jumped.should_reset_dsp_state());
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+// Every ProcessContext field the VST3 decoder consumes must also be
+// *requested* through IProcessContextRequirements, or a 3.7+ host is free to
+// withhold it. SingleComponentEffect inherits that interface and answers from
+// a member defaulting to an empty mask, so an unrequested field is invisible:
+// no missing override, no compile error, just a host that stops sending tempo.
+//
+// The invariant is checked against the decoder's observed behaviour rather
+// than a restated constant: drive one block with every kXxxValid bit set,
+// see which TransportFields the decoder actually populated, and require the
+// advertised mask to cover each one. Teaching the decoder a new field without
+// requesting it therefore fails here instead of in a DAW.
+namespace {
+
+struct TransportFieldRequirement {
+    pulp::format::TransportField field;
+    // The IProcessContextRequirements flag the host needs in order to supply
+    // this field, or 0 for a field that costs the host nothing to provide.
+    Steinberg::uint32 required_flag;
+    const char* field_name;
+};
+
+using PCR = Steinberg::Vst::IProcessContextRequirements;
+
+// One row per TransportField, in enum order. The static_asserts below make a
+// new TransportField a compile error here until its requirement is declared.
+constexpr TransportFieldRequirement kTransportFieldRequirements[] = {
+    {pulp::format::TransportField::Playing, PCR::kNeedTransportState, "Playing"},
+    {pulp::format::TransportField::Recording, PCR::kNeedTransportState, "Recording"},
+    {pulp::format::TransportField::Looping, PCR::kNeedTransportState, "Looping"},
+    {pulp::format::TransportField::Tempo, PCR::kNeedTempo, "Tempo"},
+    {pulp::format::TransportField::BeatPosition, PCR::kNeedProjectTimeMusic, "BeatPosition"},
+    // projectTimeSamples is an unconditional ProcessContext member: there is
+    // no kNeed flag to request it and no kXxxValid bit gating it.
+    {pulp::format::TransportField::SamplePosition, 0, "SamplePosition"},
+    {pulp::format::TransportField::TimeSignature, PCR::kNeedTimeSignature, "TimeSignature"},
+    {pulp::format::TransportField::LoopRange, PCR::kNeedCycleMusic, "LoopRange"},
+    // Derived from BeatPosition + TimeSignature rather than read from
+    // barPositionMusic, so it needs no flag of its own -- the two fields it is
+    // derived from carry the requirement.
+    {pulp::format::TransportField::Bar, 0, "Bar"},
+    {pulp::format::TransportField::HostTime, PCR::kNeedSystemTime, "HostTime"},
+    {pulp::format::TransportField::FrameRate, PCR::kNeedFrameRate, "FrameRate"},
+};
+
+static_assert(std::size(kTransportFieldRequirements) ==
+                  static_cast<std::size_t>(pulp::format::TransportField::Count),
+              "every TransportField needs a row declaring which "
+              "IProcessContextRequirements flag the VST3 host must be asked for");
+
+constexpr bool transport_requirement_rows_are_in_enum_order() {
+    for (std::size_t i = 0; i < std::size(kTransportFieldRequirements); ++i) {
+        if (static_cast<std::size_t>(kTransportFieldRequirements[i].field) != i)
+            return false;
+    }
+    return true;
+}
+static_assert(transport_requirement_rows_are_in_enum_order(),
+              "kTransportFieldRequirements must be indexed by TransportField order");
+
+} // namespace
+
+TEST_CASE("VST3 requests every process-context field its decoder consumes",
+          "[vst3][transport][process-context]") {
+    reset_test_processor();
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    // The live answer the host latches -- not the constant -- so a constructor
+    // that never assigns the mask fails here.
+    const Steinberg::uint32 advertised = processor.getProcessContextRequirements();
+    INFO("advertised IProcessContextRequirements mask: " << advertised);
+    REQUIRE(advertised != 0);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 8;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    Steinberg::Vst::ParameterChanges input_params;
+    Steinberg::Vst::ParameterChanges output_params;
+    Steinberg::Vst::EventList input_events(1);
+    Steinberg::Vst::EventList output_events(1);
+
+    // A maximally generous host: every optional field valid and populated, so
+    // the decoder's own reads decide which TransportFields come back.
+    using SdkContext = Steinberg::Vst::ProcessContext;
+    Steinberg::Vst::ProcessContext process_context{};
+    process_context.state =
+        SdkContext::kPlaying | SdkContext::kRecording | SdkContext::kCycleActive |
+        SdkContext::kTempoValid | SdkContext::kProjectTimeMusicValid | SdkContext::kTimeSigValid |
+        SdkContext::kCycleValid | SdkContext::kSystemTimeValid | SdkContext::kSmpteValid |
+        SdkContext::kBarPositionValid | SdkContext::kContTimeValid | SdkContext::kClockValid;
+    process_context.sampleRate = 48000.0;
+    process_context.projectTimeSamples = 96000;
+    process_context.continousTimeSamples = 96000;
+    process_context.tempo = 128.0;
+    process_context.projectTimeMusic = 8.0;
+    process_context.barPositionMusic = 8.0;
+    process_context.timeSigNumerator = 7;
+    process_context.timeSigDenominator = 8;
+    process_context.cycleStartMusic = 4.0;
+    process_context.cycleEndMusic = 12.0;
+    process_context.systemTime = 1'234'567'890;
+    process_context.samplesToNextClock = 16;
+    process_context.frameRate.framesPerSecond = 30;
+    process_context.frameRate.flags = 0;
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.inputParameterChanges = &input_params;
+    data.outputParameterChanges = &output_params;
+    data.inputEvents = &input_events;
+    data.outputEvents = &output_events;
+    data.processContext = &process_context;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    const auto decoded = test_processor->last_context;
+
+    // Positive control: the probe is only meaningful if the decoder actually
+    // populated the optional fields. A decoder that silently read nothing
+    // would otherwise make the coverage loop below vacuously true.
+    REQUIRE(decoded.has_transport(pulp::format::TransportField::Tempo));
+    REQUIRE(decoded.has_transport(pulp::format::TransportField::TimeSignature));
+    REQUIRE(decoded.has_transport(pulp::format::TransportField::FrameRate));
+
+    std::size_t populated = 0;
+    for (const auto& row : kTransportFieldRequirements) {
+        if (!decoded.has_transport(row.field))
+            continue;
+        ++populated;
+        if (row.required_flag == 0)
+            continue;
+        INFO("decoder populated TransportField::"
+             << row.field_name << " but the advertised requirement mask " << advertised
+             << " is missing flag " << row.required_flag);
+        REQUIRE((advertised & row.required_flag) == row.required_flag);
+    }
+    REQUIRE(populated > 0);
+
+    // The mask is a request for what is consumed, not a blanket ask: fields
+    // the decoder never reads stay unrequested so the host can skip them.
+    CHECK((advertised & PCR::kNeedChord) == 0);
+    CHECK((advertised & PCR::kNeedSamplesToNextClock) == 0);
+    CHECK((advertised & PCR::kNeedContinousTimeSamples) == 0);
+    CHECK((advertised & PCR::kNeedBarPositionMusic) == 0);
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

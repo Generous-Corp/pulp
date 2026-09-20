@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 78,
+  "inventory_version": 79,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 495,
-    "reviewed_headers": 205,
-    "legacy_unreviewed_headers": 290,
+    "reviewed_headers": 206,
+    "legacy_unreviewed_headers": 289,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 116,
       "capability_support": 44,
-      "infrastructure": 43,
-      "legacy_unreviewed": 290,
+      "infrastructure": 44,
+      "legacy_unreviewed": 289,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 273,
-        "reviewed_headers": 120,
-        "legacy_unreviewed_headers": 153,
+        "reviewed_headers": 121,
+        "legacy_unreviewed_headers": 152,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -4158,11 +4158,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/simd_buffer.hpp",
-      "fingerprint": "sha256:4c1f992ac9257c507f7247c1ecc2b601153dca7e24d93d7def19c0344da4c2d2",
+      "fingerprint": "sha256:7780d3b9a8e734dbacd9b2d7d06c5d07328fe167da4d8d3ea88938c71ae5a973",
       "include": "pulp/signal/simd_buffer.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "SIMD-width-aligned sample storage and its aligned allocate/free pair, used for composition inside DSP kernels rather than advertised as a capability of its own. Its allocator branches per platform because the C11 aligned_alloc it wraps is unavailable below Android API 28, which is a portability detail of the primitive and not a change to the surface it presents."
     },
     {
       "domain": "signal",
