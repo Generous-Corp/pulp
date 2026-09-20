@@ -85,6 +85,22 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
                                        std::vector<SharedIoTraceRecord>& records) noexcept {
     records.clear();
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    // The staged adapter has no callback-side trace queue. Its worker ledger
+    // is the authenticated source of terminal outcomes, and may only be
+    // observed once every request has reached a terminal state. Keep this
+    // accessor quiescent-only so a producer cannot serialize a partial trial
+    // and accidentally treat missing blocks as successful delivery.
+    if (convolver.staged_trial_) {
+        if (!convolver.staged_trial_->quiescent())
+            return false;
+        try {
+            records = convolver.staged_trial_->take_completed();
+            return true;
+        } catch (...) {
+            records.clear();
+            return false;
+        }
+    }
     if (!convolver.shared_io_ || !convolver.shared_io_->session ||
         !convolver.shared_io_->session->trace_recording_enabled())
         return false;
@@ -430,11 +446,21 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
             output.clear();
             return;
         }
-        if (!staged_trial_->admit(request, sequence, slot, now_ns + deadline_ns, now_ns) ||
-            !staged_trial_->submitted(request, now_ns)) {
+        const bool admitted =
+            staged_trial_->admit(request, sequence, slot, now_ns + deadline_ns, now_ns);
+        if (!admitted) {
             // GpuCompute has no cancellation API. The callback owns only the
             // heap completion state, so a provider callback that arrives after
             // this failed admission cannot dereference the stack.
+            output.clear();
+            return;
+        }
+        if (!staged_trial_->submitted(request, now_ns)) {
+            // Admission created an authenticated sequence/slot reservation.
+            // If submission cannot attach to that reservation, close it with
+            // one cancellation terminal so the producer's ledger remains
+            // exactly-once even on this provider-side failure.
+            (void)staged_trial_->abandon(request, now_ns);
             output.clear();
             return;
         }

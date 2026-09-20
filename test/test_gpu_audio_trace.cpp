@@ -928,3 +928,20 @@ TEST_CASE("staged async ownership abandon releases slot with one cancellation te
     CHECK(records.front().outcome == SharedIoTraceOutcome::Cancelled);
     CHECK_FALSE(state.abandon(22, 1300));
 }
+
+TEST_CASE("staged async records require quiescent ownership before producer drain",
+          "[gpu_audio][trace][staged_async]") {
+    StagedAsyncTrialState state(1);
+    REQUIRE(state.admit(31, 12, 0, 5000, 1000));
+    CHECK_FALSE(state.quiescent());
+    CHECK(state.take_completed().empty());
+
+    REQUIRE(state.submitted(31, 1100));
+    REQUIRE(state.complete(31, StagedAsyncTraceLedger::CompletionStatus::Success, 1200));
+    CHECK(state.quiescent());
+    const auto records = state.take_completed();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().sequence == 12);
+    CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::CompletedAccepted);
+    CHECK(state.take_completed().empty());
+}
