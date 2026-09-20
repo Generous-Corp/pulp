@@ -277,14 +277,32 @@ def plan_for_range(repo: Path, config: Config, base: str, head: str) -> list[Ass
 # Derived files that embed a version this bot writes, and so go stale the
 # instant it writes one. Each entry regenerates itself from the tree, so the
 # bot refreshes them rather than leaving a human to notice the breakage.
-_DERIVED_REGENERATORS: list[tuple[str, list[str]]] = [
+_DERIVED_REGENERATORS: list[tuple[tuple[str, ...], list[str]]] = [
     # Embeds the plugin surface's version and catalog_version. Left stale, the
     # Vellum freeze gate fails on the bump commit itself — so every bump PR
     # stalled until a human ran this by hand, which meant releases stopped by
     # default rather than on purpose.
     (
-        "docs/status/pulp-tooling-disposition.json",
+        ("docs/status/pulp-tooling-disposition.json",),
         ["python3", "tools/scripts/pulp_tooling_disposition.py", "--write"],
+    ),
+    # The GPU/Vellum handoff ledger and its published receipt pin 90-odd Pulp
+    # paths to an exact revision, so every commit touching one of them staled
+    # the pair. Re-pinning that by hand in each PR made two generated files a
+    # serialization point: ~148 non-merge commits in 25 days changed only these
+    # two, and they collided on the server, where the local merge driver cannot
+    # run. The bump commit already advances main by itself, so it is the one
+    # place a re-pin costs nobody a rebase — carrying it here is what lets an
+    # ordinary PR stop re-pinning at all. `--receipt` is not optional: the
+    # receipt binds itself to the ledger's exact bytes, so regenerating one
+    # without the other leaves the receipt naming a source that no longer
+    # exists.
+    (
+        (
+            "docs/status/gpu-vellum-handoff.yaml",
+            "docs/validation/gpu-handoff-provenance/receipt.json",
+        ),
+        ["python3", "tools/scripts/gpu_handoff_provenance.py", "write", "--receipt"],
     ),
 ]
 
@@ -296,21 +314,40 @@ def _refresh_derived(repo: Path) -> list[str]:
     is otherwise correct, because the bot is the single writer for versions and
     a wedged bot stops all releases. A failure here leaves the derived file
     stale, which is exactly the pre-existing behaviour and is caught downstream
-    by the same gate that caught it before."""
+    by the same gate that caught it before — but it prints which regenerator
+    failed, so a stale file afterwards is diagnosable from the run log instead
+    of being indistinguishable from one nothing ever tried to refresh."""
     refreshed: list[str] = []
-    for path, command in _DERIVED_REGENERATORS:
+    for paths, command in _DERIVED_REGENERATORS:
+        # A repo that does not carry this derived file is not a failure to
+        # report: the fixture repos these functions are tested against declare
+        # only the surfaces they care about, and a regenerator whose subject is
+        # absent has nothing to say.
+        if not (repo / paths[0]).exists():
+            continue
         try:
             subprocess.run(command, cwd=repo, check=True, capture_output=True)
         except (subprocess.CalledProcessError, OSError):
+            # Best-effort, but never silent: a stale derived file after a bump
+            # is only diagnosable if the run log names which regenerator did
+            # not run.
+            print(
+                f"version-at-land: derived regenerator failed, leaving "
+                f"{', '.join(paths)} stale: {' '.join(command)}",
+                file=sys.stderr,
+            )
             continue
-        # Only report it as edited when the content actually moved; these
-        # regenerators are idempotent, so an unchanged file is the norm.
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--", path],
-            cwd=repo, capture_output=True, text=True,
-        )
-        if status.stdout.strip():
-            refreshed.append(path)
+        # Only report a path as edited when its content actually moved; these
+        # regenerators are idempotent, so an unchanged file is the norm. Asked
+        # per path rather than for the group, because one regenerator can move
+        # the ledger and leave the receipt byte-identical.
+        for path in paths:
+            status = subprocess.run(
+                ["git", "status", "--porcelain", "--", path],
+                cwd=repo, capture_output=True, text=True,
+            )
+            if status.stdout.strip():
+                refreshed.append(path)
     return refreshed
 
 

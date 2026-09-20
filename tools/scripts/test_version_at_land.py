@@ -824,10 +824,6 @@ class PrRouteTest(unittest.TestCase):
         self.assertFalse(val._semver("0.2.0") > val._semver("0.2.0"))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RefreshDerivedTest(unittest.TestCase):
     """`_write_plan` must refresh files that embed a version it writes.
 
@@ -859,6 +855,14 @@ class RefreshDerivedTest(unittest.TestCase):
         script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text(body)
         self.r.commit("install stub regenerator")
+
+    def _install_ledger_regenerator(self, body: str) -> None:
+        """Stand in for gpu_handoff_provenance.py, whose real run needs a full
+        pinned-path inventory and a git log per row."""
+        script = self.repo / "tools/scripts/gpu_handoff_provenance.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text(body)
+        self.r.commit("install stub ledger regenerator")
 
     def test_refreshes_derived_file_when_a_version_moves(self):
         self._install_regenerator(
@@ -895,6 +899,49 @@ class RefreshDerivedTest(unittest.TestCase):
         edited = val._write_plan(self.repo, CONFIG, plan)
         self.assertNotIn("docs/status/pulp-tooling-disposition.json", edited)
 
+    def test_refreshes_the_gpu_ledger_pair_when_a_version_moves(self):
+        # The ledger and its receipt are one regenerator writing two files, so
+        # both must land in the bump commit; reporting only the first would
+        # commit a ledger whose receipt still names the previous bytes.
+        ledger = self.repo / "docs/status/gpu-vellum-handoff.yaml"
+        receipt = self.repo / "docs/validation/gpu-handoff-provenance/receipt.json"
+        for f in (ledger, receipt):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("STALE\n")
+        self._install_regenerator("pass\n")
+        self._install_ledger_regenerator(
+            "import pathlib\n"
+            "pathlib.Path('docs/status/gpu-vellum-handoff.yaml')"
+            ".write_text('REPINNED\\n')\n"
+            "pathlib.Path('docs/validation/gpu-handoff-provenance/receipt.json')"
+            ".write_text('REPINNED\\n')\n"
+        )
+        plan = [val.Assignment(surface="plugin", level="patch",
+                               current="0.5.0", assigned="0.5.1")]
+        edited = val._write_plan(self.repo, CONFIG, plan)
+        self.assertIn("docs/status/gpu-vellum-handoff.yaml", edited)
+        self.assertIn("docs/validation/gpu-handoff-provenance/receipt.json",
+                      edited)
+        self.assertIn("REPINNED", ledger.read_text())
+        self.assertIn("REPINNED", receipt.read_text())
+
+    def test_absent_ledger_is_not_an_error(self):
+        # Most fixture repos carry no ledger at all. An entry whose subject is
+        # absent is skipped outright rather than running a regenerator that has
+        # nothing to regenerate.
+        self._install_regenerator("pass\n")
+        self._install_ledger_regenerator(
+            "import pathlib\n"
+            "pathlib.Path('ledger-regenerator-ran').write_text('x\\n')\n"
+        )
+        plan = [val.Assignment(surface="plugin", level="patch",
+                               current="0.5.0", assigned="0.5.1")]
+        edited = val._write_plan(self.repo, CONFIG, plan)
+        self.assertIn(".claude-plugin/plugin.json", edited)
+        self.assertNotIn("docs/status/gpu-vellum-handoff.yaml", edited)
+        self.assertFalse((self.repo / "ledger-regenerator-ran").exists(),
+                         "the regenerator ran against a repo with no ledger")
+
     def test_a_failing_regenerator_does_not_abort_the_bump(self):
         # The bot is the single writer for versions; a wedged bot stops every
         # release. A broken regenerator must degrade to the old stale-file
@@ -906,3 +953,7 @@ class RefreshDerivedTest(unittest.TestCase):
         self.assertIn(".claude-plugin/plugin.json", edited,
                       "the version write itself must still be reported")
         self.assertNotIn("docs/status/pulp-tooling-disposition.json", edited)
+
+
+if __name__ == "__main__":
+    unittest.main()
