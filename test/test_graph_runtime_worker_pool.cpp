@@ -65,12 +65,19 @@ void square_task(void* ctx, std::uint32_t i) noexcept {
     c->runs.fetch_add(1, std::memory_order_relaxed);
 }
 
-// Timeouts here are hang guards, not part of any success path: every wait below
-// is woken by the event it is waiting for, so a passing run does not depend on
-// the deadline being generous enough.
-constexpr auto kEventTimeout = std::chrono::seconds(10);
-// Long enough that a pool which CAN idle would have done so many times over.
-constexpr auto kNoEventTimeout = std::chrono::milliseconds(250);
+// Timeouts here are hang guards, never part of a success path: every wait below
+// is woken by the event it is waiting for. Each keeps the deadline the poll it
+// replaced already used, so what changed is the waiting mechanism and not the
+// length of the fuse.
+constexpr auto kParkTimeout = std::chrono::seconds(2);
+constexpr auto kFirstBatchTimeout = std::chrono::seconds(2);
+constexpr auto kBatchProgressTimeout = std::chrono::seconds(10);
+// A pool that can park does so within a few milliseconds, so this bounds a wait
+// that must NOT be satisfied by one that easily could have been.
+constexpr auto kNoParkTimeout = std::chrono::milliseconds(250);
+// Bounded retry for a gate a worker only ever owns for a handful of
+// instructions: a hang guard on an operation that contains no wait.
+constexpr auto kGateHoldTimeout = std::chrono::seconds(5);
 
 // One-shot cross-thread event. The producer publishes; the waiter blocks until
 // it is published. Polling for a thread-pool transition competes for the very
@@ -114,7 +121,7 @@ void publish_worker_park(void* context) noexcept {
 // one CAS can lose. Retrying within a hang guard is not a timing dependency:
 // the gate is held for a bounded handful of instructions.
 bool hold_cold_transition_gate(GraphRuntimeWorkerPool& pool) {
-    const auto deadline = std::chrono::steady_clock::now() + kEventTimeout;
+    const auto deadline = std::chrono::steady_clock::now() + kGateHoldTimeout;
     while (std::chrono::steady_clock::now() < deadline) {
         if (pool.try_hold_cold_transition_gate_for_test()) return true;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -275,7 +282,7 @@ TEST_CASE("WorkerPool cold-idles workers without blocking later batches",
     pool.set_worker_park_hook_for_test(&publish_worker_park, &parked);
     pool.set_audio_workgroup(nullptr);
     REQUIRE(pool.start(4));
-    REQUIRE(parked.wait(kEventTimeout));
+    REQUIRE(parked.wait(kParkTimeout));
     REQUIRE(pool.worker_idle_sleep_count() > 0);
 
     SquareCtx ctx;
@@ -295,7 +302,7 @@ TEST_CASE("WorkerPool idle wait reports no park when the pool has no worker thre
     GraphRuntimeWorkerPool pool;
     pool.set_worker_park_hook_for_test(&publish_worker_park, &parked);
     REQUIRE(pool.start(1));
-    CHECK_FALSE(parked.wait(kNoEventTimeout));
+    CHECK_FALSE(parked.wait(kNoParkTimeout));
     CHECK(pool.worker_idle_sleep_count() == 0);
     pool.stop();
 }
@@ -315,7 +322,7 @@ TEST_CASE("WorkerPool idle wait reports no park while workers are held off the c
     // parked and publishes once per episode, so clearing the signal here leaves
     // only parks that would happen under the held gate — of which there are none.
     parked.reset();
-    CHECK_FALSE(parked.wait(kNoEventTimeout));
+    CHECK_FALSE(parked.wait(kNoParkTimeout));
 
     // The control must be able to read a park on this same pool, or its
     // negative result would only prove the probe was never wired up.
@@ -324,7 +331,7 @@ TEST_CASE("WorkerPool idle wait reports no park while workers are held off the c
     ctx.out.assign(64, 0xFFFFFFFFu);
     pool.run(64, square_task, &ctx);
     parked.reset();
-    CHECK(parked.wait(kEventTimeout));
+    CHECK(parked.wait(kParkTimeout));
     pool.stop();
 }
 
@@ -562,7 +569,7 @@ TEST_CASE("WorkerPool cold workgroup preparation transitions every worker",
     GraphRuntimeWorkerPool pool;
     pool.set_worker_park_hook_for_test(&publish_worker_park, &parked);
     REQUIRE(pool.start(4));
-    REQUIRE(parked.wait(kEventTimeout));
+    REQUIRE(parked.wait(kParkTimeout));
     REQUIRE(pool.worker_idle_sleep_count() > 0);
     auto* workgroup = make_test_workgroup("pulp-worker-pool-cold-prepare");
     REQUIRE(workgroup != nullptr);
@@ -707,7 +714,7 @@ TEST_CASE("WorkerPool started on one thread, run() driven from another, is race-
     // then re-validate from this thread while it keeps firing batches: those
     // concurrent reads against a live pool are the surface TSan watches, and
     // waiting first guarantees the driver is running underneath them.
-    CHECK(progressed.wait(kEventTimeout));
+    CHECK(progressed.wait(kFirstBatchTimeout));
     for (int probe = 0; probe < 10000; ++probe) {
         (void)pool.running();
         (void)pool.worker_count();
@@ -741,7 +748,7 @@ TEST_CASE("WorkerPool rapid back-to-back batches from a separate thread are race
             progressed.publish();
         }
     });
-    CHECK(progressed.wait(kEventTimeout));
+    CHECK(progressed.wait(kBatchProgressTimeout));
     CHECK(blocks.load() > 0);
     stop.store(true, std::memory_order_relaxed);
     driver.join();
