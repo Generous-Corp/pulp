@@ -1,9 +1,11 @@
 # P4 raw campaign implementation handoff
 
-Status: blocked on a small instrumentation/control seam. This note is an
-implementation handoff, not a performance result. It records why the current
-probe cannot honestly emit `pulp.gpu-audio.p4.raw.v1` and the bounded changes
-needed before running the campaign on Apple Silicon.
+Status: the staged producer seam is now available behind a quiescent-only
+drain, while the strict raw campaign remains blocked on callback/result timing
+and campaign context. This note is an implementation handoff, not a
+performance result. It records why the current probe cannot honestly emit
+`pulp.gpu-audio.p4.raw.v1` and the bounded changes needed before running the
+campaign on Apple Silicon.
 
 ## What exists on `origin/main`
 
@@ -76,6 +78,14 @@ public SDK redesign:
 5. Add unit tests for configuration isolation, exact terminal accounting, and
    negative-control rejection. Physical performance acceptance still requires a
    Release build and Shipyard/TartCI execution on Apple Silicon.
+
+The first producer/runtime slice is complete: `drain_gpu_convolver_trial_records`
+now drains the staged ledger only after `StagedAsyncTrialState::quiescent()`
+proves that no request remains pending. A request admitted before a failed
+submit is closed as `CancelledTeardown`, preserving exactly-once terminal
+accounting. The accessor returns authenticated intermediate records and does
+not emit `pulp.gpu-audio.p4.raw.v1`; callback/result-visible timing and matched
+trial context are still required for that format.
 
 The old paired-provider worktree (`f92a9b0b52`) contains names for much of this
 seam (`configure_gpu_convolver_service_for_next_prepare`,
