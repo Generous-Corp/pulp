@@ -3,8 +3,38 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 
 namespace pulp::host::detail {
+
+std::optional<std::vector<HostParamInfo>> processor_node_parameters(const SignalGraph& graph,
+                                                                    NodeId id) {
+    SignalGraph::GraphMutationLock mutation_lock(graph);
+    const auto processor = graph.processor_nodes_.find(id);
+    if (processor == graph.processor_nodes_.end() || !processor->second ||
+        !processor->second->instance) {
+        return std::nullopt;
+    }
+
+    std::vector<HostParamInfo> params;
+    const auto catalog = processor->second->instance->parameter_catalog();
+    params.reserve(catalog.size());
+    for (const auto& source : catalog) {
+        HostParamInfo param;
+        param.id = source.id;
+        param.name = source.name;
+        param.unit = source.unit;
+        param.min_value = source.range.min;
+        param.max_value = source.range.max;
+        param.default_value = source.range.default_value;
+        param.rate = source.rate;
+        param.flags.stepped = state::is_discrete_param(source);
+        param.flags.rampable = !param.flags.stepped;
+        param.flags.modulatable = !param.flags.stepped;
+        params.push_back(std::move(param));
+    }
+    return params;
+}
 
 // The no-retry-starvation guarantee at the exact-mailbox append site
 // (SignalGraph::append_parameter_mailbox_events_, require_complete=true) depends
@@ -85,6 +115,10 @@ TimelineGraphAdmission validate_timeline_automation_routes(
             return route_error(TimelineGraphAdmissionCode::MissingDeviceNode,
                                0, 1, device.device_placement_id,
                                device.plugin_node);
+        }
+        if (auto processor_parameters = processor_node_parameters(graph, device.plugin_node)) {
+            metadata.push_back({device, std::move(*processor_parameters)});
+            continue;
         }
         if (node->type != NodeType::Plugin) {
             return route_error(TimelineGraphAdmissionCode::DeviceNodeNotPlugin,
