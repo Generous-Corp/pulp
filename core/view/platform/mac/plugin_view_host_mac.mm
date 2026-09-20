@@ -625,7 +625,6 @@ static bool pulp_editor_should_hold_keyboard(pulp::view::View* root) {
     return root != nullptr && pulp::view::root_overlay_owns_keyboard(*root);
 }
 
-
 bool pulp_plugin_event_has_private_use_function_character(NSEvent* event) {
     NSString* chars = event.charactersIgnoringModifiers;
     if (!chars) chars = event.characters;
@@ -652,12 +651,12 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event,
         // arrives; such a key carries no character, so a text field that declines
         // it has genuinely not consumed it.
         offer.is_function_key = pulp_plugin_event_has_private_use_function_character(event);
-        // A command chord reached -performKeyEquivalent: first, and that override
-        // already offered it to root->on_global_key. Offering it again here would
-        // fire the hook — and the script keydown listener behind it — twice for
-        // one press.
-        offer.global_hook_already_offered = (event.modifierFlags & NSEventModifierFlagCommand) != 0;
-
+        // The root's global hook belongs to -performKeyEquivalent: on this
+        // platform: AppKit offers every key-down there BEFORE -keyDown:, so
+        // consulting it from both would fire an editor-wide shortcut — and the
+        // script keydown listener behind it — twice for one press. So
+        // `offer_global_hook` stays off here.
+        //
         // An open IME composition owns the key outright: the policy must not run
         // on_key_event underneath a half-composed character.
         if (auto* composing = pulp_focus_under_root(root)) {
@@ -678,8 +677,8 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event,
         const auto handled_focus = pulp_focus_identity(fv);
 
         // Who consumes this key is the shared policy's answer, not this host's:
-        // overlay Escape, then the focused view, then the root's global hook.
-        // Anything none of them claimed is the DAW's.
+        // overlay Escape, then the focused view. Anything neither claimed is
+        // the DAW's.
         const auto disposition = pulp::view::route_plugin_key(*root, offer);
 
         if (!text_focused) {

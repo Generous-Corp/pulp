@@ -283,13 +283,16 @@ tresult PLUGIN_API PulpPlugView::onKeyDown(char16 key, int16 keyCode, int16 modi
 
     // Who consumes it is the shared policy's answer — the same one the macOS
     // NSView seam asks — so an open overlay, a focused non-text widget, and a
-    // focused text field all behave identically across formats. This seam has a
-    // single delivery point, so the root hook has not been offered the key yet.
+    // focused text field all behave identically across formats.
     view::PluginKeyOffer offer;
     offer.key.key = view::KeyCode::space;
     offer.key.modifiers =
         static_cast<std::uint16_t>((modifiers & kShiftKey) != 0 ? view::kModShift : 0);
     offer.key.is_down = true;
+    // A single delivery point, so this is the only place the root hook is
+    // consulted for this press — unlike the NSView seam, where AppKit offers
+    // the same key twice and -performKeyEquivalent: owns the hook.
+    offer.offer_global_hook = true;
     switch (view::route_plugin_key(*root, offer)) {
     case view::PluginKeyDisposition::consumed:
         root->request_repaint();

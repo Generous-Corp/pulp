@@ -54,16 +54,15 @@ struct PluginKeyOffer {
     /// 0xF700-0xF8FF private-use range). Such a key is never text, so a
     /// focused text field that declines it has genuinely not consumed it.
     bool is_function_key = false;
-    /// The seam already offered this key to `root.on_global_key` before
-    /// calling here, so step 3 must not offer it again.
+    /// Whether this call may offer the key to `root.on_global_key`.
     ///
-    /// Set by macOS: AppKit gives a command chord to `-performKeyEquivalent:`
-    /// BEFORE `-keyDown:`, that override already consults the hook, and a
-    /// chord the hook declines then arrives a second time through `-keyDown:`.
-    /// Without this the hook — and the script `keydown` listener behind it —
-    /// fires twice for one press. Seams with a single delivery point (VST3
-    /// `onKeyDown`) leave it false.
-    bool global_hook_already_offered = false;
+    /// Off by default, because a seam that delivers one press TWICE would
+    /// otherwise fire the hook — and the script `keydown` listener behind it —
+    /// twice. macOS is exactly that seam: AppKit offers every key-down to
+    /// `-performKeyEquivalent:` before `-keyDown:`, and that override owns the
+    /// hook there. A seam with a single delivery point (VST3 `onKeyDown`) sets
+    /// this, and is then the only place the hook is consulted for that press.
+    bool offer_global_hook = false;
 };
 
 /// Resolve who consumes `offer` under `root`.
@@ -81,12 +80,15 @@ struct PluginKeyOffer {
 ///      text is offered only the bounded navigation set (see
 ///      `is_plugin_navigation_key`) — that floor keeps a focusable knob from
 ///      swallowing Space — and its own `on_key_event` return value decides
-///      from there. A view that accepts text input is offered every key, and
-///      a chord or function key it declines is forwarded rather than
-///      swallowed.
+///      from there. A view that accepts text input is offered every key; a
+///      chord or function key it declines cannot become text, so it falls
+///      through to step 3 and, unclaimed there, to the host — rather than
+///      being swallowed because a field happened to hold focus.
 ///   3. `root.on_global_key`, the framework-level hook a CommandRegistry or
-///      the script bridge installs. It sees only what the focused view
-///      declined, so an editor-wide ⌘Z does not fight a text field's own undo.
+///      the script bridge installs, when the seam asked for it
+///      (`PluginKeyOffer::offer_global_hook`). It sees only what the focused
+///      view declined, so an editor-wide ⌘Z does not fight a text field's own
+///      undo.
 ///
 /// Anything none of those claimed is `forward_to_host`. No allowlist of
 /// "host keys" appears anywhere in the policy: forwarding is the DEFAULT, and

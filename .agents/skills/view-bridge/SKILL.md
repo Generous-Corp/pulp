@@ -171,8 +171,9 @@ Three things are easy to get wrong here, and each one is invisible until a
 musician hits it:
 
 - **A focused text field does not consume everything.** A Command/Control chord
-  or a function key it declined is not text, so there is nothing left for it to
-  do with the key — report `forward_to_host`. The old macOS path returned
+  or a function key it declined is not text, so there is nothing left for the
+  FIELD to do with it: the key falls through to `on_global_key` and, unclaimed
+  there, to the host. The old macOS path returned
   "handled" unconditionally once a field held focus, which killed host chords
   and F-key transport for exactly as long as a type-in happened to be open.
   `PluginKeyOffer::is_function_key` is how the platform tells the policy that a
@@ -182,11 +183,13 @@ musician hits it:
   (arrows, Home/End, Enter, Escape, and never with a chord modifier) and its own
   `on_key_event` decides from there. That floor is not a claim about what the
   host wants — it is what stops a focused knob from swallowing Space.
-- **AppKit offers a command chord twice.** `-performKeyEquivalent:` runs before
-  `-keyDown:` and already consults `root.on_global_key`; the second pass sets
-  `PluginKeyOffer::global_hook_already_offered` so the hook — and the script
-  `keydown` listener behind it — fires once per press. A seam with a single
-  delivery point (VST3 `onKeyDown`) leaves it false.
+- **AppKit delivers one press twice.** `-performKeyEquivalent:` runs before
+  `-keyDown:`, and on macOS that override owns `root.on_global_key`. So
+  `PluginKeyOffer::offer_global_hook` is OFF by default and the NSView seam
+  leaves it off: consulting the hook from both passes fires an editor-wide
+  shortcut — and the script `keydown` listener behind it — twice for one press.
+  A seam with a single delivery point (VST3 `onKeyDown`) sets it, and is then
+  the only place the hook is consulted for that press.
 
 `plugin_key_focus(root)` is the scoped focus read every seam must use:
 `View::focused_input_` is process-global, so with two editors open it may name

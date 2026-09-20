@@ -91,6 +91,15 @@ PluginKeyOffer plain(KeyCode key, std::uint16_t modifiers = 0) {
     return offer;
 }
 
+// A seam that owns the global-hook offer for this press (VST3's single
+// delivery point). macOS deliberately does not, because AppKit delivers the
+// same press twice.
+PluginKeyOffer with_hook(KeyCode key, std::uint16_t modifiers = 0) {
+    PluginKeyOffer offer = plain(key, modifiers);
+    offer.offer_global_hook = true;
+    return offer;
+}
+
 PluginKeyOffer function_key(KeyCode key) {
     PluginKeyOffer offer = plain(key);
     offer.is_function_key = true;
@@ -280,22 +289,23 @@ TEST_CASE("the global hook sees only what the focused view declined",
     };
 
     // The field's own undo wins; the editor-wide hook never sees it.
-    REQUIRE(route_plugin_key(root, plain(KeyCode::z, pulp::view::kModCmd)) ==
+    REQUIRE(route_plugin_key(root, with_hook(KeyCode::z, pulp::view::kModCmd)) ==
             PluginKeyDisposition::consumed);
     REQUIRE(hook_calls == 0);
 
-    // A chord the field declined reaches the hook, which claims it.
-    REQUIRE(route_plugin_key(root, plain(KeyCode::s, pulp::view::kModCmd)) ==
+    // A chord the field declined reaches the hook, which claims it. The field
+    // holding focus is not a licence to swallow the editor's own shortcut.
+    REQUIRE(route_plugin_key(root, with_hook(KeyCode::s, pulp::view::kModCmd)) ==
             PluginKeyDisposition::consumed);
     REQUIRE(hook_calls == 1);
 
     // And a chord neither claims still reaches the host.
-    REQUIRE(route_plugin_key(root, plain(KeyCode::w, pulp::view::kModCmd)) ==
+    REQUIRE(route_plugin_key(root, with_hook(KeyCode::w, pulp::view::kModCmd)) ==
             PluginKeyDisposition::forward_to_host);
     REQUIRE(hook_calls == 2);
 }
 
-TEST_CASE("a seam that already offered the hook does not offer it twice",
+TEST_CASE("a seam that delivers one press twice does not offer the hook twice",
           "[view][plugin-key-routing]") {
     RoutingGuard g;
     TestView root;
@@ -305,17 +315,17 @@ TEST_CASE("a seam that already offered the hook does not offer it twice",
         return true;
     };
 
-    // Control: an ordinary offer does consult it.
-    REQUIRE(route_plugin_key(root, plain(KeyCode::z, pulp::view::kModCmd)) ==
+    // Control: a seam that owns the offer does consult it.
+    REQUIRE(route_plugin_key(root, with_hook(KeyCode::z, pulp::view::kModCmd)) ==
             PluginKeyDisposition::consumed);
     REQUIRE(hook_calls == 1);
 
-    // macOS gives a command chord to -performKeyEquivalent: and then again to
-    // -keyDown:. Without this the hook — and the script keydown listener
-    // behind it — fires twice for one press.
-    PluginKeyOffer second = plain(KeyCode::z, pulp::view::kModCmd);
-    second.global_hook_already_offered = true;
-    REQUIRE(route_plugin_key(root, second) == PluginKeyDisposition::forward_to_host);
+    // macOS gives a key-down to -performKeyEquivalent: and then again to
+    // -keyDown:, and that override owns the hook. Consulting it from the
+    // second pass too would fire an editor-wide shortcut — and the script
+    // keydown listener behind it — twice for one press.
+    REQUIRE(route_plugin_key(root, plain(KeyCode::z, pulp::view::kModCmd)) ==
+            PluginKeyDisposition::forward_to_host);
     REQUIRE(hook_calls == 1);
 }
 
