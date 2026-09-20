@@ -73,7 +73,13 @@ class Fixture:
             check=True, capture_output=True,
         )
         (self.main / "README").write_text("seed\n")
-        git(self.main, "add", "README")
+        # The gate takes git's ignore rules as the per-item evidence that a
+        # build directory is regenerable, so the fixture has to carry the same
+        # ignore rule the real repository does. Without it every fixture build
+        # dir is unignored, the gate keeps all of them, and every deletion test
+        # fails while asserting nothing about deletion.
+        (self.main / ".gitignore").write_text("build/\nbuild-*/\n")
+        git(self.main, "add", "README", ".gitignore")
         git(self.main, "commit", "-m", "seed")
         git(self.main, "push", "-u", "origin", "main")
 
@@ -161,7 +167,8 @@ def run_script(fx: Fixture, *args: str, env_extra: dict | None = None,
     env = dict(os.environ)
     for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
                 "PULP_WORKTREES_ROOT", "PULP_WORKTREE_BUILD_IDLE_HOURS",
-                "PULP_REAP_LIB_ONLY"):
+                "PULP_REAP_LIB_ONLY", "PULP_REAP_SAME_DEVICE_AS",
+                "PULP_REAP_STOP_AT_FREE_BYTES", "PULP_REAP_STOP_AT_PATH"):
         env.pop(var, None)
     env["PULP_BUILD_DIR_LOCK_ROOT"] = str(fx.tmp / "build-dir-locks")
     if env_extra:
@@ -265,7 +272,7 @@ class SafetyInvariantTests(FixtureTestCase):
         foreign.mkdir()
         r = self._check(foreign, self._roots_file(wt))
         self.assertIn("rc=1", r.stdout, r.stderr)
-        self.assertIn("not an absolute path ending in /build", r.stderr)
+        self.assertIn("not an absolute path ending in a build artifact dir", r.stderr)
         self.assertTrue(foreign.is_dir(), "the refused path must be untouched")
 
     def test_refuses_a_relative_path(self) -> None:
@@ -433,31 +440,41 @@ class GateTests(FixtureTestCase):
         self.assertIn(str(wt / "build"), r.stdout)
         self.assertIn("(merged, lineage-proven)", r.stdout)
 
-    def test_merged_history_without_lineage_is_kept(self) -> None:
+    def test_merged_history_without_lineage_is_reaped(self) -> None:
         wt = self.fx.add_worktree("wt-unclassified")
         branch = git(wt, "branch", "--show-current").strip()
         git(self.fx.main, "merge", "--ff-only", branch)
         git(self.fx.main, "push")
         self.fx.advance_main("later-unclassified.txt")
         r = run_script(self.fx, "--verbose", "--yes")
-        self.assertIn("lineage does not prove this exact head merged", r.stdout)
-        self.assertTrue((wt / "build").is_dir())
+        self.assertIn("git-ancestry-proven", r.stdout)
+        self.assertFalse((wt / "build").is_dir())
+        self.assertTrue((wt / "src" / "keep.txt").exists())
 
     def test_active_lineage_is_kept(self) -> None:
+        # The invariant this name states survives the ancestry relaxation. The
+        # head IS a strict ancestor of the tip here, so git alone would call it
+        # merged; an explicit `active` row still vetoes. Ancestry proves the
+        # head landed, never that work in the worktree stopped.
         wt = self.fx.add_worktree("wt-active")
         self.fx.merge_and_mark(wt)
         self.fx.mark_lineage(wt, status="active")
         r = run_script(self.fx, "--verbose", "--yes")
-        self.assertIn("lineage does not prove this exact head merged", r.stdout)
+        self.assertIn("records it active", r.stdout)
         self.assertTrue((wt / "build").is_dir())
 
-    def test_stale_lineage_head_is_kept(self) -> None:
+    def test_stale_lineage_head_is_reaped_on_git_ancestry(self) -> None:
+        # The row records `merged` against a sha that is not this head, so the
+        # registry proves nothing. It is a bookkeeping gap, not a claim that
+        # somebody is here, and git can answer the question the row cannot.
         wt = self.fx.add_worktree("wt-stale-lineage")
         self.fx.merge_and_mark(wt)
         self.fx.mark_lineage(wt, durable_sha="0" * 40)
         r = run_script(self.fx, "--verbose", "--yes")
-        self.assertIn("lineage does not prove this exact head merged", r.stdout)
-        self.assertTrue((wt / "build").is_dir())
+        self.assertIn("git-ancestry-proven", r.stdout)
+        self.assertFalse((wt / "build").is_dir())
+        self.assertTrue((wt / "src" / "keep.txt").exists())
+        self.assertTrue((wt / "uncommitted.txt").exists())
 
     def test_same_head_branch_switch_invalidates_final_identity(self) -> None:
         wt = self.fx.add_worktree("wt-original")
@@ -490,15 +507,18 @@ class GateTests(FixtureTestCase):
         self.assertIn("rc=1", r.stdout, r.stderr)
         self.assertTrue((wt / "build").is_dir())
 
-    def test_merged_lineage_without_pr_provenance_is_kept(self) -> None:
+    def test_merged_lineage_without_pr_provenance_is_reaped(self) -> None:
+        # A PR URL is the only proof a SQUASH-landed head can have, because its
+        # source head is deliberately not an ancestor. This head is an ancestor,
+        # so the missing URL costs nothing — git answers directly.
         wt = self.fx.add_worktree("wt-no-pr")
         self.fx.merge_and_mark(wt)
         branch = git(wt, "branch", "--show-current").strip()
         git(self.fx.main, "config", "--local", "--unset-all",
             f"branch.{branch}.pulpWorktreePr")
         r = run_script(self.fx, "--verbose", "--yes")
-        self.assertIn("lineage does not prove this exact head merged", r.stdout)
-        self.assertTrue((wt / "build").is_dir())
+        self.assertIn("git-ancestry-proven", r.stdout)
+        self.assertFalse((wt / "build").is_dir())
 
     def test_worktree_sitting_at_the_main_tip_is_kept(self) -> None:
         # No commits of its own: indistinguishable from one created minutes ago,
@@ -572,6 +592,26 @@ class GateTests(FixtureTestCase):
         r = run_script(self.fx, "--verbose")
         self.assertIn("unique or unproven history", r.stdout)
         self.assertTrue((wt / "build").is_dir())
+
+    def test_a_detached_worktree_is_enumerated_and_judged(self) -> None:
+        # A detached worktree has no branch, so its candidate row carries an
+        # empty middle field. A tab-collapsing read silently shifted every
+        # later field left and dropped the artifact name, which made every
+        # detached worktree's build directory invisible to the whole gate
+        # chain -- a no-op that reported itself as a clean sweep. The row must
+        # parse, reach the gates, and be judged on evidence.
+        wt = self.fx.add_worktree("wt-detached-merged", detach=True)
+        head = git(wt, "rev-parse", "HEAD").strip()
+        self.fx.advance_main("after-detached.txt")
+        self.assertEqual(
+            0, subprocess.run(
+                ["git", "-C", str(self.fx.main), "merge-base",
+                 "--is-ancestor", head, "refs/remotes/origin/main"],
+            ).returncode, "fixture precondition: the detached head must have landed")
+        r = run_script(self.fx, "--verbose", "--yes")
+        self.assertIn("git-ancestry-proven", r.stdout)
+        self.assertFalse((wt / "build").is_dir())
+        self.assertTrue((wt / "src" / "keep.txt").exists())
 
     def test_the_main_checkout_is_never_reaped(self) -> None:
         # The branch is gone from origin, the build is stale, nothing is running
@@ -847,6 +887,47 @@ class FailureModeTests(FixtureTestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("build freshness is unreadable", r.stdout)
         self.assertTrue((wt / "build").is_dir())
+
+    def test_unreadable_same_device_path_refuses_rather_than_unfiltered(self) -> None:
+        # Falling back to "no filter" is exactly the cross-volume overshoot the
+        # filter exists to prevent, so an unreadable device is a stop.
+        wt = self.fx.add_worktree("wt-dev-unreadable")
+        self.fx.merge_and_mark(wt)
+        r = run_script(self.fx, "--verbose", "--yes", env_extra={
+            "PULP_REAP_SAME_DEVICE_AS": str(self.root / "no-such-path")})
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("cannot read the filesystem", r.stderr)
+        self.assertTrue((wt / "build").is_dir())
+
+    def test_candidates_on_another_filesystem_are_skipped(self) -> None:
+        # The branch that matters: deleting a build on a volume the caller is
+        # not trying to relieve frees nothing it can measure, so it must not
+        # happen at all. `/dev` is its own filesystem on both macOS (devfs) and
+        # Linux (devtmpfs), which gives a real second device without mounting
+        # one. The precondition is asserted rather than assumed -- if the two
+        # ever landed on the same device this test would pass vacuously.
+        wt = self.fx.add_worktree("wt-dev-other")
+        self.fx.merge_and_mark(wt)
+        if os.stat("/dev").st_dev == os.stat(wt).st_dev:
+            self.skipTest("/dev is not a distinct filesystem on this host")
+        r = run_script(self.fx, "--verbose", "--yes",
+                       env_extra={"PULP_REAP_SAME_DEVICE_AS": "/dev"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("different filesystem", r.stdout)
+        self.assertIn("removed 0 build dir", r.stdout)
+        self.assertTrue((wt / "build").is_dir())
+
+    def test_same_device_filter_still_reaps_on_that_device(self) -> None:
+        # The control for the refusal above: pointed at the volume the
+        # candidates are actually on, the filter must not block anything.
+        wt = self.fx.add_worktree("wt-dev-same")
+        self.fx.merge_and_mark(wt)
+        r = run_script(self.fx, "--verbose", "--yes", env_extra={
+            "PULP_REAP_SAME_DEVICE_AS": str(wt)})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("removed 1 build dir", r.stdout)
+        self.assertNotIn("different filesystem", r.stdout)
+        self.assertFalse((wt / "build").is_dir())
 
     def test_unknown_argument_exits_2(self) -> None:
         r = run_script(self.fx, "--delete-everything")
