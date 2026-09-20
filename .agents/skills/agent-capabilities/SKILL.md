@@ -69,6 +69,16 @@ acceptance tooling, not an installed SDK capability: do not add its adapter
 request/receipt schemas, 10+10 lifecycle ledger, or source-binding receipt to
 the design-time capability catalog.
 
+The same classification holds when that surface grows a producer.
+`FrameObservation::gpu_submission_observed` is now fed by two `WindowHost`
+queries (`supports_gpu_submission_evidence()`,
+`last_frame_gpu_submission_observed()`). Those are public installed-header
+additions and get a public-header ledger classification like any other, but
+they stay OUT of `agent-capabilities.json`: a host telling the inspector whether
+its last frame reached an output is runtime control plumbing, not a
+generator-facing design capability, and a plausible `WindowHost::` prefix is not
+evidence otherwise.
+
 ## Classify the change
 
 For a new public header or symbol:

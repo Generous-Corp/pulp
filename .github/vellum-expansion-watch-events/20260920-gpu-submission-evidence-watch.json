@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260920-gpu-submission-evidence-watch",
+  "created_at": "2026-09-20T01:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record two append-only WindowHost queries that let a host answer whether its last rendered frame reached its intended output, so the Development Inspector's gpu_submission_observed flag has a producer instead of being permanently false. The macOS GPU host is the only implementer and it reports the render::frame_reached_output() verdict it already computes to decide damage retirement; a recreate outcome reports false, and every other host keeps the false default. This adds no rendering primitive, acquires no drawable, and introduces no presentation producer. It also corrects a documentation error this watch lane previously recorded: capture completion does not precede display. The health adapter stamps that timestamp after capture_back_buffer_png() returns, which is after the present call plus PNG encode, and the capture's synchronising readback blocks between submit and present, so capture completion over-reports first-visible latency rather than under-reporting it. native_present_timing stays listed in missing_trace_categories and no transferred Vellum slice changes behaviour.",
+  "tests": [
+    "gpu-handoff-provenance-selftest",
+    "gpu-recipe-catalog-selftest",
+    "vellum-freeze-check",
+    "vellum-expansion-watch",
+    "pulp-test-control-gpu-health-provider"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -617,13 +617,17 @@ public:
     /// True when this host can report whether the last rendered frame's GPU
     /// work actually reached its intended output. Appended at the public vtable
     /// tail for downstream WindowHost ABI safety.
-    virtual bool supports_gpu_submission_evidence() const { return false; }
+    virtual bool supports_gpu_submission_evidence() const {
+        return false;
+    }
 
     /// True when the most recent frame rendered by this host reached its
     /// intended output (a presentable drawable, or the offscreen target when
     /// that IS the output). Hosts that cannot observe submission keep the
     /// `false` default, so an absent producer is never read as evidence.
-    virtual bool last_frame_gpu_submission_observed() const { return false; }
+    virtual bool last_frame_gpu_submission_observed() const {
+        return false;
+    }
 
     /// True once `note_unsupported_feature(method)` has fired for `method` on
     /// this host — i.e. a window feature was requested that this host silently

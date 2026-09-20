@@ -533,9 +533,9 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                         // now answers for it. This list only selects a
                         // diagnostic string; it is not a pass gate, so dropping
                         // the entry unblocks nothing.
-                        frame.missing_trace_categories = {
-                            "native_present_timing", "pipeline_compile",
-                            "resource_upload", "shader_identity", "source_identity"};
+                        frame.missing_trace_categories = {"native_present_timing",
+                                                          "pipeline_compile", "resource_upload",
+                                                          "shader_identity", "source_identity"};
                         const auto* surface = window_ ? window_->gpu_surface() : nullptr;
                         if (!surface)
                             return frame;

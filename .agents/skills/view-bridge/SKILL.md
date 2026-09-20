@@ -219,6 +219,25 @@ window. `StandaloneConfig::headless`, `PULP_HEADLESS`, `PULP_TEST_MODE`,
 `run_with_editor()` fails before creating the host so tests cannot park a
 hidden live window forever.
 
+`WindowHost` also answers whether the frame it just rendered reached its output:
+`supports_gpu_submission_evidence()` / `last_frame_gpu_submission_observed()`,
+appended at the public vtable tail like every other host query. Only
+`MacGpuWindowHost` implements them, mirroring the
+`render::frame_reached_output()` verdict that already gates damage retirement,
+so `presented` and `offscreen` report true and `recreate` reports false even
+though the recording was submitted. Two consequences worth knowing before
+reading the flag:
+
+- **It describes the LAST rendered frame, not "now."** The inspector's
+  frame-evidence producer is correct only because
+  `capture_back_buffer_png()` runs immediately before it, on the main thread —
+  the capture renders the frame the query then answers for. Reorder those two
+  and the flag silently describes a different frame.
+- **Every other host keeps the `false` default**, so an absent producer can
+  never be read as evidence. Do not "fix" that by inferring submission from a
+  valid screenshot or an available adapter: a capture that succeeded proves the
+  host had pixels, not that they reached an output.
+
 The audio dumps (`audio_probe_json_path`, `audio_scope_json_path`,
 `audio_capture_wav_path`, `audio_capture_rolling_path`; gated by
 `PULP_ENABLE_AUDIO_PROBES`) are a SECOND headless one-shot family that reuses

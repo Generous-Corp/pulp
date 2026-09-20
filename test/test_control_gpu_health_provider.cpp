@@ -3,8 +3,8 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
-#include <pulp/view/window_host.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 #include <pulp_tooling/gpu_health/health_read_result.hpp>
 
 #include "support/a3_control_build_identity.hpp"
@@ -65,13 +65,19 @@ class SubmissionEvidenceHost final : public pulp::view::WindowHost {
 
     void show() override {}
     void hide() override {}
-    bool is_visible() const override { return false; }
+    bool is_visible() const override {
+        return false;
+    }
     void repaint() override {}
     void set_close_callback(std::function<void()>) override {}
     void run_event_loop() override {}
 
-    bool supports_gpu_submission_evidence() const override { return true; }
-    bool last_frame_gpu_submission_observed() const override { return observed_; }
+    bool supports_gpu_submission_evidence() const override {
+        return true;
+    }
+    bool last_frame_gpu_submission_observed() const override {
+        return observed_;
+    }
 
   private:
     bool observed_ = false;
@@ -83,7 +89,9 @@ class SilentHost final : public pulp::view::WindowHost {
   public:
     void show() override {}
     void hide() override {}
-    bool is_visible() const override { return false; }
+    bool is_visible() const override {
+        return false;
+    }
     void repaint() override {}
     void set_close_callback(std::function<void()>) override {}
     void run_event_loop() override {}
@@ -915,9 +923,9 @@ TEST_CASE("GPU health view adapter recovers after a capture exception") {
 TEST_CASE("GPU health provider follows the window host's submission evidence") {
     const auto record = [](pulp::view::WindowHost* window) {
         pulp::inspect::ControlGpuHealthProvider provider({.pulp_build_id = "test-build"});
-        REQUIRE(provider.begin_editor_open(
-            pulp::inspect::ControlGpuHealthProvider::CacheState::cold,
-            std::chrono::steady_clock::time_point{}));
+        REQUIRE(
+            provider.begin_editor_open(pulp::inspect::ControlGpuHealthProvider::CacheState::cold,
+                                       std::chrono::steady_clock::time_point{}));
         auto observed = frame(true);
         observed.lifecycle_id = "instance-host-submission-evidence";
         observed.gpu_submission_observed = host_submission_evidence(window);

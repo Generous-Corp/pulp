@@ -2402,7 +2402,9 @@ public:
     }
     bool supports_back_buffer_capture() const override { return true; }
 
-    bool supports_gpu_submission_evidence() const override { return true; }
+    bool supports_gpu_submission_evidence() const override {
+        return true;
+    }
 
     // Mirrors render::frame_reached_output(), i.e. `presented || offscreen`.
     // A `recreate` outcome reports false even though the recording was
