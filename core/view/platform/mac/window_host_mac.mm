@@ -2402,6 +2402,17 @@ public:
     }
     bool supports_back_buffer_capture() const override { return true; }
 
+    bool supports_gpu_submission_evidence() const override { return true; }
+
+    // Mirrors render::frame_reached_output(), i.e. `presented || offscreen`.
+    // A `recreate` outcome reports false even though the recording was
+    // submitted: the drawable's contents are undefined, so the frame proves
+    // nothing about output. Failing closed is the safe direction here — an
+    // unproven frame must never read as submission evidence.
+    bool last_frame_gpu_submission_observed() const override {
+        return last_submission_observed_.load(std::memory_order_relaxed);
+    }
+
     void invalidate_input_state() override {
         [metal_view_ clearInteractionState];
     }
@@ -2669,6 +2680,11 @@ private:
     pulp::view::mac_frame_timing::MacDisplayLinkDriver display_link_;
     NSTimer* hidden_frame_timer_ = nil;
     std::atomic<bool> needs_repaint_{true};
+    // Whether the last frame rendered by render_frame() reached its intended
+    // output. Written on the main thread by render_frame() and read by the
+    // inspector's frame-evidence producer, also on the main thread; atomic so
+    // an off-main reader can never observe a torn value.
+    std::atomic<bool> last_submission_observed_{false};
     std::atomic<bool> continuous_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
     std::shared_ptr<std::atomic<bool>> render_dispatch_alive_ =
@@ -3148,7 +3164,9 @@ private:
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
         // Retire damage only for a frame that REACHED the drawable (see render::FrameOutcome).
-        if (pulp::render::frame_reached_output(outcome)) {
+        const bool reached_output = pulp::render::frame_reached_output(outcome);
+        last_submission_observed_.store(reached_output, std::memory_order_relaxed);
+        if (reached_output) {
             tracker_.clear();  // next frame starts clean
             if (partial_repaint_enabled_) clear_pending_dirty();  // FU-2: no paint_root here
         } else if (partial_repaint_enabled_) {
