@@ -1,3 +1,28 @@
+-- The candidate set is published on its own so the CLI can ask whether the
+-- capture held any health work at all. Correlation answers an uncorrelatable
+-- capture and a capture with no health work the same way -- with nothing -- and
+-- only the candidate count separates a refused cohort from an absent one.
+CREATE OR REPLACE PERFETTO VIEW pulp_gpu_health_candidates AS
+SELECT
+  s.name,
+  s.dur,
+  s.arg_set_id,
+  th.upid AS process_upid,
+  p.pid AS process_pid,
+  COALESCE(
+    CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_evidence_id') AS TEXT),
+    CAST(EXTRACT_ARG(s.arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id,
+  -- Every health candidate is tooling-owned. The column exists so both
+  -- evidence-gated questions expose one candidate shape to the CLI; the probe
+  -- view uses it to separate its own spans from generic backend work.
+  1 AS is_tooling_owned
+FROM slice AS s
+JOIN thread_track AS tt ON s.track_id = tt.id
+JOIN thread AS th ON tt.utid = th.utid
+JOIN process AS p ON th.upid = p.upid
+WHERE s.category GLOB 'gpu*'
+  AND (s.name GLOB 'gpu_health_transition*' OR s.name GLOB 'gpu_device_loss*');
+
 -- GPU health state and device-loss evidence. The closed view returns rows only
 -- when every candidate has the same exact, valid evidence ID; mixed or
 -- uncorrelated traces fail closed as an empty result. Generic framework
@@ -6,21 +31,7 @@
 -- the whole trace by the CLI capture-integrity query.
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_health_transitions AS
 WITH candidates AS (
-  SELECT
-    s.name,
-    s.dur,
-    s.arg_set_id,
-    th.upid AS process_upid,
-    p.pid AS process_pid,
-    COALESCE(
-      CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_evidence_id') AS TEXT),
-      CAST(EXTRACT_ARG(s.arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id
-  FROM slice AS s
-  JOIN thread_track AS tt ON s.track_id = tt.id
-  JOIN thread AS th ON tt.utid = th.utid
-  JOIN process AS p ON th.upid = p.upid
-  WHERE s.category GLOB 'gpu*'
-    AND (s.name GLOB 'gpu_health_transition*' OR s.name GLOB 'gpu_device_loss*')
+  SELECT * FROM pulp_gpu_health_candidates
 ), selected_evidence AS (
   SELECT MIN(evidence_id) AS evidence_id
   FROM candidates

@@ -1553,7 +1553,11 @@ Probe diagnostics
 failures even if an inconsistent producer also labels adapter health healthy.
 Every tooling-owned `gpu_probe*`/`gpu_readback*` candidate must carry an
 evidence ID; an untagged tooling candidate invalidates the cohort while generic
-untagged backend spans remain allowed.
+untagged backend spans remain allowed. When `gpu-health` or `gpu-probe` answers
+nothing, the reported reason separates the two causes: a capture holding the
+question's spans that cannot correlate them returns
+`invalid-evidence-correlation`, and only a capture holding none of that work
+returns `missing-question-category`.
 Empty/never-flushed files, processor-reported truncation, positive data-loss/no-flush stats, missing
 categories, unfinished slices, and invalid probe correlation return
 `unavailable` with exit 2; they do not silently pass. Long acquire/present wall
