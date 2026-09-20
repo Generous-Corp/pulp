@@ -864,6 +864,43 @@ regression that asserts both sides: the portable method remains advertised and t
 implementation signature is absent. Do not raise the global method cap to hide this local
 classification error.
 
+### `SURFACE_INVENTORY_VERSION` is a shared ledger too — pick it by survey, not by increment
+
+Every branch that moves a public header has to raise it, so concurrent branches
+contend for the same integer. The obvious move — read main's value and add one —
+is wrong whenever anyone else is mid-flight, and it fails in the quietest
+possible way: two branches that both write the same number produce *identical*
+text, so git finds nothing to conflict on and both auto-merge clean. The
+collision surfaces later, at the merge commit, as an inventory version that did
+not actually increase over the branch that landed first.
+
+Choose `max(all live branches) + 1`, not `main + 1`:
+
+```sh
+git for-each-ref --format='%(refname)' refs/remotes/origin \
+  | grep -v -- '--help\|/HEAD$' > /tmp/refs.txt
+xargs -n 300 sh -c \
+  'git grep -h "^SURFACE_INVENTORY_VERSION" "$@" -- tools/scripts/agent_capability_manifest.py' _ \
+  < /tmp/refs.txt | grep -o '[0-9][0-9]*$' | sort -n | uniq -c | tail
+```
+
+Two details that are load-bearing, because getting either wrong returns an empty
+result rather than an error — and an empty survey reads exactly like "nobody
+holds a number", which is the answer that makes you collide:
+
+- **The refs must land in revision position, before `--`.** Anything after `--`
+  is a pathspec, so `git grep PATTERN -- path ref1 ref2` searches no revisions
+  and matches nothing.
+- **macOS `xargs` has no `-a`.** `xargs -a file …` aborts with `invalid option`;
+  redirect the file in with `<` instead. BSD and GNU differ here and the BSD
+  failure is easy to miss inside a pipeline.
+
+So pair the survey with a control that must return non-zero — `git grep` the
+same constant on `origin/main` alone, which is known to carry it. If the control
+is silent the instrument is broken and the survey proved nothing. A gap in the
+observed numbers is not an invitation to fill it: prefer one above the maximum,
+since a gap usually means that branch already landed or was deleted.
+
 ### `test_signal_no_exceptions.cpp` is a shared ledger — three hazards, not two
 
 Nearly every signal capability appends to it, and it assigns a **unique non-zero exit code per
