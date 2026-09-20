@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/contracts/gpu-dpr-calibration-diagnostics-v1.schema.json",
+  "title": "Pulp GPU DPR calibration diagnostics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "version", "attempt_nonce", "attempt_number", "clock",
+    "failure_class", "resolution_ms", "baseline_median_ms",
+    "extra_work_median_ms", "delta_ms", "threshold_ms", "control_detected",
+    "control_reason", "trials"
+  ],
+  "properties": {
+    "schema": {"const": "pulp.gpu-dpr-calibration-diagnostics.v1"},
+    "version": {"const": 1},
+    "attempt_nonce": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "attempt_number": {"type": "integer", "minimum": 1},
+    "clock": {"const": "dawn-gpu-timestamp"},
+    "failure_class": {"enum": [
+      "timer_quantization", "insufficient_extra_work",
+      "producer_sample_invalid", "analyzer_rejection"
+    ]},
+    "resolution_ms": {"type": "number", "exclusiveMinimum": 0},
+    "baseline_median_ms": {"type": ["number", "null"], "minimum": 0},
+    "extra_work_median_ms": {"type": ["number", "null"], "minimum": 0},
+    "delta_ms": {"type": ["number", "null"], "minimum": 0},
+    "threshold_ms": {"type": ["number", "null"], "exclusiveMinimum": 0},
+    "control_detected": {"const": false},
+    "control_reason": {"type": "string", "minLength": 1},
+    "trials": {
+      "type": "array", "minItems": 1, "maxItems": 5,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["trial_index", "baseline_ms", "extra_work_ms"],
+        "properties": {
+          "trial_index": {"type": "integer", "minimum": 0},
+          "baseline_ms": {"type": ["number", "null"], "exclusiveMinimum": 0},
+          "extra_work_ms": {"type": ["number", "null"], "exclusiveMinimum": 0}
+        }
+      }
+    }
+  }
+}

@@ -22,6 +22,7 @@ import gpu_first_visible_a3_acceptance as a3_acceptance
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 RECEIPT_SCHEMA = "pulp.gpu-dpr-cell-receipt.v1"
+CALIBRATION_DIAGNOSTIC_SCHEMA = "pulp.gpu-dpr-calibration-diagnostics.v1"
 RAW_SCHEMA = "pulp.gpu-dpr-raw-samples.v1"
 COMPLETE_OUTCOMES = {"pass", "fail"}
 INCOMPLETE_OUTCOMES = {"skip", "inconclusive"}
@@ -1084,6 +1085,11 @@ def receipt_observation(
             or any(not isinstance(item, str) or not item for item in dependencies)
         ):
             raise EvidenceError(f"{outcome} receipt requires explicit dependencies")
+        diagnostic = receipt.get("calibration_diagnostics")
+        if diagnostic is not None:
+            validate_calibration_diagnostic_artifact(
+                receipt_path.parent, diagnostic, receipt, state
+            )
         return key, None, dependencies
 
     validate_identity(receipt, scenario, state["plan"])
@@ -1303,6 +1309,72 @@ def receipt_observation(
     return key, observation, []
 
 
+def validate_calibration_diagnostic_artifact(
+    root_dir: Path, descriptor: Any, receipt: dict[str, Any], state: dict[str, Any],
+) -> None:
+    if not isinstance(descriptor, dict) or set(descriptor) != {
+        "schema", "version", "path", "sha256"
+    }:
+        raise EvidenceError("calibration diagnostic descriptor is malformed")
+    if descriptor["schema"] != CALIBRATION_DIAGNOSTIC_SCHEMA or descriptor["version"] != 1:
+        raise EvidenceError("calibration diagnostic descriptor has the wrong schema")
+    path = safe_artifact(root_dir, descriptor["path"])
+    digest = hashlib.sha256(regular_file_bytes(path, "calibration diagnostic")).hexdigest()
+    if digest != descriptor["sha256"]:
+        raise EvidenceError("calibration diagnostic digest differs from its bytes")
+    diagnostic = regular_json(path, "calibration diagnostic")
+    expected = {
+        "schema", "version", "attempt_nonce", "attempt_number", "clock",
+        "failure_class", "resolution_ms", "baseline_median_ms",
+        "extra_work_median_ms", "delta_ms", "threshold_ms", "control_detected",
+        "control_reason", "trials",
+    }
+    if not isinstance(diagnostic, dict) or set(diagnostic) != expected:
+        raise EvidenceError("calibration diagnostic fields are not canonical")
+    if (
+        diagnostic["schema"] != CALIBRATION_DIAGNOSTIC_SCHEMA
+        or diagnostic["version"] != 1
+        or diagnostic["attempt_nonce"] != receipt["attempt_nonce"]
+        or diagnostic["clock"] != "dawn-gpu-timestamp"
+        or diagnostic["failure_class"] not in {
+            "timer_quantization", "insufficient_extra_work", "producer_sample_invalid",
+            "analyzer_rejection",
+        }
+        or diagnostic["control_detected"] is not False
+        or not isinstance(diagnostic["control_reason"], str)
+        or not diagnostic["control_reason"]
+        or not isinstance(diagnostic["trials"], list)
+    ):
+        raise EvidenceError("calibration diagnostic identity or failure state is invalid")
+    if diagnostic["attempt_number"] != receipt.get("attempt_number", 1):
+        raise EvidenceError("calibration diagnostic attempt number differs from receipt")
+    def finite(value: Any, label: str, *, positive: bool = True) -> None:
+        if (
+            isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or (float(value) <= 0 if positive else float(value) < 0)
+        ):
+            raise EvidenceError(f"calibration diagnostic {label} is invalid")
+    finite(diagnostic["resolution_ms"], "resolution_ms")
+    for field in ("baseline_median_ms", "extra_work_median_ms", "threshold_ms"):
+        if diagnostic[field] is not None:
+            finite(diagnostic[field], field)
+    if diagnostic["delta_ms"] is not None:
+        finite(diagnostic["delta_ms"], "delta_ms", positive=False)
+    expected_trials = state["plan"]["trial_contract"]["gpu_timer_calibration_trials"]
+    trials = diagnostic["trials"]
+    if not isinstance(expected_trials, int) or not 0 < len(trials) <= expected_trials:
+        raise EvidenceError("calibration diagnostic trial count is invalid")
+    for index, trial in enumerate(trials):
+        if not isinstance(trial, dict) or set(trial) != {
+            "trial_index", "baseline_ms", "extra_work_ms"
+        } or trial["trial_index"] != index:
+            raise EvidenceError("calibration diagnostic trials are not aligned")
+        for field in ("baseline_ms", "extra_work_ms"):
+            if trial[field] is not None:
+                finite(trial[field], f"trial {index} {field}")
+
+
 def snapshot_receipt_bundle(
     run_dir: Path, state: dict[str, Any], receipt_path: Path, expected_nonce: str,
 ) -> tuple[Path, str]:
@@ -1397,6 +1469,18 @@ def snapshot_receipt_bundle(
                     web_artifacts[name] = {
                         "path": str(pinned.resolve()), "sha256": digest,
                     }
+    elif receipt.get("outcome") in INCOMPLETE_OUTCOMES:
+        diagnostic = receipt.get("calibration_diagnostics")
+        if diagnostic is not None:
+            validate_calibration_diagnostic_artifact(cell_dir, diagnostic, receipt, state)
+            source = safe_artifact(cell_dir, diagnostic["path"])
+            destination = evidence_dir / "calibration-diagnostics.json"
+            digest = snapshot_file(
+                source, destination, "calibration diagnostic",
+                expected_sha256=diagnostic["sha256"],
+            )
+            diagnostic["path"] = destination.name
+            diagnostic["sha256"] = digest
 
     receipt_snapshot = evidence_dir / "receipt.json"
     atomic_json(receipt_snapshot, receipt)
