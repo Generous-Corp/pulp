@@ -2711,7 +2711,7 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/daw-smoke/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "2319ba2c12068b69788a9fe3871624346cbce5f7",
+          "revision": "cdbf748193c28790d4edb973346d76da9e100fcf",
           "object_id": "a66f6ceb2012061f881e5fe43b1d6455dec1667b",
           "object_type": "blob"
         },
@@ -2775,7 +2775,7 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "2319ba2c12068b69788a9fe3871624346cbce5f7",
+          "revision": "cdbf748193c28790d4edb973346d76da9e100fcf",
           "object_id": "f56af91555b2a7bbb98e1130e99e5e161b64dfd3",
           "object_type": "blob"
         },
