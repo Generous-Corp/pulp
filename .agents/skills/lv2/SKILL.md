@@ -112,12 +112,25 @@ is not an available answer to the transport problem below. Treat that as a
 decision rather than an oversight, and state it in `format_limitations.lv2`
 rather than in a comment somewhere, so the next reader finds it.
 
-One related sharp edge: `connect_port()` indexes `audio_in_ports` /
-`audio_out_ports` (fixed size `kMaxChannels`, 8) directly from the port number,
-while `run()` clamps its loops to `kMaxChannels`. A descriptor whose buses sum
-to more than eight channels per direction is therefore bounded in `run()` and
-unbounded in `connect_port()`. Nothing in the adapter rejects such a
-descriptor. Bound the channel count before you widen a bus on this path.
+One related sharp edge, and the reason the channel ceiling must be enforced at
+**admission** rather than at connection. `audio_in_ports` / `audio_out_ports`
+are `float*[kMaxChannels]` with `kMaxChannels` = 8. A descriptor whose buses sum
+past eight per direction writes past the array — and the two arrays are adjacent
+members, so index 8 and 9 land on `audio_out_ports[0..1]` and silently mis-wire
+outputs rather than crashing. Casting the host's port number to `int` is the
+second half of the same hazard: a port past `INT_MAX` narrows to a **negative**
+index that an upper-bound check still accepts.
+
+**Do not assume `run()` is the safe half.** It clamps its pointer-gathering
+loops, then hands `BufferView` the *unclamped* channel count over that same
+eight-pointer array — and `BufferView::channel()` does not bound-check, so the
+Processor reads stack garbage as a `float*`.
+
+Enforce the ceiling in `instantiate()`, before any allocation, and return
+`nullptr` the way the missing-`urid:map` refusal already does. Clamping inside
+`connect_port()` is the wrong shape: a silently dropped connection is a
+declaration fault wearing a DSP fault's symptoms, and it leaves the `run()` half
+unfixed.
 
 ## Transport arrives as an atom, on the MIDI port
 
@@ -189,9 +202,10 @@ Follow the rule CLAP and VST3 follow: whatever ceiling `prepare()` was given,
 `run()` must clamp `n_samples` to it and zero-fill the tail
 `[max, requested)` on every output channel, so the host reads clean silence
 instead of stale buffer contents. `clamp_block_to_prepared_max()` in
-`max_block_contract.hpp` is the shared decision; its header comment enumerates
-which adapters are wired to it, so check that list rather than assuming LV2
-is on it.
+`max_block_contract.hpp` is the shared decision. **Its header comment enumerates
+the wired adapters and that list is itself stale — it omits LV2 even though
+`lv2_entry.hpp` calls `clamp_block_to_prepared_max()`.** Verify against the call
+sites, not the comment; the comment is the thing that drifted.
 
 Use the same discipline for the atom output buffer. The host allocates it; the
 plugin's only influence is `lv2:minimumSize` in the TTL, and its actual
@@ -324,9 +338,10 @@ you know what you are looking at:
 - **No sysex.** The input walk promotes only 1–3 byte short messages out of the
   sequence; a variable-length atom is skipped.
 - **No path mapping**, as above.
-- **No MPE or UMP sidecar.** `set_mpe_input` / `set_ump_input` are called by
-  VST3, AU and CLAP and by nothing on this path, so expressive input degrades
-  to plain MIDI 1.0 here.
+- **No MPE or UMP sidecar** — and the two have different reach, so do not
+  conflate them. The MPE sidecar (`set_mpe_input`) is wired on VST3 and AUv3.
+  The UMP sidecar (`set_ump_input`) is CLAP-only. Neither is wired here, so
+  expressive input degrades to plain MIDI 1.0 on this path.
 - **No latency-compensated bypass.** `LatencyCompensatedBypass` is wired into
   CLAP, VST3, AU and AAX and not into LV2, so `run()` always calls `process()`
   and a bypassed latent plugin is not delay-compensated the way it is
