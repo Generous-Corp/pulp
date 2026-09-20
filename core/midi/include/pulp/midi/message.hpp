@@ -103,7 +103,9 @@ struct MidiEvent {
     bool is_cc() const       { return message.isController(); }
     bool is_pitch_bend() const { return message.isPitchWheel(); }
     bool is_program_change() const { return message.isProgramChange(); }
-    bool is_poly_pressure() const { return message.isAftertouch(); }
+    bool is_poly_pressure() const {
+        return message.isAftertouch();
+    }
 
     /// MIDI channel (0-15).
     uint8_t channel() const  { return message.getChannel0to15(); }
