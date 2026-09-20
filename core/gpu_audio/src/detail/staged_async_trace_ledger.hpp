@@ -87,4 +87,70 @@ class StagedAsyncTraceLedger {
     std::vector<SharedIoTraceRecord> completed_;
 };
 
+// Persistent worker-side ownership for one staged async transport. This layer
+// keeps request IDs and output slots alive across submit/poll callbacks; it is
+// deliberately independent of GpuConvolver until the callback state machine is
+// ready to preserve the existing blocking behavior.
+class StagedAsyncPendingState {
+  public:
+    struct Pending {
+        std::uint64_t request_id = 0;
+        std::uint64_t sequence = 0;
+        std::uint32_t slot = 0;
+        std::uint64_t deadline_ns = 0;
+        bool submitted = false;
+    };
+
+    explicit StagedAsyncPendingState(std::size_t slot_count) : slots_(slot_count, false) {}
+
+    bool admit(std::uint64_t request_id, std::uint64_t sequence, std::uint32_t slot,
+               std::uint64_t deadline_ns) {
+        if (request_id == 0 || slot >= slots_.size() || slots_[slot] ||
+            pending_.contains(request_id))
+            return false;
+        slots_[slot] = true;
+        pending_.emplace(request_id, Pending{request_id, sequence, slot, deadline_ns, false});
+        return true;
+    }
+
+    bool mark_submitted(std::uint64_t request_id) {
+        auto it = pending_.find(request_id);
+        if (it == pending_.end() || it->second.submitted)
+            return false;
+        it->second.submitted = true;
+        return true;
+    }
+
+    bool complete(std::uint64_t request_id) {
+        auto it = pending_.find(request_id);
+        if (it == pending_.end() || !it->second.submitted)
+            return false;
+        slots_[it->second.slot] = false;
+        pending_.erase(it);
+        return true;
+    }
+
+    std::vector<Pending> expire(std::uint64_t now_ns) {
+        std::vector<Pending> expired;
+        for (auto it = pending_.begin(); it != pending_.end();) {
+            if (it->second.submitted && it->second.deadline_ns <= now_ns) {
+                slots_[it->second.slot] = false;
+                expired.push_back(it->second);
+                it = pending_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        return expired;
+    }
+
+    std::size_t size() const noexcept {
+        return pending_.size();
+    }
+
+  private:
+    std::vector<bool> slots_;
+    std::unordered_map<std::uint64_t, Pending> pending_;
+};
+
 } // namespace pulp::gpu_audio::detail
