@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 79,
+  "inventory_version": 85,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 495,
-    "reviewed_headers": 206,
-    "legacy_unreviewed_headers": 289,
+    "reviewed_headers": 207,
+    "legacy_unreviewed_headers": 288,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 116,
       "capability_support": 44,
-      "infrastructure": 44,
-      "legacy_unreviewed": 289,
+      "infrastructure": 45,
+      "legacy_unreviewed": 288,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -62,8 +62,8 @@
       },
       "midi": {
         "public_headers": 50,
-        "reviewed_headers": 21,
-        "legacy_unreviewed_headers": 29,
+        "reviewed_headers": 22,
+        "legacy_unreviewed_headers": 28,
         "unsupported_headers": 0
       },
       "music": {
@@ -1368,11 +1368,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/message.hpp",
-      "fingerprint": "sha256:ebc97204af0cf9bedd352776d8f22dfc958b4df193ebe20377013b91b4c5590d",
+      "fingerprint": "sha256:3b3e65207b2467e835cade6fd5ed82d9c22c5ac5515715528cb85dcdf62ee716",
       "include": "pulp/midi/message.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "The shared MIDI message value type every format adapter builds and reads. It underpins the whole midi.* capability family rather than any single member, so it carries no installed capability claim of its own: a capability is a behavior, and this is the vocabulary those behaviors are written in."
     },
     {
       "domain": "midi",
