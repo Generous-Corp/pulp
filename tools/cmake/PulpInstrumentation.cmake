@@ -60,10 +60,18 @@ if(PULP_SANITIZER)
         "Pick one; use separate build directories.")
 endif()
 
+# `-g1` (line tables, no full DWARF) on top of the Debug build's own debug
+# info. Clang source-based coverage reads the __LLVM_COV coverage-mapping
+# section, not DWARF, so line tables are all llvm-cov needs and full `-g` only
+# inflates the objects: measured across 60 coverage objects, DWARF was 66.5% of
+# object bytes, or roughly 6.5 GiB across the build's .o and .a files. That is
+# real headroom on a disk-constrained coverage runner, though not a cure on its
+# own — linked executables carry no DWARF under the macOS debug-map model, so
+# this does not shrink the largest component.
 set(_pulp_coverage_compile_flags
     -fprofile-instr-generate
     -fcoverage-mapping
-    -g)
+    -g1)
 
 # `-O0` keeps inlining + optimization off so per-line coverage lines up
 # 1:1 with the source — desired on GCC/Clang driver. But on clang-cl
