@@ -187,6 +187,7 @@ staged_async_callback_status(render::GpuCompute::ReadbackStatus status) noexcept
 // real GpuCompute API while leaving production process_block untouched.
 class StagedAsyncRequestHarness {
   public:
+    enum class OutputDisposition : std::uint8_t { GpuDelivered, CpuFallback, StaleRejected };
     explicit StagedAsyncRequestHarness(render::GpuCompute& compute, std::size_t slots = 1)
         : compute_(compute), pending_(slots) {}
 
@@ -197,8 +198,8 @@ class StagedAsyncRequestHarness {
         const auto request = compute_.convolve_batch_async(
             input, output, fft_size, channels, deadline,
             [this, request_holder](const render::GpuCompute::ReadbackResult& result) {
-                (void)pending_.on_callback(*request_holder,
-                                           staged_async_callback_status(result.status));
+                (void)handoff_result(*request_holder, staged_async_callback_status(result.status),
+                                     result.status == render::GpuCompute::ReadbackStatus::Success);
             });
         if (request == 0)
             return 0;
@@ -222,6 +223,16 @@ class StagedAsyncRequestHarness {
     }
     std::size_t expire(std::uint64_t now_ns) {
         return pending_.expire(now_ns).size();
+    }
+
+    OutputDisposition handoff_result(std::uint64_t request_id,
+                                     StagedAsyncPendingState::CallbackStatus status,
+                                     bool output_ready) {
+        if (!pending_.on_callback(request_id, status))
+            return OutputDisposition::StaleRejected;
+        if (status == StagedAsyncPendingState::CallbackStatus::Success && output_ready)
+            return OutputDisposition::GpuDelivered;
+        return OutputDisposition::CpuFallback;
     }
 
   private:
