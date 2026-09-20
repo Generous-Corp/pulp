@@ -696,6 +696,11 @@ docs:
     kind: policy
     summary: Event-stream delay-compensation contract; event-to-event execution still open
 
+  - slug: event-stream-timing-transform
+    path: policies/event-stream-timing-transform.md
+    kind: policy
+    summary: Compile-time and render-time timing-transform stages, coordinate ownership, and zero-transform identity
+
   - slug: licensing
     path: reference/licensing.md
     kind: reference

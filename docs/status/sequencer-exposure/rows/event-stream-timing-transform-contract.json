@@ -1,0 +1,67 @@
+{
+  "id": "event-stream-timing-transform-contract",
+  "title": "The event-stream timing-transform pipeline has a published ordering contract with its two uncovered invariants tested",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "3b664f30-96b0-4e81-9824-034dc7280518",
+  "owned_paths": [
+    "docs/policies/event-stream-timing-transform.md",
+    "docs/status/docs-index.yaml",
+    ".agents/skills/timeline/SKILL.md",
+    "test/test_timeline_event_device_chain.cpp",
+    "docs/status/sequencer-exposure/rows/event-stream-timing-transform-contract.json"
+  ],
+  "evidence": [
+    {
+      "path": "docs/policies/event-stream-timing-transform.md",
+      "needles": [
+        "The pipeline is two halves, not one list",
+        "One transform stage per coordinate",
+        "order preservation is not currently",
+        "keyed to stream position, not document"
+      ]
+    },
+    {
+      "path": "docs/status/docs-index.yaml",
+      "needles": [
+        "event-stream-timing-transform"
+      ]
+    },
+    {
+      "path": "test/test_timeline_event_device_chain.cpp",
+      "needles": [
+        "timeline zero-depth humaniser chain lands every attack exactly where a chain",
+        "timeline humaniser chain applies its timing draw exactly once"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "Timing transforms are two halves, and zero depth is not bypass",
+        "Zero depth is a"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This slice publishes an ordering contract over stages that already ship and adds two test cases for claims nothing covered. It introduces no header, type, parameter, or callable surface, and changes no runtime behavior. The stages it documents are reachable exactly as they were before it landed."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No command, flag, or projection changes. The device catalog already publishes the humaniser's parameters; this document describes where that device sits in the transform order and does not alter what the CLI reports."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool, request, or response shape changes, for the same reason as the CLI surface."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No operation, executor binding, grant, or profile policy is added. The contract constrains how a future stage-2 transform must be ordered; it creates no control a product could invoke."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability row is added or changed. The contract is a policy document an agent reads, not an advertised authoring capability."
+    }
+  }
+}
