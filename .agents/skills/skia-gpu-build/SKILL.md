@@ -598,9 +598,11 @@ scope, which reads like a presentation bracket, so a `steady_clock::now()` after
 it looks like the present endpoint. It is not. `DawnGpuSurface::end_frame()` is
 `surface_.Present()` plus `instance_.ProcessEvents()` -- no fence, no wait, no
 presented callback -- so it hands the drawable to the compositor, which displays
-it at a later vsync. Capture completion overshoots the endpoint; this undershoots
-it by up to a refresh interval, which makes a late frame look on time and a
-budget miss look like a pass. Nothing on any Pulp backend can currently satisfy
+it at a later vsync, so returning precedes display by up to a refresh interval.
+Back-buffer capture is not the safer choice either: `read_current_rgba` runs
+BEFORE that present call, so capture completion precedes display by even more.
+Both candidates land early, which makes a late frame look on time and a budget
+miss look like a pass. Nothing on any Pulp backend can currently satisfy
 `native_presented_at`: Pulp never acquires the `CAMetalDrawable` (no
 `nextDrawable`, `presentDrawable`, `addPresentedHandler`, or `presentedTime`
 anywhere in `core/`, `inspect/`, or `apple/`), so the only home for a real

@@ -110,13 +110,14 @@ class ControlGpuHealthProvider final {
         /// producer. A capture/readback completion timestamp cannot substitute
         /// for this endpoint.
         ///
-        /// Returning from a present CALL is not presentation either, and is the
-        /// more dangerous of the two wrong substitutes. A capture timestamp
-        /// overshoots and is easy to spot; the instant `GpuSurface::end_frame()`
-        /// returns UNDERSHOOTS by up to a refresh interval, because that call
-        /// only hands the drawable to the compositor and waits for nothing.
-        /// Sourcing this field from it would under-report first-visible latency
-        /// in exactly the direction that turns a budget miss into a pass. Only a
+        /// Returning from a present CALL is not presentation either. On the
+        /// macOS GPU host both candidates land EARLY, so both under-report
+        /// first-visible latency -- the direction that turns a budget miss into
+        /// a pass. `GpuSurface::end_frame()` only hands the drawable to the
+        /// compositor and waits for nothing, so returning from it precedes
+        /// display by up to a refresh interval; and the back-buffer readback
+        /// runs earlier still, BEFORE that call, so capture completion precedes
+        /// display by even more. Only a
         /// producer that observes actual display -- a presented-drawable
         /// callback carrying the instant the frame reached the screen -- may
         /// write here. No such producer exists on any Pulp backend today, which
