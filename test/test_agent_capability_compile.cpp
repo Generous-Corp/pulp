@@ -116,6 +116,7 @@
 #include <pulp/timebase/coordinate_random.hpp>
 #include <pulp/timebase/grid_projection.hpp>
 #include <pulp/timebase/groove_kernel.hpp>
+#include <pulp/timebase/inline_groove_projector.hpp>
 #include <pulp/timebase/quantize.hpp>
 #include <pulp/timebase/ratchet.hpp>
 #include <pulp/timebase/tick.hpp>
@@ -904,18 +905,24 @@ int main() {
         (void)pulp::timebase::OrderPreservingGrooveKernel::create(pulp::timebase::GrooveKernelInput{});
     }
     {
-        // timebase.ratchet
-        auto volatile binding_207 = &pulp::timebase::project_ratchet_interval<>;
+        // timebase.inline-groove-projector
+        auto volatile binding_207 = &pulp::timebase::InlineGrooveProjector::create;
         (void)binding_207;
+        (void)pulp::timebase::InlineGrooveProjector::create(pulp::timebase::InlineGrooveInput{});
+    }
+    {
+        // timebase.ratchet
+        auto volatile binding_208 = &pulp::timebase::project_ratchet_interval<>;
+        (void)binding_208;
         (void)pulp::timebase::project_ratchet_interval<>(pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, 2, pulp::timebase::TickPosition{0}, pulp::timebase::TickPosition{4}, std::span<pulp::timebase::TickPosition>{});
     }
     {
         // timebase.swing
         static_assert(sizeof(pulp::timebase::SwingRatio) > 0);
-        auto volatile binding_209 = &pulp::timebase::swing_position;
-        (void)binding_209;
-        auto volatile binding_210 = &pulp::timebase::unswing_position;
+        auto volatile binding_210 = &pulp::timebase::swing_position;
         (void)binding_210;
+        auto volatile binding_211 = &pulp::timebase::unswing_position;
+        (void)binding_211;
         pulp::timebase::SwingRatio probe_value_0{1, 2}; (void)probe_value_0;
         (void)pulp::timebase::swing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
         (void)pulp::timebase::unswing_position(pulp::timebase::TickPosition{1}, pulp::timebase::TickDuration{2}, pulp::timebase::kStraightSwing);
@@ -923,12 +930,12 @@ int main() {
     {
         // timebase.tempo-map
         static_assert(sizeof(pulp::timebase::CompiledTempoMap) > 0);
-        auto volatile binding_212 = static_cast<pulp::runtime::Result<pulp::timebase::CompiledTempoMap, pulp::timebase::TempoMapError> (*)(std::span<const pulp::timebase::TempoPoint>, pulp::timebase::RationalRate) noexcept>(&pulp::timebase::CompiledTempoMap::compile);
-        (void)binding_212;
-        auto volatile binding_213 = static_cast<pulp::timebase::SamplePosition (pulp::timebase::CompiledTempoMap::*)(pulp::timebase::TickPosition) const noexcept>(&pulp::timebase::CompiledTempoMap::ticks_to_samples);
+        auto volatile binding_213 = static_cast<pulp::runtime::Result<pulp::timebase::CompiledTempoMap, pulp::timebase::TempoMapError> (*)(std::span<const pulp::timebase::TempoPoint>, pulp::timebase::RationalRate) noexcept>(&pulp::timebase::CompiledTempoMap::compile);
         (void)binding_213;
-        auto volatile binding_214 = static_cast<pulp::timebase::SampleToTickResult (pulp::timebase::CompiledTempoMap::*)(pulp::timebase::SamplePosition) const noexcept>(&pulp::timebase::CompiledTempoMap::resolve_sample);
+        auto volatile binding_214 = static_cast<pulp::timebase::SamplePosition (pulp::timebase::CompiledTempoMap::*)(pulp::timebase::TickPosition) const noexcept>(&pulp::timebase::CompiledTempoMap::ticks_to_samples);
         (void)binding_214;
+        auto volatile binding_215 = static_cast<pulp::timebase::SampleToTickResult (pulp::timebase::CompiledTempoMap::*)(pulp::timebase::SamplePosition) const noexcept>(&pulp::timebase::CompiledTempoMap::resolve_sample);
+        (void)binding_215;
         pulp::timebase::CompiledTempoMap probe_value_0{pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}, pulp::timebase::RationalRate{48000, 1}).value()}; (void)probe_value_0;
         (void)pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}.points(), pulp::timebase::RationalRate{48000, 1});
         (void)(pulp::timebase::CompiledTempoMap::compile(pulp::timebase::TempoMap{}, pulp::timebase::RationalRate{48000, 1}).value()).ticks_to_samples(pulp::timebase::TickPosition{705600});

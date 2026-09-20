@@ -506,6 +506,62 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="timebase.inline-groove-projector",
+        domain="timebase",
+        summary=(
+            "Trivially copyable fixed-capacity groove projection that admits "
+            "reordering tables."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "factory-validation-on-control",
+            "process": "audio",
+            "reset": "replace-trivially-copyable-value",
+            "release": "none",
+        },
+        state_model=(
+            "Inline fixed-capacity groove table copied by value; projection reads it "
+            "without allocating and without mutating it."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "authored event ticks, rational swing, and at most sixteen groove steps "
+            "whose offsets are smaller than one table entry"
+        ),
+        output_domain=(
+            "projected event ticks that may reorder, and velocity scale"
+        ),
+        units=["ticks", "rational ratio", "per-thousand scale"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="validated-factory",
+                kind="cpp_function",
+                include="pulp/timebase/inline_groove_projector.hpp",
+                qualified_name="pulp::timebase::InlineGrooveProjector::create",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:1008649e2c45404205bb6f525a32b6c91dd7c881e97bb768c4037fbf0253c4cb"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "validated-factory",
+            "binding": "pulp::timebase::InlineGrooveProjector::create",
+            "operation": "function_call",
+            "arguments": "pulp::timebase::InlineGrooveInput{}",
+        }],
+    ),
+    capability(
         key="timebase.trigger-grid",
         domain="timebase",
         summary="Fixed-capacity authored trigger grid with block-invariant window projection.",

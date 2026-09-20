@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 53,
+  "manifest_revision": 54,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -41,7 +41,7 @@
       },
       "timebase": {
         "state": "partial",
-        "capabilities": 9
+        "capabilities": 10
       }
     }
   },
@@ -7640,6 +7640,66 @@
       "contract_digest": "sha256:38a154082243b8c5580061684c699e3dc0dfa167ec363e20d7d371642e1c02a2"
     },
     {
+      "key": "timebase.inline-groove-projector",
+      "domain": "timebase",
+      "summary": "Trivially copyable fixed-capacity groove projection that admits reordering tables.",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "factory-validation-on-control",
+        "process": "audio",
+        "reset": "replace-trivially-copyable-value",
+        "release": "none"
+      },
+      "state_model": "Inline fixed-capacity groove table copied by value; projection reads it without allocating and without mutating it.",
+      "seed_model": "none",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "input_domain": "authored event ticks, rational swing, and at most sixteen groove steps whose offsets are smaller than one table entry",
+      "output_domain": "projected event ticks that may reorder, and velocity scale",
+      "units": [
+        "ticks",
+        "rational ratio",
+        "per-thousand scale"
+      ],
+      "latency": "zero",
+      "tail": "none",
+      "scheduling": "event-synchronous",
+      "bindings": [
+        {
+          "role": "validated-factory",
+          "kind": "cpp_function",
+          "include": "pulp/timebase/inline_groove_projector.hpp",
+          "qualified_name": "pulp::timebase::InlineGrooveProjector::create",
+          "target": "Pulp::timebase",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "status": "usable",
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "contract_digest": "sha256:3c6ef07603af0d02844dda7cdb86ae8e326d34b8c328a96b0b9a0044be8c6cdf"
+    },
+    {
       "key": "timebase.ratchet",
       "domain": "timebase",
       "summary": "Clock-locked bounded ratchet subdivision over half-open tick intervals.",
@@ -8009,7 +8069,7 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 105,
+    "total": 106,
     "by_domain": {
       "audio": 9,
       "midi": 16,
@@ -8017,7 +8077,7 @@
       "offline": 0,
       "sequence": 2,
       "signal": 62,
-      "timebase": 9
+      "timebase": 10
     }
   },
   "compatibility": {
