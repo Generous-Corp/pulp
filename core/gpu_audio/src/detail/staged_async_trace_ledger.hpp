@@ -160,6 +160,10 @@ class StagedAsyncPendingState {
         return pending_.size();
     }
 
+    bool slot_occupied(std::uint32_t slot) const noexcept {
+        return slot < slots_.size() && slots_[slot];
+    }
+
   private:
     std::vector<bool> slots_;
     std::unordered_map<std::uint64_t, Pending> pending_;
@@ -212,6 +216,12 @@ class StagedAsyncRequestHarness {
     }
     std::size_t pending_count() const noexcept {
         return pending_.size();
+    }
+    bool slot_occupied(std::uint32_t slot) const noexcept {
+        return pending_.slot_occupied(slot);
+    }
+    std::size_t expire(std::uint64_t now_ns) {
+        return pending_.expire(now_ns).size();
     }
 
   private:
