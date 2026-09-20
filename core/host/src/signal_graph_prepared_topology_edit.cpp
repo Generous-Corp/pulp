@@ -850,8 +850,11 @@ bool SignalGraph::PreparedTopologyEdit::set_exact_parameter_event_nodes(
         claimed.reserve(nodes.size());
         for (const auto id : nodes) {
             const auto* candidate = candidate_->node(id);
-            if (candidate == nullptr || candidate->type != NodeType::Plugin
-                || !candidate->plugin || !claimed.insert(id).second) {
+            const bool processor_node = candidate != nullptr &&
+                                        candidate->type == NodeType::Plugin &&
+                                        candidate_->processor_nodes_.contains(id);
+            if (candidate == nullptr || candidate->type != NodeType::Plugin ||
+                (!candidate->plugin && !processor_node) || !claimed.insert(id).second) {
                 return false;
             }
         }
