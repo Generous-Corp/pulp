@@ -1,34 +1,63 @@
 #!/usr/bin/env python3
-"""Editing a pinned path is a two-commit operation; catch the missing second one.
+"""Chasing pin freshness on a feature branch is churn; reject it at push.
 
-``docs/status/gpu-vellum-handoff.yaml`` pins every referenced Pulp path to a
-revision, object id and object type. Change one of those files without
-regenerating and the pinned row stops describing HEAD.
+``docs/status/gpu-vellum-handoff.yaml`` and its receipt pin every referenced
+Pulp path to a revision, object id and object type. This guard used to demand
+the opposite of what it demands now: it failed a branch that edited a pinned
+path *without* regenerating. That polarity was the right one while the cost of a
+stale pin looked like a red required gate. It is the wrong one now, and the
+measurement says so.
 
-What that costs has narrowed since this guard landed, and the honest version
-matters for judging whether the guard still earns its place. Staleness of that
-kind now falls entirely on the *currency* tier, which is opt-in behind
-``PULP_GPU_HANDOFF_REQUIRE_CURRENT=1`` — nothing in ``.github`` sets it — so it
-no longer turns the required gate red twenty minutes later. The always-on
-provenance tier is unaffected, because a pin that has merely fallen behind is
-still ancestral and still names a real object.
+Regeneration is not free, and the price is not paid by the branch that pays it.
+``source_commit`` and the ``handoff_sha256`` computed over the whole ledger move
+on *every* regeneration, whatever else did or did not change, so two branches
+that both regenerate collide on the receipt unconditionally. Neither GitHub's
+mergeability check nor the merge queue can reach the ``pulp-gpu-ledger`` merge
+driver -- both do a plain text merge -- so the collision is a real conflict, and
+merging one ledger-carrying pull request re-conflicts every other one. Roughly
+one lands per refresh round.
 
-So the drift this guard catches is quiet rather than loud: the ledger keeps
-claiming an identity the repository has moved past, and every consumer that
-asks for the stronger claim — ``gpu_handoff_provenance.py check``, or any
-reader of the published receipt — gets an answer that is wrong about today.
-Catching that at push is worth a sub-second check precisely because nothing
-downstream is going to shout about it.
+The rows themselves are not the problem, which is the part that is easy to get
+backwards. A row's revision is ``git log -1 C -- path``, so a main move re-pins
+only the rows whose paths that move touched -- a median of two, and never more
+than nine, over the 52 ledger-carrying merges on main as of a15a7ff4455, with
+46% of them moving exactly one row. The unconditional collision is the receipt:
+``source_commit`` and ``handoff_sha256`` move for no reason but the
+regeneration itself.
 
-The authoritative checker, ``gpu_handoff_provenance.py check``, verifies all
-three identity fields for every pinned row. That costs ~25s because it runs a
-``git log`` per path, which is too slow for a gate that runs on every push.
+What the refresh buys is *currency* -- the claim that a pin still describes
+HEAD. That tier is opt-in behind ``PULP_GPU_HANDOFF_REQUIRE_CURRENT``, which
+nothing in ``.github`` sets. What it does not buy is provenance or coherence,
+and those hold with or without it: a pin that has merely fallen behind is still
+an ancestor of HEAD and still resolves ``revision:path`` to exactly the object
+id it recorded, so ``validate_handoff_routing``'s always-on tier stays green.
+The branch pays a guaranteed conflict for an opt-in property.
 
-So this guard asks the cheap question instead: *did this range touch a pinned
-path without touching the ledger?* That is the shape all three PRs hit on
-2026-09-05 — the ledger refresh was forgotten entirely, not merely stale. It is
-a subset of what the full checker proves, and it says so rather than implying
-the pins are verified.
+So the guard rejects the churn instead of demanding it. What it must not do is
+reject the *content*, because the ledger is a hybrid and not a generated
+artefact: ``gpu_handoff_provenance.py`` says so itself -- "the generator never
+adds, removes, or reorders rows; a path list change is a human edit". The 185
+commits that touched the ledger as of a15a7ff4455 decompose as one creation
+that pinned no rows at all, six human edits that built the inventory to 102
+rows, and 178 identity re-pins that moved no path. Only the ratio decays --
+re-measured at e17c9cd164 it is 184 re-pins against the same one creation and
+the same six edits. A blanket "do not touch these files" would outlaw the six
+to stop the rest, and it would also strand a real
+correction: ``gpu_recipe_catalog.validate_handoff_routing`` checks
+``expansion_id`` and ``route_set_sha256`` against the live ownership projection
+unconditionally, and neither is regenerable, so a branch that had to fix one
+would be red on the required gate and forbidden from fixing it.
+
+``sequencer_exposure_check.py`` faced this same fork and recorded the answer:
+"Excluding one WHOLE would drop real coverage ... So the exemption is scoped to
+the transition instead of the path." This is that shape. A diff confined to the
+fields the generator rewrites is mechanical and is rejected; any other edit to
+the same files is content, and stays permitted.
+
+Scope is the whole change set, not each file: the receipt binds itself to the
+ledger's exact bytes, so a genuine inventory edit necessarily drags
+``handoff_sha256`` along with it. Only when *every* watched file the range
+touched is churn-only is the range churn.
 """
 from __future__ import annotations
 
@@ -38,82 +67,152 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# The merge driver already owns the authoritative answer to "what does the
+# generator rewrite?", and it owns it as a walk over the document rather than as
+# a field list, because a `vellum_paths` row carries the same field names and is
+# never regenerated. Importing it is what keeps the guard and the driver from
+# drifting into two different definitions of churn: the driver neutralizes
+# exactly these fields to make a merge succeed, and the guard neutralizes
+# exactly these fields to decide a diff is empty. Same question, one answer.
+import gpu_ledger_merge_driver as driver  # noqa: E402
+
 HANDOFF = Path("docs/status/gpu-vellum-handoff.yaml")
-# --receipt is not optional in practice: the published receipt binds itself to
-# the ledger's exact bytes, so regenerating one without the other leaves the
-# receipt claiming a source that no longer exists.
-REPAIR = "python3 tools/scripts/gpu_handoff_provenance.py write --receipt"
-VERIFY = "python3 tools/scripts/gpu_handoff_provenance.py check"
+RECEIPT = Path("docs/validation/gpu-handoff-provenance/receipt.json")
+WATCHED = (HANDOFF, RECEIPT)
+
+# Named in the failure text so the reader can see what the guard does not
+# object to, rather than inferring a blanket ban from a single rejection.
+CONTENT_FIELDS = (
+    "a pinned path added to or removed from entries[*].pulp_paths",
+    "route_set_sha256 / expansion_id (the ownership projection moved)",
+    "upstream.*, authorities.*, and every other declarative field",
+)
 
 
-def pinned_paths(root: Path) -> set[str]:
-    """Every ``entries[*].pulp_paths[*].path``.
+def git(root: Path, *arguments: str) -> str | None:
+    """stdout of a successful git command, or None when it failed."""
 
-    The file carries a ``.yaml`` extension but its contents are JSON, so it
-    parses with the stdlib and needs no PyYAML — which matters because the repo
-    already treats a PyYAML dependency as real friction on PEP-668 Python.
-    """
-    doc = root / HANDOFF
-    if not doc.is_file():
-        return set()
-    try:
-        data = json.loads(doc.read_text())
-    except (OSError, json.JSONDecodeError):
-        return set()
-    found: set[str] = set()
-    for entry in data.get("entries") or []:
-        for row in entry.get("pulp_paths") or []:
-            path = row.get("path") if isinstance(row, dict) else None
-            if isinstance(path, str) and path:
-                found.add(path)
-    return found
-
-
-def changed(base: str, root: Path) -> set[str]:
-    proc = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...HEAD"],
-        cwd=root, capture_output=True, text=True, check=False,
+    completed = subprocess.run(
+        ["git", "-C", str(root), *arguments],
+        capture_output=True, text=True, check=False,
     )
-    if proc.returncode != 0:
-        return set()
-    return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def changed_paths(root: Path, base: str) -> set[str] | None:
+    """Every path the range touched, or None when the range cannot be read.
+
+    None rather than an empty set: an unresolvable base ref produces the same
+    empty answer as a branch that changed nothing, and the caller must be able
+    to say which it got instead of reporting a pass it never established.
+    """
+
+    out = git(root, "diff", "--name-only", f"{base}...HEAD")
+    if out is None:
+        return None
+    return {line.strip() for line in out.splitlines() if line.strip()}
+
+
+def neutralized(raw: str) -> object | None:
+    """The document with every regenerable field replaced, or None if unreadable.
+
+    Comparing two neutralized documents answers "is anything here but churn?"
+    without enumerating fields: a row present on one side only survives
+    neutralization and still compares unequal, which is why an added row reads
+    as content while a re-pinned one does not.
+    """
+
+    try:
+        return driver.poison(json.loads(raw))
+    except (TypeError, ValueError):
+        # TypeError as well as ValueError: `poison` walks `entries` and
+        # `pulp_paths` with `or []`, which turns None into an empty list but
+        # leaves a scalar to raise on iteration. A malformed ledger is the
+        # provenance suite's business, not this guard's, but it must not become
+        # a traceback here either.
+        return None
+
+
+def churn_only(root: Path, before_rev: str, path: Path) -> bool | None:
+    """Whether this file's change in the range rewrites nothing but identities.
+
+    None means "could not tell" -- the file was added or removed outright, or
+    either side does not parse. A guard that cannot see its subject must not
+    look like one that checked it, so the caller reports rather than decides.
+    """
+
+    before = git(root, "show", f"{before_rev}:{path.as_posix()}")
+    after = git(root, "show", f"HEAD:{path.as_posix()}")
+    if before is None or after is None:
+        return None
+    left, right = neutralized(before), neutralized(after)
+    if left is None or right is None:
+        return None
+    return left == right
+
+
+def report(base: str, churned: list[Path]) -> None:
+    print("", file=sys.stderr)
+    print("gpu-handoff-churn: this range regenerates the GPU handoff ledger's",
+          file=sys.stderr)
+    print("  generated identities and changes nothing else:", file=sys.stderr)
+    for path in churned:
+        print(f"    {path}", file=sys.stderr)
+    print("  The receipt's source_commit and handoff_sha256 move on every", file=sys.stderr)
+    print("  regeneration whatever else changed, and neither GitHub's mergeability", file=sys.stderr)
+    print("  check nor the merge queue can run the pulp-gpu-ledger merge driver —", file=sys.stderr)
+    print("  both text-merge — so this refresh conflicts with every other branch", file=sys.stderr)
+    print("  carrying one, and each merge re-conflicts the rest.", file=sys.stderr)
+    print("  Nothing downstream is waiting for it: currency is opt-in behind", file=sys.stderr)
+    print("  PULP_GPU_HANDOFF_REQUIRE_CURRENT, which nothing sets, and a pin that", file=sys.stderr)
+    print("  has merely fallen behind still satisfies the always-on provenance", file=sys.stderr)
+    print("  tier. Main carries the refresh; this branch does not need to.", file=sys.stderr)
+    print("  Drop it:", file=sys.stderr)
+    print(f"    git restore --source=$(git merge-base {base} HEAD) -- \\", file=sys.stderr)
+    print(f"        {HANDOFF} \\", file=sys.stderr)
+    print(f"        {RECEIPT}", file=sys.stderr)
+    print("    git commit -m 'drop generated ledger churn'   # or amend", file=sys.stderr)
+    print("  This guard objects to identity churn only. Still permitted, and still", file=sys.stderr)
+    print("  requiring the receipt regenerated alongside them:", file=sys.stderr)
+    for description in CONTENT_FIELDS:
+        print(f"    {description}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="origin/main")
-    ap.add_argument("--mode", choices=("report", "hint"), default="report")
-    ap.add_argument("--root", default=".")
-    args = ap.parse_args(argv)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base", default="origin/main")
+    parser.add_argument("--mode", choices=("report", "hint"), default="report")
+    parser.add_argument("--root", default=".")
+    args = parser.parse_args(argv)
     root = Path(args.root).resolve()
 
-    pins = pinned_paths(root)
-    if not pins:
-        # No ledger, or a shape this guard cannot read. Say so rather than
-        # passing silently, because a guard that cannot see its subject must
-        # never look like one that checked it.
-        print("gpu-handoff-pin: no pinned rows found; nothing checked", file=sys.stderr)
+    touched = changed_paths(root, args.base)
+    if touched is None:
+        print(f"gpu-handoff-churn: cannot diff {args.base}...HEAD; nothing checked",
+              file=sys.stderr)
+        return 0
+    watched = [path for path in WATCHED if path.as_posix() in touched]
+    if not watched:
         return 0
 
-    touched = changed(args.base, root)
-    hits = sorted(pins & touched)
-    if not hits:
+    # The range is a three-dot diff, so the "before" side is the merge base and
+    # not the base ref. Reading the base ref instead would attribute main's own
+    # refreshes to this branch, which is the one false positive that would make
+    # the guard unusable on a long-lived branch.
+    merge_base = git(root, "merge-base", args.base, "HEAD")
+    before_rev = merge_base.strip() if merge_base and merge_base.strip() else args.base
+
+    verdicts = {path: churn_only(root, before_rev, path) for path in watched}
+    if any(verdict is None for verdict in verdicts.values()):
+        print("gpu-handoff-churn: a watched ledger was added, removed, or does not "
+              "parse; nothing checked", file=sys.stderr)
         return 0
-    if str(HANDOFF) in touched:
+    if not all(verdicts.values()):
         return 0
 
-    print("", file=sys.stderr)
-    print("gpu-handoff-pin: pinned path(s) changed without refreshing the ledger:",
-          file=sys.stderr)
-    for h in hits:
-        print(f"    {h}", file=sys.stderr)
-    print(f"  {HANDOFF} pins these to an exact revision, so the rows now describe", file=sys.stderr)
-    print("  a revision the repository has moved past. The required gate will not say", file=sys.stderr)
-    print("  so — currency is opt-in — which is why this is caught here instead.", file=sys.stderr)
-    print(f"  Repair:  {REPAIR}", file=sys.stderr)
-    print(f"  Verify:  {VERIFY}", file=sys.stderr)
-    print("  (this guard only checks that the ledger was touched; the verify", file=sys.stderr)
-    print("   command above is what proves every identity field is correct)", file=sys.stderr)
+    report(args.base, watched)
     return 0 if args.mode == "hint" else 1
 
 

@@ -544,7 +544,6 @@
         ".github/workflows/vellum-routing-contract.yml",
         "tools/scripts/generate_vellum_ownership_projection.py",
         "tools/scripts/vellum_freeze_check.py",
-        "docs/status/gpu-vellum-handoff.yaml",
         "tools/scripts/gpu_handoff_provenance.py",
         "tools/scripts/test_gpu_handoff_provenance.py",
         "tools/scripts/gpu_ledger_merge_driver.py",

@@ -441,12 +441,16 @@ python3 tools/scripts/gpu_handoff_provenance.py check   # verify (~25s, git log 
 then fails the receipt's own checker. Merge first, then regenerate against the
 merged tree.
 
-`gates.sh` now runs `gpu_handoff_pin_freshness.py`, which is diff-scoped and
-sub-second and fails the push when a pinned path changed without the ledger
-being touched. It deliberately proves only *that* — it does not re-verify the
-identity fields, because doing so costs ~25s per push. A green gate means "you
-did not forget", not "the pins are correct"; the `check` command above is what
-proves the latter.
+`gates.sh` and the pre-push hook both run `gpu_handoff_pin_freshness.py`, which
+is diff-scoped and sub-second and fails the push when a branch's only change to
+the ledger or its receipt is a re-pin. It used to demand the opposite refresh;
+the refresh cost more than the staleness, because the receipt's `source_commit`
+and `handoff_sha256` move on every regeneration and neither the mergeability
+check nor the merge queue can run the `pulp-gpu-ledger` driver, so one
+ledger-carrying PR landed per refresh round. An inventory edit, a
+`route_set_sha256` or `expansion_id` correction, and every other declarative
+change stay permitted. A green gate means "you did not churn it", never "the
+pins are correct"; the `check` command above is what proves the latter.
 
 ### `gates.sh` and the pre-push hook are two lists, not one
 
@@ -994,9 +998,11 @@ sentinel is chosen so that nothing accepts it.
 **Why it needed its own gate.** The two guards that look closest both miss it,
 and each misses it for a structural reason rather than an oversight:
 
-* `gpu_handoff_pin_freshness.py` fires when a pinned path changes and the ledger
-  does **not**. A sentinel merge changes the ledger, so it reads the sentinel as
-  the refresh it was waiting for.
+* `gpu_handoff_pin_freshness.py` rejects an identity-only ledger change, and a
+  sentinel resolution reads as one — its repair, restoring the merge base, even
+  happens to be right. But it cannot say *why* the file looks that way, and it
+  goes quiet as soon as the branch also carries real content, which is exactly
+  the case that has to be regenerated rather than dropped.
 * `conflict_marker_check.py` looks for `<<<<<<<`. The driver's entire purpose is
   that there are none.
 
@@ -1007,9 +1013,9 @@ remove.
 load-bearing.** `gates.sh` is run by convention; it is not invoked by
 `.githooks/pre-push`, and `.shipyard/config.toml [validation.gates]` runs its own
 explicit script list rather than the file. A rule wired only into `gates.sh`
-therefore holds only for whoever remembered to run it — which is why
-`gpu_handoff_pin_freshness.py` (gate 6b2), wired that way, does not actually gate
-a push today.
+therefore holds only for whoever remembered to run it.
+`gpu_handoff_pin_freshness.py` (gate 6b2) was wired that way and so gated
+nothing; it is now registered in the pre-push hook alongside this one.
 
 ## Gate: gpu-provenance reachability (`hydrate_gpu_provenance_commits.py --verify-only`)
 

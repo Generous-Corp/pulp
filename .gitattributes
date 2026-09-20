@@ -1,11 +1,17 @@
 *.patch whitespace=-blank-at-eol
 
-# Generated identity ledger + its receipt. Both are regenerated from one exact
-# commit by tools/scripts/gpu_handoff_provenance.py, so every branch that lives
-# longer than a main move collides on them. The driver resolves the collision to
-# a deliberately invalid value that gates.sh rejects, turning a hand-resolved
-# conflict into one mechanical regeneration. Install it with setup.sh (or
-# tools/scripts/install-githooks.sh); a checkout without it gets today's text
-# conflict, which is the status quo rather than a worse outcome.
+# Generated identity ledger + its receipt, both written by
+# tools/scripts/gpu_handoff_provenance.py. The receipt is what collides
+# unconditionally: source_commit and the handoff_sha256 over the whole ledger
+# move on every regeneration, whatever else did. The ledger itself is milder —
+# a row is pinned to the commit that last touched its own path, so a main move
+# re-pins only the rows whose paths it touched — and it is a hybrid rather than
+# a generated file, because the inventory of rows is a human edit. The driver
+# resolves what it can to a deliberately invalid value that gates.sh rejects,
+# turning a hand-resolved conflict into one mechanical regeneration. Install it
+# with setup.sh (or tools/scripts/install-githooks.sh); a checkout without it
+# gets today's text conflict, which is the status quo rather than a worse
+# outcome. Feature branches should not be regenerating these at all —
+# gpu_handoff_pin_freshness.py rejects an identity-only refresh at push.
 docs/status/gpu-vellum-handoff.yaml merge=pulp-gpu-ledger
 docs/validation/gpu-handoff-provenance/receipt.json merge=pulp-gpu-ledger

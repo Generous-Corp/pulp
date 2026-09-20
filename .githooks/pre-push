@@ -154,6 +154,7 @@ COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
+GPU_LEDGER_CHURN="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 GPU_LEDGER_SENTINEL="$ROOT/tools/scripts/gpu_ledger_sentinel_check.py"
 GPU_PROVENANCE_VERIFY="$ROOT/tools/scripts/hydrate_gpu_provenance_commits.py"
 YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
@@ -510,6 +511,25 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
         0) ;;
         1) echo "[pre-push] conflict-marker guard: committed conflict marker(s) — run \`python3 tools/scripts/conflict_marker_check.py\` for the file:line list." >&2; fail=1 ;;
         *) echo "[pre-push] conflict_marker_check: internal error" >&2 ;;
+    esac
+fi
+
+# GPU-ledger identity churn. The ledger's generated identities and the receipt
+# digest over them move on every regeneration, and neither GitHub's mergeability
+# check nor the merge queue can run the pulp-gpu-ledger merge driver — both text
+# merge — so a branch that carries a refresh conflicts with every other branch
+# that does, and each merge re-conflicts the rest. Currency is opt-in behind
+# PULP_GPU_HANDOFF_REQUIRE_CURRENT, which nothing sets, so the branch pays a
+# guaranteed conflict for a property nothing asked for. Scoped to the
+# transition, not the path: an inventory edit, a route_set_sha256 or
+# expansion_id correction, or any other declarative change stays permitted.
+# Diff-scoped against the merge base, offline, sub-second.
+if [ -f "$GPU_LEDGER_CHURN" ]; then
+    run_gate_captured "$PYTHON" "$GPU_LEDGER_CHURN" --base "$BASE" --root "$ROOT" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] gpu_handoff_pin_freshness: internal error" >&2 ;;
     esac
 fi
 
