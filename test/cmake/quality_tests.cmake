@@ -23,7 +23,8 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
     pulp::playback
     pulp::sequence
     pulp::signal
-    pulp::timebase)
+    pulp::timebase
+    pulp::timeline)
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
