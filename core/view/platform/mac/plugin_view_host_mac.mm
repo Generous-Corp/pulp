@@ -686,7 +686,20 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event,
                 // A scripted document that claimed navigation focus answers last,
                 // through the per-press de-duplicating dispatcher (AppKit offers
                 // one press to both performKeyEquivalent: and keyDown:).
-                return nav_focused ? script_keys.dispatch(root, event) : false;
+                if (nav_focused)
+                    return script_keys.dispatch(root, event);
+                // A view holding the focus slot while claiming NEITHER keyboard
+                // is not why this editor has the key: acceptsFirstResponder is
+                // false for it, so the DAW already owns the keyboard and there
+                // is nothing to hand back. Forwarding anyway would still move
+                // first responder to the host view, and THAT ends the widget's
+                // focus out from under it — a custom control that uses Escape
+                // for its own purpose would lose focus on the first press.
+                if (fv != nullptr) {
+                    root->request_repaint();
+                    return true;
+                }
+                return false;
             }
             root->request_repaint();
             return true;

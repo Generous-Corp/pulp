@@ -191,6 +191,15 @@ musician hits it:
   A seam with a single delivery point (VST3 `onKeyDown`) sets it, and is then
   the only place the hook is consulted for that press.
 
+One documented place the macOS seam does NOT forward what the policy calls
+unclaimed: a view holding the focus slot that claims neither text nor
+navigation. `acceptsFirstResponder` is already false for it, so the DAW owns
+the keyboard and there is nothing to hand back — but forwarding would still
+move first responder to the host view, and `resignFirstResponder` ends that
+widget's focus out from under it. A custom control that uses Escape for its own
+purpose would lose focus on the first press. That is a first-responder fact, so
+it lives in the platform file rather than in the policy.
+
 `plugin_key_focus(root)` is the scoped focus read every seam must use:
 `View::focused_input_` is process-global, so with two editors open it may name
 the *other* editor's field, and answering from it reports the key handled — so
