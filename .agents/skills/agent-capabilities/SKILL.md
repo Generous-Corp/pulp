@@ -673,6 +673,36 @@ written decision, and only when the edit that tripped the gate is load-bearing
 for the change (the triage in that later section). Inventing a classification to
 unblock an incidental edit converts a safety gate into paperwork.
 
+## A portability fix to a frozen header classifies as `infrastructure`, not a capability
+
+The triage above asks whether your capability actually needs the header to
+change. Sometimes the header change *is* the whole change: a public header can
+be unbuildable on a platform and the fix has to land in it. `simd_buffer.hpp`
+wrapped C11 `aligned_alloc`, which Bionic does not provide below Android API 26,
+so every Android build of anything including it failed to compile.
+
+That still trips the frozen-baseline gate, and it still resolves by declaring
+the header in `REVIEWED_HEADERS` — but declare it honestly:
+
+- `"disposition": "infrastructure"` with `"capability_keys": []`. The edit
+  changed no consumer contract, so there is no capability to claim. Inventing
+  one to look tidier would assert a binding nothing offers.
+- Say in the rationale that the branch is a portability detail of the primitive
+  rather than a change to the surface it presents, so a later reader is not left
+  guessing whether the allocator's behavior moved.
+- It is a byte-level fingerprint refresh, so revert the `contract-history.json`
+  snapshot per the guidance above and keep the three-file change.
+
+Confirm the same post-conditions as any classification: the baseline file has no
+diff, its entry count is unchanged, `--check` reports `fresh`, and the surface's
+`legacy_unreviewed` count dropped by exactly one.
+
+**Measure `--write`'s exit status unpiped.** On a frozen header it prints
+`INVALID: public header fingerprint changed` and exits 1, exactly as documented
+above — but `--write | tail` reports `tail`'s status instead, which reads as a
+silent success and invites the wrong conclusion that the generator accepted the
+edit.
+
 ## The rederive self-test dirties the checkout for its whole run
 
 `test_agent_capability_rederive.py` and `test_agent_capability_manifest.py` both
@@ -957,6 +987,77 @@ consumer contract with typed bindings and operational probes that do not exist �
 does not, and adding it would mean manufacturing rows to describe headers no
 generator claims. Record which way you went; silence here looks identical to
 having never asked.
+
+## A domain absent from the manifest is invisible, not absent
+
+An unpublished domain does not read as "unknown" to the agents that consume this
+manifest. It reads as "Pulp does not have this", because a capability search only
+sees keys that exist. `agent-capabilities.json` carried 106 keys across `signal`,
+`midi`, `timebase`, `audio`, `music` and `sequence` and **zero `timeline.*` rows**,
+so two independent passes searching for a groove projector both found
+`timebase.groove-kernel` — the strict non-reordering realtime subset — and never
+saw `timeline::GrooveTemplate`, the canonical authored model the kernel's own
+header points back to. One of them concluded a planned slice was impossible.
+
+The tell is that nothing failed. Coverage was already `partial` with
+`absence_semantics: unknown`, every gate was green, and the manifest was
+internally consistent the whole time. A missing domain has no negative control of
+its own, so when weighing whether a surface deserves a row, ask what a consumer
+would *search* for and what it would conclude from finding nothing — not whether
+anything currently complains.
+
+When two rows are near-neighbours that differ in a load-bearing way, say so in
+`state_model`, which the digest covers, rather than only in `summary`, which it
+does not. `timeline.groove-template` names `timebase.groove-kernel` and states
+that the authored table half may reorder events while the kernel refuses to, so
+whichever one a search reaches first leads to the other.
+
+## Publishing a row for a domain outside `PUBLIC_ROOTS`
+
+Widening `PUBLIC_ROOTS` admits a whole domain to the header ledger and obliges a
+reviewed disposition for every header in it. Publishing a capability does **not**
+require that, and conflating the two turns a five-row change into a thirty-header
+classification pass. `build_surface()` resolves a binding include that
+`discover_headers()` did not inventory through `core/*/include/<include>`,
+verifies its declared fingerprint, and requires only a `REVIEWED_MINIMAL_TARGETS`
+owner. `pulp/host/*` has published this way for a long time.
+
+Take that path when the generator-facing part of a domain is a minority of its
+headers — a document/authoring subsystem whose musical-context types a generator
+reads, with editing, persistence, schema and interchange headers around them that
+no generator consumes. The domain then reports `not_inventoried` with a nonzero
+capability count, which is the honest reading: these specific rows are reviewed
+and the rest is unknown. Widening the root instead would demand a claim about
+every neighbouring header that nobody measured.
+
+Two edits are easy to miss on this path because the first one masks the second:
+
+1. **`DOMAINS`** in `agent_capability_manifest.py`. Until the domain is listed,
+   the row is rejected as an unknown domain.
+2. **The `domain` enum in `docs/status/agent-capabilities.schema.json`.** This is
+   a *different file* from the surface schema the four-edit list above names, and
+   it fails only after `DOMAINS` already accepts the row —
+   `$.capabilities[N].domain: 'x' is not one of [...]`, reported by the schema
+   validator rather than by the registry, so it reads like a regenerated-artifact
+   problem rather than a missing enum member.
+
+## `--check` says `fresh` while the history is missing your key
+
+`agent_capability_rederive.py` resets the generated artifacts to the protected
+base before regenerating. Immediately afterwards `contract-history.json` can hold
+a snapshot that predates the new key while `agent_capability_manifest.py --check`
+reports `fresh` and exits 0 — because `--check` does not require the history to
+contain the current contract. Measured: after a rederive a grep for
+`timeline.groove-template` returned **0** while the control `timebase.groove-kernel`
+returned 62; a following `--write` moved them to **1** and 63, and `--check` said
+`fresh` in both states.
+
+So do not read `--check` as proof the history recorded anything. Grep the history
+for your own key alongside a key you know is already there, and compare both
+counts. Then check `entries`: running `--write` after a rederive that already
+wrote appends a **second** snapshot (61 → 63, ~35k lines for a change that needs
+~18k). Restore the file from the protected base and run `--write` exactly once so
+the diff carries one snapshot.
 
 ## Widening `PUBLIC_ROOTS` is four more edits, and each hides the next
 

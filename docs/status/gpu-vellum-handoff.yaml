@@ -670,8 +670,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
           "state": "pulp-owned-retained",
-          "revision": "0c61a14733aeba1160092452740fead2a8ace335",
-          "object_id": "b0e588d08051993627c07ca4a6c9624dda5dad85",
+          "revision": "72dc09c78b7413d5cfd906909b340709e262e489",
+          "object_id": "e3e83922fd878e82735232e709536359afc365f9",
           "object_type": "blob"
         },
         {
@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "689780204da6f25fa04531b37ed806ce9eeb0d6f",
-          "object_id": "758132d4e1c1172697121c65c0bb9eae38d3a7be",
+          "revision": "c388dedf513a6c731d66988a369a322bb516890e",
+          "object_id": "9aea6f3d3a3c56e906f7305b6599351a6810d61b",
           "object_type": "blob"
         },
         {
@@ -2751,8 +2751,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/skia-gpu-build/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "f672cc2e21f64b7293d14204bed9301049070d87",
-          "object_id": "cd1b2f7bcaf64c9a36408014df22e3c9f11cd737",
+          "revision": "72dc09c78b7413d5cfd906909b340709e262e489",
+          "object_id": "c56c11cae6b17fc2e128530aec5f65ad021b2138",
           "object_type": "blob"
         },
         {
