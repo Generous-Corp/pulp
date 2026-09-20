@@ -15,7 +15,10 @@ function arg(name, fallback) {
   return process.argv[i + 1];
 }
 const required = name => { const v = arg(name); if (!v) throw new Error(`Required: ${name}`); return resolve(v); };
-const repo = resolve(arg('--repo', fileURLToPath(new URL('../../..', import.meta.url))));
+// This file lives two directories below the checkout root.  The previous
+// three-level default escaped the checkout in CI, so the provenance probe ran
+// `git rev-parse` from /home/runner/work/pulp instead of /home/runner/work/pulp/pulp.
+const repo = resolve(arg('--repo', fileURLToPath(new URL('../..', import.meta.url))));
 const options = { repo, wamDir: required('--wam-dir'), wclapDir: required('--wclap-dir'),
   baselineWamDir: required('--baseline-wam-dir'), baselineWclapDir: required('--baseline-wclap-dir') };
 const reportPath = required('--report');

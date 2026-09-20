@@ -439,13 +439,12 @@ TEST_CASE("LV2 sample-region allpass preserves catalog, partitions, and fresh-in
     Lv2FeatureBundle features;
 
     auto render = [&](std::vector<float>& output, bool vary_coefficient) {
-        Lv2HandleGuard handle{
-            lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor,
-                                     48000.0, "", features.features)};
+        Lv2HandleGuard handle{lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "",
+                                                       features.features)};
         REQUIRE(handle.handle != nullptr);
         auto* instance = static_cast<PulpLv2Instance*>(handle.handle);
-        auto* allpass = dynamic_cast<pulp::examples::SampleRegionAllpassProcessor*>(
-            instance->processor.get());
+        auto* allpass =
+            dynamic_cast<pulp::examples::SampleRegionAllpassProcessor*>(instance->processor.get());
         REQUIRE(allpass != nullptr);
         REQUIRE(allpass->ready());
         REQUIRE(instance->num_audio_inputs == 1);

@@ -57,6 +57,15 @@ if(PULP_SAMPLE_REGION_WEB)
     endif()
     set(CMAKE_C_FLAGS_INIT "-pthread -D_WASI_EMULATED_SIGNAL -fno-lto")
     set(CMAKE_CXX_FLAGS_INIT "-pthread -D_WASI_EMULATED_SIGNAL -frtti -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -fno-lto")
+    # wasi-sdk 33 keeps libc++ headers under the target's EH profile.  Clang's
+    # bare driver does not add that target-specific directory when invoked
+    # through a CMake sysroot, so make the profile explicit; without it even
+    # <cstddef> is unavailable on a clean SDK33 configure.
+    set(_pulp_wasi_cxx_include "${CMAKE_SYSROOT}/include/${WASI_TARGET}/eh/c++/v1")
+    if(NOT EXISTS "${_pulp_wasi_cxx_include}/cstddef")
+        message(FATAL_ERROR "Selected WASI SDK lacks the SDK33 EH libc++ headers")
+    endif()
+    string(APPEND CMAKE_CXX_FLAGS_INIT " -isystem ${_pulp_wasi_cxx_include}")
 else()
     set(WASI_TARGET "wasm32-wasi-threads")
     set(CMAKE_C_FLAGS_INIT "-fno-exceptions -pthread -D_WASI_EMULATED_SIGNAL")
