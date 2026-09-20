@@ -97,3 +97,31 @@ the canonical `GEN-*` validator, and changing `auto_handoff` before that
 upstream validator is fixed would recreate unmanaged PRs. The bounded evidence
 and canary requirements live in
 `planning/friction/2026-09-18-shipyard-workstream-validator-evidence.md`.
+
+The Rust-native orchestrators also reject one high-cost form of stale build
+reuse: a configured `CMakeCache.txt` whose `CMAKE_HOME_DIRECTORY` names a
+different checkout. M5 sessions repeatedly showed the adjacent failure class
+(CMake source-root and generator mismatches, followed by missing generated Dawn
+headers) when agents reused or copied build directories. The Rust check is
+deliberately narrower than a cache fingerprint: canonical/symlink-equivalent
+roots pass; a missing cache or absent legacy metadata remains non-gating; an
+explicit root mismatch stops before CMake/CTest and prints the exact
+reconfigure/removal command. It covers native, trace, WAM, WCLAP, and `pulp
+test` build directories without silently deleting or repairing anything.
+
+This is an owner-local guard, not a second `pulp doctor`, Shipyard receipt, or
+runner authority. Review it on 2026-12-19 against a three-month M3/M5 sample:
+retain only if it catches real wrong-root reuse with no matching-path false
+positives and negligible preflight cost; retire it if the evidence disappears
+or the canonical C++ producer makes it redundant.
+
+The M5 release-lane incident is recorded as a measured future experiment, not
+another queue checker. The existing off-fleet `queue_age_watchdog.py` remains
+the owner for queue stalls. A possible additive INFO annotation would require
+all of the following before implementation: the exact `Release CLI` workflow
+and Darwin matrix job is currently queued past threshold, the effective
+dedicated route is resolved through the real variable precedence, and a
+timestamped TartCI/assignment receipt proves fallback capacity. API errors,
+empty JIT census, old service history, or an online-but-busy runner must yield
+unknown/no finding. The annotation must not unset variables, reroute, dispatch,
+cancel, retry, create a second issue, or change required-check status.
