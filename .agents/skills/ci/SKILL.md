@@ -171,6 +171,17 @@ such as `aligned_alloc`. The probe accepts the NDK host's `clang++` or
 path expands on both macOS and Windows. A passing probe is not APK or emulator
 acceptance; the following Gradle build and artifact checks remain required.
 
+`android-run-fixtures` runs the same probe on the NDK it already installs, so
+the API floor is one of the few Android facts a pull request actually proves.
+That job's cross-compiled fixture runners are **not** a substitute: their target
+closure is narrower than the APK's, so they compiled clean throughout the
+API-26 `aligned_alloc` outage. Anything that keeps a core header out of the
+fixture runners' closure keeps it out of the pre-merge signal too, and the probe
+covers only `simd_buffer.hpp`. `tools/scripts/test_android_premerge_probe.py`
+(run from `workflow-lint.yml`) fails if the probe step, its `affected` gate, or
+the dependency closure that reaches it is dropped, or if the job stops running
+on `pull_request`.
+
 ## A green "Android Build" on a PR does not mean the APK compiles
 
 `android-build` declares `needs: resolve-runners`, and `resolve-runners` is
@@ -183,10 +194,12 @@ conclusion comes from `android-run-fixtures` alone. The check named
 The APK build runs only on `push` to `main` (behind the `paths` filter), on the
 nightly `schedule`, and on `workflow_dispatch`. Consequences worth holding:
 
-- A compile break in `core/**` reaches `main` with every pre-merge signal green,
-  and only the post-merge push run turns red. That is how an API-26
-  `std::aligned_alloc` break sat on `main` from 2026-07-29 to 2026-09-19 with
-  nobody assigned to it.
+- A compile break in `core/**` can still reach `main` with every pre-merge
+  signal green, and only the post-merge push run turns red. That is how an
+  API-26 `std::aligned_alloc` break sat on `main` from 2026-07-29 to 2026-09-19
+  with nobody assigned to it. The API-floor probe now runs pre-merge in
+  `android-run-fixtures`, which closes that specific class; a general Android
+  compile break still has no pre-merge gate.
 - To validate an Android fix BEFORE merging, dispatch the workflow on the branch
   (`workflow_dispatch`) and read `android-build` there. A PR run cannot tell you.
 - When reading history, filter runs by `event` — mixing `pull_request` runs into
