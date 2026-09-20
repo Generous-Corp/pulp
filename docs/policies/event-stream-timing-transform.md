@@ -73,15 +73,47 @@ through the order-preserving kernel, or giving it an equivalent joint check, is
 what would make the stronger claim true; until then the weaker claim is the one
 this document makes.
 
-### Stage 2 — reserved, for an external tick-domain transform
+### Stage 2 — the external tick-domain transform (Forge's Dilla Time)
 
 A tick-domain, deterministic, bounded-displacement transform owned outside Pulp
-is reserved a place here: after stage 1, before the clip clamp and the tempo-map
-conversion. **No seam exists.** There is no interface, no registration point,
-and no adapter, and this document reserves the position rather than describing
-an implementation.
+occupies this position: after stage 1, before the clip clamp and the tempo-map
+conversion. The named consumer is **Forge's Dilla Time**, and the ownership
+split is documented on the Forge side rather than inferred here: Pulp's pattern,
+relationship and deterministic-coordinate APIs author the bar, Pulp's trigger
+grid and order-preserving groove kernel project it, and Forge owns the product
+recipe, MIDI destinations, authored velocities, and the fixed-capacity
+tick-domain delivery contract.
 
-The insertion point is concrete: `program_compiler.cpp:791-809`, between
+**Pulp's side of that contract is satisfied and advertised.** Forge's configure
+step fails closed unless the installed Pulp SDK advertises reviewed usable v1
+contracts with exact digests for six capabilities. All six carry
+`status: usable`, `contract_version 1.0`, a `sha256:` `contract_digest`, and an
+`available` binding in `docs/status/agent-capabilities.json`:
+
+| capability key | what Pulp provides |
+|---|---|
+| `music.pattern-generation` | `euclidean_pattern()` and its versioned recipe (`core/music/.../pattern.hpp`) |
+| `music.rhythm-relationship` | `coincident` / `complementary` / `independent` derivation, phase offset, wrap vs proportional length mapping |
+| `music.markov-transition` | probabilistic pattern development |
+| `timebase.trigger-grid` | authored trigger cells with an exact `TriggerProbability` ratio |
+| `timebase.groove-kernel` | per-step displacement that **rejects** reordering (`GrooveKernelError::ReordersEvents`) |
+| `timebase.coordinate-random` | stateless seeded draw keyed by (tick, lane, cycle, stream) |
+
+`amount` in that contract is groove-kernel timing **strength**, not a variation
+depth: `1000` applies the full authored displacement, `0` is straight timing,
+and bypass is exactly the zero-strength result. This is why Dilla-style
+semantics must never be mapped onto the humaniser's generic depth controls —
+the humaniser is bounded random variation, while this is an exact authored
+relationship, and collapsing the two would make a deliberate displacement
+indistinguishable from jitter.
+
+**No in-Pulp seam exists**, and none is required for the split above: Forge
+consumes these capabilities through the installed-SDK binding path, not through
+a Pulp compiler stage. A future *in-compiler* stage-2 adapter — one that baked
+an external transform into `PlaybackProgram` — would be a different thing, and
+this document reserves the position for it without describing an implementation.
+
+Its insertion point would be `program_compiler.cpp:791-809`, between
 `groove.apply_timing(...)` and the tick-to-sample conversion at `:835-836`.
 Anything landing there must satisfy two constraints that are not obvious from
 the call site:
@@ -109,6 +141,12 @@ owns proving that acyclicity, because the subscription bitset records *what* a
 reader reads and never *when* it may be compiled. A future tick-domain kind
 should be designed against that reservation and that proof obligation. This is
 the precedent for the shape, not a claim that `CrossTrackRhythm` is the kind.
+
+**One caution on the order-preservation property.** The capability Forge binds,
+`timebase.groove-kernel`, is the kernel that rejects reordering. The stage that
+actually runs in Pulp's compiler is `GrooveTemplate`, which does not validate
+order (see stage 1). A recipe projected through the kernel therefore carries a
+guarantee that the same displacement authored as a document groove does not.
 
 ### Stage 3 — tick to sample
 
@@ -213,6 +251,22 @@ codebase meaning something else:
   output slot (`core/format/include/pulp/format/graph_runtime_executor.hpp:644`).
   Nothing in the event pipeline delays by a block; the event shift is a sample
   count.
+
+### Program adoption, tempo-map republish, and reset
+
+Pulp never mutates a live tempo map or a live program. A tempo change republishes
+a `PlaybackProgram` compiled against the new map, and the renderer refuses a
+program whose tempo-map identity does not match the one it is bound to, so a
+stage-1 or stage-2 displacement can never be read against a map it was not
+compiled for. "Hot swap" is therefore **program adoption**: the binding publishes
+a new node-set/content generation atomically and the previously sounding pass is
+preserved across it.
+
+The consequence for this contract is that compile-time stages need no
+mid-stream behavior at all — they are re-run, not adjusted. Render-time stages
+do: stage 4's draw is keyed to the device's stream position (see the declared
+deviation above), so adoption and seek do not reset it, and stage 5 holds a
+changed shift until the transport stops rather than applying it mid-stream.
 
 ### One transform stage per coordinate
 
