@@ -375,6 +375,51 @@ def main() -> int:
             pass
         else:
             raise AssertionError("calibration artifact path escape passed")
+        # A signed difference is legitimately negative. After a baseline sample
+        # succeeds but every extra sample fails, the extra median is zero and the
+        # delta is the negated baseline; ordinary quantization noise can also
+        # invert the two medians. Rejecting those would discard exactly the honest
+        # failure receipts this evidence path exists to retain.
+        def with_medians(baseline: float, extra: float) -> dict:
+            planted = json.loads(json.dumps(diagnostics_receipt))
+            diag = planted["diagnostics"]
+            diag["baseline_median_ms"] = baseline
+            diag["extra_work_median_ms"] = extra
+            diag["delta_ms"] = extra - baseline
+            diag["detection_threshold_ms"] = max(
+                float(diag["resolution_ms"]) * 2.0, baseline * 0.10
+            )
+            payload = json.dumps(diag) + "\n"
+            diagnostics_file.write_text(payload, encoding="utf-8")
+            planted["diagnostics_artifact"]["sha256"] = hashlib.sha256(
+                payload.encode("utf-8")
+            ).hexdigest()
+            return planted
+
+        for label, baseline, extra in (
+            ("quantization noise inverted the medians", 1.0, 0.95),
+            ("every extra sample failed after a good baseline", 1.0, 0.0),
+        ):
+            native_adapter.validate_measurement_receipt(
+                document, with_medians(baseline, extra), tmp, producer
+            )
+
+        # The unsigned magnitudes keep their sign requirement, so the relaxation
+        # above is scoped to the difference rather than disabling the check.
+        planted = with_medians(1.0, 0.95)
+        planted["diagnostics"]["resolution_ms"] = -0.065536
+        payload = json.dumps(planted["diagnostics"]) + "\n"
+        diagnostics_file.write_text(payload, encoding="utf-8")
+        planted["diagnostics_artifact"]["sha256"] = hashlib.sha256(
+            payload.encode("utf-8")
+        ).hexdigest()
+        try:
+            native_adapter.validate_measurement_receipt(document, planted, tmp, producer)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("negative resolution passed")
+
         def rebind(planted: dict) -> dict:
             """Keep a planted receipt's retained bytes consistent with its object."""
             payload = json.dumps(planted["diagnostics"]) + "\n"

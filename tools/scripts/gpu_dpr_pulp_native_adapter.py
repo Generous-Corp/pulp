@@ -239,15 +239,22 @@ def validate_measurement_receipt(
                 raise ValueError("incomplete measurement diagnostics control state is invalid")
             if not isinstance(diagnostics.get("reason"), str) or not diagnostics["reason"]:
                 raise ValueError("incomplete measurement diagnostics reason is invalid")
-            numeric_fields = (
+            # delta_ms is a signed difference and is legitimately negative when the
+            # extra-work median lands below the baseline median: after a baseline
+            # sample succeeds but every extra sample fails the extra median is zero,
+            # and ordinary quantization noise can invert the two by a fraction of a
+            # resolution step. Its value is already pinned by the equality check
+            # below, so requiring a sign here would reject honest failure receipts.
+            non_negative_fields = (
                 "resolution_ms", "baseline_median_ms", "extra_work_median_ms",
-                "delta_ms", "detection_threshold_ms",
+                "detection_threshold_ms",
             )
-            for field in numeric_fields:
+            for field in non_negative_fields + ("delta_ms",):
                 value = diagnostics.get(field)
                 if (
                     isinstance(value, bool) or not isinstance(value, (int, float))
-                    or not math.isfinite(float(value)) or float(value) < 0
+                    or not math.isfinite(float(value))
+                    or (float(value) < 0 and field in non_negative_fields)
                 ):
                     raise ValueError(f"incomplete measurement diagnostics {field} is invalid")
             expected_delta = (
