@@ -4,7 +4,9 @@
 
 #include <pulp/render/gpu_compute.hpp>
 
+#include <chrono>
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -175,5 +177,51 @@ staged_async_callback_status(render::GpuCompute::ReadbackStatus status) noexcept
     }
     return StagedAsyncPendingState::CallbackStatus::Failed;
 }
+
+// Non-RT adapter harness used by the staged campaign before attachment to
+// GpuConvolver. It proves request assignment and callback routing against the
+// real GpuCompute API while leaving production process_block untouched.
+class StagedAsyncRequestHarness {
+  public:
+    explicit StagedAsyncRequestHarness(render::GpuCompute& compute, std::size_t slots = 1)
+        : compute_(compute), pending_(slots) {}
+
+    std::uint64_t submit(const float* input, float* output, std::uint32_t fft_size,
+                         std::uint32_t channels, std::uint64_t sequence, std::uint32_t slot,
+                         std::chrono::microseconds deadline) {
+        auto request_holder = std::make_shared<std::uint64_t>(0);
+        const auto request = compute_.convolve_batch_async(
+            input, output, fft_size, channels, deadline,
+            [this, request_holder](const render::GpuCompute::ReadbackResult& result) {
+                (void)pending_.on_callback(*request_holder,
+                                           staged_async_callback_status(result.status));
+            });
+        if (request == 0)
+            return 0;
+        *request_holder = request;
+        const auto now = now_ns();
+        if (!pending_.admit(request, sequence, slot,
+                            now + static_cast<std::uint64_t>(deadline.count()) * 1000u) ||
+            !pending_.mark_submitted(request))
+            return 0;
+        return request;
+    }
+
+    std::size_t poll() noexcept {
+        return compute_.poll_readbacks();
+    }
+    std::size_t pending_count() const noexcept {
+        return pending_.size();
+    }
+
+  private:
+    static std::uint64_t now_ns() noexcept {
+        return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                              std::chrono::steady_clock::now().time_since_epoch())
+                                              .count());
+    }
+    render::GpuCompute& compute_;
+    StagedAsyncPendingState pending_;
+};
 
 } // namespace pulp::gpu_audio::detail
