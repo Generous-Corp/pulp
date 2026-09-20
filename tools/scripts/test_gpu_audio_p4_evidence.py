@@ -526,6 +526,24 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(any("path is invalid" in error for error in errors), errors)
         self.assertTrue(any("observation object" in error for error in errors), errors)
 
+    def test_build_flags_reject_unexpanded_driver_inputs(self) -> None:
+        # Clang appends forwarded frontend arguments after its driver options,
+        # so argv order alone cannot prove the effective optimization state.
+        for flags in (
+            ["-Xclang", "-O0", "-O3", "-DNDEBUG"],
+            ["-O3", "-DNDEBUG", "@overrides.rsp"],
+            ["-Xpreprocessor", "-UNDEBUG", "-O3", "-DNDEBUG"],
+            ["-O3", "-DNDEBUG", "-Wp,-UNDEBUG"],
+            ["-O3", "-DNDEBUG", "--config=overrides.cfg"],
+            ["-O3", "-DNDEBUG", "-Xarch_arm64", "-O0"],
+        ):
+            with self.subTest(flags=flags):
+                records = fixture()
+                records[0]["build_flags"] = flags
+                errors = MODULE.validate_records(records)
+                self.assertTrue(any("effective -O3 and NDEBUG" in error
+                                    for error in errors), errors)
+
     def test_raw_json_rejects_duplicate_keys_and_nonfinite_constants(self) -> None:
         cases = (
             ('{"record_kind":"manifest","record_kind":"block"}\n', "duplicate object key"),
@@ -857,6 +875,29 @@ class EvidenceTests(unittest.TestCase):
                         csv_path.unlink()
                     self.assertEqual(raw.read_bytes(), raw_bytes)
                     self.assertEqual(binary.read_bytes(), binary_bytes)
+
+    def test_alias_checks_never_publish_final_output_names(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            summary = root_path / "summary.json"
+            csv_path = root_path / "blocks.csv"
+            inspect = MODULE._inspect_distinct_paths
+            observations = []
+
+            def observe(paths: list[tuple[str, Path]]) -> str | None:
+                observations.append((summary.exists(), csv_path.exists()))
+                self.assertFalse(summary.exists())
+                self.assertFalse(csv_path.exists())
+                return inspect(paths)
+
+            with mock.patch.object(MODULE, "_inspect_distinct_paths", side_effect=observe):
+                result = MODULE._distinct_paths(
+                    [("summary output", summary), ("CSV output", csv_path)],
+                    probe_absent=(summary, csv_path),
+                )
+            self.assertIsNone(result)
+            self.assertTrue(observations)
+            self.assertEqual(list(root_path.iterdir()), [])
 
     def test_cli_atomically_replaces_outputs_and_rolls_back_second_failure(self) -> None:
         records = fixture()

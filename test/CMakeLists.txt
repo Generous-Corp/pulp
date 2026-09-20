@@ -1,5 +1,4 @@
 # Pulp Catch2 setup plus ordered owner includes; register suites in test/cmake/*_tests.cmake.
-
 include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpTestSuite.cmake)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/dsp_rt_contract_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/dsp_series_modules.cmake")
@@ -53,3 +52,4 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rack_fidelity_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rack_contract_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/consumption_census_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/authoring_capsule_tests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sample_region_delivery_tests.cmake")

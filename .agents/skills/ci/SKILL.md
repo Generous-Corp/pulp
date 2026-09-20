@@ -9225,3 +9225,53 @@ every surface: a gate that reports "no binary" as "misformatted" is the
 false-verdict class this repo keeps paying for. The wiring — exit codes kept
 apart, the PyPI pin, hosted runner — is asserted by
 `tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).
+
+## A workflow that matches a bypass trailer with its own grep will honour a quoted one
+
+`auto-release.yml` decides post-merge whether a version bump becomes a release
+tag, and two commit-message trailers call it off: `Release: skip` and a
+top-level `Version-Bump: skip reason="..."`. Both have to be found in the WHOLE
+body, because a merge-queue `COMMIT_MESSAGES` squash appends a separator and a
+co-author footer after the source commits, so `git interpret-trailers --parse`
+sees only the footer and a real declaration on the branch is invisible to it.
+
+Scanning the whole body then puts a real declaration and a merely *quoted* one
+in the same text — a friction report, a guide to this grammar, a PR body pasted
+into a commit. Two things make that worse than it sounds:
+
+* **A fence keeps the trailer at column zero.** Indentation and `>` move a
+  quoted line off the line start, so an anchored pattern excludes them for
+  free — which makes the anchor look sufficient. A fenced code block does not
+  move it, so the one quoting form an agent is most likely to write is the one
+  the anchor misses. `gate_common._fenced_line_indices` masks closed fences
+  before the scan; an *unclosed* fence masks nothing, deliberately.
+* **The failure is silent and inverted.** Every other bypass trailer fails
+  toward "the gate ran and said no", which someone reads. A bypass read from a
+  quoted example makes a release *not happen* — no run, no annotation, no
+  issue. Nothing observes it.
+
+So never match one of these trailers from a workflow step. Call
+`tools/scripts/release_trailer_guard.py`, which is a shell-callable front door
+onto the same parse every pre-merge gate uses:
+
+```bash
+# `skip` or `no-skip` on stdout; exit 2 when the commit cannot be classified
+python3 tools/scripts/release_trailer_guard.py --query release-skip --ref HEAD
+python3 tools/scripts/release_trailer_guard.py --query version-bump-skip --ref "$sha"
+```
+
+Case the exit-2 verdict explicitly and fail the step — guessing "no bypass"
+publishes an unwanted tag, and guessing "bypass" withholds a wanted one, which
+is the failure you are avoiding. Python3 is available at that point in
+`auto-release.yml`: the step runs after `actions/checkout`, on `ubuntu-latest`,
+and the next step already shells to `python3` without `setup-python`.
+
+The same grammar backs the PR-time gate and the pre-merge tag prediction
+(`gate_common.version_bump_skip_reason` / `release_skip_declared`), so a
+`Version-Bump: skip` that passes at PR time cannot fail post-merge. Keep it one
+implementation; three that agree today is what produced this.
+
+When you change that guard step, `test_release_trailer_guard.py` runs it
+**extracted from the YAML** against real commits. Do not "fix" that test by
+pasting the step into it — a transcribed copy is exactly how the shell scan
+stopped matching the parse it was supposed to mirror.

@@ -98,6 +98,11 @@ def _effective_release_flags(flags: Any) -> bool:
     """Interpret ordered Clang/GCC optimization and NDEBUG flag overrides."""
     if not isinstance(flags, list) or not flags or not all(_nonempty(flag) for flag in flags):
         return False
+    # Driver escapes and external argument files can change frontend options
+    # after ordinary argv processing. Require expanded, direct compiler flags.
+    if any(flag.startswith(("@", "-Xclang", "-Xpreprocessor", "-Xarch_", "-Wp,",
+                            "--config")) for flag in flags):
+        return False
     optimization: str | None = None
     ndebug_defined: bool | None = None
     for index, flag in enumerate(flags):
@@ -188,50 +193,46 @@ def _inspect_distinct_paths(paths: list[tuple[str, Path]]) -> str | None:
 
 def _distinct_paths(paths: list[tuple[str, Path]], *,
                     probe_absent: Iterable[Path] = ()) -> str | None:
-    """Reject aliases, probing absent outputs through the destination filesystem."""
+    """Probe filesystem name equivalence without creating public output paths."""
+    error = _inspect_distinct_paths(paths)
+    if error is not None:
+        return error
+
     labels = {path: label for label, path in paths}
-    created: list[tuple[Path, tuple[int, int]]] = []
-    error: str | None = None
+    groups: dict[tuple[int, int], list[Path]] = {}
     for path in probe_absent:
         if os.path.lexists(path):
             continue
         try:
-            descriptor = os.open(
-                path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
-                0o600,
-            )
-        except FileExistsError:
-            # An earlier probe may have created this same filesystem entry under
-            # a case-folded or normalization-equivalent spelling.
-            continue
+            parent_stat = path.parent.stat()
         except OSError as exc:
-            error = f"cannot probe {labels.get(path, 'output')} {path}: {exc}"
-            break
-        try:
-            stat = os.fstat(descriptor)
-        finally:
-            os.close(descriptor)
-        created.append((path, (stat.st_dev, stat.st_ino)))
+            return f"cannot probe {labels.get(path, 'output')} {path}: {exc}"
+        groups.setdefault((parent_stat.st_dev, parent_stat.st_ino), []).append(path)
 
-    if error is None:
-        error = _inspect_distinct_paths(paths)
-
-    cleanup_errors: list[str] = []
-    for path, identity in reversed(created):
+    for group in groups.values():
+        # A hidden sibling directory has the destination filesystem's naming
+        # behavior. Keep exact basenames so case and Unicode aliases are tested
+        # by the filesystem rather than guessed with string normalization.
         try:
-            stat = path.lstat()
-            if (stat.st_dev, stat.st_ino) != identity:
-                cleanup_errors.append(f"probe path changed while checking {path}")
-                continue
-            path.unlink()
-        except FileNotFoundError:
-            continue
+            with tempfile.TemporaryDirectory(prefix=".pulp-gpu-audio-alias-",
+                                             dir=group[0].parent) as directory:
+                probes = [(labels.get(path, "output"), Path(directory) / path.name)
+                          for path in group]
+                for _, probe in probes:
+                    try:
+                        descriptor = os.open(
+                            probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                            getattr(os, "O_CLOEXEC", 0), 0o600,
+                        )
+                    except FileExistsError:
+                        continue
+                    os.close(descriptor)
+                error = _inspect_distinct_paths(probes)
+                if error is not None:
+                    return error
         except OSError as exc:
-            cleanup_errors.append(f"cannot remove path probe {path}: {exc}")
-    if cleanup_errors:
-        return "; ".join(cleanup_errors)
-    return error
+            return f"cannot probe output directory {group[0].parent}: {exc}"
+    return _inspect_distinct_paths(paths)
 
 
 def _stage_output(path: Path, writer: Callable[[TextIO], None], *,

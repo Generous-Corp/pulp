@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 52,
+  "manifest_revision": 53,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -37,7 +37,7 @@
       },
       "signal": {
         "state": "partial",
-        "capabilities": 60
+        "capabilities": 62
       },
       "timebase": {
         "state": "partial",
@@ -4926,6 +4926,709 @@
       "contract_digest": "sha256:b080ca804dc5b6ad09957600a2e420d0588321393424e03de556336a2ee22a28"
     },
     {
+      "domain": "signal",
+      "status": "experimental",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "audio",
+        "release": "control"
+      },
+      "state_model": "Explicit retained one-sample state and immutable prepared region bindings.",
+      "seed_model": "none",
+      "input_domain": "scalar audio and explicitly promoted parameters",
+      "output_domain": "sample-synchronous audio",
+      "units": [
+        "samples",
+        "linear amplitude"
+      ],
+      "latency": "zero reported region latency; each UnitDelay retains exactly one sample",
+      "tail": "retained state until drained or reset",
+      "scheduling": "bounded sample order within prepared blocks",
+      "key": "signal.sample-region",
+      "summary": "Bounded exact-version scalar feedback regions authored through isolated topology edits.",
+      "determinism": {
+        "repeatability": "tolerance_bounded",
+        "block_partition": "invariant",
+        "platform_scope": "same_build",
+        "transport_history": "irrelevant"
+      },
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "bindings": [
+        {
+          "role": "definition",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_authoring.hpp",
+          "qualified_name": "pulp::host::SampleRegionDefinition",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "descriptor",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_authoring.hpp",
+          "qualified_name": "pulp::host::SampleRegionDescriptor",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "result",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_authoring.hpp",
+          "qualified_name": "pulp::host::SampleRegionResult",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "promoted_parameter",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_authoring.hpp",
+          "qualified_name": "pulp::host::SampleRegionPromotedParameter",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "proof",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionProof",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "limits",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionLimits",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "kernel_config",
+          "kind": "cpp_type",
+          "include": "pulp/host/custom_node_type.hpp",
+          "qualified_name": "pulp::host::SampleKernelConfig",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "kernel_descriptor",
+          "kind": "cpp_type",
+          "include": "pulp/host/custom_node_type.hpp",
+          "qualified_name": "pulp::host::SampleKernelDescriptor",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "graph",
+          "kind": "cpp_type",
+          "include": "pulp/host/signal_graph.hpp",
+          "qualified_name": "pulp::host::SignalGraph",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "parameter_contract",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_parameters.hpp",
+          "qualified_name": "pulp::host::SampleRegionParameterContract",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "register_graph",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::register_builtin_sample_region_types",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "register_edit",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::register_builtin_sample_region_types",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "begin_edit",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::begin_prepared_topology_edit",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_declare_sample_region",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::declare_sample_region",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_remove_sample_region",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::remove_sample_region",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_add_sample_region_member",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::add_sample_region_member",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_remove_sample_region_member",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::remove_sample_region_member",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_set_sample_kernel_config",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::set_sample_kernel_config",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_connect_in_sample_region",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::connect_in_sample_region",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_prove_sample_region",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::prove_sample_region",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_sample_region",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::sample_region",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_sample_regions",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::sample_regions",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_sample_region_parameter_contract",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::sample_region_parameter_contract",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_prepare",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::prepare",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_commit",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::commit",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "graph_prove_sample_region",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_runtime.hpp",
+          "qualified_name": "pulp::host::SignalGraph::prove_sample_region",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "graph_sample_region",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_runtime.hpp",
+          "qualified_name": "pulp::host::SignalGraph::sample_region",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "graph_sample_regions",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_runtime.hpp",
+          "qualified_name": "pulp::host::SignalGraph::sample_regions",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "SampleRegionCandidate",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionCandidate",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "SampleRegionGraphProof",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionGraphProof",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "SampleRegionParserShape",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionParserShape",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "SampleRegionParserProof",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionParserProof",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "SampleRegionKernelNode",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionKernelNode",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "SampleRegionConnection",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionConnection",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "SampleRegionResourceStats",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionResourceStats",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "SampleRegionKernelRegistryView",
+          "kind": "cpp_type",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::SampleRegionKernelRegistryView",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "proof_is_sample_region_v1_descriptor",
+          "kind": "cpp_function",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::is_sample_region_v1_descriptor",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "proof_sample_region_config_matches",
+          "kind": "cpp_function",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::sample_region_config_matches",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "proof_prove_sample_region",
+          "kind": "cpp_function",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::prove_sample_region",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "proof_prove_sample_regions",
+          "kind": "cpp_function",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::prove_sample_regions",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "proof_prove_sample_region_parser_shape",
+          "kind": "cpp_function",
+          "include": "pulp/host/sample_region_proof.hpp",
+          "qualified_name": "pulp::host::prove_sample_region_parser_shape",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "contract_from_regions",
+          "kind": "cpp_function",
+          "include": "pulp/host/sample_region_parameters.hpp",
+          "qualified_name": "pulp::host::SampleRegionParameterContract::from_regions",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "contract_freeze",
+          "kind": "cpp_function",
+          "include": "pulp/host/sample_region_parameters.hpp",
+          "qualified_name": "pulp::host::SampleRegionParameterContract::freeze",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "contract_bind",
+          "kind": "cpp_function",
+          "include": "pulp/host/sample_region_parameters.hpp",
+          "qualified_name": "pulp::host::SampleRegionParameterContract::bind",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_bind_parameters",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::bind_sample_region_parameters",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_add_exact_node",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::add_custom_node",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        },
+        {
+          "role": "edit_connect",
+          "kind": "cpp_function",
+          "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+          "qualified_name": "pulp::host::SignalGraph::PreparedTopologyEdit::connect",
+          "target": "Pulp::host",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_digest": "sha256:75eca34050a72368d1c7150d4ed23eb2a5fab2985a84cfe60c0809cdade544a8"
+    },
+    {
       "key": "signal.saturator",
       "contract_version": {
         "major": 1,
@@ -6462,6 +7165,65 @@
       "contract_digest": "sha256:2fe4f94556c77879e5535bf7c424741350d497456d025b68b0d92f2dc1e989b6"
     },
     {
+      "domain": "signal",
+      "status": "experimental",
+      "rt_class": "mixed",
+      "lifecycle": {
+        "construction": "control",
+        "prepare": "control",
+        "process": "audio",
+        "reset": "audio",
+        "release": "control"
+      },
+      "state_model": "Explicit retained one-sample state and immutable prepared region bindings.",
+      "seed_model": "none",
+      "input_domain": "scalar audio and explicitly promoted parameters",
+      "output_domain": "sample-synchronous audio",
+      "units": [
+        "samples",
+        "linear amplitude"
+      ],
+      "latency": "zero reported region latency; each UnitDelay retains exactly one sample",
+      "tail": "retained state until drained or reset",
+      "scheduling": "bounded sample order within prepared blocks",
+      "key": "signal.unit-delay",
+      "summary": "Exact one-sample publish/commit memory.",
+      "determinism": {
+        "repeatability": "bit_exact",
+        "block_partition": "invariant",
+        "platform_scope": "cross_platform",
+        "transport_history": "irrelevant"
+      },
+      "contract_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
+      "bindings": [
+        {
+          "role": "entrypoint",
+          "kind": "cpp_type",
+          "include": "pulp/signal/unit_delay.hpp",
+          "qualified_name": "pulp::signal::UnitDelay",
+          "target": "Pulp::signal",
+          "availability": {
+            "state": "available",
+            "platforms": [
+              "all"
+            ],
+            "required_features": []
+          }
+        }
+      ],
+      "contract_digest": "sha256:29d8330fce5becb79e5b95e3b8777782c28939c285aabd41e455ec570d5528ab"
+    },
+    {
       "key": "signal.waveguide-primitives",
       "domain": "signal",
       "summary": "Prepared bidirectional waveguide rails, passive reflection boundaries, and fixed-capacity pressure-wave scattering junctions.",
@@ -7247,14 +8009,14 @@
   ],
   "tombstones": [],
   "counts": {
-    "total": 103,
+    "total": 105,
     "by_domain": {
       "audio": 9,
       "midi": 16,
       "music": 7,
       "offline": 0,
       "sequence": 2,
-      "signal": 60,
+      "signal": 62,
       "timebase": 9
     }
   },

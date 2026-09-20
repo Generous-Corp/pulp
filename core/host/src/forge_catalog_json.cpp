@@ -88,8 +88,17 @@ std::string serialize_forge_catalog_json(const std::vector<ForgeCatalogExportNod
             if (realization_index != 0)
                 out << ", ";
             out << "{\"mode\": " << json_string(realization.mode)
-                << ", \"type_id\": " << json_string(realization.type_id)
-                << ", \"settings\": {";
+                << ", \"type_id\": " << json_string(realization.type_id);
+            if (const auto* region = forge_sample_region_v1(realization.type_id)) {
+                out << ", \"type_version\": " << region->type_version
+                    << ", \"sample_kernel_version\": " << region->sample_kernel_version
+                    << ", \"sample_region_v1\": {\"dsp_key\": " << json_string(region->type_id)
+                    << ", \"type_version\": " << region->type_version
+                    << ", \"sample_kernel_version\": " << region->sample_kernel_version
+                    << ", \"placement\": " << json_string(region->placement)
+                    << ", \"builder_role\": " << json_string(region->role) << "}";
+            }
+            out << ", \"settings\": {";
             for (std::size_t setting_index = 0; setting_index < declared.settings.size();
                  ++setting_index) {
                 if (setting_index != 0)

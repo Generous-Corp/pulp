@@ -355,12 +355,34 @@ fs::path ensure_dev_profile_sdk(const fs::path& repo_root, bool tracing) {
         return {};
     }
     const auto paths = local_sdk::profile_paths(home, identity);
+    const auto capability_handoff = [&](const fs::path& prefix, bool stamp) {
+        const auto script = snapshot.path() / "tools/scripts/sdk_capability_handoff.py";
+        if (!fs::is_regular_file(script)) {
+            std::cerr << "Error: development SDK capability handoff tool is missing.\n";
+            return false;
+        }
+        const std::vector<std::string> command{"python3",
+                                               script.string(),
+                                               stamp ? "stamp-dev" : "verify-dev",
+                                               "--prefix",
+                                               prefix.string(),
+                                               "--source-dir",
+                                               snapshot.path().string(),
+                                               "--source-sha",
+                                               identity.source_git_sha,
+                                               "--platform",
+                                               identity.platform};
+        return run_with_spinner(command_from_args(command),
+                                stamp ? "Creating development SDK capability handoff"
+                                      : "Verifying development SDK capability handoff") == 0;
+    };
 
     if (fs::exists(paths.install_prefix)) {
         const auto existing = local_sdk::validate_published_install(paths.install_prefix, identity);
-        if (existing.ok)
+        if (existing.ok && capability_handoff(paths.install_prefix, false))
             return paths.install_prefix;
-        print_validation_errors(existing, "existing " + profile + " SDK is invalid");
+        if (!existing.ok)
+            print_validation_errors(existing, "existing " + profile + " SDK is invalid");
         std::cerr << "Refusing to overwrite immutable SDK prefix " << paths.install_prefix.string()
                   << "\n";
         return {};
@@ -484,6 +506,12 @@ fs::path ensure_dev_profile_sdk(const fs::path& repo_root, bool tracing) {
         remove_staging(staging_prefix, active_build_dir);
         return {};
     }
+    // The capability handoff binds the installed importer and catalog while the
+    // separate provenance marker continues to identify a development-only SDK.
+    if (!capability_handoff(staging_prefix, true)) {
+        remove_staging(staging_prefix, active_build_dir);
+        return {};
+    }
     const auto published = local_sdk::validate_published_install(staging_prefix, identity);
     if (!published.ok) {
         print_validation_errors(published, profile + " provenance failed validation");
@@ -494,7 +522,8 @@ fs::path ensure_dev_profile_sdk(const fs::path& repo_root, bool tracing) {
     fs::rename(staging_prefix, paths.install_prefix, ec);
     if (ec) {
         if (fs::exists(paths.install_prefix) &&
-            local_sdk::validate_published_install(paths.install_prefix, identity).ok) {
+            local_sdk::validate_published_install(paths.install_prefix, identity).ok &&
+            capability_handoff(paths.install_prefix, false)) {
             remove_staging(staging_prefix, active_build_dir);
             return paths.install_prefix;
         }

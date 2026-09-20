@@ -82,6 +82,7 @@ from gate_common import (
     git_diff_names,
     git_range_trailers,
     git_commit_trailers,
+    version_bump_skip_reason,
     glob_to_regex as _glob_to_regex,
     glob_match as _glob_match,
     matches_any as _matches_any,
@@ -575,23 +576,11 @@ def _range_has_version_bump_skip_trailer(base: str, head: str) -> bool:
     A non-empty reason is required; bare `Version-Bump: skip` is
     rejected so the author has to record *why*.
     """
-    trailers = git_range_trailers(base, head)
-    for value in trailers.get("version-bump", []):
-        # Accept `skip reason="..."` (no surface prefix) to opt out of
-        # the *entire* fix/feat check. Per-surface `<surface>=skip`
-        # trailers do NOT count — those are scoped to the per-surface
-        # verdict pipeline and should not silently bypass the
-        # user-facing-PR check.
-        m = re.match(r"^\s*skip\b(.*)$", value.strip(), re.IGNORECASE)
-        if not m:
-            continue
-        rest = m.group(1)
-        # Require a non-empty reason="..." (matching the documented
-        # bypass grammar — empty-reason bypasses are rejected).
-        rm = re.search(r'reason\s*=\s*"([^"]+)"', rest)
-        if rm and rm.group(1).strip():
-            return True
-    return False
+    # The grammar itself lives in gate_common so the post-merge release tagger
+    # (.github/workflows/auto-release.yml, via release_trailer_guard.py) rules
+    # on the same values this gate does. A second copy is how a bypass comes to
+    # pass one layer and fail the other.
+    return version_bump_skip_reason(git_range_trailers(base, head)) is not None
 
 
 def _range_unreleased_fix_feat_subjects(

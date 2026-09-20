@@ -18,11 +18,30 @@ target_include_directories(pulp-gpu-audio
 target_sources(pulp-gpu-audio
     PRIVATE
         src/gpu_audio_transport.cpp
+        src/detail/realtime_gpu_audio_path.cpp
         src/detail/shared_io_arena.cpp
         src/detail/dawn_submission_tracker.cpp
+        src/detail/shared_io_compute_plan.cpp
+        src/detail/shared_io_convolution_executor.cpp
+        src/detail/shared_io_transport_bridge.cpp
+        src/detail/shared_io_stamped_bridge.cpp
+        src/detail/shared_io_convolution_pipeline.cpp
+        src/detail/shared_io_convolution_session.cpp
+        src/detail/shared_io_trace.cpp
 )
 
 target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
+
+set(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER OFF CACHE BOOL
+    "Enable the experimental shared-I/O realtime path inside GpuConvolver")
+if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
+    if(NOT PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+        message(FATAL_ERROR
+            "Experimental shared-I/O convolver requires PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON")
+    endif()
+    target_compile_definitions(pulp-gpu-audio PRIVATE
+        PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+endif()
 
 # These cache values are part of the installed SDK and release-provenance
 # contract on every platform. Reset derived provider state before capability
@@ -135,6 +154,7 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
 
     target_sources(pulp-gpu-audio PRIVATE
         src/detail/dawn_shared_io_provider.cpp)
+    target_compile_definitions(pulp-gpu-audio PRIVATE PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO=1)
     if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
         # Do not link Pulp's static Dawn archive on this edge.  The executable
         # keeps undefined Dawn references which resolve through vellum-gpu,

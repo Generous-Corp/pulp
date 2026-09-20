@@ -65,6 +65,9 @@ PUBLIC_ROOTS = (
     },
 )
 
+# Exact reviewed sample-region authoring closure; never scan the whole host root.
+SAMPLE_REGION_HOST_HEADERS = ('pulp/host/signal_graph.hpp', 'pulp/host/signal_graph_runtime.hpp', 'pulp/host/signal_graph_prepared_topology_edit.hpp', 'pulp/host/custom_node_type.hpp', 'pulp/host/sample_region_authoring.hpp', 'pulp/host/sample_region_proof.hpp', 'pulp/host/sample_region_parameters.hpp')
+
 DISPOSITIONS = {
     "capability_entrypoint",
     "capability_support",
@@ -126,6 +129,12 @@ def discover_headers(root: pathlib.Path) -> dict[str, dict[str, str]]:
                 "source": path.relative_to(root).as_posix(),
                 "fingerprint": file_fingerprint(path),
             }
+    for include in SAMPLE_REGION_HOST_HEADERS:
+        path = root / "core/host/include" / include
+        if not path.is_file():
+            raise RuntimeError(f"reviewed sample-region header is missing: {path}")
+        headers[include] = {"domain": "signal", "source": path.relative_to(root).as_posix(),
+                            "fingerprint": file_fingerprint(path)}
     return headers
 
 
