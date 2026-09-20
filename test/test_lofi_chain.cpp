@@ -378,12 +378,12 @@ TEST_CASE("The lo-fi chain allocates nothing on the audio thread",
 // The floor shaper is checked for the geometry that distinguishes it from the
 // dead-zone saturator — silence below the threshold, full scale restored above
 // it — and for the property that makes the curve choice worth offering: only
-// smoothstep leaves the threshold with zero slope. The last case pins the
-// arithmetic a caller sees when it supplies its own dry/wet mix, because that
-// mix deliberately lives outside this function.
+// smoothstep leaves the threshold with zero slope. Two interior points pin the
+// cubic itself, because endpoints and initial slope alone admit other curves,
+// and the over-range cases cover the interval past which that cubic stops
+// being a smoothstep at all.
 
-TEST_CASE("The floor shaper silences everything under its threshold",
-          "[signal][lofi]") {
+TEST_CASE("The floor shaper silences everything under its threshold", "[signal][lofi]") {
     using pulp::signal::floor_shape;
     using pulp::signal::FloorCurve;
 
@@ -395,8 +395,7 @@ TEST_CASE("The floor shaper silences everything under its threshold",
     }
 }
 
-TEST_CASE("The floor shaper rescales the surviving region to full scale",
-          "[signal][lofi]") {
+TEST_CASE("The floor shaper rescales the surviving region to full scale", "[signal][lofi]") {
     using pulp::signal::floor_shape;
     using pulp::signal::FloorCurve;
 
@@ -424,8 +423,7 @@ TEST_CASE("The floor shaper preserves sign", "[signal][lofi]") {
     }
 }
 
-TEST_CASE("Only the smoothstep curve leaves the threshold with zero slope",
-          "[signal][lofi]") {
+TEST_CASE("Only the smoothstep curve leaves the threshold with zero slope", "[signal][lofi]") {
     using pulp::signal::floor_shape;
     using pulp::signal::FloorCurve;
 
@@ -434,17 +432,14 @@ TEST_CASE("Only the smoothstep curve leaves the threshold with zero slope",
     // smoothstep is still nearly flat.
     const double threshold = 0.1;
     const double delta = 1e-4;
-    const double linear_rise =
-        floor_shape(threshold + delta, threshold, FloorCurve::linear);
-    const double smooth_rise =
-        floor_shape(threshold + delta, threshold, FloorCurve::smoothstep);
+    const double linear_rise = floor_shape(threshold + delta, threshold, FloorCurve::linear);
+    const double smooth_rise = floor_shape(threshold + delta, threshold, FloorCurve::smoothstep);
 
     REQUIRE(smooth_rise < linear_rise);
     REQUIRE(smooth_rise < linear_rise * 0.01);
 }
 
-TEST_CASE("The floor shaper clamps its threshold into the usable range",
-          "[signal][lofi]") {
+TEST_CASE("The floor shaper clamps its threshold into the usable range", "[signal][lofi]") {
     using pulp::signal::floor_shape;
     using pulp::signal::FloorCurve;
 
@@ -460,8 +455,7 @@ TEST_CASE("The floor shaper clamps its threshold into the usable range",
     REQUIRE(floor_shape(0.95, 5.0, FloorCurve::linear) == Catch::Approx(0.5));
 }
 
-TEST_CASE("The smoothstep curve is the cubic it claims to be",
-          "[signal][lofi]") {
+TEST_CASE("The smoothstep curve is the cubic it claims to be", "[signal][lofi]") {
     using pulp::signal::floor_shape;
     using pulp::signal::FloorCurve;
 
@@ -469,18 +463,15 @@ TEST_CASE("The smoothstep curve is the cubic it claims to be",
     // n*n*(2-n) also starts flat and reaches full scale, so these two interior
     // points -- one at the symmetric midpoint, one off-centre -- are what
     // distinguish 3n^2-2n^3 from its neighbours.
-    REQUIRE(floor_shape(0.55, 0.1, FloorCurve::smoothstep) ==
-            Catch::Approx(0.5));
-    REQUIRE(floor_shape(0.325, 0.1, FloorCurve::smoothstep) ==
-            Catch::Approx(0.15625));
+    REQUIRE(floor_shape(0.55, 0.1, FloorCurve::smoothstep) == Catch::Approx(0.5));
+    REQUIRE(floor_shape(0.325, 0.1, FloorCurve::smoothstep) == Catch::Approx(0.15625));
 
     // The same quarter-point under the linear curve, so the two are not
     // silently interchangeable.
     REQUIRE(floor_shape(0.325, 0.1, FloorCurve::linear) == Catch::Approx(0.25));
 }
 
-TEST_CASE("Input beyond full scale saturates instead of turning over",
-          "[signal][lofi]") {
+TEST_CASE("Input beyond full scale saturates instead of turning over", "[signal][lofi]") {
     using pulp::signal::floor_shape;
     using pulp::signal::FloorCurve;
 
@@ -496,8 +487,7 @@ TEST_CASE("Input beyond full scale saturates instead of turning over",
     }
 }
 
-TEST_CASE("The floor shaper accepts a float threshold beside a float sample",
-          "[signal][lofi]") {
+TEST_CASE("The floor shaper accepts a float threshold beside a float sample", "[signal][lofi]") {
     using pulp::signal::floor_shape;
     using pulp::signal::FloorCurve;
 
@@ -509,8 +499,7 @@ TEST_CASE("The floor shaper accepts a float threshold beside a float sample",
     REQUIRE(floor_shape(0.55, 0.1f, FloorCurve::linear) == Catch::Approx(0.5));
 }
 
-TEST_CASE("Non-finite input propagates rather than being silently swallowed",
-          "[signal][lofi]") {
+TEST_CASE("Non-finite input propagates rather than being silently swallowed", "[signal][lofi]") {
     using pulp::signal::floor_shape;
     using pulp::signal::FloorCurve;
 

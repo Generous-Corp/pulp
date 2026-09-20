@@ -79,17 +79,15 @@ enum class FloorCurve {
 /// the amount is usually a product-level control rather than a property of the
 /// transfer function.
 template <typename Sample = double>
-inline Sample floor_shape(Sample x, std::type_identity_t<Sample> threshold,
-                          FloorCurve curve) {
+inline Sample floor_shape(Sample x, std::type_identity_t<Sample> threshold, FloorCurve curve) {
     static_assert(std::is_floating_point_v<Sample>);
     const Sample limit = std::clamp(threshold, Sample{0}, Sample{0.9});
     const Sample magnitude = std::fabs(x);
-    if (magnitude <= limit) return Sample{0};
-    const Sample normalized =
-        std::min((magnitude - limit) / (Sample{1} - limit), Sample{1});
+    if (magnitude <= limit)
+        return Sample{0};
+    const Sample normalized = std::min((magnitude - limit) / (Sample{1} - limit), Sample{1});
     const Sample shaped = curve == FloorCurve::smoothstep
-                              ? normalized * normalized *
-                                    (Sample{3} - Sample{2} * normalized)
+                              ? normalized * normalized * (Sample{3} - Sample{2} * normalized)
                               : normalized;
     return std::copysign(shaped, x);
 }

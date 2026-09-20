@@ -283,6 +283,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ("pulp/signal/vca_compressor.hpp", "sha256:2f484f202dc2d75d2e87fc5683d8a6efa34f4143b120c761f5c16c330877077c"),
         ]
     ],
+    {
+        "include": "pulp/signal/lofi_chain.hpp",
+        "fingerprint": "sha256:1b4def5ba6eb434e0ec7b46a350990f5356a54dc4215d5e21d262a4d55594024",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.dither-quantizer"],
+        "rationale": (
+            "Publishes floor_shape, the dead-zone geometry the header's saturator already "
+            "used, as a reusable transfer curve so a caller no longer has to reimplement it "
+            "to get the same shape without the tanh."
+        ),
+    },
     *[
         {
             "include": include,
@@ -296,7 +307,6 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         }
         for include, fingerprint in [
             ("pulp/signal/character_delay/vintage.hpp", "sha256:b7a48feafacc26cd0329f97b7d898fbb8921dbb7e779498dc1eabd178ed2ab32"),
-            ("pulp/signal/lofi_chain.hpp", "sha256:8c3ed2535478714195f46f13591c90b3b7c63affc6a6e8a7407ebedbf9f1799b"),
         ]
     ],
     *[
