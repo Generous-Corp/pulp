@@ -1,0 +1,119 @@
+{
+  "id": "product-a-midi-content-closure",
+  "title": "Product A document-session closure for released MIDI content edits",
+  "classification": "live_product_control",
+  "delivery_state": "pending",
+  "claim_id": "product-a-midi-content-closure-20260918",
+  "owned_paths": [
+    "docs/status/sequencer-exposure/rows/product-a-midi-content-closure.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/timeline/include/pulp/timeline/clip.hpp",
+      "needles": [
+        "class MidiContent",
+        "using ClipContent"
+      ]
+    },
+    {
+      "path": "test/test_timeline_midi_content.cpp",
+      "needles": [
+        "MidiContent"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The closure records Product A runtime reachability for a released sequencer slice; it adds no SDK header, target, symbol, or installed authority."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The released slice's offline command surface is unchanged. This row records the live Product A projection, whose CLI reachability is the generic `pulp control` operation."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The released slice's offline MCP surface is unchanged. This row records the live Product A projection, whose MCP reachability is the generated control catalog."
+    },
+    "live_product_control": {
+      "disposition": "exposed",
+      "rationale": "Closes the live_product_control gap carried by released row p0-9-midi-content without rewriting that historical row. Product A now exposes the typed TimelineDocumentSession operation; its apply action admits the existing offline command JSON under the same proposal/editor writer profiles, so MIDI content edits are reachable through the exact session executor. The released row remains frozen at its merge snapshot; this pending row carries the current closure evidence.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+          "needles": [
+            "PULP_INSPECT_CAPABILITY(TimelineDocumentSession, \"timeline.document.session\", \"dev.pulp.timeline/document-session@1\", Control, Authoring, Background, Receipt, 0, 1, 1, 0)"
+          ]
+        },
+        {
+          "kind": "operation_definition",
+          "path": "inspect/src/control_manifest.cpp",
+          "needles": [
+            "TimelineDocumentSession, \"timeline/document-session\",",
+            "\"writer_profile\":{\"enum\":[\"proposal\",\"editor\"]}"
+          ]
+        },
+        {
+          "kind": "executor_binding",
+          "path": "inspect/src/control_standalone_host.cpp",
+          "needles": [
+            "make_control_timeline_document_session_executor(",
+            "install_standalone_timeline_document_session_factory("
+          ]
+        },
+        {
+          "kind": "profile_policy",
+          "path": "inspect/src/control_timeline_document_session_executor.cpp",
+          "needles": [
+            "control_timeline_admissible_writer_profile",
+            "control_timeline_conflict_result_code"
+          ]
+        },
+        {
+          "kind": "cli_projection",
+          "path": "tools/cli/cmd_control.cpp",
+          "needles": [
+            "resolve_control_operation(operation, 1)",
+            "validate_control_json_schema(params, descriptor->input_schema_json"
+          ]
+        },
+        {
+          "kind": "mcp_projection",
+          "path": "tools/mcp/mcp_control_tool_catalog.cpp",
+          "needles": [
+            "for (const auto& operation : control_operation_registry())",
+            "operation_tool_name(operation.id)"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_control_timeline_document_session.cpp",
+          "needles": [
+            "the seven layers compose end to end over a live document session",
+            "a stale expected_revision is refused live under the offline surface's own code",
+            "the broker never selects the trusted authority on a caller's behalf"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "registered_writer",
+        "writer_profile": "editor",
+        "bounds": {
+          "max_transaction_retained_bytes": 16777216,
+          "max_session_retained_bytes": 268435456
+        },
+        "refusal_codes": [
+          "capability_denied",
+          "stale_revision",
+          "transaction_id_collision",
+          "writer_quota_exhausted"
+        ]
+      }
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "Runtime Product A operations are published by the control registry, not by the design-time agent-capabilities manifest."
+    }
+  }
+}

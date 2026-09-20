@@ -47,8 +47,7 @@ TEST_CASE("query returns a concrete state for every permission class",
 TEST_CASE("desktop backend reports mobile-only classes as Restricted",
           "[platform][permissions]") {
     if (has_platform_backend()) {
-        SUCCEED("platform backend active; skipping desktop default assertions");
-        return;
+        SKIP("platform backend active; skipping desktop default assertions");
     }
     REQUIRE(query(Permission::BackgroundAudio) == PermissionState::Restricted);
     REQUIRE(query(Permission::ForegroundService) == PermissionState::Restricted);
@@ -57,8 +56,7 @@ TEST_CASE("desktop backend reports mobile-only classes as Restricted",
 TEST_CASE("desktop backend reports generic classes as Granted",
           "[platform][permissions]") {
     if (has_platform_backend()) {
-        SUCCEED("platform backend active; skipping desktop default assertions");
-        return;
+        SKIP("platform backend active; skipping desktop default assertions");
     }
     REQUIRE(query(Permission::Microphone) == PermissionState::Granted);
     REQUIRE(query(Permission::Camera) == PermissionState::Granted);

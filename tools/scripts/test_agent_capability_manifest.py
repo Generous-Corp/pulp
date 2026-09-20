@@ -794,7 +794,11 @@ def exercise_evolution(canonical: dict) -> int:
 
     stronger_previous = copy.deepcopy(canonical)
     stronger_previous["manifest_revision"] -= 1
-    row = stronger_previous["capabilities"][0]
+    row = next(
+        item
+        for item in stronger_previous["capabilities"]
+        if item["key"] == "audio.instrument-voice-allocator"
+    )
     row["contract_version"] = {"major": 1, "minor": 0}
     row["determinism"]["repeatability"] = "not_promised"
     refresh_digest(row)
@@ -1066,6 +1070,10 @@ def exercise_surface_mutations() -> int:
         root = pathlib.Path(temp)
         for public_root in surface.PUBLIC_ROOTS:
             (root / public_root["source"]).mkdir(parents=True)
+        for include in surface.SAMPLE_REGION_HOST_HEADERS:
+            header = root / "core/host/include" / include
+            header.parent.mkdir(parents=True, exist_ok=True)
+            header.write_text("#pragma once\n")
         directory = root / "core/signal/include/pulp/signal"
         legacy = directory / "legacy.hpp"
         legacy.write_text("#pragma once\nstruct Existing {};\n")

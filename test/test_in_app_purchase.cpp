@@ -183,8 +183,7 @@ TEST_CASE("IapClient stub backend reports unavailable", "[in-app-purchase]") {
         // A host/test backend got installed via static initializer — skip the
         // stub-specific assertions. The mock-backend case below still covers
         // the API contract end-to-end.
-        SUCCEED("Non-stub backend installed; stub path not exercised here.");
-        return;
+        SKIP("Non-stub backend installed; stub path not exercised here.");
     }
 
     REQUIRE_FALSE(iap.is_available());

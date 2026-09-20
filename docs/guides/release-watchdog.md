@@ -403,9 +403,41 @@ Recovery also retains independent fix/feat levels per surface and respects an
 explicit numeric `Version-Bump: <surface>=<level>` verdict.
 The tracker records those exact levels and passes them back through
 `--recover-levels`, so covered feature work cannot inflate a later fix recovery.
-For multi-commit squashes, the auto-release guard also recognizes exact embedded
+For multi-commit squashes, the auto-release guard also recognizes embedded
 source skip-trailer lines before GitHub's co-author footer; that footer prevents
 ordinary `interpret-trailers` parsing from seeing the nested source trailers.
+
+### What counts as a declared bypass
+
+Scanning a whole squash body for a trailer means a trailer that is only being
+*quoted* — a friction report, a guide to this very grammar, a PR body pasted
+into a commit — is sitting in the same text as a real declaration. Telling them
+apart is not optional here: a bypass read from a quoted example withholds a
+release tag, and a release that does not happen reports nothing anywhere.
+
+Indented and `>`-quoted prose moves the trailer off column zero, so a line-start
+anchor excludes it. A fenced code block does not, so the fence is masked before
+the scan. Both rules live in `tools/scripts/gate_common.py`, and
+`.github/workflows/auto-release.yml` reaches them through
+`tools/scripts/release_trailer_guard.py` rather than matching trailers itself:
+
+```bash
+# `skip` or `no-skip` on stdout; exit 2 when the commit cannot be classified
+python3 tools/scripts/release_trailer_guard.py --query release-skip --ref HEAD
+python3 tools/scripts/release_trailer_guard.py --query version-bump-skip --ref HEAD
+```
+
+An exit 2 fails the guard step. Neither guess is safe: "no bypass" publishes an
+unwanted tag, and "bypass" withholds a wanted one silently.
+
+The same helpers back the PR-time gate
+(`_range_has_version_bump_skip_trailer()` in `version_bump_check.py`) and the
+pre-merge tag prediction (`pr_release_tag_report.py`), so all three layers
+accept exactly the same values — including the requirement that a
+`Version-Bump: skip` carry a non-empty `reason="..."`, and the rule that a
+per-surface `Version-Bump: <surface>=skip` is not a whole-release opt-out.
+`tools/scripts/test_release_trailer_guard.py` runs the workflow's own guard
+step, extracted from the YAML, against real commits.
 For an unbumped live signal, it:
 
 1. Emits a `::warning::` annotation visible in the workflow run UI.

@@ -338,7 +338,7 @@ TEST_CASE("control registry projects capability and operation metadata",
             CHECK(operation.receipt_binding.receipt_id_field == "receipt_id");
         }
     }
-    CHECK(receipt_binding_count == 9);
+    CHECK(receipt_binding_count == 11);
     std::set<std::string_view> operation_ids;
     std::set<std::string_view> schema_ids;
     for (const auto& operation : control_operation_registry()) {
@@ -433,6 +433,33 @@ TEST_CASE("control registry projects capability and operation metadata",
             CHECK(operation.input_schema_json.find("\"x-pulp-maxUtf8Bytes\":128") !=
                   std::string_view::npos);
             CHECK(operation.output_schema_json.find("\"out_path\"") != std::string_view::npos);
+        }
+        if (operation.capability == InspectorCapability::SequencerTransportRead) {
+            CHECK(operation.id == "dev.pulp.sequencer/transport.loop.read@1");
+            CHECK(operation.result_kind == "response");
+            CHECK(operation.input_schema_json.find("\"properties\":{}") != std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"sequence\":{\"maximum\":9007199254740991,"
+                                                    "\"minimum\":1,\"type\":\"integer\"}") !=
+                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"receipt_id\"") == std::string_view::npos);
+        }
+        if (operation.capability == InspectorCapability::SequencerTransportWrite) {
+            CHECK(operation.id == "dev.pulp.sequencer/transport.loop.write@1");
+            CHECK(operation.input_schema_json.find("\"oneOf\"") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"const\":\"set-range\"") !=
+                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"const\":\"set-enabled\"") !=
+                  std::string_view::npos);
+            const auto enabled_branch =
+                operation.input_schema_json.find("\"const\":\"set-enabled\"");
+            const auto enabled_branch_end = operation.input_schema_json.find("}]}", enabled_branch);
+            REQUIRE(enabled_branch_end != std::string_view::npos);
+            const auto enabled_branch_text = operation.input_schema_json.substr(
+                enabled_branch, enabled_branch_end - enabled_branch);
+            CHECK(enabled_branch_text.find("start_tick") == std::string_view::npos);
+            CHECK(enabled_branch_text.find("end_tick") == std::string_view::npos);
+            CHECK(enabled_branch_text.find("\"expected_sequence\"") != std::string_view::npos);
+            CHECK(operation.output_schema_json.find("\"receipt_id\"") != std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::RuntimeEval) {
             CHECK(operation.input_schema_json.find("\"x-pulp-maxUtf8Bytes\":65536") !=

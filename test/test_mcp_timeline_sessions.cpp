@@ -903,6 +903,37 @@ TEST_CASE("timeline MCP answers what a device chain may name",
     // walk, so the two findings above are the catalog answering, not the lookup
     // returning whatever it was handed.
     REQUIRE(domain_of("pulp.device.event.absent").empty());
+    const auto humaniser =
+        std::find_if(devices->array.begin(), devices->array.end(), [](const auto& device) {
+            const auto* key = device.find("binding_key");
+            return key != nullptr && key->scalar == "pulp.device.event.humanise";
+        });
+    REQUIRE(humaniser != devices->array.end());
+    const auto* parameters = humaniser->find("parameters");
+    REQUIRE(parameters != nullptr);
+    REQUIRE(parameters->kind == pulp::timeline::JsonValue::Kind::Array);
+    REQUIRE(parameters->array.size() == 2);
+    const auto require_field = [](const auto& object, std::string_view key,
+                                  std::string_view expected) {
+        const auto* value = object.find(key);
+        REQUIRE(value != nullptr);
+        REQUIRE(value->scalar == expected);
+    };
+    const auto require_bool_field = [](const auto& object, std::string_view key, bool expected) {
+        const auto* value = object.find(key);
+        REQUIRE(value != nullptr);
+        REQUIRE(value->kind == pulp::timeline::JsonValue::Kind::Boolean);
+        REQUIRE(value->boolean == expected);
+    };
+    require_field(parameters->array[0], "id", "1");
+    require_field(parameters->array[0], "name", "Timing Depth");
+    require_bool_field(parameters->array[0], "automatable", false);
+    require_bool_field(parameters->array[0], "read_only", false);
+    require_bool_field(parameters->array[0], "rampable", false);
+    require_bool_field(parameters->array[0], "modulatable", false);
+    require_field(parameters->array[1], "id", "2");
+    require_field(parameters->array[1], "name", "Velocity Depth");
+    require_bool_field(parameters->array[1], "stepped", true);
 
     // The bounds ride the same answer as the devices, so a caller can predict a
     // refusal instead of discovering it by authoring a chain and being refused.

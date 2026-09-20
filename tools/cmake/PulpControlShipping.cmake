@@ -29,6 +29,9 @@ set(_PULP_INSPECTOR_SHIPPING_CAPABILITIES
     artifact.read
     sequencer.state.read
     sequencer.state.edit
+    sequencer.transport.loop.read
+    sequencer.transport.loop.write
+    timeline.document.session
     unavailable)
 
 set(_PULP_CONTROL_CAPABILITIES
@@ -53,6 +56,9 @@ set(_PULP_CONTROL_CAPABILITIES
     dev.pulp.artifact/read@1
     dev.pulp.sequencer/state.read@1
     dev.pulp.sequencer/state.edit@1
+    dev.pulp.sequencer/transport.loop.read@1
+    dev.pulp.sequencer/transport.loop.write@1
+    dev.pulp.timeline/document-session@1
     dev.pulp.unavailable/operation@1)
 
 # Registry presence pre-stages schema/client compatibility but is not permission
@@ -64,7 +70,7 @@ set(_PULP_CONTROL_UNWIRED_CAPABILITIES)
 # Installed copies of this helper cannot reach back into the source tree. The
 # truth checker pins this value to control_registry_digest.inc.
 set(_PULP_CONTROL_REGISTRY_DIGEST_V1
-    "70578eae97288609fe384bd2caa1641e62af016127f3abc6e4a3cd754422d584")
+    "fbeb069e682ae85827f48354b3dc43032fb1515cac483108cacc889d5b07e809")
 
 function(_pulp_cache_control_declarations target profile capabilities eval_ack)
     # A target's declarations are configure-time truth, not sticky user
@@ -148,7 +154,7 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
 
     set(_controller_caps
         ui.input trace.control trace.session.control state.write test.input
-        authoring.tweaks runtime.reload runtime.eval)
+        authoring.tweaks runtime.reload runtime.eval sequencer.transport.loop.write)
     foreach(_control_cap IN LISTS _control_caps)
         list(FIND _PULP_CONTROL_CAPABILITIES "${_control_cap}" _cap_index)
         list(GET _PULP_INSPECTOR_SHIPPING_CAPABILITIES ${_cap_index} _cap)

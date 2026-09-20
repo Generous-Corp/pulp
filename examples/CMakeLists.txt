@@ -43,6 +43,9 @@ add_subdirectory(pulp-tone)
 
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
+if(TARGET pulp::host AND NOT TARGET sample-region-allpass-core)
+    add_subdirectory(sample-region-allpass)
+endif()
 # Pulp Delay: stereo character delay with tempo and in-loop tone controls
 add_subdirectory(pulp-delay)
 # Combined-bundle demo: ONE binary per format exposing TWO plugins via
@@ -140,6 +143,10 @@ add_subdirectory(pulp-pluck)
 add_subdirectory(faust-gain)
 add_subdirectory(faust-filter)
 add_subdirectory(faust-tremolo)
+
+# Dense AudioRate ProcessorNode: a public, headless example of a native
+# Processor consuming a per-sample parameter lane produced by the graph.
+add_subdirectory(audio-rate-processor-node)
 
 # ViewBridge demo: custom create_view() + secondary-view attach
 add_subdirectory(view-bridge-demo)

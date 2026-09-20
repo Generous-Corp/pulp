@@ -170,8 +170,7 @@ TEST_CASE("CanvasWidget proves strict native paint on a live Dawn surface",
     std::string error;
     auto surface = pulp::render::HeadlessSurface::create(config, &error);
     if (!surface) {
-        SUCCEED("Dawn surface unavailable: " + error);
-        return;
+        SKIP("Dawn surface unavailable: " + error);
     }
 
     CanvasWidget widget;
@@ -194,8 +193,7 @@ TEST_CASE("CanvasWidget proves strict native paint on a live Dawn surface",
     auto frame = surface->render_rgba(
         [&](pulp::canvas::Canvas& canvas) { widget.paint(canvas); });
     if (frame.empty()) {
-        SUCCEED("Dawn readback unavailable: " + surface->last_error());
-        return;
+        SKIP("Dawn readback unavailable: " + surface->last_error());
     }
 
     REQUIRE(calls == 1);

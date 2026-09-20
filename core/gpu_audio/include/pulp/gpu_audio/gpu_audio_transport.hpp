@@ -1,15 +1,16 @@
 #pragma once
 
 #include <atomic>
-#include <mutex>
 #include <chrono>
 #include <cstdint>
+#include <mutex>
 #include <semaphore>
 #include <thread>
 #include <vector>
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/planar_audio_ring_buffer.hpp>
+#include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
 namespace pulp::gpu_audio {
@@ -21,22 +22,22 @@ namespace pulp::gpu_audio {
 /// ring and reads a block that was produced `latency_blocks` ago from a second
 /// ring — it never waits on, allocates for, or synchronizes with the GPU. A
 /// separate non-RT context calls pump() to drain the input ring, run the node,
-/// and fill the output ring. (pump() is driven by a background worker thread in
-/// a later slice; exposing it directly keeps the scheduling logic
-/// deterministically testable.)
+/// and fill the output ring. Config::run_worker_thread can drive pump() from an
+/// internal non-RT worker; exposing pump() directly keeps the scheduling logic
+/// deterministically testable and supports an externally owned service worker.
 ///
 /// Latency is established by priming the output ring with `latency_blocks` of
 /// silence at prepare(); the host is told `latency_samples()` for PDC.
 class GpuAudioTransport {
-public:
+  public:
     // The node's descriptor is the single source of truth for channels, block
     // size, and latency. Config only carries transport knobs.
     struct Config {
-        uint32_t ring_blocks = 4;        // ring capacity, in blocks (>= latency+2)
-        // Spawn an internal non-RT worker thread that drives pump(). The worker
-        // POLLS the input ring (the audio thread never signals it), so the RT
-        // path stays fully decoupled and lock-free. When false, the caller
-        // drives pump() (deterministic tests / custom worker integration).
+        uint32_t ring_blocks = 4; // ring capacity, in blocks (>= latency+2)
+        // Spawn an internal non-RT worker thread that drives pump(). By default
+        // the worker polls the input ring, so the RT path stays fully decoupled
+        // and lock-free. When false, the caller drives pump() (deterministic
+        // tests / custom worker integration).
         bool run_worker_thread = false;
         // Opt-in: the RT process() posts a semaphore after each input write and
         // the worker waits on it (with the poll interval as a fallback timeout)
@@ -49,9 +50,9 @@ public:
     };
 
     struct Stats {
-        std::uint64_t produced_blocks = 0;   // blocks the worker completed
-        std::uint64_t miss_blocks = 0;       // RT reads with no ready output
-        std::uint64_t input_dropped_frames = 0;   // RT writes lost to a full input ring
+        std::uint64_t produced_blocks = 0;      // blocks the worker completed
+        std::uint64_t miss_blocks = 0;          // RT reads with no ready output
+        std::uint64_t input_dropped_frames = 0; // RT writes lost to a full input ring
         // Wet blocks the worker dropped to realign the stream after a miss. Each
         // miss already emitted a substitute (dry/fallback) block for that timeline
         // slot, so its late-arriving wet counterpart is redundant; dropping it
@@ -67,7 +68,9 @@ public:
     };
 
     GpuAudioTransport() = default;
-    ~GpuAudioTransport() { release(); }
+    ~GpuAudioTransport() {
+        release();
+    }
 
     GpuAudioTransport(const GpuAudioTransport&) = delete;
     GpuAudioTransport& operator=(const GpuAudioTransport&) = delete;
@@ -77,19 +80,28 @@ public:
     /// carries transport knobs. Returns false if the descriptor is invalid
     /// (zero channels/block, input!=output channels), ring_blocks is too small
     /// for the latency, or the miss policy is CpuFallback without
-    /// supports_cpu_fallback.
+    /// supports_cpu_fallback. Callback and external pump callers must be stopped
+    /// before preparation; an already-prepared shared node retains its sequence
+    /// and fallback history across transport preparation.
     bool prepare(GpuAudioNode* node, const Config& config);
     void release() noexcept;
 
-    bool is_prepared() const noexcept { return prepared_; }
-    uint32_t latency_samples() const noexcept { return latency_blocks_ * block_size_; }
+    bool is_prepared() const noexcept {
+        return prepared_;
+    }
+    uint32_t latency_samples() const noexcept {
+        return latency_blocks_ * block_size_;
+    }
 
     /// Real-time-safe. Writes `n` input frames to the worker and reads the
     /// `latency_blocks`-delayed output. `n` must equal block_size. On a miss
     /// (worker not ready) the node's MissPolicy fills `output`. No allocation,
-    /// locking, or blocking.
-    void process(const audio::BufferView<const float>& input,
-                 audio::BufferView<float>& output, uint32_t n) noexcept;
+    /// locking, or blocking. Calls to process() and process_offline() share one
+    /// callback timeline and must never overlap. A rejected view emits silence
+    /// and advances one zero-input position through the prepared fallback and
+    /// delay state, preserving the due position of subsequent valid audio.
+    void process(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
+                 uint32_t n) noexcept;
 
     /// Offline / faster-than-real-time render path. NOT real-time-safe — it
     /// drives the node SYNCHRONOUSLY on the calling thread (blocking GPU readback
@@ -101,7 +113,10 @@ public:
     /// stays sample-aligned between realtime playback and an offline bounce. While
     /// this is in use the background worker yields (a shared mutex serializes node
     /// access); switch back to process() to resume async realtime operation. `n`
-    /// must equal block_size.
+    /// must equal block_size. The experimental shared provider is fenced into
+    /// continuously primed CPU fallback here; a new host preparation is required
+    /// before it may admit GPU work again. The callback must already be stopped
+    /// before crossing this non-RT boundary.
     void process_offline(const audio::BufferView<const float>& input,
                          audio::BufferView<float>& output, uint32_t n) noexcept;
 
@@ -111,7 +126,12 @@ public:
 
     Stats stats() const noexcept;
 
-private:
+    /// Host/UI-only snapshot of the prepared integration path. This is
+    /// allocation-free and does not touch the callback timeline. Provider
+    /// identity is Unknown when a generic staged node cannot establish it.
+    GpuAudioCapabilityReport capability_report() const noexcept;
+
+  private:
     GpuAudioNode* node_ = nullptr;
     // Derived from the node descriptor + config at prepare(); authoritative for
     // the RT path so it never calls the (allocating) descriptor().
@@ -123,11 +143,26 @@ private:
     MissPolicy miss_policy_ = MissPolicy::Silence;
     bool prepared_ = false;
 
+    void reset_staged_transport_state() noexcept;
+    void process_shared(const audio::BufferView<const float>&, audio::BufferView<float>&,
+                        std::uint32_t, std::uint64_t, bool input_valid) noexcept;
+    void process_realtime_position(const audio::BufferView<const float>&, audio::BufferView<float>&,
+                                   std::uint32_t, std::uint64_t, bool input_valid) noexcept;
+    void process_offline_position(const audio::BufferView<const float>&, audio::BufferView<float>&,
+                                  std::uint32_t, std::uint64_t, bool input_valid) noexcept;
+    void process_invalid_position(audio::BufferView<float>&, std::uint64_t, bool offline) noexcept;
+
     audio::PlanarAudioRingBuffer input_ring_;
     audio::PlanarAudioRingBuffer output_ring_;
 
     audio::Buffer<float> worker_in_;
     audio::Buffer<float> worker_out_;
+    // Callback-owned scratch for rejected views. Zero input advances every
+    // stateful delay/history position without reading the malformed input.
+    audio::Buffer<float> rejected_input_;
+    audio::Buffer<float> rejected_output_;
+    std::vector<const float*> rejected_input_ptrs_;
+    std::vector<float*> rejected_output_ptrs_;
     // Stable channel-pointer arrays for the worker views (BufferView holds the
     // array by reference, so it must outlive the views).
     std::vector<float*> in_fptrs_;
@@ -136,8 +171,8 @@ private:
 
     std::atomic<std::uint64_t> produced_blocks_{0};
     std::atomic<std::uint64_t> miss_blocks_{0};
-    std::atomic<std::uint64_t> input_dropped_blocks_{0};  // whole-block input drops
-    std::atomic<std::uint64_t> resynced_blocks_{0};       // late wet blocks dropped to realign
+    std::atomic<std::uint64_t> input_dropped_blocks_{0}; // whole-block input drops
+    std::atomic<std::uint64_t> resynced_blocks_{0};      // late wet blocks dropped to realign
     // Resync debt: output slots a miss already substituted for, whose late wet
     // counterparts must still be dropped to realign the stream. Incremented on a
     // miss, decremented as those blocks are drained. Touched ONLY by process() on
@@ -166,6 +201,19 @@ private:
     // unchanged.
     bool wake_on_write_ = false;
     std::counting_semaphore<> wake_sem_{0};
+
+    // Private callback-side GPU path captured at prepare() from the concrete
+    // node. These are plain function pointers so the RT process path does not
+    // allocate, lock, or touch a public base-class extension.
+    void* realtime_gpu_context_ = nullptr;
+    std::uint8_t (*realtime_gpu_process_)(void*, const audio::BufferView<const float>&,
+                                          audio::BufferView<float>&, std::uint32_t, std::uint64_t,
+                                          bool) noexcept = nullptr;
+    std::uint32_t (*realtime_gpu_service_)(void*, std::uint64_t) noexcept = nullptr;
+    bool (*realtime_gpu_fence_)(void*) noexcept = nullptr;
+    void (*realtime_gpu_delivered_)(void*, std::uint64_t, std::uint8_t) noexcept = nullptr;
+    std::uint64_t callback_sequence_ = 0; // one monotonic RT/offline callback timeline
+    bool realtime_gpu_fenced_for_offline_ = false;
 
     // Synchronous (offline) drive. When `synchronous_` is set, the background
     // worker yields and process_offline() pumps the node inline under

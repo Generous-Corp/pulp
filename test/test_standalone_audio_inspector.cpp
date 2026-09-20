@@ -91,8 +91,7 @@ TEST_CASE("StandaloneApp wires its output probe into the Audio Inspector window"
         // No usable audio device (headless CI without an output device). The
         // probe is only prepare()d inside start(); skip honestly rather than
         // assert on an un-prepared probe.
-        SUCCEED("no audio device available — standalone wiring check skipped");
-        return;
+        SKIP("no audio device available — standalone wiring check skipped");
     }
 
     // start() opens AND starts a real output device, whose callback runs

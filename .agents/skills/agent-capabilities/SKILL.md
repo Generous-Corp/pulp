@@ -1083,3 +1083,40 @@ suite roughly 1.5x slower than M3. A selftest measured at ~62 s on an idle M3 �
 class — is already over the 120 s default once that factor and a loaded host are
 applied, even though the local number looks like comfortable headroom. Scale the
 local measurement before deciding a test needs no explicit `TIMEOUT`.
+
+## An installed `inspect/` control header is not a design-time capability row
+
+`tools/cmake/PulpInstallRules.cmake` installs the capability-control executor
+headers (`control_state_write_executor.hpp`,
+`control_timeline_document_session_executor.hpp`, and their siblings) into the
+same SDK that carries the design-time agent-capability contracts. Sharing an
+install list is not sharing a registry, and the resemblance is the trap: the
+headers declare typed request/outcome structs and a resolver, which reads like a
+binding, so the reflex is to add a manifest row "for consistency".
+
+Do not. Runtime operation metadata — operations, grants, instances, receipts —
+is broker authority and stays outside the design-time manifest by construction.
+A control operation is declared once in `inspect/src/control_manifest.cpp` and
+its capability once in `capability_definitions.inc`; the CLI and MCP surfaces
+then project it from `control_operation_registry()`. Nothing in that path reads
+the agent-capabilities manifest, so a row added there would advertise a contract
+no consumer resolves and no gate re-derives.
+
+The practical consequence is a disposition, not a code change: a sequencer
+exposure row covering a live control operation records
+`design_time_agent_manifest: not_applicable` with that boundary as its
+rationale, and never `gap` — `gap` claims someone owes the row, and nobody does.
+
+What the install entry *does* buy is honesty on a different surface. Adding the
+header to the install list is exactly what lets the same exposure row claim
+`installed_sdk: exposed`, because an embedding host then links the typed source
+seam rather than re-declaring it. Omit the install entry and that claim is
+false, while the manifest row would still have been wrong.
+
+## Humaniser kernel versus placed-device controls
+
+`midi.humanize` 1.1 advertises the compatible future-attack spec update method
+and supports a nonnegative timing floor. Its operational binding constructs a
+kernel and invokes the update with a bounded spec. This design-time kernel
+registration does not advertise placed-device parameter operations or grants;
+the event-humaniser exposure ledger keeps those product-control gaps explicit.

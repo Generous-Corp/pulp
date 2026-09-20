@@ -51,6 +51,32 @@ authorizes maintenance routing only; it does not authorize Pulp consumption,
 downstream cutover, or implementation before the corresponding Vellum
 acknowledgement.
 
+## A test-manifest line can cross a capability family
+
+`vellum_expansion_watch_check.py` matches changed paths against per-family
+selectors, and `visual-proof-harness` owns `test/cmake/view_widget_bridge_tests.cmake`
+outright. Registering **any** new test target in that manifest crosses the family
+— including a control-plane or audio test with no screenshot, golden, capture or
+render surface anywhere in it — so the change needs its own append-only event
+under `.github/vellum-expansion-watch-events/`.
+
+The failure reads as a false positive and is not one:
+
+```
+watch event family coverage differs; affected=['visual-proof-harness'] covered=[]
+```
+
+Two things make it hard to place. The checker reports the family, never the path
+that selected it, so grep the selector lists in `vellum_expansion_watch_check.py`
+for each changed path rather than guessing from the family's name. And an event
+file is only counted once it is **committed** — the checker reads the diff, not
+the working tree, so writing the JSON and re-running reports the identical
+failure and reads as a rejected event.
+
+The event's `capability_families` must equal the affected set exactly, and its
+`rationale` should name the single line that crossed the selector, so a reader
+can tell a manifest registration apart from a real harness change.
+
 ## GPU doctor boundary
 
 Pulp owns the `pulp doctor gpu` CLI/MCP adapters, typed GPU-health evidence,
@@ -527,3 +553,22 @@ The event is a new JSON file directly under
 claiming the affected families sorted. Coverage is compared for **equality**,
 not containment: claiming a family the diff does not touch fails the same way
 omitting one does.
+
+## Refreshing the ledger pulls this skill into skill-sync
+
+The repair for a stale pin edits `docs/status/gpu-vellum-handoff.yaml`, and that
+path is mapped to this skill in `tools/scripts/skill_path_map.json`. So a change
+that never intended to touch Vellum routing — refreshing one registry-digest
+literal inside a pinned validator script such as
+`tools/scripts/test_release_artifact_contents.py` — fails three gates in a chain,
+each naming something further from the edit than the last:
+
+1. the ctest, as `gpu-recipe-catalog-selftest`, for a stale row;
+2. the pre-push `gpu-handoff-pin` guard, once the ledger is behind the pin;
+3. `skill-sync`, once the ledger is regenerated, for `pulp-vellum-change-routing`.
+
+Expect the third rather than discovering it: the regeneration is mechanical and
+carries no routing decision, so either record what the pinned edit taught you
+here, or declare it with `Skill-Update: skip skill=pulp-vellum-change-routing
+reason="..."` on a commit in the range. Do not resolve it by reverting the ledger
+refresh — that puts step 1 back.

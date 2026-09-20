@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260919-skip-not-pass-tree-wide-watch",
+  "created_at": "2026-09-19T16:26:05Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "An unmet precondition was reporting a pass. SUCCEED() records a passing assertion, WARN() emits a message and still leaves the case passing, and a bare return; is recorded as passed with no output, so a suite's pass count stayed identical whether the lane ran or the precondition vanished. This widens the existing GPU-only rule to the whole test tree: the mechanical shape (a top-of-case guard whose next statement is return;) now reports with Catch2's SKIP(), which ctest surfaces as Skipped because PulpCatch.cmake sets SKIP_RETURN_CODE 4, and tools/scripts/check_skip_not_pass.py plus its self-test and a frozen ledger enforce the rule mechanically instead of in prose. It also repairs the CTest non-run summary, whose reason column read ctest's <skipped message>, the mechanism, identical for every Catch2 skip in the suite. Three families are crossed by test files only. design-source-ingest via nine files under the test/test_design_*, test/test_design_import*, test/test_cli_design*, test/test_cli_import* and test/test_import* selectors; chromium-authoring-frontend via test/test_browser_capture_ir.cpp and test/test_browser_import_cli.cpp under test/test_browser_capture* and test/test_browser_import*; and visual-proof-harness via test/test_screenshot_cli_contracts.cpp under test/test_*screenshot*. In every one of those files the diff is the guard line alone. No importer, DesignIR schema, browser capture path, generated design output, template, renderer, asset pipeline, harness, fixture, snapshot, threshold or Vellum-owned source changes, and no test selection or CTest verdict changes: the diff converts a silent pass into an honest skip and adds a lint. Registered watch-only so each family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "skip-not-pass-lint",
+    "skip-not-pass-lint-selftest",
+    "python3 tools/scripts/test_ctest_nonruns.py",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

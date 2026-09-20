@@ -33,6 +33,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from consumption_census import profile_key
+
 CENSUS_RELPATH = Path("docs/status/consumption-profiles.json")
 SCHEMA_RELPATH = Path("docs/status/consumption-profiles.schema.json")
 FACTS_NAME = "consumption-census-facts.json"
@@ -134,7 +136,8 @@ def main(argv: list[str]) -> int:
                 return 77
             expect("valid-current", baseline, 0)
 
-            key = next(iter(document["profiles"]))
+            staged_facts = json.loads((staged / FACTS_NAME).read_text())
+            key = profile_key(staged_facts)
             # A key is "<system>-<processor>-<enabled features>". Synthetic
             # profiles below move a real one to another platform, so they keep
             # the feature half and swap only the platform half.

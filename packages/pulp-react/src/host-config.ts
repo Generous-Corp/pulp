@@ -729,6 +729,7 @@ export const PulpHostConfig: HostConfig<
                 shim._textContent = initialText ?? '';
                 shim._nativeCreated = true;
                 shim.__pulpId = id;
+                shim.__pulpAuthoredLayout__ = normalizedProps;
                 // The Element constructor seeds internal `_id`, but the
                 // public `.id` getter returns an empty string until the
                 // setter marks it user-visible. Calling the setter keeps
@@ -889,6 +890,7 @@ export const PulpHostConfig: HostConfig<
                 newProps as Record<string, unknown>,
             );
             const dom = instance._dom as Record<string, unknown>;
+            dom.__pulpAuthoredLayout__ = newN;
             const committedText = asText(newN.children)
                 ?? (newN.text as string | undefined);
             if (committedText !== undefined) dom._textContent = committedText;

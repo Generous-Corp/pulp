@@ -15,7 +15,7 @@ struct FaustFilterFixture {
         processor = create_faust_filter();
         processor->set_state_store(&store);
         processor->define_parameters(store);
-        processor->prepare({48000.0, 512, 2, 2});
+        processor->prepare({48000.0, 2048, 2, 2});
     }
 
     void process(audio::Buffer<float>& in, audio::Buffer<float>& out) {

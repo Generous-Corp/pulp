@@ -488,7 +488,30 @@ endif()
 # surfacing later as a broken downstream GPU plugin. Guarded because a non-GPU
 # or minimally-configured SDK need not carry the transport.
 if(TARGET Pulp::gpu-audio)
+    if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+        if(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE)
+            message(FATAL_ERROR
+                "Pulp SDK smoke: installed D15 package claims production "
+                "release eligibility before exhaustive builder provenance")
+        endif()
+        if(NOT TARGET Pulp::gpu-audio-vellum-provider)
+            message(FATAL_ERROR
+                "Pulp SDK smoke: D15 SDK did not recreate its installed "
+                "Pulp::gpu-audio-vellum-provider target")
+        endif()
+        get_property(_pulp_gpu_audio_linked_runtimes GLOBAL PROPERTY
+            PULP_MACHO_LINKED_RUNTIME_DEPENDENCY_TARGETS)
+        if(NOT Pulp::gpu-audio-vellum-provider IN_LIST
+               _pulp_gpu_audio_linked_runtimes)
+            message(FATAL_ERROR
+                "Pulp SDK smoke: the installed Vellum provider is not "
+                "registered for final Mach-O link inspection: "
+                "${_pulp_gpu_audio_linked_runtimes}")
+        endif()
+        unset(_pulp_gpu_audio_linked_runtimes)
+    endif()
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp"
+"#include <pulp/gpu_audio/gpu_audio_capability.hpp>\n"
 "#include <pulp/gpu_audio/gpu_audio_transport.hpp>\n"
 "\n"
 "// Reference a header type and an archive-defined symbol (stats()) so the\n"
@@ -497,11 +520,46 @@ if(TARGET Pulp::gpu-audio)
 "int main() {\n"
 "    pulp::gpu_audio::GpuAudioTransport transport;\n"
 "    const auto stats = transport.stats();\n"
-"    return transport.is_prepared() ? 1 : (stats.miss_blocks == 0 ? 0 : 2);\n"
+"    const auto report = transport.capability_report();\n"
+"    return transport.is_prepared() ? 1 :\n"
+"        (stats.miss_blocks == 0 &&\n"
+"         report.path == pulp::gpu_audio::GpuAudioExecutionPath::Unavailable &&\n"
+"         report.provider == pulp::gpu_audio::GpuAudioProvider::Unknown &&\n"
+"         report.eligibility == pulp::gpu_audio::GpuAudioEligibility::Unavailable &&\n"
+"         report.fallback_policy == pulp::gpu_audio::MissPolicy::Silence &&\n"
+"         report.prepared_lead_blocks == 0 &&\n"
+"         !report.prepared && !report.fallback_available &&\n"
+"         !report.diagnostics_available ? 0 : 2);\n"
 "}\n")
     add_executable(PulpSDKSmokeGpuAudioProbe
         "${CMAKE_CURRENT_BINARY_DIR}/gpu_audio_export_probe.cpp")
     target_link_libraries(PulpSDKSmokeGpuAudioProbe PRIVATE Pulp::gpu-audio)
+
+    # Public installed-SDK lifecycle proof. This deliberately exercises only
+    # the backend-neutral transport contract: prepare/release/reprepare,
+    # worker-serviced delivery, and a bounded CpuFallback result when the
+    # worker is late or absent. Provider-side device-loss injection is private
+    # to the Dawn shared-I/O probes; the public SDK has no loss-injection hook.
+    add_executable(PulpSDKSmokeGpuAudioLifecycleProbe
+        gpu_audio_lifecycle_probe.cpp)
+    target_link_libraries(PulpSDKSmokeGpuAudioLifecycleProbe PRIVATE Pulp::gpu-audio)
+    if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+        set_target_properties(PulpSDKSmokeGpuAudioProbe PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-probe/$<CONFIG>")
+        pulp_stage_runtime_dependencies(PulpSDKSmokeGpuAudioProbe)
+        pulp_verify_runtime_dependencies_staged(PulpSDKSmokeGpuAudioProbe)
+
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/no_gpu_audio_probe.cpp"
+            "int main() { return 0; }\n")
+        add_executable(PulpSDKSmokeNoGpuAudioProbe
+            "${CMAKE_CURRENT_BINARY_DIR}/no_gpu_audio_probe.cpp")
+        set_target_properties(PulpSDKSmokeNoGpuAudioProbe PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY
+                "${CMAKE_CURRENT_BINARY_DIR}/no-gpu-audio-probe/$<CONFIG>")
+        pulp_stage_runtime_dependencies(PulpSDKSmokeNoGpuAudioProbe)
+        pulp_verify_runtime_dependencies_staged(PulpSDKSmokeNoGpuAudioProbe)
+    endif()
 endif()
 
 # Bundle-relocatability helper reachability.

@@ -94,13 +94,15 @@ different request with an earlier result.
 
 A running host's step grid is reachable through the same unified control
 platform as every other Pulp capability -- no bespoke sequencer verb, no new
-transport. Two typed operations are registered, both gated on their own
-capability and both bound to the host-main executor:
+transport. Four typed operations are registered, each gated on its own
+capability and all bound to the host-main executor:
 
 | Operation | Capability | Result | Profiles |
 |---|---|---|---|
 | `dev.pulp.sequencer/state.read@1` | `sequencer.state.read` | `response` | observe, develop |
 | `dev.pulp.sequencer/state.edit@1` | `sequencer.state.edit` | `receipt` | develop |
+| `dev.pulp.sequencer/transport.loop.read@1` | `sequencer.transport.loop.read` | `response` | observe, develop |
+| `dev.pulp.sequencer/transport.loop.write@1` | `sequencer.transport.loop.write` | `receipt` | develop |
 
 `state.read` copies the UI-side published snapshot and the seqlock playhead out
 of the channel; `pattern`, `include_snapshot`, and `include_playhead` bound what
@@ -111,6 +113,16 @@ comes back, and the response carries `epoch`, `engine_sequence`, and
 or `switch-pattern` -- and submits it to the single-producer command FIFO,
 returning `receipt_id`, `applied`, and `client_sequence`. `gesture_phase` groups
 a drag into one undoable gesture the way a parameter gesture does.
+
+`transport.loop.read@1` takes no parameters and returns the whole loop cell at
+once -- `enabled`, `start_tick`, `end_tick`, `playing`, and the monotonic
+`sequence` that stamps it. `transport.loop.write@1` carries exactly one
+`action`: `set-range` moves the boundaries, `set-enabled` toggles the loop and
+requires an `expected_sequence` so a toggle raced against another writer is
+refused rather than applied to a cell the caller never saw. Both actions require
+an `idempotency_key`, and the receipt echoes the resulting cell alongside
+`receipt_id` and `applied`, so a replayed key is answerable without a second
+read.
 
 Three things about these operations are not obvious from their schemas:
 
@@ -134,9 +146,11 @@ prints the frozen registry offline, and `--json` emits the canonical
 `dev.pulp.control/registry@1` projection with both JSON Schema bodies. Listing
 an operation is never a grant. To call one, use `pulp control call --instance ID
 dev.pulp.sequencer/state.read@1 --params JSON`; through MCP the registry derives
-the tools `pulp_control_sequencer_state_read` and
-`pulp_control_sequencer_state_edit` from the same rows, so Forge Sequencer and
-Forge Modular reach the grid with no bespoke surface. Grants and consent are
+one tool per row -- `pulp_control_sequencer_state_read`,
+`pulp_control_sequencer_state_edit`,
+`pulp_control_sequencer_transport_loop_read`, and
+`pulp_control_sequencer_transport_loop_write` -- so Forge Sequencer and
+Forge Modular reach the grid and its loop with no bespoke surface. Grants and consent are
 broker authority.
 
 Adding a sequencer control operation means updating this section too:
@@ -1936,11 +1950,14 @@ at the model layer, and keep a separate standalone-shape assertion for the host
 refusal so narrowing the model's reach does not silently retire it.
 
 The device catalog (`tools/timeline/src/device_catalog.cpp`) publishes what a
-chain may name — binding key, domain, reported latency, and the two bounds
-admission enforces. It lives in `tools/timeline` rather than in either
-boundary because `pulp-cli` and `pulp-mcp-core` link `pulp::tool-timeline`
-publicly but not `pulp::host`; putting the encoder anywhere else widens a
-target's link surface to pull the host in.
+chain may name — binding key, domain, reported latency, stable parameter IDs,
+plain ranges, defaults, units and behavior flags, and the two bounds admission
+enforces. Built-in humaniser controls are direct runtime controls; the catalog
+marks them non-automatable, non-rampable and non-modulatable, and Timeline
+placement state does not persist them. The catalog lives in `tools/timeline`
+rather than in either boundary because `pulp-cli` and `pulp-mcp-core` link
+`pulp::tool-timeline` publicly but not `pulp::host`; putting the encoder anywhere
+else widens a target's link surface to pull the host in.
 
 ### `Track::create` moves its input partway through, so late validation reads an empty collection
 
@@ -3960,3 +3977,47 @@ later round measures a warmed cache.
 The growth cases run each operation at two sizes for several rounds, so the
 suite costs several times a single-size pass — `timeline_tests.cmake` gives
 `pulp-test-timeline-scale` a correspondingly long `TIMEOUT`.
+
+## The live broker surface projects `ConflictCode`; it must never re-decide it
+
+`dev.pulp.timeline/document-session@1` exposes a mutable `DocumentSession`
+through the Pulp control broker, and the whole design rests on one rule: the
+broker reads the authority verdict the session already reached and never reaches
+its own. `control_timeline_conflict_result_code` is a total, one-directional
+switch from `timeline::ConflictCode` onto `ControlResultCode` —
+`CapabilityDenied` (the `CommandAuthority` axis) lands on `PolicyDenied`,
+`StaleRevision` on `StateConflict`, the quota codes on `ResourceExhausted`. A
+`WriterCapabilityMask` refusal therefore arrives at the live surface under the
+same name the offline CLI and MCP boundaries use, and a test can assert one
+verdict from both sides.
+
+The failure mode this forbids is quiet: a broker that consults the mask itself,
+or maps a conflict by category rather than by member, becomes a second authority
+model. It will agree with the session for a while and then drift on exactly the
+case that matters — a newly added `ConflictCode`, which is a wire ordinal the
+session owns. Because the switch is total over the enum, adding a member breaks
+the build at the projection rather than silently defaulting; keep it that way
+and never add a `default:` arm to `control_timeline_conflict_result_code`.
+
+Two more constraints that are not obvious from the session API:
+
+- **The broker never escalates a caller into `trusted`.**
+  `control_timeline_admissible_writer_profile` admits `proposal` and `editor`
+  and refuses everything else, *including* `trusted`, and an unnamed profile
+  resolves *down* to `proposal` rather than to whatever authority the host
+  itself happens to hold. Selecting the unquotaed profile on a caller's behalf
+  is the escalation the seam exists to prevent, so this is policy, not a default
+  worth tidying.
+- **A `registered_writer` exposure row must state that profile's exact
+  quotas.** `tools/scripts/sequencer_exposure_check.py` parses
+  `tools/timeline/src/writer_profile.cpp` rather than trusting the ledger, so
+  `authority.bounds` has to equal the profile's real
+  `max_transaction_retained_bytes` / `max_session_retained_bytes`, and every
+  `refusal_codes` entry has to be a name `conflict_code_name` emits. Transcribe
+  neither from memory; read them out of that source.
+
+The live operation reaches Forge Sequencer and Forge Modular without any
+Forge-side change, because `tools/cli/cmd_control.cpp` and
+`tools/mcp/mcp_control_tool_catalog.cpp` both walk the registry rather than
+enumerating operations by hand — declaring the capability grantable is what
+projects it to both surfaces.

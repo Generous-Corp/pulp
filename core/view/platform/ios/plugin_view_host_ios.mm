@@ -5,12 +5,13 @@
 
 #if TARGET_OS_IOS
 
-#include <pulp/canvas/cg_canvas.hpp>
-#include <pulp/view/drag_drop.hpp>
-#import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <UIKit/UIKit.h>
 #include <algorithm>
 #include <atomic>
+#include <pulp/canvas/cg_canvas.hpp>
+#include <pulp/view/drag_drop.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -934,9 +935,16 @@ public:
             metal_view_.onLayout = ^{ this->handle_layout(); };
 
             // Native drag-and-drop. Map a drop point through the Metal view's
-            // LIVE pointTransform (the inverse design-viewport map touches use),
-            // captured weakly so a drop never resurrects a torn-down view.
-            __weak PulpMetalPluginView* weak_view = metal_view_;
+            // LIVE pointTransform (the inverse design-viewport map touches use).
+            // The block capture must NOT retain the view (a drop must never
+            // resurrect a torn-down view). This file compiles under MRC like
+            // the mac hosts, where the established non-retaining capture is
+            // __block (MRC blocks do not retain __block object variables);
+            // __weak would require ARC. The capture is safe because the block
+            // only fires from UIKit interactions attached to metal_view_
+            // itself, and the destructor invalidates drag_drop_ before the
+            // view member is released.
+            __block PulpMetalPluginView* weak_view = metal_view_;
             drag_drop_ = [[PulpIOSDragDrop alloc] initWithRoot:&root_
                                                       hostView:metal_view_
                                                 pointTransform:^pulp::view::Point(pulp::view::Point p) {

@@ -97,7 +97,7 @@ TEST_CASE("UnitDelay publishes old state until the next state is committed",
 }
 
 TEST_CASE("UnitDelay impulse and reset are exact through RenderScenario",
-          "[signal][unit-delay][audio-harness]") {
+          "[signal][unit-delay][audio-harness][i2][DSP-01]") {
     auto result = RenderScenario(create_unit_delay_processor)
                       .name("unit-delay.impulse")
                       .sample_rate(48'000.0)
@@ -141,7 +141,7 @@ TEST_CASE("UnitDelay process and reset are realtime safe", "[signal][unit-delay]
 }
 
 TEST_CASE("UnitDelay scalar oracle rejects publish-before-read ordering",
-          "[signal][unit-delay][negative-control]") {
+          "[signal][unit-delay][negative-control][i2][NEG-03]") {
     PublishBeforeReadDelay broken;
     constexpr std::array<float, 5> expected{0.0f, 1.0f, -0.25f, 0.5f, 0.0f};
 

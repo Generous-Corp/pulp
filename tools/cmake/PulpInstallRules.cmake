@@ -167,6 +167,21 @@ install(TARGETS ${PULP_SDK_TARGETS}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+# A D15-enabled pulp-gpu-audio archive retains Dawn references which resolve
+# through Vellum's shared provider. Ship that provider inside the Pulp SDK so a
+# find_package(Pulp) consumer never depends on the build machine's Vellum
+# prefix. PulpConfig recreates a Pulp-owned imported target for this artifact.
+if(PULP_GPU_AUDIO_HAS_VELLUM_D15 AND TARGET Vellum::Gpu)
+    install(IMPORTED_RUNTIME_ARTIFACTS Vellum::Gpu
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(FILES
+        "${PULP_GPU_AUDIO_VELLUM_NOTICE_DIR}/LICENSE.md"
+        "${PULP_GPU_AUDIO_VELLUM_NOTICE_DIR}/NOTICE.md"
+        "${PULP_GPU_AUDIO_VELLUM_NOTICE_DIR}/DEPENDENCIES.md"
+        DESTINATION "share/doc/Pulp/third-party/Vellum")
+endif()
+
 # Also install third-party targets that our exported targets depend on
 if(PULP_HAS_VST3)
     install(TARGETS vst3-sdk
@@ -405,6 +420,7 @@ elseif(TARGET pulp-inspect-protocol)
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_read_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_state_write_executor.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_timeline_document_session_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/control_trace_session_executor.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/main_thread_rpc.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/inspect/include/pulp/inspect/trace_inspector.hpp"
@@ -740,6 +756,7 @@ install(FILES
     # so it must land beside it in the installed SDK too — a consumer that can
     # stage sidecars but cannot verify them is exactly the gap WAH-3 closes.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpRuntimeStaging.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpStageMachOLinkedRuntime.cmake"
     # Resolved by PulpRuntimeStaging.cmake relative to its own directory, so it
     # must land beside it — a consumer that can stage sidecars but not verify
     # them is exactly the gap WAH-3 closes.
@@ -921,6 +938,7 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_open_documents.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_view.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac.mm"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_script_keys.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_text_input.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac_host_lifetime.hpp"

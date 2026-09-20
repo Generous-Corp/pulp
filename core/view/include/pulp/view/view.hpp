@@ -272,22 +272,46 @@ public:
     /// Walks own value, then parent chain. nullopt if no ancestor set it.
     std::optional<Color> inheritable_text_color() const;
 
-    void set_inheritable_font_size(float size) { inh_font_size_ = size; }
+    // An inheritable typography value is read by every descendant Label that
+    // did not set its own, so it changes their measured boxes and must move
+    // the layout generation for the same reason Label's own setters do.
+    // Guarded on a real change so a replayed identical style stays clean.
+    void set_inheritable_font_size(float size) {
+        if (inh_font_size_ && *inh_font_size_ == size)
+            return;
+        inh_font_size_ = size;
+        invalidate_layout();
+    }
     void clear_inheritable_font_size() { inh_font_size_.reset(); }
     std::optional<float> inheritable_font_size() const;
 
-    void set_inheritable_letter_spacing(float sp) { inh_letter_spacing_ = sp; }
+    void set_inheritable_letter_spacing(float sp) {
+        if (inh_letter_spacing_ && *inh_letter_spacing_ == sp)
+            return;
+        inh_letter_spacing_ = sp;
+        invalidate_layout();
+    }
     void clear_inheritable_letter_spacing() { inh_letter_spacing_.reset(); }
     std::optional<float> inheritable_letter_spacing() const;
 
-    void set_inheritable_font_weight(int w) { inh_font_weight_ = w; }
+    void set_inheritable_font_weight(int w) {
+        if (inh_font_weight_ && *inh_font_weight_ == w)
+            return;
+        inh_font_weight_ = w;
+        invalidate_layout();
+    }
     void clear_inheritable_font_weight() { inh_font_weight_.reset(); }
     std::optional<int> inheritable_font_weight() const;
 
     /// Inheritable font-family cascade. Mirrors the font-weight pattern;
     /// Labels read this when set_font_family hasn't been called directly.
     /// Font-manager resolution is independent from the cascade plumbing.
-    void set_inheritable_font_family(std::string f) { inh_font_family_ = std::move(f); }
+    void set_inheritable_font_family(std::string f) {
+        if (inh_font_family_ && *inh_font_family_ == f)
+            return;
+        inh_font_family_ = std::move(f);
+        invalidate_layout();
+    }
     void clear_inheritable_font_family() { inh_font_family_.reset(); }
     std::optional<std::string> inheritable_font_family() const;
 

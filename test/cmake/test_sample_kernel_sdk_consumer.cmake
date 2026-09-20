@@ -43,6 +43,8 @@ target_link_libraries(consumer PRIVATE Pulp::host)
 file(WRITE "${_source}/main.cpp" [=[
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+#include <pulp/host/sample_region_plan.hpp>
+#include <pulp/host/sample_region_proof.hpp>
 
 #include <cstdint>
 #include <type_traits>
@@ -84,6 +86,17 @@ int main() {
     if (!delay || delay->state_size != sizeof(float) ||
         delay->state_alignment != alignof(float)) return 5;
     if (!graph.sample_kernel_type("sdk.consumer.scalar", 1)) return 6;
+
+    SampleRegionCandidate candidate;
+    const auto proof = prove_sample_region(candidate);
+    if (proof.accepted || proof.reason != SampleRegionRefusalReason::UnknownRegion) return 7;
+    const auto graph_proof = prove_sample_regions({candidate});
+    if (graph_proof.accepted ||
+        graph_proof.reason != SampleRegionRefusalReason::UnknownRegion) return 8;
+    const auto parser_proof = prove_sample_region_parser_shape({});
+    if (!parser_proof.accepted) return 9;
+    const auto plan = build_sample_region_plan(candidate);
+    if (plan.proof.accepted || plan.plan.has_value()) return 10;
     return 0;
 }
 ]=])

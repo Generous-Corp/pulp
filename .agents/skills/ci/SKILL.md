@@ -690,6 +690,37 @@ runner.environment == 'self-hosted'`. The second clause matters: when
 `PULP_LOCAL_MACOS_RUNS_ON_JSON` is unset the leg falls back to hosted
 `macos-15`, which has no representative GPU and must not opt in.
 
+### Where to read what did NOT run
+
+`build.yml`'s ctest call passes `--output-junit`, and an `if: always()` step
+turns that report into a job-summary table of every `notrun`/`disabled` case.
+Read it before concluding a green `macos` check means the suite ran: ctest
+returns 0 whether every test passed or every skip-capable test declined, so the
+required check is green either way and the table is the only place the
+difference appears.
+
+Two traps in reading it:
+
+- The table's population is what ctest **attempted**. `ctest -N` is the control
+  for what is **registered**, and the step prints both. A gap between them is
+  real information rather than a fault: label exclusions, `--exclude-regex`, and
+  configure-time absence remove tests from the report entirely, and a test that
+  was never configured is not a skip at all.
+- ctest's `<skipped message=...>` is the mechanism, not the reason. It reads
+  `SKIP_RETURN_CODE=4` for every Catch2 skip in the suite. The author's reason
+  lives in the captured console output, under `<file>:<line>: SKIPPED:` /
+  `explicitly with message:`, which is where `tools/scripts/ctest_nonruns.py`
+  recovers it from. A row that shows the bare mechanism is a non-Catch2 skip,
+  typically a script exiting `SKIP_RETURN_CODE`.
+
+The step asserts nothing, deliberately. Skipping is frequently correct (no GPU,
+no device, no vendor SDK, wrong platform) and a rule that made skips fail has
+already caused an iOS-gate outage once; the defect being addressed is
+invisibility, not skipping. In test source the corresponding rule is that an
+unmet precondition uses Catch2's `SKIP()`, never `SUCCEED`/`WARN`/a bare
+`return;`, all of which leave the case passing and therefore invisible here.
+`tools/scripts/check_skip_not_pass.py` enforces that mechanically.
+
 ## A ctest SKIP is green, so a test that never ran reads as a passing one
 
 `SKIP_RETURN_CODE` is the right tool — a test needing a GPU, a device, an absent
@@ -2191,6 +2222,12 @@ bisectable.
   (`CMakeLists.txt`, `tools/cmake/PulpAndroid.cmake`,
   `tools/cmake/PulpDependencies.cmake`, `tools/deps/manifest.json`, plus Android
   Gradle files), and do not give `.cxx` a restore key that ignores those inputs.
+- **Pin the package list on every `android-actions/setup-android@v3` step.** Its
+  default is `tools platform-tools`, but Google removed the legacy `tools`
+  package from current repositories. An omitted `with.packages` therefore fails
+  inside setup before repository code runs. Use `packages: platform-tools` and
+  install the exact NDK, emulator, platform, and system image later with the
+  workflow's explicit `sdkmanager` step.
 - **`version-at-land.yml` + `version_at_land.py` are the single-writer,
   post-merge half of the version-bump intent-trailer model, and the workflow
   runs LIVE (`--push`).** They exist to kill the version-bump merge treadmill
@@ -9188,3 +9225,53 @@ every surface: a gate that reports "no binary" as "misformatted" is the
 false-verdict class this repo keeps paying for. The wiring — exit codes kept
 apart, the PyPI pin, hosted runner — is asserted by
 `tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).
+
+## A workflow that matches a bypass trailer with its own grep will honour a quoted one
+
+`auto-release.yml` decides post-merge whether a version bump becomes a release
+tag, and two commit-message trailers call it off: `Release: skip` and a
+top-level `Version-Bump: skip reason="..."`. Both have to be found in the WHOLE
+body, because a merge-queue `COMMIT_MESSAGES` squash appends a separator and a
+co-author footer after the source commits, so `git interpret-trailers --parse`
+sees only the footer and a real declaration on the branch is invisible to it.
+
+Scanning the whole body then puts a real declaration and a merely *quoted* one
+in the same text — a friction report, a guide to this grammar, a PR body pasted
+into a commit. Two things make that worse than it sounds:
+
+* **A fence keeps the trailer at column zero.** Indentation and `>` move a
+  quoted line off the line start, so an anchored pattern excludes them for
+  free — which makes the anchor look sufficient. A fenced code block does not
+  move it, so the one quoting form an agent is most likely to write is the one
+  the anchor misses. `gate_common._fenced_line_indices` masks closed fences
+  before the scan; an *unclosed* fence masks nothing, deliberately.
+* **The failure is silent and inverted.** Every other bypass trailer fails
+  toward "the gate ran and said no", which someone reads. A bypass read from a
+  quoted example makes a release *not happen* — no run, no annotation, no
+  issue. Nothing observes it.
+
+So never match one of these trailers from a workflow step. Call
+`tools/scripts/release_trailer_guard.py`, which is a shell-callable front door
+onto the same parse every pre-merge gate uses:
+
+```bash
+# `skip` or `no-skip` on stdout; exit 2 when the commit cannot be classified
+python3 tools/scripts/release_trailer_guard.py --query release-skip --ref HEAD
+python3 tools/scripts/release_trailer_guard.py --query version-bump-skip --ref "$sha"
+```
+
+Case the exit-2 verdict explicitly and fail the step — guessing "no bypass"
+publishes an unwanted tag, and guessing "bypass" withholds a wanted one, which
+is the failure you are avoiding. Python3 is available at that point in
+`auto-release.yml`: the step runs after `actions/checkout`, on `ubuntu-latest`,
+and the next step already shells to `python3` without `setup-python`.
+
+The same grammar backs the PR-time gate and the pre-merge tag prediction
+(`gate_common.version_bump_skip_reason` / `release_skip_declared`), so a
+`Version-Bump: skip` that passes at PR time cannot fail post-merge. Keep it one
+implementation; three that agree today is what produced this.
+
+When you change that guard step, `test_release_trailer_guard.py` runs it
+**extracted from the YAML** against real commits. Do not "fix" that test by
+pasting the step into it — a transcribed copy is exactly how the shell scan
+stopped matching the parse it was supposed to mirror.

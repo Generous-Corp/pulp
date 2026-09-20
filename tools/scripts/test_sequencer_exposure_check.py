@@ -29,6 +29,7 @@ from sequencer_exposure_check import (
     load_ledger_from_worktree,
     resolve_git_comparison,
     validate_document,
+    validate_dependency_references,
     validate_git_provenance,
     validate_release_evidence,
     validate_schema_contract,
@@ -354,6 +355,18 @@ def main() -> int:
         errors = validate_document(valid, root)
         if errors:
             raise AssertionError("valid fixture failed:\n" + "\n".join(errors))
+        strict_valid = copy.deepcopy(valid)
+        strict_valid["rows"][0]["delivery_state"] = "pending"
+        strict_valid["rows"][0].pop("release", None)
+        strict_valid["rows"][0]["surfaces"]["installed_sdk"]["dependencies"] = [
+            "missing-owner"
+        ]
+        strict_errors = validate_dependency_references(strict_valid)
+        if not any("missing-owner" in error for error in strict_errors):
+            raise AssertionError("strict dependency mode accepted an unresolved active dependency")
+        strict_valid["rows"][0]["surfaces"]["installed_sdk"]["dependencies"] = []
+        if validate_dependency_references(strict_valid):
+            raise AssertionError("strict dependency mode rejected a dependency-free active row")
 
         # An exposed surface must declare the authority it admits a caller under.
         # The rejection is the assertion that matters, so it is stated first and

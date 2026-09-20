@@ -231,6 +231,15 @@ without inferring them from transport fields. `HeadlessHost::process(...,
 ProcessContext)` forwards those flags unchanged, so tests can cover
 runtime-mode decisions without a plug-in format SDK.
 
+An in-process `ProcessorNode` that declares
+`NodeCapabilities::consumes_audio_rate_modulations` receives dense lanes through
+the appended `Processor::process_block(ProcessBlock&)` hook. `prepare()` freezes
+the descriptor, parameter catalog, capability, and delivery policy off the
+audio thread. The graph preallocates lane samples and descriptors for at most 64
+destinations per node, 256 per graph, and 16,384 frames. The callback borrows
+that storage; it must not retain a lane span after the call. Dense scratch is
+per node, is never persistent state, and is not carried across live swap.
+
 The contract is deliberately non-owning: bus audio is borrowed from the
 host or renderer, event containers are owned by adapters, and scratch
 memory is provided before the callback. This keeps the same hard

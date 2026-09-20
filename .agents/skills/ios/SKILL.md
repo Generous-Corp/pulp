@@ -934,6 +934,22 @@ cases (REQUIRE+ENABLE+missing-Skia fail; REQUIRE off succeeds;
 REQUIRE on + ENABLE off fails). Add a case here whenever a new flag
 contradicts an existing one.
 
+### The GPU (`PULP_HAS_SKIA`) half of `plugin_view_host_ios.mm` only compiles in a GPU-ON configure
+
+Both long-standing iOS gates configure `PULP_ENABLE_GPU=OFF`, so the
+`#ifdef PULP_HAS_SKIA` sections of the iOS plugin view host were compiled
+by nothing and silently drifted (missing `pointer_dispatch.hpp` include;
+a `__weak` capture in a manual-refcounted file — this repo's ObjC++ is
+MRC everywhere, so use the mac hosts' `__block` non-retaining capture
+instead; MRC blocks do not retain `__block` object variables). The iOS
+compile gate now carries an iphonesimulator GPU leg
+(`-DPULP_ENABLE_GPU=ON -DPULP_REQUIRE_GPU_FOR_SDK=ON`, manifest-pinned
+`ios-simulator-arm64-x86_64` Skia slice fetched into the build tree)
+that builds `PulpGpuSmoke_AUv3` + `PulpGpuSmoke_HostApp_Embed`, so
+breakage there reds the required macos check. When editing the GPU half
+of the iOS host, that leg is the compile proof — a CG-only green run
+says nothing about it.
+
 ### `IOSGpuPluginViewHost::gpu_surface()` exposes the host's wgpu::Surface (Phase iOS-D.3b Slice 1)
 
 `PluginViewHost` now has a `virtual render::GpuSurface* gpu_surface()`

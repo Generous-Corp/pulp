@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -20,10 +21,16 @@ inline constexpr std::string_view kEventHumaniserBindingKey = "pulp.device.event
 /// reports. A note can only be displaced by a device that received it before
 /// its nominal time, so the window is what buys the device the right to place
 /// a note anywhere in `[nominal - window, nominal]` once the host has shifted
-/// the scheduling window by the same amount. It is a compile-time constant and
-/// no parameter changes it: a latency that moved under automation would
-/// invalidate the shift the host already resolved and cached.
+/// the scheduling window by the same amount. Timing depth changes the jitter
+/// span inside this fixed window; it never changes the reported latency because
+/// the host resolves and caches the compensation shift before playback.
 inline constexpr int kEventHumaniserWindowSamples = 512;
+
+/// Stable parameter IDs exposed by the built-in humaniser. Timing depth is a
+/// normalized share of the fixed look-ahead window; velocity depth is the
+/// maximum MIDI-velocity displacement. Neither changes reported latency.
+inline constexpr std::uint32_t kEventHumaniserTimingDepthParamId = 1;
+inline constexpr std::uint32_t kEventHumaniserVelocityDepthParamId = 2;
 
 /// The longest device chain the host binding lowers today. Any number of
 /// event-to-event devices would be sound, but each one needs its own prepared

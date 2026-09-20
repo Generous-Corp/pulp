@@ -147,8 +147,7 @@ TEST_CASE("PushNotifications stub backend reports unavailable", "[push-notificat
         // Real platform backend got installed via static initializer —
         // skip the stub-specific assertions. The mock-backend case below
         // still covers the API contract end-to-end.
-        SUCCEED("Platform backend installed; stub path not exercised here.");
-        return;
+        SKIP("Platform backend installed; stub path not exercised here.");
     }
 
     REQUIRE_FALSE(notifications.is_available());

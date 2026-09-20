@@ -18,14 +18,16 @@
 // invalidates and a WM_PAINT triggers render_frame(). For embed callers that
 // drive frames explicitly (pulp_embed_tick), repaint() renders synchronously.
 
-#include <pulp/view/plugin_view_host.hpp>
-#include <pulp/view/plugin_frame_renderer.hpp>  // shared with the Linux host
-#include <pulp/view/pointer_dispatch.hpp>
-#include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
-#include <pulp/view/platform/win_pointer_input.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/platform/win_plugin_input_router.hpp>
+#include <pulp/view/platform/win_pointer_input.hpp>
 #include <pulp/view/platform/win_surface_lifecycle.hpp>
-#include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
+#include <pulp/view/plugin_frame_renderer.hpp> // shared with the Linux host
+#include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/repaint_damage.hpp> // compute_effective_damage (platform-free)
+#include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
 #include <pulp/view/window_host.hpp>
 
 #ifdef PULP_HAS_SKIA
@@ -59,8 +61,9 @@
 #include <pulp/view/drag_drop.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <atomic>
+#include <chrono>
+#include <cmath>
 #include <cstring>
 #include <cwchar>
 #include <functional>
@@ -92,6 +95,8 @@ static_assert(win_input::kVkOem1 == VK_OEM_1);
 static_assert(win_input::kVkOem7 == VK_OEM_7);
 
 constexpr const wchar_t* kChildClassName = L"PulpPluginViewHostChild";
+constexpr UINT_PTR kFrameTimerId = 1;
+constexpr UINT kFrameTimerPeriodMs = 16;
 
 class WinPluginViewHost;
 
@@ -155,6 +160,7 @@ public:
           size_(options.size),
           use_gpu_(options.use_gpu),
           options_(options) {
+        root_.set_frame_clock(&frame_clock_);
         // Dawn cannot configure presentation until attach_to_parent() gives the
         // HWND its final parent and style, so gpu_surface() is legitimately
         // null for the whole window between create() and attach. Say so, rather
@@ -180,6 +186,8 @@ public:
     }
 
     ~WinPluginViewHost() override {
+        stop_frame_timer();
+        root_.set_frame_clock(nullptr);
         root_.set_plugin_view_host(nullptr);
         shutdown_drag_drop();
 #ifdef PULP_HAS_SKIA
@@ -239,6 +247,7 @@ public:
         }
         ShowWindow(hwnd_, SW_SHOW);
         attached_.store(true, std::memory_order_release);
+        start_frame_timer();
 #ifdef PULP_HAS_SKIA
         // Dawn configures its presentation surface for the HWND's current
         // native-window shape. Creating it while this HWND is still the hidden
@@ -278,6 +287,7 @@ public:
 
     void detach() override {
         if (!hwnd_) return;
+        stop_frame_timer();
         input_router_.cancel_gesture();
         try {
             transfer_input_focus(root_, nullptr);
@@ -412,8 +422,10 @@ public:
         input_router_.on_focus_changed(gained);
     }
 
-
-    void repaint() override {
+    // Paint/invalidate without changing the host's dirty state. The timer uses
+    // this after it has consumed the dirty bit for the measured frame; public
+    // repaint() remains the dirty signal used by input, resize, and View.
+    void paint_or_invalidate() {
 #ifdef PULP_HAS_SKIA
         if (gpu_surface_ && skia_surface_) {
             render_frame(nullptr, nullptr, nullptr);
@@ -421,6 +433,11 @@ public:
         }
 #endif
         if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+
+    void repaint() override {
+        needs_repaint_ = true;
+        paint_or_invalidate();
     }
 
     // Coalesced repaint for INPUT-driven updates (mouse down/move/up).
@@ -440,6 +457,7 @@ public:
     // which means a message pump exists to deliver the WM_PAINT. Callers that
     // drive frames explicitly (pulp_embed_tick) still use repaint() directly.
     void request_repaint_from_input() {
+        needs_repaint_ = true;
         if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
@@ -597,6 +615,10 @@ private:
     HWND hwnd_ = nullptr;
     std::atomic<bool> attached_{false};
     std::function<void()> idle_callback_;
+    FrameClock frame_clock_;
+    HostFramePump frame_pump_;
+    bool needs_repaint_ = true;
+    bool continuous_frames_ = false;
     std::function<void(uint32_t, uint32_t)> resize_cb_;
     float design_viewport_w_ = 0.0f;
     float design_viewport_h_ = 0.0f;
@@ -614,6 +636,48 @@ private:
     // FU-2: when true the host clips the repaint to the damaged rect and blits
     // a retained persistent-scene target. Default OFF.
     bool partial_repaint_enabled_ = false;
+
+    void start_frame_timer() {
+        if (!hwnd_ || SetTimer(hwnd_, kFrameTimerId, kFrameTimerPeriodMs, nullptr) == 0)
+            runtime::log_warn("WinPluginViewHost: SetTimer frame pump failed");
+        frame_pump_.suspend();
+        needs_repaint_ = true;
+    }
+
+    void stop_frame_timer() {
+        if (hwnd_)
+            KillTimer(hwnd_, kFrameTimerId);
+        frame_pump_.suspend();
+        needs_repaint_ = false;
+        continuous_frames_ = false;
+    }
+
+    void handle_frame_timer() {
+        // KillTimer cannot remove a WM_TIMER already queued by the host loop.
+        // Teardown must therefore be checked at dispatch time as well as at
+        // detach, so a stale callback cannot paint an orphaned child HWND.
+        if (!attached_.load(std::memory_order_acquire))
+            return;
+        // The Windows plug-in host is embedded in a DAW-owned message loop, so
+        // WM_TIMER is the portable frame source available to this HWND. Gate
+        // the UI-thread work before walking the tree; static editors therefore
+        // pay no frame-clock or render cost after their first paint.
+        if (!should_dispatch_host_frame(frame_pump_, needs_repaint_, continuous_frames_,
+                                        static_cast<bool>(idle_callback_)))
+            return;
+
+        const auto now =
+            std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
+                .count();
+        const bool dirty = needs_repaint_;
+        needs_repaint_ = false;
+        const auto tick = begin_host_frame(&root_, frame_clock_, frame_pump_, now, dirty);
+        continuous_frames_ = tick.continuous;
+        if (tick.should_render) {
+            advance_host_frame(&root_, frame_clock_, tick.dt);
+            paint_or_invalidate();
+        }
+    }
 
     // Window-space mapping lives in win_pointer_input.hpp so the signed-word
     // unpack and the physical→logical divide are unit-tested off Windows (the
@@ -873,6 +937,10 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     auto* host = reinterpret_cast<WinPluginViewHost*>(
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (host && msg == WM_TIMER && wp == kFrameTimerId) {
+        host->handle_frame_timer();
+        return 0;
+    }
     if (host && msg == WM_PAINT) {
         host->handle_wm_paint();
         return 0;

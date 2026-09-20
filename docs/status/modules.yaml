@@ -62,7 +62,7 @@ modules:
       - runtime
     docs: reference/modules.md#dawproject
   - name: host
-    summary: Plugin hosting, the SignalGraph binding that compiles an authored graph into an immutable routed runtime snapshot with latency compensation and anticipation lanes, and a transport-aware one-shot offline renderer for bouncing a timeline region
+    summary: Plugin hosting, the SignalGraph binding that compiles an authored graph including retained native Processor nodes into an immutable routed runtime snapshot with latency compensation dense audio-rate modulation and anticipation lanes, and a transport-aware one-shot offline renderer for bouncing a timeline region
     status: experimental
     dependencies:
       - playback
@@ -156,7 +156,8 @@ modules:
 
   - name: format
     summary: >-
-      Plugin format adapters (VST3, AU, CLAP, standalone, headless), validation
+      Plugin format adapters (VST3, AU, CLAP, standalone, headless), native
+      ProcessorNode dense audio-rate graph delivery, validation
       harness, diagnostic reporter. Ships as three targets: pulp::format-core
       (the authoring surface, view-free), pulp::format-view (ViewBridge, editor
       chrome and the CLAP adapter, which carry the core/view dependency), and

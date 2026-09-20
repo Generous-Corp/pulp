@@ -1823,8 +1823,12 @@ the `latency_samples` the device reports — so a caller can add the chain's
 latencies and predict both the scheduling-window shift and a refusal past
 `latency_ceiling_samples` without authoring anything. `max_chain_length` is the
 longest chain the host binding lowers; a longer one is refused rather than
-truncated. The `pulp_timeline_device_catalog` MCP tool returns the same object
-from the same encoder, so the CLI and MCP answers are identical by construction.
+truncated. A device's `parameters` list publishes each stable ID, plain value
+range, default, unit, and behavior flags. The built-in humaniser's Timing Depth
+and Velocity Depth are direct runtime controls: both are non-automatable,
+non-rampable, non-modulatable, and are not persisted in Timeline placement
+state. The `pulp_timeline_device_catalog` MCP tool returns the same object from
+the same encoder, so the CLI and MCP answers are identical by construction.
 
 `export` first plans conversion against the selected format and stops unless
 every reported lossy concept has its own repeated `--accept-loss <concept-id>`

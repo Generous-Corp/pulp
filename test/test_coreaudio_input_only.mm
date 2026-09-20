@@ -187,10 +187,9 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
     // later sibling SECTION from Catch2's discovery, so a per-section gate would
     // silently stop the -10868 / output / duplex guards from ever running.
     if (!audio_hardware_open_enabled()) {
-        SUCCEED("set PULP_TEST_AUDIO_OPEN_HARDWARE=1 to open a real audio device — "
-                "skipping every open()/start() section so the suite never re-clocks "
-                "the developer's interface or a shared CI Mac");
-        return;
+        SKIP("set PULP_TEST_AUDIO_OPEN_HARDWARE=1 to open a real audio device — "
+             "skipping every open()/start() section so the suite never re-clocks "
+             "the developer's interface or a shared CI Mac");
     }
 
     auto sys = create_audio_system();
@@ -198,8 +197,7 @@ TEST_CASE("CoreAudio opens a device input-only and delivers captured frames",
 
     DeviceInfo in_dev;
     if (!find_input_device(*sys, in_dev)) {
-        SUCCEED("no input-capable audio device present — cannot exercise input-only open");
-        return;
+        SKIP("no input-capable audio device present — cannot exercise input-only open");
     }
 
     // The regression guard for the AUHAL EnableIO/CurrentDevice ordering bug.

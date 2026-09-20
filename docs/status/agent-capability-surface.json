@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 75,
+  "inventory_version": 78,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 488,
-    "reviewed_headers": 198,
+    "public_headers": 495,
+    "reviewed_headers": 205,
     "legacy_unreviewed_headers": 290,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 108,
+      "capability_entrypoint": 116,
       "capability_support": 44,
-      "infrastructure": 44,
+      "infrastructure": 43,
       "legacy_unreviewed": 290,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 266,
-        "reviewed_headers": 113,
+        "public_headers": 273,
+        "reviewed_headers": 120,
         "legacy_unreviewed_headers": 153,
         "unsupported_headers": 2
       },
@@ -1132,6 +1132,83 @@
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
     },
     {
+      "domain": "signal",
+      "source": "core/host/include/pulp/host/custom_node_type.hpp",
+      "fingerprint": "sha256:c290d8321ca4432c27569f23513a667ef27f0c9a550013ba21a6c256547bb6f1",
+      "include": "pulp/host/custom_node_type.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.sample-region"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/host/include/pulp/host/sample_region_authoring.hpp",
+      "fingerprint": "sha256:15e798963f6115b371c9a644de16619a6ea10e5c797845b25db72c14301ebaf7",
+      "include": "pulp/host/sample_region_authoring.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.sample-region"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/host/include/pulp/host/sample_region_parameters.hpp",
+      "fingerprint": "sha256:39d608c270c2714a56d0f6213d75837abfead2b271503e02b597ddf6f21e8c25",
+      "include": "pulp/host/sample_region_parameters.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.sample-region"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/host/include/pulp/host/sample_region_proof.hpp",
+      "fingerprint": "sha256:f40d8f2adf1ba7cb5c2b5e415d1f8c0219b95eb9c470f89041e9f45569f8f4a4",
+      "include": "pulp/host/sample_region_proof.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.sample-region"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/host/include/pulp/host/signal_graph.hpp",
+      "fingerprint": "sha256:1a6063deb4e3316cb45ddef006e5a728fbd0eef6af8551a3c9fc68804a379bc0",
+      "include": "pulp/host/signal_graph.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.sample-region"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/host/include/pulp/host/signal_graph_prepared_topology_edit.hpp",
+      "fingerprint": "sha256:e4d22adde4a16ab367d0b8c1acbcdced9cec747b1bbe5543003c5d396d39c628",
+      "include": "pulp/host/signal_graph_prepared_topology_edit.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.sample-region"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "signal",
+      "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
+      "fingerprint": "sha256:c348a20011297911cb028596abb74c56a032b805fdf51653f7151b3c247668e7",
+      "include": "pulp/host/signal_graph_runtime.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.sample-region"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/android_midi_fifo.hpp",
       "fingerprint": "sha256:6f28940461c02bc3f631a756e270c2eeaea532c4d415ccd78fecf614b2668f6c",
@@ -1251,7 +1328,7 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/humanize.hpp",
-      "fingerprint": "sha256:eb1b342c0dc35280d028d649d911262c8f2249f3c35d64badc58ad966408c02e",
+      "fingerprint": "sha256:1c4307dd8107cb3e38f9b3fd5046303f8ab8346164f021ecca414c9f227468b1",
       "include": "pulp/midi/humanize.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -2086,7 +2163,7 @@
     {
       "domain": "playback",
       "source": "core/playback/include/pulp/playback/transport.hpp",
-      "fingerprint": "sha256:13685c53c2e82e28bff6b56edf5a82e94e78cbedb73539c6a0046d5dd0c7a1be",
+      "fingerprint": "sha256:fd25dfd0e69c3355cce4802bc9bb40771218d35cb4d7c2fd529749b25fceb993",
       "include": "pulp/playback/transport.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -4521,9 +4598,11 @@
       "source": "core/signal/include/pulp/signal/unit_delay.hpp",
       "fingerprint": "sha256:7e91b280e5a3a83b78ed1f84301990eee1b6dcaa8b7736f07287452896d22726",
       "include": "pulp/signal/unit_delay.hpp",
-      "disposition": "infrastructure",
-      "capability_keys": [],
-      "rationale": "Exact one-sample state primitive for ordinary Processor composition and the sample-region causal cut. The complete sample-region capability is published only after its graph authoring, runtime, persistence, and control surfaces land; this helper makes no standalone generator capability claim."
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "signal.unit-delay"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
     },
     {
       "domain": "signal",

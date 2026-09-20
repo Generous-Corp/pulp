@@ -140,8 +140,7 @@ TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient routes marked text to 
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME text-input test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME text-input test skipped.");
         }
 
         View root;
@@ -313,8 +312,7 @@ TEST_CASE("PluginViewHost (mac CPU) — NSTextInputClient contains throwing text
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME exception-containment test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME exception-containment test skipped.");
         }
 
         View root;
@@ -397,8 +395,7 @@ TEST_CASE("PluginViewHost (mac CPU) — host focus loss cancels active IME marke
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME focus-loss test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME focus-loss test skipped.");
         }
 
         View root;
@@ -461,8 +458,7 @@ TEST_CASE("PluginViewHost (mac CPU) — overlay press cancels active IME before 
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted overlay IME test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted overlay IME test skipped.");
         }
 
         View root;
@@ -523,8 +519,7 @@ TEST_CASE("PluginViewHost (mac CPU) — right click routes to the painted overla
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted overlay context-menu test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted overlay context-menu test skipped.");
         }
 
         View root;
@@ -573,8 +568,7 @@ TEST_CASE("PluginViewHost (mac GPU) — right click routes to the painted overla
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — GPU overlay context-menu test skipped.");
-            return;
+            SKIP("No Cocoa window — GPU overlay context-menu test skipped.");
         }
 
         View root;
@@ -634,8 +628,7 @@ TEST_CASE("PluginViewHost (mac CPU) — outside right click repaints dismissal",
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — overlay dismissal repaint test skipped.");
-            return;
+            SKIP("No Cocoa window — overlay dismissal repaint test skipped.");
         }
         View root;
         PluginViewHost::Options opts;
@@ -676,8 +669,7 @@ TEST_CASE("PluginViewHost (mac CPU) — host focus loss survives IME cancellatio
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME focus-loss teardown test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME focus-loss teardown test skipped.");
         }
 
         View root;
@@ -742,8 +734,7 @@ TEST_CASE("PluginViewHost (mac CPU) — host focus loss clears a replacement "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME replacement-focus test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME replacement-focus test skipped.");
         }
 
         View root;
@@ -813,8 +804,7 @@ TEST_CASE("PluginViewHost (mac CPU) — focus transfer cancels old active IME "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME focus-transfer test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME focus-transfer test skipped.");
         }
 
         View root;
@@ -883,8 +873,7 @@ TEST_CASE("PluginViewHost (mac CPU) — mouse down refreshes targets after IME "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME mouse refresh test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME mouse refresh test skipped.");
         }
         View root;
         PluginViewHost::Options opts;
@@ -958,8 +947,7 @@ TEST_CASE("PluginViewHost (mac CPU) — mouse focus changes clear replacement "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME mouse replacement-focus test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME mouse replacement-focus test skipped.");
         }
 
         View root;
@@ -1053,8 +1041,7 @@ TEST_CASE("PluginViewHost (mac CPU) — non-focusable click target removed durin
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME removed-target test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME removed-target test skipped.");
         }
 
         View root;
@@ -1121,8 +1108,7 @@ TEST_CASE("PluginViewHost (mac CPU) — IME candidate rect follows ScrollView "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted IME scroll rect test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted IME scroll rect test skipped.");
         }
 
         View root;
@@ -1187,8 +1173,7 @@ TEST_CASE("PluginViewHost (mac GPU) — hosted view adopts NSTextInputClient whe
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted GPU IME conformance test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted GPU IME conformance test skipped.");
         }
 
         View root;

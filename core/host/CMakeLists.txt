@@ -42,6 +42,10 @@ target_sources(pulp-host PRIVATE
     src/timeline_graph_binding_routes.cpp
     src/timeline_graph_stretch_policy.cpp
     src/graph_editor_view.cpp
+    src/sample_region_plan.cpp
+    src/sample_region_proof.cpp
+    src/sample_region_parameters.cpp
+    src/sample_region_runtime.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
@@ -112,3 +116,19 @@ if(APPLE)
 else()
     target_sources(pulp-host PRIVATE src/hosted_editor_container_stub.cpp)
 endif()
+
+# Public sample-region authoring example and catalog schemas ship in the SDK
+# even when its producer disables examples and tests.
+install(FILES
+    "${PULP_ROOT_DIR}/examples/sample-region-allpass/CMakeLists.txt"
+    "${PULP_ROOT_DIR}/examples/sample-region-allpass/README.md"
+    "${PULP_ROOT_DIR}/examples/sample-region-allpass/allpass_graph.hpp"
+    "${PULP_ROOT_DIR}/examples/sample-region-allpass/allpass_graph.cpp"
+    "${PULP_ROOT_DIR}/examples/sample-region-allpass/allpass_processor.hpp"
+    "${PULP_ROOT_DIR}/examples/sample-region-allpass/allpass_processor.cpp"
+    "${PULP_ROOT_DIR}/examples/sample-region-allpass/installed_consumer.cpp"
+    DESTINATION share/pulp/examples/sample-region-allpass)
+install(FILES
+    "${PULP_ROOT_DIR}/docs/status/dsp-capabilities.schema.json"
+    "${PULP_ROOT_DIR}/docs/status/forge-catalog.schema.json"
+    DESTINATION share/pulp)

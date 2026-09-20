@@ -331,6 +331,47 @@ TEST_CASE("humanize keeps jitter inside the declared bounds", "[midi][humanize]"
     REQUIRE(saw_velocity_move);
 }
 
+TEST_CASE("humanize minimum timing keeps a fixed-latency depth inside its window",
+          "[midi][humanize]") {
+    constexpr midi::HumanizeSpec fixed{512, 0, 91, 512};
+    constexpr midi::HumanizeSpec half_depth{512, 0, 91, 256};
+    REQUIRE(midi::Humanize<>::valid_spec(fixed));
+    REQUIRE(midi::Humanize<>::jittered_position(fixed, 0, 60, 1'000) == 1'512);
+    for (std::uint8_t note = 0; note < 128; ++note) {
+        const auto position = midi::Humanize<>::jittered_position(half_depth, 0, note, 1'000);
+        REQUIRE(position >= 1'256);
+        REQUIRE(position <= 1'512);
+    }
+    REQUIRE_FALSE(midi::Humanize<>::valid_spec({511, 0, 91, 512}));
+}
+
+TEST_CASE("humanize depth updates preserve attacks already in flight", "[midi][humanize]") {
+    midi::Humanize<> humanize{{512, 0, 91, 512}};
+    auto input = prepared_buffer();
+    auto output = prepared_buffer();
+    REQUIRE(input.add(midi::MidiEvent::note_on(0, 60, 100)));
+    REQUIRE(humanize.process(input, output, {0}, 64).complete);
+    REQUIRE(output.empty());
+
+    REQUIRE(humanize.update_spec_for_future_attacks({0, 0, 91}));
+    input.clear();
+    REQUIRE(input.add(midi::MidiEvent::note_on(0, 61, 100)));
+    REQUIRE(humanize.process(input, output, {64}, 64).complete);
+    REQUIRE(output.size() == 1);
+    REQUIRE(output[0].note() == 61);
+
+    input.clear();
+    for (std::int64_t start = 128; start <= 512; start += 64) {
+        REQUIRE(humanize.process(input, output, {start}, 64).complete);
+        if (start < 512)
+            REQUIRE(output.empty());
+    }
+    REQUIRE(output.size() == 1);
+    REQUIRE(output[0].note() == 60);
+    REQUIRE(output[0].sample_offset == 0);
+    REQUIRE(humanize.empty());
+}
+
 TEST_CASE("humanize is invariant under block partition", "[midi][humanize][parity]") {
     // The determinism oracle: the same seed and the same authored events must
     // produce one event stream regardless of how the host slices its blocks.

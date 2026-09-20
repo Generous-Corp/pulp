@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/host/forge_catalog_export.hpp>
 #include <pulp/host/forge_catalog_index.hpp>
+#include <pulp/host/signal_graph.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -125,4 +127,49 @@ TEST_CASE("Forge catalog index comparison detects add and remove drift", "[host]
     const CatalogIndexDiff stale_include =
         compare_catalog_headers({"forge_delay_catalog.hpp"}, indexed);
     REQUIRE(stale_include.stale_in_index == std::vector<std::string>{"forge_filter_catalog.hpp"});
+}
+
+TEST_CASE("sample-region Forge routes bind exact registered scalar identities",
+          "[forge][catalog][sample-region]") {
+    using namespace pulp::host;
+    SignalGraph graph;
+    REQUIRE(register_builtin_sample_region_types(graph));
+    const auto nodes = forge_catalog_export_nodes();
+    REQUIRE(audit_forge_catalog_export(nodes).empty());
+    std::set<std::string_view> roles;
+    for (const auto& row : kForgeSampleRegionV1) {
+        REQUIRE(roles.insert(row.role).second);
+        const auto* scalar = graph.sample_kernel_type(row.type_id, row.type_version);
+        REQUIRE(scalar != nullptr);
+        REQUIRE(is_sample_region_v1_descriptor(*scalar));
+        REQUIRE(scalar->version == row.sample_kernel_version);
+        REQUIRE(scalar->num_input_ports == row.inputs);
+        REQUIRE(scalar->num_output_ports == row.outputs);
+        REQUIRE(scalar->state_size == row.state_bytes);
+        REQUIRE(scalar->state_alignment == row.state_alignment);
+        const auto* block = graph.custom_node_type(row.type_id, row.type_version);
+        REQUIRE(block != nullptr);
+        REQUIRE(block->version == row.type_version);
+        std::size_t routes = 0;
+        for (const auto& node : nodes)
+            for (const auto& realization : node.realizations)
+                if (realization.type_id == row.type_id)
+                    ++routes;
+        REQUIRE(routes == 1);
+        const bool boundary = row.role == "input_boundary" || row.role == "output_boundary";
+        REQUIRE(row.placement == (boundary ? "region_builder_only" : "normal_node"));
+        const auto expected_config =
+            boundary                  ? SampleKernelConfigKind::BoundaryIndex
+            : row.role == "constant"  ? SampleKernelConfigKind::FiniteConstant
+            : row.role == "parameter" ? SampleKernelConfigKind::PromotedParameterId
+                                      : SampleKernelConfigKind::None;
+        REQUIRE(scalar->authored_config_kind == expected_config);
+        const std::string_view config_name = boundary                  ? "BoundaryIndex"
+                                             : row.role == "constant"  ? "FiniteConstant"
+                                             : row.role == "parameter" ? "PromotedParameterId"
+                                                                       : "None";
+        REQUIRE(row.config_kind == config_name);
+    }
+    REQUIRE(roles.size() == 7);
+    REQUIRE(forge_sample_region_v1("unknown.legacy.node") == nullptr);
 }

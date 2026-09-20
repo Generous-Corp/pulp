@@ -63,6 +63,40 @@ if(NOT EXISTS "${_prefix}/lib/cmake/Pulp/PulpVerifyRuntimeStaging.cmake")
         "directory, so an SDK without it cannot verify its own bundles.")
 endif()
 
+if(PULP_PARENT_GPU_AUDIO_HAS_VELLUM_D15)
+    set(_installed_vellum_runtime
+        "${_prefix}/lib/${PULP_PARENT_GPU_AUDIO_VELLUM_RUNTIME_NAME}")
+    if(NOT EXISTS "${_installed_vellum_runtime}")
+        message(FATAL_ERROR
+            "D15 SDK did not ship its declared GPU-audio provider: "
+            "${_installed_vellum_runtime}")
+    endif()
+    foreach(_vellum_doc LICENSE.md NOTICE.md DEPENDENCIES.md)
+        set(_installed_vellum_doc
+            "${_prefix}/share/doc/Pulp/third-party/Vellum/${_vellum_doc}")
+        if(NOT EXISTS "${_installed_vellum_doc}")
+            message(FATAL_ERROR
+                "D15 SDK redistributed Vellum without ${_vellum_doc}: "
+                "${_installed_vellum_doc}")
+        endif()
+        set(_source_vellum_doc
+            "${PULP_PARENT_GPU_AUDIO_VELLUM_NOTICE_DIR}/${_vellum_doc}")
+        file(SHA256 "${_source_vellum_doc}" _source_vellum_doc_sha256)
+        file(SHA256 "${_installed_vellum_doc}" _installed_vellum_doc_sha256)
+        if(NOT _installed_vellum_doc_sha256 STREQUAL
+               _source_vellum_doc_sha256)
+            message(FATAL_ERROR
+                "Installed Vellum ${_vellum_doc} differs from the validated "
+                "provider document")
+        endif()
+    endforeach()
+    if(PULP_PARENT_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE)
+        message(FATAL_ERROR
+            "D15 test fixture unexpectedly claims release eligibility before "
+            "Vellum's exhaustive renderer-builder provenance gate is closed")
+    endif()
+endif()
+
 # The SDK's design-import frontend delegates to this installed helper. Launch
 # it from the staged prefix so a missing install rpath fails here instead of
 # later in Forge (or another SDK consumer) with a dynamic-loader error. Windows
@@ -202,6 +236,35 @@ if(NOT _audio_timing_result EQUAL 0)
         "${_audio_timing_output}\n${_audio_timing_error}")
 endif()
 
+# Public GPU-audio lifecycle consumer. This proves the installed
+# Pulp::gpu-audio target can drive prepare/release/reprepare, worker-serviced
+# delivery, and CpuFallback on late/missing worker service. Device-loss
+# injection remains a private Dawn-provider concern because the public SDK has
+# no provider-loss injection/status hook.
+set(_gpu_audio_lifecycle_probe
+    "${_consumer_build}/PulpSDKSmokeGpuAudioLifecycleProbe${CMAKE_EXECUTABLE_SUFFIX}")
+if(NOT EXISTS "${_gpu_audio_lifecycle_probe}")
+    set(_gpu_audio_lifecycle_probe
+        "${_consumer_build}/${_config}/PulpSDKSmokeGpuAudioLifecycleProbe${CMAKE_EXECUTABLE_SUFFIX}")
+endif()
+if(PULP_PARENT_GPU_AUDIO_AVAILABLE AND NOT EXISTS "${_gpu_audio_lifecycle_probe}")
+    message(FATAL_ERROR
+        "Installed-SDK GPU-audio lifecycle probe was not built: ${_gpu_audio_lifecycle_probe}")
+endif()
+if(EXISTS "${_gpu_audio_lifecycle_probe}")
+    execute_process(
+        COMMAND "${_gpu_audio_lifecycle_probe}"
+        RESULT_VARIABLE _gpu_audio_lifecycle_result
+        OUTPUT_VARIABLE _gpu_audio_lifecycle_output
+        ERROR_VARIABLE _gpu_audio_lifecycle_error)
+    if(NOT _gpu_audio_lifecycle_result EQUAL 0)
+        message(FATAL_ERROR
+            "Installed-SDK GPU-audio lifecycle probe failed "
+            "(${_gpu_audio_lifecycle_result})\n"
+            "${_gpu_audio_lifecycle_output}\n${_gpu_audio_lifecycle_error}")
+    endif()
+endif()
+
 # This probe calls the archive-defined AgentView::create() entry point with an
 # invalid snapshot and succeeds only when the installed SDK links and preserves
 # the API's fail-closed runtime contract. Check both single- and multi-config
@@ -239,6 +302,70 @@ if(NOT _build_output MATCHES "pulp-runtime-staging:")
         "tools/validation/sdk-smoke wires "
         "pulp_verify_runtime_dependencies_staged() for every built format.\n"
         "${_build_output}")
+endif()
+
+if(PULP_PARENT_GPU_AUDIO_HAS_VELLUM_D15
+   AND NOT _build_output MATCHES
+       "verified ${PULP_PARENT_GPU_AUDIO_VELLUM_RUNTIME_NAME}")
+    message(FATAL_ERROR
+        "The installed D15 SDK consumer did not verify its Vellum runtime "
+        "sidecar (${PULP_PARENT_GPU_AUDIO_VELLUM_RUNTIME_NAME}).\n${_build_output}")
+endif()
+
+if(PULP_PARENT_GPU_AUDIO_HAS_VELLUM_D15
+   AND NOT _build_output MATCHES
+       "PulpSDKSmokeNoGpuAudioProbe: skipped unlinked ${PULP_PARENT_GPU_AUDIO_VELLUM_RUNTIME_NAME}")
+    message(FATAL_ERROR
+        "The unrelated installed-SDK consumer did not report a target-scoped "
+        "Vellum sidecar skip.\n${_build_output}")
+endif()
+
+if(PULP_PARENT_GPU_AUDIO_HAS_VELLUM_D15)
+    file(GLOB_RECURSE _consumer_vellum_sidecars
+        "${_consumer_build}/${PULP_PARENT_GPU_AUDIO_VELLUM_RUNTIME_NAME}")
+    list(LENGTH _consumer_vellum_sidecars _consumer_vellum_sidecar_count)
+    if(NOT _consumer_vellum_sidecar_count EQUAL 1)
+        message(FATAL_ERROR
+            "Expected exactly one D15 sidecar for the one SDK smoke target "
+            "that links Pulp::gpu-audio; found ${_consumer_vellum_sidecar_count}: "
+            "${_consumer_vellum_sidecars}")
+    endif()
+    file(GLOB_RECURSE _negative_vellum_sidecars
+        "${_consumer_build}/no-gpu-audio-probe/*/${PULP_PARENT_GPU_AUDIO_VELLUM_RUNTIME_NAME}")
+    if(_negative_vellum_sidecars)
+        message(FATAL_ERROR
+            "Unrelated SDK target received the 27 MB Vellum provider: "
+            "${_negative_vellum_sidecars}")
+    endif()
+    foreach(_vellum_doc LICENSE.md NOTICE.md DEPENDENCIES.md)
+        file(GLOB_RECURSE _consumer_vellum_attribution
+            "${_consumer_build}/gpu-audio-probe/*/PulpThirdParty/Vellum/${_vellum_doc}")
+        list(LENGTH _consumer_vellum_attribution
+            _consumer_vellum_attribution_count)
+        if(NOT _consumer_vellum_attribution_count EQUAL 1)
+            message(FATAL_ERROR
+                "Expected exactly one staged Vellum ${_vellum_doc}; found "
+                "${_consumer_vellum_attribution_count}: "
+                "${_consumer_vellum_attribution}")
+        endif()
+        list(GET _consumer_vellum_attribution 0 _staged_vellum_doc)
+        file(SHA256 "${_staged_vellum_doc}" _staged_vellum_doc_sha256)
+        file(SHA256
+            "${PULP_PARENT_GPU_AUDIO_VELLUM_NOTICE_DIR}/${_vellum_doc}"
+            _source_vellum_doc_sha256)
+        if(NOT _staged_vellum_doc_sha256 STREQUAL
+               _source_vellum_doc_sha256)
+            message(FATAL_ERROR
+                "Staged Vellum ${_vellum_doc} differs from provider source")
+        endif()
+        file(GLOB_RECURSE _negative_vellum_attribution
+            "${_consumer_build}/no-gpu-audio-probe/*/PulpThirdParty/Vellum/${_vellum_doc}")
+        if(_negative_vellum_attribution)
+            message(FATAL_ERROR
+                "Unrelated SDK target received Vellum ${_vellum_doc}: "
+                "${_negative_vellum_attribution}")
+        endif()
+    endforeach()
 endif()
 
 message(STATUS "installed_sdk_runtime_staging_verified=true")

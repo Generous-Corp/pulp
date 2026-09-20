@@ -58,7 +58,9 @@ std::string read_recorded(const fs::path& p) {
 
 TEST_CASE("audio compare --help explains it is advisory, not a gate",
           "[cli][shellout][audio-compare]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"audio", "compare", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("advisory") != std::string::npos);
@@ -68,7 +70,9 @@ TEST_CASE("audio compare --help explains it is advisory, not a gate",
 
 TEST_CASE("audio compare needs two positional WAVs (exit 2)",
           "[cli][shellout][audio-compare]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto none = run_pulp({"audio", "compare"});
     REQUIRE(none.exit_code == 2);
     REQUIRE(none.stderr_output.find("reference.wav") != std::string::npos);
@@ -79,7 +83,9 @@ TEST_CASE("audio compare needs two positional WAVs (exit 2)",
 
 TEST_CASE("audio compare hints to install the opt-in tool when it is absent",
           "[cli][shellout][audio-compare]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     ScopedEnvVar home("HOME");
     ScopedEnvVar pulp_home("PULP_HOME");
     make_temp_home(home, pulp_home);  // empty — no managed wrapper present
@@ -92,7 +98,9 @@ TEST_CASE("audio compare hints to install the opt-in tool when it is absent",
 #ifndef _WIN32
 TEST_CASE("audio compare forwards the verb + flags and passes the tool's exit code",
           "[cli][shellout][audio-compare]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     ScopedEnvVar home("HOME");
     ScopedEnvVar pulp_home("PULP_HOME");
     auto dir = make_temp_home(home, pulp_home);

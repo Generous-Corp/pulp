@@ -88,13 +88,17 @@ Four connection variants cover the non-audio-passthrough cases:
   can be represented as a valid `state::ModulationLane` with `GraphNode` scope:
   the destination parameter must be continuous, writable, automatable,
   modulatable, and `HostParamInfo::rate == AudioRate`. Accepted edges emit one
-  `ParameterEvent` per sample and participate in latency alignment. While the
-  plugin ABI still carries dense modulation through the fixed 1024-slot
-  `ParameterEventQueue`, `prepare()` fails closed when
+  mapped, mixed, finally clamped value per sample and participates in latency
+  alignment. A native in-process `ProcessorNode` added with
+  `add_processor_node()` receives those values as borrowed
+  `AudioRateModulationView` lanes through `Processor::process_block()`. Hosted
+  plugin ABIs still carry dense modulation through the fixed 1024-slot
+  `ParameterEventQueue`, so their `prepare()` fails closed when
   `audio_rate_params * max_block_size + sparse_params * 2` would exceed that
-  capacity. For example, one dense lane is allowed at 1024 samples and rejected
-  at 2048/4096 samples until a separate dense modulation view replaces the
-  sparse-event transport for those blocks.
+  capacity. The in-process dense path accepts 2048- and 4096-frame blocks under
+  its separate 64-lane-per-node, 256-lane-per-graph, and 16,384-frame limits.
+  Processor nodes are runtime-owned and are explicitly refused by
+  `.pulpgraph` and `.pulpbake` v1 serialization.
 - Sidechain is *not* a separate API: connect a secondary source to the
   plugin node's sidechain audio-port indices (e.g. `connect(side, 0, p,
   2)` when the plugin exposes ports 2/3 as its sidechain bus).

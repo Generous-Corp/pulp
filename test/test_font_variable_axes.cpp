@@ -19,8 +19,7 @@ using namespace pulp::canvas;
 
 TEST_CASE("Variable axes: empty axis list resolves cleanly", "[font][axes][issue-2163]") {
 #ifndef PULP_HAS_SKIA
-    SUCCEED("Non-Skia builds use the resolver stub");
-    return;
+    SKIP("Non-Skia builds use the resolver stub");
 #endif
 
     FontOptions opts;
@@ -40,8 +39,7 @@ TEST_CASE("Variable axes: empty axis list resolves cleanly", "[font][axes][issue
 
 TEST_CASE("Variable axes: axis on non-variable face still resolves", "[font][axes]") {
 #ifndef PULP_HAS_SKIA
-    SUCCEED("Non-Skia builds use the resolver stub");
-    return;
+    SKIP("Non-Skia builds use the resolver stub");
 #endif
 
     // Bundled Inter is static — requesting `wght=450` should NOT
