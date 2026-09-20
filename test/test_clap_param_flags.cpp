@@ -104,3 +104,64 @@ TEST_CASE("CLAP modulation advertisement matches the inbound decode predicate",
                 pulp::state::is_modulatable_param(*parameter));
     }
 }
+
+TEST_CASE("CLAP projects declared hidden and read-only parameters",
+          "[clap][params][visibility]") {
+    // Baseline: an undeclared parameter is visible, writable and automatable
+    // exactly as before, so existing plugins are unchanged.
+    const pulp::state::ParamInfo ordinary{
+        .id = 40,
+        .name = "Gain",
+        .range = {0.0f, 1.0f, 0.5f},
+    };
+    const auto ordinary_flags = pulp::format::clap_generic::params_flags(ordinary);
+    REQUIRE((ordinary_flags & CLAP_PARAM_IS_HIDDEN) == 0);
+    REQUIRE((ordinary_flags & CLAP_PARAM_IS_READONLY) == 0);
+    REQUIRE((ordinary_flags & CLAP_PARAM_IS_AUTOMATABLE) != 0);
+
+    pulp::state::ParamInfo hidden = ordinary;
+    hidden.id = 41;
+    hidden.hidden = true;
+    REQUIRE((pulp::format::clap_generic::params_flags(hidden) & CLAP_PARAM_IS_HIDDEN) != 0);
+
+    // A meter-style value: the host renders it and must never drive it.
+    pulp::state::ParamInfo meter = ordinary;
+    meter.id = 42;
+    meter.read_only = true;
+    const auto meter_flags = pulp::format::clap_generic::params_flags(meter);
+    REQUIRE((meter_flags & CLAP_PARAM_IS_READONLY) != 0);
+    // Automation is a host write, so read-only withholds AUTOMATABLE too.
+    REQUIRE((meter_flags & CLAP_PARAM_IS_AUTOMATABLE) == 0);
+    // ...and a value the host may not write is not one it may offset either.
+    REQUIRE((meter_flags & CLAP_PARAM_IS_MODULATABLE) == 0);
+
+    pulp::state::ParamInfo not_automatable = ordinary;
+    not_automatable.id = 43;
+    not_automatable.automatable = false;
+    const auto not_automatable_flags =
+        pulp::format::clap_generic::params_flags(not_automatable);
+    REQUIRE((not_automatable_flags & CLAP_PARAM_IS_AUTOMATABLE) == 0);
+    // Non-automatable is not read-only: the host may still set it directly.
+    REQUIRE((not_automatable_flags & CLAP_PARAM_IS_READONLY) == 0);
+}
+
+TEST_CASE("CLAP keeps a bypass control reachable despite a hide or read-only declaration",
+          "[clap][params][visibility][bypass]") {
+    // Hosts surface bypass in their own chrome. A plugin that hid or froze it
+    // would become un-bypassable from the host, so the shared predicates
+    // refuse both for a bypass control.
+    pulp::state::ParamInfo bypass{
+        .id = 44,
+        .name = "Effect Enabled",
+        .range = {0.0f, 1.0f, 0.0f},
+    };
+    bypass.designation = pulp::state::ParamDesignation::Bypass;
+    bypass.hidden = true;
+    bypass.read_only = true;
+
+    const auto flags = pulp::format::clap_generic::params_flags(bypass);
+    REQUIRE((flags & CLAP_PARAM_IS_BYPASS) != 0);
+    REQUIRE((flags & CLAP_PARAM_IS_HIDDEN) == 0);
+    REQUIRE((flags & CLAP_PARAM_IS_READONLY) == 0);
+    REQUIRE((flags & CLAP_PARAM_IS_AUTOMATABLE) != 0);
+}
