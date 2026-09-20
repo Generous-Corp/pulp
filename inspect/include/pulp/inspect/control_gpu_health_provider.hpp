@@ -104,20 +104,29 @@ class ControlGpuHealthProvider final {
         /// screenshot or available adapter does not prove GPU submission.
         bool gpu_submission_observed = false;
         /// Set only by a native lifecycle producer after the frame became
-        /// visible. Back-buffer capture alone is an upper bound, not present.
+        /// visible. A back-buffer capture proves only that the host rendered
+        /// those pixels; it observes nothing about display, so it can never
+        /// stand in for this flag.
         bool native_present_observed = false;
         /// Timestamp supplied by the trusted native compositor/presentation
         /// producer. A capture/readback completion timestamp cannot substitute
         /// for this endpoint.
         ///
-        /// Returning from a present CALL is not presentation either. On the
-        /// macOS GPU host both candidates land EARLY, so both under-report
-        /// first-visible latency -- the direction that turns a budget miss into
-        /// a pass. `GpuSurface::end_frame()` only hands the drawable to the
-        /// compositor and waits for nothing, so returning from it precedes
-        /// display by up to a refresh interval; and the back-buffer readback
-        /// runs earlier still, BEFORE that call, so capture completion precedes
-        /// display by even more. Only a
+        /// Returning from a present CALL is not presentation either, and the
+        /// two available macOS candidates miss in OPPOSITE directions.
+        /// `GpuSurface::end_frame()` only hands the drawable to the compositor
+        /// and waits for nothing, so returning from it precedes display by up
+        /// to a refresh interval and UNDER-reports first-visible latency -- the
+        /// direction that turns a budget miss into a pass.
+        ///
+        /// Back-buffer capture completion is the opposite error, not a tighter
+        /// version of the same one. The timestamp is taken AFTER
+        /// `capture_back_buffer_png()` returns, so it is that present-call
+        /// return PLUS PNG encode time; and the readback inside it blocks on a
+        /// synchronising submit, spinning until the GPU signals, BETWEEN submit
+        /// and present -- delaying the very present it claims to measure.
+        /// Capture completion therefore OVER-reports first-visible latency, so
+        /// it risks failing a frame that met its budget. Only a
         /// producer that observes actual display -- a presented-drawable
         /// callback carrying the instant the frame reached the screen -- may
         /// write here. No such producer exists on any Pulp backend today, which

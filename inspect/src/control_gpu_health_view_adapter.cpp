@@ -39,6 +39,11 @@ void ControlGpuHealthViewAdapter::poll(std::chrono::steady_clock::time_point now
     impl_->capture_attempted = true;
     try {
         const auto png = impl_->config.capture_back_buffer_png();
+        // Stamped AFTER the capture returns, so this instant is the present
+        // call's return plus PNG encode time -- and the capture's blocking
+        // synchronising readback has already delayed that present. The value
+        // therefore over-reports first-visible latency; it is not a substitute
+        // for a presented-drawable timestamp in either direction.
         const auto capture_completed_at = impl_->config.capture_completed_at();
         const auto stats = view::analyze_screenshot_content(png);
         auto frame = impl_->config.frame_evidence();
