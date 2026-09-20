@@ -792,6 +792,65 @@ def main() -> int:
         assert len(state["cells"]) == 84
         assert runner.status_document(state)["incomplete_cells"] == 84
 
+        # Incomplete timer-calibration evidence must retain the exact producer
+        # diagnostic bytes and bind them to the receipt by path and digest.
+        diagnostics_run = root / "diagnostics-artifact-run"
+        diagnostics_state = runner.initial_state(
+            planned, manifest, manifest_path, analyzer_identity
+        )
+        runner.save_state(diagnostics_run, diagnostics_state)
+        diagnostics_key = runner.cell_key("dense-text-thin-strokes", "exact", 1)
+        diagnostics_nonce, diagnostics_request_path = runner.issue_attempt(
+            diagnostics_run, diagnostics_state, manifest, diagnostics_key
+        )
+        diagnostics_request = runner.load_json(diagnostics_request_path)
+        diagnostics = {
+            "schema": "pulp.gpu-dpr-calibration-diagnostics.v1",
+            "stage": "calibration", "attempt_nonce": diagnostics_nonce,
+            "clock": "dawn-gpu-timestamp", "failure_class": "timer_quantization",
+            "control_detected": False,
+            "reason": "GPU timer did not detect the known-extra-work control",
+            "resolution_ms": 0.1, "baseline_median_ms": 1.0,
+            "extra_work_median_ms": 1.05, "delta_ms": 0.05,
+            "detection_threshold_ms": 0.2,
+            "baseline_samples_ms": [1.0], "extra_work_samples_ms": [1.05],
+            "trials": [],
+        }
+        diagnostics_cell = runner.cell_directory(diagnostics_run, diagnostics_key)
+        diagnostics_name = f"gpu-timer-calibration-diagnostics-{diagnostics_nonce}.json"
+        diagnostics_path = diagnostics_cell / diagnostics_name
+        write_json(diagnostics_path, diagnostics)
+        diagnostics_receipt = {
+            "schema": runner.RECEIPT_SCHEMA, "version": 1,
+            "attempt_nonce": diagnostics_nonce,
+            "attempt_number": diagnostics_request["attempt_number"],
+            "scenario_id": diagnostics_request["scenario"]["id"],
+            "scenario_kind": diagnostics_request["scenario"]["kind"],
+            "mode": diagnostics_request["mode"],
+            "requested_dpr": diagnostics_request["requested_dpr"],
+            "outcome": "inconclusive",
+            "reason": diagnostics["reason"],
+            "dependencies": ["gpu:timer-calibration"],
+            "diagnostics": diagnostics,
+            "diagnostics_artifact": {
+                "schema": "pulp.gpu-dpr-diagnostics-artifact.v1",
+                "path": diagnostics_name,
+                "sha256": runner.sha256_file(diagnostics_path),
+            },
+        }
+        diagnostics_receipt_path = diagnostics_cell / "receipt.json"
+        write_json(diagnostics_receipt_path, diagnostics_receipt)
+        runner.receipt_observation(
+            diagnostics_receipt_path, diagnostics_state, manifest,
+            manifest_path, diagnostics_run,
+        )
+        diagnostics_receipt["diagnostics_artifact"]["sha256"] = "0" * 64
+        write_json(diagnostics_receipt_path, diagnostics_receipt)
+        expect_rejected(
+            diagnostics_receipt_path, diagnostics_state, manifest, diagnostics_run,
+            "calibration diagnostics artifact digest drift",
+        )
+
         request_run = root / "adaptive-request-run"
         request_state = runner.initial_state(
             planned, manifest, manifest_path, analyzer_identity

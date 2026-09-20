@@ -730,13 +730,22 @@ bool terminate_and_reap_child(pid_t pid, int& status, std::string& error) {
 
 std::string incomplete_json(const DprMeasurementRequest& request,
                             std::string_view reason, std::string_view dependency,
-                            std::string_view diagnostics = {}) {
+                            std::string_view diagnostics = {},
+                            std::string_view diagnostics_path = {},
+                            std::string_view diagnostics_sha256 = {}) {
     auto result = evaluate_dpr_measurement_readiness(request);
     result.reason = std::string(reason);
     result.dependencies = {std::string(dependency)};
     auto json = choc::json::parse(to_json(result, true));
     if (!diagnostics.empty())
         json.setMember("diagnostics", choc::json::parse(diagnostics));
+    if (!diagnostics_path.empty() || !diagnostics_sha256.empty()) {
+        auto artifact = choc::value::createObject("");
+        artifact.setMember("schema", "pulp.gpu-dpr-diagnostics-artifact.v1");
+        artifact.setMember("path", diagnostics_path);
+        artifact.setMember("sha256", diagnostics_sha256);
+        json.setMember("diagnostics_artifact", std::move(artifact));
+    }
     return choc::json::toString(json, true) + "\n";
 }
 
@@ -1055,13 +1064,19 @@ int run_dpr_measurement(const DprMeasurementRequest& request,
             timer_detection_threshold, failure_class, message);
         const auto diagnostics_path = cell /
             ("gpu-timer-calibration-diagnostics-" + request.attempt_nonce + ".json");
-        if (!write_text(diagnostics_path, diagnostics)) {
+        (void)runtime::Tracing::stop_owned(*tracing.ownership);
+        const bool diagnostics_written = write_text(diagnostics_path, diagnostics);
+        if (!diagnostics_written) {
             runtime::log_error("DPR calibration diagnostics could not be written: {}",
                                diagnostics_path.string());
         }
-        (void)runtime::Tracing::stop_owned(*tracing.ownership);
-        write_text(receipt_path, incomplete_json(request, message,
-                                                 "gpu:timer-calibration", diagnostics));
+        const auto diagnostics_digest = diagnostics_written
+            ? runtime::sha256_hex(diagnostics)
+            : std::string{};
+        write_text(receipt_path, incomplete_json(
+            request, message, "gpu:timer-calibration", diagnostics,
+            diagnostics_written ? diagnostics_path.filename().string() : "",
+            diagnostics_digest));
         if (error) *error = message;
         return 3;
     }
