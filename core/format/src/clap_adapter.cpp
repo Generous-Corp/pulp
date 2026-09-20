@@ -535,20 +535,22 @@ bool clap_param_modulation_lane(const PulpClapPlugin& self,
     }
 
     lane = state::ModulationLane{
-        .source = {
-            .id = kClapHostModulationSourceId,
-            .scope = state::ModulationScope::Global,
-            .rate = state::ModulationRate::Control,
-            .units = "CLAP PARAM_MOD",
-        },
-        .target = {
-            .param_id = param_id,
-            .scope = state::ModulationScope::Global,
-            .param_rate = info->rate,
-            .modulatable = info->range.step <= 0.0f,
-            .writable = true,
-            .units = info->unit,
-        },
+        .source =
+            {
+                .id = kClapHostModulationSourceId,
+                .scope = state::ModulationScope::Global,
+                .rate = state::ModulationRate::Control,
+                .units = "CLAP PARAM_MOD",
+            },
+        .target =
+            {
+                .param_id = param_id,
+                .scope = state::ModulationScope::Global,
+                .param_rate = info->rate,
+                .modulatable = state::is_modulatable_param(*info),
+                .writable = true,
+                .units = info->unit,
+            },
         .mix = state::ModulationMixMode::Add,
         .depth = static_cast<float>(event.amount),
     };
