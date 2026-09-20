@@ -324,8 +324,10 @@ bool g_au_ump_declare = true;
 // MidiBuffer — so a test can assert MIDI 2.0 resolution survives AND that the
 // legacy buffer still carries the same notes.
 class TestAUUmpInstrumentProcessor : public pulp::format::Processor {
-public:
-    TestAUUmpInstrumentProcessor() { g_last_ump_processor = this; }
+  public:
+    TestAUUmpInstrumentProcessor() {
+        g_last_ump_processor = this;
+    }
 
     pulp::format::PluginDescriptor descriptor() const override {
         pulp::format::PluginDescriptor d{
@@ -345,16 +347,12 @@ public:
     void define_parameters(pulp::state::StateStore&) override {}
     void prepare(const pulp::format::PrepareContext&) override {}
 
-    void process(pulp::audio::BufferView<float>&,
-                 const pulp::audio::BufferView<const float>&,
-                 pulp::midi::MidiBuffer&,
-                 pulp::midi::MidiBuffer&,
+    void process(pulp::audio::BufferView<float>&, const pulp::audio::BufferView<const float>&,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
                  const pulp::format::ProcessContext&) override {}
 
-    void process(pulp::format::ProcessBuffers&,
-                 pulp::midi::MidiBuffer& midi_in,
-                 pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
+    void process(pulp::format::ProcessBuffers&, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
         ++process_count;
         captured_ump.clear();
         captured_midi1.clear();
@@ -374,7 +372,8 @@ public:
                 });
             }
         }
-        for (const auto& e : midi_in) captured_midi1.push_back(e);
+        for (const auto& e : midi_in)
+            captured_midi1.push_back(e);
     }
 
     int process_count = 0;
@@ -1183,10 +1182,9 @@ TEST_CASE("AU v3 negotiates MIDI 2.0 and delivers UMP channel voice at full reso
             ScopedFactoryRegistration registration(create_ump_instrument_processor);
 
             NSError* error = nil;
-            PulpAudioUnit* unit =
-                [[PulpAudioUnit alloc] initWithComponentDescription:desc
-                                                           options:0
-                                                             error:&error];
+            PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                              options:0
+                                                                                error:&error];
             REQUIRE(unit != nil);
             REQUIRE(error == nil);
 
@@ -1225,8 +1223,7 @@ TEST_CASE("AU v3 negotiates MIDI 2.0 and delivers UMP channel voice at full reso
             // projection the conversion layer previously had no case for.
             pulp::midi::UmpPacket pressure;
             pressure.word_count = 2;
-            pressure.words[0] = (0x4u << 28) |
-                                (uint32_t(0xD0u | (kChannel & 0x0F)) << 16);
+            pressure.words[0] = (0x4u << 28) | (uint32_t(0xD0u | (kChannel & 0x0F)) << 16);
             pressure.words[1] = kPressure32;
             // Per-note pitch bend has NO MIDI 1.0 equivalent, so it can only
             // arrive through the native UMP stream.
@@ -1244,8 +1241,7 @@ TEST_CASE("AU v3 negotiates MIDI 2.0 and delivers UMP channel voice at full reso
             list.numPackets = 1;
             list.packet[0].timeStamp = 0;
             UInt32 w = 0;
-            const std::array<pulp::midi::UmpPacket, 3> packets{
-                note_on, pressure, per_note_bend};
+            const std::array<pulp::midi::UmpPacket, 3> packets{note_on, pressure, per_note_bend};
             for (const auto& packet : packets) {
                 for (int i = 0; i < packet.word_count; ++i)
                     list.packet[0].words[w++] = packet.words[i];
@@ -1259,8 +1255,7 @@ TEST_CASE("AU v3 negotiates MIDI 2.0 and delivers UMP channel voice at full reso
 
             AUInternalRenderBlock block = [unit internalRenderBlock];
             REQUIRE(block != nil);
-            auto status = block(&flags, &timestamp, kFrames, 0, &output.list,
-                                &event, nil);
+            auto status = block(&flags, &timestamp, kFrames, 0, &output.list, &event, nil);
             REQUIRE(status == noErr);
 
             result.ump_input_present = processor->ump_input_present;
@@ -1312,8 +1307,7 @@ TEST_CASE("AU v3 negotiates MIDI 2.0 and delivers UMP channel voice at full reso
             REQUIRE(r.midi1[0].note() == kNote);
             REQUIRE(r.midi1[0].channel() == kChannel);
             REQUIRE(r.midi1[1].data()[0] == (0xD0 | kChannel));
-            REQUIRE(r.midi1[1].data()[1] ==
-                    static_cast<uint8_t>(kPressure32 >> 25));
+            REQUIRE(r.midi1[1].data()[1] == static_cast<uint8_t>(kPressure32 >> 25));
         }
 
         SECTION("instrument without supports_ump keeps legacy delivery") {
@@ -1352,10 +1346,9 @@ TEST_CASE("AU v3 promotes short MIDI into the UMP stream for an opted-in plugin"
         ScopedFactoryRegistration registration(create_ump_instrument_processor);
 
         NSError* error = nil;
-        PulpAudioUnit* unit =
-            [[PulpAudioUnit alloc] initWithComponentDescription:desc
-                                                       options:0
-                                                         error:&error];
+        PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                          options:0
+                                                                            error:&error];
         REQUIRE(unit != nil);
         auto* processor = g_last_ump_processor;
         REQUIRE(processor != nullptr);
@@ -1383,7 +1376,7 @@ TEST_CASE("AU v3 promotes short MIDI into the UMP stream for an opted-in plugin"
         event.MIDI.eventSampleTime = 0;
         event.MIDI.length = 3;
         event.MIDI.cable = 0;
-        event.MIDI.data[0] = 0x92;  // note-on, channel 2
+        event.MIDI.data[0] = 0x92; // note-on, channel 2
         event.MIDI.data[1] = 64;
         event.MIDI.data[2] = 127;
         event.MIDI.next = nullptr;
@@ -1395,8 +1388,7 @@ TEST_CASE("AU v3 promotes short MIDI into the UMP stream for an opted-in plugin"
 
         AUInternalRenderBlock block = [unit internalRenderBlock];
         REQUIRE(block != nil);
-        REQUIRE(block(&flags, &timestamp, kFrames, 0, &output.list, &event,
-                      nil) == noErr);
+        REQUIRE(block(&flags, &timestamp, kFrames, 0, &output.list, &event, nil) == noErr);
 
         const auto ump = processor->captured_ump;
         const auto midi1 = processor->captured_midi1;
@@ -1429,13 +1421,11 @@ TEST_CASE("AU adapters advertise descriptor-declared MPE support to the host",
 
             auto supports = [&](bool declare_mpe) -> BOOL {
                 g_au_mpe_declare = declare_mpe;
-                ScopedFactoryRegistration registration(
-                    create_mpe_instrument_processor);
+                ScopedFactoryRegistration registration(create_mpe_instrument_processor);
                 NSError* error = nil;
-                PulpAudioUnit* unit =
-                    [[PulpAudioUnit alloc] initWithComponentDescription:desc
-                                                               options:0
-                                                                 error:&error];
+                PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                                  options:0
+                                                                                    error:&error];
                 REQUIRE(unit != nil);
                 const BOOL value = unit.supportsMPE;
                 [unit release];
@@ -1453,40 +1443,34 @@ TEST_CASE("AU adapters advertise descriptor-declared MPE support to the host",
         // decide whether to route an MPE zone here at all.
         {
             g_au_mpe_declare = true;
-            ScopedFactoryRegistration registration(
-                create_mpe_instrument_processor);
+            ScopedFactoryRegistration registration(create_mpe_instrument_processor);
             pulp::format::au::PulpAUInstrument unit(nullptr);
 
             UInt32 size = 0;
             bool writable = true;
-            REQUIRE(unit.GetPropertyInfo(kAudioUnitProperty_SupportsMPE,
-                                         kAudioUnitScope_Global, 0, size,
-                                         writable) == noErr);
+            REQUIRE(unit.GetPropertyInfo(kAudioUnitProperty_SupportsMPE, kAudioUnitScope_Global, 0,
+                                         size, writable) == noErr);
             REQUIRE(size == sizeof(UInt32));
             REQUIRE_FALSE(writable);
 
             UInt32 value = 0;
-            REQUIRE(unit.GetProperty(kAudioUnitProperty_SupportsMPE,
-                                     kAudioUnitScope_Global, 0, &value) == noErr);
+            REQUIRE(unit.GetProperty(kAudioUnitProperty_SupportsMPE, kAudioUnitScope_Global, 0,
+                                     &value) == noErr);
             REQUIRE(value == 1);
         }
         {
             g_au_mpe_declare = false;
-            ScopedFactoryRegistration registration(
-                create_mpe_instrument_processor);
+            ScopedFactoryRegistration registration(create_mpe_instrument_processor);
             pulp::format::au::PulpAUInstrument unit(nullptr);
 
             UInt32 size = 0;
             bool writable = true;
-            REQUIRE(unit.GetPropertyInfo(kAudioUnitProperty_SupportsMPE,
-                                         kAudioUnitScope_Global, 0, size,
-                                         writable) ==
-                    kAudioUnitErr_InvalidProperty);
+            REQUIRE(unit.GetPropertyInfo(kAudioUnitProperty_SupportsMPE, kAudioUnitScope_Global, 0,
+                                         size, writable) == kAudioUnitErr_InvalidProperty);
 
             UInt32 value = 0;
-            REQUIRE(unit.GetProperty(kAudioUnitProperty_SupportsMPE,
-                                     kAudioUnitScope_Global, 0, &value) ==
-                    kAudioUnitErr_InvalidProperty);
+            REQUIRE(unit.GetProperty(kAudioUnitProperty_SupportsMPE, kAudioUnitScope_Global, 0,
+                                     &value) == kAudioUnitErr_InvalidProperty);
         }
         g_au_mpe_declare = true;
     }

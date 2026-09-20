@@ -371,14 +371,10 @@ OSStatus fill_parameter_clump_property_info(const state::StateStore& store,
 /// input. Report `kAudioUnitErr_InvalidProperty` when the plug-in did not opt
 /// in, which is what a host reads as "no" and matches leaving the property
 /// unimplemented.
-OSStatus fill_supports_mpe_property_info(bool supports_mpe,
-                                         AudioUnitScope scope,
-                                         UInt32& out_size,
+OSStatus fill_supports_mpe_property_info(bool supports_mpe, AudioUnitScope scope, UInt32& out_size,
                                          bool& out_writable);
 
-OSStatus fill_supports_mpe(bool supports_mpe,
-                           AudioUnitScope scope,
-                           void* out_data);
+OSStatus fill_supports_mpe(bool supports_mpe, AudioUnitScope scope, void* out_data);
 
 OSStatus fill_parameter_clump_name(const state::StateStore& store,
                                    AudioUnitScope scope,

@@ -51,40 +51,40 @@
 //   • pulpLastParameterEvent* — main-thread, read-only snapshots of the
 //     last block's param-event queue (sample-offset, ramp duration, etc).
 
-#import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
+#import <AudioToolbox/AudioToolbox.h>
 #import <CoreAudioKit/CoreAudioKit.h>
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <limits>
 #import <mach/mach_time.h>
+#include <memory>
 #include <pulp/events/plugin_main_thread.hpp>
-#include <pulp/format/audio_workgroup_client.hpp>
-#include <pulp/format/processor.hpp>
-#include <pulp/runtime/trace_session.hpp>
-#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/adapter_boundary.hpp>
-#include <pulp/format/plugin_state_io.hpp>
-#include <pulp/format/parameter_text.hpp>
+#include <pulp/format/ara.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
+#include <pulp/format/detail/audio_buffer_list_validation.hpp>
+#include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/format/parameter_text.hpp>
+#include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
-#include <pulp/format/ara.hpp>
-#include <pulp/signal/scoped_flush_denormals.hpp>
-#include <pulp/format/detail/playhead_diff.hpp>
-#include <pulp/format/detail/audio_buffer_list_validation.hpp>
+#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
-#include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/alive_token.hpp>
+#include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/runtime/trace_session.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
-#include <cmath>
-#include <memory>
-#include <array>
-#include <atomic>
-#include <limits>
 #include <vector>
 
 namespace pulp::format::au {
@@ -446,8 +446,7 @@ struct ScopedAuV3HostWriting {
     // here rather than re-derived per render.
     _bridge.ump_enabled = desc.effective_capabilities().supports_ump;
     if (_bridge.ump_enabled) {
-        pulp::runtime::log_info("AU: MIDI 2.0 (UMP) input enabled for '{}'",
-                                desc.name);
+        pulp::runtime::log_info("AU: MIDI 2.0 (UMP) input enabled for '{}'", desc.name);
     }
 
     // Create buses
@@ -542,7 +541,9 @@ struct ScopedAuV3HostWriting {
 // offered MPE input. Bridged to the v2 kAudioUnitProperty_SupportsMPE.
 // `mpe.enabled` is the same descriptor opt-in the render block gates on, so
 // what the host is told and what the adapter does cannot drift.
-- (BOOL)supportsMPE { return _bridge.mpe.enabled ? YES : NO; }
+- (BOOL)supportsMPE {
+    return _bridge.mpe.enabled ? YES : NO;
+}
 
 // MIDI protocol negotiation. An AU that does not override this "will default to
 // receiving legacy MIDI" (AUAudioUnit.h), which folds 16-bit velocity and
@@ -554,7 +555,8 @@ struct ScopedAuV3HostWriting {
 // Gated on the descriptor opt-in: a plug-in that does not declare supports_ump
 // defers to super, so its delivery stays byte-for-byte what it is today.
 - (MIDIProtocolID)AudioUnitMIDIProtocol API_AVAILABLE(macos(12.0), ios(15.0), tvos(15.0)) {
-    if (_bridge.ump_enabled) return kMIDIProtocol_2_0;
+    if (_bridge.ump_enabled)
+        return kMIDIProtocol_2_0;
     return [super AudioUnitMIDIProtocol];
 }
 
@@ -1191,9 +1193,8 @@ struct ScopedAuV3HostWriting {
                         // adapter, which converts its MIDI 1.0 events for the
                         // same reason.
                         if (bridge->ump_enabled) {
-                            bridge->ump_buffer.add(
-                                pulp::midi::midi1_event_to_ump2(me),
-                                me.sample_offset);
+                            bridge->ump_buffer.add(pulp::midi::midi1_event_to_ump2(me),
+                                                   me.sample_offset);
                         }
                     }
                 } else if (event->head.eventType == AURenderEventMIDIEventList) {
@@ -1247,8 +1248,7 @@ struct ScopedAuV3HostWriting {
                             // type-0x3 (Data/SysEx7) feeds the reassembler.
                             pulp::midi::walk_ump_packet(
                                 pkt->words, static_cast<uint32_t>(pkt->wordCount),
-                                [&](uint8_t mt, const uint32_t* mw,
-                                    uint32_t mwc) {
+                                [&](uint8_t mt, const uint32_t* mw, uint32_t mwc) {
                                     if (mt == 0x3) {
                                         reassembler.feed_packet(mw[0], mw[1],
                                                                 emit, &ctx);
@@ -1264,15 +1264,13 @@ struct ScopedAuV3HostWriting {
                                         return;
                                     pulp::midi::UmpPacket packet;
                                     packet.word_count = static_cast<int>(mwc);
-                                    for (uint32_t k = 0;
-                                         k < mwc && k < packet.words.size(); ++k)
+                                    for (uint32_t k = 0; k < mwc && k < packet.words.size(); ++k)
                                         packet.words[k] = mw[k];
                                     // Native UMP for a Processor that asked for
                                     // it: 16-bit velocity and 32-bit controller
                                     // values survive intact.
                                     if (bridge->ump_enabled)
-                                        bridge->ump_buffer.add(
-                                            packet, ctx.sample_offset);
+                                        bridge->ump_buffer.add(packet, ctx.sample_offset);
                                     // MIDI 1.0 projection regardless, so the
                                     // MidiBuffer the Processor already reads —
                                     // and the MPE sidecar that runs off it —
@@ -1281,8 +1279,7 @@ struct ScopedAuV3HostWriting {
                                     // CC) return false and reach an opted-in
                                     // Processor through the UMP buffer only.
                                     pulp::midi::MidiEvent me;
-                                    if (pulp::midi::ump_to_midi1_event(packet,
-                                                                       me)) {
+                                    if (pulp::midi::ump_to_midi1_event(packet, me)) {
                                         me.sample_offset = ctx.sample_offset;
                                         midi_in.add(me);
                                     }
@@ -1513,8 +1510,7 @@ struct ScopedAuV3HostWriting {
         // reads exactly as it does without this adapter path. Set every block
         // rather than once at allocation: the pointer must not outlive a
         // teardown that clears the buffer.
-        bridge->processor->set_ump_input(
-            bridge->ump_enabled ? &bridge->ump_buffer : nullptr);
+        bridge->processor->set_ump_input(bridge->ump_enabled ? &bridge->ump_buffer : nullptr);
 
         bridge->processor->set_param_events(&bridge->param_events);
         {
