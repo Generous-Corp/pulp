@@ -894,3 +894,22 @@ TEST_CASE("staged async ledger emits one authenticated terminal record per reque
     REQUIRE(ledger.submitted(request + 1, 2100));
     REQUIRE(ledger.complete(request + 1, StagedAsyncTraceLedger::CompletionStatus::Failed, 2200));
 }
+
+TEST_CASE("staged async trial state atomically owns request slot and sequence",
+          "[gpu_audio][trace][staged_async]") {
+    StagedAsyncTrialState state(2);
+    REQUIRE(state.admit(9, 4, 1, 5000, 1000));
+    CHECK(state.pending_count() == 1);
+    CHECK(state.slot_occupied(1));
+    CHECK_FALSE(state.admit(10, 5, 1, 5001, 1001));
+    CHECK_FALSE(state.submitted(10, 1002));
+    REQUIRE(state.submitted(9, 1100));
+    REQUIRE(state.complete(9, StagedAsyncTraceLedger::CompletionStatus::Expired, 1200));
+    CHECK(state.pending_count() == 0);
+    CHECK_FALSE(state.slot_occupied(1));
+
+    const auto records = state.take_completed();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().sequence == 4);
+    CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::LateRejected);
+}
