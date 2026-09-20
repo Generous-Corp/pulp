@@ -11,7 +11,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
 #include <numeric>
 #include <thread>
 #include <vector>
@@ -63,25 +65,61 @@ void square_task(void* ctx, std::uint32_t i) noexcept {
     c->runs.fetch_add(1, std::memory_order_relaxed);
 }
 
-bool wait_for_progress(const std::atomic<std::uint64_t>& counter) {
-    // A busy yield loop can repeatedly win the scheduler on low-core hosted
-    // macOS runners and starve the driver thread this probe is waiting for.
-    // Poll with a short sleep and keep the deadline diagnostic-only.
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (counter.load(std::memory_order_relaxed) == 0 &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+// Timeouts here are hang guards, not part of any success path: every wait below
+// is woken by the event it is waiting for, so a passing run does not depend on
+// the deadline being generous enough.
+constexpr auto kEventTimeout = std::chrono::seconds(10);
+// Long enough that a pool which CAN idle would have done so many times over.
+constexpr auto kNoEventTimeout = std::chrono::milliseconds(250);
+
+// One-shot cross-thread event. The producer publishes; the waiter blocks until
+// it is published. Polling for a thread-pool transition competes for the very
+// cores the pool needs in order to reach that transition, which is what made
+// the cold-idle assertion timing-sensitive on a loaded host.
+class Signal {
+public:
+    void publish() noexcept {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            published_ = true;
+        }
+        condition_.notify_all();
     }
-    return counter.load(std::memory_order_relaxed) > 0;
+    bool wait(std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return condition_.wait_for(lock, timeout, [this] { return published_; });
+    }
+    bool wait(std::chrono::seconds timeout) {
+        return wait(std::chrono::duration_cast<std::chrono::milliseconds>(timeout));
+    }
+    void reset() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        published_ = false;
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    bool published_ = false;
+};
+
+// Pool park hook. A Signal wired here must be declared BEFORE the pool it
+// watches, so the pool's destructor joins the worker threads that call into it
+// before the Signal goes away.
+void publish_worker_park(void* context) noexcept {
+    static_cast<Signal*>(context)->publish();
 }
 
-bool wait_for_worker_idle_sleep(GraphRuntimeWorkerPool& pool) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (pool.worker_idle_sleep_count() == 0 &&
-           std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::yield();
+// A worker briefly owns the cold-transition gate while it decides to park, so
+// one CAS can lose. Retrying within a hang guard is not a timing dependency:
+// the gate is held for a bounded handful of instructions.
+bool hold_cold_transition_gate(GraphRuntimeWorkerPool& pool) {
+    const auto deadline = std::chrono::steady_clock::now() + kEventTimeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pool.try_hold_cold_transition_gate_for_test()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    return pool.worker_idle_sleep_count() > 0;
+    return false;
 }
 
 bool wait_for_workgroup_update(GraphRuntimeWorkerPool& pool) {
@@ -232,16 +270,61 @@ TEST_CASE("WorkerPool stop is idempotent",
 
 TEST_CASE("WorkerPool cold-idles workers without blocking later batches",
           "[format][worker-pool][rt-safety]") {
+    Signal parked;  // declared before the pool: its workers publish into it
     GraphRuntimeWorkerPool pool;
+    pool.set_worker_park_hook_for_test(&publish_worker_park, &parked);
     pool.set_audio_workgroup(nullptr);
     REQUIRE(pool.start(4));
-    REQUIRE(wait_for_worker_idle_sleep(pool));
+    REQUIRE(parked.wait(kEventTimeout));
+    REQUIRE(pool.worker_idle_sleep_count() > 0);
 
     SquareCtx ctx;
     ctx.out.assign(128, 0xFFFFFFFFu);
     pool.run(128, square_task, &ctx);
     REQUIRE(ctx.runs.load() == 128);
     for (std::uint32_t i = 0; i < 128; ++i) REQUIRE(ctx.out[i] == i * i);
+    pool.stop();
+}
+
+TEST_CASE("WorkerPool idle wait reports no park when the pool has no worker threads",
+          "[format][worker-pool][rt-safety]") {
+    // Negative control for the cold-idle wait. A single participant runs every
+    // batch inline and spawns no thread, so there is no park to observe and the
+    // wait must report that rather than succeed on patience alone.
+    Signal parked;
+    GraphRuntimeWorkerPool pool;
+    pool.set_worker_park_hook_for_test(&publish_worker_park, &parked);
+    REQUIRE(pool.start(1));
+    CHECK_FALSE(parked.wait(kNoEventTimeout));
+    CHECK(pool.worker_idle_sleep_count() == 0);
+    pool.stop();
+}
+
+TEST_CASE("WorkerPool idle wait reports no park while workers are held off the cold path",
+          "[format][worker-pool][rt-safety]") {
+    // Negative control with live worker threads: holding the cold-transition
+    // gate makes every worker's park attempt fail, so the pool spins forever
+    // without idling. A wait that merely became more patient would still report
+    // success here; only one woken by the transition itself can report failure.
+    Signal parked;
+    GraphRuntimeWorkerPool pool;
+    pool.set_worker_park_hook_for_test(&publish_worker_park, &parked);
+    REQUIRE(pool.start(4));
+    REQUIRE(hold_cold_transition_gate(pool));
+    // A worker may already have parked before the gate was claimed; it stays
+    // parked and publishes once per episode, so clearing the signal here leaves
+    // only parks that would happen under the held gate — of which there are none.
+    parked.reset();
+    CHECK_FALSE(parked.wait(kNoEventTimeout));
+
+    // The control must be able to read a park on this same pool, or its
+    // negative result would only prove the probe was never wired up.
+    pool.release_cold_transition_gate_for_test();
+    SquareCtx ctx;
+    ctx.out.assign(64, 0xFFFFFFFFu);
+    pool.run(64, square_task, &ctx);
+    parked.reset();
+    CHECK(parked.wait(kEventTimeout));
     pool.stop();
 }
 
@@ -475,9 +558,12 @@ TEST_CASE("WorkerPool rapid workgroup publications stay coherent and retire safe
 
 TEST_CASE("WorkerPool cold workgroup preparation transitions every worker",
           "[format][worker-pool][workgroup][rt-safety][lifetime]") {
+    Signal parked;  // declared before the pool: its workers publish into it
     GraphRuntimeWorkerPool pool;
+    pool.set_worker_park_hook_for_test(&publish_worker_park, &parked);
     REQUIRE(pool.start(4));
-    REQUIRE(wait_for_worker_idle_sleep(pool));
+    REQUIRE(parked.wait(kEventTimeout));
+    REQUIRE(pool.worker_idle_sleep_count() > 0);
     auto* workgroup = make_test_workgroup("pulp-worker-pool-cold-prepare");
     REQUIRE(workgroup != nullptr);
     pool.set_audio_workgroup(workgroup);
@@ -608,19 +694,23 @@ TEST_CASE("WorkerPool started on one thread, run() driven from another, is race-
     ctx.out.assign(kTasks, 0);
     std::atomic<bool> stop{false};
     std::atomic<std::uint64_t> batches{0};
+    Signal progressed;
     std::thread driver([&] {
         while (!stop.load(std::memory_order_relaxed)) {
             ctx.runs.store(0, std::memory_order_relaxed);
             pool.run(kTasks, square_task, &ctx);
             batches.fetch_add(1, std::memory_order_relaxed);
+            progressed.publish();
         }
     });
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (batches.load(std::memory_order_relaxed) == 0 &&
-           std::chrono::steady_clock::now() < deadline) {
+    // Block on the driver's own progress instead of contending for its cores,
+    // then re-validate from this thread while it keeps firing batches: those
+    // concurrent reads against a live pool are the surface TSan watches, and
+    // waiting first guarantees the driver is running underneath them.
+    CHECK(progressed.wait(kEventTimeout));
+    for (int probe = 0; probe < 10000; ++probe) {
         (void)pool.running();
         (void)pool.worker_count();
-        std::this_thread::yield();
     }
     stop.store(true, std::memory_order_relaxed);
     driver.join();
@@ -641,15 +731,18 @@ TEST_CASE("WorkerPool rapid back-to-back batches from a separate thread are race
     ctx.out.assign(8, 0);
     std::atomic<bool> stop{false};
     std::atomic<std::uint64_t> blocks{0};
+    Signal progressed;
     std::thread driver([&] {
         while (!stop.load(std::memory_order_relaxed)) {
             pool.run(8, square_task, &ctx);
             pool.run(8, square_task, &ctx);
             pool.run(8, square_task, &ctx);
             blocks.fetch_add(1, std::memory_order_relaxed);
+            progressed.publish();
         }
     });
-    CHECK(wait_for_progress(blocks));
+    CHECK(progressed.wait(kEventTimeout));
+    CHECK(blocks.load() > 0);
     stop.store(true, std::memory_order_relaxed);
     driver.join();
 }
