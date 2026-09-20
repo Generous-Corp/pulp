@@ -452,28 +452,78 @@ TEST_CASE("The floor shaper clamps its threshold into the usable range",
     REQUIRE(floor_shape(0.5, -1.0, FloorCurve::linear) == Catch::Approx(0.5));
 
     // A threshold past the ceiling is held at 0.9, which keeps the rescale
-    // divisor away from zero and the output finite.
-    const double clamped = floor_shape(1.0, 5.0, FloorCurve::linear);
-    REQUIRE(std::isfinite(clamped));
-    REQUIRE(clamped == Catch::Approx(1.0));
+    // divisor away from zero. Probing at full scale cannot show where the
+    // ceiling is -- any ceiling in (0,1) maps 1.0 to 1.0 -- so probe inside the
+    // surviving region instead, where 0.95 lands midway only if the ceiling is
+    // exactly 0.9.
+    REQUIRE(floor_shape(1.0, 5.0, FloorCurve::linear) == Catch::Approx(1.0));
+    REQUIRE(floor_shape(0.95, 5.0, FloorCurve::linear) == Catch::Approx(0.5));
 }
 
-TEST_CASE("A caller-supplied dry/wet mix composes with the floor shaper",
+TEST_CASE("The smoothstep curve is the cubic it claims to be",
           "[signal][lofi]") {
     using pulp::signal::floor_shape;
     using pulp::signal::FloorCurve;
 
-    // The mix is deliberately not part of floor_shape. A caller that wants one
-    // crossfades toward the shaped value, and these are the numbers that comes
-    // out to — including the case where the input is silenced but the mix only
-    // moves the output part of the way there.
-    const auto mixed = [](double x, double threshold, FloorCurve curve,
-                          double amount) {
-        return x + amount * (floor_shape(x, threshold, curve) - x);
-    };
+    // Pinning only the endpoints and the initial slope admits other cubics.
+    // n*n*(2-n) also starts flat and reaches full scale, so these two interior
+    // points -- one at the symmetric midpoint, one off-centre -- are what
+    // distinguish 3n^2-2n^3 from its neighbours.
+    REQUIRE(floor_shape(0.55, 0.1, FloorCurve::smoothstep) ==
+            Catch::Approx(0.5));
+    REQUIRE(floor_shape(0.325, 0.1, FloorCurve::smoothstep) ==
+            Catch::Approx(0.15625));
 
-    REQUIRE(mixed(0.05, 0.1, FloorCurve::linear, 1.0) == Catch::Approx(0.0));
-    REQUIRE(mixed(0.55, 0.1, FloorCurve::linear, 1.0) == Catch::Approx(0.5));
-    REQUIRE(mixed(0.05, 0.1, FloorCurve::linear, 0.5) == Catch::Approx(0.025));
-    REQUIRE(mixed(0.55, 0.1, FloorCurve::linear, 0.0) == Catch::Approx(0.55));
+    // The same quarter-point under the linear curve, so the two are not
+    // silently interchangeable.
+    REQUIRE(floor_shape(0.325, 0.1, FloorCurve::linear) == Catch::Approx(0.25));
+}
+
+TEST_CASE("Input beyond full scale saturates instead of turning over",
+          "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // Without the clamp the smoothstep polynomial leaves its valid interval:
+    // it falls back to zero at a normalised 1.5 and then goes negative, which
+    // copysign would return as a large positive sample. An EQ in front of this
+    // makes that reachable, so both curves are held at full scale instead.
+    for (const auto curve : {FloorCurve::linear, FloorCurve::smoothstep}) {
+        REQUIRE(floor_shape(1.45, 0.1, curve) == Catch::Approx(1.0));
+        REQUIRE(floor_shape(2.0, 0.1, curve) == Catch::Approx(1.0));
+        REQUIRE(floor_shape(-2.0, 0.1, curve) == Catch::Approx(-1.0));
+        REQUIRE(floor_shape(1e6, 0.1, curve) == Catch::Approx(1.0));
+    }
+}
+
+TEST_CASE("The floor shaper accepts a float threshold beside a float sample",
+          "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // The threshold is a non-deduced parameter so a caller may mix a literal
+    // with a typed sample. Deducing it would make this line a compile error,
+    // which is exactly the shape a float call site reaches for.
+    const float shaped = floor_shape(0.55f, 0.1, FloorCurve::linear);
+    REQUIRE(shaped == Catch::Approx(0.5f));
+    REQUIRE(floor_shape(0.55, 0.1f, FloorCurve::linear) == Catch::Approx(0.5));
+}
+
+TEST_CASE("Non-finite input propagates rather than being silently swallowed",
+          "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+
+    // Infinity saturates, because the clamp bounds it like any other
+    // over-range input.
+    REQUIRE(floor_shape(inf, 0.1, FloorCurve::linear) == Catch::Approx(1.0));
+    REQUIRE(floor_shape(-inf, 0.1, FloorCurve::linear) == Catch::Approx(-1.0));
+
+    // NaN is not silenced into a plausible-looking zero. A caller that can
+    // produce one is expected to guard upstream.
+    REQUIRE(std::isnan(floor_shape(nan, 0.1, FloorCurve::linear)));
+    REQUIRE(std::isnan(floor_shape(0.5, nan, FloorCurve::linear)));
 }

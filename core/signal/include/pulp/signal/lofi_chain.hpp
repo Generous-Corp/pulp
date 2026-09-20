@@ -58,24 +58,35 @@ enum class FloorCurve {
 /// This is the dead-zone geometry of `dead_zone_saturate` without the tanh.
 /// Where that function exists to truncate a decaying tail the way an early
 /// converter did, this one exists to lift a floor: everything under the
-/// threshold is discarded and what remains is stretched back to full scale, so
-/// a source's noise bed disappears while its body keeps its level.
+/// threshold is discarded and the surviving region is stretched back to full
+/// scale. Only a full-scale input keeps its level; everything below it is
+/// pulled down, which is what makes a noise bed vanish rather than merely
+/// quieten.
 ///
 /// The curve choice is audible at the threshold itself. `linear` arrives with a
 /// non-zero slope, which makes material hovering near the threshold chatter as
 /// it crosses; `smoothstep` leaves with zero slope and fades that crossing in.
+///
+/// Input beyond full scale saturates. That clamp is load-bearing rather than
+/// defensive: `3n^2 - 2n^3` is only a smoothstep on [0, 1]. Past it the curve
+/// turns over, reaches zero at n = 1.5, then goes negative — and `copysign`
+/// would hand that back as a large positive sample. A caller whose upstream
+/// gain can exceed unity, which is any caller with an EQ in front, would hear
+/// that as a burst rather than a floor.
 ///
 /// Returns the shaped sample only. Deciding how much of it to use is the
 /// caller's: a dry/wet mix toward this value belongs at the call site, because
 /// the amount is usually a product-level control rather than a property of the
 /// transfer function.
 template <typename Sample = double>
-inline Sample floor_shape(Sample x, Sample threshold, FloorCurve curve) {
+inline Sample floor_shape(Sample x, std::type_identity_t<Sample> threshold,
+                          FloorCurve curve) {
     static_assert(std::is_floating_point_v<Sample>);
     const Sample limit = std::clamp(threshold, Sample{0}, Sample{0.9});
     const Sample magnitude = std::fabs(x);
     if (magnitude <= limit) return Sample{0};
-    const Sample normalized = (magnitude - limit) / (Sample{1} - limit);
+    const Sample normalized =
+        std::min((magnitude - limit) / (Sample{1} - limit), Sample{1});
     const Sample shaped = curve == FloorCurve::smoothstep
                               ? normalized * normalized *
                                     (Sample{3} - Sample{2} * normalized)
