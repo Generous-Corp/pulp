@@ -673,6 +673,36 @@ written decision, and only when the edit that tripped the gate is load-bearing
 for the change (the triage in that later section). Inventing a classification to
 unblock an incidental edit converts a safety gate into paperwork.
 
+## A portability fix to a frozen header classifies as `infrastructure`, not a capability
+
+The triage above asks whether your capability actually needs the header to
+change. Sometimes the header change *is* the whole change: a public header can
+be unbuildable on a platform and the fix has to land in it. `simd_buffer.hpp`
+wrapped C11 `aligned_alloc`, which Bionic does not provide below Android API 26,
+so every Android build of anything including it failed to compile.
+
+That still trips the frozen-baseline gate, and it still resolves by declaring
+the header in `REVIEWED_HEADERS` — but declare it honestly:
+
+- `"disposition": "infrastructure"` with `"capability_keys": []`. The edit
+  changed no consumer contract, so there is no capability to claim. Inventing
+  one to look tidier would assert a binding nothing offers.
+- Say in the rationale that the branch is a portability detail of the primitive
+  rather than a change to the surface it presents, so a later reader is not left
+  guessing whether the allocator's behavior moved.
+- It is a byte-level fingerprint refresh, so revert the `contract-history.json`
+  snapshot per the guidance above and keep the three-file change.
+
+Confirm the same post-conditions as any classification: the baseline file has no
+diff, its entry count is unchanged, `--check` reports `fresh`, and the surface's
+`legacy_unreviewed` count dropped by exactly one.
+
+**Measure `--write`'s exit status unpiped.** On a frozen header it prints
+`INVALID: public header fingerprint changed` and exits 1, exactly as documented
+above — but `--write | tail` reports `tail`'s status instead, which reads as a
+silent success and invites the wrong conclusion that the generator accepted the
+edit.
+
 ## The rederive self-test dirties the checkout for its whole run
 
 `test_agent_capability_rederive.py` and `test_agent_capability_manifest.py` both

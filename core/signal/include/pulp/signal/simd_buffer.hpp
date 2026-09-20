@@ -13,6 +13,16 @@
 #include <malloc.h>
 inline void* pulp_aligned_alloc(size_t alignment, size_t size) { return _aligned_malloc(size, alignment); }
 inline void pulp_aligned_free(void* p) { _aligned_free(p); }
+#elif defined(__ANDROID__)
+// Bionic exposes aligned_alloc only from API 28; posix_memalign supports
+// the older API floor and its allocation can be released with free.
+inline void* pulp_aligned_alloc(size_t alignment, size_t size) {
+    void* allocation = nullptr;
+    return posix_memalign(&allocation, alignment, size) == 0 ? allocation : nullptr;
+}
+inline void pulp_aligned_free(void* p) {
+    std::free(p);
+}
 #else
 inline void* pulp_aligned_alloc(size_t alignment, size_t size) { return std::aligned_alloc(alignment, size); }
 inline void pulp_aligned_free(void* p) { std::free(p); }
