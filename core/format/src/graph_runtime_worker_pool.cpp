@@ -4,8 +4,8 @@
 
 #include <cassert>
 #if !defined(PULP_WASM)
-#include <pulp/audio/workgroup.hpp>
 #include <chrono>
+#include <pulp/audio/workgroup.hpp>
 #endif
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
 #include <intrin.h>
@@ -61,7 +61,8 @@ bool GraphRuntimeWorkerPool::start(std::uint32_t worker_count) {
 #if defined(PULP_WASM)
     // AudioWorklet hosts cannot spawn workers. Refuse before disturbing an
     // existing inline pool, and omit the unreachable thread-spawn import.
-    if (worker_count > 1) return false;
+    if (worker_count > 1)
+        return false;
 #endif
     stop();
     if (worker_count == 0) return false;
