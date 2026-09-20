@@ -142,11 +142,27 @@ reader reads and never *when* it may be compiled. A future tick-domain kind
 should be designed against that reservation and that proof obligation. This is
 the precedent for the shape, not a claim that `CrossTrackRhythm` is the kind.
 
-**One caution on the order-preservation property.** The capability Forge binds,
-`timebase.groove-kernel`, is the kernel that rejects reordering. The stage that
-actually runs in Pulp's compiler is `GrooveTemplate`, which does not validate
-order (see stage 1). A recipe projected through the kernel therefore carries a
-guarantee that the same displacement authored as a document groove does not.
+**One caution on the order-preservation property, and how narrow it is.** The
+capability named above, `timebase.groove-kernel`, rejects a table that would
+reorder events. The stage that actually runs in Pulp's compiler is
+`GrooveTemplate`, which does not validate order (see stage 1). So the kernel
+carries a guarantee the authored document groove does not.
+
+**But that guarantee covers a far narrower class of tables than its name
+suggests, and an ordinary authored groove is not in it.** Derived from
+`validate_order()` and confirmed by measurement: a cyclic table is admitted only
+when its scaled offsets **descend by at most one tick per slot**. A groove
+authored at one percent of a sixteenth step moves 1'764 ticks, so it is refused
+outright — measured at 0 admitted out of 15'000 trials for each of two real
+shipped feel tables, against a flat-table control admitted 15 of 15, with the
+first refusal at strength 1.
+
+The practical consequence for a stage-2 consumer: **the order-preserving kernel
+is not the surface a realtime consumer binds for an ordinary groove table.** It
+is the strict non-reordering subset, useful when a consumer walks events in
+authored order and cannot re-sort them. A consumer projecting a normal authored
+feel needs a projection that does not validate order — the same contract
+`GrooveTemplate` already documents for the compile-time stage.
 
 ### Stage 3 — tick to sample
 

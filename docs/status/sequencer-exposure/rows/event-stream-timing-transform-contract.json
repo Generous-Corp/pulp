@@ -5,15 +5,11 @@
   "delivery_state": "pending",
   "claim_id": "3b664f30-96b0-4e81-9824-034dc7280518",
   "owned_paths": [
-    "docs/policies/event-stream-timing-transform.md",
-    "docs/status/docs-index.yaml",
     ".agents/skills/timeline/SKILL.md",
     "test/test_timeline_event_device_chain.cpp",
     "test/test_playback_note_renderer.cpp",
     "docs/status/sequencer-exposure/rows/event-stream-timing-transform-contract.json",
-    "docs/guides/rhythm-generation.md",
-    ".agents/skills/playback/SKILL.md",
-    "test/test_music_generative.cpp"
+    ".agents/skills/playback/SKILL.md"
   ],
   "evidence": [
     {
