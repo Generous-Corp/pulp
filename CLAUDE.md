@@ -1598,26 +1598,29 @@ tools/scripts/clean_worktree_builds.sh --verbose  # also explain every skip
 tools/scripts/clean_worktree_builds.sh --yes      # delete
 ```
 
-It only considers directories `git worktree list` reports for this repository,
-and deletes only when **all five** hold: the exact head is a strict ancestor of
-current `origin/main`; the exact head is proven landed - by the shared
-lineage registry recording it `merged` with a PR URL, which is the only proof
-a squash-landed head can have (on 2026-09-13, 54 provably merged worktrees
-held 947 GB because their records were still `active`; run
-`worktree_lineage.sh reconcile` to back-fill them from `origin/main`'s merge
-commits, zero API calls); the build has been idle beyond
-`PULP_WORKTREE_BUILD_IDLE_HOURS` (default 2) across its entire tree; no live
-process names, has its cwd in, or holds an open file under the worktree; and the
-physical path/common Git directory re-pass a fresh registry check at deletion
-time. Removal first renames `build/` from an already-opened physical worktree
-directory, so replacement-path races cannot redirect it. A deleted
-remote branch is not completion evidence: unique, active, unclassified, or
-stale-lineage work is preserved automatically. The mutable gates are checked
-again immediately before removal. If `origin` or process state is unavailable,
-or full Git history cannot be established, it removes nothing (exit 3). The
-main checkout is never reaped. `PULP_WORKTREES_ROOT`
-narrows the sweep and is echoed in the header, because that variable is often
-already exported and silently halves the totals. Tested by
+It only considers directories `git worktree list` reports for this repository
+(`build` and `build-*`, so coverage/sanitizer trees are in scope), and deletes
+only when **all five** hold: the exact head is a strict ancestor of current
+`origin/main`; that head is proven landed, **either** by the lineage registry
+recording it `merged` with a PR URL **or** by git ancestry alone; the build has
+been idle beyond `PULP_WORKTREE_BUILD_IDLE_HOURS` (default 2) across its entire
+tree; no live process names, has its cwd in, or holds an open file under the
+worktree; and the physical path/common Git directory re-pass a fresh registry
+check at deletion time. Removal first renames `build/` from an already-opened
+physical worktree directory, so replacement-path races cannot redirect it.
+**Absence of a registry row is not evidence of non-merge** — 54 provably merged
+worktrees held 947 GB on 2026-09-13 because nobody recorded a closeout — but a
+**squash**-landed head still needs its PR URL, that head being deliberately not
+an ancestor (`worktree_lineage.sh reconcile` back-fills them, zero API calls).
+**An explicit `active` row still vetoes, and ancestry may not overrule it**:
+ancestry proves a head *landed*, never that work there *stopped*. A deleted
+remote branch is still not completion evidence. The mutable gates are re-checked
+immediately before removal. If `origin` or process state is unavailable, or full
+Git history cannot be established, it removes nothing (exit 3). The main
+checkout is never reaped. `PULP_WORKTREES_ROOT` narrows the sweep and is echoed
+in the header, because it is often already exported and silently halves the
+totals; `PULP_REAP_SAME_DEVICE_AS=<path>` confines candidates to one filesystem,
+since free space is per-volume. Tested by
 `tools/scripts/test_clean_worktree_builds.py`.
 
 Scheduling either reaper is deliberately not wired up here — whether a machine
