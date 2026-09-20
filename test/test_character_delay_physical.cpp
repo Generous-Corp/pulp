@@ -149,7 +149,7 @@ double hysteresis_alias_excess_dbc(const std::vector<double>& dut,
 // ═══════════════════════════════════════════════════════════════════════════
 
 TEST_CASE("the hysteresis solver converges inside its iteration cap",
-          "[character-delay][hysteresis][slow]") {
+          "[character-delay][hysteresis]") {
     // 4x the saturation onset: the Langevin function saturates around an
     // argument of 3, and the argument is field/shape, so the onset field is
     // 3 x shape and the drive level is four times that.
@@ -345,7 +345,7 @@ TEST_CASE("physical tape feedback calibration is continuous and releases above u
 }
 
 TEST_CASE("physical hysteresis oversampling suppresses max-drive aliasing",
-          "[character-delay][hysteresis][aliasing][slow]") {
+          "[character-delay][hysteresis][aliasing]") {
     const auto reference = hysteresis_alias_spectrum(16);
     const double one_times = hysteresis_alias_excess_dbc(hysteresis_alias_spectrum(1), reference);
     const double four_times = hysteresis_alias_excess_dbc(hysteresis_alias_spectrum(4), reference);
@@ -512,7 +512,7 @@ TEST_CASE("the loss cascade is exact at every age, not just at fitted points",
 }
 
 TEST_CASE("the shipped loss shapes reproduce a fresh derivation",
-          "[character-delay][tape][loss][slow]") {
+          "[character-delay][tape][loss]") {
     // The shapes in tables.hpp were derived offline by the fitter that still
     // lives in tape_loss.hpp. This re-runs that derivation and checks the
     // shipped values give the same RESPONSE — comparing responses rather than
