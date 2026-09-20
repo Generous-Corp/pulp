@@ -511,8 +511,7 @@ TEST_CASE("the loss cascade is exact at every age, not just at fitted points",
     }
 }
 
-TEST_CASE("the shipped loss shapes reproduce a fresh derivation",
-          "[character-delay][tape][loss]") {
+TEST_CASE("the shipped loss shapes reproduce a fresh derivation", "[character-delay][tape][loss]") {
     // The shapes in tables.hpp were derived offline by the fitter that still
     // lives in tape_loss.hpp. This re-runs that derivation and checks the
     // shipped values give the same RESPONSE — comparing responses rather than
