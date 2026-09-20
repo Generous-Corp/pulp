@@ -108,8 +108,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "72175b3aabb755664c5129ef1f56aa3849bd3775",
-          "object_id": "e8277b54f07c335058c8822073601bd777bd6595",
+          "revision": "322516cfbcfa40fc35a01bf16c908d2f580c42a2",
+          "object_id": "1bbca6be2ff4dcd5b8f4012bfe05ea3a23b1a5c9",
           "object_type": "tree"
         },
         {
@@ -1658,8 +1658,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/cli/gpu_probe",
           "state": "pulp-owned-retained",
-          "revision": "72175b3aabb755664c5129ef1f56aa3849bd3775",
-          "object_id": "e8277b54f07c335058c8822073601bd777bd6595",
+          "revision": "322516cfbcfa40fc35a01bf16c908d2f580c42a2",
+          "object_id": "1bbca6be2ff4dcd5b8f4012bfe05ea3a23b1a5c9",
           "object_type": "tree"
         },
         {
