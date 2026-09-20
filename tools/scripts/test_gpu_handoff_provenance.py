@@ -60,7 +60,9 @@ def stale_pin_remedy(check_report: str) -> str:
     far from the edit, and nothing in a field list says the repair is
     regeneration rather than a hand edit. Returns "" when the report names no
     drift, so a failure with another cause never acquires a remedy that does
-    not apply to it.
+    not apply to it. One stale path produces several drift rows -- a revision
+    field and an object_id field name the same path -- so the paths are
+    deduplicated rather than listed once per field.
     """
 
     try:
@@ -70,7 +72,7 @@ def stale_pin_remedy(check_report: str) -> str:
     if not isinstance(report, dict):
         return ""
     drifted = sorted(
-        str(drift["path"]) for drift in report.get("drifts", ()) if "path" in drift
+        {str(drift["path"]) for drift in report.get("drifts", ()) if "path" in drift}
     )
     command = report.get("repair_command")
     if not drifted or not command:
@@ -83,7 +85,7 @@ def stale_pin_remedy(check_report: str) -> str:
             "Regenerate the ledger and its receipt, and commit both:",
             f"  {command}",
             "pinned paths that moved:",
-            *(f"  {path}" for path in sorted(set(drifted))),
+            *(f"  {path}" for path in drifted),
         ]
     )
 
