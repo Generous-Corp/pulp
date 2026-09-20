@@ -185,7 +185,7 @@ constexpr pulp::state::ParamID kNoAutoId = 13;
 // parameter, so the projection is asserted against a live registration rather
 // than against the predicate it was built from.
 class VisibilityProcessor : public pulp::format::Processor {
-public:
+  public:
     pulp::format::PluginDescriptor descriptor() const override {
         return {
             .name = "VstVisibility",
@@ -199,35 +199,35 @@ public:
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
-        store.add_parameter({.id = kVisibleId, .name = "Gain",
-                             .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+        store.add_parameter({.id = kVisibleId, .name = "Gain", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
 
-        pulp::state::ParamInfo hidden{.id = kHiddenId, .name = "Internal",
-                                      .range = {0.0f, 1.0f, 0.0f, 0.0f}};
+        pulp::state::ParamInfo hidden{
+            .id = kHiddenId, .name = "Internal", .range = {0.0f, 1.0f, 0.0f, 0.0f}};
         hidden.hidden = true;
         store.add_parameter(hidden);
 
-        pulp::state::ParamInfo meter{.id = kMeterId, .name = "Output Level",
+        pulp::state::ParamInfo meter{.id = kMeterId,
+                                     .name = "Output Level",
                                      .unit = "dB",
                                      .range = {-60.0f, 0.0f, -60.0f, 0.0f}};
         meter.read_only = true;
         store.add_parameter(meter);
 
-        pulp::state::ParamInfo no_auto{.id = kNoAutoId, .name = "Quality",
-                                       .range = {0.0f, 1.0f, 0.0f, 0.0f}};
+        pulp::state::ParamInfo no_auto{
+            .id = kNoAutoId, .name = "Quality", .range = {0.0f, 1.0f, 0.0f, 0.0f}};
         no_auto.automatable = false;
         store.add_parameter(no_auto);
     }
 
     void prepare(const pulp::format::PrepareContext&) override {}
     void process(pulp::audio::BufferView<float>& out,
-                 const pulp::audio::BufferView<const float>& in,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
         for (std::size_t ch = 0; ch < out.num_channels() && ch < in.num_channels(); ++ch) {
             auto ic = in.channel(ch);
             auto oc = out.channel(ch);
-            for (std::size_t i = 0; i < out.num_samples(); ++i) oc[i] = ic[i];
+            for (std::size_t i = 0; i < out.num_samples(); ++i)
+                oc[i] = ic[i];
         }
     }
 };
@@ -236,7 +236,7 @@ std::unique_ptr<pulp::format::Processor> make_visibility_processor() {
     return std::make_unique<VisibilityProcessor>();
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("VST3 registers declared hidden and read-only parameters with matching flags",
           "[vst3][params][visibility]") {

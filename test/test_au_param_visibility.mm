@@ -32,7 +32,7 @@ constexpr pulp::state::ParamID kNoAutoId = 4;
 // parameter, so each projection is asserted against a live adapter rather than
 // against the predicate it was built from.
 class VisibilityProcessor : public pulp::format::Processor {
-public:
+  public:
     pulp::format::PluginDescriptor descriptor() const override {
         return {
             .name = "AuVisibility",
@@ -46,35 +46,35 @@ public:
     }
 
     void define_parameters(pulp::state::StateStore& store) override {
-        store.add_parameter({.id = kVisibleId, .name = "Gain",
-                             .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+        store.add_parameter({.id = kVisibleId, .name = "Gain", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
 
-        pulp::state::ParamInfo hidden{.id = kHiddenId, .name = "Internal",
-                                      .range = {0.0f, 1.0f, 0.0f, 0.0f}};
+        pulp::state::ParamInfo hidden{
+            .id = kHiddenId, .name = "Internal", .range = {0.0f, 1.0f, 0.0f, 0.0f}};
         hidden.hidden = true;
         store.add_parameter(hidden);
 
-        pulp::state::ParamInfo meter{.id = kMeterId, .name = "Output Level",
+        pulp::state::ParamInfo meter{.id = kMeterId,
+                                     .name = "Output Level",
                                      .unit = "dB",
                                      .range = {-60.0f, 0.0f, -60.0f, 0.0f}};
         meter.read_only = true;
         store.add_parameter(meter);
 
-        pulp::state::ParamInfo no_auto{.id = kNoAutoId, .name = "Quality",
-                                       .range = {0.0f, 1.0f, 0.0f, 0.0f}};
+        pulp::state::ParamInfo no_auto{
+            .id = kNoAutoId, .name = "Quality", .range = {0.0f, 1.0f, 0.0f, 0.0f}};
         no_auto.automatable = false;
         store.add_parameter(no_auto);
     }
 
     void prepare(const pulp::format::PrepareContext&) override {}
     void process(pulp::audio::BufferView<float>& out,
-                 const pulp::audio::BufferView<const float>& in,
-                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-                 const pulp::format::ProcessContext&) override {
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
         for (std::size_t ch = 0; ch < out.num_channels() && ch < in.num_channels(); ++ch) {
             auto ic = in.channel(ch);
             auto oc = out.channel(ch);
-            for (std::size_t i = 0; i < out.num_samples(); ++i) oc[i] = ic[i];
+            for (std::size_t i = 0; i < out.num_samples(); ++i)
+                oc[i] = ic[i];
         }
     }
 };
@@ -88,11 +88,13 @@ struct ScopedFactoryRegistration {
         : previous(pulp::format::registered_factory()) {
         pulp::format::register_plugin(factory);
     }
-    ~ScopedFactoryRegistration() { pulp::format::register_plugin(previous); }
+    ~ScopedFactoryRegistration() {
+        pulp::format::register_plugin(previous);
+    }
     pulp::format::ProcessorFactory previous;
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("AU v2 GetParameterInfo projects declared hidden and read-only parameters",
           "[au][auv2][params][visibility]") {
@@ -102,8 +104,7 @@ TEST_CASE("AU v2 GetParameterInfo projects declared hidden and read-only paramet
     const auto info_for = [&effect](pulp::state::ParamID id) {
         AudioUnitParameterInfo info{};
         REQUIRE(effect.GetParameterInfo(kAudioUnitScope_Global,
-                                        static_cast<AudioUnitParameterID>(id),
-                                        info) == noErr);
+                                        static_cast<AudioUnitParameterID>(id), info) == noErr);
         return info;
     };
 
@@ -146,8 +147,9 @@ TEST_CASE("AU v3 parameter tree projects declared hidden and read-only parameter
     desc.componentManufacturer = 'Plup';
 
     NSError* error = nil;
-    PulpAudioUnit* unit =
-        [[PulpAudioUnit alloc] initWithComponentDescription:desc options:0 error:&error];
+    PulpAudioUnit* unit = [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                                      options:0
+                                                                        error:&error];
     REQUIRE(unit != nil);
     REQUIRE(error == nil);
 
@@ -155,8 +157,7 @@ TEST_CASE("AU v3 parameter tree projects declared hidden and read-only parameter
     REQUIRE(tree != nil);
 
     const auto flags_for = [tree](pulp::state::ParamID id) {
-        AUParameter* param =
-            [tree parameterWithAddress:static_cast<AUParameterAddress>(id)];
+        AUParameter* param = [tree parameterWithAddress:static_cast<AUParameterAddress>(id)];
         REQUIRE(param != nil);
         return param.flags;
     };

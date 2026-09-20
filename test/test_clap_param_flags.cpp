@@ -105,8 +105,7 @@ TEST_CASE("CLAP modulation advertisement matches the inbound decode predicate",
     }
 }
 
-TEST_CASE("CLAP projects declared hidden and read-only parameters",
-          "[clap][params][visibility]") {
+TEST_CASE("CLAP projects declared hidden and read-only parameters", "[clap][params][visibility]") {
     // Baseline: an undeclared parameter is visible, writable and automatable
     // exactly as before, so existing plugins are unchanged.
     const pulp::state::ParamInfo ordinary{
@@ -138,8 +137,7 @@ TEST_CASE("CLAP projects declared hidden and read-only parameters",
     pulp::state::ParamInfo not_automatable = ordinary;
     not_automatable.id = 43;
     not_automatable.automatable = false;
-    const auto not_automatable_flags =
-        pulp::format::clap_generic::params_flags(not_automatable);
+    const auto not_automatable_flags = pulp::format::clap_generic::params_flags(not_automatable);
     REQUIRE((not_automatable_flags & CLAP_PARAM_IS_AUTOMATABLE) == 0);
     // Non-automatable is not read-only: the host may still set it directly.
     REQUIRE((not_automatable_flags & CLAP_PARAM_IS_READONLY) == 0);

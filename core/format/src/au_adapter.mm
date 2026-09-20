@@ -587,11 +587,16 @@ struct ScopedAuV3HostWriting {
         if (!pulp::state::is_automatable_param(p))
             auFlags |= kAudioUnitParameterFlag_NonRealTime;
 
-        AUParameter *auParam = [AUParameterTree createParameterWithIdentifier:identifier
-            name:name address:address min:p.range.min max:p.range.max
-            unit:unit unitName:nil
-            flags:auFlags
-            valueStrings:valueStrings dependentParameters:nil];
+        AUParameter* auParam = [AUParameterTree createParameterWithIdentifier:identifier
+                                                                         name:name
+                                                                      address:address
+                                                                          min:p.range.min
+                                                                          max:p.range.max
+                                                                         unit:unit
+                                                                     unitName:nil
+                                                                        flags:auFlags
+                                                                 valueStrings:valueStrings
+                                                          dependentParameters:nil];
         auParam.value = p.range.default_value;
         [auParams addObject:auParam];
     }

@@ -123,8 +123,7 @@ OSStatus fill_parameter_info(const state::StateStore& store,
     const auto* param = store.info(static_cast<state::ParamID>(param_id));
     if (!param) return kAudioUnitErr_InvalidParameter;
 
-    out_info.flags = kAudioUnitParameterFlag_IsReadable
-                   | kAudioUnitParameterFlag_HasCFNameString;
+    out_info.flags = kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
 
     // AU has no single "hidden"/"readonly"/"automatable" triple, so each
     // attribute maps to the flag whose documented meaning matches:
