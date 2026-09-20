@@ -909,6 +909,68 @@ Extract codes from every return form, including ternaries (`return c ? 0 : N;`) 
 
 For A3 v2 terminal acceptance, never treat receipt fields as publication or trace proof. The verifier must derive protected `main`, the canonical receipt blob, required check identities/results, and artifact digests live, then replay the pinned analyzer over the exact trace bytes.
 
+## Graduating a frozen legacy header: add to the registry, never restamp the baseline
+
+Editing the bytes of a header carried in
+`tools/agent-capabilities/legacy-unreviewed-baseline.json` fails the check with
+`public header fingerprint changed`. The baseline is pinned twice over —
+`FROZEN_LEGACY_COUNT` and `FROZEN_LEGACY_DIGEST` in
+`agent_capability_surface.py` — so editing that file to match is the laundering
+the pin exists to prevent, and it fails anyway.
+
+The supported move is to **graduate** the header: add an entry to
+`REVIEWED_HEADERS` in `agent_capability_registry.py` with the header's new
+fingerprint, a `disposition` (`infrastructure` when it binds no capability of
+its own), and a rationale. `build_surface_document` consults `reviewed` **before**
+`baseline_entries`, so the baseline row is simply never reached — leave that file
+byte-identical. The frozen count stays 337 and its digest stays valid.
+
+### The version bump compares against the snapshot on disk, not against main
+
+`SURFACE_INVENTORY_VERSION` must increase relative to
+`docs/status/agent-capability-surface.json` **as it currently sits in the working
+tree** — which your own previous `--write` already moved. So a second round of
+source edits (a `format_changed.sh` reflow is enough, since it changes the
+header's bytes and therefore its fingerprint) makes `--write` exit 1 with
+`public surface changed without an inventory_version increase`, even though you
+already bumped. Bumping again burns a second published identity for one change.
+
+Reset the snapshot to the base and write once instead:
+
+```sh
+git checkout origin/main -- docs/status/agent-capability-surface.json
+python3 tools/scripts/agent_capability_manifest.py --write
+```
+
+Corollary: run `format_changed.sh` **before** deriving the fingerprint, or
+re-derive after it. A fingerprint pasted from a pre-format read is stale.
+
+### Pick the version above every branch in flight, not above main
+
+Identical bumps on two branches merge cleanly and silently reuse one published
+identity, so incrementing main's value is not enough. Survey the remote branches
+first — and note that in zsh a `"$ref:tools/..."` expansion applies the `:t`
+history modifier and silently mangles the path, so the survey loop returns
+nothing while looking like a clean negative. Drive it from Python, or verify the
+loop against a ref you know carries the constant:
+
+```sh
+python3 - <<'EOF'
+import subprocess, re
+refs = subprocess.run(["git","for-each-ref","--sort=-committerdate",
+                       "--format=%(refname)","refs/remotes/origin","--count=250"],
+                      capture_output=True, text=True).stdout.split()
+seen = {}
+for ref in refs:
+    r = subprocess.run(["git","show",f"{ref}:tools/scripts/agent_capability_manifest.py"],
+                       capture_output=True, text=True)
+    m = re.search(r"^SURFACE_INVENTORY_VERSION\s*=\s*(\d+)", r.stdout, re.M) if not r.returncode else None
+    if m: seen[ref] = int(m.group(1))
+assert seen, "instrument dead - no branch yielded the constant"
+print("branches read:", len(seen), "max:", max(seen.values()))
+EOF
+```
+
 ## `PulpInstallRules.cmake` fires this gate for reasons that have nothing to do with capabilities
 
 The skill-path map ties this skill to `tools/cmake/PulpInstallRules.cmake`,

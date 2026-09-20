@@ -453,6 +453,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/midi/ump_conversion.hpp",
+        "fingerprint": "sha256:bdabd201b0a1e36cc4e8df2d4162d521a041b316e695f4b8a3bb8988938d5f38",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Bidirectional MIDI 1.0 / MIDI 2.0 UMP translation and the spec data-value "
+            "scaling it rests on; it is shared plumbing beneath the bound MIDI kernels "
+            "rather than a capability of its own."
+        ),
+    },
+    {
         "include": "pulp/midi/detail/note_schedule.hpp",
         "fingerprint": "sha256:2c3079340fe726d87e09042f023fb307aa7c0a0a9a25719cb1d4d0b16eb51e23",
         "disposition": "infrastructure",
