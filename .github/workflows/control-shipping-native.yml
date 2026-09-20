@@ -211,6 +211,107 @@ jobs:
           tools/ci/governed-build.sh \
             cmake --build smoke/build --config Release
 
+      - name: Execute installed-SDK GPU-audio lifecycle probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_prefix="${RUNNER_TEMP}/pulp-control-shipping-sdk"
+          candidates=()
+          while IFS= read -r candidate; do
+            candidates+=("$candidate")
+          done < <(
+            find smoke/build -type f \( \
+              -name 'PulpSDKSmokeGpuAudioLifecycleProbe' -o \
+              -name 'PulpSDKSmokeGpuAudioLifecycleProbe.exe' \
+            \) -print | sort
+          )
+          if [ "${#candidates[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one installed-SDK GPU-audio lifecycle probe"
+            echo "::error::found ${#candidates[@]} candidates"
+            printf '%s\n' "${candidates[@]}"
+            exit 1
+          fi
+          probe="${candidates[0]}"
+          receipt="gpu-audio-lifecycle-receipt.json"
+          log="gpu-audio-lifecycle.log"
+          set +e
+          "$probe" >"$log" 2>&1
+          status=$?
+          set -e
+
+          PROBE_PATH="$probe" \
+          RECEIPT_PATH="$receipt" \
+          LOG_PATH="$log" \
+          EXIT_CODE="$status" \
+          PULP_SDK_PREFIX="$sdk_prefix" \
+          PULP_SOURCE_HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}" \
+          python3 - <<'PY'
+          import datetime
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          probe = pathlib.Path(os.environ["PROBE_PATH"]).resolve()
+          receipt_path = pathlib.Path(os.environ["RECEIPT_PATH"])
+          log_path = pathlib.Path(os.environ["LOG_PATH"]).resolve()
+          sdk_prefix = pathlib.Path(os.environ["PULP_SDK_PREFIX"]).resolve()
+          digest = hashlib.sha256(probe.read_bytes()).hexdigest()
+          config = sdk_prefix / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake"
+          config_digest = (
+              hashlib.sha256(config.read_bytes()).hexdigest()
+              if config.is_file()
+              else None
+          )
+          head = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"], text=True
+          ).strip()
+          status = int(os.environ["EXIT_CODE"])
+          receipt = {
+              "schema": "dev.pulp.control/gpu-audio-lifecycle@1",
+              "verdict": "pass" if status == 0 else "fail",
+              "probe": "PulpSDKSmokeGpuAudioLifecycleProbe",
+              "command": [str(probe)],
+              "exit_code": status,
+              "executable": str(probe),
+              "executable_sha256": digest,
+              "log": str(log_path),
+              "sdk_prefix": str(sdk_prefix),
+              "sdk_config": str(config),
+              "sdk_config_sha256": config_digest,
+              "source_sha": os.environ.get("GITHUB_SHA", ""),
+              "source_head_sha": os.environ.get("PULP_SOURCE_HEAD_SHA", ""),
+              "checkout_head": head,
+              "runner_os": os.environ.get("RUNNER_OS", ""),
+              "runner_arch": os.environ.get("RUNNER_ARCH", ""),
+              "workflow_run_id": os.environ.get("GITHUB_RUN_ID", ""),
+              "recorded_at_utc": datetime.datetime.now(
+                  datetime.timezone.utc
+              ).isoformat(),
+          }
+          receipt_path.write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+          if [ "$status" -ne 0 ]; then
+            cat "$log"
+            exit "$status"
+          fi
+
+      - name: Upload installed-SDK GPU-audio lifecycle receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-shipping-${{ matrix.leg }}-gpu-audio-lifecycle
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            gpu-audio-lifecycle-receipt.json
+            gpu-audio-lifecycle.log
+
       - name: Verify native scanner evidence
         shell: bash
         env:
