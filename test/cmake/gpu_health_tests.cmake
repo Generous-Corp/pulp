@@ -33,6 +33,27 @@ if(Python3_EXECUTABLE)
         TIMEOUT 180)
 endif()
 
+# The product measurement producer is a tooling-only target on the same Apple
+# GPU guard that declares it, so resolve it through a generator expression
+# rather than if(TARGET): tools/cli/gpu_probe is configured after test/.
+if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU
+        AND PROJECT_IS_TOP_LEVEL AND Python3_EXECUTABLE)
+    add_test(NAME gpu-dpr-calibration-failure-proof
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_dpr_calibration_failure_proof.py"
+                "$<TARGET_FILE:pulp-gpu-dpr-native-measurement>")
+    # It drives the real producer: twenty fresh GPU processes precede the
+    # calibration control, so this runs in minutes on dedicated hardware. The
+    # `slow` label keeps it off the required gate, which neither builds the
+    # producer nor configures PULP_BENCHMARK/PULP_TRACING; the test reports a
+    # skip rather than a pass when either premise is absent.
+    set_tests_properties(gpu-dpr-calibration-failure-proof PROPERTIES
+        LABELS "gpu;gpu-dpr;calibration;slow"
+        RESOURCE_LOCK pulp_gpu
+        SKIP_RETURN_CODE 77
+        TIMEOUT 1800)
+endif()
+
 if(PULP_ENABLE_INSPECTOR)
 function(_pulp_attach_a3_control_build_identity target source_path)
     set(_revision "0000000000000000000000000000000000000000")
@@ -115,7 +136,7 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
     _pulp_cache_control_declarations(
         pulp-control-gpu-health-standalone-product-fixture
         developer-local
-        "dev.pulp.gpu/health.read@1" FALSE)
+        "dev.pulp.gpu/health.read@1;dev.pulp.session/control@1;dev.pulp.trace/session-control@1" FALSE)
     _pulp_configure_control_shipping(
         pulp-control-gpu-health-standalone-product-fixture
         "dev.pulp.test.gpu-health-standalone-product"
