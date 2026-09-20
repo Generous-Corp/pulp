@@ -34,6 +34,8 @@ OUTPUT_CAP_BYTES = 1024 * 1024
 MEASUREMENT_SCOPE_SCHEMA = "pulp.gpu-dpr-native-measurement-scope.v1"
 MEASUREMENT_ATTESTATION_SCHEMA = "pulp.gpu-dpr-native-measurement-attestation.v1"
 FIRST_FRAME_TRIAL_SCHEMA = "pulp.gpu-dpr-first-frame-trial.v1"
+DIAGNOSTICS_ARTIFACT_SCHEMA = "pulp.gpu-dpr-diagnostics-artifact.v1"
+CALIBRATION_DEPENDENCY = "gpu:timer-calibration"
 ARTIFACT_KINDS = {
     "capture", "reference_capture", "trace", "raw_samples", "input_receipt"
 }
@@ -95,6 +97,54 @@ def checked_artifact(root: Path, value: Any, label: str) -> Path:
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"{label} artifact is not a regular file")
     return path
+
+
+def shared_evidence_helpers(source_root: Path) -> Any:
+    """Resolve the runner's own secure-artifact helpers for this adapter.
+
+    Containment and symlink rules for retained evidence belong to one
+    implementation. The runner snapshots this adapter on its own, so a plain
+    sibling import is unavailable once it is pinned; resolving the module from
+    the SHA-bound source root loads the exact file the ingesting runner uses.
+    """
+    candidates = [Path(__file__).resolve().parent, source_root / "tools" / "scripts"]
+    for directory in candidates:
+        module = directory / "gpu_dpr_evidence.py"
+        if not module.is_file() or module.is_symlink():
+            continue
+        if str(directory) not in sys.path:
+            sys.path.insert(0, str(directory))
+        import gpu_dpr_evidence
+
+        return gpu_dpr_evidence
+    raise ValueError("shared DPR evidence helpers are unavailable to the adapter")
+
+
+def validate_calibration_diagnostics_artifact(
+    receipt: dict[str, Any], cell_dir: Path, source_root: Path,
+) -> None:
+    """Bind calibration diagnostics to retained, contained, digest-exact bytes."""
+    evidence = shared_evidence_helpers(source_root)
+    binding = receipt.get("diagnostics_artifact")
+    if not isinstance(binding, dict) or binding.get("schema") != (
+        DIAGNOSTICS_ARTIFACT_SCHEMA
+    ):
+        raise ValueError("timer-calibration receipt lacks diagnostics artifact binding")
+    path = evidence.safe_artifact(cell_dir, binding.get("path", ""))
+    payload = evidence.regular_file_bytes(path, "calibration diagnostics artifact")
+    digest = binding.get("sha256")
+    if (
+        not isinstance(digest, str) or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+        or hashlib.sha256(payload).hexdigest() != digest
+    ):
+        raise ValueError("calibration diagnostics artifact digest does not match")
+    try:
+        retained = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("calibration diagnostics artifact is not valid JSON") from error
+    if retained != receipt.get("diagnostics"):
+        raise ValueError("receipt diagnostics differ from retained artifact")
 
 
 def validate_fresh_process_ledger(
@@ -181,6 +231,15 @@ def validate_measurement_receipt(
         ):
             raise ValueError("incomplete measurement receipt lacks reason/dependencies")
         diagnostics = receipt.get("diagnostics")
+        # A calibration dependency is the producer claiming it measured and
+        # failed. The outer runner treats that receipt's diagnostics as
+        # mandatory evidence, so this layer requires the same thing rather than
+        # letting an unsupported claim reach ingestion.
+        calibration = CALIBRATION_DEPENDENCY in dependencies
+        if calibration and diagnostics is None:
+            raise ValueError("timer-calibration receipt lacks calibration diagnostics")
+        if calibration and receipt.get("producer_sha256") != sha256(pinned_producer):
+            raise ValueError("timer-calibration receipt is not bound to the pinned producer")
         if diagnostics is not None:
             if not isinstance(diagnostics, dict) or diagnostics.get("schema") != (
                 "pulp.gpu-dpr-calibration-diagnostics.v1"
@@ -194,7 +253,8 @@ def validate_measurement_receipt(
                 raise ValueError("incomplete measurement diagnostics nonce is unbound")
             failure_class = diagnostics.get("failure_class")
             if failure_class not in {
-                "producer_sample_invalid", "timer_quantization", "insufficient_extra_work",
+                "producer_sample_invalid", "timer_quantization",
+                "insufficient_extra_work", "analyzer_rejection",
             }:
                 raise ValueError("incomplete measurement diagnostics failure class is invalid")
             if diagnostics.get("control_detected") is not False:
@@ -250,6 +310,10 @@ def validate_measurement_receipt(
                             raise ValueError("valid calibration sample value is malformed")
                     elif value is not None:
                         raise ValueError("invalid calibration sample must have null value")
+        if calibration:
+            validate_calibration_diagnostics_artifact(
+                receipt, cell_dir, source_root(request)
+            )
         return receipt
 
     scope = receipt.get("measurement_scope")
