@@ -1182,6 +1182,19 @@ struct ScopedAuV3HostWriting {
                         me.sample_offset =
                             static_cast<int32_t>(event->head.eventSampleTime);
                         midi_in.add(me);
+                        // A host is free to keep using this transport even
+                        // after the unit reports kMIDIProtocol_2_0 — the
+                        // protocol governs MIDIEventList delivery, not whether
+                        // short MIDI stops. Promote to UMP here so an opted-in
+                        // Processor sees one union stream and never has to ask
+                        // which transport a note arrived on. Mirrors the CLAP
+                        // adapter, which converts its MIDI 1.0 events for the
+                        // same reason.
+                        if (bridge->ump_enabled) {
+                            bridge->ump_buffer.add(
+                                pulp::midi::midi1_event_to_ump2(me),
+                                me.sample_offset);
+                        }
                     }
                 } else if (event->head.eventType == AURenderEventMIDIEventList) {
                     // AUMIDIEventList delivers UMP-encoded events. The

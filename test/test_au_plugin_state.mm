@@ -1336,6 +1336,88 @@ TEST_CASE("AU v3 negotiates MIDI 2.0 and delivers UMP channel voice at full reso
     g_au_ump_declare = true;
 }
 
+TEST_CASE("AU v3 promotes short MIDI into the UMP stream for an opted-in plugin",
+          "[au][auv3][ump][midi2]") {
+    // A host may keep sending AURenderEventMIDI even after the unit reports
+    // kMIDIProtocol_2_0 — the protocol governs MIDIEventList delivery, not
+    // whether short MIDI stops. Without promotion an opted-in Processor that
+    // reads ump_input() alone would see an empty buffer and lose every note.
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_MusicDevice;
+        desc.componentSubType = 'TstU';
+        desc.componentManufacturer = 'Plup';
+
+        g_au_ump_declare = true;
+        ScopedFactoryRegistration registration(create_ump_instrument_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        auto* processor = g_last_ump_processor;
+        REQUIRE(processor != nullptr);
+
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+
+        constexpr UInt32 kFrames = 16;
+        float left[kFrames] = {};
+        float right[kFrames] = {};
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0].mNumberChannels = 1;
+        output.list.mBuffers[0].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[0].mData = left;
+        output.list.mBuffers[1].mNumberChannels = 1;
+        output.list.mBuffers[1].mDataByteSize = kFrames * sizeof(float);
+        output.list.mBuffers[1].mData = right;
+
+        AURenderEvent event{};
+        event.MIDI.eventType = AURenderEventMIDI;
+        event.MIDI.eventSampleTime = 0;
+        event.MIDI.length = 3;
+        event.MIDI.cable = 0;
+        event.MIDI.data[0] = 0x92;  // note-on, channel 2
+        event.MIDI.data[1] = 64;
+        event.MIDI.data[2] = 127;
+        event.MIDI.next = nullptr;
+
+        AudioUnitRenderActionFlags flags = 0;
+        AudioTimeStamp timestamp{};
+        timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+        timestamp.mSampleTime = 0;
+
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+        REQUIRE(block(&flags, &timestamp, kFrames, 0, &output.list, &event,
+                      nil) == noErr);
+
+        const auto ump = processor->captured_ump;
+        const auto midi1 = processor->captured_midi1;
+        [unit deallocateRenderResources];
+        [unit release];
+        g_au_ump_declare = true;
+
+        REQUIRE(ump.size() == 1);
+        REQUIRE(ump[0].message_type == 0x4);
+        REQUIRE(ump[0].status == 0x92);
+        REQUIRE(ump[0].note == 64);
+        // 7-bit 127 scales to full-scale 16-bit, not 127 << 9.
+        REQUIRE(ump[0].velocity_16 == 0xFFFF);
+        // The MIDI 1.0 event is still delivered too — promotion adds a
+        // transport, it does not replace one.
+        REQUIRE(midi1.size() == 1);
+        REQUIRE(midi1[0].is_note_on());
+        REQUIRE(midi1[0].note() == 64);
+    }
+}
+
 TEST_CASE("AU adapters advertise descriptor-declared MPE support to the host",
           "[au][auv2][auv3][mpe][negotiation]") {
     SECTION("AU v3 supportsMPE follows the descriptor") {
