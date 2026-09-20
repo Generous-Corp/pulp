@@ -3,6 +3,7 @@
 
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
 
+#include "detail/gpu_convolver_trial_config.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
@@ -63,6 +64,21 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
 
 GpuConvolver::~GpuConvolver() = default;
 
+namespace detail {
+bool configure_gpu_convolver_trial(GpuConvolver& convolver,
+                                   const GpuConvolverTrialConfig& config) noexcept {
+    if (convolver.prepared_)
+        return false;
+    convolver.trial_requested_path_ = static_cast<std::uint8_t>(config.requested_path);
+    convolver.trial_configured_ = true;
+    convolver.trial_enable_trace_ = config.enable_trace;
+    convolver.trial_capture_admissions_ = config.capture_admissions;
+    convolver.trial_completion_policy_ = static_cast<std::uint8_t>(config.completion_policy);
+    convolver.trial_completion_wait_ns_ = config.completion_wait_ns;
+    return true;
+}
+} // namespace detail
+
 GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
     GpuAudioNodeDescriptor d;
     d.name = "gpu-convolver";
@@ -119,6 +135,14 @@ bool GpuConvolver::prepare() {
     init_fallback();
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    const auto requested_path = static_cast<detail::SharedIoRequest>(trial_requested_path_);
+    // The legacy staged provider has no authenticated SharedIoTraceRecord
+    // bridge yet. Fail closed rather than silently running a different path.
+    if (trial_configured_ && requested_path == detail::SharedIoRequest::RequireStaged)
+        return false;
+#endif
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (expected_dawn_revision_available()) {
         try {
             constexpr uint32_t kSharedIoCapacity = 8;
@@ -145,7 +169,16 @@ bool GpuConvolver::prepare() {
                     }
 
                     auto created = detail::create_dawn_shared_io_convolution_session(
-                        {.provider = {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA},
+                        {.provider =
+                             {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+                              .completion_policy =
+                                  trial_configured_
+                                      ? static_cast<detail::DawnSharedIoProvider::CompletionPolicy>(
+                                            trial_completion_policy_)
+                                      : detail::DawnSharedIoProvider::CompletionPolicy::
+                                            ProcessEvents,
+                              .completion_wait_ns =
+                                  trial_configured_ ? trial_completion_wait_ns_ : 0},
                          .session = {.pipeline = {.capacity = shared_capacity,
                                                   .channels = channels_,
                                                   .block_size = block_,
@@ -154,7 +187,9 @@ bool GpuConvolver::prepare() {
                                                   .lead_blocks = latency_blocks_},
                                      .slots = kSharedIoSlots,
                                      .sample_rate = sample_rate_,
-                                     .trace = {.enabled = pulp::runtime::kTracingEnabled}},
+                                     .trace = {.capture_admissions = trial_capture_admissions_,
+                                               .enabled = pulp::runtime::kTracingEnabled ||
+                                                          trial_enable_trace_}},
                          .normalized_ir_spectrum = state->normalized_ir_spectrum});
                     // A failed preparation may still own physically live
                     // storage. Retain that session even when it cannot run.
