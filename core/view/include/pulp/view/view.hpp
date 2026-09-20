@@ -428,9 +428,18 @@ public:
 
     /// Mouse down with full event context.
     virtual void on_mouse_event(const MouseEvent& event) {
+        // An `overflow: scroll` container consumes the wheel the way
+        // ScrollView does — it is the scroll boundary, so the tick does not
+        // also reach the pointer callback.
+        if (event.is_wheel && handle_scroll_wheel(event))
+            return;
         auto callback = on_pointer_event;
         if (callback) callback(event);
     }
+    /// Applies a wheel tick to this view's scroll offset; true when a scroll
+    /// container with range consumed it. Out-of-line so `on_mouse_event`
+    /// stays one branch for the common non-scroll view.
+    bool handle_scroll_wheel(const MouseEvent& event);
     /// True if this widget adjusts its VALUE on a scroll-wheel over it (knobs,
     /// faders, sliders, steppers, pan). The host routes the wheel to such a
     /// widget under the cursor instead of scrolling an enclosing scroll view.
@@ -445,8 +454,11 @@ public:
     /// active gesture so a live param push never fights the user mid-drag.
     virtual bool is_gesture_active() const { return false; }
     /// True if this widget is itself a scroll container that should consume
-    /// wheel input before an ancestor scroll view.
-    virtual bool wants_wheel_scroll() const { return false; }
+    /// wheel input before an ancestor scroll view. The base answer is true for
+    /// an `overflow: scroll` view whose content actually overflows — a
+    /// container that fits reports false so the wheel keeps bubbling to
+    /// whatever ancestor CAN scroll, matching a browser.
+    virtual bool wants_wheel_scroll() const;
     /// True if this widget handles mouse down/drag through virtual methods even
     /// when it does not expose JS pointer callbacks or focus.
     virtual bool wants_mouse_input() const { return false; }
@@ -1650,15 +1662,69 @@ public:
     /// True iff children_ is already in that order — paint_all's fast path then iterates children_ directly, no sorted-copy alloc. Exposed for tests.
     bool children_in_z_order() const;
 
-    /// Overflow mode
-    /// `scroll` accepted as a third keyword so the yoga `overflow`
-    /// compat entry covers all 3 spec values. Paint clipping treats
-    /// `scroll` like `hidden` (no scrollbar UI yet); the Yoga layout
-    /// path forwards the enum through `YGNodeStyleSetOverflow` so the
+    /// Overflow mode.
+    /// `hidden` and `scroll` both clip painting to the box; `scroll`
+    /// additionally makes the container SCROLLABLE (see below). The Yoga
+    /// layout path forwards the enum through `YGNodeStyleSetOverflow` so the
     /// engine knows about it for descendant-overflow measurement.
     enum class Overflow { hidden, visible, scroll };
-    void set_overflow(Overflow o) { overflow_ = o; }
+    void set_overflow(Overflow o) {
+        overflow_ = o;
+        // A box that no longer scrolls has no scroll position (CSS collapses
+        // scrollTop to 0 too); a stale offset would keep translating children
+        // after the clip that justified it was removed.
+        if (o != Overflow::scroll) {
+            scroll_offset_x_ = 0.0f;
+            scroll_offset_y_ = 0.0f;
+        }
+    }
     Overflow overflow() const { return overflow_; }
+
+    // ── Scrollable overflow (`overflow: scroll`, CSS `auto`) ─────────────
+    //
+    // A plain View with `Overflow::scroll` is a scroll container: it clips to
+    // its box, offsets its children by `-scroll_offset`, and consumes the
+    // wheel. `ScrollView` is the richer widget over the same notion (animated
+    // offset, scrollbar chrome, drag) and overrides these so one query serves
+    // either. ONE function backs paint and hit-testing —
+    // `child_paint_offset()` — so they cannot disagree about where a child is
+    // (see its doc below).
+
+    /// True when this view scrolls its own content; `ScrollView` always does.
+    /// A content-extent walk stops at one, which owns its private overflow.
+    virtual bool is_scroll_container() const {
+        return overflow_ == Overflow::scroll;
+    }
+
+    /// Scroll offset in px, always within `[0, max_scroll_offset_*]`. Positive
+    /// scrolls content UP/LEFT (CSS `scrollTop`/`scrollLeft`). Virtual so
+    /// `ScrollView` reports its ANIMATED offset through the same accessor.
+    virtual float scroll_offset_x() const {
+        return scroll_offset_x_;
+    }
+    virtual float scroll_offset_y() const {
+        return scroll_offset_y_;
+    }
+
+    /// Union of the laid-out descendant boxes, never smaller than the
+    /// viewport. Recomputed on demand rather than cached — it is read only
+    /// from input-time paths, and a cache would go stale on a layout change
+    /// and silently clamp to the wrong range. Non-scroll views never walk.
+    Size scroll_content_size() const;
+
+    /// Scrollable range, `content - viewport` clamped at 0. Zero means the
+    /// content fits and the container must not scroll.
+    float max_scroll_offset_x() const;
+    float max_scroll_offset_y() const;
+
+    /// Set / advance the offset, clamped into `[0, max_scroll_offset_*]`: a
+    /// container that fits stays at 0 and a wheel past either end stops there.
+    /// True when it actually moved, so a clamped no-op skips the repaint.
+    /// Virtual so `ScrollView` routes through its own animated setter.
+    virtual bool set_scroll_offset(float x, float y);
+    bool scroll_offset_by(float dx, float dy) {
+        return set_scroll_offset(scroll_offset_x() + dx, scroll_offset_y() + dy);
+    }
 
     /// Import-only accommodation. A common imported-design pattern puts a
     /// circular value-marker (an XY-pad-style dot) as a position:absolute child
@@ -1771,7 +1837,9 @@ public:
     /// `child_paint_offset()`: over-reporting true only costs a wider repaint,
     /// whereas deriving it from one child's offset would miss a container that
     /// moves some children and not others.
-    virtual bool applies_child_paint_offset() const { return false; }
+    virtual bool applies_child_paint_offset() const {
+        return scroll_offset_x_ != 0.0f || scroll_offset_y_ != 0.0f;
+    }
 
     /// The translation this container applies to ONE child's paint, in the
     /// container's own coordinate space. It takes the child because the answer
@@ -1782,9 +1850,20 @@ public:
     /// their bounds origin. Any walk that converts a descendant's bounds into
     /// an ancestor's space must accumulate this in addition to `bounds()`, or
     /// it reports the UNSCROLLED position forever.
+    ///
+    /// This is THE offset an `overflow: scroll` container scrolls by: both
+    /// `paint_children_in_order()` and `hit_test()` route through this one
+    /// function, so a scrolled child paints and hit-tests at the same place by
+    /// construction — the invariant `ContextMenu` gets by baking its offset
+    /// into the row rects. Changing the rule here moves both halves together.
     virtual Point child_paint_offset(const View& child) const {
-        (void)child;
-        return Point{0.0f, 0.0f};
+        if (scroll_offset_x_ == 0.0f && scroll_offset_y_ == 0.0f)
+            return Point{0.0f, 0.0f};
+        // A `position: sticky` child stays pinned vertically while the content
+        // scrolls beneath it — same rule ScrollView applies.
+        if (child.position() == Position::sticky)
+            return Point{-scroll_offset_x_, 0.0f};
+        return Point{-scroll_offset_x_, -scroll_offset_y_};
     }
 
     /// Returns the six affine components in (a,b,c,d,e,f) order; meaningful
@@ -2860,6 +2939,9 @@ private:
     // intentionally need clipping must call set_overflow(Overflow::hidden)
     // explicitly — same opt-in as `overflow:hidden` in CSS.
     Overflow overflow_ = Overflow::visible;
+    /// Scroll offset in px, meaningful only while `overflow_ == scroll` and
+    /// clamped into `[0, max_scroll_offset_*]` by set_scroll_offset.
+    float scroll_offset_x_ = 0.0f, scroll_offset_y_ = 0.0f;
     /// Import-only circle-marker clip tolerance (see set_clip_marker_tolerance).
     /// Default OFF: native trees clip strictly and skip the per-frame scan.
     bool clip_marker_tolerance_ = false;
@@ -3014,6 +3096,21 @@ void accumulate_overflow_extent(const View* v,
                                 float& min_y,
                                 float& max_x,
                                 float& max_y);
+
+// Expand `right` / `bottom` to cover every visible laid-out descendant box of
+// `parent`, in `parent`'s coordinate space offset by `parent_x/y`. Sets
+// `found` when it measured at least one child, so a childless container is
+// distinguishable from one whose content genuinely ends at the origin.
+//
+// The walk STOPS at a nested `is_scroll_container()` child: that child owns
+// its own private overflow and clips it, so the outer container measures the
+// nested viewport box rather than content the inner one already scrolls.
+//
+// Single implementation shared by `View::scroll_content_size()` and
+// `ScrollView::update_automatic_content_size()` — two content measurements
+// that disagreed would clamp the two scrollers to different ranges.
+void accumulate_scroll_content_extent(const View& parent, float parent_x, float parent_y,
+                                      float& right, float& bottom, bool& found);
 
 // ── Accessibility exposure gate ──────────────────────────────────────────────
 //
