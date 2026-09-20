@@ -288,6 +288,16 @@ set_tests_properties(consumption-census-drift PROPERTIES
     SKIP_RETURN_CODE 77
     PASS_REGULAR_EXPRESSION "consumption_census_verified=true")
 
+# A drift gate's value is what it SAYS. `public_headers.count` is walked live
+# from each target's exported include roots, so one new header under a root a
+# target already exports drifts the census with no target, symbol or CMake
+# change — and a message calling that a closure change sends the reader to the
+# link graph, where there is nothing to find. This drives the description over
+# the committed census and needs no build tree of its own.
+add_test(NAME consumption-census-drift-description
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_consumption_census.py")
+
 add_test(NAME consumption-census-negative-contract
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/consumption_census_contract.py"
