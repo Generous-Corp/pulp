@@ -413,38 +413,47 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
             1'000'000ull,
             static_cast<std::uint64_t>(block_) * 1'000'000'000ull / sample_rate_);
         const auto deadline = std::chrono::microseconds(deadline_ns / 1000ull);
-        bool complete = false;
-        render::GpuCompute::ReadbackStatus status = render::GpuCompute::ReadbackStatus::Failed;
-        std::uint64_t completion_id = 0;
+        struct Completion {
+            bool done = false;
+            render::GpuCompute::ReadbackStatus status = render::GpuCompute::ReadbackStatus::Failed;
+            std::uint64_t id = 0;
+        };
+        auto completion = std::make_shared<Completion>();
         const auto request = gpu_->convolve_batch_async(
             in_pad_.data(), time_.data(), fft_size_, channels_, deadline,
-            [&](const render::GpuCompute::ReadbackResult& result) {
-                status = result.status;
-                completion_id = result.id;
-                complete = true;
+            [completion](const render::GpuCompute::ReadbackResult& result) {
+                completion->status = result.status;
+                completion->id = result.id;
+                completion->done = true;
             });
-        if (request == 0 || !staged_trial_->admit(request, sequence, slot,
-                                                   now_ns + deadline_ns, now_ns) ||
+        if (request == 0) {
+            output.clear();
+            return;
+        }
+        if (!staged_trial_->admit(request, sequence, slot, now_ns + deadline_ns, now_ns) ||
             !staged_trial_->submitted(request, now_ns)) {
+            // GpuCompute has no cancellation API. The callback owns only the
+            // heap completion state, so a provider callback that arrives after
+            // this failed admission cannot dereference the stack.
             output.clear();
             return;
         }
         // GpuCompute guarantees that poll_readbacks() resolves every request at
         // success or at its deadline, so this worker loop is bounded by the
         // provider deadline rather than an unbounded wait on GPU progress.
-        while (!complete)
+        while (!completion->done)
             (void)gpu_->poll_readbacks();
         (void)staged_trial_->complete(
-            completion_id,
-            status == render::GpuCompute::ReadbackStatus::Success
+            completion->id,
+            completion->status == render::GpuCompute::ReadbackStatus::Success
                 ? detail::StagedAsyncTraceLedger::CompletionStatus::Success
-            : status == render::GpuCompute::ReadbackStatus::Expired
+            : completion->status == render::GpuCompute::ReadbackStatus::Expired
                 ? detail::StagedAsyncTraceLedger::CompletionStatus::Expired
                 : detail::StagedAsyncTraceLedger::CompletionStatus::Failed,
             static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                            std::chrono::steady_clock::now().time_since_epoch())
                                            .count()));
-        if (status != render::GpuCompute::ReadbackStatus::Success) {
+        if (completion->status != render::GpuCompute::ReadbackStatus::Success) {
             output.clear();
             return;
         }
