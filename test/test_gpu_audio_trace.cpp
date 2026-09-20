@@ -913,3 +913,18 @@ TEST_CASE("staged async trial state atomically owns request slot and sequence",
     CHECK(records.front().sequence == 4);
     CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::LateRejected);
 }
+
+TEST_CASE("staged async ownership abandon releases slot with one cancellation terminal",
+          "[gpu_audio][trace][staged_async]") {
+    StagedAsyncTrialState state(1);
+    REQUIRE(state.admit(22, 8, 0, 5000, 1000));
+    REQUIRE(state.submitted(22, 1100));
+    CHECK(state.slot_occupied(0));
+    REQUIRE(state.abandon(22, 1200));
+    CHECK_FALSE(state.slot_occupied(0));
+    const auto records = state.take_completed();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::CancelledTeardown);
+    CHECK(records.front().outcome == SharedIoTraceOutcome::Cancelled);
+    CHECK_FALSE(state.abandon(22, 1300));
+}
