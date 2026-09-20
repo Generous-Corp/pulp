@@ -25,14 +25,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <optional>
 #include <string>
-#include <utility>
-#include <atomic>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -1794,14 +1794,15 @@ static_assert(std::size(kTransportFieldRequirements) ==
 
 constexpr bool transport_requirement_rows_are_in_enum_order() {
     for (std::size_t i = 0; i < std::size(kTransportFieldRequirements); ++i) {
-        if (static_cast<std::size_t>(kTransportFieldRequirements[i].field) != i) return false;
+        if (static_cast<std::size_t>(kTransportFieldRequirements[i].field) != i)
+            return false;
     }
     return true;
 }
 static_assert(transport_requirement_rows_are_in_enum_order(),
               "kTransportFieldRequirements must be indexed by TransportField order");
 
-}  // namespace
+} // namespace
 
 TEST_CASE("VST3 requests every process-context field its decoder consumes",
           "[vst3][transport][process-context]") {
@@ -1850,13 +1851,11 @@ TEST_CASE("VST3 requests every process-context field its decoder consumes",
     // the decoder's own reads decide which TransportFields come back.
     using SdkContext = Steinberg::Vst::ProcessContext;
     Steinberg::Vst::ProcessContext process_context{};
-    process_context.state = SdkContext::kPlaying | SdkContext::kRecording |
-                            SdkContext::kCycleActive | SdkContext::kTempoValid |
-                            SdkContext::kProjectTimeMusicValid |
-                            SdkContext::kTimeSigValid | SdkContext::kCycleValid |
-                            SdkContext::kSystemTimeValid | SdkContext::kSmpteValid |
-                            SdkContext::kBarPositionValid | SdkContext::kContTimeValid |
-                            SdkContext::kClockValid;
+    process_context.state =
+        SdkContext::kPlaying | SdkContext::kRecording | SdkContext::kCycleActive |
+        SdkContext::kTempoValid | SdkContext::kProjectTimeMusicValid | SdkContext::kTimeSigValid |
+        SdkContext::kCycleValid | SdkContext::kSystemTimeValid | SdkContext::kSmpteValid |
+        SdkContext::kBarPositionValid | SdkContext::kContTimeValid | SdkContext::kClockValid;
     process_context.sampleRate = 48000.0;
     process_context.projectTimeSamples = 96000;
     process_context.continousTimeSamples = 96000;
@@ -1896,12 +1895,14 @@ TEST_CASE("VST3 requests every process-context field its decoder consumes",
 
     std::size_t populated = 0;
     for (const auto& row : kTransportFieldRequirements) {
-        if (!decoded.has_transport(row.field)) continue;
+        if (!decoded.has_transport(row.field))
+            continue;
         ++populated;
-        if (row.required_flag == 0) continue;
+        if (row.required_flag == 0)
+            continue;
         INFO("decoder populated TransportField::"
-             << row.field_name << " but the advertised requirement mask "
-             << advertised << " is missing flag " << row.required_flag);
+             << row.field_name << " but the advertised requirement mask " << advertised
+             << " is missing flag " << row.required_flag);
         REQUIRE((advertised & row.required_flag) == row.required_flag);
     }
     REQUIRE(populated > 0);
