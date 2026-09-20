@@ -591,6 +591,23 @@ focused built test binaries documented in the acceptance guide. The envelope
 pins all three executables and fails closed on missing configuration or
 protocol drift. It does not provide generic present/cache instrumentation and
 must not be used to relabel capture completion as native presentation.
+
+There is a second, likelier relabel, and it fails in the opposite direction.
+`window_host_mac.mm` wraps `gpu_surface_->end_frame()` in a `gpu_present` trace
+scope, which reads like a presentation bracket, so a `steady_clock::now()` after
+it looks like the present endpoint. It is not. `DawnGpuSurface::end_frame()` is
+`surface_.Present()` plus `instance_.ProcessEvents()` -- no fence, no wait, no
+presented callback -- so it hands the drawable to the compositor, which displays
+it at a later vsync. Capture completion overshoots the endpoint; this undershoots
+it by up to a refresh interval, which makes a late frame look on time and a
+budget miss look like a pass. Nothing on any Pulp backend can currently satisfy
+`native_presented_at`: Pulp never acquires the `CAMetalDrawable` (no
+`nextDrawable`, `presentDrawable`, `addPresentedHandler`, or `presentedTime`
+anywhere in `core/`, `inspect/`, or `apple/`), so the only home for a real
+presented-drawable callback is where the drawable is created -- inside Dawn,
+behind `core/render/src/metal_surface_mac.mm` and `gpu_surface_dawn.cpp`, both
+framework-authoritative-transferred. Leave `native_present_timing` listed in
+`missing_trace_categories` rather than filling the field from either substitute.
 Select the checked-in standalone, constrained-headless, REAPER, or Forge role
 producer rather than an undocumented producer path. The adapter pins the role
 entry point and its checked-in support from the exact Pulp source root. Each
