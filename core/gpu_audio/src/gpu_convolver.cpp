@@ -73,9 +73,32 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     convolver.trial_configured_ = true;
     convolver.trial_enable_trace_ = config.enable_trace;
     convolver.trial_capture_admissions_ = config.capture_admissions;
+    convolver.trial_success_stride_ = std::max<std::uint32_t>(1, config.success_stride);
     convolver.trial_completion_policy_ = static_cast<std::uint8_t>(config.completion_policy);
     convolver.trial_completion_wait_ns_ = config.completion_wait_ns;
     return true;
+}
+
+bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
+                                       std::vector<SharedIoTraceRecord>& records) noexcept {
+    records.clear();
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (!convolver.shared_io_ || !convolver.shared_io_->session ||
+        !convolver.shared_io_->session->trace_recording_enabled())
+        return false;
+    try {
+        convolver.shared_io_->session->drain_trace_records(
+            static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
+            [&](const SharedIoTraceRecord& record) { records.push_back(record); });
+        return true;
+    } catch (...) {
+        records.clear();
+        return false;
+    }
+#else
+    (void)convolver;
+    return false;
+#endif
 }
 } // namespace detail
 
@@ -187,7 +210,8 @@ bool GpuConvolver::prepare() {
                                                   .lead_blocks = latency_blocks_},
                                      .slots = kSharedIoSlots,
                                      .sample_rate = sample_rate_,
-                                     .trace = {.capture_admissions = trial_capture_admissions_,
+                                     .trace = {.success_stride = trial_success_stride_,
+                                               .capture_admissions = trial_capture_admissions_,
                                                .enabled = pulp::runtime::kTracingEnabled ||
                                                           trial_enable_trace_}},
                          .normalized_ir_spectrum = state->normalized_ir_spectrum});
