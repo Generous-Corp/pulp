@@ -303,6 +303,35 @@ pinned set. What catches a stale pin instead is
 fires only for the branch that actually moved a pinned path and prints the
 repair command with it.
 
+## A red `gpu-handoff-provenance-selftest` names a fixture, not your file
+
+The suite drives the generator's refusal paths on purpose, against a scratch
+repository whose files are named `leaf.txt` and `nested/inner.txt`. Three of
+those refusals print to the real stderr, so a run of this suite emits — while
+passing — a null source commit reaching `git rev-parse`, an unclean-checkout
+refusal naming `leaf.txt`, and a dozen contract-line violations from a fixture
+ledger that cannot satisfy the closed v2 contract. None of it is yours.
+
+Read the `FAIL:` line and nothing else. Two authors lost pushes to that text
+because it appears above the single assertion that actually failed and reads
+like a diagnosis. The control is cheap: the identical block appears in a green
+run on a clean checkout.
+
+Currency is also not this suite's to reject. The currency tier is opt-in behind
+`PULP_GPU_HANDOFF_REQUIRE_CURRENT=1` and nothing in `.github` sets it, so a
+stale ledger must not redden the required gate twenty minutes after a push —
+`gpu_handoff_pin_freshness.py` catches the missing regeneration at push instead,
+in under a second, with the repair command attached. A `gpu-handoff-provenance-selftest`
+that goes red only because a branch edited a pinned path is a defect in the
+suite, not a demand to regenerate.
+
+One such defect is worth knowing because its shape recurs: `resolve` **writes**
+its repair into the same two files `check` reads, so a `check` run after
+`resolve` reports the repair and agrees with any verdict at all. Measured on a
+tree that edits one pinned path without regenerating, `check` exits 1 naming two
+drifts before `resolve` and 0 naming none after. Any cross-check of `resolve`
+has to be read before it runs.
+
 ## The "Vellum freeze" CI job runs two checks, and the second is the one that fails
 
 `.github/workflows/vellum-freeze-check.yml` runs `vellum_freeze_check.py` **and**

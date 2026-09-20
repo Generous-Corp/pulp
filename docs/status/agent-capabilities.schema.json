@@ -92,7 +92,7 @@
           },
           "domain": {
             "type": "string",
-            "enum": ["audio", "midi", "music", "offline", "sequence", "signal", "timebase"]
+            "enum": ["audio", "midi", "music", "offline", "sequence", "signal", "timebase", "timeline"]
           },
           "summary": { "type": "string", "minLength": 1 },
           "contract_version": {
