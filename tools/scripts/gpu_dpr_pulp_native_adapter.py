@@ -34,6 +34,7 @@ OUTPUT_CAP_BYTES = 1024 * 1024
 MEASUREMENT_SCOPE_SCHEMA = "pulp.gpu-dpr-native-measurement-scope.v1"
 MEASUREMENT_ATTESTATION_SCHEMA = "pulp.gpu-dpr-native-measurement-attestation.v1"
 FIRST_FRAME_TRIAL_SCHEMA = "pulp.gpu-dpr-first-frame-trial.v1"
+CALIBRATION_DIAGNOSTIC_SCHEMA = "pulp.gpu-dpr-calibration-diagnostics.v1"
 ARTIFACT_KINDS = {
     "capture", "reference_capture", "trace", "raw_samples", "input_receipt"
 }
@@ -180,6 +181,9 @@ def validate_measurement_receipt(
             or not isinstance(dependencies, list) or not dependencies
         ):
             raise ValueError("incomplete measurement receipt lacks reason/dependencies")
+        diagnostic = receipt.get("calibration_diagnostics")
+        if diagnostic is not None:
+            validate_calibration_diagnostics(diagnostic, request, cell_dir)
         return receipt
 
     scope = receipt.get("measurement_scope")
@@ -264,6 +268,78 @@ def validate_measurement_receipt(
         "audio_device_opened": False,
     }
     return receipt
+
+
+def _finite_number(value: Any, label: str, *, positive: bool = True) -> None:
+    if (
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or (float(value) <= 0 if positive else float(value) < 0)
+    ):
+        qualifier = "positive" if positive else "non-negative"
+        raise ValueError(f"calibration diagnostic {label} must be finite and {qualifier}")
+
+
+def validate_calibration_diagnostics(
+    descriptor: Any, request: dict[str, Any], cell_dir: Path,
+) -> None:
+    if not isinstance(descriptor, dict) or set(descriptor) != {
+        "schema", "version", "path", "sha256"
+    }:
+        raise ValueError("calibration diagnostic descriptor is malformed")
+    if descriptor["schema"] != CALIBRATION_DIAGNOSTIC_SCHEMA or descriptor["version"] != 1:
+        raise ValueError("calibration diagnostic descriptor has the wrong schema")
+    artifact = checked_artifact(cell_dir, descriptor["path"], "calibration diagnostic")
+    if descriptor["sha256"] != sha256(artifact):
+        raise ValueError("calibration diagnostic digest differs from its bytes")
+    diagnostic = load_json(artifact)
+    required = {
+        "schema", "version", "attempt_nonce", "attempt_number", "clock",
+        "failure_class", "resolution_ms", "baseline_median_ms",
+        "extra_work_median_ms", "delta_ms", "threshold_ms", "control_detected",
+        "control_reason", "trials",
+    }
+    if set(diagnostic) != required:
+        raise ValueError("calibration diagnostic fields are not canonical")
+    if (
+        diagnostic["schema"] != CALIBRATION_DIAGNOSTIC_SCHEMA
+        or diagnostic["version"] != 1
+        or diagnostic["attempt_nonce"] != request["attempt_nonce"]
+        or diagnostic["attempt_number"] != request["attempt_number"]
+        or diagnostic["clock"] != "dawn-gpu-timestamp"
+        or diagnostic["failure_class"] not in {
+            "timer_quantization", "insufficient_extra_work", "producer_sample_invalid",
+            "analyzer_rejection",
+        }
+        or diagnostic["control_detected"] is not False
+        or not isinstance(diagnostic["control_reason"], str)
+        or not diagnostic["control_reason"]
+        or not isinstance(diagnostic["trials"], list)
+    ):
+        raise ValueError("calibration diagnostic identity or failure state is invalid")
+    _finite_number(diagnostic["resolution_ms"], "resolution_ms")
+    for field in ("baseline_median_ms", "extra_work_median_ms", "threshold_ms"):
+        value = diagnostic[field]
+        if value is not None:
+            _finite_number(value, field)
+    if diagnostic["delta_ms"] is not None:
+        _finite_number(diagnostic["delta_ms"], "delta_ms", positive=False)
+    expected = request.get("trial_contract", {}).get("gpu_timer_calibration_trials")
+    if (
+        isinstance(expected, bool) or not isinstance(expected, int)
+        or len(diagnostic["trials"]) == 0
+        or len(diagnostic["trials"]) > expected
+    ):
+        raise ValueError("calibration diagnostic trial count is invalid")
+    for index, trial in enumerate(diagnostic["trials"]):
+        if not isinstance(trial, dict) or set(trial) != {
+            "trial_index", "baseline_ms", "extra_work_ms"
+        } or trial["trial_index"] != index:
+            raise ValueError("calibration diagnostic trials are not aligned")
+        for field in ("baseline_ms", "extra_work_ms"):
+            value = trial[field]
+            if value is not None:
+                _finite_number(value, f"trial {index} {field}")
 
 
 def run_measurement_producer(
@@ -446,6 +522,7 @@ def incomplete_receipt(
         "schema": RECEIPT_SCHEMA,
         "version": 1,
         "attempt_nonce": request["attempt_nonce"],
+        "attempt_number": request["attempt_number"],
         "scenario_id": scenario["id"],
         "scenario_kind": scenario["kind"],
         "mode": request["mode"],

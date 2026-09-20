@@ -106,6 +106,41 @@ def noisy_measurement_producer(path: Path) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+def failed_calibration_producer(path: Path) -> None:
+    path.write_text(
+        '''#!/usr/bin/env python3
+import argparse, hashlib, json
+from pathlib import Path
+p=argparse.ArgumentParser(); p.add_argument('--request'); p.add_argument('--receipt'); a=p.parse_args()
+r=json.loads(Path(a.request).read_text()); root=Path(a.receipt).parent
+diagnostic={
+  'schema':'pulp.gpu-dpr-calibration-diagnostics.v1','version':1,
+  'attempt_nonce':r['attempt_nonce'],'attempt_number':r['attempt_number'],
+  'clock':'dawn-gpu-timestamp','failure_class':'producer_sample_invalid',
+  'resolution_ms':0.001,'baseline_median_ms':0.2,'extra_work_median_ms':None,
+  'delta_ms':None,'threshold_ms':0.02,'control_detected':False,
+  'control_reason':'GPU timer extra-work calibration did not complete',
+  'trials':[{'trial_index':0,'baseline_ms':0.2,'extra_work_ms':None},
+            {'trial_index':1,'baseline_ms':0.2,'extra_work_ms':None}]}
+path=root/'calibration-diagnostics.json'; path.write_text(json.dumps(diagnostic)+'\\n')
+receipt={
+  'schema':'pulp.gpu-dpr-cell-receipt.v1','version':1,
+  'attempt_nonce':r['attempt_nonce'],'attempt_number':r['attempt_number'],
+  'scenario_id':r['scenario']['id'],'scenario_kind':r['scenario']['kind'],
+  'mode':r['mode'],'requested_dpr':r['requested_dpr'],'outcome':'inconclusive',
+  'reason':'GPU timer extra-work calibration did not complete',
+  'dependencies':['gpu:timer-calibration'],
+  'calibration_diagnostics':{
+    'schema':'pulp.gpu-dpr-calibration-diagnostics.v1','version':1,
+    'path':path.name,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}}
+Path(a.receipt).write_text(json.dumps(receipt)+'\\n')
+raise SystemExit(3)
+''',
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
 def request(root: Path, expected_digest: str) -> dict:
     return {
         "schema": "pulp.gpu-dpr-cell-request.v1",
@@ -288,6 +323,32 @@ def main() -> int:
             f"measurement-producer-{document['attempt_nonce']}.stderr.log"
         )
         assert producer_log.stat().st_size == 1024 * 1024
+
+        # A real producer's failed calibration must retain aligned partial
+        # samples, and the adapter must bind the diagnostic bytes into the
+        # incomplete receipt instead of treating the reason as free text.
+        failed_calibration_producer(producer)
+        completed = subprocess.run(
+            [sys.executable, str(ADAPTER), "--request", str(request_path),
+             "--receipt", str(receipt_path)],
+            env=measured_env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert completed.returncode == 3, completed
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        descriptor = receipt["calibration_diagnostics"]
+        diagnostic_path = tmp / descriptor["path"]
+        diagnostic = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+        assert descriptor["sha256"] == digest(diagnostic_path)
+        assert diagnostic["failure_class"] == "producer_sample_invalid"
+        assert diagnostic["trials"][1]["extra_work_ms"] is None
+        native_adapter.validate_calibration_diagnostics(descriptor, document, tmp)
+        diagnostic_path.write_text(json.dumps({**diagnostic, "control_reason": "tampered"}) + "\n")
+        try:
+            native_adapter.validate_calibration_diagnostics(descriptor, document, tmp)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("tampered calibration diagnostic passed")
 
     print(
         "gpu_dpr_pulp_native_adapter_selftest=true real_capture_protocol=pass "
