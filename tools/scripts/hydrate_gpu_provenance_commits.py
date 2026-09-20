@@ -82,6 +82,178 @@ def event_ref_candidates(event_ref: str) -> list[str]:
     return candidates
 
 
+def offline_git_env() -> dict[str, str]:
+    """Git environment that answers from local objects or not at all.
+
+    A blobless partial clone resolves a missing object over the network, so a
+    presence probe against an absent commit pays seconds of transport before it
+    can report the absence. Verification is a statement about what this
+    checkout already holds, so the lazy fetch is refused outright.
+    """
+    env = dict(os.environ)
+    env["GIT_NO_LAZY_FETCH"] = "1"
+    return env
+
+
+def present_commits(root: pathlib.Path, revisions: list[str]) -> set[str]:
+    """The subset of `revisions` this checkout already holds as commits.
+
+    One batch call for the whole set: a spawn per revision buys the same answer
+    for tens of times the cost, and this runs on every push.
+    """
+    if not revisions:
+        return set()
+    completed = subprocess.run(
+        ["git", "cat-file", "--batch-check=%(objectname) %(objecttype)"],
+        cwd=root, input="\n".join(revisions) + "\n",
+        text=True, capture_output=True, check=False, env=offline_git_env(),
+    )
+    present = set()
+    for line in completed.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == "commit":
+            present.add(parts[0])
+    return present
+
+
+def committer_dates(root: pathlib.Path, revisions: list[str]) -> dict[str, int]:
+    """Committer timestamps for revisions this checkout can already read.
+
+    Pass only revisions known to be present: one absent argument makes Git
+    reject the whole invocation, which would cost every other row its date.
+    """
+    if not revisions:
+        return {}
+    completed = subprocess.run(
+        ["git", "log", "--no-walk", "--format=%H %ct", *sorted(revisions)],
+        cwd=root, text=True, capture_output=True, check=False,
+        env=offline_git_env(),
+    )
+    dates: dict[str, int] = {}
+    for line in completed.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and SHA.fullmatch(parts[0]) and parts[1].isdigit():
+            dates[parts[0]] = int(parts[1])
+    return dates
+
+
+def shallow_boundaries(root: pathlib.Path) -> list[str]:
+    """Commits this checkout treats as parentless grafts.
+
+    The file lives in the COMMON Git directory, so every linked worktree of a
+    truncated clone shares one horizon rather than carrying its own.
+    """
+    completed = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"], cwd=root,
+        text=True, capture_output=True, check=False,
+    )
+    if completed.returncode != 0:
+        return []
+    common = pathlib.Path(completed.stdout.strip())
+    if not common.is_absolute():
+        common = root / common
+    try:
+        content = (common / "shallow").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return [token for token in content.split() if SHA.fullmatch(token)]
+
+
+def reachable_commits(root: pathlib.Path) -> set[str]:
+    """Every commit reachable from HEAD or from any remote-tracking branch.
+
+    Ancestry against HEAD alone is the wrong question for a push-time check: a
+    developer working on a branch cut before a pin landed fails it for every
+    such pin, which is ordinary work rather than a defect. What a push needs to
+    know is whether a commit will exist on the remote once it lands. HEAD
+    covers what is being pushed, the remote-tracking refs cover what is already
+    published, and a commit rewritten away before its first push is reachable
+    from neither.
+    """
+    completed = subprocess.run(
+        ["git", "rev-list", "HEAD", "--remotes"], cwd=root,
+        text=True, capture_output=True, check=False, env=offline_git_env(),
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise HydrationError(f"cannot enumerate reachable commits: {detail}")
+    return set(completed.stdout.split())
+
+
+def verify(root: pathlib.Path) -> tuple[list[str], list[str], int | None, int | None]:
+    """Adjudicate every pinned commit against what this checkout can prove.
+
+    Returns the unpublishable rows, the rows a truncated checkout cannot answer
+    for, the graft horizon, and the oldest pinned timestamp. A complete clone
+    reports no undecidable rows; a truncated one refuses to call a row broken
+    when its own missing history is an equally good explanation.
+    """
+    revisions = required_commits(root)
+    boundaries = shallow_boundaries(root)
+    present = present_commits(root, sorted(set(revisions) | set(boundaries)))
+    reachable = reachable_commits(root)
+    dates = committer_dates(root, sorted(present))
+    horizon_dates = [dates[sha] for sha in boundaries if sha in dates]
+    horizon = max(horizon_dates) if horizon_dates else None
+    pinned_dates = [dates[rev] for rev in revisions if rev in dates]
+    oldest = min(pinned_dates) if pinned_dates else None
+
+    suspect = [rev for rev in revisions if rev not in present or rev not in reachable]
+    if not suspect:
+        return [], [], horizon, oldest
+    if not boundaries:
+        return suspect, [], horizon, oldest
+    if horizon is None:
+        # Truncated, with no readable horizon to adjudicate against. Reporting
+        # these as broken would invent a finding out of a missing measurement.
+        return [], suspect, horizon, oldest
+    broken, undecidable = [], []
+    for revision in suspect:
+        when = dates.get(revision)
+        if when is not None and when > horizon:
+            broken.append(revision)
+        else:
+            undecidable.append(revision)
+    return broken, undecidable, horizon, oldest
+
+
+def command_verify(root: pathlib.Path) -> int:
+    try:
+        broken, undecidable, horizon, oldest = verify(root)
+    except HydrationError as error:
+        print(f"gpu-provenance-verify: FAIL: {error}", file=sys.stderr)
+        return 1
+    for revision in undecidable:
+        print(
+            f"gpu-provenance-verify: SKIP: {revision} is unreachable, and this "
+            "checkout is truncated at or after that commit, so a rewritten pin "
+            "and history this clone never fetched look identical here",
+            file=sys.stderr,
+        )
+    if horizon is not None and oldest is not None:
+        margin = (oldest - horizon) // 86400
+        print(
+            f"gpu-provenance-verify: horizon margin {margin}d "
+            "(oldest pinned commit against this clone's graft boundary)",
+            file=sys.stderr,
+        )
+    if broken:
+        for revision in broken:
+            print(
+                f"gpu-provenance-verify: FAIL: {revision} is pinned by checked-in "
+                "GPU provenance but is reachable from neither HEAD nor any "
+                "remote-tracking branch, so it will not exist on the remote after "
+                "this push; regenerate the ledger against the commit that "
+                "replaced it",
+                file=sys.stderr,
+            )
+        return 1
+    print(
+        f"gpu-provenance-verify: PASS skipped={len(undecidable)} cap={MAX_COMMITS}"
+    )
+    return 0
+
+
 def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
     revisions = required_commits(root)
     missing = [revision for revision in revisions if not is_commit(root, revision)]
@@ -144,7 +316,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=pathlib.Path, default=pathlib.Path(__file__).parents[2])
     parser.add_argument("--remote", default="origin")
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="adjudicate the pinned commits against local objects and refs; never fetch",
+    )
     args = parser.parse_args(argv)
+    if args.verify_only:
+        return command_verify(args.root.resolve())
     try:
         total, fetched = hydrate(args.root.resolve(), args.remote)
     except HydrationError as error:
