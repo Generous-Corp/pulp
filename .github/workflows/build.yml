@@ -1161,7 +1161,7 @@ jobs:
     # below still run and report.
     if: >-
       !inputs.local_proof
-      && always()
+      && !cancelled()
       && needs.resolve-provider.result == 'success'
       && needs.classify.result == 'success'
       && needs.classify.outputs.native_build_required == 'true'
@@ -2217,7 +2217,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
       !inputs.local_proof
-      && always()
+      && !cancelled()
       && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
@@ -2246,7 +2246,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     if: >-
       !inputs.local_proof
-      && always()
+      && !cancelled()
       && github.event_name == 'merge_group'
       && (needs.resolve-provider.result != 'success'
           || needs.classify.result != 'success'
@@ -2289,7 +2289,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: ${{ !inputs.local_proof && always() && github.event_name != 'push' && github.event_name != 'merge_group' }}
+    if: ${{ !inputs.local_proof && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' }}
     steps:
       - name: Linux leg outcome (advisory)
         env:
@@ -2336,7 +2336,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
-    if: ${{ !inputs.local_proof && always() && github.event_name != 'push' && github.event_name != 'merge_group' }}
+    if: ${{ !inputs.local_proof && !cancelled() && github.event_name != 'push' && github.event_name != 'merge_group' }}
     steps:
       - name: Windows leg outcome (advisory)
         env:

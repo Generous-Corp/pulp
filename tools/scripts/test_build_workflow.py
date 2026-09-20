@@ -135,6 +135,44 @@ class LocalProofWorkflowTest(unittest.TestCase):
         self.assertIn("github.ref", concurrency["group"])
         self.assertIn("!inputs.local_proof", concurrency["cancel-in-progress"])
 
+    def test_no_job_gates_itself_on_always(self) -> None:
+        # `always()` runs a job even when the run has been CANCELLED, so a superseded
+        # run keeps building and keeps holding its concurrency group. Every newer head
+        # then waits at `pending`, which is indistinguishable from runner starvation,
+        # and only a force-cancel (which bypasses `always()`) releases it.
+        # `!cancelled()` buys the same thing the `always()` here was for: it still
+        # evaluates when an upstream need failed or was skipped.
+        offenders = {
+            name: " ".join(str(job.get("if", "")).split())
+            for name, job in self.jobs.items()
+            if "always()" in str(job.get("if", ""))
+        }
+        self.assertEqual(
+            offenders,
+            {},
+            "job-level `always()` keeps a cancelled run alive and holds the "
+            f"concurrency group; use `!cancelled()`. offenders: {offenders}",
+        )
+
+    def test_the_always_scan_reaches_the_jobs(self) -> None:
+        # Guards the scan above: an empty job map would pass it vacuously.
+        self.assertGreater(len(self.jobs), 5)
+        self.assertIn("build", self.jobs)
+        self.assertEqual(
+            {n for n, j in {"a": {"if": "always() && x"}, "b": {"if": "!cancelled()"}}.items()
+             if "always()" in str(j.get("if", ""))},
+            {"a"},
+        )
+
+    def test_cancellation_sensitive_jobs_still_run_on_upstream_failure(self) -> None:
+        # `!cancelled()` must not regress the reason the gate was permissive: the
+        # alias jobs report an outcome when an upstream need did NOT succeed.
+        for name in ("macos", "linux", "windows"):
+            with self.subTest(job=name):
+                condition = " ".join(str(self.jobs[name].get("if", "")).split())
+                self.assertIn("!cancelled()", condition)
+                self.assertNotIn("always()", condition)
+
     def test_local_proof_structurally_suppresses_every_ordinary_job(self) -> None:
         ordinary = set(self.jobs) - {"local-proof"}
         self.assertTrue(ordinary)

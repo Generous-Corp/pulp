@@ -1454,6 +1454,16 @@ Push runs are also exempt from `cancel-in-progress`: they share the
 `refs/heads/main` concurrency group, so cancelling a superseded one would kill
 its cache-save step exactly when main is busiest. PR runs still cancel.
 
+**Keep job-level `if:` gates on `!cancelled()`, never `always()`.** A job gated on
+`always()` runs even when its run has been cancelled, so a superseded run keeps
+building, stays `in_progress`, and goes on holding its group. Every newer head of
+that PR then sits at `pending` with zero jobs, which is indistinguishable from
+runner starvation from the outside, and an ordinary `POST .../cancel` will not
+free it: only `force-cancel` bypasses `always()`. `!cancelled()` buys what these
+gates actually need, since it still evaluates when an upstream need failed or was
+skipped. Step-level `always()` is fine and is used deliberately for log upload.
+`tools/scripts/test_build_workflow.py` enforces the job-level rule.
+
 The `classify` job diffs an **event-dependent base**
 (`tools/scripts/resolve_classify_base.py`): a PR diffs
 `github.event.pull_request.base.sha`, a merge group diffs

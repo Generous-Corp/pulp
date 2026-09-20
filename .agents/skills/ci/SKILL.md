@@ -1198,12 +1198,32 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>" --jq '.status'
    ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>/jobs?per_page=1" --jq '.total_count'
    ```
-   The usual cause is a superseded run for the same PR still sitting `queued`.
+   The cause is a superseded run for the same PR still holding the group.
    `build.yml` groups on `build-${{ github.ref }}`, which is `refs/pull/N/merge`
-   for every run of that PR, and its `cancel-in-progress` cancels only runs that
-   are **in progress** — a `queued` predecessor holds the group indefinitely and
-   the newer run waits behind it forever. Pushing a fix while the first run is
-   still queued behind congestion is all it takes to reach this state.
+   for every run of that PR, so each new head queues behind the last.
+
+   **`cancel-in-progress` is on and does fire. A cancelled run is not a stopped
+   run.** A job gated on `always()` keeps running after its run is cancelled, so
+   the predecessor stays `in_progress` and goes on holding the group while every
+   newer head sits at `pending`. Read the predecessor's **conclusion**: if it is
+   already `cancelled` while its jobs are still going, the cancel was delivered
+   and ignored, and nothing about the pool or the runner is at fault. Only
+   `force-cancel` bypasses `always()`, which is exactly why a plain cancel looks
+   accepted (`{}`) and changes nothing.
+
+   Check before blaming capacity:
+   ```bash
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>" --jq '.status, .conclusion'
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>/jobs?per_page=100" \
+     --jq '[.jobs[] | select(.status != "completed")] | map(.name)'
+   ```
+
+   Two readings that mislead here. A superseded run reporting `cancelled` with
+   `jobs.total_count` of **0** proves nothing about `cancel-in-progress`: GitHub
+   keeps at most one *pending* run per group and evicts the previous one
+   unconditionally, so those cancellations happen even when nothing else works.
+   And a self-hosted runner is rarely the culprit: a tartci macOS job that
+   receives a real cancellation cancels its step and completes in seconds.
 
    `POST actions/runs/{id}/cancel` returns `{}` and does nothing to a run that was
    never assigned. Use **force-cancel**, then confirm the successor expands:
