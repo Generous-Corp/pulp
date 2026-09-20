@@ -152,6 +152,50 @@ Debugging rule: if a plugin's text field drops a key, first determine **whether
 the key even reaches the NSView** (log in `keyDown:`). If it never arrives, the
 fix belongs at the format layer (`onKeyDown`), not the view host.
 
+### One policy answers "did the editor consume this key?" for every format
+
+`pulp::view::route_plugin_key` (`core/view/include/pulp/view/plugin_key_routing.hpp`)
+is the shared answer, and every format seam asks it rather than deciding for
+itself: the macOS `-keyDown:` path in `plugin_view_host_mac.mm` (AU v2/v3, CLAP,
+and VST3's NSView) and `PulpPlugView::onKeyDown` (VST3's own pipeline) both route
+through it. It takes no platform type, because the three seams share no code —
+only the policy.
+
+It answers in this order: an open overlay's Escape, then the focused view under
+**this** root, then `root.on_global_key`. Anything none of them claimed is
+`forward_to_host`. Forwarding is the DEFAULT and consumption is what has to be
+earned; there is no allowlist of "keys the host wants" anywhere in the policy,
+because such a list is always incomplete and fails silently when it is.
+
+Three things are easy to get wrong here, and each one is invisible until a
+musician hits it:
+
+- **A focused text field does not consume everything.** A Command/Control chord
+  or a function key it declined is not text, so there is nothing left for it to
+  do with the key — report `forward_to_host`. The old macOS path returned
+  "handled" unconditionally once a field held focus, which killed host chords
+  and F-key transport for exactly as long as a type-in happened to be open.
+  `PluginKeyOffer::is_function_key` is how the platform tells the policy that a
+  key carries no character (AppKit's 0xF700-0xF8FF private-use range).
+- **A merely focusable widget must not become a keyboard sink.** A view that
+  accepts navigation but not text is offered only `is_plugin_navigation_key`
+  (arrows, Home/End, Enter, Escape, and never with a chord modifier) and its own
+  `on_key_event` decides from there. That floor is not a claim about what the
+  host wants — it is what stops a focused knob from swallowing Space.
+- **AppKit offers a command chord twice.** `-performKeyEquivalent:` runs before
+  `-keyDown:` and already consults `root.on_global_key`; the second pass sets
+  `PluginKeyOffer::global_hook_already_offered` so the hook — and the script
+  `keydown` listener behind it — fires once per press. A seam with a single
+  delivery point (VST3 `onKeyDown`) leaves it false.
+
+`plugin_key_focus(root)` is the scoped focus read every seam must use:
+`View::focused_input_` is process-global, so with two editors open it may name
+the *other* editor's field, and answering from it reports the key handled — so
+the host never sees it either and the spacebar dies with no visible cause.
+
+Pinned headlessly by `test/test_plugin_key_routing.cpp`, where every case that
+asserts consumption has a sibling asserting the key it must hand back.
+
 ## `release_view()` — for containers that own the view
 
 `TabPanel::add_tab` and similar widgets take `std::unique_ptr<view::View>`.

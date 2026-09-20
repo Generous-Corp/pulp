@@ -95,6 +95,10 @@ pulp_add_test_suite(pulp-test-combo-dropdown LIBRARIES pulp::view)
 # Generalized overlay-click routing (View::active_overlay_)
 pulp_add_test_suite(pulp-test-overlay-routing LIBRARIES pulp::view)
 
+# Embedded-plugin key routing: which keys the editor consumes, and which
+# it must hand back to the DAW (transport, Musical Typing, host shortcuts).
+pulp_add_test_suite(pulp-test-plugin-key-routing LIBRARIES pulp::view)
+
 # Auto-clearing input-focus slot (View::focused_input_)
 pulp_add_test_suite(pulp-test-focused-input LIBRARIES pulp::view)
 
