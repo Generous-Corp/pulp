@@ -448,8 +448,19 @@ void GraphRuntimeWorkerPool::worker_loop(std::uint32_t worker_index) noexcept {
                     }
                     active_worker_threads_.fetch_sub(1, std::memory_order_acq_rel);
                     cold_transition_gate_.store(false, std::memory_order_release);
+                    bool park_published = false;
                     do {
                         worker_idle_sleep_count_.fetch_add(1, std::memory_order_relaxed);
+                        if (!park_published) {
+                            // Publish the cold-idle transition once per episode,
+                            // after the count is visible, so an observer is woken
+                            // by the transition rather than polling for it. The
+                            // hook is null in every shipping build.
+                            park_published = true;
+                            if (worker_park_hook_) {
+                                worker_park_hook_(worker_park_context_);
+                            }
+                        }
                         std::this_thread::sleep_for(kColdIdleSleep);
                         if (stopping_.load(std::memory_order_acquire)) return;
                     } while (!reheat_requested_.load(std::memory_order_acquire) &&

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260919-pr8598-gpu-present-endpoint-doc-watch",
+  "created_at": "2026-09-19T23:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record a documentation-only correction to the native presentation endpoint contract and its matching skill note. Returning from GpuSurface::end_frame() is a submit-side event, not presentation, and the back-buffer readback runs earlier still, so both candidate timestamps under-report first-visible latency rather than overshooting it as the prior comment claimed. The change adds no producer, alters no rendering primitive, and touches no transferred Vellum slice; it forecloses an incorrect implementation of an endpoint Pulp already retains.",
+  "tests": [
+    "gpu-handoff-provenance-selftest",
+    "gpu-recipe-catalog-selftest",
+    "vellum-freeze-check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
