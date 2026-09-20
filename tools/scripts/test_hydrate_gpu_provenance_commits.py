@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import pathlib
 import subprocess
@@ -180,6 +182,77 @@ class HydrationTests(unittest.TestCase):
         ):
             with self.assertRaises(hydration.HydrationError):
                 hydration.hydrate(pathlib.Path("/repo"), "origin")
+
+
+class VerifyOnlyTests(unittest.TestCase):
+    """The push-time arm's plumbing, mocked where mocking is honest.
+
+    What the checkout holds is a question only real git can answer, so the
+    adjudication itself is covered against real repositories next door. What
+    belongs here is the contract the arm owes its callers: that it dispatches
+    away from hydration, and that it never reaches the network.
+    """
+
+    def run_main(self, argv: list[str]) -> tuple[int, str]:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(io.StringIO()):
+            code = hydration.main(argv)
+        return code, stderr.getvalue()
+
+    def test_verify_only_dispatches_away_from_hydration(self) -> None:
+        with (
+            mock.patch.object(hydration, "verify", return_value=([], [], None, None)),
+            mock.patch.object(hydration, "hydrate") as hydrate,
+        ):
+            code, _ = self.run_main(["--root", "/repo", "--verify-only"])
+        self.assertEqual(code, 0)
+        hydrate.assert_not_called()
+
+    def test_verify_only_reports_a_broken_pin_as_failure(self) -> None:
+        with mock.patch.object(
+            hydration, "verify", return_value=(["a" * 40], [], None, None)
+        ):
+            code, output = self.run_main(["--root", "/repo", "--verify-only"])
+        self.assertEqual(code, 1)
+        self.assertIn("a" * 40, output)
+
+    def test_verify_only_never_fetches(self) -> None:
+        """The one assertion a mock can make better than real git can.
+
+        A verification that silently repaired what it was asked to judge would
+        pass every adjudication test next door while defeating the gate, and on
+        a partial clone the repair is what an ordinary presence probe does by
+        default. Watching every argv is how that stays impossible.
+        """
+        handoff = {
+            "entries": [
+                {"pulp_paths": [{"repo": "Generous-Corp/pulp", "revision": "a" * 40}]}
+            ]
+        }
+        receipt = {"verification_equivalent_head": "b" * 40}
+        calls = []
+
+        def record(argv, **kwargs):
+            calls.append((list(argv), kwargs.get("env") or {}))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with (
+            mock.patch.object(hydration, "load_object", side_effect=[handoff, receipt]),
+            mock.patch.object(hydration.subprocess, "run", side_effect=record),
+        ):
+            code, _ = self.run_main(["--root", "/repo", "--verify-only"])
+
+        self.assertEqual(code, 1)  # proves nothing, so it fails closed
+        self.assertTrue(calls, "no git was run at all; the assertion below is vacuous")
+        for argv, _env in calls:
+            self.assertNotIn("fetch", argv)
+        object_reads = [
+            env for argv, env in calls
+            if "cat-file" in argv or "rev-list" in argv or "log" in argv
+        ]
+        self.assertTrue(object_reads, "no object read was attempted")
+        for env in object_reads:
+            self.assertEqual(env.get("GIT_NO_LAZY_FETCH"), "1")
 
 
 if __name__ == "__main__":
