@@ -233,6 +233,17 @@ PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
     // on any future destroy path would have leaked the attachment, and a leaked
     // attachment means the .pftrace is never flushed — the capture silently
     // produces nothing. No-op unless PULP_TRACING=ON.
+
+    // Ask the host for exactly the ProcessContext fields
+    // build_process_context() decodes. The base class already advertises
+    // IProcessContextRequirements and answers from this member, which
+    // defaults to an empty mask -- i.e. "send me nothing" -- so assigning it
+    // is what turns the inherited interface into a real request. Set here
+    // rather than in initialize() because the host may latch the answer any
+    // time after construction, and an empty first answer cannot be revised:
+    // the SDK specifies the value is read once before setActive and "cannot
+    // be changed afterwards".
+    processContextRequirements = kProcessContextRequirements;
 }
 
 PulpVst3Processor::~PulpVst3Processor() = default;
