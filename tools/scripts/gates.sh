@@ -94,6 +94,7 @@ PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
 GHP="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 SRG="$ROOT/tools/scripts/silent_revert_guard.py"
 GLS="$ROOT/tools/scripts/gpu_ledger_sentinel_check.py"
+GPV="$ROOT/tools/scripts/hydrate_gpu_provenance_commits.py"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 MANIFEST_MIRRORS="$ROOT/tools/scripts/check_manifest_mirrors.py"
@@ -363,6 +364,23 @@ if [ -f "$GLS" ]; then
     echo "" >&2
     echo "▸ gpu-ledger sentinel (no unregenerated ledger from a merge)" >&2
     if ! "$PYTHON" "$GLS" --root "$ROOT" --mode=report; then
+        fail=1
+    fi
+fi
+
+# ── 6b4. gpu-provenance reachability ────────────────────────────────────────
+# A ledger can name a commit that exists in this object store and still will not
+# exist on the remote: an amend or rebase rewrites the commit CARRYING the
+# ledger after the ledger named it, orphaning the sha recorded inside. Asking
+# whether the object exists cannot see that, because the orphan is still an
+# object here; the question is reachability from HEAD or a remote-tracking ref.
+# The rewrite happens after authoring, so the push is the only place that can
+# catch it. A truncated clone cannot tell an orphan from history it never
+# fetched, and says so rather than inventing a finding.
+if [ -f "$GPV" ]; then
+    echo "" >&2
+    echo "▸ gpu-provenance reachability (no pin that will not exist on the remote)" >&2
+    if ! "$PYTHON" "$GPV" --root "$ROOT" --verify-only; then
         fail=1
     fi
 fi

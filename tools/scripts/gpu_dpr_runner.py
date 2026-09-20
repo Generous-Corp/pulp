@@ -23,7 +23,7 @@ import gpu_dpr_experiment as experiment  # noqa: E402
 import gpu_dpr_v2_runner as runner_v2  # noqa: E402
 from gpu_dpr_evidence import (  # noqa: E402
     A2T_RECEIPT_SCHEMA, A3_RECEIPT_SCHEMA, ALL_OUTCOMES, ARTIFACT_KINDS,
-    COMPLETE_OUTCOMES, EvidenceError, INCOMPLETE_OUTCOMES, METRIC_UNITS,
+    COMPLETE_OUTCOMES, AnalyzerRejection, EvidenceError, INCOMPLETE_OUTCOMES, METRIC_UNITS,
     NONCE_HEX_LENGTH, RAW_SCHEMA, RECEIPT_SCHEMA, TRACE_ANALYSIS_SCHEMA,
     atomic_json, cell_directory, cell_key, checked_cell_directory,
     exact_executable, load_json, parse_cell_key, receipt_observation,
@@ -172,18 +172,22 @@ def record_attempt(
     state: dict[str, Any], key: str, outcome: str, receipt_path: str | None,
     reason: str | None, dependencies: list[str], observation: dict[str, Any] | None,
     nonce: str | None = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> None:
     if nonce is not None:
         state.setdefault("issued_attempts", {}).pop(nonce, None)
     cell = state["cells"][key]
-    cell["attempts"].append({
+    attempt = {
         "number": len(cell["attempts"]) + 1,
         "outcome": outcome,
         "receipt": receipt_path,
         "reason": reason,
         "dependencies": dependencies,
         "nonce": nonce,
-    })
+    }
+    if diagnostics is not None:
+        attempt["diagnostics"] = diagnostics
+    cell["attempts"].append(attempt)
     cell["dependencies"] = dependencies
     cell["observation"] = observation
     cell["status"] = "complete" if outcome in COMPLETE_OUTCOMES else outcome
@@ -455,6 +459,14 @@ def run_cells(
                 continue
             try:
                 ingest_receipt(run_dir, receipt, attempt_nonce)
+            except AnalyzerRejection as error:
+                state = load_state(run_dir)
+                record_attempt(
+                    state, key, "inconclusive", str(receipt.resolve()),
+                    f"analyzer rejected: {error}", ["analyzer:rejected"], None,
+                    attempt_nonce, error.metadata,
+                )
+                save_state(run_dir, state)
             except (
                 EvidenceError, OSError, json.JSONDecodeError, KeyError, TypeError,
                 subprocess.TimeoutExpired,

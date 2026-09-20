@@ -295,6 +295,27 @@ class EvidenceError(ValueError):
     """A receipt exists but cannot support a measured A4 cell."""
 
 
+class AnalyzerRejection(EvidenceError):
+    """Trace analyzer ran but its process/output contract was rejected."""
+
+    def __init__(self, message: str, metadata: dict[str, Any]):
+        super().__init__(message)
+        self.metadata = metadata
+
+
+def _analyzer_metadata(question: str, completed: subprocess.CompletedProcess[str],
+                       parse_error: str | None = None) -> dict[str, Any]:
+    return {
+        "schema": "pulp.gpu-dpr-analyzer-rejection.v1",
+        "status": "rejected",
+        "question": question,
+        "returncode": completed.returncode,
+        "stdout_sha256": hashlib.sha256(completed.stdout.encode()).hexdigest(),
+        "stderr_sha256": hashlib.sha256(completed.stderr.encode()).hexdigest(),
+        **({"parse_error": parse_error} if parse_error else {}),
+    }
+
+
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -443,6 +464,34 @@ def safe_artifact(root_dir: Path, relative: str) -> Path:
     if not candidate.is_file() or not stat.S_ISREG(candidate.stat().st_mode):
         raise EvidenceError(f"artifact is missing: {relative}")
     return candidate
+
+
+def validate_incomplete_diagnostics_artifact(
+    receipt: dict[str, Any], cell_dir: Path,
+) -> None:
+    """Require calibration diagnostics to remain bound to retained bytes."""
+    binding = receipt.get("diagnostics_artifact")
+    if not isinstance(binding, dict) or binding.get("schema") != (
+        "pulp.gpu-dpr-diagnostics-artifact.v1"
+    ):
+        raise EvidenceError("timer-calibration receipt lacks diagnostics artifact binding")
+    path = safe_artifact(cell_dir, binding.get("path", ""))
+    payload = regular_file_bytes(path, "calibration diagnostics artifact")
+    digest = binding.get("sha256")
+    if (
+        not isinstance(digest, str) or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+        or hashlib.sha256(payload).hexdigest() != digest
+    ):
+        raise EvidenceError("calibration diagnostics artifact digest does not match")
+    try:
+        diagnostics = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise EvidenceError("calibration diagnostics artifact is not valid JSON") from error
+    if diagnostics != receipt.get("diagnostics"):
+        raise EvidenceError("receipt diagnostics differ from retained artifact")
+    if diagnostics.get("schema") != "pulp.gpu-dpr-calibration-diagnostics.v1":
+        raise EvidenceError("unsupported calibration diagnostics schema")
 
 
 def new_frozen_evidence_directory(run_dir: Path, key: str, nonce: str) -> Path:
@@ -812,11 +861,16 @@ def analyze_trace(
         try:
             result = json.loads(completed.stdout)
         except (json.JSONDecodeError, TypeError) as error:
-            raise EvidenceError(
-                f"trace analyzer returned invalid JSON for {question}: {error}"
+            metadata = _analyzer_metadata(question, completed, str(error))
+            raise AnalyzerRejection(
+                f"trace analyzer returned invalid JSON for {question}: {error}",
+                metadata,
             ) from error
         if not isinstance(result, dict):
-            raise EvidenceError(f"trace analyzer result for {question} is not an object")
+            raise AnalyzerRejection(
+                f"trace analyzer result for {question} is not an object",
+                _analyzer_metadata(question, completed),
+            )
         verdict = result.get("verdict")
         expected_exit = {
             "pass": 0, "fail": 1, "unavailable": 2, "unverified": 2
@@ -826,16 +880,25 @@ def analyze_trace(
             or result.get("question") != question
             or expected_exit is None or completed.returncode != expected_exit
         ):
-            raise EvidenceError(f"trace analyzer result/exit contract failed for {question}")
+            raise AnalyzerRejection(
+                f"trace analyzer result/exit contract failed for {question}",
+                _analyzer_metadata(question, completed),
+            )
         if question in {"gpu-health", "gpu-probe"} and verdict != "pass":
-            raise EvidenceError(f"trace question {question} did not pass")
+            raise AnalyzerRejection(
+                f"trace question {question} did not pass",
+                _analyzer_metadata(question, completed),
+            )
         if question == "gpu-startup" and verdict not in {"pass", "unverified"}:
-            raise EvidenceError("trace question gpu-startup is unavailable or failed")
+            raise AnalyzerRejection(
+                "trace question gpu-startup is unavailable or failed",
+                _analyzer_metadata(question, completed),
+            )
         question_ids = result.get("evidence_ids")
         if question_ids != [expected_evidence_id]:
-            raise EvidenceError(
-                f"trace analyzer must return the cell attempt nonce as the only evidence id "
-                f"for {question}"
+            raise AnalyzerRejection(
+                f"trace analyzer must return the cell attempt nonce as the only evidence id for {question}",
+                _analyzer_metadata(question, completed),
             )
         for evidence_id in question_ids:
             if evidence_id not in evidence_ids:
@@ -846,7 +909,10 @@ def analyze_trace(
             or any(not isinstance(item, str) or not item for item in categories)
             or categories != sorted(set(categories))
         ):
-            raise EvidenceError(f"trace analyzer did not derive categories for {question}")
+            raise AnalyzerRejection(
+                f"trace analyzer did not derive categories for {question}",
+                _analyzer_metadata(question, completed),
+            )
         scope = result.get("category_scope")
         if (
             not isinstance(scope, dict)
@@ -859,11 +925,15 @@ def analyze_trace(
             or not isinstance(scope.get("process_pid"), int)
             or scope["process_pid"] < 0
         ):
-            raise EvidenceError(
-                f"trace categories are not scoped to the cell evidence/process for {question}"
+            raise AnalyzerRejection(
+                f"trace categories are not scoped to the cell evidence/process for {question}",
+                _analyzer_metadata(question, completed),
             )
         if category_scope is not None and scope != category_scope:
-            raise EvidenceError("trace questions resolved different category process scopes")
+            raise AnalyzerRejection(
+                "trace questions resolved different category process scopes",
+                _analyzer_metadata(question, completed),
+            )
         category_scope = scope
         observed_categories.update(categories)
     if category_scope is None:
@@ -1084,6 +1154,10 @@ def receipt_observation(
             or any(not isinstance(item, str) or not item for item in dependencies)
         ):
             raise EvidenceError(f"{outcome} receipt requires explicit dependencies")
+        if "gpu:timer-calibration" in dependencies:
+            validate_incomplete_diagnostics_artifact(
+                receipt, checked_cell_directory(run_dir, key)
+            )
         return key, None, dependencies
 
     validate_identity(receipt, scenario, state["plan"])
