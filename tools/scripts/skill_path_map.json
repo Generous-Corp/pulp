@@ -428,6 +428,14 @@
         "docs/status/cli-commands.yaml"
       ]
     },
+    "lv2": {
+      "paths": [
+        "core/format/src/lv2_adapter.cpp",
+        "core/format/include/pulp/format/lv2_adapter.hpp",
+        "core/format/include/pulp/format/lv2_entry.hpp",
+        ".agents/skills/lv2/**"
+      ]
+    },
     "moonbase": {
       "paths": [
         "examples/moonbase-activation/**"
