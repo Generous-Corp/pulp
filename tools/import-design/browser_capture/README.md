@@ -48,8 +48,11 @@ width; its default viewport remains an automatically correctable initial width.
 state before the same-frame evidence capture. Plans use
 `pulp-browser-interactions-v1` and contain only bounded `click`,
 `context-click`, `type`, `wait-for`, and `wait-ms` actions. `context-click`
-uses a real secondary-button press/release. The helper records selectors and typed-text
-length in `interaction-report.json`; it persists neither typed plaintext nor a
+uses a real secondary-button press/release. A mutating action may include a
+bounded `expect` object (`selector`, `state`, and optional timeout) to require a
+post-action visible, hidden, attached, or detached state delta; the observed
+state is recorded in `interaction-report.json`. The helper records selectors
+and typed-text length in `interaction-report.json`; it persists neither typed plaintext nor a
 per-action text hash. The published plan identity hashes a canonical redacted
 plan in which typed text is replaced by its length, so short private values
 cannot be recovered by hashing candidate plans. Same-document history and

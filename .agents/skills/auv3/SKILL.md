@@ -272,12 +272,49 @@ MIDI list and asserts per-note NoteOn/PitchBend/Timbre/Pressure routing.
 merges its own internal state (e.g. maximum frames to render) into the
 dictionary, and the round-trip must preserve it.
 
-`supportsUserPresets` currently returns `NO`. `currentPreset` is not
-overridden — use `fullState` for persistence, not
-`AUAudioUnitPreset`. Wiring user presets requires implementing
-`userPresets`, `supportsUserPresets`, `saveUserPreset:error:`,
-`deleteUserPreset:error:`, `presetStateFor:error:`, and
-`currentPreset` as a matched pair.
+### Presets: `factoryPresets` + `currentPreset`
+
+iOS hosts — AUM, Loopy Pro, Cubasis — drive presets **exclusively**
+through this API, so an AUv3 that answers nothing here has no preset
+UX at all on the platform Pulp ships to first.
+
+`factoryPresets` builds `AUAudioUnitPreset` objects from the shared
+`FactoryPresetTable` (`au_factory_presets.hpp`, the same table the
+three AU v2 adapters serve `GetPresets` from), bound in
+`initWithComponentDescription:`. It returns **nil, not an empty
+array**, when the plug-in ships none — an empty array makes a host
+draw an empty menu. The table is discovered from the loaded bundle, so
+it is empty in any unit-test binary; a test stages a folder through
+the Pulp-private `pulpFactoryPresetTable` accessor.
+
+`setCurrentPreset:` implements Apple's documented split, and getting
+it wrong is the trap here:
+
+- **number >= 0 — a factory preset.** Load it from the table. It must
+  actually move `StateStore` values; a host that only sees the name
+  change will look like it is working.
+- **number < 0 — a user preset.** Ask `super`'s
+  `presetStateFor:error:` and assign the result to `fullState`. Never
+  index the factory table with it.
+
+`supportsUserPresets` therefore returns **YES**. Pulp owns no writable
+preset store: `userPresets`, `saveUserPreset:error:`,
+`deleteUserPreset:error:` and `presetStateFor:error:` all have
+AUAudioUnit base-class implementations backed by a location Apple
+manages, and `fullState` already round-trips the StateStore plus any
+processor-owned payload. The two things a plug-in must supply are the
+`YES` and the negative-number branch above.
+
+Both branches are wrapped in
+`will/didChangeValueForKey:@"allParameterValues"` — that pseudo-property
+is how AUAudioUnit tells a host every parameter may have moved at once,
+and `currentPreset` is one of the changes Apple names for it.
+
+`currentPreset`'s accessors are **both** overridden, so nothing is
+synthesized and the ivar must be retained and released in `-dealloc`
+(this file is MRR, not ARC). A rejected selection — an out-of-range
+factory number, an unreadable user preset — must leave both the
+parameters and the previously reported `currentPreset` untouched.
 
 ### ARA companion factory
 

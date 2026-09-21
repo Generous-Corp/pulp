@@ -1,5 +1,9 @@
-#include <pulp/music/music.hpp>
 #include <pulp/music/detail/random_range.hpp>
+#include <pulp/music/music.hpp>
+#include <pulp/timebase/coordinate_random.hpp>
+#include <pulp/timebase/groove_kernel.hpp>
+#include <pulp/timebase/quantize.hpp>
+#include <pulp/timebase/trigger_grid.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -612,4 +616,353 @@ TEST_CASE("looping shift registers rotate and mutate from caller-supplied draws"
           == PatternError::invalid_probability);
     CHECK(looping_shift_register(BinaryPattern<8>{}, {0, 1}, 0).error
           == PatternError::empty_pattern);
+}
+
+namespace {
+
+namespace tb = pulp::timebase;
+
+// One bar of 4/4 on the shared tick resolution, divided into sixteenths.
+constexpr std::int64_t kSixteenth = tb::kTicksPerQuarter / 4;
+constexpr std::int64_t kEighth = tb::kTicksPerQuarter / 2;
+constexpr std::int64_t kBar = tb::kTicksPerQuarter * 4;
+
+// The per-lane displacements this worked example authors, in ticks. At 120 BPM
+// a sixteenth lasts 125 ms, so these are 6.25 ms early and 12.5 ms late.
+constexpr std::int64_t kSnareEarly = -kSixteenth / 20;
+constexpr std::int64_t kBassLate = kSixteenth / 10;
+
+constexpr std::size_t kHatTrack = 0;
+constexpr std::size_t kSnareTrack = 1;
+constexpr std::size_t kBassTrack = 2;
+
+std::vector<std::int64_t> positions_on_track(const std::vector<tb::TriggerEvent>& events,
+                                             std::size_t track) {
+    std::vector<std::int64_t> result;
+    for (const auto& event : events)
+        if (event.track == track)
+            result.push_back(event.position.value);
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("sixteenth lanes take an exact per-lane feel from authored microtiming",
+          "[music][timebase][rhythm]") {
+    // A five-step source cycled across a sixteen-step bar is a 5-over-4
+    // polymeter: the source repeats every five sixteenths, the bar does not,
+    // and the two only realign after five bars.
+    const auto source = euclidean_pattern<16>(5, 2);
+    REQUIRE(source);
+    REQUIRE(source.pattern.size() == 5);
+    REQUIRE(source.pattern.onset_count() == 2);
+    CHECK(*source.pattern.at(0));
+    CHECK(*source.pattern.at(3));
+
+    RhythmRelationshipConfig config;
+    config.target_steps = 16;
+    config.relationship = RhythmRelationship::coincident;
+    config.length_mapping = RhythmLengthMapping::wrap;
+    const auto bass_lane = derive_rhythm_relationship(source.pattern, config);
+    REQUIRE(bass_lane);
+
+    // Wrap mapping reads source step (target_step % 5), so the two source
+    // onsets reappear wherever that residue is 0 or 3.
+    std::vector<std::size_t> bass_steps;
+    for (std::size_t step = 0; step < 16; ++step)
+        if (*bass_lane.pattern.at(step))
+            bass_steps.push_back(step);
+    CHECK(bass_steps == std::vector<std::size_t>{0, 3, 5, 8, 10, 13, 15});
+
+    tb::TriggerGrid<4, 16> grid;
+    REQUIRE(grid.configure(3, 16, tb::TickDuration{kSixteenth}) == tb::TriggerGridError::None);
+
+    // A cell may not move more than half a step, which is what keeps adjacent
+    // steps from swapping; both authored offsets sit well inside that bound.
+    CHECK(grid.minimum_microtiming().value == -kSixteenth / 2);
+    CHECK(grid.maximum_microtiming().value == (kSixteenth - 1) / 2);
+    REQUIRE(kSnareEarly > grid.minimum_microtiming().value);
+    REQUIRE(kBassLate < grid.maximum_microtiming().value);
+
+    for (std::size_t step = 0; step < 16; ++step)
+        REQUIRE(grid.set_cell(kHatTrack, step,
+                              tb::TriggerCell{true, 90, {1, 1}, tb::TickDuration{0}}) ==
+                tb::TriggerGridError::None);
+    for (const std::size_t step : {std::size_t{4}, std::size_t{12}})
+        REQUIRE(grid.set_cell(kSnareTrack, step,
+                              tb::TriggerCell{true, 110, {1, 1}, tb::TickDuration{kSnareEarly}}) ==
+                tb::TriggerGridError::None);
+    for (const std::size_t step : bass_steps)
+        REQUIRE(grid.set_cell(kBassTrack, step,
+                              tb::TriggerCell{true, 100, {1, 1}, tb::TickDuration{kBassLate}}) ==
+                tb::TriggerGridError::None);
+
+    // Every cell here is authored at probability 1/1, so the draws decide
+    // nothing; the projection still requires exactly one word per coordinate.
+    const std::vector<std::uint64_t> draws(grid.coordinate_count(), 0);
+    std::vector<tb::TriggerEvent> events(grid.coordinate_count());
+    const auto projected = grid.project_window(tb::TickPosition{0}, tb::TickPosition{0},
+                                               tb::TickPosition{kBar}, draws, events);
+    REQUIRE(projected);
+    REQUIRE(projected.event_count == 16 + 2 + 7);
+    events.resize(projected.event_count);
+
+    // Each lane lands exactly where the authored offset puts it. Nothing here
+    // rounds: the displacement is an integer tick added to an integer grid.
+    for (const auto& event : events) {
+        const auto grid_tick = static_cast<std::int64_t>(event.step) * kSixteenth;
+        if (event.track == kHatTrack)
+            CHECK(event.position.value == grid_tick);
+        else if (event.track == kSnareTrack)
+            CHECK(event.position.value == grid_tick + kSnareEarly);
+        else
+            CHECK(event.position.value == grid_tick + kBassLate);
+    }
+
+    // The same landings stated as absolute ticks, derived by hand from the
+    // grid: sixteenth 4 is 705600, and the snare sits 8820 ticks before it.
+    CHECK(positions_on_track(events, kHatTrack).front() == 0);
+    CHECK(positions_on_track(events, kHatTrack).back() == 15 * kSixteenth);
+    CHECK(positions_on_track(events, kSnareTrack) == std::vector<std::int64_t>{696780, 2107980});
+    CHECK(positions_on_track(events, kBassTrack) ==
+          std::vector<std::int64_t>{17640, 546840, 899640, 1428840, 1781640, 2310840, 2663640});
+
+    // Emission is step-major then track-major, which is deliberately not
+    // position order. At step 4 the on-grid hat is emitted before the snare
+    // that sounds 8820 ticks earlier, so a consumer that needs chronological
+    // order sorts the window itself.
+    const auto hat_at_four = std::find_if(events.begin(), events.end(), [](const auto& event) {
+        return event.step == 4 && event.track == kHatTrack;
+    });
+    const auto snare_at_four = std::find_if(events.begin(), events.end(), [](const auto& event) {
+        return event.step == 4 && event.track == kSnareTrack;
+    });
+    REQUIRE(hat_at_four != events.end());
+    REQUIRE(snare_at_four != events.end());
+    CHECK(hat_at_four < snare_at_four);
+    CHECK(snare_at_four->position < hat_at_four->position);
+}
+
+TEST_CASE("triplet swing quantizes straight sixteenths and round-trips within one tick",
+          "[timebase][rhythm]") {
+    constexpr tb::TickDuration grid{kEighth};
+    REQUIRE(tb::valid_swing_grid(grid));
+    REQUIRE(tb::valid_swing_ratio(tb::kTripletSwing));
+
+    // Straight sixteenths pushed onto a triplet eighth feel: the beat's four
+    // sixteenths land on 0, 1/3, 2/3 and 5/6 of the quarter.
+    struct Landing {
+        std::int64_t authored;
+        std::int64_t swung;
+    };
+    const std::array<Landing, 5> landings{{
+        {0, 0},
+        {kSixteenth, tb::kTicksPerQuarter / 3},
+        {kEighth, 2 * tb::kTicksPerQuarter / 3},
+        {3 * kSixteenth, 5 * tb::kTicksPerQuarter / 6},
+        {tb::kTicksPerQuarter, tb::kTicksPerQuarter},
+    }};
+    for (const auto& landing : landings)
+        CHECK(tb::swing_position({landing.authored}, grid, tb::kTripletSwing).value ==
+              landing.swung);
+    CHECK(landings[1].swung == 235200);
+    CHECK(landings[2].swung == 470400);
+    CHECK(landings[3].swung == 588000);
+
+    // The straight ratio is the identity on every tick of a pair, bit for bit.
+    std::int64_t straight_moves = 0;
+    for (std::int64_t tick = 0; tick < 2 * kEighth; ++tick)
+        straight_moves += tb::swing_position({tick}, grid, tb::kStraightSwing).value != tick;
+    CHECK(straight_moves == 0);
+
+    // Round-tripping the whole pair: the expanded half of each pair recovers
+    // exactly, while the compressed half has fewer ticks to land on than it
+    // came from, so it recovers at most one tick late and never early.
+    std::int64_t expanded_misses = 0;
+    std::int64_t compressed_one_late = 0;
+    std::int64_t compressed_worse = 0;
+    for (std::int64_t tick = 0; tick < 2 * kEighth; ++tick) {
+        const auto swung = tb::swing_position({tick}, grid, tb::kTripletSwing);
+        const auto delta = tb::unswing_position(swung, grid, tb::kTripletSwing).value - tick;
+        if (tick < kEighth)
+            expanded_misses += delta != 0;
+        else {
+            compressed_one_late += delta == 1;
+            compressed_worse += delta != 0 && delta != 1;
+        }
+    }
+    CHECK(expanded_misses == 0);
+    CHECK(compressed_worse == 0);
+    CHECK(compressed_one_late == 117600);
+
+    // An invalid grid or ratio is the identity: the caller validates, and a bad
+    // setting must not silently move music.
+    constexpr tb::SwingRatio degenerate{1, 1};
+    CHECK_FALSE(tb::valid_swing_grid(tb::TickDuration{0}));
+    CHECK_FALSE(tb::valid_swing_ratio(degenerate));
+    CHECK(tb::swing_position({kSixteenth}, tb::TickDuration{0}, tb::kTripletSwing).value ==
+          kSixteenth);
+    CHECK(tb::swing_position({kSixteenth}, grid, degenerate).value == kSixteenth);
+    CHECK(tb::unswing_position({kSixteenth}, grid, degenerate).value == kSixteenth);
+}
+
+TEST_CASE("order-preserving groove projection scales by strength and refuses to reorder",
+          "[timebase][groove]") {
+    const std::array<tb::GrooveKernelStep, 1> table{
+        {{tb::TickDuration{kBassLate}, tb::kGrooveKernelUnitScale}}};
+
+    tb::GrooveKernelInput input;
+    input.table_grid = tb::TickDuration{kSixteenth};
+    input.steps = table;
+    input.timing_strength = tb::kGrooveKernelUnitScale;
+
+    const auto full = tb::OrderPreservingGrooveKernel::create(input);
+    REQUIRE(full.has_value());
+    const auto moved = full.value().apply_timing(tb::TickPosition{0});
+    REQUIRE(moved.has_value());
+    CHECK(moved.value().value == kBassLate);
+
+    // Strength scales the authored displacement exactly: half of 17640 is 8820.
+    input.timing_strength = tb::kGrooveKernelUnitScale / 2;
+    const auto half = tb::OrderPreservingGrooveKernel::create(input);
+    REQUIRE(half.has_value());
+    const auto half_moved = half.value().apply_timing(tb::TickPosition{0});
+    REQUIRE(half_moved.has_value());
+    CHECK(half_moved.value().value == kBassLate / 2);
+
+    // Zero timing strength is exact identity, and that includes swing.
+    input.timing_strength = 0;
+    input.swing_grid = tb::TickDuration{kEighth};
+    input.swing = tb::kTripletSwing;
+    const auto bypass = tb::OrderPreservingGrooveKernel::create(input);
+    REQUIRE(bypass.has_value());
+    std::int64_t bypass_moves = 0;
+    for (std::int64_t tick = 0; tick < kBar; tick += 4410) {
+        const auto out = bypass.value().apply_timing(tb::TickPosition{tick});
+        REQUIRE(out.has_value());
+        bypass_moves += out.value().value != tick;
+    }
+    CHECK(bypass_moves == 0);
+
+    // Control: the same sweep at full strength must move material, or the
+    // identity assertion above could not fail.
+    input.timing_strength = tb::kGrooveKernelUnitScale;
+    const auto swung = tb::OrderPreservingGrooveKernel::create(input);
+    REQUIRE(swung.has_value());
+    std::int64_t swung_moves = 0;
+    for (std::int64_t tick = 0; tick < kBar; tick += 4410) {
+        const auto out = swung.value().apply_timing(tb::TickPosition{tick});
+        REQUIRE(out.has_value());
+        swung_moves += out.value().value != tick;
+    }
+    CHECK(swung_moves > 0);
+
+    // Swing and table displacement add: the off-beat eighth is carried 117600
+    // ticks by the triplet ratio and a further 17640 by the authored table.
+    const auto combined = swung.value().apply_timing(tb::TickPosition{kEighth});
+    REQUIRE(combined.has_value());
+    CHECK(combined.value().value == kEighth + 117600 + kBassLate);
+
+    // A table whose neighbouring steps cross is refused rather than silently
+    // reordering the material it is asked to displace.
+    const std::array<tb::GrooveKernelStep, 2> crossing{{
+        {tb::TickDuration{kSixteenth / 2}, tb::kGrooveKernelUnitScale},
+        {tb::TickDuration{-kSixteenth / 2}, tb::kGrooveKernelUnitScale},
+    }};
+    tb::GrooveKernelInput reordering;
+    reordering.table_grid = tb::TickDuration{kSixteenth};
+    reordering.steps = crossing;
+    const auto rejected = tb::OrderPreservingGrooveKernel::create(reordering);
+    REQUIRE_FALSE(rejected.has_value());
+    CHECK(rejected.error() == tb::GrooveKernelError::ReordersEvents);
+}
+
+TEST_CASE("coordinate-keyed trigger probability is invariant under window partition",
+          "[timebase][rhythm]") {
+    tb::TriggerGrid<2, 16> grid;
+    REQUIRE(grid.configure(2, 16, tb::TickDuration{kSixteenth}) == tb::TriggerGridError::None);
+    for (std::size_t step = 0; step < 16; ++step) {
+        REQUIRE(grid.set_cell(0, step, tb::TriggerCell{true, 90, {1, 1}, tb::TickDuration{0}}) ==
+                tb::TriggerGridError::None);
+        REQUIRE(grid.set_cell(1, step, tb::TriggerCell{true, 60, {1, 2}, tb::TickDuration{0}}) ==
+                tb::TriggerGridError::None);
+    }
+
+    // One stable word per coordinate, derived from the musical coordinate
+    // itself rather than from a callback-local stream.
+    const auto make_draws = [&grid](std::uint64_t seed) {
+        std::vector<std::uint64_t> draws(grid.coordinate_count());
+        for (std::size_t step = 0; step < grid.step_count(); ++step)
+            for (std::size_t track = 0; track < grid.track_count(); ++track)
+                draws[step * grid.track_count() + track] = tb::coordinate_random(
+                    seed, tb::RandomCoordinate{
+                              tb::TickPosition{static_cast<std::int64_t>(step) * kSixteenth},
+                              static_cast<std::uint64_t>(track), 0, 0});
+        return draws;
+    };
+
+    const auto project = [&grid](const std::vector<std::uint64_t>& draws, std::int64_t begin,
+                                 std::int64_t end) {
+        std::vector<tb::TriggerEvent> events(grid.coordinate_count());
+        const auto result = grid.project_window(tb::TickPosition{0}, tb::TickPosition{begin},
+                                                tb::TickPosition{end}, draws, events);
+        REQUIRE(result);
+        events.resize(result.event_count);
+        return events;
+    };
+
+    const auto draws = make_draws(0x5EEDu);
+    const auto whole = project(draws, 0, kBar);
+    const auto first = project(draws, 0, kBar / 2);
+    const auto second = project(draws, kBar / 2, kBar);
+
+    // The probabilistic lane must actually be partly selected, or the
+    // comparison below would hold for an empty or a saturated lane.
+    const auto selected = whole.size() - 16;
+    REQUIRE(selected > 0);
+    REQUIRE(selected < 16);
+
+    std::vector<tb::TriggerEvent> joined = first;
+    joined.insert(joined.end(), second.begin(), second.end());
+    CHECK(joined == whole);
+
+    // Control: the draws are genuinely consulted, so a different seed selects a
+    // different set of steps.
+    CHECK(project(make_draws(0xA11CEu), 0, kBar) != whole);
+}
+
+TEST_CASE("Euclidean onsets reproduce an even bell pattern but not son clave", "[music][rhythm]") {
+    const auto onsets = [](const auto& pattern) {
+        std::vector<std::size_t> result;
+        for (std::size_t step = 0; step < pattern.size(); ++step)
+            if (*pattern.at(step))
+                result.push_back(step);
+        return result;
+    };
+
+    // The evenly-spread three-onset figure over eight steps.
+    const auto tresillo = euclidean_pattern<16>(8, 3);
+    REQUIRE(tresillo);
+    CHECK(onsets(tresillo.pattern) == std::vector<std::size_t>{0, 3, 6});
+
+    // A seven-onset bell over twelve steps is reachable, but only at the
+    // rotation that starts the cycle in the right place.
+    const auto bell = euclidean_pattern<16>(12, 7, 5);
+    REQUIRE(bell);
+    CHECK(onsets(bell.pattern) == std::vector<std::size_t>{0, 2, 4, 5, 7, 9, 11});
+
+    // The asymmetric five-onset clave figure is NOT an even distribution, so no
+    // rotation of the even five-in-sixteen pattern produces it. Authoring it
+    // directly is the supported route, and the two differ at step 4.
+    const std::vector<std::size_t> son{0, 3, 6, 10, 12};
+    for (std::int64_t rotation = 0; rotation < 16; ++rotation) {
+        const auto even = euclidean_pattern<16>(16, 5, rotation);
+        REQUIRE(even);
+        CHECK(onsets(even.pattern) != son);
+    }
+    BinaryPattern<16> authored;
+    constexpr std::array<std::uint8_t, 16> son_bits{1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0};
+    REQUIRE(authored.assign(son_bits) == PatternError::none);
+    CHECK(onsets(authored) == son);
+    CHECK(authored.onset_count() == 5);
 }

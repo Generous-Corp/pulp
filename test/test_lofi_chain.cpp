@@ -7,6 +7,7 @@
 // spectral images that hold creates, the dead zone for the silence it imposes
 // on small signals, and the whole chain for stage ordering and determinism.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
@@ -372,4 +373,146 @@ TEST_CASE("The lo-fi chain allocates nothing on the audio thread",
 
     REQUIRE(std::isfinite(sink));
     REQUIRE(allocations == 0);
+}
+
+// The floor shaper is checked for the geometry that distinguishes it from the
+// dead-zone saturator — silence below the threshold, full scale restored above
+// it — and for the property that makes the curve choice worth offering: only
+// smoothstep leaves the threshold with zero slope. Two interior points pin the
+// cubic itself, because endpoints and initial slope alone admit other curves,
+// and the over-range cases cover the interval past which that cubic stops
+// being a smoothstep at all.
+
+TEST_CASE("The floor shaper silences everything under its threshold", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    for (const auto curve : {FloorCurve::linear, FloorCurve::smoothstep}) {
+        REQUIRE(floor_shape(0.05, 0.1, curve) == 0.0);
+        REQUIRE(floor_shape(-0.05, 0.1, curve) == 0.0);
+        REQUIRE(floor_shape(0.1, 0.1, curve) == 0.0);
+        REQUIRE(floor_shape(0.0, 0.1, curve) == 0.0);
+    }
+}
+
+TEST_CASE("The floor shaper rescales the surviving region to full scale", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // Just above the threshold the output leaves silence, and at full scale it
+    // arrives at full scale, for either curve.
+    REQUIRE(floor_shape(0.1 + 1e-9, 0.1, FloorCurve::linear) > 0.0);
+    REQUIRE(floor_shape(1.0, 0.1, FloorCurve::linear) == Catch::Approx(1.0));
+    REQUIRE(floor_shape(1.0, 0.1, FloorCurve::smoothstep) == Catch::Approx(1.0));
+
+    // A half-way input maps to the midpoint of the rescaled range under the
+    // linear curve.
+    REQUIRE(floor_shape(0.55, 0.1, FloorCurve::linear) == Catch::Approx(0.5));
+}
+
+TEST_CASE("The floor shaper preserves sign", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    for (const auto curve : {FloorCurve::linear, FloorCurve::smoothstep}) {
+        const double positive = floor_shape(0.7, 0.2, curve);
+        const double negative = floor_shape(-0.7, 0.2, curve);
+        REQUIRE(positive > 0.0);
+        REQUIRE(negative < 0.0);
+        REQUIRE(negative == Catch::Approx(-positive));
+    }
+}
+
+TEST_CASE("Only the smoothstep curve leaves the threshold with zero slope", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // This is the whole reason the curve is selectable: measured just above the
+    // threshold, the linear ramp already has the slope it will keep, while
+    // smoothstep is still nearly flat.
+    const double threshold = 0.1;
+    const double delta = 1e-4;
+    const double linear_rise = floor_shape(threshold + delta, threshold, FloorCurve::linear);
+    const double smooth_rise = floor_shape(threshold + delta, threshold, FloorCurve::smoothstep);
+
+    REQUIRE(smooth_rise < linear_rise);
+    REQUIRE(smooth_rise < linear_rise * 0.01);
+}
+
+TEST_CASE("The floor shaper clamps its threshold into the usable range", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // A negative threshold behaves as zero, so nothing is discarded.
+    REQUIRE(floor_shape(0.5, -1.0, FloorCurve::linear) == Catch::Approx(0.5));
+
+    // A threshold past the ceiling is held at 0.9, which keeps the rescale
+    // divisor away from zero. Probing at full scale cannot show where the
+    // ceiling is -- any ceiling in (0,1) maps 1.0 to 1.0 -- so probe inside the
+    // surviving region instead, where 0.95 lands midway only if the ceiling is
+    // exactly 0.9.
+    REQUIRE(floor_shape(1.0, 5.0, FloorCurve::linear) == Catch::Approx(1.0));
+    REQUIRE(floor_shape(0.95, 5.0, FloorCurve::linear) == Catch::Approx(0.5));
+}
+
+TEST_CASE("The smoothstep curve is the cubic it claims to be", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // Pinning only the endpoints and the initial slope admits other cubics.
+    // n*n*(2-n) also starts flat and reaches full scale, so these two interior
+    // points -- one at the symmetric midpoint, one off-centre -- are what
+    // distinguish 3n^2-2n^3 from its neighbours.
+    REQUIRE(floor_shape(0.55, 0.1, FloorCurve::smoothstep) == Catch::Approx(0.5));
+    REQUIRE(floor_shape(0.325, 0.1, FloorCurve::smoothstep) == Catch::Approx(0.15625));
+
+    // The same quarter-point under the linear curve, so the two are not
+    // silently interchangeable.
+    REQUIRE(floor_shape(0.325, 0.1, FloorCurve::linear) == Catch::Approx(0.25));
+}
+
+TEST_CASE("Input beyond full scale saturates instead of turning over", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // Without the clamp the smoothstep polynomial leaves its valid interval:
+    // it falls back to zero at a normalised 1.5 and then goes negative, which
+    // copysign would return as a large positive sample. An EQ in front of this
+    // makes that reachable, so both curves are held at full scale instead.
+    for (const auto curve : {FloorCurve::linear, FloorCurve::smoothstep}) {
+        REQUIRE(floor_shape(1.45, 0.1, curve) == Catch::Approx(1.0));
+        REQUIRE(floor_shape(2.0, 0.1, curve) == Catch::Approx(1.0));
+        REQUIRE(floor_shape(-2.0, 0.1, curve) == Catch::Approx(-1.0));
+        REQUIRE(floor_shape(1e6, 0.1, curve) == Catch::Approx(1.0));
+    }
+}
+
+TEST_CASE("The floor shaper accepts a float threshold beside a float sample", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    // The threshold is a non-deduced parameter so a caller may mix a literal
+    // with a typed sample. Deducing it would make this line a compile error,
+    // which is exactly the shape a float call site reaches for.
+    const float shaped = floor_shape(0.55f, 0.1, FloorCurve::linear);
+    REQUIRE(shaped == Catch::Approx(0.5f));
+    REQUIRE(floor_shape(0.55, 0.1f, FloorCurve::linear) == Catch::Approx(0.5));
+}
+
+TEST_CASE("Non-finite input propagates rather than being silently swallowed", "[signal][lofi]") {
+    using pulp::signal::floor_shape;
+    using pulp::signal::FloorCurve;
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+
+    // Infinity saturates, because the clamp bounds it like any other
+    // over-range input.
+    REQUIRE(floor_shape(inf, 0.1, FloorCurve::linear) == Catch::Approx(1.0));
+    REQUIRE(floor_shape(-inf, 0.1, FloorCurve::linear) == Catch::Approx(-1.0));
+
+    // NaN is not silenced into a plausible-looking zero. A caller that can
+    // produce one is expected to guard upstream.
+    REQUIRE(std::isnan(floor_shape(nan, 0.1, FloorCurve::linear)));
+    REQUIRE(std::isnan(floor_shape(0.5, nan, FloorCurve::linear)));
 }

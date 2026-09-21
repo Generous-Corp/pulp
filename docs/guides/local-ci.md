@@ -1100,10 +1100,30 @@ It is tiered:
   `PULP_LOCAL_MACOS_RUNS_ON_JSON`, the Studios that host the required `macos`
   gate. A file scan cannot resolve that, so in a workflow the bound is the
   **author's** responsibility: route a self-hosted macOS leg through
-  `tools/ci/governed-build.sh` (as `build.yml`'s intel-canary compile,
-  `examples-validation.yml`, `web-plugins.yml`'s `gpu-audio-macos` job, and
-  `format-baseline-diff.yml` now do). The steer everywhere is `pulp build` /
+  `tools/ci/governed-build.sh` (as `build.yml`'s matrix `Build` step on its
+  macOS and Linux legs and its intel-canary compile, `examples-validation.yml`,
+  `web-plugins.yml`'s `gpu-audio-macos` job, and `format-baseline-diff.yml` now
+  do; `build.yml`'s Windows leg keeps a literal, because a GitHub-hosted
+  ephemeral runner shares with nobody and no lane runs the wrapper under MSYS
+  bash today). The steer everywhere is `pulp build` /
   `tools/ci/governed-build.sh`, which take their `-j` from the governor.
+
+  A **literal** `--parallel N` in a workflow is the specific anti-pattern here,
+  and not only because no one number fits every runner. It is also a silent
+  ceiling: it keeps its value when a VM is resized, so the resize buys nothing
+  and the no-op reads as "more cores did not help" rather than "the build was
+  never asked to use them". `build.yml`'s `Build` step carried `--parallel 4`
+  fleet-wide for this reason until it was replaced by the governor.
+
+  **The gate VM's bound is RAM, not vCPU.** tartci sizes a macOS VM's cores
+  from the lane's lease (`vm_cores`, 12 for Pulp's gate lane on the Studio) but
+  never sets `--memory` — only the Linux provider does — so every macOS gate VM
+  runs at the golden image's 8 GiB whatever its core count. The Tier-0 bound is
+  `min(cores, RAM x 0.75 / 1.5 GiB)`, so at 8 GiB the memory axis pins the build
+  to **4 jobs** on a 12-, 6- or 4-vCPU VM alike. Raising `vm_cores` alone
+  therefore does not speed up the build step; the VM's memory has to move with
+  it. Read a leg's actual share from its `[governed-build]` log line rather than
+  inferring it from the lease.
 - **Tier 1 — tartci per-host lease governor.** On a host running a tartci lease
   store, builds and VM runners acquire a weighted core+memory lease before
   starting; admission is `min(core-budget, memory-budget)`, so a build that
@@ -2563,6 +2583,54 @@ gh workflow run runner-health-check.yml -f alarm_minutes=60
 # Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
 python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json
 ```
+
+#### Label reconciliation: *why* a stalled job is not being picked up
+
+Queue age answers *is the lane alive*. When the answer is no, it does not say
+why, and the reader is left guessing among a wedged worker, an expired token,
+an asleep host, and a label nothing serves. On 2026-09-21 it was the label: three
+queued `macos` jobs each requested `pulp-build-merge-group` while every online
+runner advertised `pulp-build-pr-head`. Those jobs were unschedulable from the
+moment they queued, the merge queue head sat in `AWAITING_CHECKS` behind them,
+and 5 h 30 min passed with zero merges and no alarm anywhere.
+
+The same sweep now reconciles the two. For each **distinct label set some job has
+already been queued on past `alarm_minutes`**, it compares the request against
+the labels online self-hosted runners advertise — across **both** the repo and
+org scopes, because runners in an org runner group are invisible to the repo
+endpoint and this org keeps online ones.
+
+| finding | level | means |
+|---|---|---|
+| `unschedulable_labels` | alarm | No online runner, busy or idle, advertises the full requested set. The finding names the labels nothing carries. |
+| `runner_census_blind` | warn | The census could not be completed (a scope refused, a listing came back short, or nothing was online), so no label can be called unserved this sweep. It reports the unconfirmed diff as a lead, never a verdict. |
+
+Three properties make this safe, and each is pinned by a test:
+
+- **Demand-gated, so an idle fleet is silent by construction.** This is *not* the
+  scheduled label-satisfiability census argued against above. That census asks
+  "does anything advertise label X?" of the whole fleet on a timer, and because
+  these runners are JIT — registered only while serving — a healthy lane answers
+  "no" every idle night until the alarm is muted. This check has nothing to
+  evaluate unless a real job is stalled on a real label set. The JIT objection is
+  bounded rather than ignored: a healthy lane mints a runner in seconds to
+  minutes, so a missing label has had 45 minutes to appear before anything fires.
+- **Saturation is not unschedulable.** GitHub places a job on one runner that
+  carries *every* requested label, so "schedulable" means some online runner's
+  label set is a superset of the request. A busy superset is a deep queue on a
+  working lane and stays silent at any age.
+- **Fails closed on blindness.** A failed or empty runner read reports an
+  evidence gap — never "unschedulable", and never a clean bill of health either.
+  That gap is scoped to this finding: it deliberately does not use the sweep-wide
+  degraded predicate, because neither a truncated run listing nor a failed jobs
+  call can falsify a queued job's own requested labels, and sharing the predicate
+  would leave the check permanently degraded on a repo busy enough to truncate.
+
+The org-scoped runners API needs `Administration: Read`, which `GITHUB_TOKEN`
+does not carry, so the workflow passes `secrets.RELEASE_BOT_TOKEN` when it is
+configured (the same fallback `runner-topology-check.yml` uses). Without it the
+org scope refuses, the census records the refusal, and every reconciliation
+reports `runner_census_blind` instead of naming a label — honest, and disarmed.
 
 #### Contribution: the host that goes quiet while the lane stays healthy
 

@@ -21,6 +21,7 @@
 // invariants pure C++ so the test runs on every CI lane.
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
@@ -28,6 +29,7 @@
 #include <pulp/view/view.hpp>
 
 #include <memory>
+#include <vector>
 
 using pulp::view::View;
 using pulp::view::Point;
@@ -1220,4 +1222,245 @@ TEST_CASE("a ComboBox marks itself as an overlay trigger",
           "[view][overlay][pointer][trigger]") {
     pulp::view::ComboBox combo;
     REQUIRE(combo.overlay_trigger());
+}
+
+// ── Overlay STACK ────────────────────────────────────────────────────────────
+//
+// A single slot could describe only one open popover, so a submenu and the menu
+// that opened it could not both be tracked: claiming the submenu overwrote its
+// parent, which stayed on screen with nothing able to dismiss it. These pin the
+// three stack outcomes — nest, replace, restore — plus the paint and input
+// consequences that make an open overlay behave like one.
+
+namespace {
+
+// Records its own address into a shared log whenever it paints, so a test can
+// assert PAINT ORDER rather than inferring it from a colour. Order is the whole
+// question here: an overlay that paints before a sibling is an overlay the
+// sibling draws on top of.
+class PaintLogView : public View {
+public:
+    PaintLogView(std::vector<const View*>* log) : log_(log) {}
+    void paint(pulp::canvas::Canvas&) override {
+        if (log_) log_->push_back(this);
+    }
+
+private:
+    std::vector<const View*>* log_ = nullptr;
+};
+
+// Index of `v` in a paint log, or -1. A view that never painted is not "first";
+// the caller must distinguish those, so this never folds absence into an order.
+long paint_index(const std::vector<const View*>& log, const View* v) {
+    for (std::size_t i = 0; i < log.size(); ++i)
+        if (log[i] == v) return static_cast<long>(i);
+    return -1;
+}
+
+View* add_child_at(View& parent, std::unique_ptr<View> child,
+                   pulp::view::Rect bounds) {
+    child->set_bounds(bounds);
+    View* raw = child.get();
+    parent.add_child(std::move(child));
+    return raw;
+}
+
+}  // namespace
+
+TEST_CASE("a nested overlay claim stacks and a sibling claim replaces",
+          "[view][overlay][stack][issue-8609]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    View* menu_a = add_child_at(root, std::make_unique<TestView>(),
+                                {100.0f, 100.0f, 200.0f, 200.0f});
+    View* submenu = add_child_at(*menu_a, std::make_unique<TestView>(),
+                                 {20.0f, 40.0f, 160.0f, 100.0f});
+    View* menu_b = add_child_at(root, std::make_unique<TestView>(),
+                                {400.0f, 100.0f, 200.0f, 200.0f});
+
+    REQUIRE(root.overlay_depth() == 0);
+
+    menu_a->claim_overlay();
+    REQUIRE(root.overlay_depth() == 1);
+    REQUIRE(root.interaction().active_overlay == menu_a);
+
+    // A DESCENDANT claim is a submenu: it stacks, leaving its parent open.
+    submenu->claim_overlay();
+    REQUIRE(root.overlay_depth() == 2);
+    REQUIRE(root.interaction().active_overlay == submenu);
+
+    // Dismissing the top restores the one below as active, so the next Escape
+    // or outside press acts on the parent menu instead of finding nothing.
+    submenu->dismiss_claimed_overlay();
+    REQUIRE(root.overlay_depth() == 1);
+    REQUIRE(root.interaction().active_overlay == menu_a);
+
+    // A claim that is NOT a descendant is a different menu, so the open one is
+    // dismissed rather than left on screen untracked.
+    bool a_dismissed = false;
+    menu_a->on_overlay_dismissed = [&a_dismissed]() { a_dismissed = true; };
+    menu_b->claim_overlay();
+    REQUIRE(a_dismissed);
+    REQUIRE(root.overlay_depth() == 1);
+    REQUIRE(root.interaction().active_overlay == menu_b);
+
+    // Dismissing the last leaves none.
+    menu_b->dismiss_claimed_overlay();
+    REQUIRE(root.overlay_depth() == 0);
+    REQUIRE(root.interaction().active_overlay == nullptr);
+}
+
+TEST_CASE("two roots keep independent overlay stacks",
+          "[view][overlay][stack][issue-8609]") {
+    OverlayGuard g;
+    TestView root_a;
+    root_a.set_bounds({0.0f, 0.0f, 400.0f, 300.0f});
+    TestView root_b;
+    root_b.set_bounds({0.0f, 0.0f, 400.0f, 300.0f});
+
+    View* overlay_a = add_child_at(root_a, std::make_unique<TestView>(),
+                                   {10.0f, 10.0f, 100.0f, 100.0f});
+    View* nested_a = add_child_at(*overlay_a, std::make_unique<TestView>(),
+                                  {5.0f, 5.0f, 50.0f, 50.0f});
+    View* overlay_b = add_child_at(root_b, std::make_unique<TestView>(),
+                                   {10.0f, 10.0f, 100.0f, 100.0f});
+
+    overlay_a->claim_overlay();
+    nested_a->claim_overlay();
+    overlay_b->claim_overlay();
+
+    // Two Pulp editors in one host process (the shared-AUHostingService case)
+    // must not share a stack: editor B opening a menu cannot close editor A's.
+    REQUIRE(root_a.overlay_depth() == 2);
+    REQUIRE(root_b.overlay_depth() == 1);
+    REQUIRE(root_a.interaction().active_overlay == nested_a);
+    REQUIRE(root_b.interaction().active_overlay == overlay_b);
+
+    // And dismissing in one realm leaves the other's stack untouched.
+    View::dismiss_active_overlay(root_b);
+    REQUIRE(root_b.overlay_depth() == 0);
+    REQUIRE(root_a.overlay_depth() == 2);
+    REQUIRE(root_a.interaction().active_overlay == nested_a);
+}
+
+TEST_CASE("an open overlay paints above a higher-z sibling and later chrome",
+          "[view][overlay][stack][paint][issue-8609]") {
+    OverlayGuard g;
+    std::vector<const View*> log;
+
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    // The reported shape: the menu's branch is EARLY in insertion order and
+    // carries the LOWER z-index, while a slider and a header stats row come
+    // later and higher. Both of those painted on top of the open menu.
+    View* panel = add_child_at(root, std::make_unique<PaintLogView>(&log),
+                               {0.0f, 0.0f, 800.0f, 600.0f});
+    View* menu = add_child_at(*panel, std::make_unique<PaintLogView>(&log),
+                              {100.0f, 100.0f, 200.0f, 200.0f});
+    menu->set_z_index(1);
+    View* slider = add_child_at(*panel, std::make_unique<PaintLogView>(&log),
+                                {0.0f, 400.0f, 800.0f, 40.0f});
+    slider->set_z_index(50);
+    View* stats = add_child_at(root, std::make_unique<PaintLogView>(&log),
+                               {0.0f, 0.0f, 800.0f, 40.0f});
+    stats->set_z_index(90);
+
+    pulp::canvas::RecordingCanvas rc;
+
+    // Control: with nothing open, the documented z-index order still holds —
+    // otherwise a green assertion below would only prove the tree never
+    // painted at all.
+    root.paint_all(rc);
+    REQUIRE(paint_index(log, menu) >= 0);
+    REQUIRE(paint_index(log, slider) >= 0);
+    REQUIRE(paint_index(log, stats) >= 0);
+    REQUIRE(paint_index(log, menu) < paint_index(log, slider));
+    REQUIRE(paint_index(log, menu) < paint_index(log, stats));
+
+    log.clear();
+    menu->claim_overlay();
+    root.paint_all(rc);
+
+    REQUIRE(paint_index(log, menu) >= 0);
+    REQUIRE(paint_index(log, slider) >= 0);
+    REQUIRE(paint_index(log, stats) >= 0);
+    // An open overlay outranks z-index within its own parent...
+    REQUIRE(paint_index(log, menu) > paint_index(log, slider));
+    // ...and outranks a later, higher-z branch of the ROOT, which it can only
+    // do if the hoist is applied at every level between it and the root.
+    REQUIRE(paint_index(log, menu) > paint_index(log, stats));
+
+    menu->release_overlay();
+}
+
+TEST_CASE("a press outside an open overlay does not reach the view beneath",
+          "[view][overlay][stack][pointer][issue-8609]") {
+    OverlayGuard g;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    int canvas_presses = 0;
+    View* content = add_child_at(root, std::make_unique<TestView>(),
+                                 {0.0f, 0.0f, 800.0f, 600.0f});
+    content->on_click = [&canvas_presses]() { ++canvas_presses; };
+
+    View* menu = add_child_at(root, std::make_unique<TestView>(),
+                              {100.0f, 100.0f, 200.0f, 200.0f});
+    menu->set_overlay_consumes_outside_click(true);
+
+    // Control: with no overlay open the same press DOES reach the content,
+    // so a zero below means the overlay blocked it rather than that the
+    // press never landed.
+    root.simulate_click({600.0f, 500.0f});
+    REQUIRE(canvas_presses == 1);
+
+    menu->claim_overlay();
+    const auto press =
+        pulp::view::route_press_to_active_overlay(root, {600.0f, 500.0f});
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(press.consume_press);
+
+    // And through the synthetic-input path a host does not mediate: the press
+    // is spent closing the menu, never delivered to the canvas underneath.
+    // Drawing on the canvas while a menu is up is the reported symptom.
+    menu->claim_overlay();
+    root.simulate_click({600.0f, 500.0f});
+    REQUIRE(canvas_presses == 1);
+    REQUIRE(root.overlay_depth() == 0);
+}
+
+TEST_CASE("a press inside a parent menu closes only the submenu above it",
+          "[view][overlay][stack][pointer][issue-8609]") {
+    OverlayGuard g;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    View* menu = add_child_at(root, std::make_unique<TestView>(),
+                              {100.0f, 100.0f, 200.0f, 300.0f});
+    View* item = add_child_at(*menu, std::make_unique<TestView>(),
+                              {0.0f, 240.0f, 200.0f, 30.0f});
+    View* submenu = add_child_at(*menu, std::make_unique<TestView>(),
+                                 {200.0f, 20.0f, 160.0f, 100.0f});
+
+    menu->claim_overlay();
+    submenu->claim_overlay();
+    REQUIRE(root.overlay_depth() == 2);
+
+    // A press on a parent-menu item, outside the open submenu: the submenu
+    // closes and the press still lands on the item. Closing the whole nest, or
+    // losing the press, are the two ways a nested menu is unusable.
+    const auto press =
+        pulp::view::route_press_to_active_overlay(root, {150.0f, 355.0f});
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::routed);
+    REQUIRE(press.target == item);
+    REQUIRE(root.overlay_depth() == 1);
+    REQUIRE(root.interaction().active_overlay == menu);
+
+    menu->release_overlay();
 }

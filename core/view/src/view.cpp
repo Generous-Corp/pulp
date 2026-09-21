@@ -203,7 +203,10 @@ View::~View() {
     // teardown. (~ComboBox does the same for active_popup.)
     if (RootInteractionState* s = existing_interaction()) {
         if (s->focused_input == this) s->focused_input = nullptr;
-        if (s->active_overlay == this) s->active_overlay = nullptr;
+        // Stack-aware: a dying overlay may sit UNDER an open submenu, in which
+        // case clearing only the active slot would leave a freed pointer on
+        // the stack for the next press to walk.
+        detach_overlay(*s, this);
     }
     if (active_overlay_ == this) active_overlay_ = nullptr;
     if (focused_input_ == this) focused_input_ = nullptr;
@@ -987,10 +990,14 @@ std::unique_ptr<View> View::remove_child(View* child) {
         focused->View::on_focus_changed(false);
     }
     if (RootInteractionState* state = structure_root->interaction_state_.get();
-        state && belongs_to_removed_subtree(state->active_overlay)) {
-        View* overlay = state->active_overlay;
-        state->active_overlay = nullptr;
-        if (active_overlay_ == overlay) active_overlay_ = nullptr;
+        state != nullptr) {
+        // Top-down over the whole stack, not just the active slot: a nest of
+        // menus can be removed as one subtree, and an entry left behind under
+        // a retired one is a dangling pointer the next press would walk.
+        for (std::size_t i = state->overlay_stack.size(); i > 0; --i) {
+            View* overlay = state->overlay_stack[i - 1];
+            if (belongs_to_removed_subtree(overlay)) detach_overlay(*state, overlay);
+        }
         // Structural removal is already the dismissal outcome. Do not invoke
         // on_overlay_dismissed here: that callback may synchronously mutate the
         // same tree while remove_child owns its iterators. Clearing the root
@@ -1029,19 +1036,17 @@ std::unique_ptr<View> View::remove_child(View* child) {
     // its old ancestry. Once parent_ is severed, its destructor resolves the
     // detached fallback state and cannot clear the former root's slot.
     if (RootInteractionState* state = structure_root->existing_interaction();
-        state && state->active_overlay) {
-        bool overlay_is_removed = false;
-        for (View* current = state->active_overlay; current;
-             current = current->parent_) {
-            if (current == child) {
-                overlay_is_removed = true;
-                break;
+        state != nullptr) {
+        for (std::size_t i = state->overlay_stack.size(); i > 0; --i) {
+            View* overlay = state->overlay_stack[i - 1];
+            bool overlay_is_removed = false;
+            for (View* current = overlay; current; current = current->parent_) {
+                if (current == child) {
+                    overlay_is_removed = true;
+                    break;
+                }
             }
-        }
-        if (overlay_is_removed) {
-            if (active_overlay_ == state->active_overlay)
-                active_overlay_ = nullptr;
-            state->active_overlay = nullptr;
+            if (overlay_is_removed) detach_overlay(*state, overlay);
         }
     }
     // Any lifecycle/drag callback above may mutate this parent's children.
@@ -1194,6 +1199,12 @@ void View::retire_interaction_state_for_realm_reset(
             focused_input_ = nullptr;
         if (active_overlay_ == interaction_state_->active_overlay)
             active_overlay_ = nullptr;
+        // The whole realm leaves with the state block, so its claims are no
+        // longer live. Leaving them counted would only cost the paint path its
+        // slower branch, but an honest count is what keeps that branch rare.
+        const std::size_t retired = interaction_state_->overlay_stack.size();
+        overlay_claims_live_ -= static_cast<std::uint32_t>(
+            std::min<std::size_t>(retired, overlay_claims_live_));
         retired_interaction = std::move(interaction_state_);
     }
 }
@@ -1487,8 +1498,10 @@ void View::dismiss_claimed_overlay() {
     // destroy this view or claim a replacement overlay.
     RootInteractionState* state = existing_interaction();
     if (!state || state->active_overlay != this) return;
-    state->active_overlay = nullptr;
-    if (active_overlay_ == this) active_overlay_ = nullptr;
+    // Pops exactly one level: the overlay below (a parent menu, when this is a
+    // submenu) becomes active again, so the next Escape or outside press acts
+    // on it instead of finding nothing open.
+    detach_overlay(*state, this);
     auto dismissed = on_overlay_dismissed;
     if (dismissed) dismissed();
 }
@@ -1497,8 +1510,7 @@ void View::dismiss_active_overlay(View& scope) {
     RootInteractionState* state = scope.existing_interaction();
     View* victim = state ? state->active_overlay : nullptr;
     if (!victim) return;
-    state->active_overlay = nullptr;
-    if (active_overlay_ == victim) active_overlay_ = nullptr;
+    detach_overlay(*state, victim);
     // Copy the callback before invoking it, matching dismiss_claimed_overlay().
     // `on_overlay_dismissed` is a std::function whose storage lives inside the
     // victim View, and the callback may synchronously destroy that view (a
@@ -1710,15 +1722,79 @@ void View::release_input_focus() {
     if (focused_input_ == this) focused_input_ = nullptr;  // shim mirror
 }
 
+std::uint32_t View::overlay_claims_live_ = 0;
+
+bool View::detach_overlay(RootInteractionState& state, View* victim) {
+    auto& stack = state.overlay_stack;
+    auto it = std::find(stack.begin(), stack.end(), victim);
+    if (it == stack.end()) return false;
+    stack.erase(it);
+    if (overlay_claims_live_ > 0) --overlay_claims_live_;
+    republish_overlay(state);
+    return true;
+}
+
+void View::republish_overlay(RootInteractionState& state) {
+    View* const previous = state.active_overlay;
+    View* const top =
+        state.overlay_stack.empty() ? nullptr : state.overlay_stack.back();
+    state.active_overlay = top;
+    // Only follow the shim when it was already tracking THIS root's overlay.
+    // Two editors in one host process each own their stack, and re-pointing a
+    // shim that belongs to the other editor is exactly the cross-editor bleed
+    // the per-root state exists to prevent.
+    if (active_overlay_ == previous) active_overlay_ = top;
+}
+
+bool View::is_overlay_descendant_of(const View* ancestor) const {
+    for (const View* v = parent_; v != nullptr; v = v->parent_)
+        if (v == ancestor) return true;
+    return false;
+}
+
+std::size_t View::overlay_depth() const {
+    RootInteractionState* s = const_cast<View*>(this)->existing_interaction();
+    return s ? s->overlay_stack.size() : 0;
+}
+
 void View::claim_overlay() {
-    interaction().active_overlay = this;
+    // Close every overlay this claim is not allowed to sit on top of.
+    //
+    // A claim that DESCENDS from the open overlay is a submenu and stacks on
+    // it, which is what makes dismissing the submenu restore its parent. Any
+    // other claim is a different menu, so the open one closes — the reported
+    // "open submenu B and submenu A stays on screen". Re-claiming a view that
+    // is already open closes only the submenus above it.
+    //
+    // Re-resolves the state block every pass because `on_overlay_dismissed` is
+    // author code: it may unmount the popover it is closing, open a
+    // replacement, or tear down the whole editor realm.
+    for (;;) {
+        RootInteractionState* s = existing_interaction();
+        if (s == nullptr || s->overlay_stack.empty()) break;
+        View* const top = s->overlay_stack.back();
+        if (top == this || is_overlay_descendant_of(top)) break;
+        if (!detach_overlay(*s, top)) break;
+        // Fired AFTER the pop, matching dismiss_claimed_overlay(), so a
+        // callback that claims a replacement is not immediately undone.
+        auto dismissed = top->on_overlay_dismissed;
+        if (dismissed) dismissed();
+    }
+
+    RootInteractionState& s = interaction();
+    if (std::find(s.overlay_stack.begin(), s.overlay_stack.end(), this) ==
+        s.overlay_stack.end()) {
+        s.overlay_stack.push_back(this);
+        ++overlay_claims_live_;
+    }
+    // Already present means the loop above left it on top; re-claiming an open
+    // overlay is idempotent rather than a second copy of the same view.
+    republish_overlay(s);
     active_overlay_ = this;  // process-global shim mirror
 }
 
 void View::release_overlay() {
-    if (RootInteractionState* s = existing_interaction();
-        s && s->active_overlay == this)
-        s->active_overlay = nullptr;
+    if (RootInteractionState* s = existing_interaction()) detach_overlay(*s, this);
     if (active_overlay_ == this) active_overlay_ = nullptr;  // shim mirror
     overlay_consumes_outside_click_ = false;
 }

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260920-pr8601-build-parallelism-bound-watch",
+  "created_at": "2026-09-20T06:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Record that a build-parallelism fix crosses this family's selector without touching anything the family is about. Every cmake --build the Rust CLI emitted carried no job flag and no CMAKE_BUILD_PARALLEL_LEVEL, which is not one job but a delegation to the generator: serial under Unix Makefiles, cores + 2 under Ninja, neither a share of a shared host. The fix computes the governor's existing bound, min(cores, RAM budget / 1.5 GiB) with a granted lease share or the tartci host profile preferred over it, and emits it on every such command. design-source-ingest is crossed by exactly one file, experimental/pulp-rs/src/cmd/design.rs, and by exactly one line in it: the cmake --build that compiles the pulp-design-tool target now carries the bound like the other three call sites. No importer, DesignIR schema, capture path, codegen output, fixture, or packaging artifact changes, and the design command's behaviour is unchanged apart from how many compile jobs its build step is allowed to run. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "vellum-expansion-watch",
+    "cargo test --manifest-path experimental/pulp-rs/Cargo.toml build_parallelism"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

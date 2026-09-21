@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -264,6 +265,33 @@ inline LV2_Handle instantiate(
     }
     inst->processor->set_state_store(&inst->store);
 
+    // Admission check: the audio port arrays on the instance are fixed at
+    // lv2_adapter::kMaxChannels, and every index the manifest declares is a
+    // port the host will connect. A descriptor whose buses sum past that
+    // ceiling in either direction therefore has no valid wiring at all, so it
+    // is refused here rather than dropped a port at a time in connect_port() —
+    // a dropped connection renders as silence, which reads as a DSP fault
+    // instead of a declaration fault. Same shape as the missing-urid:map
+    // refusal above: log and hand the host a null instance.
+    const auto admission_desc = inst->processor->descriptor();
+    int declared_inputs = 0;
+    for (const auto& bus : admission_desc.input_buses) {
+        declared_inputs += bus.default_channels;
+    }
+    int declared_outputs = 0;
+    for (const auto& bus : admission_desc.output_buses) {
+        declared_outputs += bus.default_channels;
+    }
+    if (declared_inputs < 0 || declared_inputs > lv2_adapter::kMaxChannels ||
+        declared_outputs < 0 || declared_outputs > lv2_adapter::kMaxChannels) {
+        pulp::runtime::log_warn(
+            "lv2: descriptor declares {} input and {} output channels; this adapter carries at "
+            "most {} per direction, refusing to instantiate",
+            declared_inputs, declared_outputs, lv2_adapter::kMaxChannels);
+        delete inst;
+        return nullptr;
+    }
+
     // Define parameters
     inst->processor->define_parameters(inst->store);
     auto params = inst->store.all_params();
@@ -277,18 +305,11 @@ inline LV2_Handle instantiate(
     inst->control_in_ports = new float*[inst->num_params]();
     inst->control_out_ports = new float*[inst->num_params]();
 
-    // Count audio channels from descriptor
-    auto desc = inst->processor->descriptor();
-    inst->num_audio_inputs = 0;
-    for (const auto& bus : desc.input_buses) {
-        inst->num_audio_inputs += bus.default_channels;
-    }
-    inst->num_audio_outputs = 0;
-    for (const auto& bus : desc.output_buses) {
-        inst->num_audio_outputs += bus.default_channels;
-    }
-    inst->accepts_midi = desc.accepts_midi;
-    inst->produces_midi = desc.produces_midi;
+    // Audio channel counts, already summed and bounds-checked above.
+    inst->num_audio_inputs = declared_inputs;
+    inst->num_audio_outputs = declared_outputs;
+    inst->accepts_midi = admission_desc.accepts_midi;
+    inst->produces_midi = admission_desc.produces_midi;
 
     // Pre-reserve the RT MIDI buffers here (control thread) so run() never
     // allocates on the audio thread. set_realtime_capacity_limit(true) makes
@@ -310,40 +331,46 @@ inline LV2_Handle instantiate(
 inline void connect_port(LV2_Handle handle, uint32_t port, void* data) {
     auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(handle);
 
-    int audio_in_end = inst->num_audio_inputs;
-    int audio_out_end = audio_in_end + inst->num_audio_outputs;
-    int control_end = audio_out_end + inst->num_params;
-    // MIDI atom ports follow control ports. A plug-in with accepts_midi gets
-    // one atom input port at index control_end.
-    int atom_in_end = control_end + (inst->accepts_midi ? 1 : 0);
-    // Plug-ins with produces_midi get one atom output port right after the
-    // (optional) input. TTL emits these in the same order in
-    // generate_plugin_ttl(), so the host's port index matches.
-    int atom_out_end = atom_in_end + (inst->produces_midi ? 1 : 0);
-    // The latency-reporting output control port is always the last port,
-    // emitted unconditionally by generate_plugin_ttl() after the atom ports.
-    int latency_end = atom_out_end + 1;
+    // One ordering, shared with the manifest generator. Every slot index comes
+    // from the layout rather than from arithmetic repeated here, and the audio
+    // arrays are safe to index because instantiate() refuses a descriptor
+    // wider than lv2_adapter::kMaxChannels in either direction.
+    const lv2_adapter::Lv2PortLayout layout = inst->port_layout();
 
-    int idx = static_cast<int>(port);
+    // LV2 port numbers are uint32_t. A value past INT_MAX is not a port this
+    // plugin declared; map it to a number the layout classifies as None rather
+    // than letting the narrowing produce a negative index.
+    const int idx = port <= static_cast<uint32_t>(std::numeric_limits<int>::max())
+                        ? static_cast<int>(port)
+                        : -1;
 
-    if (idx < audio_in_end) {
-        inst->audio_in_ports[idx] = static_cast<float*>(data);
-    } else if (idx < audio_out_end) {
-        inst->audio_out_ports[idx - audio_in_end] = static_cast<float*>(data);
-    } else if (idx < control_end) {
-        inst->control_in_ports[idx - audio_out_end] = static_cast<float*>(data);
-    } else if (idx < atom_in_end) {
+    switch (layout.kind_of(idx)) {
+    case lv2_adapter::Lv2PortKind::AudioIn:
+        inst->audio_in_ports[layout.slot_of(idx)] = static_cast<float*>(data);
+        break;
+    case lv2_adapter::Lv2PortKind::AudioOut:
+        inst->audio_out_ports[layout.slot_of(idx)] = static_cast<float*>(data);
+        break;
+    case lv2_adapter::Lv2PortKind::Control:
+        inst->control_in_ports[layout.slot_of(idx)] = static_cast<float*>(data);
+        break;
+    case lv2_adapter::Lv2PortKind::AtomIn:
         // LV2 atom input port — host hands us an LV2_Atom_Sequence buffer.
         inst->midi_in_atom = data;
-    } else if (idx < atom_out_end) {
+        break;
+    case lv2_adapter::Lv2PortKind::AtomOut:
         // LV2 atom output port — host pre-allocates an LV2_Atom_Sequence
         // buffer sized by lv2:minimumSize in the TTL. run() writes
         // outgoing MIDI events into it.
         inst->midi_out_atom = data;
-    } else if (idx < latency_end) {
+        break;
+    case lv2_adapter::Lv2PortKind::Latency:
         // Latency output control port — host reads the value run() writes
         // here for plugin delay compensation.
         inst->latency_port = static_cast<float*>(data);
+        break;
+    case lv2_adapter::Lv2PortKind::None:
+        break;
     }
 }
 
@@ -430,7 +457,9 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         }
     }
 
-    // Build buffer views
+    // Build buffer views. The views below carry the instance's channel counts
+    // over these fixed-size pointer arrays, which is only sound because
+    // instantiate() refused any descriptor wider than kMaxChannels.
     const float* in_ptrs[lv2_adapter::kMaxChannels] = {};
     float* out_ptrs[lv2_adapter::kMaxChannels] = {};
 

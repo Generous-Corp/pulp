@@ -1,0 +1,47 @@
+{
+  "id": "lv2-skill-and-tooling-disposition",
+  "title": "The LV2 adapter has an agent skill, and that skill carries an explicit Vellum-boundary disposition",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "3918578f-ae7d-4a75-b358-76636d5fd691",
+  "owned_paths": [
+    ".agents/skills/lv2/SKILL.md",
+    "docs/status/sequencer-exposure/rows/lv2-skill-and-tooling-disposition.json"
+  ],
+  "evidence": [
+    {
+      "path": ".agents/skills/lv2/SKILL.md",
+      "needles": [
+        "Transport arrives as an atom, on the MIDI port"
+      ]
+    },
+    {
+      "path": "docs/status/pulp-tooling-disposition.json",
+      "needles": [
+        "\"name\": \"lv2\""
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "A skill is agent-facing guidance and an inventory row is a boundary classification. Neither adds a header, type, parameter or callable surface, and the LV2 adapter behaves exactly as it did before either landed."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No command, flag or projection changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool, request or response shape changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No operation, executor binding, grant or profile policy is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability row is added or changed. The Vellum disposition records that this plug-in-format surface sits outside the audio-free framework boundary, which is an ownership statement rather than an advertised capability."
+    }
+  }
+}

@@ -1622,10 +1622,37 @@ jobs:
               fi
             fi
           fi
-          # Four is the smallest fleet-wide cap that fills each 4-vCPU Mac Pro
-          # VM without claiming an entire shared Studio host. Keep this literal:
-          # bare --parallel is unbounded with Makefiles, while no flag is serial.
-          cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4
+          # Parallelism is DERIVED here, never a literal. This one step runs on
+          # runners with different shapes — self-hosted macOS gate VMs sized by
+          # their tartci lease, GitHub-hosted Linux/Windows/macOS, and an
+          # external contributor's checkout — and no single number is correct
+          # for all of them. A literal is also a silent ceiling: it keeps its
+          # value when a VM is resized, so the resize buys nothing and the
+          # no-op reads as "more cores did not help".
+          #
+          # The governor bounds the build by min(cores, RAM/1.5GiB): it takes a
+          # tartci lease share where a lease store exists, and falls back to
+          # that tier-0 bound where none does (inside a build VM, or a plain
+          # checkout). It never fails the build for a missing or denied lease,
+          # so this is safe on every leg including a fork PR. It passes no
+          # -j itself — CMAKE_BUILD_PARALLEL_LEVEL from the wrapper governs,
+          # which is why no --parallel flag belongs on the governed command.
+          #
+          # Windows keeps a literal, and that is not an oversight. The governor
+          # exists to divide a SHARED host; the Windows leg is a GitHub-hosted
+          # ephemeral 4-core runner that shares with nobody, so a literal that
+          # matches a fixed runner shape is already correct there. It is also
+          # the one leg this PR cannot prove: `windows` is excluded from the
+          # `pull_request` and `merge_group` matrices (see the matrix builder
+          # above), so it runs only on push/nightly/dispatch — and no workflow
+          # runs this wrapper under MSYS bash today, where a checked-out .sh
+          # does not carry a filesystem exec bit. Do not fold these branches
+          # together without first proving that path on a dispatch run.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4
+          else
+            tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" --config Release
+          fi
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
           rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
 

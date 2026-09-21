@@ -144,6 +144,23 @@ For an existing capability change:
   fingerprint would silently launder every unreviewed header edit. Paste the
   measured digest over the declared one in `agent_capability_registry.py`, bump
   `SURFACE_INVENTORY_VERSION` in `agent_capability_manifest.py`, then `--write`.
+- Before choosing the next `SURFACE_INVENTORY_VERSION`, check whether an open
+  branch already claimed it. Two branches that both bump 79 to 80 do not
+  conflict — the edits are identical, so git merges them silently and the
+  surface ends up recorded under a version that describes two different
+  inventories. Nothing downstream catches that, because each side passes
+  `--check` on its own.
+
+  ```sh
+  for p in $(ghapp api "repos/Generous-Corp/pulp/pulls?state=open&per_page=100" --jq '.[].number'); do
+      ghapp api "repos/Generous-Corp/pulp/pulls/$p/files?per_page=100" \
+          --jq '.[] | select(.filename=="tools/scripts/agent_capability_manifest.py") | .patch' 2>/dev/null \
+          | grep -q "^+SURFACE_INVENTORY_VERSION" && echo "PR #$p claims a version"
+  done
+  ```
+
+  Skip past any claimed integer rather than racing for it; the values only have
+  to be distinct and increasing, not contiguous.
 - `--write` also appends a full snapshot to
   `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
   that dwarf the change that caused them. `--check` does not require it, so for
@@ -792,6 +809,60 @@ PULP_AGENT_CAPABILITY_BASE_REF=<sha> python3 tools/scripts/agent_capability_mani
 
 That path is deliberately literal: an explicit ref is used as given, without the
 ancestry fallback.
+
+## `gates.sh` runs one check the capability transaction never mentions: the exposure ledger
+
+The inverse of the section below is also true and catches people going the other
+way. While an `agent_capability_catalog_*.py` file is an *exclusively owned* path
+in `docs/status/sequencer-exposure`, adding a `capability(...)` block to it makes
+`gates.sh` fail with
+
+    transition: sequencer-owned changed path is not covered by an added or
+    materially changed pending row: tools/scripts/agent_capability_catalog_<domain>.py
+
+Nothing in `agent_capability_manifest.py --check` predicts this — it reports
+`fresh` while the push is still blocked — and the four-edit checklist below is
+silent about it because the fifth edit lives in a different gate entirely. The
+fix is a **new** `pending` row under `docs/status/sequencer-exposure/rows/`
+owning that catalog file and its own row file; an existing row that already owns
+the path does not satisfy the transition rule. A capability published on an
+installed header fills `installed_sdk` and `design_time_agent_manifest` as
+`exposed` and the three timeline surfaces as `not_applicable`; measure
+`installed_sdk` against the per-subsystem `install(DIRECTORY …)` loop in
+`tools/cmake/PulpInstallRules.cmake` rather than assuming it.
+
+**Do not generalise that to "every catalog is watched" — most are not, and the
+owner count is what decides.** `_exclusively_owned_paths` in
+`tools/scripts/sequencer_exposure_check.py` watches a path only while *exactly
+one* row or tombstone declares it, in **both** the base and the resulting ledger
+state. Zero owners is not watched, and two or more are shared by construction and
+are not watched either. So the recorded fix is self-limiting: the row added to
+satisfy the gate is another owner, and once a catalog has two, the next
+`capability(...)` block added to it passes this gate silently. Measured on this
+tree, only `agent_capability_catalog_performance.py` is watched at all;
+`agent_capability_catalog_timing.py` already carried two owners before this row
+existed, and `foundations`/`signal` carry none.
+
+Count the owners of the file you are about to touch, and **count them through the
+checker's own loader**. A glob over `docs/status/sequencer-exposure/rows/*.json`
+gives the wrong answer three ways: one file can carry several rows, released rows
+do not all live there, and tombstones declare `owned_paths` too. `_declared_owners`
+is the authority:
+
+```sh
+python3 - <<'EOF'
+import pathlib, sys
+sys.path.insert(0, "tools/scripts")
+import sequencer_exposure_check as check
+root = pathlib.Path(".").resolve()
+ledger = check.load_ledger_from_worktree(root)
+owners = check._declared_owners(ledger[0] if isinstance(ledger, tuple) else ledger)
+for path in sorted(p for p in owners if "agent_capability_catalog_" in p):
+    print(len(owners[path]), path, sorted(owners[path]))
+EOF
+```
+
+A catalog printing `1` is watched by this gate; `0`, or `2` and up, is not.
 
 ## `gates.sh` does NOT run the capability check — adding a public header passes pre-push and fails in CI
 

@@ -142,6 +142,20 @@ public:
     /// The factory presets directory (inside the plugin bundle).
     std::filesystem::path factory_presets_dir() const { return factory_dir_; }
 
+    /// Point factory-preset discovery at a directory.
+    ///
+    /// The constructor cannot resolve this on its own: the folder that holds a
+    /// plug-in's bundled presets is format- and platform-specific (a macOS
+    /// bundle keeps them under `Contents/Resources/Presets`, a flat iOS
+    /// app-extension bundle directly under `Presets`), and a headless host has
+    /// no bundle at all. Until a caller sets it, `factory_presets()` scans an
+    /// empty path and returns nothing — so a plug-in that ships factory presets
+    /// must call this, normally from its format adapter.
+    void set_factory_presets_dir(std::filesystem::path dir) {
+        factory_dir_ = std::move(dir);
+        cache_valid_ = false;
+    }
+
 private:
     StateStore& store_;
     std::string manufacturer_;
