@@ -79,12 +79,13 @@ PresetManager::PresetManager(StateStore& store, const std::string& manufacturer,
 #endif
     }
 
-    // Factory presets: look in the executable's bundle Resources
-#ifdef __APPLE__
-    // macOS: MyPlugin.component/Contents/Resources/Presets/
-    // This is a simplification — in practice, use NSBundle
-    factory_dir_ = ""; // Set by the format adapter if applicable
-#endif
+    // Factory presets live inside the plug-in bundle, whose layout is
+    // format- and platform-specific and which a headless host does not have at
+    // all — so this class cannot resolve it. It stays empty (factory_presets()
+    // then finds nothing) until a caller supplies it through
+    // set_factory_presets_dir(); the AU adapters derive it from the loaded
+    // binary in pulp::format::au::FactoryPresetTable.
+    factory_dir_.clear();
 }
 
 void PresetManager::ensure_user_dir() {

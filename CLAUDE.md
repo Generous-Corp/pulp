@@ -129,10 +129,10 @@ cannot tell whether a leg is ephemeral or one of the shared self-hosted Studios
 (the macOS matrix leg resolves to `PULP_LOCAL_MACOS_RUNS_ON_JSON` — the shared
 Studios that host the required `macos` gate). In a workflow, bounding a
 whole-machine build is therefore the **author's** job: route a self-hosted leg
-through `tools/ci/governed-build.sh` (as `build.yml`, `examples-validation.yml`,
-`web-plugins.yml`, and `format-baseline-diff.yml` do for their macOS legs). When
-adding a build command anywhere, give `--parallel`/`-j` a bounded share (or route
-it through the governor), not the machine's core count.
+through `tools/ci/governed-build.sh` (`build.yml`'s `Build` step + intel canary,
+`examples-validation.yml`, `web-plugins.yml`, `format-baseline-diff.yml`). When
+adding a build command anywhere, derive `--parallel`/`-j` from the governor: a
+literal is a silent ceiling that survives a VM resize, a core count is the melt.
 
 **External SDKs** (not committed, cloned at configure time or manually):
 - VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)

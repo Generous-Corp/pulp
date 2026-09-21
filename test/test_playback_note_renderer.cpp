@@ -13,7 +13,9 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <random>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -1236,4 +1238,197 @@ TEST_CASE("scrub note rendering is allocation free after prepare") {
     }
     REQUIRE(code == NoteRenderCode::Ok);
     REQUIRE(allocations == 0);
+}
+
+namespace {
+
+// One bar of 4/4 at 120 BPM against a 48 kHz document clock, which is the
+// tempo_map() every case in this file renders against. Each quantity below is
+// arithmetic on that tempo, that sample rate and kTicksPerQuarter, so the
+// expected sample positions asserted further down are derived from the document
+// rather than read back out of the code under test.
+//
+//   quarter = 705'600 ticks = 0.5 s = 24'000 samples
+//   => one tick = 5/147 sample, exact for every tick that is a multiple of 147
+constexpr std::int64_t kFeelQuarterTicks = kTicksPerQuarter;        // 705'600
+constexpr std::int64_t kFeelEighthTicks = kFeelQuarterTicks / 2;    // 352'800
+constexpr std::int64_t kFeelSixteenthTicks = kFeelQuarterTicks / 4; // 176'400
+constexpr std::int64_t kFeelBarTicks = kFeelQuarterTicks * 4;       // 2'822'400
+
+// The two authored displacements, as ticks and as the samples they must become.
+//    -7'350 ticks = -7'350 * 5 / 147 = -250 samples, about 5.2 ms ahead of the grid
+//   +11'025 ticks = 11'025 * 5 / 147 = +375 samples, about 7.8 ms behind it
+// Both are smaller than the sixteenth-note table step they are authored in, so
+// neither is a table written wrong.
+constexpr std::int64_t kSnareEarlyTicks = -7'350;
+constexpr std::int64_t kBassLateTicks = 11'025;
+
+// A lane feel authored as a repeating sixteenth-note groove table whose single
+// entry displaces every note in that lane by `timing_offset_ticks`, at full
+// timing strength. Velocity is left at the identity scale, so the case measures
+// placement alone and not accent.
+GrooveTemplate lane_groove(std::string name, std::int64_t timing_offset_ticks) {
+    GrooveTemplateInput input;
+    input.name = std::move(name);
+    input.step = TickDuration{kFeelSixteenthTicks};
+    input.steps = {GrooveStep{TickDuration{timing_offset_ticks}, kGrooveUnitScale}};
+    input.timing_strength = kGrooveUnitScale;
+    return take(GrooveTemplate::create(std::move(input)));
+}
+
+// One lane of the kit: a sequence owning its own feel and one bar-long clip of
+// notes. A groove is sequence-owned context and a Track carries none of its
+// own, so a lane that plays with its own feel is a lane that owns its own
+// sequence, referenced from the arrangement.
+Sequence feel_lane(std::uint64_t sequence_id, std::string name,
+                   std::optional<GrooveTemplate> groove, const std::vector<std::int64_t>& onsets,
+                   std::int64_t note_duration_ticks, std::uint8_t pitch) {
+    std::vector<NoteEvent> notes;
+    std::uint64_t note_id = sequence_id + 1;
+    for (const auto onset : onsets)
+        notes.push_back(NoteEvent{{note_id++}, {onset}, {note_duration_ticks}, 40'000, pitch, 0});
+    auto clip = take(Clip::create({sequence_id + 50}, {0}, {kFeelBarTicks},
+                                  take(MidiContent::create(std::move(notes)))));
+    SequenceInput input;
+    input.id = {sequence_id};
+    input.name = std::move(name);
+    input.musical_duration = TickDuration{kFeelBarTicks};
+    input.tracks = {take(Track::create({sequence_id + 60}, "lane", {std::move(clip)}))};
+    input.groove = std::move(groove);
+    return take(Sequence::create(std::move(input)));
+}
+
+// Whether the three lanes carry their authored feels or all state no feel. The
+// second is the control: the same notes, the same arrangement, the same render,
+// with only the authored grooves removed.
+enum class KitFeel { authored, none };
+
+// A kit a musician would actually ask for: hats straight on the grid, the
+// backbeat leaning early, the bass leaning late, all three playing the same bar
+// together. Each lane is one arrangement track holding one reference to that
+// lane's own sequence, which is where its feel lives.
+std::shared_ptr<const Project> kit_feel_project(KitFeel feel) {
+    const auto authored = [&](std::string name,
+                              std::int64_t offset) -> std::optional<GrooveTemplate> {
+        if (feel == KitFeel::none)
+            return std::nullopt;
+        return lane_groove(std::move(name), offset);
+    };
+
+    // Eighth notes across the bar, authored straight and played straight.
+    std::vector<std::int64_t> hat_onsets;
+    for (std::int64_t onset = 0; onset < kFeelBarTicks; onset += kFeelEighthTicks)
+        hat_onsets.push_back(onset);
+    auto hats =
+        feel_lane(100, "hats", authored("straight", 0), hat_onsets, kFeelSixteenthTicks, 42);
+    // Backbeats on two and four.
+    auto snare = feel_lane(200, "snare", authored("early", kSnareEarlyTicks),
+                           {kFeelQuarterTicks, kFeelQuarterTicks * 3}, kFeelSixteenthTicks, 38);
+    // Root on one and three.
+    auto bass = feel_lane(300, "bass", authored("late", kBassLateTicks), {0, kFeelQuarterTicks * 2},
+                          kFeelEighthTicks, 36);
+
+    std::vector<Track> arrangement;
+    arrangement.push_back(take(Track::create(
+        {10}, "hats", {take(Clip::create({11}, {0}, {kFeelBarTicks}, SequenceRef{{100}, {0}}))})));
+    arrangement.push_back(take(Track::create(
+        {20}, "snare", {take(Clip::create({21}, {0}, {kFeelBarTicks}, SequenceRef{{200}, {0}}))})));
+    arrangement.push_back(take(Track::create(
+        {30}, "bass", {take(Clip::create({31}, {0}, {kFeelBarTicks}, SequenceRef{{300}, {0}}))})));
+    auto root =
+        take(Sequence::create({2}, "kit", TickDuration{kFeelBarTicks}, std::move(arrangement)));
+
+    return std::make_shared<const Project>(take(Project::create(
+        ProjectInput{{1},
+                     "per-lane feel",
+                     10'000,
+                     {2},
+                     {},
+                     {std::move(root), std::move(hats), std::move(snare), std::move(bass)}})));
+}
+
+// Note-on sample positions for one arrangement track, taken from the real
+// scheduler over a fixed block partition rather than from the compiled program,
+// so the reading covers the render as well as the compile.
+std::vector<std::int64_t> rendered_note_on_samples(ProgramHarness& programs,
+                                                   const CompiledTempoMap& map, ItemId track_id,
+                                                   std::int64_t through_sample) {
+    constexpr std::uint32_t kBlockFrames = 1'024;
+    ArrangementNoteRenderer renderer(track_id);
+    REQUIRE(renderer.prepare(64));
+    PlaybackProgramBlockLatch latch;
+    MasterTransport transport;
+    prepare_playing_transport(transport, map, kBlockFrames);
+    std::vector<std::int64_t> samples;
+    for (std::int64_t base = 0; base < through_sample; base += kBlockFrames) {
+        const auto snapshot = next_block(transport, kBlockFrames);
+        auto program = latch.begin_block(programs.store);
+        REQUIRE(renderer.process(program, snapshot).code == NoteRenderCode::Ok);
+        for (const auto& event : renderer.events()) {
+            const auto status = static_cast<std::uint8_t>(event.data()[0] & 0xf0u);
+            if (status == 0x90u && event.data()[2] != 0)
+                samples.push_back(base + event.sample_offset);
+        }
+    }
+    return samples;
+}
+
+std::vector<std::int64_t> compiled_note_on_samples(const PlaybackProgramStore& store,
+                                                   ItemId track_id) {
+    const auto program = store.read();
+    REQUIRE(program);
+    std::vector<std::int64_t> samples;
+    for (const auto& event : program->find_track(track_id)->arrangement_note_events())
+        if (event.kind == NoteProgramEventKind::On)
+            samples.push_back(event.sample.value);
+    return samples;
+}
+
+} // namespace
+
+TEST_CASE("each lane's authored groove lands that lane on its own exact samples",
+          "[playback][rhythm]") {
+    const auto map = tempo_map();
+
+    // Hand-derived from 120 BPM at 48 kHz: a quarter is 24'000 samples, so an
+    // eighth is 12'000 and a straight bar of eighth-note hats is that ladder.
+    const std::vector<std::int64_t> expected_hats{0,      12'000, 24'000, 36'000,
+                                                  48'000, 60'000, 72'000, 84'000};
+    // Backbeats sit on 24'000 and 72'000 straight; the early feel is -250.
+    const std::vector<std::int64_t> expected_snare{23'750, 71'750};
+    // Beats one and three sit on 0 and 48'000 straight; the late feel is +375.
+    const std::vector<std::int64_t> expected_bass{375, 48'375};
+
+    ProgramHarness programs;
+    programs.publish(kit_feel_project(KitFeel::authored), map, 1);
+
+    // The compile stage places all three lanes in one pass over one arrangement.
+    REQUIRE(compiled_note_on_samples(programs.store, {10}) == expected_hats);
+    REQUIRE(compiled_note_on_samples(programs.store, {20}) == expected_snare);
+    REQUIRE(compiled_note_on_samples(programs.store, {30}) == expected_bass);
+
+    // The render stage delivers them at the same samples, block-relative offsets
+    // folded back onto the document clock.
+    constexpr std::int64_t kThroughSample = 102'400;
+    REQUIRE(rendered_note_on_samples(programs, *map, {10}, kThroughSample) == expected_hats);
+    REQUIRE(rendered_note_on_samples(programs, *map, {20}, kThroughSample) == expected_snare);
+    REQUIRE(rendered_note_on_samples(programs, *map, {30}, kThroughSample) == expected_bass);
+
+    // Control: the same notes with no authored feel must land on the grid, and
+    // must differ from the grooved render. Without this a compile that silently
+    // displaced nothing would satisfy every assertion above only if the
+    // expectations were also wrong, and the hats -- straight in both -- would
+    // hide it.
+    ProgramHarness straight;
+    straight.publish(kit_feel_project(KitFeel::none), map, 1);
+    const auto straight_hats = rendered_note_on_samples(straight, *map, {10}, kThroughSample);
+    const auto straight_snare = rendered_note_on_samples(straight, *map, {20}, kThroughSample);
+    const auto straight_bass = rendered_note_on_samples(straight, *map, {30}, kThroughSample);
+    REQUIRE(straight_snare == std::vector<std::int64_t>{24'000, 72'000});
+    REQUIRE(straight_bass == std::vector<std::int64_t>{0, 48'000});
+    REQUIRE(straight_snare != expected_snare);
+    REQUIRE(straight_bass != expected_bass);
+    // The straight lane is untouched either way, so the displacement each lane
+    // received is that lane's own and not the arrangement's.
+    REQUIRE(straight_hats == expected_hats);
 }
