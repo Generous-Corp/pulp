@@ -63,6 +63,19 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         return shader_result(true, "");
     });
 
+    register_bridge_function(api, "setWidgetShaderChart", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto sksl = args.get<std::string>(1, "");
+        auto* v = self.widget(id);
+        auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+        if (!host) return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        auto error = canvas::Canvas::compile_sdf_chart_sksl(canvas::Canvas::SDFShape::flat_arc, sksl);
+        if (!error.empty()) return shader_result(false, error);
+        host->set_chart_shader(std::move(sksl));
+        self.request_repaint();
+        return shader_result(true, "");
+    });
+
     register_bridge_function(api, "setWidgetShaderUniforms", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         if (args.numArgs < 2 || args[1] == nullptr) return shader_result(false, "Uniforms must be an object");
@@ -137,6 +150,7 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
                 false, "Widget '" + id + "' does not support custom shaders");
 
         host->clear_custom_shader();
+        host->set_chart_shader({});
         self.request_repaint();
         return shader_result(true, "");
     });

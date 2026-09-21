@@ -35,6 +35,8 @@ public:
 
     bool has_custom_shader() const { return !custom_sksl_.empty(); }
     const std::string& custom_shader() const { return custom_sksl_; }
+    void set_chart_shader(std::string sksl) { chart_sksl_ = std::move(sksl); }
+    const std::string& chart_shader() const { return chart_sksl_; }
 
     void set_shader_uniforms(std::vector<canvas::Canvas::NamedUniform> uniforms) {
         shader_uniforms_ = std::move(uniforms);
@@ -65,6 +67,7 @@ public:
 
 private:
     std::string custom_sksl_;
+    std::string chart_sksl_;
     bool shader_uses_time_ = false;
     bool shader_draw_failure_logged_ = false;
     std::vector<canvas::Canvas::NamedUniform> shader_uniforms_;

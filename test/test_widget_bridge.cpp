@@ -4701,17 +4701,20 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
         globalThis.set = setWidgetShaderUniforms('knob', { gain: 0.75, tint: [1, 0.5, 0.25, 1] });
         globalThis.read = getWidgetShaderUniforms('knob');
         globalThis.reach = setWidgetShaderReach('knob', 12);
+        globalThis.chart = setWidgetShaderChart('knob', 'half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }');
         globalThis.bad = setWidgetShaderUniforms('knob', { tooWide: [1, 2, 3, 4, 5] });
     )");
     REQUIRE(engine.evaluate("set.success").getWithDefault<bool>(false));
     REQUIRE(engine.evaluate("read.gain").getWithDefault<double>(0.0) == Catch::Approx(0.75));
     REQUIRE(engine.evaluate("read.tint[2]").getWithDefault<double>(0.0) == Catch::Approx(0.25));
     REQUIRE(engine.evaluate("reach.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("chart.success").getWithDefault<bool>(false));
     REQUIRE_FALSE(engine.evaluate("bad.success").getWithDefault<bool>(true));
     auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
     REQUIRE(knob != nullptr);
     REQUIRE(knob->shader_reach() == Catch::Approx(12.0f));
     REQUIRE(knob->shader_uniforms().size() == 2);
+    REQUIRE_FALSE(knob->chart_shader().empty());
 }
 
 // shader_uses_time() decides whether the render loop stays pinned, and is read

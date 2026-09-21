@@ -47,6 +47,20 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
     options.uniforms = u;
     options.named_uniforms = host.shader_uniforms();
     options.reach = host.shader_reach();
+    if (!host.chart_shader().empty()) {
+        if (dynamic_cast<Knob*>(&view) != nullptr) {
+            canvas::Canvas::SDFStyle style;
+            style.fill_color = u.fill_color;
+            style.stroke_color = u.fill_color;
+            style.stroke_width = 8.0f;
+            style.arc_start = Knob::start_angle;
+            style.arc_sweep = Knob::end_angle - Knob::start_angle;
+            if (canvas.draw_sdf_shape_with_shader(canvas::Canvas::SDFShape::flat_arc,
+                                                  0, 0, w, h, style,
+                                                  host.chart_shader(), options))
+                return true;
+        }
+    }
     if (canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options)) {
         return true;
     }
