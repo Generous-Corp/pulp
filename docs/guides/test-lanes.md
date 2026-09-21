@@ -264,7 +264,8 @@ example `grep -rc "PULP_ENABLE_GPU" .github/workflows/build.yml` returns a
 non-zero count — so that an empty result reads as "not wired" rather than "my
 grep was wrong".
 
-Two more traps worth knowing before you write the lane:
+More traps worth knowing before you write the lane — every one of them
+returns a clean, confident, empty answer rather than an error:
 
 - **`ctest -R` is case-sensitive.** `-R 'renderer3d|scene3d'` selects 144 of the
   gated tests and silently drops the capitalized Catch2 case names; the
@@ -273,6 +274,19 @@ Two more traps worth knowing before you write the lane:
 - **A selection that matches nothing exits 0.** Pass `--no-tests=error`, and
   assert a floor on the selected count as well — the first catches an empty
   selection, the second catches one that merely shrank.
+- **`-R` is a regex, so a literal `(` in a case name is a group.** A Catch2
+  case whose name contains `run()` is selected zero times by
+  `ctest -N -R 'run() clamps'` and once by `-R 'run\(\) clamps'`. Control for
+  it with a pattern you know matches — a bare `-R 'LV2'` selecting 18 tests
+  proves the instrument works while the specific pattern selects none.
+- **A comma in a Catch2 case name makes that name unusable as a filter**, and
+  the way it fails is worse than a miss. Catch2 splits a test spec on commas,
+  so `./binary "A, B"` matches nothing, prints `No tests ran` and exits 2 —
+  while the same binary exits 0 on a comma-free name. `confirm_failure.sh`
+  reads that exit as `INCONCLUSIVE — the test already fails before any edit`,
+  so a working test reports as one that does not cover its code and the honest
+  next move, rewriting the test, is exactly wrong. Name new cases without
+  commas; `\,` escapes one in an existing name.
 
 ### A test whose premise cannot hold in CI
 
