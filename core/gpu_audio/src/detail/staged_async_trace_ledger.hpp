@@ -212,7 +212,9 @@ class StagedAsyncPendingState {
         return pending_.size();
     }
 
-    bool empty() const noexcept { return pending_.empty(); }
+    bool empty() const noexcept {
+        return pending_.empty();
+    }
 
     bool slot_occupied(std::uint32_t slot) const noexcept {
         return slot < slots_.size() && slots_[slot];
@@ -274,13 +276,19 @@ class StagedAsyncTrialState {
     bool slot_occupied(std::uint32_t slot) const noexcept {
         return pending_.slot_occupied(slot);
     }
-    std::size_t pending_count() const noexcept { return pending_.size(); }
+    std::size_t pending_count() const noexcept {
+        return pending_.size();
+    }
     // Records may only be drained after the worker has stopped admitting or
     // polling requests.  Returning this as an explicit predicate keeps the
     // quiescent ownership requirement at the producer boundary instead of
     // making callers infer it from an empty record vector.
-    bool quiescent() const noexcept { return pending_.empty(); }
-    std::vector<SharedIoTraceRecord> take_completed() { return ledger_.take_completed(); }
+    bool quiescent() const noexcept {
+        return pending_.empty();
+    }
+    std::vector<SharedIoTraceRecord> take_completed() {
+        return ledger_.take_completed();
+    }
 
   private:
     StagedAsyncTraceLedger ledger_;

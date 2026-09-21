@@ -426,8 +426,7 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         const auto now_ns = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
         const auto deadline_ns = std::max<std::uint64_t>(
-            1'000'000ull,
-            static_cast<std::uint64_t>(block_) * 1'000'000'000ull / sample_rate_);
+            1'000'000ull, static_cast<std::uint64_t>(block_) * 1'000'000'000ull / sample_rate_);
         const auto deadline = std::chrono::microseconds(deadline_ns / 1000ull);
         struct Completion {
             bool done = false;

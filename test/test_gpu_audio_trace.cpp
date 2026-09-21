@@ -884,7 +884,7 @@ TEST_CASE("staged async ledger emits one authenticated terminal record per reque
     CHECK(record.has(SharedIoTraceStage::SubmitEnd));
     CHECK(record.has(SharedIoTraceStage::CompletionObserved));
     CHECK(shared_io_trace_duration(record, SharedIoTraceStage::SubmitBegin,
-                                    SharedIoTraceStage::CompletionObserved)
+                                   SharedIoTraceStage::CompletionObserved)
               .available);
     CHECK(ledger.take_completed().empty());
 
