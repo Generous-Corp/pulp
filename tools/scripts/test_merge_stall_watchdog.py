@@ -555,8 +555,11 @@ class TestMainCli(unittest.TestCase):
             )
 
         self.assertEqual(snapshot["open_prs"], [])
-        self.assertEqual(snapshot["errors"][0]["stage"], "graphql")
-        self.assertIn("authorization failure", snapshot["errors"][0]["error"])
+        graphql_errors = [
+            err for err in snapshot["errors"] if err["stage"] == "graphql"
+        ]
+        self.assertEqual(len(graphql_errors), 1)
+        self.assertIn("authorization failure", graphql_errors[0]["error"])
 
     def test_workflow_counts_queue_alarms_for_issue_maintenance(self):
         workflow = (
@@ -565,9 +568,29 @@ class TestMainCli(unittest.TestCase):
             / "workflows"
             / "merge-stall-check.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn("f['level'] in ('alarm', 'queue_alarm')", workflow)
+        # Every actionable level must reach COUNT, or the sweep detects a
+        # stall and then declines to open the tracker that reports it.
+        for level in ("alarm", "queue_alarm", "throughput_alarm", "blind_alarm"):
+            self.assertIn(f"'{level}'", workflow)
         self.assertIn('degraded=${degraded}', workflow)
         self.assertIn('if [ "$DEGRADED" = "true" ]', workflow)
+
+    def test_this_suite_is_actually_executed_by_ci(self):
+        """A test nothing runs cannot fail, so it guards nothing.
+
+        This file existed and asserted real behavior while no workflow ever
+        invoked it. Pin the registration so it cannot silently lapse again.
+        """
+        lint = (
+            Path(__file__).resolve().parents[2]
+            / ".github"
+            / "workflows"
+            / "workflow-lint.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "python3 tools/scripts/test_merge_stall_watchdog.py", lint
+        )
+        self.assertIn("'tools/scripts/merge_stall_watchdog.py'", lint)
 
     def test_documented_fallback_contains_every_main_required_context(self):
         self.assertEqual(
@@ -639,6 +662,201 @@ class TestChecksFromRollup(unittest.TestCase):
             }
         }
         self.assertFalse(msw._checks_from_rollup(commit)["macos"]["green"])
+
+
+class MergeThroughputTests(unittest.TestCase):
+    """The outcome heartbeat: nothing merging while work waits to merge."""
+
+    @staticmethod
+    def snap(last_merge_minutes_ago, depth, online=3, **extra):
+        snapshot = {
+            "generated_at": NOW.isoformat(),
+            "merge_throughput": {
+                "last_merge_at": ago(last_merge_minutes_ago),
+                "last_merge_sha": "abc123def456",
+            },
+            "merge_queue": {"depth": depth},
+            "runner_capacity": {"registered": online, "online": online, "busy": 0},
+            "errors": [],
+        }
+        snapshot.update(extra)
+        return snapshot
+
+    def test_alarms_when_queue_waits_and_nothing_merges(self):
+        found = msw.analyze_merge_throughput(self.snap(340, 5), NOW, 90)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["level"], "throughput_alarm")
+        self.assertEqual(found[0]["queue_depth"], 5)
+        self.assertAlmostEqual(found[0]["minutes_since_last_merge"], 340, places=0)
+
+    def test_empty_queue_is_never_an_alarm(self):
+        """The denominator. A quiet repo merging nothing is correct."""
+        self.assertEqual(
+            msw.analyze_merge_throughput(self.snap(10_000, 0), NOW, 90), []
+        )
+
+    def test_recent_merge_is_quiet(self):
+        self.assertEqual(
+            msw.analyze_merge_throughput(self.snap(20, 5), NOW, 90), []
+        )
+
+    def test_dead_fleet_does_not_suppress_the_alarm(self):
+        """Capacity is diagnosis, never a condition: zero runners still alarms."""
+        found = msw.analyze_merge_throughput(self.snap(340, 5, online=0), NOW, 90)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["runners_online"], 0)
+
+    def test_alarm_is_never_invented_from_a_failed_read(self):
+        """A missing input must not manufacture an alarm; blindness owns it."""
+        blind = self.snap(340, 5)
+        del blind["merge_queue"]
+        self.assertEqual(msw.analyze_merge_throughput(blind, NOW, 90), [])
+
+
+class TransientRetryTests(unittest.TestCase):
+    """A slow minute upstream must not blind the guard for a whole sweep."""
+
+    def _proc(self, code, stderr=""):
+        return subprocess.CompletedProcess(
+            args=["gh"], returncode=code, stdout="{}", stderr=stderr
+        )
+
+    def test_a_504_is_retried_and_can_succeed(self):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            if len(calls) < 3:
+                return self._proc(1, "gh: HTTP 504 We couldn't respond in time")
+            return self._proc(0)
+
+        with (
+            mock.patch.object(msw.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(msw.time, "sleep"),
+        ):
+            self.assertEqual(msw._gh(["api", "graphql"]), "{}")
+        self.assertEqual(len(calls), 3)
+
+    def test_a_terminal_failure_is_not_retried(self):
+        """Retrying a real error is background load, never a fix."""
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return self._proc(1, "gh: HTTP 401 Bad credentials")
+
+        with (
+            mock.patch.object(msw.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(msw.time, "sleep"),
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                msw._gh(["api", "graphql"])
+        self.assertEqual(len(calls), 1)
+
+    def test_retries_are_bounded(self):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return self._proc(1, "gh: HTTP 504 timeout")
+
+        with (
+            mock.patch.object(msw.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(msw.time, "sleep"),
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                msw._gh(["api", "graphql"])
+        self.assertEqual(len(calls), msw._GH_RETRIES)
+
+    def test_pr_page_size_stays_within_the_budget_that_completes(self):
+        """The 50-per-page query timed out on every sweep for days."""
+        self.assertIn("first: 25", msw._PR_QUERY)
+
+
+class BlindSweepTests(unittest.TestCase):
+    """A sweep that observed nothing must never render as calm."""
+
+    def test_failed_reads_raise_a_blind_alarm(self):
+        snapshot = {
+            "errors": [
+                {"stage": "merge-queue", "error": "boom"},
+                {"stage": "graphql", "error": "boom"},
+            ],
+            "open_prs": [],
+            "merge_queue": None,
+        }
+        found = msw.analyze_blindness(snapshot)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["level"], "blind_alarm")
+        self.assertEqual(found[0]["failed_stages"], ["graphql", "merge-queue"])
+
+    def test_blind_alarm_names_the_verdicts_it_could_not_reach(self):
+        found = msw.analyze_blindness(
+            {"errors": [{"stage": "merge-queue", "error": "boom"}]}
+        )
+        self.assertEqual(
+            found[0]["silenced_alarms"], ["queue_alarm", "throughput_alarm"]
+        )
+
+    def test_a_complete_sweep_is_silent(self):
+        """Control: the guard can be quiet, so a red above is real signal."""
+        self.assertEqual(msw.analyze_blindness({"errors": []}), [])
+        self.assertEqual(msw.analyze_blindness({}), [])
+
+    def test_measured_outage_snapshot_is_no_longer_reported_as_calm(self):
+        """Regression on the real 2026-09-21 05:55Z sweep.
+
+        Both collection calls failed, so the watchdog held no observation at
+        all, yet rendered "Merges are flowing" and exited green while the
+        repository had merged nothing for four hours.
+        """
+        snapshot = {
+            "generated_at": NOW.isoformat(),
+            "repo": "Generous-Corp/pulp",
+            "base": "main",
+            "open_prs": [],
+            "merge_queue": None,
+            "errors": [
+                {"stage": "merge-queue", "error": "Command '['gh', ...]'"},
+                {"stage": "graphql", "error": "Command '['gh', ...]'"},
+            ],
+        }
+        findings = msw.analyze_blindness(snapshot)
+        findings.extend(msw.analyze_merge_throughput(snapshot, NOW, 90))
+        self.assertTrue(findings, "a blind sweep must produce a finding")
+
+        summary = msw.render_summary(findings, 45, snapshot["errors"])
+        self.assertNotIn("Merges are flowing", summary)
+        self.assertIn("blind sweep", summary)
+
+        body = msw.render_body(findings, 45, NOW)
+        self.assertIn("could not observe", body)
+        self.assertIn("not evidence of health", body)
+
+    def test_renderers_accept_every_new_level(self):
+        """The summary table indexes per-level keys; a miss would KeyError."""
+        findings = [
+            {
+                "level": "throughput_alarm",
+                "minutes_since_last_merge": 340.0,
+                "last_merge_at": ago(340),
+                "last_merge_sha": "abc123def456",
+                "queue_depth": 5,
+                "runners_online": 3,
+                "threshold_minutes": 90,
+            },
+            {
+                "level": "blind_alarm",
+                "failed_stages": ["merge-queue"],
+                "silenced_alarms": ["queue_alarm", "throughput_alarm"],
+                "detail": [{"stage": "merge-queue", "error": "boom"}],
+            },
+        ]
+        summary = msw.render_summary(findings, 45, None)
+        self.assertIn("throughput alarm", summary)
+        self.assertIn("blind alarm", summary)
+        body = msw.render_body(findings, 45, NOW)
+        self.assertIn("Nothing is merging", body)
 
 
 if __name__ == "__main__":
