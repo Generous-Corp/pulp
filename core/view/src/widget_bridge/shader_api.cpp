@@ -501,6 +501,8 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
 
         host->clear_custom_shader();
         host->set_chart_shader({});
+        host->set_shader_geometry(std::nullopt);
+        host->set_shader_geometry_spec({}, 0);
         self.request_repaint();
         return shader_result(true, "");
     });
