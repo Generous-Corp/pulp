@@ -3044,13 +3044,15 @@ private:
         PULP_TRACE_SCOPE_NAMED_ARGS("render", "frame", "frame_index",
                                     frame_clock_.frame());
 
-        if (!gpu_surface_ || !skia_surface_) return false;
-
-        // Clear before the attempt, so the three early returns below cannot
-        // leave a PREVIOUS frame's verdict standing as this frame's evidence.
-        // Each of them returns false, and one of them presents an undrawn
-        // drawable, so none of them produced output worth claiming.
+        // Clear before anything can return, so none of the three early returns
+        // below can leave a PREVIOUS frame's verdict standing as this frame's
+        // evidence. Each of them returns false, and one of them presents an
+        // undrawn drawable, so none of them produced output worth claiming.
+        // Reset first rather than per-return: the invariant is then a property
+        // of the function, not of whoever edits its exits next.
         last_submission_observed_.store(false, std::memory_order_relaxed);
+
+        if (!gpu_surface_ || !skia_surface_) return false;
 
         // Emit the per-frame dirty-rect decision the host would use for
         // clipping. The actual paint path is unchanged; this is a wiring
