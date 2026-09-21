@@ -17,10 +17,12 @@
 
 #include <AudioUnitSDK/AUBase.h>
 #include <AudioToolbox/AudioUnitProperties.h>
+
 #include <AudioUnit/AudioUnit.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreMIDI/MIDIServices.h>
 #include <mach/mach_time.h>
+#include <pulp/format/au_factory_presets.hpp>
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/state_restore_gate.hpp>

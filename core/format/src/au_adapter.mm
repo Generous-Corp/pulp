@@ -23,7 +23,10 @@
 //  │ outputBusses / inputBusses               │ NSArray   │ main + audio │ NO (cached)  │
 //  │ latency                                  │ seconds   │ KVO/main     │ NO           │
 //  │ tailTime                                 │ seconds   │ KVO/main     │ NO           │
-//  │ supportsUserPresets                      │ BOOL=NO   │ main         │ NO (const)   │
+//  │ supportsUserPresets                      │ BOOL=YES  │ main         │ NO (const)   │
+//  │ factoryPresets                           │ NSArray   │ main         │ YES (build)  │
+//  │ currentPreset                            │ AUAudio…  │ main         │ NO (ivar)    │
+//  │ setCurrentPreset:                        │ void      │ main         │ YES (load)   │
 //  │ canProcessInPlace                        │ BOOL=YES  │ main + audio │ NO (const)   │
 //  │ parameterTree                            │ AUParam…  │ main         │ YES (first call) │
 //  │ shouldBypassEffect                       │ BOOL      │ main + audio │ NO (atomic)  │
@@ -51,38 +54,39 @@
 //   • pulpLastParameterEvent* — main-thread, read-only snapshots of the
 //     last block's param-event queue (sample-offset, ramp duration, etc).
 
-#import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
+#import <AudioToolbox/AudioToolbox.h>
 #import <CoreAudioKit/CoreAudioKit.h>
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <limits>
 #import <mach/mach_time.h>
+#include <memory>
 #include <pulp/events/plugin_main_thread.hpp>
-#include <pulp/format/audio_workgroup_client.hpp>
-#include <pulp/format/processor.hpp>
-#include <pulp/runtime/trace_session.hpp>
-#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/format/adapter_boundary.hpp>
-#include <pulp/format/plugin_state_io.hpp>
-#include <pulp/format/parameter_text.hpp>
+#include <pulp/format/ara.hpp>
+#include <pulp/format/au_factory_presets.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
+#include <pulp/format/detail/audio_buffer_list_validation.hpp>
+#include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/host_quirks.hpp>
+#include <pulp/format/parameter_text.hpp>
+#include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/registry.hpp>
-#include <pulp/format/ara.hpp>
-#include <pulp/signal/scoped_flush_denormals.hpp>
-#include <pulp/format/detail/playhead_diff.hpp>
-#include <pulp/format/detail/audio_buffer_list_validation.hpp>
+#include <pulp/format/state_restore_gate.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
-#include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/alive_token.hpp>
+#include <pulp/runtime/assert.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/runtime/trace_session.hpp>
+#include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
-#include <cmath>
-#include <memory>
-#include <array>
-#include <atomic>
-#include <limits>
 #include <vector>
 
 namespace pulp::format::au {
@@ -113,6 +117,10 @@ struct AUBridge {
     // inside process(). Declared after processor so it outlives every render
     // that consults it.
     StateRestoreGate state_restore_gate;
+    // Factory presets, bound after define_parameters(). Declared after `store`
+    // so reverse member destruction retires the PresetManager while the store
+    // it holds a reference to is still alive.
+    FactoryPresetTable factory_presets;
     AudioWorkgroupClient* audio_workgroup_client = nullptr;
     double sample_rate = 48000.0;
     AUAudioFrameCount max_frames = 512;
@@ -291,6 +299,12 @@ struct ScopedAuV3HostWriting {
     AUParameterObserverToken _automationToken;
     pulp::state::ListenerToken _automationListener;
 
+    // Last preset the host selected. Retained because `currentPreset` is a
+    // `retain` property whose accessors are both overridden here, so nothing
+    // is synthesized to hold it. Covers factory AND user presets — a host
+    // reads it back to show which entry is ticked.
+    AUAudioUnitPreset* _currentPreset;
+
     // ObjC ivars destroy in REVERSE declaration order, so declaring this LAST
     // makes it destroy FIRST — wrong for tracing, which must outlive every span
     // this instance can emit. -dealloc therefore resets it explicitly at the
@@ -321,6 +335,11 @@ struct ScopedAuV3HostWriting {
 /// synthesized-AUValue path is in use); otherwise the StateStore parameter ID
 /// that proxies the bypass surface.
 - (uint32_t)pulpBypassParameterId;
+
+/// The factory-preset table this unit serves, so a plug-in whose presets live
+/// outside the default bundle folder can re-point discovery before the host
+/// scans. Main-thread only.
+- (pulp::format::au::FactoryPresetTable*)pulpFactoryPresetTable;
 
 - (NSUInteger)pulpLastParameterEventCount;
 - (NSUInteger)pulpLastParameterEventCapacity;
@@ -372,6 +391,13 @@ struct ScopedAuV3HostWriting {
     }
     _bridge.processor->set_state_store(&_bridge.store);
     _bridge.processor->define_parameters(_bridge.store);
+    {
+        // Discover the plug-in's bundled factory presets. Empty for a plug-in
+        // that ships none, and for any build not loaded from a bundle (a unit
+        // test binary, a standalone host).
+        const auto desc = _bridge.processor->descriptor();
+        _bridge.factory_presets.bind(_bridge.store, desc.manufacturer, desc.name);
+    }
     _bridge.audio_workgroup_client =
         dynamic_cast<pulp::format::AudioWorkgroupClient*>(_bridge.processor.get());
 
@@ -508,8 +534,92 @@ struct ScopedAuV3HostWriting {
     return tail > 0 ? static_cast<double>(tail) / _bridge.sample_rate : 0.0;
 }
 
-- (BOOL)supportsUserPresets { return NO; }
+// User presets are stored by AUAudioUnit itself — `userPresets`,
+// `saveUserPreset:error:`, `deleteUserPreset:error:` and `presetStateFor:error:`
+// all have base-class implementations backed by an internal location Apple
+// owns. A plug-in opts in by answering YES here and by restoring a negative
+// preset number in `setCurrentPreset:`, which is what the two below do. Pulp
+// needs no writable store of its own: `fullState` already round-trips the
+// StateStore plus any processor-owned payload.
+- (BOOL)supportsUserPresets {
+    return YES;
+}
 - (BOOL)canProcessInPlace { return YES; }
+
+// ── Presets ────────────────────────────────────────────────────────────────
+
+- (NSArray<AUAudioUnitPreset*>*)factoryPresets {
+    const auto& table = _bridge.factory_presets;
+    const NSUInteger count = static_cast<NSUInteger>(table.size());
+    // nil, not an empty array: a host reads an empty array as "this plug-in has
+    // a factory bank that happens to be empty" and shows the menu anyway.
+    if (count == 0)
+        return nil;
+
+    NSMutableArray<AUAudioUnitPreset*>* presets = [NSMutableArray arrayWithCapacity:count];
+    for (NSUInteger i = 0; i < count; ++i) {
+        AUAudioUnitPreset* preset = [[AUAudioUnitPreset alloc] init];
+        preset.number = static_cast<NSInteger>(i);
+        preset.name = [NSString stringWithUTF8String:table.name_at(i).c_str()];
+        [presets addObject:preset];
+#if !__has_feature(objc_arc)
+        [preset release];
+#endif
+    }
+    return presets;
+}
+
+- (AUAudioUnitPreset*)currentPreset {
+    return _currentPreset;
+}
+
+- (void)setCurrentPreset:(AUAudioUnitPreset*)currentPreset {
+    if (currentPreset == nil) {
+#if !__has_feature(objc_arc)
+        [_currentPreset release];
+#endif
+        _currentPreset = nil;
+        return;
+    }
+
+    // Apple's contract: a non-negative number is a factory preset the plug-in
+    // owns; a negative one is a user preset the base class stored for us.
+    if (currentPreset.number >= 0) {
+        const auto index = static_cast<std::size_t>(currentPreset.number);
+        if (_bridge.factory_presets.preset_at(index) == nullptr)
+            return;
+        [self willChangeValueForKey:@"allParameterValues"];
+        const bool loaded = _bridge.factory_presets.load(index);
+        [self didChangeValueForKey:@"allParameterValues"];
+        if (!loaded)
+            return;
+    } else {
+        NSError* error = nil;
+        NSDictionary<NSString*, id>* state = [self presetStateFor:currentPreset error:&error];
+        if (state == nil) {
+            // A nil `name` is legal on AUAudioUnitPreset, and -UTF8String on
+            // nil yields a null char* that std::format would read.
+            const char* label = currentPreset.name != nil ? currentPreset.name.UTF8String : "";
+            pulp::runtime::log_warn("AU: user preset '{}' could not be read",
+                                    label != nullptr ? label : "");
+            return;
+        }
+        // setFullState: takes the state-restore gate, so this cannot run while
+        // the render block is inside process().
+        [self willChangeValueForKey:@"allParameterValues"];
+        [self setFullState:state];
+        [self didChangeValueForKey:@"allParameterValues"];
+    }
+
+    if (_currentPreset != currentPreset) {
+#if !__has_feature(objc_arc)
+        [_currentPreset release];
+        _currentPreset = [currentPreset retain];
+#else
+        _currentPreset = currentPreset;
+#endif
+    }
+}
 
 - (AURenderContextObserver)renderContextObserver {
     auto* bridge = &_bridge;
@@ -846,6 +956,9 @@ struct ScopedAuV3HostWriting {
     }
     [_parameterTree release];
     _parameterTree = nil;
+
+    [_currentPreset release];
+    _currentPreset = nil;
 
     if (_mainThreadToken != 0) {
         pulp::events::unregister_plugin_backend(_mainThreadToken);
@@ -1542,6 +1655,10 @@ struct ScopedAuV3HostWriting {
 
 - (uint32_t)pulpBypassParameterId {
     return static_cast<uint32_t>(_bridge.bypass_param_id);
+}
+
+- (pulp::format::au::FactoryPresetTable*)pulpFactoryPresetTable {
+    return &_bridge.factory_presets;
 }
 
 - (NSUInteger)pulpLastParameterEventCount {

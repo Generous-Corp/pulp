@@ -12,6 +12,7 @@ afterEach(() => {
     const host = globalThis as unknown as Record<string, unknown>;
     delete host.__pulpApplyMaterializedImportMetadata__;
     delete host.__pulpRefreshMaterializedState__;
+    delete host.__pulpMaterializedStateResolver__;
     delete host.getRootSize;
     delete host.layout;
 });
@@ -489,13 +490,267 @@ describe('host-config materialized metadata', () => {
         expect(host.__pulpMaterializedTreeEpoch__ as number).toBeGreaterThan(before);
     });
 
-    it('refreshes captured semantic state once per React commit', () => {
+    // The captured-state matcher resolves selectors over the registry, so a
+    // commit that mutated no host node cannot have changed which state
+    // matches. It used to run outside the gate, once per commit -- meaning
+    // every pointer sample of a drag walked one selector per captured state
+    // across the whole registry for an answer that could not have moved.
+    it('refreshes captured semantic state only on a commit that mutated the tree', () => {
         const host = globalThis as unknown as Record<string, unknown>;
         let refreshes = 0;
         host.__pulpRefreshMaterializedState__ = () => ++refreshes;
+
+        // A newly installed hook is itself a reason to run, so drain that.
         resetAfterCommit?.({});
+        expect(refreshes).toBe(1);
+
+        resetAfterCommit?.({});
+        resetAfterCommit?.({});
+        expect(refreshes).toBe(1);
+
+        // CONTROL: a commit that did mutate the tree must still refresh. If
+        // this stays at 1 the hook is not wired and the zero above is vacuous.
+        mutate();
         resetAfterCommit?.({});
         expect(refreshes).toBe(2);
+    });
+
+    // The one input that is not a function of the registry. An embedder may
+    // drive the captured state from its own signal, which can change without
+    // any host mutation, so a runtime that installs a resolver keeps the
+    // unconditional refresh it had before.
+    it('refreshes captured semantic state on every commit when a resolver is installed', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let refreshes = 0;
+        host.__pulpRefreshMaterializedState__ = () => ++refreshes;
+        host.__pulpMaterializedStateResolver__ = () => null;
+
+        resetAfterCommit?.({});
+        resetAfterCommit?.({});
+        resetAfterCommit?.({});
+        expect(refreshes).toBe(3);
+
+        // CONTROL: removing the resolver must restore the gate, otherwise this
+        // case would pass against a build that never gated anything.
+        delete host.__pulpMaterializedStateResolver__;
+        resetAfterCommit?.({});
+        expect(refreshes).toBe(3);
+    });
+
+    // Gating the refresh introduced a new way to lose it entirely: an importer
+    // that installs its hook after the first commits would wait for a host
+    // mutation that may never come.
+    it('refreshes a captured-state hook installed after earlier commits', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        mutate();
+        resetAfterCommit?.({});
+        resetAfterCommit?.({});
+
+        let refreshes = 0;
+        host.__pulpRefreshMaterializedState__ = () => ++refreshes;
+        resetAfterCommit?.({});   // no mutation, but the hook is new
+
+        expect(refreshes).toBe(1);
+    });
+
+    // ── Re-apply scope ─────────────────────────────────────────────
+    //
+    // A commit that moved one node left every other captured node's geometry
+    // alone, so the re-apply is handed the subtree roots the commit touched.
+    // `null` means "blast radius unknown -- re-apply everything", which is the
+    // safe direction: slow, never wrong.
+    function armScopeSpy(): { calls: () => Array<readonly string[] | null> } {
+        const host = globalThis as unknown as Record<string, unknown>;
+        const calls: Array<readonly string[] | null> = [];
+        host.__pulpApplyMaterializedImportMetadata__ = (scope: unknown) => {
+            calls.push((scope as readonly string[] | null) ?? null);
+            return 0;
+        };
+        // Installing the spy is itself a hook-identity change, which arms one
+        // unconditional application. Drain it, and CONTROL on it: if the
+        // priming call did not land, every assertion below is vacuous.
+        resetAfterCommit?.({});
+        expect(calls).toHaveLength(1);
+        calls.length = 0;
+        return { calls: () => calls };
+    }
+
+    const sorted = (scope: readonly string[] | null) =>
+        scope === null ? null : [...scope].sort();
+
+    it('scopes a re-apply to the instance a commit updated', () => {
+        const spy = armScopeSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+
+        commitUpdate(instance('knob'), null, 'view',
+            { width: 10 }, { width: 20 }, null);
+        resetAfterCommit?.({});
+
+        expect(spy.calls()).toHaveLength(1);
+        expect(sorted(spy.calls()[0])).toEqual(['knob']);
+    });
+
+    it('accumulates every instance a single commit mutated', () => {
+        const spy = armScopeSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+
+        commitUpdate(instance('a'), null, 'view', { width: 1 }, { width: 2 }, null);
+        commitUpdate(instance('b'), null, 'view', { top: 1 }, { top: 2 }, null);
+        resetAfterCommit?.({});
+
+        expect(sorted(spy.calls()[0])).toEqual(['a', 'b']);
+    });
+
+    // A reorder renumbers the parent's whole child list, and captured paths
+    // resolve through those sibling indices. Scoping to the moved child alone
+    // would leave its former siblings holding another row's captured box --
+    // visibly wrong, and invisible to any operation count.
+    it('scopes a sibling reorder to the parent, not only the moved child', () => {
+        const spy = armScopeSpy();
+
+        reorderSiblings();
+        resetAfterCommit?.({});
+
+        expect(sorted(spy.calls()[0])).toEqual(['p', 'y']);
+    });
+
+    // Root-level children have no captured parent to scope through: their
+    // paths resolve against the registry's parentless roots, so a
+    // container-level mutation can renumber any of them.
+    it('falls back to an unscoped re-apply for a container-level mutation', () => {
+        const spy = armScopeSpy();
+        const clearContainer = PulpHostConfig.clearContainer as
+            (container: unknown) => void;
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+
+        clearContainer({});
+        resetAfterCommit?.({});
+        expect(spy.calls()[0]).toBeNull();
+
+        // CONTROL: the same instrument must produce a real scope for an
+        // ordinary commit, or `null` above proves nothing about the fallback.
+        commitUpdate(instance('a'), null, 'view', { width: 1 }, { width: 2 }, null);
+        resetAfterCommit?.({});
+        expect(sorted(spy.calls()[1])).toEqual(['a']);
+    });
+
+    // Ordering hazard: an unscoped mark and a scoped one can land in the same
+    // commit. The unscoped one has to win -- narrowing it would drop every
+    // binding the container-level mutation renumbered.
+    it('does not narrow an unscoped mutation with a later scoped one', () => {
+        const spy = armScopeSpy();
+        const clearContainer = PulpHostConfig.clearContainer as
+            (container: unknown) => void;
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+
+        clearContainer({});
+        commitUpdate(instance('a'), null, 'view', { width: 1 }, { width: 2 }, null);
+        resetAfterCommit?.({});
+
+        expect(spy.calls()[0]).toBeNull();
+    });
+
+    // A root resize moves the metrics every captured inset is derived from,
+    // for every node -- not only the ones this commit touched.
+    it('falls back to an unscoped re-apply when the root box changed', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        let size = { width: 400, height: 300 };
+        host.getRootSize = () => size;
+        const spy = armScopeSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+
+        size = { width: 800, height: 300 };
+        commitUpdate(instance('a'), null, 'view', { width: 1 }, { width: 2 }, null);
+        resetAfterCommit?.({});
+
+        expect(spy.calls()[0]).toBeNull();
+    });
+
+    // ── Event handlers ─────────────────────────────────────────────
+    //
+    // React recreates every inline closure on each render, so a component
+    // rendering `onPointerMove={(e) => ...}` emits a changed handler on every
+    // pointer sample. That alone used to disqualify the commit and re-apply
+    // the whole captured document.
+    it('does not re-apply for a commit that only recreated an inline handler', () => {
+        const spy = armSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+
+        commitUpdate(instance('a'), null, 'view',
+            { onPointerMove: () => {}, onClick: () => {} },
+            { onPointerMove: () => {}, onClick: () => {} }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(0);
+
+        // CONTROL: a geometric change on the same instrument must still
+        // re-apply. If this reads 0 the spy is broken, not the gate.
+        commitUpdate(instance('a'), null, 'view',
+            { width: 10 }, { width: 20 }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(1);
+    });
+
+    // The exemption is about the handler's payload being a function identity,
+    // not about `on`-prefixed keys being ignorable. A real geometry change
+    // riding alongside one must still re-apply.
+    it('re-applies when a handler changes alongside geometry', () => {
+        const spy = armSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+
+        commitUpdate(instance('a'), null, 'view',
+            { onClick: () => {}, width: 10 },
+            { onClick: () => {}, width: 20 }, null);
+        resetAfterCommit?.({});
+
+        expect(spy.count()).toBe(1);
+    });
+
+    // A prop that merely starts with "on" is not a handler. `onlyChild` fails
+    // the capitalised-third-character test and must take the ordinary path.
+    it('does not treat a lowercase on-prefixed prop as a handler', () => {
+        const spy = armSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+
+        commitUpdate(instance('a'), null, 'view',
+            { onlyChild: 1 }, { onlyChild: 2 }, null);
+        resetAfterCommit?.({});
+
+        expect(spy.count()).toBe(1);
+    });
+
+    // The fixed-text gate walks every non-text prop and bails on any change.
+    // A recreated handler was enough to push a one-word status readout back
+    // onto the full re-apply path on every keystroke.
+    it('keeps a fixed text-only update exempt despite a recreated handler', () => {
+        const spy = armSpy();
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+
+        commitUpdate(instance('status'), null, 'span',
+            { children: 'BAND 1/64', width: 240, height: 26,
+              whiteSpace: 'nowrap', onClick: () => {} },
+            { children: 'BAND 2/64', width: 240, height: 26,
+              whiteSpace: 'nowrap', onClick: () => {} }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(0);
+
+        // CONTROL: the same update with a real non-text prop change must
+        // still re-apply.
+        commitUpdate(instance('status'), null, 'span',
+            { children: 'BAND 2/64', width: 240, height: 26,
+              whiteSpace: 'nowrap', opacity: 0.5 },
+            { children: 'BAND 3/64', width: 240, height: 26,
+              whiteSpace: 'nowrap', opacity: 1 }, null);
+        resetAfterCommit?.({});
+        expect(spy.count()).toBe(1);
     });
 
     it('publishes mixed-content text renderer targets on the owning DOM node', () => {

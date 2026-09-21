@@ -8438,7 +8438,6 @@
         "core/timeline/tools/test_schema_mcp_emit.py",
         "docs/reference/cli.md",
         "docs/status/cli-commands.yaml",
-        "docs/status/pulp-tooling-disposition.json",
         "docs/status/sequencer-exposure.json",
         "test/cmake/cli_tests.cmake",
         "test/test_cli_timeline_render_shellout.cpp",
@@ -8461,6 +8460,12 @@
           "path": "tools/cli/cmd_seq.cpp",
           "needles": [
             "parse_tail_frames",
+            "--tail-frames"
+          ]
+        },
+        {
+          "path": "docs/status/pulp-tooling-disposition.json",
+          "needles": [
             "--tail-frames"
           ]
         }
