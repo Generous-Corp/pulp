@@ -2759,12 +2759,32 @@ bisectable.
   0.00s though the code under test was race-free by design. The correct pattern:
   record the violation into an `atomic`/guarded value in the worker, `join()`,
   then assert on the test thread (`REQUIRE_FALSE(bad.load())`). The lint is a
-  lexical scan (best-effort: it does not follow calls into helpers) with a
-  same-length string/comment-blanking pass that also skips C++ digit separators
-  (`10'000`); suppress a verified-safe line with a trailing
+  lexical scan (best-effort: it does not follow calls into named functions) with
+  a same-length string/comment-blanking pass that also skips C++ digit
+  separators (`10'000`); suppress a verified-safe line with a trailing
   `// thread-assert:allow`. Runs as the `thread-safe-assertions` ctest case and
   in `gates.sh`. When graduating any required lane to VMs, expect this class of
   latent UB to surface — fix at the source, don't suppress.
+  **The spawn token is not always on the line that installs the body**, and
+  keying on it alone is why this guard once returned a clean exit on its own
+  subject: a `std::vector<std::thread>` populated by `emplace_back(lambda)`
+  carries `std::thread` only in the DECLARATION, so a hammer test with eight
+  workers each running `REQUIRE` 2000 times scanned clean while the direct
+  `std::thread t([]{ REQUIRE })` form flagged correctly — the instrument ran,
+  its positive control worked, and the output was indistinguishable from a
+  checked file. It now also resolves containers of threads/futures, lambdas
+  bound to a name and spawned later (`auto body = [...]; std::thread t(body)`),
+  and one bound lambda naming another. It still cannot follow an assertion into
+  a named function, a `std::function` held in a field or map, or a thread a
+  helper spawns; `thread_assert_check.py`'s docstring is the authoritative
+  caught/not-caught list, and a clean run means "none of those shapes",
+  never "no thread-unsafe assertion". `--wide` is a diagnostic pass that
+  reports every assertion in any lambda in a thread-spawning TU and always
+  exits 0; on 2026-09-20 it returned 266 hits over 29 files against the gate's
+  1, which is why it is a review aid and not the gate. The paired
+  unsafe/safe-twin fixtures live in `test_thread_assert_check.py`
+  (`thread-safe-assertions-selftest` ctest) so the guard is proven to
+  distinguish the shapes rather than proven to be quiet.
 - **ctest label-exclusion guard (`ctest_label_exclusion_guard.py`).** A Catch2
   suite whose *every* ctest registration carries a label in
   `PULP_COVERAGE_CTEST_LABEL_EXCLUDE` (`validation|slow|performance|bench|quality-lab`,
