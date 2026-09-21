@@ -194,7 +194,7 @@ static const char* kSDFShapeSkSL = R"(
 
     // SDF for arc with thickness (flat caps)
     float sdFlatArc(float2 p, float outerR, float innerR, float startAngle, float sweepAngle) {
-        float angle = atan2(p.y, p.x);
+        float angle = atan(p.y, p.x);
         float halfSweep = sweepAngle * 0.5;
         float midAngle = startAngle + halfSweep;
         float angleDiff = angle - midAngle;
@@ -282,6 +282,78 @@ static const char* kSDFShapeSkSL = R"(
         }
     }
 )";
+
+// Phase-B authoring entry point.  Reuse the production primitive functions
+// above, but stop before their legacy main() and provide a structured geometry
+// value to the author's shade() function.  Keeping this composer alongside
+// the legacy source makes the two paths share exactly the same distances.
+static std::string compose_sdf_geometry_shader(Canvas::SDFShape shape,
+                                               const std::string& author_sksl) {
+    (void)shape;
+    const std::string source(kSDFShapeSkSL);
+    const auto main_at = source.find("half4 main(float2 coord)");
+    std::string primitive_prelude =
+        main_at == std::string::npos ? source : source.substr(0, main_at);
+    // SkSL exposes atan(y, x), whereas the legacy source used atan2 in a
+    // path that was not previously composed through RuntimeEffect.
+    for (std::size_t at = primitive_prelude.find("atan2("); at != std::string::npos;
+         at = primitive_prelude.find("atan2(", at + 1))
+        primitive_prelude.replace(at, 6, "atan(");
+    return primitive_prelude + R"(
+struct PulpGeom { float sdf; float2 grad; float2 pos; float2 uv; float coverage; };
+struct PulpFragment { half4 color; float strokeWidth; float sigma; };
+
+float pulp_shape_distance(float2 p) {
+    float2 halfSize = resolution * 0.5 - float2(2.0);
+    float r = min(halfSize.x, halfSize.y);
+    if (shapeType < 0.5) return sdBox(p, halfSize);
+    if (shapeType < 1.5) return sdCircle(p, r);
+    if (shapeType < 2.5) return sdRoundBox(p, halfSize, cornerRadius);
+    if (shapeType < 3.5) {
+        float angle = atan(p.y, p.x);
+        float halfSweep = arcSweep * 0.5;
+        float diff = angle - (arcStart + halfSweep);
+        diff -= 6.2832 * floor((diff + 3.1416) / 6.2832);
+        float ring = abs(length(p) - r * 0.8) - strokeWidth * 0.5;
+        return max(ring, (abs(diff) - halfSweep) * r * 0.5);
+    }
+    if (shapeType < 4.5) return sdDiamond(p, r);
+    if (shapeType < 5.5) return sdSquircle(p, halfSize, squirclePower);
+    if (shapeType < 6.5) return sdTriangle(p, r);
+    if (shapeType < 7.5) return sdRing(p, r, r * innerRadius);
+    if (shapeType < 8.5) return sdStadium(p, halfSize);
+    if (shapeType < 9.5) return sdCross(p, halfSize, armWidth);
+    if (shapeType < 10.5) return sdFlatSegment(p, halfSize);
+    if (shapeType < 11.5) return sdRoundedSegment(p, halfSize.x, max(strokeWidth, 2.0));
+    if (shapeType < 12.5) return sdFlatArc(p, r, r * innerRadius, arcStart, arcSweep);
+    return sdQuadBezier(p, float2(-halfSize.x, halfSize.y),
+                        float2(bezierCX * halfSize.x, bezierCY * halfSize.y),
+                        float2(halfSize.x, halfSize.y), max(strokeWidth, 2.0));
+}
+
+PulpGeom pulp_geom(float2 coord) {
+    float2 p = coord - resolution * 0.5;
+    float d = pulp_shape_distance(p);
+    // Central differences keep the gradient tied to the exact composed field
+    // and remain stable for all primitive branches.
+    float e = 0.5;
+    float2 grad = float2(pulp_shape_distance(p + float2(e, 0.0)) -
+                         pulp_shape_distance(p - float2(e, 0.0)),
+                         pulp_shape_distance(p + float2(0.0, e)) -
+                         pulp_shape_distance(p - float2(0.0, e))) / (2.0 * e);
+    return PulpGeom(d, normalize(grad), p, coord / resolution,
+                    1.0 - smoothstep(-1.0, 1.0, d));
+}
+)" + author_sksl + R"(
+half4 main(float2 coord) {
+    PulpGeom g = pulp_geom(coord);
+    PulpFragment f = shade(g, coord);
+    float sd = f.strokeWidth > 0.0 ? abs(g.sdf) - f.strokeWidth * 0.5 : g.sdf;
+    float alpha = 1.0 - smoothstep(-1.0, 1.0, sd);
+    return f.color * half(alpha);
+}
+)";
+}
 
 void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
                                  const SDFStyle& style) {
@@ -406,7 +478,11 @@ half4 main(float2 coord) {
 std::string Canvas::compile_sdf_chart_sksl(SDFShape, const std::string& sksl) {
     if (sksl.empty()) return "Empty shader code";
     std::string error;
-    auto effect = RuntimeEffectCache::instance().get_or_compile(compose_sdf_chart_shader(sksl), error);
+    const bool structured = sksl.find("PulpFragment shade") != std::string::npos;
+    const auto source = structured
+                            ? compose_sdf_geometry_shader(SDFShape::flat_arc, sksl)
+                            : compose_sdf_chart_shader(sksl);
+    auto effect = RuntimeEffectCache::instance().get_or_compile(source, error);
     return effect ? std::string() : error;
 }
 
@@ -419,7 +495,10 @@ bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
     // Keep the chart prelude deliberately small and explicit. It is emitted
     // before the author function so the same source can be compiled at draw
     // time and by the bridge's normal SkSL compiler.
-    const std::string source = compose_sdf_chart_shader(author_sksl);
+    const bool structured = author_sksl.find("PulpFragment shade") != std::string::npos;
+    const std::string source = structured
+                                   ? compose_sdf_geometry_shader(shape, author_sksl)
+                                   : compose_sdf_chart_shader(author_sksl);
     std::string error;
     auto effect = RuntimeEffectCache::instance().get_or_compile(source, error);
     if (!effect) return false;

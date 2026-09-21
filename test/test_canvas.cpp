@@ -888,6 +888,16 @@ TEST_CASE("SDF chart prelude exposes analytic feathering and bounded operators",
     REQUIRE(error.empty());
 }
 
+TEST_CASE("SDF geometry composer exposes PulpGeom and PulpFragment",
+          "[canvas][sdf][shader]") {
+    const auto error = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::flat_arc,
+        "PulpFragment shade(PulpGeom g, float2 p) { "
+        "return PulpFragment(half4(g.uv.x, abs(g.sdf), g.coverage, 1), 0, 0); }");
+    INFO(error);
+    REQUIRE(error.empty());
+}
+
 TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
     RecordingCanvas rc;
     Canvas::SDFStyle style;
