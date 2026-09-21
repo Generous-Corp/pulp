@@ -6,12 +6,17 @@
 // notes, rendered with and without the device in front of it, must not produce
 // the same samples, and the compensation the host resolved must equal the
 // window the device reported.
+#include "../core/host/src/signal_graph_internal.hpp"
 #include "../core/host/src/timeline_graph_binding_internal.hpp"
 #include "support/timeline_graph_binding_test_support.hpp"
 
 #include <pulp/host/timeline_device_resolver.hpp>
+#include <pulp/midi/humanize.hpp>
+#include <pulp/playback/event_compensation.hpp>
+#include <pulp/playback/note_renderer.hpp>
 
 #include <bit>
+#include <cmath>
 #include <optional>
 
 namespace {
@@ -146,6 +151,149 @@ TimelineGraphAdmissionCode admission_code(const std::shared_ptr<const CompiledTe
     const std::array routes{TimelineTrackGraphRoute{{10}, output_node}};
     const auto admission = binding.prepare(*pinned, routes, config(2), 48'000.0, 64);
     return admission.code;
+}
+
+/// One emitted note event restated in absolute playback samples, carrying its
+/// velocity.
+///
+/// The event-PDC suite's own collector keeps `data()[1]` only and sorts its
+/// result before returning it, so neither a velocity receipt nor a claim about
+/// the order the chain emitted events in can be read out of it. This one keeps
+/// both and preserves buffer order.
+struct LandedEvent {
+    std::int64_t sample = 0;
+    std::uint8_t status = 0;
+    std::uint8_t note = 0;
+    std::uint8_t velocity = 0;
+    auto operator<=>(const LandedEvent&) const = default;
+};
+
+/// The scheduling shift the host resolves for a one-humaniser chain, derived
+/// from the catalog rather than restated, so a device whose window moved cannot
+/// leave a test certifying the old number.
+std::int64_t resolved_humaniser_shift() {
+    const auto* humaniser = pulp::host::find_builtin_device(kEventHumaniserBindingKey);
+    REQUIRE(humaniser != nullptr);
+    const std::array chain{humaniser->latency_samples};
+    const auto resolved = accumulate_event_chain_shift(
+        chain, pulp::host::detail::timeline_graph_binding::kEventDeviceLatencyCeilingSamples);
+    REQUIRE(resolved);
+    return resolved.shift.samples;
+}
+
+/// Runs the real scheduler across `blocks` consecutive blocks and returns every
+/// note event the chain emitted, in absolute playback samples.
+///
+/// With `with_humaniser`, the compensating shift the host resolved is applied to
+/// the read window and each block is then passed through a live humaniser device
+/// slot -- the same slot the binding instantiates. Without it, the window is
+/// unshifted and the renderer's own stream is the result, which is the authored
+/// position. Comparing the two is therefore comparing a compensated device chain
+/// against the same content with no device in it at all.
+std::vector<LandedEvent> landed_events(const std::shared_ptr<const CompiledTempoMap>& map,
+                                       bool with_humaniser, float timing_depth = 0.0f,
+                                       float velocity_depth = 0.0f, std::size_t blocks = 256) {
+    constexpr std::uint32_t kFrames = 64;
+    std::vector<DevicePlacement> devices;
+    if (with_humaniser)
+        devices.push_back(DevicePlacement{{20}, humaniser_configuration()});
+    devices.push_back(DevicePlacement{{21}, instrument_configuration()});
+
+    ProgramHarness programs;
+    programs.publish(chain_project(*map, std::move(devices)), map,
+                     take(DecodedAudioAssetPool::create({})), 1);
+    auto program = programs.store.read();
+    REQUIRE(program);
+    PlaybackProgramBlock block(program.get());
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(256));
+    MasterTransport transport;
+    MasterTransportConfig transport_config;
+    transport_config.max_buffer_size = 256;
+    transport_config.initially_playing = true;
+    REQUIRE(transport.prepare(*map, transport_config) == TransportError::None);
+
+    const EventCompensationShift shift{with_humaniser ? resolved_humaniser_shift() : 0};
+
+    std::unique_ptr<PluginSlot> device;
+    if (with_humaniser) {
+        const auto* humaniser = pulp::host::find_builtin_device(kEventHumaniserBindingKey);
+        REQUIRE(humaniser != nullptr);
+        device =
+            pulp::host::load_builtin_plugin(pulp::host::builtin_device_plugin_info(*humaniser));
+        REQUIRE(device != nullptr);
+        // Ahead of prepare(), so the slot's reset picks the depths up rather
+        // than starting on its defaults and adopting these one block later.
+        device->set_parameter(kEventHumaniserTimingDepthParamId, timing_depth);
+        device->set_parameter(kEventHumaniserVelocityDepthParamId, velocity_depth);
+        REQUIRE(device->prepare(48'000.0, static_cast<int>(kFrames)));
+    }
+
+    midi::MidiBuffer device_out;
+    midi::UmpBuffer device_ump;
+    pulp::host::prepare_midi_block_storage(device_out, device_ump);
+    const state::ParameterEventQueue parameter_events;
+    Buffer device_audio(2, kFrames);
+
+    std::vector<LandedEvent> landed;
+    for (std::size_t index = 0; index < blocks; ++index) {
+        TransportSnapshot transport_snapshot;
+        REQUIRE(transport.begin_block(kFrames, transport_snapshot) == TransportError::None);
+        const auto result = renderer.process(block, transport_snapshot, shift);
+        REQUIRE(result.code == playback::NoteRenderCode::Ok);
+        const auto origin = static_cast<std::int64_t>(index * kFrames);
+        const midi::MidiBuffer* emitted = &renderer.events();
+        if (device) {
+            auto view = device_audio.view();
+            device->process(view, device_audio.const_view(), renderer.events(), device_out,
+                            parameter_events, static_cast<int>(kFrames));
+            emitted = &device_out;
+        }
+        // Read in buffer order, with no sort imposed here. The PDC suite's
+        // collector sorts its result, which would hide any reordering the chain
+        // itself performed.
+        for (const auto& event : *emitted)
+            landed.push_back(
+                {origin + event.sample_offset, event.data()[0], event.data()[1], event.data()[2]});
+    }
+    return landed;
+}
+
+/// Note-on landings only, which is the population the humaniser displaces.
+std::vector<LandedEvent> attacks(const std::vector<LandedEvent>& events) {
+    std::vector<LandedEvent> result;
+    for (const auto& event : events)
+        if ((event.status & 0xf0u) == 0x90u && event.velocity != 0)
+            result.push_back(event);
+    return result;
+}
+
+/// Note-off landings only. The kernel forwards a release unchanged, so this is
+/// the population that shows the shift with nothing delaying it back.
+std::vector<LandedEvent> releases(const std::vector<LandedEvent>& events) {
+    std::vector<LandedEvent> result;
+    for (const auto& event : events)
+        if ((event.status & 0xf0u) == 0x80u ||
+            ((event.status & 0xf0u) == 0x90u && event.velocity == 0))
+            result.push_back(event);
+    return result;
+}
+
+/// The kernel spec the device derives from its depth controls.
+///
+/// Restated here because an exact oracle has to be able to predict the draw,
+/// and the device keeps its seed private. The window comes from the catalog
+/// rather than from a literal, so only the seed is a restatement; a seed change
+/// is a change to what the musician hears and should fail a test that claims to
+/// predict it.
+midi::HumanizeSpec humaniser_spec(float timing_depth, std::uint8_t velocity_depth) {
+    const auto* humaniser = pulp::host::find_builtin_device(kEventHumaniserBindingKey);
+    REQUIRE(humaniser != nullptr);
+    const auto window = static_cast<std::int64_t>(humaniser->latency_samples);
+    const auto variable = static_cast<std::int64_t>(
+        std::llround(std::clamp(timing_depth, 0.0f, 1.0f) * static_cast<float>(window)));
+    return {window, velocity_depth, 0x5ee'd10'ddull, window - variable};
 }
 
 } // namespace
@@ -447,4 +595,133 @@ TEST_CASE("timeline built-in device catalog describes what a chain may name") {
     REQUIRE(pulp::host::kAdmittedDeviceChainLength == 2);
     REQUIRE(pulp::host::event_device_latency_ceiling_samples() ==
             pulp::host::detail::timeline_graph_binding::kEventDeviceLatencyCeilingSamples);
+}
+
+// Zero timing depth and zero velocity depth is the humaniser's declared control
+// setting, not a whole-device bypass: the device still reports the full window
+// as its latency, the host still reads the scheduling window that much early,
+// and the kernel still delays every ATTACK by `minimum_timing_samples`, which at
+// zero depth is the whole window. Those two displacements are equal and
+// opposite, so an attack lands on the sample the document authored.
+//
+// MEASURED rather than assumed, and the two event kinds do not agree:
+//
+//   attacks  identical in every field -- 600/2600/4600, velocity 127, in both
+//   releases a FIXED -512 offset      -- 1800/3800/5800 become 1288/3288/5288
+//
+// The asymmetry is the kernel being attack-only. A release is forwarded
+// unchanged, so nothing delays it back into the window the compensated read
+// pulled it out of, and it lands exactly one window early. Zero depth is
+// therefore a deterministic control setting and NOT render identity, which is
+// what the device's own exposure record says it is.
+TEST_CASE("timeline zero-depth humaniser chain lands every attack exactly where a chain "
+          "without it does",
+          "[parity]") {
+    const auto map = tempo_map();
+    const auto without_device = landed_events(map, false);
+    const auto zero_depth = landed_events(map, true, 0.0f, 0.0f);
+
+    // Populated, so an equality below is two real streams agreeing rather than
+    // two empty ones comparing equal.
+    const auto authored_attacks = attacks(without_device);
+    const auto authored_releases = releases(without_device);
+    REQUIRE(authored_attacks.size() == 3);
+    REQUIRE(authored_releases.size() == 3);
+    REQUIRE(attacks(zero_depth).size() == authored_attacks.size());
+    REQUIRE(releases(zero_depth).size() == authored_releases.size());
+
+    // The device really is in the chain and really is compensated for, so the
+    // comparison is a compensated chain against an uncompensated one.
+    REQUIRE(resolved_humaniser_shift() == kEventHumaniserWindowSamples);
+
+    // Tuple-identical: sample, status, note AND velocity.
+    REQUIRE(attacks(zero_depth) == authored_attacks);
+
+    // The fixed offset, asserted exactly rather than papered over.
+    const auto observed_releases = releases(zero_depth);
+    for (std::size_t index = 0; index < authored_releases.size(); ++index) {
+        INFO("release " << index);
+        REQUIRE(observed_releases[index].sample ==
+                authored_releases[index].sample - kEventHumaniserWindowSamples);
+        REQUIRE(observed_releases[index].status == authored_releases[index].status);
+        REQUIRE(observed_releases[index].note == authored_releases[index].note);
+    }
+
+    // Deterministic: the same depths render the same landings twice, so the
+    // equality above is a contract and not one lucky draw.
+    REQUIRE(landed_events(map, true, 0.0f, 0.0f) == zero_depth);
+
+    // Control: the same chain at full depth does NOT land its attacks where the
+    // undeviced chain does. Without this, the equality above could be a
+    // comparison that cannot tell any two chains apart.
+    const auto full_depth = landed_events(map, true, 1.0f, 0.0f);
+    REQUIRE(attacks(full_depth) != authored_attacks);
+}
+
+// Groove and humanisation are separated structurally -- one is compiled into the
+// program, the other runs as a device -- and nothing until now read the result
+// against a closed-form prediction, so a stage applied twice would land events
+// on wrong samples with every existing assertion still green.
+//
+// The oracle is `Humanize::jittered_position`, the pure per-event draw the
+// kernel exposes for exactly this. The coordinate it draws against is the
+// position the compensated read handed the device, which is the authored sample
+// read one window early; with no groove device in this chain that lowered
+// position IS the post-groove position. Equality can only hold if the draw was
+// applied exactly once.
+TEST_CASE("timeline humaniser chain applies its timing draw exactly once", "[parity]") {
+    const auto map = tempo_map();
+    const auto shift = resolved_humaniser_shift();
+    const auto authored = attacks(landed_events(map, false));
+    REQUIRE(authored.size() == 3);
+
+    SECTION("a non-zero depth lands on the closed-form draw") {
+        constexpr float kDepth = 1.0f;
+        const auto spec = humaniser_spec(kDepth, 0);
+        const auto landed = attacks(landed_events(map, true, kDepth, 0.0f));
+        REQUIRE(landed.size() == authored.size());
+
+        bool any_displaced = false;
+        for (std::size_t index = 0; index < landed.size(); ++index) {
+            const auto lowered = authored[index].sample - shift;
+            const auto predicted =
+                midi::Humanize<>::jittered_position(spec, 0, authored[index].note, lowered);
+            INFO("attack " << index << " lowered " << lowered << " predicted " << predicted
+                           << " landed " << landed[index].sample);
+            REQUIRE(landed[index].sample == predicted);
+            if (predicted != lowered)
+                any_displaced = true;
+        }
+        // The draw actually moved something. An oracle that predicted a
+        // zero displacement would be satisfied by a device that did nothing.
+        REQUIRE(any_displaced);
+
+        // Control: the oracle reads the device's own seed rather than agreeing
+        // with whatever spec it is handed. A different seed must disagree.
+        auto other_seed = spec;
+        other_seed.seed ^= 1ull;
+        bool disagrees = false;
+        for (std::size_t index = 0; index < landed.size(); ++index)
+            if (midi::Humanize<>::jittered_position(other_seed, 0, authored[index].note,
+                                                    authored[index].sample - shift) !=
+                landed[index].sample)
+                disagrees = true;
+        REQUIRE(disagrees);
+    }
+
+    SECTION("zero depth lands on the lowered position plus the whole window") {
+        const auto spec = humaniser_spec(0.0f, 0);
+        // At zero depth the draw span is one sample wide, so the displacement is
+        // the whole window and nothing else -- which is what cancels the shift.
+        REQUIRE(spec.minimum_timing_samples == spec.timing_samples);
+        const auto landed = attacks(landed_events(map, true, 0.0f, 0.0f));
+        REQUIRE(landed.size() == authored.size());
+        for (std::size_t index = 0; index < landed.size(); ++index) {
+            const auto lowered = authored[index].sample - shift;
+            INFO("attack " << index);
+            REQUIRE(midi::Humanize<>::jittered_position(spec, 0, authored[index].note, lowered) ==
+                    landed[index].sample);
+            REQUIRE(landed[index].sample == authored[index].sample);
+        }
+    }
 }

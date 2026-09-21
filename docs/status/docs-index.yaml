@@ -299,6 +299,11 @@ docs:
     kind: guide
     summary: The pulp::signal::osc oscillator suite — VA, VCO, DCO, and WT (modern + lo-fi tiers) over shared phase/BLEP primitives; distinct from the legacy signal::Oscillator
 
+  - slug: rhythm-generation
+    path: guides/rhythm-generation.md
+    kind: guide
+    summary: Rhythm and timing-feel primitives — Euclidean patterns and recipes, lane relationships (coincident/complementary/independent, wrap vs proportional polymeter), Markov transitions, authored trigger grids with per-cell microtiming, swing quantization and its round-trip bound, order-preserving groove projection, and coordinate-keyed determinism
+
   - slug: examples
     path: guides/examples.md
     kind: guide
@@ -695,6 +700,11 @@ docs:
     path: policies/event-stream-pdc.md
     kind: policy
     summary: Event-stream delay-compensation contract; event-to-event execution still open
+
+  - slug: event-stream-timing-transform
+    path: policies/event-stream-timing-transform.md
+    kind: policy
+    summary: Compile-time and render-time timing-transform stages, coordinate ownership, and zero-transform identity
 
   - slug: licensing
     path: reference/licensing.md
