@@ -548,7 +548,7 @@ jobs:
           df -h /
           free_kib="$(df -Pk / | awk 'NR==2 {print $4}')"
           if [ "${free_kib}" -lt $((10 * 1024 * 1024)) ]; then
-            echo "::error::Hosted macOS coverage has less than 10 GiB free after safe image cleanup. Refusing a predictably truncated coverage build."
+            echo "::error::Hosted macOS coverage has less than 10 GiB free after safe image cleanup, so this runner arrived short. NOTE: this is an ARRIVAL floor, not a capacity guarantee — a full coverage run needs tens of GiB and has historically exhausted the disk roughly 110 minutes AFTER passing this check. Disk pressure during the run is bounded by run_coverage.sh's incremental profile reclamation, not by this threshold."
             exit 1
           fi
 

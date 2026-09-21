@@ -16,7 +16,36 @@ single source of truth for that model.
 | **cross-platform-check** | per PR (x86-64 Linux, arm64 Linux, x86-64 Windows) | advisory | no | core tests, excludes `validation` + `slow` **only** — so the timing group does run here, off the reference platform |
 
 The required gate is **serialized on self-hosted macOS runners** and takes
-~30 min. Keeping it lean is why the two label groups below are excluded from it.
+about 40 min (median 39.8 min of wall-clock over 45 sampled `pull_request`
+runs). Keeping it
+lean is why the two label groups below are excluded from it.
+
+### Where the required gate's wall-clock goes
+
+Measured per-step medians over the same sample, across the 40 runs that
+allocated a native macOS build (the other 5 resolved to the no-native-build
+alias and are excluded here, since they run no build or test step). The step
+medians sum to 39.5 min, slightly under the 39.8 min job median — the
+difference is per-run scheduling overhead, not a missing step:
+
+| Step | Median | Share |
+|------|--------|-------|
+| `Build` | 21.3 min | 54 % |
+| `Test (non-Windows)` | 14.8 min | 37 % |
+| `Configure` | 1.3 min | 3 % |
+| everything else (checkout, brew, ccache install, bootstrap, receipts) | ~2.1 min | 5 % |
+
+Two properties of that profile are worth knowing before optimizing it. `Build`
+already runs against a warm build dir at a 92-94 % ccache hit rate, so it is
+dominated by linking rather than by recompilation. `Test` is **not** uniformly
+parallel: under `-j8` the run reaches concurrency 5-8 for its first ~4 min and
+then drops to a single test at a time for a median 10.0 min (n=6), because
+`RUN_SERIAL` and `PROCESSORS 8` tests can only be scheduled alone and CTest
+defers them until the parallel queue drains. `pulp-browser-capture-node-integration`
+alone is ~6 min of that tail and is always the last test to finish; it is
+`RUN_SERIAL` deliberately, because a real-Chrome CDP screenshot crosses its
+bounded deadline when unrelated CTest work shares the machine. The serial set,
+not the test count, is what sets the floor on the test phase.
 For a merge group whose base, head, tree, policy, toolchain record, and tested
 artifact identities exactly match a successful PR receipt, the protected-base
 verifier derives a new merge-group-bound decision and the native repetition is
@@ -62,9 +91,10 @@ filter `build.yml`'s PR ctest uses on `pull_request`, `workflow_dispatch`, and
 ### Affected slow proofs
 
 `agent-capability-installed-sdk` installs Pulp and builds an independent
-consumer for every exported capability and typed binding. It measured roughly
-12 minutes by itself on a warm Apple runner, so charging it to every unrelated
-PR made the required test phase mostly one irrelevant proof. It carries
+consumer for every exported capability and typed binding. It runs as its own
+step on the required macOS job, where it measures a median 129 s (n=17,
+range 104-174 s); charging that to every unrelated PR made a meaningful share
+of the required test phase one irrelevant proof. It carries
 `slow;agent-capability-installed-sdk` and is restored by `build.yml` only when
 the exact diff touches the capability skill, installed manifest/schemas,
 capability history, registry/generator, compile projection, CMake target/export
@@ -73,6 +103,18 @@ job and the parallel Linux matrix leg so platform-specific exports retain their
 pre-merge proof; even an otherwise skip-safe selected documentation change
 allocates those jobs. Relevant changes therefore still fail before merge, while unrelated PRs
 and merge groups do not pay its cost. An unknown diff fails closed and runs it.
+
+Read that selector honestly before treating it as narrow: the pattern list in
+`tools/scripts/classify_changes.py` includes a bare `*.cmake` / `**/*.cmake`,
+so **any** CMake file anywhere selects the proof — including a
+`test/cmake/*_tests.cmake` manifest edited only to register an unrelated test.
+Because "tests ship with fixes" makes such an edit routine, the proof is
+selected by roughly half of the open PR population at any time (20 of 41 in one
+census), and `*.cmake` is what selects it in the large majority of those.
+Narrowing that glob would be a fail-closed weakening of a deliberately
+conservative classifier, so it wants an explicit owner decision about which
+`test/cmake` manifests genuinely reach the installed export surface — several
+of them (SDK-consumer and smoke manifests) do.
 The explicit restoration is limited to reduced PR, merge-group, and Shipyard
 dispatch corpora; unfiltered main/nightly runs already include the proof and do
 not run it a second time.

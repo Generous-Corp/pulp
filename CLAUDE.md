@@ -129,10 +129,10 @@ cannot tell whether a leg is ephemeral or one of the shared self-hosted Studios
 (the macOS matrix leg resolves to `PULP_LOCAL_MACOS_RUNS_ON_JSON` — the shared
 Studios that host the required `macos` gate). In a workflow, bounding a
 whole-machine build is therefore the **author's** job: route a self-hosted leg
-through `tools/ci/governed-build.sh` (as `build.yml`, `examples-validation.yml`,
-`web-plugins.yml`, and `format-baseline-diff.yml` do for their macOS legs). When
-adding a build command anywhere, give `--parallel`/`-j` a bounded share (or route
-it through the governor), not the machine's core count.
+through `tools/ci/governed-build.sh` (`build.yml`'s `Build` step + intel canary,
+`examples-validation.yml`, `web-plugins.yml`, `format-baseline-diff.yml`). When
+adding a build command anywhere, derive `--parallel`/`-j` from the governor: a
+literal is a silent ceiling that survives a VM resize, a core count is the melt.
 
 **External SDKs** (not committed, cloned at configure time or manually):
 - VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)
@@ -1905,7 +1905,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
 | `text-metrics` | Baseline, half-leading, and font-face resolution for Label and captured (browser-imported) text — the arithmetic that decides where a glyph lands and how wide the box must be, plus the measure-vs-paint divergences that make text clip or sit low without any test going red. |
 | `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
-| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, order-preserving groove kernels, coordinate randomness, streaming cursors, and quantization arithmetic. |
+| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, inline and order-preserving groove projection, coordinate randomness, streaming cursors, and quantization arithmetic. |
 | `timeline` | Build, edit, validate, explain, render, import, or integrate Pulp timeline projects through the CLI, MCP tools, or C++ SDK. |
 | `trace-analysis` | The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). |
 | `trace-sql` | SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. |
