@@ -588,6 +588,143 @@ class FixtureRepository(unittest.TestCase):
         self.assertIn('"revision": "' + "0" * 40, handoff.read_text(encoding="utf-8"))
 
 
+# The inventory floor: what the ledger covered when this floor was last reviewed.
+#
+# `test_canonical_inventory_covers_the_shipped_ledger` is one-directional. It
+# asserts every declared path exists, and never that a path is still declared,
+# so deleting a row plus its matching `retained_paths` entry -- precisely what
+# taking one side of a whole-file conflict produces -- leaves a document that
+# validates. The generator accepts the shrunken set ("101 rows unchanged"), the
+# receipt rebinds to it, the provenance tier reports no drift, and the loss is
+# silent. These two literals are the missing direction.
+#
+# They are a FLOOR, not a frozen reading. Of the 185 commits that have touched
+# this file, one created it carrying no inventory at all and six grew the path
+# set, from 67 to 102 rows and 59 to 93 paths. The other 178 were identity
+# re-pins that moved no path. So an addition must cost nothing: a new row
+# raises the count past the floor and adds a path the baseline does not name,
+# and both assertions stay green without anyone editing this file. That is
+# deliberate -- a test pinning exact equality would go red on every legitimate
+# addition and be deleted by the author it obstructed, which is how this hole
+# stays open.
+#
+# A REMOVAL is the reviewed edit. A path genuinely deleted from the repo must
+# be removed from this baseline in the same commit that removes it from the
+# ledger, and that edit is the durable record that a human intended the loss.
+# An unintended drop has no such edit, so it lands here as a failure naming the
+# path. The generator never edits a path list -- `canonical_inventory` is
+# explicit that a path list change is a human edit -- so this baseline lives in
+# the test rather than in a generated sidecar, and never conflicts on a re-pin.
+#
+# Both assertions are load-bearing, because neither subsumes the other. Eight
+# paths are pinned by more than one entry -- control_gpu_health_provider.cpp by
+# three, the rest by two -- and those are the nine surplus rows that separate
+# 102 rows from 93 paths. Dropping one row of a duplicated path lowers the row
+# count while leaving the path set whole, so only the count sees it. Dropping
+# the sole row for a unique path lowers both, and only the set names which
+# path went.
+CANONICAL_ROW_FLOOR = 102
+# Composition at the last review: 94 blob rows and 8 tree rows. Recorded rather
+# than asserted -- a path that becomes a directory legitimately flips type.
+CANONICAL_PATH_FLOOR = frozenset(
+    {
+        ".agents/skills/daw-smoke/SKILL.md",
+        ".agents/skills/forge-app-delivery/SKILL.md",
+        ".agents/skills/prove-before-showing/SKILL.md",
+        ".agents/skills/pulp-vellum-change-routing/SKILL.md",
+        ".agents/skills/screenshot/SKILL.md",
+        ".agents/skills/skia-gpu-build/SKILL.md",
+        ".agents/skills/trace-analysis/SKILL.md",
+        ".agents/skills/trace-analysis/references/hints_gpu.md",
+        ".agents/skills/trace-sql/SKILL.md",
+        ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+        ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+        ".agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql",
+        ".agents/skills/view-bridge/SKILL.md",
+        ".agents/skills/web-plugins/SKILL.md",
+        ".github/vellum-ownership.json",
+        ".github/workflows/release-cli.yml",
+        "core/render/include/pulp/render/headless_surface.hpp",
+        "core/render/include/pulp/render/skia_surface.hpp",
+        "core/render/src/skia_surface.cpp",
+        "core/view/platform/mac/window_host_mac.mm",
+        "core/view/src/editor_bridge.cpp",
+        "core/view/src/view.cpp",
+        "core/view/src/widget_bridge.cpp",
+        "core/view/src/widget_bridge/bridge_dispatch.cpp",
+        "docs/contracts/gpu-dpr-corpus-v2-template.json",
+        "docs/contracts/gpu-dpr-experiment-v1.schema.json",
+        "docs/contracts/gpu-dpr-experiment-v2.schema.json",
+        "docs/contracts/gpu-dpr-live-verification-v1.schema.json",
+        "docs/contracts/gpu-first-visible-a3-acceptance-v1.schema.json",
+        "docs/contracts/gpu-first-visible-a3-acceptance-v2.schema.json",
+        "docs/contracts/gpu-health-read-result-v1.schema.json",
+        "docs/contracts/gpu-vellum-package-terminal-v1.schema.json",
+        "docs/status/gpu-recipes.yaml",
+        "docs/validation/gpu-dpr",
+        "docs/validation/gpu-first-visible-a3-acceptance.json",
+        "docs/validation/gpu-first-visible-a3-acceptance.md",
+        "docs/validation/gpu-probes",
+        "docs/validation/gpu-trace-overhead",
+        "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+        "experimental/pulp-rs/src/cmd/upgrade.rs",
+        "experimental/pulp-rs/src/install.rs",
+        "experimental/pulp-rs/src/install/tests.rs",
+        "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+        "inspect/include/pulp/inspect/control_gpu_health_read_executor.hpp",
+        "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+        "inspect/src/control_gpu_health_provider.cpp",
+        "inspect/src/control_gpu_health_read_executor.cpp",
+        "inspect/src/control_gpu_health_view_adapter.cpp",
+        "test/cmake/gpu_health_tests.cmake",
+        "test/fixtures/gpu-ux/dpr",
+        "test/support/a3_control_build_identity.hpp",
+        "test/test_control_gpu_health_provider.cpp",
+        "test/test_control_gpu_health_standalone_product.cpp",
+        "tools/cli/gpu_health",
+        "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+        "tools/cli/gpu_health/src/health_read_result_json.cpp",
+        "tools/cli/gpu_probe",
+        "tools/cli/gpu_recipe_catalog_data.h.in",
+        "tools/mcp/mcp_gpu_tools.cpp",
+        "tools/mcp/mcp_trace_tools.cpp",
+        "tools/scripts/gpu_dpr_evidence.py",
+        "tools/scripts/gpu_dpr_experiment.py",
+        "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+        "tools/scripts/gpu_dpr_runner.py",
+        "tools/scripts/gpu_dpr_v2_evidence.py",
+        "tools/scripts/gpu_dpr_v2_runner.py",
+        "tools/scripts/gpu_dpr_v2_terminal.py",
+        "tools/scripts/gpu_first_visible_a3_acceptance.py",
+        "tools/scripts/gpu_first_visible_a3_acceptance_v2.py",
+        "tools/scripts/gpu_first_visible_a3_auv2_logic_producer.py",
+        "tools/scripts/gpu_first_visible_a3_campaign.py",
+        "tools/scripts/gpu_first_visible_a3_clap_reaper_producer.py",
+        "tools/scripts/gpu_first_visible_a3_constrained_adapter_producer.py",
+        "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+        "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+        "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+        "tools/scripts/gpu_first_visible_a3_role_producer.py",
+        "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+        "tools/scripts/gpu_first_visible_a3_vst3_reaper_producer.py",
+        "tools/scripts/gpu_recipe_catalog.py",
+        "tools/scripts/gpu_trace_overhead_acceptance.py",
+        "tools/scripts/package_cli.py",
+        "tools/scripts/release_artifact_contents.py",
+        "tools/scripts/release_product_matrix.json",
+        "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+        "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
+        "tools/scripts/test_gpu_first_visible_a3_campaign.py",
+        "tools/scripts/test_gpu_first_visible_a3_external_adapter.py",
+        "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
+        "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+        "tools/scripts/test_package_cli.py",
+        "tools/scripts/test_release_artifact_contents.py",
+        "tools/scripts/verify_gpu_probe_acceptance.py",
+    }
+)
+
+
 class CheckedInLedger(unittest.TestCase):
     """Bind the shipped ledger to the generator that is supposed to own it."""
 
@@ -608,6 +745,59 @@ class CheckedInLedger(unittest.TestCase):
         )
         for path in provenance.canonical_paths(document):
             self.assertTrue((self.root / path).exists(), f"{path} is absent")
+
+    def test_the_shipped_ledger_still_covers_every_path_in_the_floor(self) -> None:
+        """Fail loudly on a consistent row drop, the mutation nothing else sees.
+
+        The case above walks declared paths outward to the filesystem. Nothing
+        walked the other way, so a row removed together with its disposition
+        left no evidence: the document still parsed, every surviving row still
+        routed, and regeneration rebound the receipt to the smaller set. This
+        asserts the direction that was missing.
+
+        The remedy when this goes red is not to edit the numbers. A path is
+        missing from the ledger that a reviewer previously accepted, and the
+        repair is to restore the dropped row -- typically by redoing a conflict
+        resolution that took one side of a whole-file conflict instead of
+        merging both. Lower the floor only when a path was deliberately
+        deleted, in the commit that deletes it.
+        """
+
+        # A floor that lost its own contents would assert nothing, which is
+        # the exact failure this case exists to end. Refuse to pass vacuously.
+        self.assertTrue(
+            CANONICAL_PATH_FLOOR,
+            "CANONICAL_PATH_FLOOR is empty, so this case asserts nothing; "
+            "restore it from the ledger's canonical paths",
+        )
+
+        document = provenance.load_handoff(self.handoff)
+        inventory = provenance.canonical_inventory(document)
+        present = set(provenance.canonical_paths(document))
+
+        dropped = sorted(CANONICAL_PATH_FLOOR - present)
+        self.assertEqual(
+            dropped,
+            [],
+            "the GPU handoff ledger no longer covers "
+            f"{len(dropped)} path(s) it is required to cover. A row was "
+            "dropped from docs/status/gpu-vellum-handoff.yaml -- restore it "
+            "rather than lowering CANONICAL_PATH_FLOOR, unless this commit "
+            "deliberately deletes the path:\n"
+            + "\n".join(f"  {path}" for path in dropped),
+        )
+
+        # Eight paths are pinned by more than one entry, so a duplicated path
+        # can lose a row without losing its path. The count is what sees that.
+        self.assertGreaterEqual(
+            len(inventory),
+            CANONICAL_ROW_FLOOR,
+            f"the GPU handoff ledger pins {len(inventory)} rows, below the "
+            f"reviewed floor of {CANONICAL_ROW_FLOOR}. Every covered path is "
+            "still present, so a row was dropped from a path that more than "
+            "one entry pins. Restore it rather than lowering "
+            "CANONICAL_ROW_FLOOR.",
+        )
 
     def test_regenerating_the_shipped_ledger_reproduces_it_exactly(self) -> None:
         """Regeneration at HEAD must be a byte-identical no-op.
@@ -1256,11 +1446,12 @@ class MergeSentinel(unittest.TestCase):
     def test_the_sentinel_check_reads_a_merged_ledger_and_refuses_it(self) -> None:
         """The local half of the design, end to end on real driver output.
 
-        The pin-freshness guard cannot cover this: it fires when a pinned path
-        changes and the ledger does not, and a sentinel merge changes the
-        ledger, so it reads the sentinel as the refresh it was waiting for. The
-        conflict-marker guard cannot either -- the driver's whole purpose is
-        that there are no markers.
+        No other guard can name this file as poisoned. The pin-freshness
+        guard reasons about whether pinned identities are fresh and never
+        reads the sentinel value at all, so whatever verdict it reaches on a
+        sentinel resolution it reaches for another reason, and it cannot say
+        the sentinel is why. The conflict-marker guard cannot either -- the
+        driver's whole purpose is that there are no markers.
         """
 
         # Spelled out rather than taken from sentinel_check.LEDGERS: naming the
