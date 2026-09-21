@@ -432,34 +432,87 @@ them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and ex
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
 
-### Editing a `gpu-vellum-handoff.yaml`-pinned path is a TWO-commit operation
+### A PR does not re-pin `gpu-vellum-handoff.yaml` — the version bot does
 
 `docs/status/gpu-vellum-handoff.yaml` pins every referenced Pulp path to an
-exact revision, object id and object type. Change one of those files and the
-pinned row goes stale, so `gpu-recipe-catalog-selftest` and
-`gpu-handoff-provenance-selftest` fail — **in CI, ~20 minutes later**. On
-2026-09-05 three separate PRs each discovered it that way in one night, and one
-of them additionally went `DIRTY` colliding with another PR's regenerated
-receipt, because the ledger is a serialization point every such PR must pass
-through.
+exact revision, object id and object type, and
+`docs/validation/gpu-handoff-provenance/receipt.json` binds itself to that
+ledger's exact bytes. Editing any pinned path stales both. That used to make
+every such PR carry a hand-run re-pin as a second commit, and the cost was
+larger than it looked: **~148 non-merge commits in 25 days changed only those
+two files**, in 124 distinct subject spellings. They also collide on
+github.com, where the local `pulp-gpu-ledger` merge driver cannot run — so two
+PRs that both re-pinned went `DIRTY` against each other, serializing on a
+generated artifact neither author had opinions about.
 
-The repair is a tool-generated identity refresh, never a hand edit:
+`version_at_land._refresh_derived` now regenerates the pair inside the
+`chore: bump versions` commit the release bot writes to `main`. That commit
+advances `main` by itself, so a re-pin there costs nobody a rebase.
 
-```bash
-python3 tools/scripts/gpu_handoff_provenance.py write   # regenerate
-python3 tools/scripts/gpu_handoff_provenance.py check   # verify (~25s, git log per row)
-```
+**So: edit a pinned path and push. Do not re-pin.** The rows go stale, and
+stale is survivable — provenance is ancestral, and currency is opt-in behind
+`PULP_GPU_HANDOFF_REQUIRE_CURRENT`, which nothing in `.github` sets.
 
-**Hand-resolving the receipt is the trap**: it passes the merge conflict and
-then fails the receipt's own checker. Merge first, then regenerate against the
-merged tree.
+"Survivable" is about gates, not about truth. `gpu_handoff_provenance.py check`
+is the strong currency claim — the one that asserts every pinned row names the
+blob HEAD actually holds — and between a merge that touches a pinned path and
+the next `chore: bump versions` commit it is **expected to be red on `main`**.
+That is the designed steady state, not a defect and not something to repair by
+hand: the bot's next bump regenerates the pair. No gate runs `check` (nothing in
+`.github/`, `.shipyard/config.toml` or a ctest command invokes it; the
+`gpu-handoff-provenance-selftest` ctest carries the currency assertion but skips
+it unless `PULP_GPU_HANDOFF_REQUIRE_CURRENT=1`), so a red `check` blocks nothing
+— it just means the ledger is between refreshes. Run it when you want the
+stronger claim, and read a red one against the clock rather than as a bug.
 
-`gates.sh` now runs `gpu_handoff_pin_freshness.py`, which is diff-scoped and
-sub-second and fails the push when a pinned path changed without the ledger
-being touched. It deliberately proves only *that* — it does not re-verify the
-identity fields, because doing so costs ~25s per push. A green gate means "you
-did not forget", not "the pins are correct"; the `check` command above is what
-proves the latter.
+Two things still belong to the PR:
+
+- **An editorial ledger change** — adding, removing or re-stating a pinned
+  path, and equally an edit to `authorities`, `upstream`, `cutover_trigger`,
+  `self_binding`, `stop_rules`, or an entry's `vellum_paths`,
+  `terminal_evidence`, `input_receipts` or `accepted_dispositions`. The bot
+  regenerates identities; it cannot make any of those decisions. Editorial is
+  the whole document minus the three derived identity fields, and all of it is
+  a legitimate in-PR ledger edit that still owes the regeneration:
+
+  ```bash
+  python3 tools/scripts/gpu_handoff_provenance.py write --receipt   # regenerate both
+  python3 tools/scripts/gpu_handoff_provenance.py check             # verify (~25s, git log per row)
+  ```
+
+  Pass `--receipt`. A bare `write` leaves the receipt naming bytes that no
+  longer exist. **Hand-resolving either file is the trap**: it passes the merge
+  conflict and then fails the receipt's own checker. Merge first, then
+  regenerate against the merged tree.
+
+- **A pinned path you deleted or renamed.** Staleness survives; a *missing*
+  path does not — the required gate goes red on it. Drop or move the row in the
+  same PR and regenerate.
+
+`gpu_handoff_pin_freshness.py` enforces exactly those two shapes, from both
+`gates.sh` and the pre-push hook: it fails an identity-only re-pin (ledger or
+receipt moved, the ledger's editorial content did not) and a pinned path
+deleted or renamed while the inventory still lists it. Diff-scoped and
+sub-second — an `ls-tree`/`show` pair per side and one `git diff
+--name-status`. It does not re-verify the identity fields; the `check` command
+above is what proves those.
+
+**It reports three outcomes, and `2` is one of them.** `0` is checked-and-clean,
+`1` is a violation, and `2` is *git could not answer, so nothing was checked* —
+an unresolvable `--base`, a deleted branch, a shallow clone, a typo. That third
+code exists because the gate reads its subject through `git`, and an empty
+changed-path list is how it spells clean: a swallowed non-zero return therefore
+reads as a pass, and the violation sails through with the gate looking green.
+The same split is in `silent_revert_guard.py`, which prints `HISTORY
+UNAVAILABLE` and exits `2` for the same reason.
+
+That matters when wiring it, because the two local surfaces route exit codes
+differently. `gates.sh` uses `if ! "$PYTHON" …`, so every non-zero already
+fails. The **pre-push hook enumerates codes in a `case`, and its `*)` arm prints
+"internal error" WITHOUT setting `fail`** — so an unmapped `2)` would print a
+line and let the push through, putting the blind spot back one layer out from
+the script that just closed it. Map every non-zero code a gate can return, and
+when you add an outcome to a gate, add its arm to the hook in the same change.
 
 ### `gates.sh` and the pre-push hook are two lists, not one
 
@@ -1007,9 +1060,10 @@ sentinel is chosen so that nothing accepts it.
 **Why it needed its own gate.** The two guards that look closest both miss it,
 and each misses it for a structural reason rather than an oversight:
 
-* `gpu_handoff_pin_freshness.py` fires when a pinned path changes and the ledger
-  does **not**. A sentinel merge changes the ledger, so it reads the sentinel as
-  the refresh it was waiting for.
+* `gpu_handoff_pin_freshness.py` no longer looks at staleness at all — it
+  rejects an in-PR re-pin and an orphaned pinned path. A sentinel merge leaves
+  the inventory unchanged, so the most it could say is "do not re-pin", which
+  is the opposite of the repair a sentinel needs.
 * `conflict_marker_check.py` looks for `<<<<<<<`. The driver's entire purpose is
   that there are none.
 
@@ -1020,9 +1074,9 @@ remove.
 load-bearing.** `gates.sh` is run by convention; it is not invoked by
 `.githooks/pre-push`, and `.shipyard/config.toml [validation.gates]` runs its own
 explicit script list rather than the file. A rule wired only into `gates.sh`
-therefore holds only for whoever remembered to run it — which is why
-`gpu_handoff_pin_freshness.py` (gate 6b2), wired that way, does not actually gate
-a push today.
+therefore holds only for whoever remembered to run it —
+`gpu_handoff_pin_freshness.py` (gate 6b2) sat in exactly that state until it was
+wired into the hook too, so neither surface can be assumed to inherit the other.
 
 ## Gate: gpu-provenance reachability (`hydrate_gpu_provenance_commits.py --verify-only`)
 
@@ -1424,6 +1478,47 @@ measured baseline as a must-stay-quiet case and will fail a tuning that
 re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
+
+### …but the same sweep DOES name the label, once a job is already stalled on it
+
+The paragraph above forbids a *scheduled* label census, and that still holds.
+What the sweep also does now is narrower and safe for exactly one reason: it is
+**demand-gated**. Only a label set that some job has already been queued on past
+the alarm threshold is ever compared against the labels online runners
+advertise. Nothing queued means nothing to compare, so the 3am empty-runner-list
+reading is never consulted — the failure mode the paragraph above warns about
+cannot occur by construction, not by tuning. The JIT objection is bounded rather
+than waved away: a healthy lane mints a runner in seconds to minutes, so a label
+that has not appeared in 45 minutes is not a minting delay.
+
+It exists because on 2026-09-21 the merge queue deadlocked for 5h30m with zero
+merges: three queued `macos` jobs each asked for `pulp-build-merge-group` while
+every online runner advertised `pulp-build-pr-head`. Queue age could say the
+lane looked dead; nothing said which label was missing.
+
+Three things to know before reading or touching it:
+
+- **Unschedulable and saturated are different verdicts.** GitHub places a job on
+  ONE runner carrying *every* requested label, so "schedulable" means some online
+  runner's label set is a superset of the request. A superset that is **busy** is
+  a deep queue on a working lane and stays silent at any age. Only "no online
+  runner carries this set, busy or idle" is `unschedulable_labels`.
+- **It needs `Administration: Read`, and is honestly disarmed without it.** Org
+  runner groups are invisible to `repos/.../actions/runners` and this org keeps
+  online runners there, so both scopes are read. `GITHUB_TOKEN` cannot read the
+  org scope, so the workflow passes `secrets.RELEASE_BOT_TOKEN` when configured
+  (same fallback `runner-topology-check.yml` uses). Without it the org scope
+  refuses, the census records the refusal, and every reconciliation reports
+  `runner_census_blind` instead of naming a label. **If you see that finding
+  every sweep, the token is missing — the fleet is not necessarily sick.**
+- **An empty or failed runner read is a gap, never an absence claim.** Zero
+  online runners is the JIT idle state, which is precisely the reading a broken
+  census also produces, so it can never license a verdict. That gap is scoped to
+  this finding: it deliberately does not use the sweep-wide degraded predicate,
+  because the completed-run listing on this repo is always truncated and sharing
+  the predicate would leave the check permanently unable to fire. For the same
+  reason the census is collected outside `snapshot["errors"]` — a new API call
+  must not gain the power to silence the older alarms.
 
 ### The same sweep also answers "is every host still in it" — a different question
 
@@ -2664,12 +2759,32 @@ bisectable.
   0.00s though the code under test was race-free by design. The correct pattern:
   record the violation into an `atomic`/guarded value in the worker, `join()`,
   then assert on the test thread (`REQUIRE_FALSE(bad.load())`). The lint is a
-  lexical scan (best-effort: it does not follow calls into helpers) with a
-  same-length string/comment-blanking pass that also skips C++ digit separators
-  (`10'000`); suppress a verified-safe line with a trailing
+  lexical scan (best-effort: it does not follow calls into named functions) with
+  a same-length string/comment-blanking pass that also skips C++ digit
+  separators (`10'000`); suppress a verified-safe line with a trailing
   `// thread-assert:allow`. Runs as the `thread-safe-assertions` ctest case and
   in `gates.sh`. When graduating any required lane to VMs, expect this class of
   latent UB to surface — fix at the source, don't suppress.
+  **The spawn token is not always on the line that installs the body**, and
+  keying on it alone is why this guard once returned a clean exit on its own
+  subject: a `std::vector<std::thread>` populated by `emplace_back(lambda)`
+  carries `std::thread` only in the DECLARATION, so a hammer test with eight
+  workers each running `REQUIRE` 2000 times scanned clean while the direct
+  `std::thread t([]{ REQUIRE })` form flagged correctly — the instrument ran,
+  its positive control worked, and the output was indistinguishable from a
+  checked file. It now also resolves containers of threads/futures, lambdas
+  bound to a name and spawned later (`auto body = [...]; std::thread t(body)`),
+  and one bound lambda naming another. It still cannot follow an assertion into
+  a named function, a `std::function` held in a field or map, or a thread a
+  helper spawns; `thread_assert_check.py`'s docstring is the authoritative
+  caught/not-caught list, and a clean run means "none of those shapes",
+  never "no thread-unsafe assertion". `--wide` is a diagnostic pass that
+  reports every assertion in any lambda in a thread-spawning TU and always
+  exits 0; on 2026-09-20 it returned 266 hits over 29 files against the gate's
+  1, which is why it is a review aid and not the gate. The paired
+  unsafe/safe-twin fixtures live in `test_thread_assert_check.py`
+  (`thread-safe-assertions-selftest` ctest) so the guard is proven to
+  distinguish the shapes rather than proven to be quiet.
 - **ctest label-exclusion guard (`ctest_label_exclusion_guard.py`).** A Catch2
   suite whose *every* ctest registration carries a label in
   `PULP_COVERAGE_CTEST_LABEL_EXCLUDE` (`validation|slow|performance|bench|quality-lab`,
@@ -8815,6 +8930,50 @@ loud on a no-op. The pre-push hook (`.githooks/pre-push`) adds two backstop guar
 pushes: it refuses a **detached-HEAD** push and an **empty-diff-vs-base** push (the latter
 catches a rebase that flattened a branch to zero files). Root cause + the four-fix plan:
 `planning/friction/2026-07-15-git-state-in-shared-worktree-hell.md`.
+
+## Hosted macOS coverage dies of DISK, and the pre-flight check cannot see it
+
+A hosted `macos-15` coverage job that fails with **zero failed steps** — `Run coverage suite`
+reports success (it carries `continue-on-error`), then every later step is `null` — has **two
+different causes, and the step shape cannot tell them apart.** Read the check-run annotation
+(`ghapp api repos/<owner>/<repo>/check-runs/<job_id>/annotations`), never the step list, and
+never a log grep — the logs truncate around 17.6k lines and return false zeros:
+
+| annotation | cause | job duration |
+|---|---|---|
+| `Process completed with exit code 1` | **disk**: `No space left on device` mid-suite | 123-147 min |
+| `The hosted runner lost communication with the server` | **time**: the 180-minute suite budget (`coverage.yml`), i.e. the suite is simply too slow | 150-182 min, clustered at ~181 |
+
+The two duration ranges do not overlap, so elapsed time alone is a reliable second opinion.
+Sampling 35 recent macOS coverage failures found 21 of the time kind against 7 of the disk kind,
+so **do not assume disk** — over a longer 46-day window the disk kind dominated, and the mix
+moves as the suite grows.
+
+For the disk kind: the runner exhausts its filesystem mid-suite and dies before the lane's own
+`Verify Cobertura XML exists` detector can fire, so nothing in the step list names the cause.
+
+**Do not "fix" this by raising the 10 GiB threshold** in the "Reclaim hosted macOS coverage
+disk" step. That check runs ONCE, before the Skia fetch and before the build, and it answers
+only *did the Xcode cleanup free anything / did this runner arrive short?* Measured across ten
+failing and ten succeeding jobs, free space at that checkpoint was **75-76 GiB in all twenty** —
+failing and succeeding runners are indistinguishable there. No threshold between 10 and 76
+changes an outcome, and anything above 76 refuses every run. The disk is consumed by the run
+itself, a median ~109 minutes later.
+
+Disk pressure is bounded in `scripts/run_coverage.sh` instead: `%p-%m` per-process profiles are
+absorbed into a running profdata **while the suite runs** and deleted as absorbed. If you touch
+that loop, the safety rule is that a shard may be reclaimed **iff `kill -0` on the PID in its
+filename fails**. Never gate on mtime — a slow test's shard looks stale while its process is
+still writing, and reclaiming it drops that test's coverage with no error, which is the same
+silent under-reporting that moving off the shared `%Nm` pool already fixed once.
+
+**Counting these failures: log grep UNDERCOUNTS.** Large job logs truncate (~17.6k lines), so a
+confirmed ENOSPC job can return zero hits, and a further population fails with the annotation
+"The hosted runner lost communication with the server" and no usable log. Count with check-run
+annotations plus step shape (step 12 success, later steps `null`, zero failed steps), not `grep`.
+Also note the guard's own message text appears in EVERY hosted coverage log, because the workflow
+echoes the shell source — grepping the message string reports a guard firing on every run. Match
+the emitted annotation at line start (`##[error]Hosted macOS coverage has less than 10 GiB`).
 
 ## Coverage-on-main can go red from a time-budget kill (not a code failure) (2026-07-15)
 

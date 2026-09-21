@@ -60,38 +60,67 @@ void set_overlay_dismissal_policy(const OverlayDismissalPolicy& policy) {
 }
 
 OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
-    auto* state = root.existing_interaction();
-    auto* overlay = state ? state->active_overlay : nullptr;
-    if (!overlay) return {};
+    // Walk the overlay stack from the top. An entry that contains the press
+    // wins; an entry that does not is dismissed, revealing the one below it.
+    // That single loop is what makes a nest of menus behave: pressing a parent
+    // menu item while its submenu is open closes only the submenu and lands on
+    // the item, instead of either closing the whole nest or losing the press
+    // to whatever sibling pixel sits under the submenu.
+    bool dismissed_any = false;
+    bool consume_press = false;
+    for (;;) {
+        auto* state = root.existing_interaction();
+        auto* overlay = state ? state->active_overlay : nullptr;
+        if (!overlay) break;
 
-    // The root-owned slot guarantees this overlay belongs to this editor. Keep
-    // the tree check as a stale-slot safety guard: a detached holder is treated
-    // like an outside press and dismissed only from this root's slot.
-    if (overlay_still_in_tree(overlay, &root) &&
-        overlay->overlay_contains(root_pt)) {
-        // Hit-test inside the overlay's own subtree so nested buttons and
-        // labels still receive the press. Only route when this resolves to a
-        // real view: a null result means the overlay's guards rejected the
-        // point, and force-dispatching to the overlay anyway would bypass
-        // them. Do not dismiss in that case — the overlay is still mounted.
-        if (auto* sub = overlay->hit_test(point_to_local(root_pt, overlay, &root)))
-            return {OverlayPressRouting::routed, sub};
-        return {OverlayPressRouting::not_hittable, nullptr};
+        // The root-owned slot guarantees this overlay belongs to this editor.
+        // Keep the tree check as a stale-slot safety guard: a detached holder
+        // is treated like an outside press and dismissed only from this
+        // root's slot.
+        if (overlay_still_in_tree(overlay, &root) &&
+            overlay->overlay_contains(root_pt)) {
+            // Hit-test inside the overlay's own subtree so nested buttons and
+            // labels still receive the press. Only route when this resolves to
+            // a real view: a null result means the overlay's guards rejected
+            // the point, and force-dispatching to the overlay anyway would
+            // bypass them. Do not dismiss in that case — the overlay is still
+            // mounted.
+            if (auto* sub =
+                    overlay->hit_test(point_to_local(root_pt, overlay, &root)))
+                return {OverlayPressRouting::routed, sub};
+            if (dismissed_any)
+                return {OverlayPressRouting::dismissed, nullptr, consume_press};
+            return {OverlayPressRouting::not_hittable, nullptr};
+        }
+
+        // Outside this overlay: auto-release so "dismiss on outside click"
+        // works without every JSX caller registering a global click listener.
+        // Go through the dismissal path rather than the bare release_overlay()
+        // so React state can flip setOpen(false) via on_overlay_dismissed; a
+        // bare release leaves the component believing it is still open.
+        //
+        // Read the consumption decision BEFORE dismissing. A dismissal
+        // callback is arbitrary application code that routinely unmounts the
+        // popover and reflows what is underneath, so anything asked afterwards
+        // answers about a different tree than the one the user pressed on.
+        const bool entry_consumes = overlay->overlay_consumes_outside_click() &&
+                                    !press_hits_overlay_trigger(root, root_pt);
+        consume_press = consume_press || entry_consumes;
+        View::dismiss_active_overlay(root);
+        dismissed_any = true;
+
+        // An overlay that consumes its outside press spends that press on the
+        // close; nothing below it — not even a parent menu — may also act on
+        // it. Without this the one press would close a modal AND operate the
+        // menu behind it.
+        if (entry_consumes) break;
+
+        // No-progress guard: a dismissal callback may re-claim the same view,
+        // and a loop that kept asking would never terminate.
+        auto* after = root.existing_interaction();
+        if (after != nullptr && after->active_overlay == overlay) break;
     }
-
-    // Outside the overlay: auto-release so "dismiss on outside click" works
-    // without every JSX caller registering a global click listener. Go through
-    // dismiss_active_overlay() rather than the bare release_overlay() so React
-    // state can flip setOpen(false) via on_overlay_dismissed; a bare release
-    // leaves the component believing it is still open.
-    //
-    // Resolve the press target BEFORE dismissing. A dismissal callback is
-    // arbitrary application code that routinely unmounts the popover and
-    // reflows what is underneath, so a hit test taken afterwards answers about
-    // a different tree than the one the user pressed on.
-    const bool consume_press = overlay->overlay_consumes_outside_click() &&
-                               !press_hits_overlay_trigger(root, root_pt);
-    View::dismiss_active_overlay(root);
+    if (!dismissed_any) return {};
     return {OverlayPressRouting::dismissed, nullptr, consume_press};
 }
 

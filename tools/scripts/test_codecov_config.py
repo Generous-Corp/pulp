@@ -210,15 +210,15 @@ class CodecovYamlStructure(unittest.TestCase):
             "flags drifted from the reports the workflows actually upload",
         )
 
-    def test_upload_flags_are_current_and_not_path_scoped(self):
+    def test_upload_flags_carry_forward_and_are_not_path_scoped(self):
         flags = self.doc["flags"]
         for flag_name in sorted(EXPECTED_UPLOAD_ONLY_FLAGS):
             with self.subTest(flag=flag_name):
                 flag = flags[flag_name]
                 self.assertIs(
                     flag.get("carryforward"),
-                    False,
-                    f"{flag_name} upload flag must expose a missing current report",
+                    True,
+                    f"{flag_name} upload flag must preserve the last known report",
                 )
                 self.assertNotIn(
                     "paths",

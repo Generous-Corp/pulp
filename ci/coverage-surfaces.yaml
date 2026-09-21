@@ -6,7 +6,9 @@ schema_version: 1
 policy:
   merge_behavior: advisory
   required_status_contexts: []
-  carryforward: false
+  # Preserve the last known dashboard when an advisory producer misses;
+  # receipt checks still identify the stale run.
+  carryforward: true
   canonical_refresh_cron: "17 */8 * * *"
 
 component_sets:

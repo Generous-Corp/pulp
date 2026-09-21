@@ -1,5 +1,6 @@
 #include "detail/shared_io_convolution_session.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/staged_async_trace_ledger.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/runtime/trace.hpp>
@@ -852,4 +853,109 @@ TEST_CASE("recovery atomically closes future worker reservations without reclaim
     REQUIRE(bridge.activate_epoch(2));
     REQUIRE(bridge.begin_worker_admission());
     bridge.end_worker_admission();
+}
+
+TEST_CASE("staged async ledger emits one authenticated terminal record per request",
+          "[gpu_audio][trace][staged_async]") {
+    StagedAsyncTraceLedger ledger;
+    constexpr std::uint64_t request = 41;
+    constexpr std::uint64_t sequence = 17;
+
+    REQUIRE(ledger.admit(request, sequence, 2, 1000));
+    CHECK_FALSE(ledger.admit(request, sequence + 1, 3, 1001));
+    CHECK_FALSE(ledger.admit(request + 1, sequence, 3, 1001));
+    REQUIRE(ledger.submitted(request, 1100));
+    CHECK_FALSE(ledger.submitted(request, 1101));
+    REQUIRE(ledger.complete(request, StagedAsyncTraceLedger::CompletionStatus::Success, 1200));
+    CHECK(ledger.empty());
+
+    const auto records = ledger.take_completed();
+    REQUIRE(records.size() == 1);
+    const auto& record = records.front();
+    CHECK(record.generation == 1);
+    CHECK(record.valid());
+    CHECK(record.sequence == sequence);
+    CHECK(record.gpu_work_admitted);
+    CHECK(record.gpu_terminal == SharedIoGpuTerminalDisposition::CompletedAccepted);
+    CHECK(record.outcome == SharedIoTraceOutcome::Success);
+    CHECK(record.has(SharedIoTraceStage::Scheduled));
+    CHECK(record.has(SharedIoTraceStage::WorkerEntry));
+    CHECK(record.has(SharedIoTraceStage::EncodeBegin));
+    CHECK(record.has(SharedIoTraceStage::EncodeEnd));
+    CHECK(record.has(SharedIoTraceStage::SubmitBegin));
+    CHECK(record.has(SharedIoTraceStage::SubmitEnd));
+    CHECK(record.has(SharedIoTraceStage::CompletionObserved));
+    CHECK(shared_io_trace_duration(record, SharedIoTraceStage::SubmitBegin,
+                                   SharedIoTraceStage::CompletionObserved)
+              .available);
+    CHECK(ledger.take_completed().empty());
+
+    // Retirement releases the sequence identity so a later generation may
+    // reuse the numeric sequence without colliding with a live request.
+    REQUIRE(ledger.admit(request + 1, sequence, 3, 2000));
+    REQUIRE(ledger.submitted(request + 1, 2100));
+    REQUIRE(ledger.complete(request + 1, StagedAsyncTraceLedger::CompletionStatus::Failed, 2200));
+}
+
+TEST_CASE("staged async trial state atomically owns request slot and sequence",
+          "[gpu_audio][trace][staged_async]") {
+    StagedAsyncTrialState state(2);
+    REQUIRE(state.admit(9, 4, 1, 5000, 1000));
+    CHECK(state.pending_count() == 1);
+    CHECK(state.slot_occupied(1));
+    CHECK_FALSE(state.admit(10, 5, 1, 5001, 1001));
+    CHECK_FALSE(state.submitted(10, 1002));
+    REQUIRE(state.submitted(9, 1100));
+    REQUIRE(state.complete(9, StagedAsyncTraceLedger::CompletionStatus::Expired, 1200));
+    CHECK(state.pending_count() == 0);
+    CHECK_FALSE(state.slot_occupied(1));
+
+    const auto records = state.take_completed();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().sequence == 4);
+    CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::LateRejected);
+}
+
+TEST_CASE("staged async trial state preserves the configured preparation generation",
+          "[gpu_audio][trace][staged_async][generation]") {
+    StagedAsyncTrialState state(1, 9);
+    REQUIRE(state.admit(51, 3, 0, 5000, 1000));
+    REQUIRE(state.submitted(51, 1100));
+    REQUIRE(state.complete(51, StagedAsyncTraceLedger::CompletionStatus::Success, 1200));
+    const auto records = state.take_completed();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().generation == 9);
+    CHECK(records.front().valid());
+}
+
+TEST_CASE("staged async ownership abandon releases slot with one cancellation terminal",
+          "[gpu_audio][trace][staged_async]") {
+    StagedAsyncTrialState state(1);
+    REQUIRE(state.admit(22, 8, 0, 5000, 1000));
+    REQUIRE(state.submitted(22, 1100));
+    CHECK(state.slot_occupied(0));
+    REQUIRE(state.abandon(22, 1200));
+    CHECK_FALSE(state.slot_occupied(0));
+    const auto records = state.take_completed();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::CancelledTeardown);
+    CHECK(records.front().outcome == SharedIoTraceOutcome::Cancelled);
+    CHECK_FALSE(state.abandon(22, 1300));
+}
+
+TEST_CASE("staged async records require quiescent ownership before producer drain",
+          "[gpu_audio][trace][staged_async]") {
+    StagedAsyncTrialState state(1);
+    REQUIRE(state.admit(31, 12, 0, 5000, 1000));
+    CHECK_FALSE(state.quiescent());
+    CHECK(state.take_completed().empty());
+
+    REQUIRE(state.submitted(31, 1100));
+    REQUIRE(state.complete(31, StagedAsyncTraceLedger::CompletionStatus::Success, 1200));
+    CHECK(state.quiescent());
+    const auto records = state.take_completed();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().sequence == 12);
+    CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::CompletedAccepted);
+    CHECK(state.take_completed().empty());
 }
