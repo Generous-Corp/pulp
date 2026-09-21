@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 86,
+  "inventory_version": 82,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 495,
-    "reviewed_headers": 207,
-    "legacy_unreviewed_headers": 288,
+    "reviewed_headers": 208,
+    "legacy_unreviewed_headers": 287,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 116,
       "capability_support": 44,
-      "infrastructure": 45,
-      "legacy_unreviewed": 288,
+      "infrastructure": 46,
+      "legacy_unreviewed": 287,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -62,8 +62,8 @@
       },
       "midi": {
         "public_headers": 50,
-        "reviewed_headers": 22,
-        "legacy_unreviewed_headers": 28,
+        "reviewed_headers": 23,
+        "legacy_unreviewed_headers": 27,
         "unsupported_headers": 0
       },
       "music": {
