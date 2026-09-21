@@ -274,19 +274,106 @@ def plan_for_range(repo: Path, config: Config, base: str, head: str) -> list[Ass
     return assignments
 
 
+# The GPU/Vellum handoff ledger and the receipt that binds itself to that
+# ledger's exact bytes. Named once because both the regenerator entry below and
+# the churn guard beside it address this pair specifically.
+_GPU_LEDGER = "docs/status/gpu-vellum-handoff.yaml"
+_GPU_RECEIPT = "docs/validation/gpu-handoff-provenance/receipt.json"
+_GPU_LEDGER_PAIR = (_GPU_LEDGER, _GPU_RECEIPT)
+
 # Derived files that embed a version this bot writes, and so go stale the
 # instant it writes one. Each entry regenerates itself from the tree, so the
 # bot refreshes them rather than leaving a human to notice the breakage.
-_DERIVED_REGENERATORS: list[tuple[str, list[str]]] = [
+_DERIVED_REGENERATORS: list[tuple[tuple[str, ...], list[str]]] = [
     # Embeds the plugin surface's version and catalog_version. Left stale, the
     # Vellum freeze gate fails on the bump commit itself — so every bump PR
     # stalled until a human ran this by hand, which meant releases stopped by
     # default rather than on purpose.
     (
-        "docs/status/pulp-tooling-disposition.json",
+        ("docs/status/pulp-tooling-disposition.json",),
         ["python3", "tools/scripts/pulp_tooling_disposition.py", "--write"],
     ),
+    # The GPU/Vellum handoff ledger and its published receipt pin 90-odd Pulp
+    # paths to an exact revision, so every commit touching one of them staled
+    # the pair. Re-pinning that by hand in each PR made two generated files a
+    # serialization point: ~148 non-merge commits in 25 days changed only these
+    # two, and they collided on the server, where the local merge driver cannot
+    # run. The bump commit already advances main by itself, so it is the one
+    # place a re-pin costs nobody a rebase — carrying it here is what lets an
+    # ordinary PR stop re-pinning at all. `--receipt` is not optional: the
+    # receipt binds itself to the ledger's exact bytes, so regenerating one
+    # without the other leaves the receipt naming a source that no longer
+    # exists.
+    (
+        _GPU_LEDGER_PAIR,
+        ["python3", "tools/scripts/gpu_handoff_provenance.py", "write", "--receipt"],
+    ),
 ]
+
+
+def _drop_receipt_churn(repo: Path) -> None:
+    """Undo a receipt rewrite that only restamps `source_commit`.
+
+    `gpu_handoff_provenance.py write --receipt` always rewrites the receipt's
+    `source_commit` to the commit it regenerated from, even when it reports
+    that the ledger's rows did not move. On the bump path that means every bump
+    commit — roughly four a day — would carry a receipt-only diff describing a
+    re-pin that did not happen, and the bot's bump PR would then go DIRTY on
+    github.com against any open PR that touched the receipt: exactly the
+    collision moving the re-pin here was meant to end.
+
+    `gpu_handoff_provenance.py resolve` already classifies this shape as CHURN
+    and keeps HEAD's bytes rather than committing it. This mirrors that
+    verdict's two conditions — the regenerated ledger is byte-identical to the
+    committed one, and the committed receipt already binds it — and restores
+    the receipt when both hold. It deliberately does not change the
+    regenerator's own semantics: `write --receipt` keeps restamping, and only
+    this caller declines to carry the result.
+
+    Best-effort like its caller: this runs inside a bump the bot must be able
+    to finish, so any failure leaves the regenerated receipt in place (a churn
+    diff, which is the pre-existing behaviour) rather than aborting.
+    """
+    try:
+        # Imported here, not at module scope, so a missing or broken provenance
+        # module degrades to the churn diff instead of breaking every bump. The
+        # import is also what keeps the binding rule in ONE place: duplicating
+        # the sha256 comparison here would be a second copy free to drift from
+        # the one `resolve` decides by.
+        from gpu_handoff_provenance import LEDGER_SENTINEL, binding_proof
+
+        # Condition 1: regeneration left the ledger exactly as HEAD has it.
+        # (The index equals HEAD for this path — the caller has staged nothing
+        # yet — so a clean `status` is a byte-identity claim about HEAD.)
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--", _GPU_LEDGER],
+            cwd=repo, capture_output=True, text=True, check=True,
+        )
+        if status.stdout.strip():
+            return
+
+        # Condition 2: the receipt HEAD already carries binds that ledger, so
+        # rewriting it would move nothing but `source_commit`.
+        head_receipt = subprocess.run(
+            ["git", "show", f"HEAD:{_GPU_RECEIPT}"],
+            cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout
+        ledger_text = (repo / _GPU_LEDGER).read_text(encoding="utf-8")
+        if LEDGER_SENTINEL in head_receipt:
+            return
+        binds, _, _ = binding_proof(ledger_text, head_receipt)
+        # A True that cannot be False is not evidence: prove the comparison
+        # discriminates on this exact input before acting on it.
+        control, _, _ = binding_proof(ledger_text + "\n", head_receipt)
+        if not binds or control:
+            return
+
+        subprocess.run(
+            ["git", "checkout", "--", _GPU_RECEIPT],
+            cwd=repo, capture_output=True, check=True,
+        )
+    except Exception:  # noqa: BLE001 - best-effort; a bump must still finish
+        return
 
 
 def _refresh_derived(repo: Path) -> list[str]:
@@ -296,21 +383,43 @@ def _refresh_derived(repo: Path) -> list[str]:
     is otherwise correct, because the bot is the single writer for versions and
     a wedged bot stops all releases. A failure here leaves the derived file
     stale, which is exactly the pre-existing behaviour and is caught downstream
-    by the same gate that caught it before."""
+    by the same gate that caught it before — but it prints which regenerator
+    failed, so a stale file afterwards is diagnosable from the run log instead
+    of being indistinguishable from one nothing ever tried to refresh."""
     refreshed: list[str] = []
-    for path, command in _DERIVED_REGENERATORS:
+    for paths, command in _DERIVED_REGENERATORS:
+        # A repo that does not carry this derived file is not a failure to
+        # report: the fixture repos these functions are tested against declare
+        # only the surfaces they care about, and a regenerator whose subject is
+        # absent has nothing to say.
+        if not (repo / paths[0]).exists():
+            continue
         try:
             subprocess.run(command, cwd=repo, check=True, capture_output=True)
         except (subprocess.CalledProcessError, OSError):
+            # Best-effort, but never silent: a stale derived file after a bump
+            # is only diagnosable if the run log names which regenerator did
+            # not run.
+            print(
+                f"version-at-land: derived regenerator failed, leaving "
+                f"{', '.join(paths)} stale: {' '.join(command)}",
+                file=sys.stderr,
+            )
             continue
-        # Only report it as edited when the content actually moved; these
-        # regenerators are idempotent, so an unchanged file is the norm.
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--", path],
-            cwd=repo, capture_output=True, text=True,
-        )
-        if status.stdout.strip():
-            refreshed.append(path)
+        if paths == _GPU_LEDGER_PAIR:
+            _drop_receipt_churn(repo)
+
+        # Only report a path as edited when its content actually moved; these
+        # regenerators are idempotent, so an unchanged file is the norm. Asked
+        # per path rather than for the group, because one regenerator can move
+        # the ledger and leave the receipt byte-identical.
+        for path in paths:
+            status = subprocess.run(
+                ["git", "status", "--porcelain", "--", path],
+                cwd=repo, capture_output=True, text=True,
+            )
+            if status.stdout.strip():
+                refreshed.append(path)
     return refreshed
 
 

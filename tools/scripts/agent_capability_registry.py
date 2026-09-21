@@ -134,6 +134,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/timebase/coordinate_random.hpp": "Pulp::timebase",
     "pulp/timebase/grid_projection.hpp": "Pulp::timebase",
     "pulp/timebase/groove_kernel.hpp": "Pulp::timebase",
+    "pulp/timebase/inline_groove_projector.hpp": "Pulp::timebase",
     "pulp/timebase/ratchet.hpp": "Pulp::timebase",
     "pulp/timebase/trigger_grid.hpp": "Pulp::timebase",
     "pulp/timebase/compiled_tempo_map.hpp": "Pulp::timebase",

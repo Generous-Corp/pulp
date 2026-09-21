@@ -931,6 +931,16 @@ sits under the click. `_reevaluateOverlay` therefore re-runs on those two
 attributes as well as on `position` / `zIndex`, and reads them outside the
 shape branch.
 
+The same is true of the ARIA statements on the CLAIM side —
+`role="menu" | "listbox" | "tree" | "grid" | "dialog" | "alertdialog"` and
+`aria-modal="true"` (see [HTML / DOM-lite compat](html.md#pulp-specific-author-hints)).
+They are read outside the shape branch, they consume the dismissing press the
+way `data-overlay="true"` does, and `_reevaluateOverlay` re-runs on `role` and
+`aria-modal` too. A menu authored that way therefore needs no CSS shape at all
+— which matters because the shape branch tests `position: absolute` exactly, so
+a menu positioned `fixed`, or one with no `z-index`, matches nothing and would
+otherwise claim nothing.
+
 ## Known buggy-but-supported
 
 1. `css/lineHeight` unitless multiplier (`lineHeight: 1.5`) — silently

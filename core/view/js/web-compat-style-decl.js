@@ -74,6 +74,30 @@ CSSStyleDeclaration.prototype._reevaluateOverlay = function() {
     var shapeClaim = (posResolved === "absolute" &&
                       zVal >= _PULP_AUTO_OVERLAY_Z_INDEX_THRESHOLD);
 
+    // 3. ARIA statement. `role="menu"|"listbox"|"tree"|"grid"|"dialog"|
+    //    "alertdialog"` and `aria-modal="true"` say "I AM a dismissable
+    //    overlay" in the vocabulary a document that cares about assistive
+    //    technology has already written it in — the exact counterpart of the
+    //    `aria-haspopup` trigger mark read below. A STATEMENT, not an
+    //    inference, so it joins the explicit branch: it claims with the same
+    //    outside-click consumption `data-overlay="true"` does, because an
+    //    author who wrote role="menu" meant a menu, and a menu that lets the
+    //    press through keeps painting on whatever the press just changed.
+    if (!hinted && el.getAttribute) {
+        var roleAttr = el.getAttribute("role");
+        if (roleAttr != null) {
+            var roleTok = String(roleAttr).toLowerCase();
+            hinted = (roleTok === "menu" || roleTok === "listbox" ||
+                      roleTok === "tree" || roleTok === "grid" ||
+                      roleTok === "dialog" || roleTok === "alertdialog");
+        }
+        if (!hinted) {
+            var modalAttr = el.getAttribute("aria-modal");
+            hinted = (modalAttr != null &&
+                      String(modalAttr).toLowerCase() === "true");
+        }
+    }
+
     var shouldClaim = hinted || shapeClaim;
 
     // `data-overlay-trigger="true"` marks a control that OPENS an overlay — a
