@@ -71,7 +71,10 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
                                    const GpuConvolverTrialConfig& config) noexcept {
     if (convolver.prepared_)
         return false;
+    if (config.generation == 0)
+        return false;
     convolver.trial_requested_path_ = static_cast<std::uint8_t>(config.requested_path);
+    convolver.trial_generation_ = config.generation;
     convolver.trial_configured_ = true;
     convolver.trial_enable_trace_ = config.enable_trace;
     convolver.trial_capture_admissions_ = config.capture_admissions;
@@ -271,7 +274,8 @@ bool GpuConvolver::prepare() {
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (trial_configured_ && requested_path == detail::SharedIoRequest::RequireStaged && gpu_)
-        staged_trial_ = std::make_unique<detail::StagedAsyncTrialState>(2);
+        staged_trial_ =
+            std::make_unique<detail::StagedAsyncTrialState>(2, trial_generation_);
 #endif
 
     prepared_ = true;

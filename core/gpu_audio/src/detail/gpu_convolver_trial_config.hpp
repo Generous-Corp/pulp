@@ -54,6 +54,11 @@ constexpr bool valid_gpu_convolver_trial_context(const GpuConvolverTrialContext&
 // once by GpuConvolver::prepare() and is never read by the callback.
 struct GpuConvolverTrialConfig {
     SharedIoRequest requested_path = SharedIoRequest::Auto;
+    // Preparation generation stamped into staged terminal records. Shared-I/O
+    // records receive their generation from the prepared arena; keeping this
+    // explicit makes a matched staged/shared pair comparable without inventing
+    // identity after the fact.
+    std::uint64_t generation = 1;
     bool enable_trace = false;
     bool capture_admissions = false;
     std::uint32_t success_stride = 1;

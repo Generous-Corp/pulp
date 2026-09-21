@@ -21,12 +21,16 @@ namespace pulp::gpu_audio::detail {
 class StagedAsyncTraceLedger {
   public:
     enum class CompletionStatus : std::uint8_t { Success, Expired, Failed };
+    explicit StagedAsyncTraceLedger(std::uint64_t generation = 1)
+        : generation_(generation == 0 ? 1 : generation) {}
+
     bool admit(std::uint64_t request_id, std::uint64_t sequence, std::uint32_t slot,
                std::uint64_t now_ns) {
         if (request_id == 0 || entries_.contains(request_id) || sequences_.contains(sequence))
             return false;
         Entry entry;
         entry.record.kind = SharedIoTraceKind::Terminal;
+        entry.record.generation = generation_;
         entry.record.sequence = sequence;
         entry.record.gpu_work_admitted = true;
         entry.record.set(SharedIoTraceStage::Scheduled, now_ns);
@@ -123,6 +127,7 @@ class StagedAsyncTraceLedger {
     // prevents a producer from emitting two dispositions for one block.
     std::unordered_set<std::uint64_t> sequences_;
     std::vector<SharedIoTraceRecord> completed_;
+    std::uint64_t generation_ = 1;
 };
 
 // Persistent worker-side ownership for one staged async transport. This layer
@@ -229,7 +234,8 @@ class StagedAsyncPendingState {
 // This is deliberately unused by the default blocking path.
 class StagedAsyncTrialState {
   public:
-    explicit StagedAsyncTrialState(std::size_t slots) : pending_(slots) {}
+    explicit StagedAsyncTrialState(std::size_t slots, std::uint64_t generation = 1)
+        : ledger_(generation), pending_(slots) {}
 
     bool admit(std::uint64_t request_id, std::uint64_t sequence, std::uint32_t slot,
                std::uint64_t deadline_ns, std::uint64_t now_ns) {
