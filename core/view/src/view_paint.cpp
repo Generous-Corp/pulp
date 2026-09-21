@@ -1645,7 +1645,65 @@ void View::paint_border(canvas::Canvas& canvas, float paint_w, float paint_h,
     if (rounded) canvas.restore();
 }
 
+bool View::paint_children_overlay_last(canvas::Canvas& canvas) {
+    RootInteractionState* state = existing_interaction();
+    if (state == nullptr || state->overlay_stack.empty()) return false;
+
+    // Which of MY children lead to an open overlay? Bounded on purpose: the
+    // stack is a nest of submenus, not an unbounded list, and a fixed buffer
+    // keeps this allocation-free inside paint_all's no-alloc region.
+    constexpr std::size_t kMaxHoisted = 8;
+    View* hoisted[kMaxHoisted];
+    std::size_t hoisted_n = 0;
+    for (View* overlay : state->overlay_stack) {
+        for (View* v = overlay; v != nullptr && v->parent_ != nullptr;
+             v = v->parent_) {
+            if (v->parent_ != this) continue;
+            bool already = false;
+            for (std::size_t i = 0; i < hoisted_n; ++i)
+                already = already || hoisted[i] == v;
+            if (!already && hoisted_n < kMaxHoisted) hoisted[hoisted_n++] = v;
+            break;
+        }
+    }
+    if (hoisted_n == 0) return false;
+
+    const auto is_hoisted = [&hoisted, &hoisted_n](const View* c) {
+        for (std::size_t i = 0; i < hoisted_n; ++i)
+            if (hoisted[i] == c) return true;
+        return false;
+    };
+
+    // Two passes over the SAME order the normal path would use, so z-index and
+    // insertion order still decide everything within each group. The only
+    // change is that the overlay's branch lands after its siblings — applied
+    // at every level between the overlay and the root, which is what makes an
+    // overlay outrank all non-overlay content in the whole tree rather than
+    // only its immediate siblings.
+    if (children_in_z_order()) {
+        for (const auto& child : children_)
+            if (!is_hoisted(child.get())) child->paint_all(canvas);
+        for (const auto& child : children_)
+            if (is_hoisted(child.get())) child->paint_all(canvas);
+    } else {
+        auto paint_order = sorted_children_by_z_index();
+        for (View* child : paint_order)
+            if (!is_hoisted(child)) child->paint_all(canvas);
+        for (View* child : paint_order)
+            if (is_hoisted(child)) child->paint_all(canvas);
+    }
+    return true;
+}
+
 void View::paint_children_in_order(canvas::Canvas& canvas) {
+    // An open overlay outranks sibling order AND z-index: a menu that a slider
+    // or a header row can paint over is not a menu. Gated on the process-wide
+    // live-claim count so an ordinary frame with nothing open pays one integer
+    // compare, and on child_count so a leaf never walks to its root.
+    if (overlay_claims_live_ != 0 && children_.size() > 1 &&
+        paint_children_overlay_last(canvas))
+        return;
+
     // Paint children. CSS z-index ordering: stable-sort
     // ascending by z_index() so siblings with equal z keep insertion
     // order (CSS painting-order rule). Higher z paints later, ending
