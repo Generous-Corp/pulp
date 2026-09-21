@@ -162,26 +162,37 @@ exit=1
 
 The terminal record is `status: "screening_failed"`,
 `performance_verdict: "unassigned"`, with `staged_records: 12`,
-`shared_records: 0`, `staged_misses: 0`, and `shared_misses: 10`.
+`shared_records: 22`, `staged_terminal_records: 12`,
+`shared_terminal_records: 2`, `terminal_records_required: 12`,
+`staged_misses: 0`, and `shared_misses: 10`.
 The receipt SHA-256 is
-`db347e39169708fb8916fd5adcdb13dc46a0b0b9f568b4f1cda39b3f2127a7da`;
+`56ae50166e8d6ce44803f6cbd966407cd9d0d275da4cc0b4881c1fda4aec8767`;
 the preserved stderr SHA-256 is
 `9591e15c3c26f12180d2448eae87586ed73e841fd15db149c480b32f7c42c19e`;
 the benchmark executable SHA-256 is
-`025f656efe45b90c8fecd86e260820a51d755096fcd859c0b659f2a153f95869`.
+`116b4e0ee1221ef8b548dfa63435a9bac4d6e8051cf0c930f5ad7d837a7312a7`.
 
 This is not an unavailable-provider result. The standalone
 `pulp-gpu-dawn-shared-io-provider-probe` passed on the same host and reported
 an Apple M5 Max Metal adapter (`hardware_model: "Mac17,7"`,
 `adapter_name: "Apple M5 Max"`, `process_events_calls: 147`), and the exact
-provider identity fixtures passed. The zero shared records therefore expose a
-benchmark lifecycle gap: `run_trial` makes only bounded `pump()` calls and
-then drains the trace queue, while `drain_gpu_convolver_trial_records` does not
-service or fence the asynchronous provider. The provider probe's successful
-completion requires a bounded `ProcessEvents` wait loop. Until the benchmark
-adds that quiescent service/fence step, keep this capture as a failed
-intermediate diagnostic and do not treat it as a completed matched screening,
-performance result, or raw receipt.
+provider identity fixtures passed. The first run exposed a trace-ownership
+gap: the normal service hook drained the private trial queue into Perfetto
+before the quiescent accessor could read it (`attempted: 22`, `enqueued: 22`,
+`drained: 22`, `invalid: 0`, `dropped: 0`). The benchmark now retains that
+queue for configured trials and performs a bounded non-RT provider service
+drain before reading it. The corrected run proves queue delivery, but only two
+of the required twelve shared terminal records completed; the remaining
+records are callback/fallback dispositions and the run exits 1. Keep this as a
+failed intermediate diagnostic and do not treat it as a completed performance
+result or raw receipt.
+
+The corrected capability snapshots identify the staged trial as an eligible
+staged path with an unknown generic provider and a prepared CPU fallback, and
+the shared trial as an eligible, prepared `SharedMemory` path with provider
+`Dawn` and a prepared CPU fallback. The shared path was therefore selected;
+its 2/12 terminal completion count is a lifecycle/completion gap, not a
+provider-unavailable fallback classification.
 
 ## Stop condition
 

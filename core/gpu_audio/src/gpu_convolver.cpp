@@ -340,7 +340,12 @@ std::uint32_t GpuConvolver::service_realtime_shared_io(void* self, std::uint64_t
         !convolver->shared_io_->session || !convolver->shared_io_->session->prepared())
         return detail::kRealtimeGpuServiceInactive;
     const auto result = convolver->shared_io_->session->service(now_ns);
-    (void)convolver->shared_io_->session->drain_trace();
+    // A configured private trial owns the authenticated trace queue until its
+    // quiescent accessor drains it. The normal runtime path may continue to
+    // mirror records into Perfetto here, but consuming trial records would
+    // make the matched benchmark observe an empty shared path.
+    if (!convolver->trial_configured_)
+        (void)convolver->shared_io_->session->drain_trace();
     return static_cast<std::uint32_t>(
         std::min<std::size_t>(result.terminal_records,
                               static_cast<std::size_t>(detail::kRealtimeGpuServiceInactive - 1u)));
