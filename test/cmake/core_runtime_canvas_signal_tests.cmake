@@ -510,7 +510,8 @@ foreach(_pulp_shared_io_suite gpu-audio-trace gpu-shared-io-convolution-pipeline
                 ${_pulp_shared_io_session_sources}
         LIBRARIES pulp::audio pulp::runtime Threads::Threads
         INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
-                     ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+                     ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+                     ${CMAKE_SOURCE_DIR}/core/render/include)
 endforeach()
 if(Python3_EXECUTABLE)
     add_test(NAME gpu-audio-trace-validator-selftest

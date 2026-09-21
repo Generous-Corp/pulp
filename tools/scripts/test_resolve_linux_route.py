@@ -312,15 +312,28 @@ def test_workflow_exposes_reason_and_uses_resolved_provider() -> None:
 
 def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:
     text = BUILD_WORKFLOW.read_text(encoding="utf-8")
+    # Windows carries the explicit fallback cap. The macOS/Linux path goes
+    # through governed-build.sh, whose lease-derived CMAKE_BUILD_PARALLEL_LEVEL
+    # is the cap, so it deliberately passes no --parallel of its own. Assert
+    # the governed form is PRESENT rather than only asserting an absence: a
+    # bare "no unbounded build exists" also passes if the build line were
+    # deleted outright, which would retire the cap instead of enforcing it.
     assert (
         'cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4' in text
     )
-    # The fleet-wide path is wrapped by governed-build.sh; reject only an
-    # unbounded direct invocation while allowing the Windows branch's explicit
-    # --parallel 4 command.
+    # Anchored at BOTH ends. The trailing anchor is the load-bearing half:
+    # a bare substring check still passes when a --parallel is appended to the
+    # governed command, which would override the lease-derived cap and defeat
+    # the governor while leaving every other assertion here green.
+    assert re.search(
+        r'(?m)^\s*tools/ci/governed-build\.sh cmake --build '
+        r'"\$PULP_BUILD_DIR" --config Release\s*$',
+        text,
+    )
+    # Anchored at line start, so governed-build.sh's embedded cmake command is
+    # not mistaken for an unbounded direct invocation.
     assert not re.search(
-        r'(?m)^\s*(?!tools/ci/governed-build\.sh )'
-        r'cmake --build "\$PULP_BUILD_DIR" --config Release\n',
+        r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR" --config Release\s*$',
         text,
     )
 

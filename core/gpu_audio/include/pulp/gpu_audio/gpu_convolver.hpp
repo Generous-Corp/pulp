@@ -13,9 +13,16 @@
 
 namespace pulp::gpu_audio {
 
+class GpuConvolver;
+
 namespace detail {
 struct RealtimeGpuNodePath;
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
+struct GpuConvolverTrialConfig;
+struct SharedIoTraceRecord;
+class StagedAsyncTrialState;
+bool configure_gpu_convolver_trial(GpuConvolver&, const GpuConvolverTrialConfig&) noexcept;
+bool drain_gpu_convolver_trial_records(GpuConvolver&, std::vector<SharedIoTraceRecord>&) noexcept;
 } // namespace detail
 
 /// First real GPU audio node: FFT-based (overlap-add) convolution of the input
@@ -206,6 +213,12 @@ class GpuConvolver : public GpuAudioNode {
     bool has_realtime_shared_io() const noexcept;
 
     friend detail::RealtimeGpuNodePath detail::realtime_gpu_node_path(GpuAudioNode*) noexcept;
+    friend bool
+    detail::configure_gpu_convolver_trial(GpuConvolver&,
+                                          const detail::GpuConvolverTrialConfig&) noexcept;
+    friend bool
+    detail::drain_gpu_convolver_trial_records(GpuConvolver&,
+                                              std::vector<detail::SharedIoTraceRecord>&) noexcept;
 
     struct SharedIoState;
 
@@ -217,9 +230,19 @@ class GpuConvolver : public GpuAudioNode {
     uint32_t latency_blocks_ = kLatencyBlocks;
     std::vector<float> ir_;
     uint32_t fft_size_ = 0;
+    std::uint8_t trial_requested_path_ = 0; // detail::SharedIoRequest::Auto
+    std::uint64_t trial_generation_ = 1;
+    bool trial_configured_ = false;
+    bool trial_enable_trace_ = false;
+    bool trial_capture_admissions_ = false;
+    std::uint32_t trial_success_stride_ = 1;
+    std::uint8_t trial_completion_policy_ = 0; // Dawn completion policy enum
+    std::uint64_t trial_completion_wait_ns_ = 0;
 
     std::unique_ptr<render::GpuCompute> gpu_;
     std::unique_ptr<SharedIoState> shared_io_;
+    std::unique_ptr<detail::StagedAsyncTrialState> staged_trial_;
+    std::uint64_t staged_sequence_ = 0;
     std::vector<float> ir_spec_;            // 2*fft_size interleaved IR spectrum
     std::vector<std::vector<float>> carry_; // per-channel OLA accumulator (fft_size)
 

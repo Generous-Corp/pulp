@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260920-pr8636-materialized-reapply-scope",
+  "created_at": "2026-09-20T12:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record the scoped captured-metadata re-apply for the watched import and render families. `resetAfterCommit` re-applied Chromium-captured metadata across the WHOLE captured document on every qualifying commit -- O(document) work for an O(1) repaint -- which a Perfetto capture measured as bursts of 2139-9024 bridge calls costing 45-157ms and producing 86-190ms visible stalls, twice per pointer stroke plus once per 700ms status-banner throttle. The change is confined to Pulp-owned commit bookkeeping: the single global `materializedTreeDirty` boolean becomes an all-flag plus a set of dirty instance ids, `applyMaterializedImportMetadata` accepts that scope and skips bindings whose node is neither a scoped node nor a descendant of one, `__pulpRefreshMaterializedState__` moves inside the same gate, and `isEventHandler` is consulted by the paint-only and fixed-text-only gates so a recreated inline closure no longer dirties the tree. It does not change what the metadata MEANS, how a design is captured or ingested, or any transferred renderer, canvas, Skia, Graphite, Dawn, or resource implementation authority; a relationship change scopes to the parent because captured paths resolve through sibling indices, container-level mutations and root resizes still force the full pass, and an absent or empty scope applies everything so an older checked-in runtime artifact that ignores the new argument stays correct.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD",
+    "materialized_runtime_commit_cost.test.mjs: scoped bridge ops 10746 -> 895 (section) / 111 (row) / 13 (leaf), against a control forcing materializedNodeInScope to return true which stays flat at 10746 for every scope",
+    "packages/pulp-react/test/host-config-materialized-metadata.test.ts: +11 cases, incl. a sibling reorder scoping to the parent and an unknown scope id applying nothing",
+    "tools/scripts/confirm_failure.sh --no-build: CONFIRMED on two breaks (scope filter disabled; mark ignores the scope id)",
+    "vitest 701/701 across 62 files; jsx-runtime node tests 64/64",
+    "tools/scripts/gates.sh origin/main: all gates pass"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

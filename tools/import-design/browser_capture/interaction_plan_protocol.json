@@ -5,10 +5,18 @@
   "type": "object",
   "x-pulp-max-document-bytes": 65536,
   "x-pulp-max-total-wait-ms": 30000,
-  "required": ["schema", "version", "actions"],
+  "required": [
+    "schema",
+    "version",
+    "actions"
+  ],
   "properties": {
-    "schema": { "const": "pulp-browser-interactions-v1" },
-    "version": { "const": 1 },
+    "schema": {
+      "const": "pulp-browser-interactions-v1"
+    },
+    "version": {
+      "const": 1
+    },
     "actions": {
       "type": "array",
       "minItems": 1,
@@ -17,68 +25,162 @@
         "oneOf": [
           {
             "type": "object",
-            "required": ["action", "selector"],
+            "required": [
+              "action",
+              "selector"
+            ],
             "properties": {
-              "action": { "const": "click" },
-              "selector": { "type": "string", "minLength": 1, "maxLength": 512 },
-              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 }
+              "action": {
+                "const": "click"
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              "expect": {
+                "$ref": "#/$defs/expectedState"
+              }
             },
             "additionalProperties": false
           },
           {
             "type": "object",
-            "required": ["action", "selector", "event"],
+            "required": [
+              "action",
+              "selector",
+              "event"
+            ],
             "properties": {
-              "action": { "const": "dispatch-event" },
-              "selector": { "type": "string", "minLength": 1, "maxLength": 512 },
-              "event": { "enum": ["contextmenu", "pointerdown"] },
-              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 }
+              "action": {
+                "const": "dispatch-event"
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "event": {
+                "enum": [
+                  "contextmenu",
+                  "pointerdown"
+                ]
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              "expect": {
+                "$ref": "#/$defs/expectedState"
+              }
             },
             "additionalProperties": false
           },
           {
             "type": "object",
-            "required": ["action", "selector"],
+            "required": [
+              "action",
+              "selector"
+            ],
             "properties": {
-              "action": { "const": "context-click" },
-              "selector": { "type": "string", "minLength": 1, "maxLength": 512 },
-              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 }
+              "action": {
+                "const": "context-click"
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              "expect": {
+                "$ref": "#/$defs/expectedState"
+              }
             },
             "additionalProperties": false
           },
           {
             "type": "object",
-            "required": ["action", "selector", "text"],
+            "required": [
+              "action",
+              "selector",
+              "text"
+            ],
             "properties": {
-              "action": { "const": "type" },
-              "selector": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "action": {
+                "const": "type"
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
               "text": {
                 "type": "string",
                 "description": "Public prototype input only; rendered text may persist in capture evidence, so secrets are forbidden",
                 "maxLength": 4096
               },
-              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 }
-            },
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "required": ["action", "selector"],
-            "properties": {
-              "action": { "const": "wait-for" },
-              "selector": { "type": "string", "minLength": 1, "maxLength": 512 },
-              "state": {
-                "enum": ["attached", "detached", "visible", "hidden"]
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
               },
-              "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 10000 }
+              "expect": {
+                "$ref": "#/$defs/expectedState"
+              }
             },
             "additionalProperties": false
           },
           {
             "type": "object",
-            "required": ["action", "milliseconds"],
+            "required": [
+              "action",
+              "selector"
+            ],
             "properties": {
-              "action": { "const": "wait-ms" },
+              "action": {
+                "const": "wait-for"
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "state": {
+                "enum": [
+                  "attached",
+                  "detached",
+                  "visible",
+                  "hidden"
+                ]
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "action",
+              "milliseconds"
+            ],
+            "properties": {
+              "action": {
+                "const": "wait-ms"
+              },
               "milliseconds": {
                 "type": "integer",
                 "minimum": 0,
@@ -91,5 +193,34 @@
       }
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "expectedState": {
+      "type": "object",
+      "required": [
+        "selector"
+      ],
+      "properties": {
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "state": {
+          "enum": [
+            "attached",
+            "detached",
+            "visible",
+            "hidden"
+          ]
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }
