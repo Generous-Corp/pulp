@@ -1200,35 +1200,54 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
 
    After a new push the head SHA changes — re-read the runs on the **new** SHA.
 
-   **1b. The run EXISTS but never becomes jobs — a queued predecessor is holding
-   the concurrency group.** Read the run's `status` as a *word*, not as a synonym
-   for "busy": `queued` means admitted and waiting for a runner, `pending` means
-   it was never expanded at all. A run stuck at `pending` with `jobs.total_count`
-   of **0** has no jobs to schedule, so the required check is never *created* —
-   `macos` reads as `NOT REPORTED` rather than red, and free runner capacity does
-   nothing for it.
+   **1b. The run EXISTS but never becomes jobs — a cancelled predecessor is
+   still running and holding the concurrency group.** A run stuck at `pending`
+   with `jobs.total_count` of **0** has no jobs to schedule, so the required
+   check is never *created* — `macos` reads as `NOT REPORTED` rather than red,
+   and free runner capacity does nothing for it.
    ```bash
    ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>" --jq '.status'
    ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>/jobs?per_page=1" --jq '.total_count'
    ```
-   The usual cause is a superseded run for the same PR still sitting `queued`.
-   `build.yml` groups on `build-${{ github.ref }}`, which is `refs/pull/N/merge`
-   for every run of that PR, and its `cancel-in-progress` cancels only runs that
-   are **in progress** — a `queued` predecessor holds the group indefinitely and
-   the newer run waits behind it forever. Pushing a fix while the first run is
-   still queued behind congestion is all it takes to reach this state.
+   The cause is **job-level `if: always()`**, not the concurrency expression and
+   not the runner. `build.yml` groups on `build-${{ github.ref }}`, which is
+   `refs/pull/N/merge` for every run of that PR. `cancel-in-progress` is on and
+   *does* fire — but a job gated on `always()` keeps running after its run has
+   been cancelled. So the superseded run is marked `cancelled` and **carries on
+   building**: it stays `in_progress`, goes on holding the group, and every newer
+   head sits at `pending` with zero jobs.
 
-   `POST actions/runs/{id}/cancel` returns `{}` and does nothing to a run that was
-   never assigned. Use **force-cancel**, then confirm the successor expands:
+   **Check the predecessor's `conclusion`, not its `status` or its timing** —
+   that is the discriminating field:
+   ```bash
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>" --jq '.status, .conclusion'
+   ```
+   A wedged predecessor reads `in_progress` / `cancelled`. Reading only `status`
+   invites the wrong mechanism: an earlier revision of this entry claimed GitHub
+   never cancels a queued predecessor, which is false — it is cancelled, it just
+   does not stop.
+
+   This also explains the two symptoms a "never cancelled" story cannot:
+   `POST actions/runs/{id}/cancel` is accepted (`{}`) and changes nothing, while
+   **force-cancel** clears it instantly — force-cancel is documented to bypass
+   "conditions that would otherwise cause a workflow execution to continue, such
+   as an `always()` condition on a job". Use it, then confirm the successor
+   expands:
    ```bash
    ghapp api -X POST "repos/Generous-Corp/pulp/actions/runs/<old-id>/force-cancel"
    ghapp api "repos/Generous-Corp/pulp/actions/runs/<new-id>/jobs?per_page=1" --jq '.total_count'
    ```
    The symptom is indistinguishable from ordinary queue congestion from the
-   outside, which is the trap: on 2026-09-20 pulp#8611 and #8613 each sat two
-   hours behind a queued predecessor while capacity was demonstrably draining
+   outside, which is the trap: on 2026-09-20 pulp#8611 and #8613 each sat hours
+   behind a wedged predecessor while capacity was demonstrably draining
    (in-flight runs fell 16 to 10 and other PRs merged). Before blaming the pool,
    check whether **this PR** has more than one live run.
+
+   The source fix landed in pulp#8644; the population was far larger than it
+   looked from one PR — 46 wedged supersessions across three sampled weeks. The
+   control that settles the mechanism: of 12 wedged supersessions whose
+   predecessor had started jobs, the conclusion tally was `{'cancelled': 12}`,
+   which a dead `cancel-in-progress` cannot produce.
 2. **Is it a version-bump race?** The other concurrent agent re-bumping `main`'s
    `CMakeLists.txt VERSION` makes the PR `DIRTY` (conflict on the VERSION line).
    Merge `origin/main` in, re-resolve the VERSION to one above main, push,
