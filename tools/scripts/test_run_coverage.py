@@ -282,7 +282,7 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "output/retry flags.",
         )
 
-    def test_ctest_success_progress_is_quiet_to_protect_runner_disk(self) -> None:
+    def test_ctest_progress_is_suppressed_and_failures_are_replayed(self) -> None:
         text = SCRIPT.read_text()
         self.assertEqual(
             text.count('--quiet --output-on-failure'),
@@ -290,6 +290,34 @@ class ObjectDiscoveryTests(unittest.TestCase):
             "both filtered and full coverage runs must suppress successful "
             "CTest progress while retaining failure output",
         )
+        self.assertIn(
+            "run_ctest()",
+            text,
+            "the full coverage suite must run through the bounded-output helper",
+        )
+        self.assertIn(
+            ">/dev/null",
+            text,
+            "per-test CTest progress must not fill the hosted runner log pager",
+        )
+        self.assertIn(
+            "ctest --rerun-failed --output-on-failure",
+            text,
+            "failed tests must still be replayed with diagnostics",
+        )
+
+    def test_coverage_build_output_does_not_fill_runner_logs(self) -> None:
+        script = SCRIPT.read_text()
+        self.assertIn(
+            'cmake --build "${BUILD_DIR}" -j"${JOBS}" > /dev/null 2>"${BUILD_LOG}"',
+            script,
+        )
+        self.assertIn('tail -n 200 "${BUILD_LOG}"', script)
+
+    def test_html_drilldown_can_be_disabled_for_ci(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn('PULP_COVERAGE_SKIP_HTML:-0', text)
+        self.assertIn('Skipping llvm-cov HTML drilldown', text)
 
     def test_profraw_cleanup_uses_find_delete(self) -> None:
         text = SCRIPT.read_text()
@@ -322,39 +350,24 @@ class ObjectDiscoveryTests(unittest.TestCase):
             text[cleanup:html],
         )
 
-    def test_profraw_pattern_is_per_process(self) -> None:
-        """One profile per process, with a merge pool inside it.
+    def test_profraw_shards_are_reclaimed_after_merge(self) -> None:
+        text = SCRIPT.read_text()
+        marker = 'echo "=== Merged ${PROFILE_SHARDS_SEEN} raw profile shard(s) (${RECLAIMED_SHARDS} absorbed during the run); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="'
+        self.assertIn(marker, text)
+        self.assertIn('find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete', text[text.index(marker):])
 
-        The earlier `%{CTEST_JOBS}m` pool was chosen to stop parallel exits
-        corrupting a single shared `%m` file, and it did — but an N-file pool is
-        shared by every binary writing into the directory, and profiles with
-        different counter layouts cannot merge into one file. ctest runs
-        hundreds of different test binaries, so all but a handful were silently
-        discarded: a full run left seven profraw files, and the gate reported
-        71% where the same tests measured 91% serially. The number moved DOWN
-        when coverage was added, which is how it surfaced.
-
-        `%p-%m` keeps each process isolated, so the original corruption cannot
-        recur, and removes the cross-binary collision entirely.
-        """
+    def test_profraw_pattern_is_per_process_with_incremental_reclamation(self) -> None:
+        """Preserve every binary's counters while bounding disk incrementally."""
         text = SCRIPT.read_text()
         self.assertIn(
             'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"',
             text,
-            "run_coverage.sh should give each test process its own merge-enabled "
-            "profile; a pool shared across binaries discards most of them.",
+            "each process needs an isolated merge-enabled profile so binaries "
+            "with different counter layouts cannot overwrite one another.",
         )
-        self.assertNotIn(
-            'pulp-%m.profraw"',
-            text,
-            "a single shared profile is corrupted by parallel exits.",
-        )
-        self.assertNotIn(
-            "m.profraw" if False else 'pulp-%${CTEST_JOBS}m.profraw',
-            text,
-            "an N-file pool is shared across binaries, so profiles with "
-            "different counter layouts cannot merge and are dropped.",
-        )
+        self.assertIn("coverage_reclaim_loop &", text)
+        self.assertIn("coverage_absorb_finished_shards()", text)
+        self.assertIn('kill -0 "${pid}"', text)
 
     def test_merge_tolerates_isolated_bad_shards_but_has_a_mass_guard(self) -> None:
         text = SCRIPT.read_text()
