@@ -73,8 +73,9 @@ public SDK redesign:
    explicit `unavailable` timing and keep the campaign in screening; do not
    infer it from worker timestamps.
 4. Add a dedicated benchmark target that runs separate staged and shared
-   trials on one prepared device, writes the raw JSONL records, and leaves
-   `performance_verdict` unassigned. Keep the existing paced probe unchanged.
+   trials on one prepared device, writes an explicitly intermediate JSONL
+   record, and leaves `performance_verdict` unassigned. Keep the existing
+   paced probe unchanged.
 5. Add unit tests for configuration isolation, exact terminal accounting, and
    negative-control rejection. Physical performance acceptance still requires a
    Release build and Shipyard/TartCI execution on Apple Silicon.
@@ -95,6 +96,25 @@ seam (`configure_gpu_convolver_service_for_next_prepare`,
 stack and emits `pulp.gpu-audio-paced-convolution-paired.v1`. Do not cherry-pick
 that stack wholesale or relabel its receipts. Port only the controls above after
 reconciling them with the current merged P5/P6 implementation.
+
+## Matched screening slice (`7304159271`)
+
+The private target `pulp-gpu-audio-p4-matched-convolution-benchmark` now runs
+the same 2-channel, 32-frame, 48 kHz, 257-tap input/IR pair through separate
+`RequireStaged` and `RequireSharedHostPointer` `GpuConvolver` preparations. It
+drives both with a caller-owned `GpuAudioTransport`, stops the transport before
+draining records, checks every authenticated record, and carries one shared
+pair ID plus input/IR context fingerprints into the output. Staged records now
+carry their configured preparation generation so they can be matched against
+shared records without manufacturing identity.
+
+The target emits `pulp.gpu-audio.p4.matched.v1` only. Callback and
+publish-to-consumable timing, transfer counters, and source/kernel/plan
+digests remain explicitly unavailable; `performance_verdict` is always
+`unassigned`, and the summary records `raw_receipt: "not_emitted"`. This is a
+screening diagnostic, not a P4 raw receipt or a realtime, latency, throughput,
+or CPU-load result. The producer worktree has no configured runtime/build, so
+the target has not been executed on a physical Apple Silicon provider here.
 
 ## Stop condition
 
