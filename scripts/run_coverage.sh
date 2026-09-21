@@ -171,12 +171,6 @@ if ! grep -q '^PULP_ENABLE_COVERAGE:BOOL=ON$' "${CACHE_FILE}" 2>/dev/null; then
 fi
 
 echo "=== Building ==="
-# Compiler warnings from the large example-driven graph can fill the hosted
-# runner's Actions log pager and exhaust the root disk before report upload.
-# Keep compiler output off the Actions log pager. Clang writes warnings to
-# stderr, so redirecting stdout alone still lets a warning-heavy build consume
-# runner log/disk resources before the report can be uploaded. Preserve a
-# bounded tail for diagnosis when the build itself fails.
 BUILD_LOG="${BUILD_DIR}/build.log"
 if ! cmake --build "${BUILD_DIR}" -j"${JOBS}" > /dev/null 2>"${BUILD_LOG}"; then
     echo "=== Coverage build failed; last 200 log lines ===" >&2
@@ -188,13 +182,106 @@ echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 cd "${BUILD_DIR}"
-# Use a bounded merge pool per instrumented module. `%Nm` is LLVM's
-# concurrency-safe online merge form: the runtime selects and locks one of N
-# shards, and `%m` scopes the pool to the instrumented module. A per-process
-# `%p-%m` file grows without bound across the full suite and can exhaust the
-# hosted runner before llvm-profdata runs. Keep the pool equal to the capped
-# CTest concurrency so parallel exits remain safe without retaining one raw
-# profile per test process.
+
+# ---------------------------------------------------------------------------
+# Incremental profile reclamation.
+#
+# Per-process shards are what make this lane's coverage correct, but they also
+# accumulate for the whole suite: a full run holds roughly 20k shards / ~17 GiB
+# at peak. A hosted macOS runner arrives with ~76 GiB free, and measured
+# failures land during the test run while that pile is still growing — long
+# after the workflow's one-shot pre-flight disk check has passed.
+#
+# So absorb finished shards into a running profdata while the suite is still
+# running and delete them as they are absorbed, bounding the peak instead of
+# letting it grow monotonically. Counter merging is additive and associative,
+# so feeding the running profdata back in as an input yields the same result as
+# a single final merge over every shard.
+#
+# A shard may be absorbed IFF no live process owns it. `%p-%m` puts the owning
+# PID in the filename, so `kill -0` answers that exactly. Do NOT gate on mtime:
+# a slow test's shard looks stale while its process is still writing, and
+# reclaiming it would drop that test's coverage silently — the same class of
+# quiet under-reporting this lane already fixed once by leaving the shared pool.
+# A recycled PID only ever makes this MORE conservative (the shard is skipped
+# and the final merge collects it), never less.
+mkdir -p "${REPORT_DIR}"
+RUNNING_PROFDATA="${REPORT_DIR}/pulp-running.profdata"
+RECLAIM_LOG="${REPORT_DIR}/llvm-profdata-reclaim.log"
+RECLAIM_STOP_FILE="${BUILD_DIR}/.coverage-reclaim-stop"
+RECLAIM_COUNT_FILE="${BUILD_DIR}/.coverage-reclaim-count"
+# Absorb only under disk pressure, so an uncontended run keeps the original
+# single-merge behaviour and pays nothing.
+COVERAGE_RECLAIM_FREE_KIB="${PULP_COVERAGE_RECLAIM_FREE_KIB:-$((25 * 1024 * 1024))}"
+COVERAGE_RECLAIM_POLL_SECS="${PULP_COVERAGE_RECLAIM_POLL_SECS:-20}"
+rm -f "${RECLAIM_STOP_FILE}" "${RUNNING_PROFDATA}" "${RECLAIM_LOG}"
+printf '0\n' > "${RECLAIM_COUNT_FILE}"
+
+coverage_free_kib() {
+    df -Pk "${BUILD_DIR}" 2>/dev/null | awk 'NR==2 {print $4}'
+}
+
+# Absorb every shard whose owning process has exited. Returns 0 always; a
+# failed merge leaves the shards in place for the final merge to collect.
+coverage_absorb_finished_shards() {
+    local batch="${BUILD_DIR}/.coverage-reclaim-batch"
+    local inputs="${BUILD_DIR}/.coverage-reclaim-inputs"
+    local merged="${REPORT_DIR}/pulp-running.next.profdata"
+    local shard name pid absorbed previous free
+
+    : > "${batch}"
+    while IFS= read -r shard; do
+        name="${shard##*/}"
+        [[ "${name}" =~ ^pulp-([0-9]+)-[0-9]+_[0-9]+\.profraw$ ]] || continue
+        pid="${BASH_REMATCH[1]}"
+        # Live owner: leave it alone.
+        kill -0 "${pid}" 2>/dev/null && continue
+        printf '%s\n' "${shard}" >> "${batch}"
+    done < <(find "${PROFRAW_DIR}" -name 'pulp-*.profraw' -type f 2>/dev/null)
+
+    absorbed=$(wc -l < "${batch}" | tr -d ' ')
+    if [[ "${absorbed}" -eq 0 ]]; then
+        rm -f "${batch}"
+        return 0
+    fi
+
+    cp "${batch}" "${inputs}"
+    if [[ -f "${RUNNING_PROFDATA}" ]]; then
+        printf '%s\n' "${RUNNING_PROFDATA}" >> "${inputs}"
+    fi
+    if llvm-profdata merge -sparse --failure-mode=all \
+        --input-files="${inputs}" -o "${merged}" 2>>"${RECLAIM_LOG}"; then
+        mv -f "${merged}" "${RUNNING_PROFDATA}"
+        # Delete exactly the shards that were absorbed, never the profdata.
+        tr '\n' '\0' < "${batch}" | xargs -0 rm -f
+        previous=$(cat "${RECLAIM_COUNT_FILE}" 2>/dev/null || echo 0)
+        printf '%s\n' "$(( previous + absorbed ))" > "${RECLAIM_COUNT_FILE}"
+        free="$(coverage_free_kib)"
+        echo "=== reclaim: absorbed ${absorbed} finished shard(s); free ${free:-unknown} KiB ==="
+    else
+        rm -f "${merged}"
+        echo "run_coverage.sh: incremental reclaim merge failed; leaving shards for the final merge" >&2
+    fi
+    rm -f "${batch}" "${inputs}"
+    return 0
+}
+
+coverage_reclaim_loop() {
+    local free
+    while [[ ! -f "${RECLAIM_STOP_FILE}" ]]; do
+        free="$(coverage_free_kib)"
+        if [[ -n "${free}" && "${free}" -lt "${COVERAGE_RECLAIM_FREE_KIB}" ]]; then
+            coverage_absorb_finished_shards || true
+        fi
+        sleep "${COVERAGE_RECLAIM_POLL_SECS}"
+    done
+}
+# Give every test PROCESS its own profile (`%p-%m`, set below). A shared `%Nm`
+# pool was tried and removed: one pool is shared across binaries, profiles with
+# different counter layouts cannot merge into a single shard, and most were
+# discarded — a full run left seven shards and the lane reported well under the
+# coverage it actually had. Per-process shards are correct but they accumulate,
+# so they are absorbed incrementally while the suite runs (see below).
 
 # Regression guard for #317: track the test-suite outcome without aborting the
 # coverage report. A broken test run should still upload its partial coverage
@@ -213,8 +300,11 @@ CTEST_RC=0
 # even the macOS leg past the workflow's internal budget (a killed run drops the
 # Cobertura report and reddens main). `-j` matches the parallelism the primary
 # build.yml/build-macos.yml lanes already use; source-based instrumentation is
-# parallel-safe because the `%Nm` pool is module-scoped and each shard is
-# locked by the profile runtime. Cap at 8 like the
+# parallel-safe because `%p-%m` gives each test PROCESS its own merge-enabled
+# profile. This comment used to claim that of the `%Nm` pool, which was not
+# true: an N-file pool is shared across binaries, profiles with different
+# counter layouts cannot merge, and most were discarded — so this lane was
+# reporting a number well below the coverage it actually had. Cap at 8 like the
 # primary lanes so a
 # high-core self-hosted runner doesn't oversubscribe memory with instrumented
 # Debug test processes. `--timeout` bounds a single wedged test so it can't eat
@@ -224,27 +314,22 @@ CTEST_RC=0
 CTEST_JOBS="${TEST_JOBS}"
 if [[ "${CTEST_JOBS}" -gt 8 ]]; then CTEST_JOBS=8; fi
 CTEST_PER_TEST_TIMEOUT="${PULP_COVERAGE_CTEST_TIMEOUT:-600}"
-export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${CTEST_JOBS}m.profraw"
-# CTest writes a progress line for every test. With nearly 22,000 tests this
-# can fill the hosted runner's Actions log pager (and its root disk) before
-# coverage generation starts, producing an ENOSPC failure with no receipt.
-# Keep the normal path quiet; if the suite fails, replay only CTest's failed
-# tests so the useful diagnostics remain visible without retaining a giant log.
-run_ctest() {
-    if [[ -n "${TESTS_REGEX}" ]]; then
-        ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure \
-            --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" \
-            >/dev/null
-    else
-        ctest "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure \
-            --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" \
-            >/dev/null
-    fi
-}
-run_ctest || CTEST_RC=$?
+export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
+echo "=== Free space before tests: $(coverage_free_kib) KiB (reclaim below ${COVERAGE_RECLAIM_FREE_KIB} KiB) ==="
+coverage_reclaim_loop &
+RECLAIM_PID=$!
+if [[ -n "${TESTS_REGEX}" ]]; then
+    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
+else
+    ctest "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
+fi
+touch "${RECLAIM_STOP_FILE}"
+wait "${RECLAIM_PID}" 2>/dev/null || true
+rm -f "${RECLAIM_STOP_FILE}"
+RECLAIMED_SHARDS=$(cat "${RECLAIM_COUNT_FILE}" 2>/dev/null || echo 0)
+echo "=== Free space after tests: $(coverage_free_kib) KiB; ${RECLAIMED_SHARDS} shard(s) absorbed during the run ==="
 if [[ "${CTEST_RC}" -ne 0 ]]; then
-    echo "=== ctest failed with exit ${CTEST_RC}; replaying failed tests for diagnostics. Coverage report WILL be generated from partial profile data. ==="
-    ctest --rerun-failed --output-on-failure -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || true
+    echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="
 fi
 
 echo "=== Merging profiles ==="
@@ -257,7 +342,14 @@ PROFILE_INPUTS="${REPORT_DIR}/llvm-profdata-inputs.txt"
 # overwrites the prior result instead of accumulating it.
 find "${PROFRAW_DIR}" -name '*.profraw' -type f -print > "${PROFILE_INPUTS}"
 PROFILE_SHARDS=$(wc -l < "${PROFILE_INPUTS}" | tr -d ' ')
-if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
+RECLAIMED_SHARDS=$(cat "${RECLAIM_COUNT_FILE}" 2>/dev/null || echo 0)
+# Anything absorbed mid-run lives in the running profdata, which merges in as
+# just another input. Total shards seen = still on disk + already absorbed.
+if [[ -f "${RUNNING_PROFDATA}" ]]; then
+    printf '%s\n' "${RUNNING_PROFDATA}" >> "${PROFILE_INPUTS}"
+fi
+PROFILE_SHARDS_SEEN=$(( PROFILE_SHARDS + RECLAIMED_SHARDS ))
+if [[ "${PROFILE_SHARDS_SEEN}" -eq 0 ]]; then
     echo "run_coverage.sh: no raw profile shards were produced" >&2
     exit 1
 fi
@@ -270,17 +362,20 @@ if ! llvm-profdata merge -sparse --failure-mode=all \
     exit 1
 fi
 cat "${MERGE_LOG}" >&2
+# Corruption can surface in either merge, so count both logs against the full
+# population of shards seen. Scoping this to the final merge alone would shrink
+# the denominator every time reclamation ran and make the guard fire spuriously.
 INVALID_PROFILE_SHARDS=$(grep -Ec '^(warning|error): .*\.profraw:' "${MERGE_LOG}" || true)
+if [[ -f "${RECLAIM_LOG}" ]]; then
+    INVALID_RECLAIMED_SHARDS=$(grep -Ec '^(warning|error): .*\.profraw:' "${RECLAIM_LOG}" || true)
+    INVALID_PROFILE_SHARDS=$(( INVALID_PROFILE_SHARDS + INVALID_RECLAIMED_SHARDS ))
+fi
 if [[ "${INVALID_PROFILE_SHARDS}" -gt 25 \
-      && $((INVALID_PROFILE_SHARDS * 100)) -gt $((PROFILE_SHARDS * 5)) ]]; then
-    echo "run_coverage.sh: ${INVALID_PROFILE_SHARDS}/${PROFILE_SHARDS} raw profile shards were invalid (>5%) — refusing to publish incomplete coverage" >&2
+      && $((INVALID_PROFILE_SHARDS * 100)) -gt $((PROFILE_SHARDS_SEEN * 5)) ]]; then
+    echo "run_coverage.sh: ${INVALID_PROFILE_SHARDS}/${PROFILE_SHARDS_SEEN} raw profile shards were invalid (>5%) — refusing to publish incomplete coverage" >&2
     exit 1
 fi
-echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
-# The individual profraw shards are no longer needed after the merged profile
-# is written. Remove them before the expensive object discovery/export pass;
-# a full run can otherwise retain many GB until the runner tears down.
-find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
+echo "=== Merged ${PROFILE_SHARDS_SEEN} raw profile shard(s) (${RECLAIMED_SHARDS} absorbed during the run); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="
 
 # The merged profdata is now the complete coverage input. Raw shards are no
 # longer needed, and retaining thousands of them leaves too little room for
@@ -289,6 +384,7 @@ find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 # if cleanup cannot complete, fail closed instead of generating a report from
 # an unbounded disk state.
 echo "=== Reclaiming merged raw profile shards ==="
+rm -f "${RUNNING_PROFDATA}" "${RECLAIM_COUNT_FILE}"
 if ! find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete; then
     echo "run_coverage.sh: could not delete merged raw profile shards" >&2
     exit 1
@@ -497,17 +593,13 @@ llvm-cov report \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     | tee "${REPORT_DIR}/summary.txt"
 
-if [[ "${PULP_COVERAGE_SKIP_HTML:-0}" == "1" ]]; then
-    echo "=== Skipping llvm-cov HTML drilldown (report XML/LCOV remain enabled) ==="
-else
-    echo "=== llvm-cov show (HTML drilldown) ==="
-    llvm-cov show \
-        "@${OBJ_RSP}" \
-        -instr-profile="${PROFDATA}" \
-        -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
-        -format=html \
-        -output-dir="${REPORT_DIR}"
-fi
+echo "=== llvm-cov show (HTML drilldown) ==="
+llvm-cov show \
+    "@${OBJ_RSP}" \
+    -instr-profile="${PROFDATA}" \
+    -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
+    -format=html \
+    -output-dir="${REPORT_DIR}"
 
 # Emit Cobertura XML for Codecov + diff-cover via
 #   llvm-cov export --format=lcov  →  lcov_cobertura.py  →  Cobertura XML
