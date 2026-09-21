@@ -4789,6 +4789,29 @@ TEST_CASE("WidgetBridge installs structured SDF shader geometry options",
 #endif
 }
 
+TEST_CASE("WidgetBridge validates bounded left leaning geometry trees",
+          "[view][bridge][shader][sdf]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        globalThis.ok = setWidgetShaderGeometry('knob', {
+          op: 'union', children: [
+            { op: 'union', children: [{ shape: 'circle' }, { shape: 'rect' }] },
+            { shape: 'circle' }
+          ]
+        });
+        globalThis.right = setWidgetShaderGeometry('knob', {
+          op: 'union', children: [{ shape: 'circle' },
+            { op: 'union', children: [{ shape: 'rect' }, { shape: 'circle' }] }]
+        });
+    )");
+    REQUIRE(engine.evaluate("ok.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("right.success").getWithDefault<bool>(true));
+}
+
 TEST_CASE("WidgetBridge publishes vector shader scope with neutral stale texel",
           "[view][bridge][shader][value-channel]") {
     ScriptEngine engine;

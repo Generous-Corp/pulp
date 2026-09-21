@@ -102,6 +102,12 @@ public:
     const std::optional<canvas::Canvas::ShaderGeometry>& shader_geometry() const {
         return shader_geometry_;
     }
+    void set_shader_geometry_spec(std::string spec, std::uint64_t topology_hash) {
+        shader_geometry_spec_ = std::move(spec);
+        shader_geometry_topology_hash_ = topology_hash;
+    }
+    const std::string& shader_geometry_spec() const { return shader_geometry_spec_; }
+    std::uint64_t shader_geometry_topology_hash() const { return shader_geometry_topology_hash_; }
 
     /// True when the shader actually declares a `time` uniform, and therefore
     /// needs a continuous repaint to animate.
@@ -133,6 +139,8 @@ private:
     std::optional<ShaderScopeBinding> shader_scope_binding_;
     float shader_reach_ = 0.0f;
     std::optional<canvas::Canvas::ShaderGeometry> shader_geometry_;
+    std::string shader_geometry_spec_;
+    std::uint64_t shader_geometry_topology_hash_ = 0;
 };
 
 } // namespace pulp::view

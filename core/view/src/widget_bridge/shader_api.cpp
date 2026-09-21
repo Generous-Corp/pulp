@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <functional>
+#include <cstdint>
 #include <vector>
 
 namespace pulp::view {
@@ -65,6 +67,70 @@ parse_shader_geometry(const choc::value::ValueView& options) {
         return std::nullopt;
     }
     return geometry;
+}
+
+struct GeometryValidation {
+    std::string error;
+    std::uint64_t topology_hash = 1469598103934665603ull;
+    int leaves = 0;
+    int max_depth = 0;
+};
+
+GeometryValidation validate_geometry_tree(const choc::value::ValueView& root) {
+    GeometryValidation result;
+    auto mix = [&](std::string_view text) {
+        for (const auto c : text) {
+            result.topology_hash ^= static_cast<std::uint8_t>(c);
+            result.topology_hash *= 1099511628211ull;
+        }
+    };
+    std::function<void(const choc::value::ValueView&, int, bool)> visit =
+        [&](const choc::value::ValueView& node, int depth, bool right_child) {
+            if (!result.error.empty()) return;
+            result.max_depth = std::max(result.max_depth, depth);
+            if (depth > 8) {
+                result.error = "Shader geometry exceeds maximum depth 8";
+                return;
+            }
+            if (!node.isObject()) {
+                result.error = "Each shader geometry node must be an object";
+                return;
+            }
+            if (right_child && node.hasObjectMember("op")) {
+                result.error = "Shader geometry must be left-leaning; right child may not be a composite";
+                return;
+            }
+            if (node.hasObjectMember("shape")) {
+                const auto shape = node["shape"].getWithDefault<std::string>("");
+                if (shape.empty()) {
+                    result.error = "Shader geometry leaf shape must not be empty";
+                    return;
+                }
+                ++result.leaves;
+                if (result.leaves > 16) {
+                    result.error = "Shader geometry exceeds maximum of 16 leaves";
+                    return;
+                }
+                mix("leaf:"); mix(shape);
+                return;
+            }
+            if (!node.hasObjectMember("op") || !node.hasObjectMember("children") ||
+                !node["children"].isArray() || node["children"].size() != 2) {
+                result.error = "Composite shader geometry needs an op and exactly two children";
+                return;
+            }
+            const auto op = node["op"].getWithDefault<std::string>("");
+            if (op != "union" && op != "intersect" && op != "subtract" &&
+                op != "smoothUnion" && op != "smoothSubtract") {
+                result.error = "Unknown shader geometry operator '" + op + "'";
+                return;
+            }
+            mix("op:"); mix(op);
+            visit(node["children"][0], depth + 1, false);
+            visit(node["children"][1], depth + 1, true);
+        };
+    visit(root, 1, false);
+    return result;
 }
 
 } // namespace
@@ -132,6 +198,22 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         host->set_custom_shader(std::move(sksl));
         host->set_shader_geometry(std::move(geometry));
         host->set_shader_reach(reach);
+        self.request_repaint();
+        return shader_result(true, "");
+    });
+
+    register_bridge_function(api, "setWidgetShaderGeometry", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        if (args.numArgs < 2 || args[1] == nullptr)
+            return shader_result(false, "Shader geometry must be an object");
+        auto* v = self.widget(id);
+        auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+        if (!host)
+            return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        const auto validation = validate_geometry_tree(*args[1]);
+        if (!validation.error.empty()) return shader_result(false, validation.error);
+        host->set_shader_geometry_spec(choc::json::toString(*args[1], false),
+                                       validation.topology_hash);
         self.request_repaint();
         return shader_result(true, "");
     });
