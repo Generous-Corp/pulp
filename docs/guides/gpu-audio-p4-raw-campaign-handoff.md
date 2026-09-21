@@ -116,6 +116,28 @@ screening diagnostic, not a P4 raw receipt or a realtime, latency, throughput,
 or CPU-load result. The producer worktree has no configured runtime/build, so
 the target has not been executed on a physical Apple Silicon provider here.
 
+## Downstream GPU-NAM audit boundary
+
+The current `origin/main` tree has no checked-in `examples/gpu-nam` consumer.
+The GPU-NAM documentation points to the separate `pulp-gpu-nam` repository,
+but that downstream checkout was not built or exercised by this matched
+screening branch. In particular, this branch has no downstream evidence for
+the consumer's fallback priming, provider handoff, teardown, or lifecycle
+behavior under a missed or unavailable GPU path.
+
+Installed-SDK/provider identity receipts are also absent from this campaign.
+The exact-provider proof used to configure the Pulp build establishes the
+framework-side pinned provider only; it does not attest an installed
+GPU-NAM SDK, downstream provider revision, or consumer/provider compatibility.
+Those receipts must be captured at the downstream repository boundary and
+bound to its source and executable before any GPU-NAM result can be promoted.
+
+Therefore downstream GPU-NAM proof remains **not run** and is a separate gate.
+The follow-up must build the external consumer against the installed SDK,
+record provider and SDK identity, and run explicit fallback-priming and
+lifecycle checks. None of those checks may be inferred from the matched
+screening output or represented as `pulp.gpu-audio.p4.raw.v1` evidence.
+
 ## Stop condition
 
 Until the seam and benchmark exist, the honest status is **screening only**:
