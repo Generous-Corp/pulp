@@ -323,7 +323,9 @@ TEST_CASE("extract_claude_classnames handles comma-separated selector lists",
 
 TEST_CASE("pulp import-design --from claude emits classnames.json by default",
           "[cli][import-design][issue-1035][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-import-design-classnames");
     auto html_in = fixture_dir() / "example.html";
@@ -363,7 +365,9 @@ TEST_CASE("pulp import-design --dry-run --strict-fidelity exits 0 on a clean imp
     // and the new return path is exercised. (The failure→4 path needs real
     // skewed PNG assets; the geometry logic is unit-covered in
     // test_design_fidelity.cpp / test_design_import.cpp.)
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-import-design-dryrun-strict");
     auto html_in = fixture_dir() / "example.html";
@@ -389,7 +393,9 @@ TEST_CASE("pulp import-design --fidelity-report writes a valid ledger",
     // so this asserts the header + taxonomy + zeroed summary — the durable,
     // diffable contract shape. (The by-kind counting logic is unit-covered in
     // test_design_fidelity_ledger.cpp.)
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-import-design-fidelity-report");
     auto html_in = fixture_dir() / "example.html";
@@ -419,7 +425,9 @@ TEST_CASE("pulp import-design --fidelity-report writes a valid ledger",
 
 TEST_CASE("pulp import-design --from claude --no-emit-classnames suppresses the artifact",
           "[cli][import-design][issue-1035][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-import-design-classnames-off");
     auto html_in = fixture_dir() / "example.html";
@@ -487,7 +495,9 @@ TEST_CASE("looks_like_bundler_entry on empty / pathological input",
 
 TEST_CASE("pulp import-design --from claude emits native-react hint on bundler entry",
           "[cli][import-design][friction-3][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-import-design-friction3");
     // Tiny bundler entry — should produce few elements + the hint.
@@ -525,7 +535,9 @@ TEST_CASE("pulp import-design --from claude emits native-react hint on bundler e
 
 TEST_CASE("pulp import-design --output anchors sidecar files to output dir",
           "[cli][import-design][friction-4][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-import-design-friction4");
     auto html_in = fixture_dir() / "example.html";
@@ -545,7 +557,9 @@ TEST_CASE("pulp import-design --output anchors sidecar files to output dir",
 
 TEST_CASE("pulp import-design respects explicit sidecar paths over --output anchor",
           "[cli][import-design][friction-4][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-import-design-friction4-explicit");
     auto sidecar_dir = tmp / "sidecars";
@@ -584,7 +598,9 @@ TEST_CASE("pulp import-design respects explicit sidecar paths over --output anch
 // with a stderr note. This guards against the silent-empty footgun.
 TEST_CASE("pulp import-design --from figma auto-routes a figma-plugin envelope",
           "[cli][import-design][issue-41][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-import-source-routing");
     auto scene = tmp / "scene.pulp.json";
@@ -660,7 +676,9 @@ fs::path write_sprite_knob_fixture(const fs::path& tmp) {
 
 TEST_CASE("pulp import-design --knob-style sprite keeps a child-art knob interactive",
           "[cli][import-design][sprite][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-sprite-knob-hoist");
     auto scene = write_sprite_knob_fixture(tmp);
@@ -697,7 +715,9 @@ TEST_CASE("pulp import-design --knob-style sprite keeps a child-art knob interac
 // This guards the baked lane: children survive AND the parsed manifest is kept.
 TEST_CASE("pulp import-design --emit ir-json keeps a figma-plugin tree + assets",
           "[cli][import-design][ir-json][figma-plugin][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-irjson-figma-plugin");
     auto scene = write_sprite_knob_fixture(tmp);  // 1 asset (knob_body) + nested GainKnob
@@ -724,7 +744,9 @@ TEST_CASE("pulp import-design normalizes + emits a Figma blend mode (end-to-end)
     // The figma-plugin export carries the blend mode in the `figma` block in
     // UPPER_SNAKE. parse_ir_node normalizes it to the CSS keyword and codegen
     // emits setMixBlendMode — except PASS_THROUGH (= normal), which is dropped.
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-blend-mode");
     {
@@ -763,7 +785,9 @@ TEST_CASE("pulp import-design lowers an SVG path node to a native SvgPath (end-t
     // Full pipeline: the figma-plugin parser routes a `path` node carrying `d`
     // through parse_ir_node (which preserves it as path_data) and codegen emits
     // createSvgPath + setSvgPath — instead of silently dropping the vector.
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-vector-path");
     {
@@ -800,7 +824,9 @@ TEST_CASE("pulp import-design --knob-style sprite keeps multi-layer knob art (no
     // the leaf knob codegen would silently drop every layer after the first.
     // So when there is >1 asset-image child the importer DEMOTES to a plain
     // container and every layer renders as an image (faithful, not turnable).
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-sprite-knob-multilayer");
     fs::create_directories(tmp / "assets");
@@ -854,7 +880,9 @@ TEST_CASE("pulp import-design --knob-style sprite keeps multi-layer knob art (no
 
 TEST_CASE("pulp import-design default (silver) knob keeps the native vector body",
           "[cli][import-design][sprite][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
 
     auto tmp = unique_temp_dir("pulp-sprite-knob-silver");
     auto scene = write_sprite_knob_fixture(tmp);
@@ -876,7 +904,9 @@ TEST_CASE("pulp import-design default (silver) knob keeps the native vector body
 // ── `pulp design compile` — the design contract CLI ─────────────────────────
 
 TEST_CASE("pulp design compile --stdout --json emits the manifest", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "compile", "--stdout", "--json"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
@@ -888,7 +918,9 @@ TEST_CASE("pulp design compile --stdout --json emits the manifest", "[cli][desig
 }
 
 TEST_CASE("pulp design compile --stdout --prompt emits the binding contract", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "compile", "--stdout", "--prompt"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
@@ -898,7 +930,9 @@ TEST_CASE("pulp design compile --stdout --prompt emits the binding contract", "[
 }
 
 TEST_CASE("pulp design compile writes both artifacts to --out-dir", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto tmp = unique_temp_dir("pulp-design-compile");
     auto r = run_pulp({"design", "compile", "-o", tmp.string()});
     REQUIRE_FALSE(r.timed_out);
@@ -914,7 +948,9 @@ TEST_CASE("pulp design compile writes both artifacts to --out-dir", "[cli][desig
 }
 
 TEST_CASE("pulp design compile rejects mutually exclusive sources", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "compile", "--design-md", "a.md", "--theme", "b.json"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 2);
@@ -922,7 +958,9 @@ TEST_CASE("pulp design compile rejects mutually exclusive sources", "[cli][desig
 }
 
 TEST_CASE("pulp design compile rejects --json with --prompt", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "compile", "--json", "--prompt", "--stdout"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 2);
@@ -930,14 +968,18 @@ TEST_CASE("pulp design compile rejects --json with --prompt", "[cli][design-comp
 }
 
 TEST_CASE("pulp design compile rejects an unknown flag", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "compile", "--nope"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 2);
 }
 
 TEST_CASE("pulp design compile --help prints usage", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "compile", "--help"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
@@ -945,9 +987,13 @@ TEST_CASE("pulp design compile --help prints usage", "[cli][design-compile][shel
 }
 
 TEST_CASE("pulp design compile --design-md compiles a project's tokens", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto md = repo_root() / "test" / "fixtures" / "imports" / "designmd" / "alpha" / "DESIGN.md";
-    if (!fs::exists(md)) { SUCCEED("skipped: DESIGN.md fixture absent"); return; }
+    if (!fs::exists(md)) {
+        SKIP("DESIGN.md fixture absent");
+    }
     auto r = run_pulp({"design", "compile", "--design-md", md.string(), "--stdout", "--json"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
@@ -957,7 +1003,9 @@ TEST_CASE("pulp design compile --design-md compiles a project's tokens", "[cli][
 }
 
 TEST_CASE("pulp design compile --theme on an unreadable file fails cleanly", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto missing = unique_temp_dir("pulp-design-theme") / "nope.json";
     auto r = run_pulp({"design", "compile", "--theme", missing.string(), "--stdout"});
     REQUIRE_FALSE(r.timed_out);
@@ -966,7 +1014,9 @@ TEST_CASE("pulp design compile --theme on an unreadable file fails cleanly", "[c
 }
 
 TEST_CASE("pulp design compile --out-dir requires a value", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "compile", "--out-dir"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 2);
@@ -974,7 +1024,9 @@ TEST_CASE("pulp design compile --out-dir requires a value", "[cli][design-compil
 }
 
 TEST_CASE("pulp design compile --stdout with no filter prints both artifacts", "[cli][design-compile][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "compile", "--stdout"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code == 0);
@@ -993,7 +1045,9 @@ fs::path write_js(const fs::path& dir, const std::string& name, const std::strin
 }  // namespace
 
 TEST_CASE("pulp design lint-adherence flags a raw hex and exits 1", "[cli][design-adherence][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-adherence");
     auto js = write_js(dir, "ui.js", "el.style.background = '#14171c';\n");
     auto r = run_pulp({"design", "lint-adherence", js.string()});
@@ -1004,7 +1058,9 @@ TEST_CASE("pulp design lint-adherence flags a raw hex and exits 1", "[cli][desig
 }
 
 TEST_CASE("pulp design lint-adherence passes clean JS with exit 0", "[cli][design-adherence][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-adherence-clean");
     auto js = write_js(dir, "ui.js", "el.style.color = 'var(--accent-primary)';\n");
     auto r = run_pulp({"design", "lint-adherence", js.string()});
@@ -1015,7 +1071,9 @@ TEST_CASE("pulp design lint-adherence passes clean JS with exit 0", "[cli][desig
 }
 
 TEST_CASE("pulp design lint-adherence honors a compiled --manifest", "[cli][design-adherence][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-adherence-manifest");
     auto compiled = run_pulp({"design", "compile", "-o", dir.string()});
     REQUIRE(compiled.exit_code == 0);
@@ -1029,7 +1087,9 @@ TEST_CASE("pulp design lint-adherence honors a compiled --manifest", "[cli][desi
 }
 
 TEST_CASE("pulp design lint-adherence --strict fails on an info finding", "[cli][design-adherence][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-adherence-strict");
     auto js = write_js(dir, "ui.js", "el.style.padding = '8px';\n");
     auto lax = run_pulp({"design", "lint-adherence", js.string()});
@@ -1040,7 +1100,9 @@ TEST_CASE("pulp design lint-adherence --strict fails on an info finding", "[cli]
 }
 
 TEST_CASE("pulp design lint-adherence errors on a missing file / missing arg", "[cli][design-adherence][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto noarg = run_pulp({"design", "lint-adherence"});
     REQUIRE(noarg.exit_code == 2);
     auto missing = run_pulp({"design", "lint-adherence", "/no/such/ui.js"});
@@ -1049,7 +1111,9 @@ TEST_CASE("pulp design lint-adherence errors on a missing file / missing arg", "
 }
 
 TEST_CASE("pulp design lint-adherence rejects --manifest with --design-md", "[cli][design-adherence][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-adherence-excl");
     auto js = write_js(dir, "ui.js", "x = 1;\n");
     auto r = run_pulp({"design", "lint-adherence", js.string(),
@@ -1060,7 +1124,9 @@ TEST_CASE("pulp design lint-adherence rejects --manifest with --design-md", "[cl
 }
 
 TEST_CASE("pulp design lint-adherence rejects --design-md with --theme", "[cli][design-adherence][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-adherence-src-excl");
     auto js = write_js(dir, "ui.js", "x = 1;\n");
     auto r = run_pulp({"design", "lint-adherence", js.string(),
@@ -1071,7 +1137,9 @@ TEST_CASE("pulp design lint-adherence rejects --design-md with --theme", "[cli][
 }
 
 TEST_CASE("pulp design lint-adherence --help prints usage", "[cli][design-adherence][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "lint-adherence", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design lint-adherence") != std::string::npos);
@@ -1081,7 +1149,9 @@ TEST_CASE("pulp design lint-adherence --help prints usage", "[cli][design-adhere
 
 TEST_CASE("pulp design record writes a ledger and auto-versions per name",
           "[cli][design-record][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto tmp = unique_temp_dir("pulp-design-record");
     auto ledger = tmp / ".pulp-design-meta.json";
     auto ui = tmp / "ui.js";
@@ -1109,7 +1179,9 @@ TEST_CASE("pulp design record --status approved preserves provenance",
           "[cli][design-record][shellout]") {
     // Regression: approving an existing revision must NOT wipe the fields the
     // approve call did not re-pass (source/viewport/design_systems).
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto tmp = unique_temp_dir("pulp-design-record-approve");
     auto ledger = tmp / ".pulp-design-meta.json";
     auto ui = tmp / "ui.js";
@@ -1135,7 +1207,9 @@ TEST_CASE("pulp design record --status approved preserves provenance",
 
 TEST_CASE("pulp design record --remove and --reconcile drop entries",
           "[cli][design-record][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto tmp = unique_temp_dir("pulp-design-record-drop");
     auto ledger = tmp / ".pulp-design-meta.json";
     auto ui = tmp / "ui.js";
@@ -1164,7 +1238,9 @@ TEST_CASE("pulp design record --remove and --reconcile drop entries",
 
 TEST_CASE("pulp design record rejects conflicting operations and bad status",
           "[cli][design-record][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto tmp = unique_temp_dir("pulp-design-record-bad");
     auto ledger = tmp / ".pulp-design-meta.json";
 
@@ -1191,7 +1267,9 @@ TEST_CASE("pulp design record rejects conflicting operations and bad status",
 }
 
 TEST_CASE("pulp design record --help prints usage", "[cli][design-record][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "record", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design record") != std::string::npos);
@@ -1199,7 +1277,9 @@ TEST_CASE("pulp design record --help prints usage", "[cli][design-record][shello
 
 TEST_CASE("pulp design record refuses a corrupt ledger instead of overwriting it",
           "[cli][design-record][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto tmp = unique_temp_dir("pulp-record-corrupt");
     auto ledger = tmp / ".pulp-design-meta.json";
     const std::string corrupt = "{\"assets\":[{\"name\":\"panel\",\"version\":\"v1\"}";  // truncated
@@ -1215,7 +1295,9 @@ TEST_CASE("pulp design record refuses a corrupt ledger instead of overwriting it
 
 TEST_CASE("pulp design record --reconcile resolves paths against the ledger dir",
           "[cli][design-record][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto proj = unique_temp_dir("pulp-record-rel") / "project";
     fs::create_directories(proj);
     auto ledger = proj / ".pulp-design-meta.json";
@@ -1237,7 +1319,9 @@ TEST_CASE("pulp design record --reconcile resolves paths against the ledger dir"
 
 TEST_CASE("pulp design record auto-links a new version to the prior one",
           "[cli][design-record][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto tmp = unique_temp_dir("pulp-record-chain");
     auto ledger = tmp / ".pulp-design-meta.json";
     run_pulp({"design", "record", "--ledger", ledger.string(), "--name", "panel", "--asset", "v1.js"});
@@ -1260,7 +1344,9 @@ TEST_CASE("pulp design record auto-links a new version to the prior one",
 // with the screenshot tool itself.
 
 TEST_CASE("pulp design gallery --json lists tagged cards, ignores untagged", "[cli][design-gallery][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-gallery-json");
     write_js(dir, "knob.js", "// @dsCard group=knobs viewport=120x140\n// @startingPoint\nk=1;\n");
     write_js(dir, "plain.js", "const x = 1;\n");  // untagged -> not a card
@@ -1280,7 +1366,9 @@ TEST_CASE("pulp design gallery --json lists tagged cards, ignores untagged", "[c
 }
 
 TEST_CASE("pulp design gallery --no-render writes html + json artifact", "[cli][design-gallery][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-gallery-out");
     write_js(dir, "fader.js", "// @dsCard group=faders viewport=40x200\nf=1;\n");
     auto out = dir / "artifact";
@@ -1299,7 +1387,9 @@ TEST_CASE("pulp design gallery --no-render writes html + json artifact", "[cli][
 }
 
 TEST_CASE("pulp design gallery --help prints usage", "[cli][design-gallery][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "gallery", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design gallery") != std::string::npos);
@@ -1308,7 +1398,9 @@ TEST_CASE("pulp design gallery --help prints usage", "[cli][design-gallery][shel
 // ── `pulp design handoff` — project handoff-contract parser CLI ───────────────
 
 TEST_CASE("pulp design handoff parses a project folder to JSON", "[cli][design-handoff][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-handoff");
     // A project with a handoff README and two _ds/<slug>/ systems.
     fs::create_directories(dir / "_ds" / "ink-signal");
@@ -1333,7 +1425,9 @@ TEST_CASE("pulp design handoff parses a project folder to JSON", "[cli][design-h
 }
 
 TEST_CASE("pulp design handoff summary flags an undeclared fidelity", "[cli][design-handoff][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-handoff-bare");
     std::ofstream(dir / "README.md") << "# Bare\n\nNo fidelity here.\n";
     auto r = run_pulp({"design", "handoff", dir.string()});
@@ -1344,7 +1438,9 @@ TEST_CASE("pulp design handoff summary flags an undeclared fidelity", "[cli][des
 }
 
 TEST_CASE("pulp design handoff errors on a folder with no README", "[cli][design-handoff][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-handoff-empty");
     auto r = run_pulp({"design", "handoff", dir.string()});
     REQUIRE(r.exit_code == 1);
@@ -1353,7 +1449,9 @@ TEST_CASE("pulp design handoff errors on a folder with no README", "[cli][design
 }
 
 TEST_CASE("pulp design handoff --help prints usage", "[cli][design-handoff][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "handoff", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design handoff") != std::string::npos);
@@ -1362,7 +1460,9 @@ TEST_CASE("pulp design handoff --help prints usage", "[cli][design-handoff][shel
 // ── `pulp design variants` — typed component-contract CLI ────────────────────
 
 TEST_CASE("pulp design variants collapses a variant set to a contract", "[cli][design-variants][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-variants");
     auto vf = dir / "variants.txt";
     std::ofstream(vf) << "# Button variants\n"
@@ -1383,7 +1483,9 @@ TEST_CASE("pulp design variants collapses a variant set to a contract", "[cli][d
 }
 
 TEST_CASE("pulp design variants requires --component", "[cli][design-variants][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-variants-nc");
     auto vf = dir / "v.txt";
     std::ofstream(vf) << "Size=S\n";
@@ -1394,7 +1496,9 @@ TEST_CASE("pulp design variants requires --component", "[cli][design-variants][s
 }
 
 TEST_CASE("pulp design variants --help prints usage", "[cli][design-variants][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "variants", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design variants") != std::string::npos);
@@ -1417,7 +1521,9 @@ const char* kTweakBody =
 }  // namespace
 
 TEST_CASE("pulp design tweak lists parameters", "[cli][design-tweak][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-tweak-list");
     auto art = write_tweak_artifact(dir, kTweakBody);
     auto r = run_pulp({"design", "tweak", art.string()});
@@ -1428,7 +1534,9 @@ TEST_CASE("pulp design tweak lists parameters", "[cli][design-tweak][shellout]")
 }
 
 TEST_CASE("pulp design tweak --json prints the payload", "[cli][design-tweak][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-tweak-json");
     auto art = write_tweak_artifact(dir, kTweakBody);
     auto r = run_pulp({"design", "tweak", art.string(), "--json"});
@@ -1441,7 +1549,9 @@ TEST_CASE("pulp design tweak --json prints the payload", "[cli][design-tweak][sh
 
 TEST_CASE("pulp design tweak --set rewrites in place, preserving surrounding bytes",
           "[cli][design-tweak][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-tweak-set");
     auto art = write_tweak_artifact(dir, kTweakBody);
     // A number stays a number; a bare color string is auto-quoted.
@@ -1459,7 +1569,9 @@ TEST_CASE("pulp design tweak --set rewrites in place, preserving surrounding byt
 
 TEST_CASE("pulp design tweak stores an injection-shaped value as a plain string",
           "[cli][design-tweak][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-tweak-inject");
     auto art = write_tweak_artifact(dir, kTweakBody);
     // A crafted value must not smuggle structure into the block; it is quoted.
@@ -1475,7 +1587,9 @@ TEST_CASE("pulp design tweak stores an injection-shaped value as a plain string"
 
 TEST_CASE("pulp design tweak rejects a non-UTF-8 --set value, leaving the file intact",
           "[cli][design-tweak][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-tweak-badutf8");
     auto art = write_tweak_artifact(dir, kTweakBody);
     auto before = read_text(art);
@@ -1491,7 +1605,9 @@ TEST_CASE("pulp design tweak rejects a non-UTF-8 --set value, leaving the file i
 
 TEST_CASE("pulp design tweak --out with no value is fatal, not in-place",
           "[cli][design-tweak][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-tweak-outmissing");
     auto art = write_tweak_artifact(dir, kTweakBody);
     auto before = read_text(art);
@@ -1503,7 +1619,9 @@ TEST_CASE("pulp design tweak --out with no value is fatal, not in-place",
 }
 
 TEST_CASE("pulp design tweak errors when there is no block", "[cli][design-tweak][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-tweak-noblock");
     auto art = write_tweak_artifact(dir, "const x = 1;\n");
     auto r = run_pulp({"design", "tweak", art.string()});
@@ -1513,7 +1631,9 @@ TEST_CASE("pulp design tweak errors when there is no block", "[cli][design-tweak
 }
 
 TEST_CASE("pulp design tweak --help prints usage", "[cli][design-tweak][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"design", "tweak", "--help"});
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("Usage: pulp design tweak") != std::string::npos);
@@ -1548,7 +1668,9 @@ fs::path write_tokens_envelope(const fs::path& dir) {
 
 TEST_CASE("import-design --emit-w3c-tokens writes a DTCG document",
           "[cli][import-design][design-tokens][w3c][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto dir = unique_temp_dir("pulp-import-w3c-tokens");
     auto scene = write_tokens_envelope(dir);
     auto w3c = dir / "design.tokens.json";
@@ -1577,7 +1699,9 @@ TEST_CASE("import-design --emit-w3c-tokens writes a DTCG document",
 
 TEST_CASE("import-design --emit-w3c-tokens without a path exits 2",
           "[cli][import-design][design-tokens][w3c][shellout]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     auto r = run_pulp({"import-design", "--from", "figma-plugin",
                        "--emit-w3c-tokens"});
     REQUIRE_FALSE(r.timed_out);

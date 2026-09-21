@@ -180,7 +180,9 @@ agent tiers:
 - **`trace-analysis`** — the investigation harness: the chain-of-evidence loop,
   the wall-time-vs-CPU-time rule, follow-the-blocker, exhaustive verification,
   and Pulp-specific domain hints (`references/hints_dsp.md`, `hints_frame.md`,
-  `hints_js.md`, `hints_gpu.md`, `hints_crossplatform.md`).
+  `hints_js.md`, `hints_gpu.md`, `hints_gpu_audio.md`, `hints_crossplatform.md`).
+  Shared-I/O audio event semantics and exact-capture validation are documented
+  in [Diagnosing GPU audio with Perfetto](gpu-audio-tracing.md).
 - **`trace-sql`** — the SQL discipline (idempotent views, `GLOB` not `LIKE`,
   incomplete-slice handling, stable-key joins) plus the **Pulp trace-stdlib** of
   named query primitives.

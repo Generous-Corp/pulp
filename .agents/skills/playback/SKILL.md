@@ -1385,6 +1385,32 @@ awkward tick count when the frame grid is what is under test. And
 friend -- so a test that only compiles a program never reaches that validator
 and cannot fail on anything it holds.
 
+## A per-lane feel is one sequence per lane, because groove is sequence-owned
+
+A groove belongs to a `Sequence`, not a `Track`: `Sequence::groove()` exists, `Track`
+has none, and the compiler reads `context_sequence->groove()` when it lowers notes. So
+the musically obvious request — "straight hats, snare a little early, bass a little
+late" — is authored as **one nested sequence per lane**, each carrying its own
+`timeline::GrooveTemplate`, referenced from an arrangement track by a `SequenceRef`
+clip. There is no per-track feel knob, and looking for one wastes time.
+
+That shape works exactly. At 120 BPM / 48 kHz a quarter is 705'600 ticks and 24'000
+samples, so one tick is 5/147 of a sample — exact for any tick that is a multiple of
+147. An authored -7'350 ticks lands a note 250 samples early and +11'025 lands it 375
+late, at both the compiled `NoteProgramEvent.sample` and the position the renderer
+emits. When asserting this, derive the expected samples by hand rather than by calling
+the same conversion under test, and keep a no-groove render as the control: without it
+a lowering that silently dropped the groove would pass.
+
+**The order-preserving refusal does not run here.** `timebase::OrderPreservingGrooveKernel`
+rejects a reordering table with `GrooveKernelError::ReordersEvents`, but it has no
+consumer on the compile path. `timeline::GrooveTemplate::create` validates only that
+each offset is smaller than a step, plus velocity and strength bounds — no monotonicity
+check, and the model says the omission is deliberate. So within a lane a two-entry table
+leaning opposite ways can push step N past step N+1 with nothing refusing it, and across
+lanes independent grooves are unconstrained by construction. Treat "the kernel guarantees
+order" as true only of the kernel, never of an authored document groove.
+
 ## A feel-free groove pads nothing observable, so do not test the reach short-circuit
 
 `groove_timing_reach()` returns a supremum, not an estimate: swing's

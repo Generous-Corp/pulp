@@ -73,7 +73,9 @@ std::string json_escape(const std::string& value) {
 
 TEST_CASE("audio validate summarize reports pitch and level on a sine",
           "[cli][shellout][audio-validate]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     const auto wav = write_sine_wav(temp_wav("sine.wav"), 440.0, 48000.0, 24000,
                                     0.5f, /*clip=*/false);
 
@@ -87,7 +89,9 @@ TEST_CASE("audio validate summarize reports pitch and level on a sine",
 
 TEST_CASE("audio validate doctor --thd discriminates clean from distorted",
           "[cli][shellout][audio-validate]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     const auto clean = write_sine_wav(temp_wav("clean.wav"), 440.0, 48000.0,
                                       24000, 0.5f, /*clip=*/false);
     const auto dirty = write_sine_wav(temp_wav("dirty.wav"), 440.0, 48000.0,
@@ -118,7 +122,9 @@ TEST_CASE("audio validate doctor --thd discriminates clean from distorted",
 
 TEST_CASE("audio validate compare passes identical, fails differing files",
           "[cli][shellout][audio-validate]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     const auto a = write_sine_wav(temp_wav("a.wav"), 440.0, 48000.0, 24000,
                                   0.5f, false);
     const auto b = write_sine_wav(temp_wav("b.wav"), 440.0, 48000.0, 24000,
@@ -136,7 +142,9 @@ TEST_CASE("audio validate compare passes identical, fails differing files",
 
 TEST_CASE("audio validate assert exits nonzero on a failing assertions.json",
           "[cli][shellout][audio-validate]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     const auto wav = write_sine_wav(temp_wav("assert.wav"), 440.0, 48000.0,
                                     24000, 0.5f, false);
     REQUIRE(json_escape("C:\\tmp\\pulp\\assert.wav") ==
@@ -164,7 +172,9 @@ TEST_CASE("audio validate assert exits nonzero on a failing assertions.json",
 
 TEST_CASE("audio validate doctor --response is a peak-normalized self-spectrum",
           "[cli][shellout][audio-validate]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     // A 1 kHz tone: its own magnitude spectrum, normalized to the peak bin,
     // must read ~0 dB at 1000 Hz (the loudest frequency) and well below at an
     // off-tone frequency. This guards the prior bug where dividing by a flat
@@ -194,7 +204,9 @@ TEST_CASE("audio validate doctor --response is a peak-normalized self-spectrum",
 
 TEST_CASE("audio validate doctor refuses cleanly when it cannot measure",
           "[cli][shellout][audio-validate]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     // The analyzers throw std::invalid_argument for inputs they would
     // otherwise misread as clean (silence, a fundamental past Nyquist, a
     // capture shorter than the analysis window). The CLI must surface that as
@@ -255,7 +267,9 @@ TEST_CASE("audio validate doctor refuses cleanly when it cannot measure",
 
 TEST_CASE("audio validate reports errors and exits nonzero on bad input",
           "[cli][shellout][audio-validate]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     // Missing file: clear error, nonzero exit, no crash.
     auto missing = run_pulp(
         {"audio", "validate", "summarize", "/nonexistent/none.wav"});
@@ -268,7 +282,9 @@ TEST_CASE("audio validate reports errors and exits nonzero on bad input",
 
 TEST_CASE("adding validate did not disturb the existing pulp audio surface",
           "[cli][shellout][audio-validate]") {
-    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
     // The existing model/read-bundle verbs still work; bare `pulp audio`
     // prints usage and exits 0.
     auto bare = run_pulp({"audio"});

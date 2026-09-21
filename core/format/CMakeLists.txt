@@ -332,6 +332,12 @@ endif()
 # not in the shared library. The au_adapter.mm (AUv3) works on both macOS and iOS.
 if(APPLE)
     target_compile_definitions(pulp-format-core PRIVATE PULP_AU=1)
+    # Factory-preset discovery is shared by both AU generations and depends on
+    # CoreFoundation/AudioToolbox only, so it is built for every Apple target
+    # rather than gated on PULP_HAS_AUSDK (which covers the AU v2 sources).
+    target_sources(pulp-format-core PRIVATE
+        src/au_factory_presets.cpp
+    )
     # CoreMIDI supplies the MIDIPacketList builders the AU v2 MIDI-output path
     # uses to deliver kAudioUnitProperty_MIDIOutputCallback packets to the host.
     # PUBLIC so every consumer of pulp::format (the AU v2 adapter header inlines

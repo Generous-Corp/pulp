@@ -25,6 +25,14 @@ times to be worth remembering.
 
 ### Native scripted UI is not a WebView
 
+When a materialized canvas is retained as the native paint and hit-test
+surface, its authored behavior wrapper may be a sibling view. The bridge must
+relay every DOM input channel that the wrapper can subscribe to, including
+`on_context_menu`; pointer, wheel, click, and context-menu relays must remain
+liveness-checked and preserve callbacks already installed on the retained
+surface. A right-click that lands on the retained canvas must still reach the
+wrapper's context-menu handler after React replaces that wrapper.
+
 `ScriptedUiSession`, `WidgetBridge`, and `@pulp/react` execute through Pulp's JS
 engine and native Skia/Dawn view tree; they do not require `WebViewPanel`. In an
 SDK configured with `PULP_BUILD_WEBVIEW=ON`, use `pulp::view-native` (or
@@ -1122,6 +1130,28 @@ registered bridge in the process. The standalone window host may use that
 fan-out. A plugin host must use `WidgetBridge::dispatch_key_for_root`, which
 returns whether the owning bridge consumed the event and cannot reach another
 editor's JS runtime.
+
+## Document shortcuts in macOS plugin editors
+
+Offer document shortcuts through the root-scoped script dispatcher after native
+text editing and framework commands decline the key. Its boolean consumption
+result comes from a registered shortcut or JavaScript `preventDefault()`; merely
+having a listener is not permission to swallow a DAW key. Unconsumed keyDown
+continues through the existing host-forwarding path. Do not acquire persistent
+first responder just to make document shortcuts work.
+
+AppKit can offer the same event to `performKeyEquivalent:` and then `keyDown:`.
+The per-editor `PluginScriptKeys` remembers that event's identity and verdict,
+so a listener sees one press while an unclaimed Space still reaches transport.
+Keep the CPU and GPU hosts on the same helper. Test the actual JavaScript effect
+and host receipt, including two live editors and text-input priority; counting
+calls to the dispatcher does not prove this contract.
+
+This path serves macOS AU, CLAP, and VST3 NSView editors. VST3's separate
+`IPlugView::onKeyDown` accommodation remains limited to Space in a focused text
+field. Windows currently routes script keys only for bounded navigation focus;
+Linux's X11 plugin host has no general keyboard event pump. Neither platform
+inherits the macOS shortcut behavior from this change.
 
 ## Keyboard-focus host etiquette — never hold the host's first responder when idle
 

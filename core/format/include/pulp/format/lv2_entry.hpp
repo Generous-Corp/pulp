@@ -9,20 +9,29 @@
 //   #include <pulp/format/lv2_entry.hpp>
 //   PULP_LV2_PLUGIN(my_namespace::create_my_processor, "http://pulp.audio/plugins/my_plugin")
 
-#include <pulp/format/processor.hpp>
+#include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/lv2_adapter.hpp>
+#include <pulp/format/max_block_contract.hpp>
+#include <pulp/format/plugin_state_io.hpp>
+#include <pulp/format/processor.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 
-#include <lv2/core/lv2.h>
 #include <lv2/atom/atom.h>
 #include <lv2/atom/util.h>
+#include <lv2/buf-size/buf-size.h>
+#include <lv2/core/lv2.h>
 #include <lv2/midi/midi.h>
+#include <lv2/state/state.h>
+#include <lv2/time/time.h>
 #include <lv2/urid/urid.h>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
+#include <span>
 #include <vector>
 
 namespace pulp::format::lv2_generic {
@@ -36,6 +45,163 @@ inline const char* g_uri = nullptr;
 // beyond this drops (set_realtime_capacity_limit) rather than allocating.
 inline constexpr std::size_t kRealtimeMidiEventCapacity =
     state::ParameterEventQueue::kCapacity;
+
+// Keep the advertised atom-port capacity ahead of what a full block of MIDI
+// actually needs, so raising kRealtimeMidiEventCapacity fails here rather than
+// silently truncating a host-allocated sequence at run time.
+static_assert(lv2_adapter::kAtomPortMinimumSize >=
+                  sizeof(LV2_Atom_Sequence) +
+                      kRealtimeMidiEventCapacity * (sizeof(LV2_Atom_Event) + 8),
+              "lv2:minimumSize must cover a full block of outgoing MIDI");
+
+// ── time:Position decode ─────────────────────────────────────────────────
+
+/// Read a numeric atom body as a double, whatever integer or float type the
+/// host chose for it. Returns false for a type this adapter does not model, in
+/// which case the property is skipped rather than guessed at.
+inline bool read_numeric_atom(const LV2_Atom* atom, const lv2_adapter::Lv2TimeUrids& urids,
+                              double& out) noexcept {
+    if (!atom)
+        return false;
+    const void* body = LV2_ATOM_BODY_CONST(atom);
+    if (urids.atom_float != 0 && atom->type == urids.atom_float && atom->size == sizeof(float)) {
+        float v = 0.0f;
+        std::memcpy(&v, body, sizeof(v));
+        out = static_cast<double>(v);
+        return true;
+    }
+    if (urids.atom_double != 0 && atom->type == urids.atom_double && atom->size == sizeof(double)) {
+        double v = 0.0;
+        std::memcpy(&v, body, sizeof(v));
+        out = v;
+        return true;
+    }
+    if (urids.atom_int != 0 && atom->type == urids.atom_int && atom->size == sizeof(int32_t)) {
+        int32_t v = 0;
+        std::memcpy(&v, body, sizeof(v));
+        out = static_cast<double>(v);
+        return true;
+    }
+    if (urids.atom_long != 0 && atom->type == urids.atom_long && atom->size == sizeof(int64_t)) {
+        int64_t v = 0;
+        std::memcpy(&v, body, sizeof(v));
+        out = static_cast<double>(v);
+        return true;
+    }
+    if (urids.atom_bool != 0 && atom->type == urids.atom_bool && atom->size == sizeof(int32_t)) {
+        int32_t v = 0;
+        std::memcpy(&v, body, sizeof(v));
+        out = v != 0 ? 1.0 : 0.0;
+        return true;
+    }
+    return false;
+}
+
+/// Decode a `time:Position` object into @p out, overwriting only the
+/// properties the host actually sent. Returns false when @p obj is not a
+/// time:Position, leaving @p out untouched.
+///
+/// Allocation-free: the whole walk is over the host's buffer.
+inline bool decode_time_position(const LV2_Atom_Object* obj, const lv2_adapter::Lv2TimeUrids& urids,
+                                 lv2_adapter::Lv2TimePosition& out) noexcept {
+    if (!obj || urids.time_position == 0)
+        return false;
+    if (obj->body.otype != urids.time_position)
+        return false;
+
+    LV2_ATOM_OBJECT_FOREACH(obj, prop) {
+        const LV2_Atom* value = &prop->value;
+        double numeric = 0.0;
+        if (!read_numeric_atom(value, urids, numeric))
+            continue;
+        const LV2_URID key = prop->key;
+        if (urids.time_speed != 0 && key == urids.time_speed) {
+            out.speed = static_cast<float>(numeric);
+            out.has_speed = true;
+        } else if (urids.time_frame != 0 && key == urids.time_frame) {
+            out.frame = static_cast<int64_t>(numeric);
+            out.has_frame = true;
+        } else if (urids.time_bar != 0 && key == urids.time_bar) {
+            out.bar = static_cast<int64_t>(numeric);
+            out.has_bar = true;
+        } else if (urids.time_beat != 0 && key == urids.time_beat) {
+            out.beat = numeric;
+            out.has_beat = true;
+        } else if (urids.time_beats_per_bar != 0 && key == urids.time_beats_per_bar) {
+            out.beats_per_bar = static_cast<float>(numeric);
+            out.has_beats_per_bar = true;
+        } else if (urids.time_beat_unit != 0 && key == urids.time_beat_unit) {
+            out.beat_unit = static_cast<int32_t>(numeric);
+            out.has_beat_unit = true;
+        } else if (urids.time_beats_per_minute != 0 && key == urids.time_beats_per_minute) {
+            out.beats_per_minute = static_cast<float>(numeric);
+            out.has_beats_per_minute = true;
+        }
+    }
+    return true;
+}
+
+/// Advance a latched transport by one block of @p n_samples while it is
+/// rolling, so the position keeps moving between the Positions a host chooses
+/// to send. A stopped transport is left where it is.
+inline void advance_time_position(lv2_adapter::Lv2TimePosition& pos, uint32_t n_samples,
+                                  double sample_rate) noexcept {
+    if (!pos.has_speed || pos.speed == 0.0f)
+        return;
+    if (n_samples == 0)
+        return;
+    const double frames = static_cast<double>(n_samples) * static_cast<double>(pos.speed);
+    if (pos.has_frame) {
+        pos.frame += static_cast<int64_t>(frames);
+    }
+    if (pos.has_beat && pos.has_beats_per_minute && sample_rate > 0.0 &&
+        pos.beats_per_minute > 0.0f) {
+        pos.beat += (frames / sample_rate) * (static_cast<double>(pos.beats_per_minute) / 60.0);
+    }
+}
+
+/// Project a decoded `time:Position` onto the neutral transport every adapter
+/// hands the shared ProcessContext mapper.
+///
+/// Unit note: LV2 counts `time:beat` in beats of `time:beatUnit`, while
+/// ProcessContext counts quarter notes, so a 6/8 host's beats are scaled by
+/// 4 / beatUnit. Fields LV2's time extension does not model stay invalid:
+/// there is no record-arm, no cycle range, and no host clock. `framesPerSecond`
+/// is the audio sample rate, NOT an SMPTE rate, so `frame_rate` stays unknown.
+inline boundary::HostTransport to_host_transport(const lv2_adapter::Lv2TimePosition& pos) noexcept {
+    boundary::HostTransport transport;
+    if (pos.has_speed) {
+        transport.is_playing = pos.speed != 0.0f;
+        transport.validity.set(TransportField::Playing);
+    }
+    if (pos.has_beats_per_minute) {
+        transport.tempo_bpm = static_cast<double>(pos.beats_per_minute);
+        transport.validity.set(TransportField::Tempo);
+    }
+    if (pos.has_frame) {
+        transport.position_samples = pos.frame;
+        transport.validity.set(TransportField::SamplePosition);
+    }
+    const bool time_sig =
+        pos.has_beats_per_bar && pos.has_beat_unit && pos.beats_per_bar > 0.0f && pos.beat_unit > 0;
+    if (time_sig) {
+        transport.time_sig_numerator = static_cast<int>(pos.beats_per_bar);
+        transport.time_sig_denominator = static_cast<int>(pos.beat_unit);
+        transport.validity.set(TransportField::TimeSignature);
+    }
+    if (pos.has_beat) {
+        const double quarter_notes_per_beat = (pos.has_beat_unit && pos.beat_unit > 0)
+                                                  ? 4.0 / static_cast<double>(pos.beat_unit)
+                                                  : 1.0;
+        transport.position_beats = pos.beat * quarter_notes_per_beat;
+        transport.validity.set(TransportField::BeatPosition);
+    }
+    if (pos.has_bar) {
+        transport.host_bar = pos.bar;
+        transport.validity.set(TransportField::Bar);
+    }
+    return transport;
+}
 
 // ── LV2 Callbacks ────────────────────────────────────────────────────────
 
@@ -64,12 +230,67 @@ inline LV2_Handle instantiate(
     inst->urid_midi_event = urid_map->map(urid_map->handle, LV2_MIDI__MidiEvent);
     inst->urid_atom_sequence = urid_map->map(urid_map->handle, LV2_ATOM__Sequence);
     inst->urid_atom_chunk = urid_map->map(urid_map->handle, LV2_ATOM__Chunk);
+    inst->urid_state_blob = urid_map->map(urid_map->handle, lv2_adapter::kStateBlobUri);
+
+    auto& time_urids = inst->time_urids;
+    time_urids.atom_object = urid_map->map(urid_map->handle, LV2_ATOM__Object);
+    time_urids.atom_blank = urid_map->map(urid_map->handle, LV2_ATOM__Blank);
+    time_urids.atom_float = urid_map->map(urid_map->handle, LV2_ATOM__Float);
+    time_urids.atom_double = urid_map->map(urid_map->handle, LV2_ATOM__Double);
+    time_urids.atom_int = urid_map->map(urid_map->handle, LV2_ATOM__Int);
+    time_urids.atom_long = urid_map->map(urid_map->handle, LV2_ATOM__Long);
+    time_urids.atom_bool = urid_map->map(urid_map->handle, LV2_ATOM__Bool);
+    time_urids.time_position = urid_map->map(urid_map->handle, LV2_TIME__Position);
+    time_urids.time_bar = urid_map->map(urid_map->handle, LV2_TIME__bar);
+    time_urids.time_beat = urid_map->map(urid_map->handle, LV2_TIME__beat);
+    time_urids.time_beat_unit = urid_map->map(urid_map->handle, LV2_TIME__beatUnit);
+    time_urids.time_beats_per_bar = urid_map->map(urid_map->handle, LV2_TIME__beatsPerBar);
+    time_urids.time_beats_per_minute = urid_map->map(urid_map->handle, LV2_TIME__beatsPerMinute);
+    time_urids.time_frame = urid_map->map(urid_map->handle, LV2_TIME__frame);
+    time_urids.time_speed = urid_map->map(urid_map->handle, LV2_TIME__speed);
+
+    // Block ceiling. LV2 has no argument for it; a host that supports
+    // bufsz:boundedBlockLength publishes bufsz:maxBlockLength through the
+    // options feature instead. Without it, fall back to the documented floor —
+    // Ardour and JACK allow blocks well past it, which is exactly the case
+    // run()'s clamp exists to survive.
+    inst->max_block_length = lv2_adapter::max_block_length_from_options(
+        lv2_adapter::find_options(features),
+        urid_map->map(urid_map->handle, LV2_BUF_SIZE__maxBlockLength), time_urids.atom_int,
+        time_urids.atom_long, lv2_adapter::kDefaultMaxBlockLength);
     inst->processor = g_factory();
     if (!inst->processor) {
         delete inst;
         return nullptr;
     }
     inst->processor->set_state_store(&inst->store);
+
+    // Admission check: the audio port arrays on the instance are fixed at
+    // lv2_adapter::kMaxChannels, and every index the manifest declares is a
+    // port the host will connect. A descriptor whose buses sum past that
+    // ceiling in either direction therefore has no valid wiring at all, so it
+    // is refused here rather than dropped a port at a time in connect_port() —
+    // a dropped connection renders as silence, which reads as a DSP fault
+    // instead of a declaration fault. Same shape as the missing-urid:map
+    // refusal above: log and hand the host a null instance.
+    const auto admission_desc = inst->processor->descriptor();
+    int declared_inputs = 0;
+    for (const auto& bus : admission_desc.input_buses) {
+        declared_inputs += bus.default_channels;
+    }
+    int declared_outputs = 0;
+    for (const auto& bus : admission_desc.output_buses) {
+        declared_outputs += bus.default_channels;
+    }
+    if (declared_inputs < 0 || declared_inputs > lv2_adapter::kMaxChannels ||
+        declared_outputs < 0 || declared_outputs > lv2_adapter::kMaxChannels) {
+        pulp::runtime::log_warn(
+            "lv2: descriptor declares {} input and {} output channels; this adapter carries at "
+            "most {} per direction, refusing to instantiate",
+            declared_inputs, declared_outputs, lv2_adapter::kMaxChannels);
+        delete inst;
+        return nullptr;
+    }
 
     // Define parameters
     inst->processor->define_parameters(inst->store);
@@ -84,18 +305,11 @@ inline LV2_Handle instantiate(
     inst->control_in_ports = new float*[inst->num_params]();
     inst->control_out_ports = new float*[inst->num_params]();
 
-    // Count audio channels from descriptor
-    auto desc = inst->processor->descriptor();
-    inst->num_audio_inputs = 0;
-    for (const auto& bus : desc.input_buses) {
-        inst->num_audio_inputs += bus.default_channels;
-    }
-    inst->num_audio_outputs = 0;
-    for (const auto& bus : desc.output_buses) {
-        inst->num_audio_outputs += bus.default_channels;
-    }
-    inst->accepts_midi = desc.accepts_midi;
-    inst->produces_midi = desc.produces_midi;
+    // Audio channel counts, already summed and bounds-checked above.
+    inst->num_audio_inputs = declared_inputs;
+    inst->num_audio_outputs = declared_outputs;
+    inst->accepts_midi = admission_desc.accepts_midi;
+    inst->produces_midi = admission_desc.produces_midi;
 
     // Pre-reserve the RT MIDI buffers here (control thread) so run() never
     // allocates on the audio thread. set_realtime_capacity_limit(true) makes
@@ -108,7 +322,7 @@ inline LV2_Handle instantiate(
     // Prepare the processor
     format::PrepareContext ctx;
     ctx.sample_rate = sample_rate;
-    ctx.max_buffer_size = 4096;  // LV2 doesn't specify upfront; use reasonable max
+    ctx.max_buffer_size = inst->max_block_length;
     inst->processor->prepare(ctx);
 
     return static_cast<LV2_Handle>(inst);
@@ -117,40 +331,46 @@ inline LV2_Handle instantiate(
 inline void connect_port(LV2_Handle handle, uint32_t port, void* data) {
     auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(handle);
 
-    int audio_in_end = inst->num_audio_inputs;
-    int audio_out_end = audio_in_end + inst->num_audio_outputs;
-    int control_end = audio_out_end + inst->num_params;
-    // MIDI atom ports follow control ports. A plug-in with accepts_midi gets
-    // one atom input port at index control_end.
-    int atom_in_end = control_end + (inst->accepts_midi ? 1 : 0);
-    // Plug-ins with produces_midi get one atom output port right after the
-    // (optional) input. TTL emits these in the same order in
-    // generate_plugin_ttl(), so the host's port index matches.
-    int atom_out_end = atom_in_end + (inst->produces_midi ? 1 : 0);
-    // The latency-reporting output control port is always the last port,
-    // emitted unconditionally by generate_plugin_ttl() after the atom ports.
-    int latency_end = atom_out_end + 1;
+    // One ordering, shared with the manifest generator. Every slot index comes
+    // from the layout rather than from arithmetic repeated here, and the audio
+    // arrays are safe to index because instantiate() refuses a descriptor
+    // wider than lv2_adapter::kMaxChannels in either direction.
+    const lv2_adapter::Lv2PortLayout layout = inst->port_layout();
 
-    int idx = static_cast<int>(port);
+    // LV2 port numbers are uint32_t. A value past INT_MAX is not a port this
+    // plugin declared; map it to a number the layout classifies as None rather
+    // than letting the narrowing produce a negative index.
+    const int idx = port <= static_cast<uint32_t>(std::numeric_limits<int>::max())
+                        ? static_cast<int>(port)
+                        : -1;
 
-    if (idx < audio_in_end) {
-        inst->audio_in_ports[idx] = static_cast<float*>(data);
-    } else if (idx < audio_out_end) {
-        inst->audio_out_ports[idx - audio_in_end] = static_cast<float*>(data);
-    } else if (idx < control_end) {
-        inst->control_in_ports[idx - audio_out_end] = static_cast<float*>(data);
-    } else if (idx < atom_in_end) {
+    switch (layout.kind_of(idx)) {
+    case lv2_adapter::Lv2PortKind::AudioIn:
+        inst->audio_in_ports[layout.slot_of(idx)] = static_cast<float*>(data);
+        break;
+    case lv2_adapter::Lv2PortKind::AudioOut:
+        inst->audio_out_ports[layout.slot_of(idx)] = static_cast<float*>(data);
+        break;
+    case lv2_adapter::Lv2PortKind::Control:
+        inst->control_in_ports[layout.slot_of(idx)] = static_cast<float*>(data);
+        break;
+    case lv2_adapter::Lv2PortKind::AtomIn:
         // LV2 atom input port — host hands us an LV2_Atom_Sequence buffer.
         inst->midi_in_atom = data;
-    } else if (idx < atom_out_end) {
+        break;
+    case lv2_adapter::Lv2PortKind::AtomOut:
         // LV2 atom output port — host pre-allocates an LV2_Atom_Sequence
         // buffer sized by lv2:minimumSize in the TTL. run() writes
         // outgoing MIDI events into it.
         inst->midi_out_atom = data;
-    } else if (idx < latency_end) {
+        break;
+    case lv2_adapter::Lv2PortKind::Latency:
         // Latency output control port — host reads the value run() writes
         // here for plugin delay compensation.
         inst->latency_port = static_cast<float*>(data);
+        break;
+    case lv2_adapter::Lv2PortKind::None:
+        break;
     }
 }
 
@@ -200,6 +420,15 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(handle);
     if (!inst->processor) return;
 
+    // Honor the block ceiling prepare() sized the Processor for. A host that
+    // declares bufsz:boundedBlockLength never exceeds it; one that declares
+    // neither the feature nor the option can, and the shared contract is to
+    // render the prefix and hand back silence for the tail rather than overrun
+    // scratch. Tail zero-fill happens after the output pointers resolve.
+    const uint32_t requested_samples = n_samples;
+    n_samples = static_cast<uint32_t>(
+        clamp_block_to_prepared_max(static_cast<int>(n_samples), inst->max_block_length));
+
     // Hardware flush-to-zero for the whole audio-thread render, matching every
     // other adapter (clap_adapter.cpp, vst3_adapter.cpp, au_adapter.mm, ...).
     // Protects recursive DSP feedback from denormal stalls under LV2.
@@ -228,7 +457,9 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         }
     }
 
-    // Build buffer views
+    // Build buffer views. The views below carry the instance's channel counts
+    // over these fixed-size pointer arrays, which is only sound because
+    // instantiate() refused any descriptor wider than kMaxChannels.
     const float* in_ptrs[lv2_adapter::kMaxChannels] = {};
     float* out_ptrs[lv2_adapter::kMaxChannels] = {};
 
@@ -237,6 +468,16 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     }
     for (int i = 0; i < inst->num_audio_outputs && i < lv2_adapter::kMaxChannels; ++i) {
         out_ptrs[i] = inst->audio_out_ports[i];
+    }
+
+    // Silence the region past the prepared maximum so an over-long block reads
+    // as clean silence instead of whatever the host buffer last held.
+    if (requested_samples > n_samples) {
+        for (int i = 0; i < inst->num_audio_outputs && i < lv2_adapter::kMaxChannels; ++i) {
+            if (!out_ptrs[i])
+                continue;
+            std::fill(out_ptrs[i] + n_samples, out_ptrs[i] + requested_samples, 0.0f);
+        }
     }
 
     audio::BufferView<const float> input(in_ptrs,
@@ -286,24 +527,57 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
         // ignored here; LV2 variable-length event support is not wired yet.
         inst->midi_in.clear();
         inst->midi_out.clear();
+        bool transport_received = false;
         if (inst->midi_in_atom && inst->urid_atom_sequence && inst->urid_midi_event) {
             const auto* seq = static_cast<const LV2_Atom_Sequence*>(inst->midi_in_atom);
             if (seq->atom.type == inst->urid_atom_sequence) {
+                const auto& time_urids = inst->time_urids;
                 LV2_ATOM_SEQUENCE_FOREACH(seq, ev) {
-                    if (ev->body.type != inst->urid_midi_event) continue;
-                    const auto* data = reinterpret_cast<const uint8_t*>(ev + 1);
-                    const uint32_t size = ev->body.size;
-                    if (size >= 1 && size <= 3 && (data[0] & 0x80)) {
-                        midi::MidiEvent me;
-                        me.message = choc::midi::ShortMessage(
-                            data[0],
-                            size > 1 ? data[1] : uint8_t{0},
-                            size > 2 ? data[2] : uint8_t{0});
-                        me.sample_offset = static_cast<int32_t>(ev->time.frames);
-                        inst->midi_in.add(me);
+                    if (ev->body.type == inst->urid_midi_event) {
+                        const auto* data = reinterpret_cast<const uint8_t*>(ev + 1);
+                        const uint32_t size = ev->body.size;
+                        if (size >= 1 && size <= 3 && (data[0] & 0x80)) {
+                            midi::MidiEvent me;
+                            me.message =
+                                choc::midi::ShortMessage(data[0], size > 1 ? data[1] : uint8_t{0},
+                                                         size > 2 ? data[2] : uint8_t{0});
+                            me.sample_offset = static_cast<int32_t>(ev->time.frames);
+                            inst->midi_in.add(me);
+                        }
+                        continue;
+                    }
+                    // Transport. The host delivers time:Position on the same
+                    // sequence as MIDI; a block can carry several (a seek mid
+                    // block), and the last one wins for this block's context.
+                    const bool is_object =
+                        (time_urids.atom_object != 0 && ev->body.type == time_urids.atom_object) ||
+                        (time_urids.atom_blank != 0 && ev->body.type == time_urids.atom_blank);
+                    if (!is_object)
+                        continue;
+                    const auto* obj = reinterpret_cast<const LV2_Atom_Object*>(&ev->body);
+                    if (decode_time_position(obj, time_urids, inst->transport)) {
+                        inst->has_transport = true;
+                        transport_received = true;
                     }
                 }
             }
+        }
+
+        // Project the latched transport onto this block, then let the shared
+        // mapper derive the bar and the change flags. Extrapolate only when the
+        // host sent nothing new this block — a Position that just arrived is
+        // already positioned at the block start.
+        if (inst->has_transport) {
+            if (!transport_received) {
+                advance_time_position(inst->transport, n_samples, inst->sample_rate);
+            }
+            boundary::apply_host_transport(proc_ctx, to_host_transport(inst->transport),
+                                           inst->playhead_prev);
+        } else {
+            // No transport ever seen: still run the diff so the snapshot tracks
+            // block size and the validity mask stays honestly empty.
+            boundary::apply_host_transport(proc_ctx, boundary::HostTransport{},
+                                           inst->playhead_prev);
         }
 
         inst->processor->process(process_buffers, inst->midi_in, inst->midi_out,
@@ -322,6 +596,82 @@ inline void deactivate(LV2_Handle) {
     // Nothing needed
 }
 
+// ── state:interface ──────────────────────────────────────────────────────
+//
+// One property, keyed by lv2_adapter::kStateBlobUri, holding the same
+// versioned envelope plugin_state_io::serialize() produces for every other
+// format: the StateStore payload plus whatever the Processor returns from
+// serialize_plugin_state(). Control-port values are the host's to save and
+// restore, so the envelope's parameter half is redundant under LV2 and is
+// simply overwritten by the port values on the next run(); the plugin-owned
+// half — sampler buffers, file references, blobs — has no other way home.
+
+inline LV2_State_Status save_state(LV2_Handle instance, LV2_State_Store_Function store,
+                                   LV2_State_Handle handle, uint32_t, const LV2_Feature* const*) {
+    auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(instance);
+    if (!inst || !inst->processor || !store)
+        return LV2_STATE_ERR_UNKNOWN;
+    if (inst->urid_state_blob == 0 || inst->urid_atom_chunk == 0) {
+        return LV2_STATE_ERR_NO_FEATURE;
+    }
+
+    const auto data = plugin_state_io::serialize(inst->store, *inst->processor);
+    // The spec requires size > 0 for a stored property. Nothing to save is a
+    // success, not an error — restore() falls back to defaults.
+    if (data.empty())
+        return LV2_STATE_SUCCESS;
+
+    return store(handle, inst->urid_state_blob, data.data(), data.size(), inst->urid_atom_chunk,
+                 LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE);
+}
+
+inline LV2_State_Status restore_state(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
+                                      LV2_State_Handle handle, uint32_t,
+                                      const LV2_Feature* const*) {
+    auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(instance);
+    if (!inst || !inst->processor || !retrieve)
+        return LV2_STATE_ERR_UNKNOWN;
+    if (inst->urid_state_blob == 0)
+        return LV2_STATE_ERR_NO_FEATURE;
+
+    std::size_t size = 0;
+    uint32_t type = 0;
+    uint32_t flags = 0;
+    const void* value = retrieve(handle, inst->urid_state_blob, &size, &type, &flags);
+    // A host may legitimately restore an empty map to reset the plugin. The
+    // spec requires falling back to defaults rather than failing.
+    if (!value || size == 0)
+        return LV2_STATE_SUCCESS;
+    if (inst->urid_atom_chunk != 0 && type != 0 && type != inst->urid_atom_chunk) {
+        return LV2_STATE_ERR_BAD_TYPE;
+    }
+
+    const auto* bytes = static_cast<const uint8_t*>(value);
+    // restore() is in LV2's Instantiation threading class, so no run() call is
+    // in flight and Processor::deserialize_plugin_state() gets the
+    // non-concurrent context it documents.
+    const bool ok = plugin_state_io::deserialize(std::span<const uint8_t>(bytes, size), inst->store,
+                                                 *inst->processor);
+    if (!ok)
+        return LV2_STATE_ERR_UNKNOWN;
+
+    // A restored state can name a different derived source than the live one
+    // (a different impulse response, a different sample set). Reconcile it here
+    // or a worker-less processor renders the old state for the rest of the
+    // session.
+    inst->processor->on_non_realtime_tick();
+    return LV2_STATE_SUCCESS;
+}
+
+inline const LV2_State_Interface g_state_interface = {save_state, restore_state};
+
+inline const void* extension_data(const char* uri) {
+    if (uri && std::strcmp(uri, LV2_STATE__interface) == 0) {
+        return &g_state_interface;
+    }
+    return nullptr;
+}
+
 inline void cleanup(LV2_Handle handle) {
     auto* inst = static_cast<lv2_adapter::PulpLv2Instance*>(handle);
     if (inst) {
@@ -333,16 +683,9 @@ inline void cleanup(LV2_Handle handle) {
 }
 
 // The LV2 descriptor
-inline LV2_Descriptor g_lv2_descriptor = {
-    nullptr,       // URI — set at static init
-    instantiate,
-    connect_port,
-    activate,
-    run,
-    deactivate,
-    cleanup,
-    nullptr        // extension_data
-};
+inline LV2_Descriptor g_lv2_descriptor = {nullptr, // URI — set at static init
+                                          instantiate, connect_port, activate,      run,
+                                          deactivate,  cleanup,      extension_data};
 
 } // namespace pulp::format::lv2_generic
 

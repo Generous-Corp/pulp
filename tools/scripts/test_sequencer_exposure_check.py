@@ -15,7 +15,9 @@ from sequencer_exposure_check import (
     LEDGER_PATH,
     LEDGER_ROWS_DIR,
     LEDGER_TOMBSTONES_DIR,
+    SHARED_REGISTRY_PATHS,
     _ancestry_problem,
+    _declared_owners,
     _exclusively_owned_paths,
     _load_base_transition,
     _load_base_transition_with_receipt,
@@ -29,6 +31,7 @@ from sequencer_exposure_check import (
     load_ledger_from_worktree,
     resolve_git_comparison,
     validate_document,
+    validate_dependency_references,
     validate_git_provenance,
     validate_release_evidence,
     validate_schema_contract,
@@ -39,13 +42,6 @@ from sequencer_exposure_check import (
 
 SHA_A = "1" * 40
 SHA_B = "2" * 40
-
-# Manifests the repository compels unrelated slices to append to: registering a
-# skill's paths is the Skill Maintenance Rule, not a sequencer delivery. A row
-# that owns one whole turns a routine registration into a required-gate failure.
-SHARED_REGISTRATION_MANIFESTS = {
-    "tools/scripts/skill_path_map.json",
-}
 
 _CHECK_TALLY = {"clean": 0, "calibrated": 0}
 
@@ -354,6 +350,18 @@ def main() -> int:
         errors = validate_document(valid, root)
         if errors:
             raise AssertionError("valid fixture failed:\n" + "\n".join(errors))
+        strict_valid = copy.deepcopy(valid)
+        strict_valid["rows"][0]["delivery_state"] = "pending"
+        strict_valid["rows"][0].pop("release", None)
+        strict_valid["rows"][0]["surfaces"]["installed_sdk"]["dependencies"] = [
+            "missing-owner"
+        ]
+        strict_errors = validate_dependency_references(strict_valid)
+        if not any("missing-owner" in error for error in strict_errors):
+            raise AssertionError("strict dependency mode accepted an unresolved active dependency")
+        strict_valid["rows"][0]["surfaces"]["installed_sdk"]["dependencies"] = []
+        if validate_dependency_references(strict_valid):
+            raise AssertionError("strict dependency mode rejected a dependency-free active row")
 
         # An exposed surface must declare the authority it admits a caller under.
         # The rejection is the assertion that matters, so it is stated first and
@@ -1210,19 +1218,100 @@ def main() -> int:
         raise AssertionError(
             "shipped ledger watched no path at all; the annexation control is blind"
         )
-    annexed_registries = sorted(SHARED_REGISTRATION_MANIFESTS & watched)
+    # Asserting these are merely unwatched would now be tautological, because
+    # the exclusion guarantees it however the ledger is written. The invariant
+    # with teeth is that no row DECLARES one: a declaration the watch ignores
+    # is a false ownership record, so check the declarations themselves.
+    declared = _declared_owners(shipped_ledger)
+    annexed_registries = sorted(SHARED_REGISTRY_PATHS & set(declared))
     if annexed_registries:
         raise AssertionError(
-            "shipped ledger annexes a shared registration manifest, so every "
-            "unrelated PR touching it fails this gate; list it as evidence "
-            f"instead of owned_paths: {annexed_registries}"
+            "shipped ledger annexes a shared registry, so every unrelated PR "
+            "touching it fails this gate; list it as evidence instead of "
+            f"owned_paths: {annexed_registries}"
         )
-    unwatched_registries = sorted(SHARED_REGISTRATION_MANIFESTS - watched)
-    if unwatched_registries != sorted(SHARED_REGISTRATION_MANIFESTS):
+    if not declared:
         raise AssertionError(
-            "shared registration manifest control is inconsistent: "
-            f"{unwatched_registries}"
+            "shipped ledger declared no owned path at all; the annexation "
+            "control is blind"
         )
+
+    # ── A shared registry is unwatchable, and annexing one is rejected ───────
+    # The deadlock this prevents: the Vellum freeze gate compels every skill
+    # author to classify their skill in the tooling disposition inventory,
+    # while a single pending row that annexed the same file made this gate
+    # reject that very edit. Two required gates demanding opposite things has
+    # no bypass trailer, so the carve-out has to live in the watch itself.
+    registry_path = "docs/status/pulp-tooling-disposition.json"
+    ordinary_path = "docs/status/watched-sample-artifact.json"
+    annexing = copy.deepcopy(valid)
+    annexing["rows"][0]["owned_paths"] = [registry_path, ordinary_path]
+    annexed_watch = _exclusively_owned_paths(annexing, annexing)
+    if registry_path in annexed_watch:
+        raise AssertionError(
+            "a shared registry stayed watched while exactly one row declared "
+            "it, so the skill-addition deadlock can recur"
+        )
+    # CONTROL: the single-owner rule still watches an ordinary path declared by
+    # the same row, so the carve-out narrowed the registry and nothing else.
+    if ordinary_path not in annexed_watch:
+        raise AssertionError(
+            "the carve-out unwatched an ordinary exclusively-owned path, so it "
+            f"is too broad to tell a registry from a real annexation: {annexed_watch}"
+        )
+    _CHECK_TALLY["clean"] += 1
+
+    registry_change = validate_transition(annexing, annexing, [registry_path])
+    if any(registry_path in error for error in registry_change):
+        raise AssertionError(
+            f"a shared-registry edit still demanded a ledger row: {registry_change}"
+        )
+    _CHECK_TALLY["clean"] += 1
+    # CONTROL: an unauthorized edit to an ordinary exclusively-owned path is
+    # still rejected. A carve-out that swallowed this would leave a genuinely
+    # owned surface unwatched, which is worse than the deadlock it removes.
+    ordinary_change = validate_transition(annexing, annexing, [ordinary_path])
+    if not any(ordinary_path in error for error in ordinary_change):
+        raise AssertionError(
+            "control: an unauthorized edit to an exclusively-owned path passed, "
+            f"so the watch is not measuring anything: {ordinary_change}"
+        )
+    _CHECK_TALLY["calibrated"] += 1
+
+    # Declaring a shared registry is rejected when the row is authored, with the
+    # remedy named, so a re-annexation fails loudly instead of being silently
+    # void. A recorded claim the watch ignores is a false ownership record.
+    checkout_root = Path(__file__).resolve().parents[2]
+    annex_errors = validate_document(annexing, checkout_root)
+    if not any(
+        "cannot be exclusively owned" in error and registry_path in error
+        for error in annex_errors
+    ):
+        raise AssertionError(
+            f"annexing a shared registry was accepted by the validator: {annex_errors}"
+        )
+    _CHECK_TALLY["calibrated"] += 1
+
+    annexing_tombstone = copy.deepcopy(valid)
+    annexing_tombstone["tombstones"] = [
+        {
+            "id": "retired-registry-annexation",
+            "delivery_state": "pending",
+            "claim_id": "4f1c0f6e-6f2a-4a0e-9a4a-2a7c1c2d3e4f",
+            "owned_paths": [registry_path],
+            "rationale": "A tombstone may not annex a shared registry either.",
+        }
+    ]
+    tombstone_errors = validate_document(annexing_tombstone, checkout_root)
+    if not any(
+        "cannot be exclusively owned" in error and registry_path in error
+        for error in tombstone_errors
+    ):
+        raise AssertionError(
+            "a tombstone annexed a shared registry and was accepted: "
+            f"{tombstone_errors}"
+        )
+    _CHECK_TALLY["calibrated"] += 1
 
     # ── The ledger is carried as one file per row ────────────────────────────
     # A single document has one append point, so two branches that each add a
@@ -1543,7 +1632,11 @@ def main() -> int:
     # The watch itself: a watched path stays red unless the transition is
     # mechanical, and goes green when it is.
     mech_current = copy.deepcopy(valid)
-    watched_path = "docs/status/pulp-tooling-disposition.json"
+    # Any ordinary exclusively-owned path stands in here: the subject is the
+    # mechanical exemption inside validate_transition, not one production entry.
+    # Naming a real artifact made this control depend on that file staying
+    # watchable, which it is not once a shared inventory is de-annexed.
+    watched_path = "docs/status/watched-sample-artifact.json"
     mech_current["rows"][0]["owned_paths"] = [watched_path]
     mech_base_doc = copy.deepcopy(mech_current)
     red = validate_transition(

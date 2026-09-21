@@ -13,6 +13,18 @@
 
 namespace pulp::gpu_audio {
 
+class GpuConvolver;
+
+namespace detail {
+struct RealtimeGpuNodePath;
+RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
+struct GpuConvolverTrialConfig;
+struct SharedIoTraceRecord;
+class StagedAsyncTrialState;
+bool configure_gpu_convolver_trial(GpuConvolver&, const GpuConvolverTrialConfig&) noexcept;
+bool drain_gpu_convolver_trial_records(GpuConvolver&, std::vector<SharedIoTraceRecord>&) noexcept;
+} // namespace detail
+
 /// First real GPU audio node: FFT-based (overlap-add) convolution of the input
 /// with a fixed impulse response, computed on the GPU via render::GpuCompute on
 /// the transport's non-RT worker.
@@ -42,15 +54,18 @@ namespace pulp::gpu_audio {
 /// convolution costs microseconds, and no amount of batching beats a map
 /// round-trip for a single stereo pair.
 class GpuConvolver : public GpuAudioNode {
-public:
-    /// Fixed worker/round-trip latency, in host blocks, reported to the host as
-    /// PDC. The continuously-fed CPU fallback delays its output by this many
-    /// blocks so a miss substitute lands on the exact timeline slot the GPU ring
-    /// would have filled.
+  public:
+    /// Default worker/round-trip latency, in host blocks. A constructed node may
+    /// select another positive lead for a controlled campaign; the selected value
+    /// is reported as PDC and shared by the bridge and CPU fallback.
     static constexpr uint32_t kLatencyBlocks = 2;
+    static constexpr uint32_t kMaxLatencyBlocks = 64;
 
     GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                  std::vector<float> impulse_response);
+    GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
+                 std::vector<float> impulse_response, uint32_t latency_blocks);
+    ~GpuConvolver() override;
 
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
@@ -60,11 +75,11 @@ public:
     /// RT-safe. Feed the continuously-fed CPU fallback one block so its history
     /// stays current, and stage the latency-aligned substitute for a possible
     /// miss this block. Called by the transport on every block (hit or miss).
-    void prime_fallback(const audio::BufferView<const float>& input,
-                        uint32_t n) noexcept override {
-        if (!prepared_ || n != block_ || fallback_delay_blocks_ == 0) return;
-        float* slot_base = fb_delay_.data() +
-                           static_cast<std::size_t>(fb_delay_idx_) * block_ * channels_;
+    void prime_fallback(const audio::BufferView<const float>& input, uint32_t n) noexcept override {
+        if (!prepared_ || n != block_ || fallback_delay_blocks_ == 0)
+            return;
+        float* slot_base =
+            fb_delay_.data() + static_cast<std::size_t>(fb_delay_idx_) * block_ * channels_;
         for (uint32_t ch = 0; ch < channels_ && ch < fallback_.size(); ++ch) {
             float* slot = slot_base + static_cast<std::size_t>(ch) * block_;
             float* due = fb_out_.data() + static_cast<std::size_t>(ch) * block_;
@@ -81,7 +96,10 @@ public:
             // state (and the delay ring) for the whole IR tail, not just one block.
             bool finite = true;
             for (uint32_t i = 0; i < n; ++i) {
-                if (!std::isfinite(x[i])) { finite = false; break; }
+                if (!std::isfinite(x[i])) {
+                    finite = false;
+                    break;
+                }
             }
             if (!finite) {
                 fallback_[ch].reset();
@@ -96,12 +114,12 @@ public:
     /// RT-safe miss substitute: emit the latency-aligned block that
     /// prime_fallback() already computed for this timeline slot.
     void process_cpu_fallback(const audio::BufferView<const float>& /*input*/,
-                              audio::BufferView<float>& output,
-                              uint32_t n) noexcept override {
+                              audio::BufferView<float>& output, uint32_t n) noexcept override {
         const uint32_t out_ch = static_cast<uint32_t>(output.num_channels());
         for (uint32_t ch = 0; ch < out_ch; ++ch)
             std::fill_n(output.channel_ptr(ch), n, 0.0f);
-        if (!prepared_ || n != block_) return;
+        if (!prepared_ || n != block_)
+            return;
         const uint32_t ch_count = std::min<uint32_t>(channels_, out_ch);
         for (uint32_t ch = 0; ch < ch_count; ++ch) {
             const float* due = fb_out_.data() + static_cast<std::size_t>(ch) * block_;
@@ -110,12 +128,22 @@ public:
     }
 
     /// True if the GPU compute device initialized (process_block uses the GPU).
-    bool gpu_available() const { return gpu_ != nullptr; }
-    /// The live compute backend ("Metal"/"D3D12"/"Vulkan"), or "" if CPU-only.
-    std::string backend() const { return gpu_ ? gpu_->capabilities().backend : std::string(); }
-    uint32_t fft_size() const { return fft_size_; }
+    bool gpu_available() const {
+        return gpu_ != nullptr || has_realtime_shared_io();
+    }
+    /// The live native compute backend ("Metal"/"D3D12"/"Vulkan"), or "" if CPU-only.
+    /// On the shared path this names Dawn's underlying Metal backend; use the
+    /// transport capability report when the provider identity itself matters.
+    std::string backend() const {
+        return gpu_                       ? gpu_->capabilities().backend
+               : has_realtime_shared_io() ? std::string("Metal")
+                                          : std::string();
+    }
+    uint32_t fft_size() const {
+        return fft_size_;
+    }
 
-protected:
+  protected:
     /// Allocate + load the CPU fallback machinery (both the RT miss fallback and
     /// the no-GPU worker fallback) and the latency-alignment delay ring. Shared
     /// by the render and no-render prepare() paths so they can never drift.
@@ -128,7 +156,7 @@ protected:
             fallback_[ch].load_ir(ir_.data(), ir_.size(), block_);
             worker_fallback_[ch].load_ir(ir_.data(), ir_.size(), block_);
         }
-        fallback_delay_blocks_ = kLatencyBlocks;
+        fallback_delay_blocks_ = latency_blocks_;
         fb_delay_idx_ = 0;
         fb_delay_.assign(static_cast<std::size_t>(fallback_delay_blocks_) * block_ * channels_,
                          0.0f);
@@ -147,55 +175,93 @@ protected:
     /// convolver and emit silence for that channel; it self-heals on the next
     /// finite block instead of dying for the tail.
     void render_worker_fallback(const audio::BufferView<const float>& input,
-                                audio::BufferView<float>& output,
-                                uint32_t n) noexcept {
+                                audio::BufferView<float>& output, uint32_t n) noexcept {
         const uint32_t out_ch = static_cast<uint32_t>(output.num_channels());
         for (uint32_t ch = 0; ch < out_ch; ++ch)
             std::fill_n(output.channel_ptr(ch), n, 0.0f);
-        if (!prepared_) return;
+        if (!prepared_)
+            return;
         const uint32_t ch_count = std::min<uint32_t>(channels_, out_ch);
         for (uint32_t ch = 0; ch < ch_count && ch < worker_fallback_.size(); ++ch) {
-            if (ch >= input.num_channels()) continue;
+            if (ch >= input.num_channels())
+                continue;
             const float* x = input.channel_ptr(ch);
             bool finite = true;
             for (uint32_t i = 0; i < n; ++i) {
-                if (!std::isfinite(x[i])) { finite = false; break; }
+                if (!std::isfinite(x[i])) {
+                    finite = false;
+                    break;
+                }
             }
             if (!finite) {
-                worker_fallback_[ch].reset();  // output stays the pre-cleared silence
+                worker_fallback_[ch].reset(); // output stays the pre-cleared silence
                 continue;
             }
-            worker_fallback_[ch].process(x, output.channel_ptr(ch),
-                                         static_cast<std::size_t>(n));
+            worker_fallback_[ch].process(x, output.channel_ptr(ch), static_cast<std::size_t>(n));
         }
     }
+
+    static std::uint8_t process_realtime_shared_io(void* self,
+                                                   const audio::BufferView<const float>& input,
+                                                   audio::BufferView<float>& output,
+                                                   std::uint32_t n, std::uint64_t sequence,
+                                                   bool input_valid) noexcept;
+    static std::uint32_t service_realtime_shared_io(void* self, std::uint64_t now_ns) noexcept;
+    static bool fence_realtime_shared_io(void* self) noexcept;
+    static void complete_realtime_shared_io(void*, std::uint64_t, std::uint8_t) noexcept;
+    static std::uint64_t next_realtime_shared_io_sequence(void*) noexcept;
+    bool has_realtime_shared_io() const noexcept;
+
+    friend detail::RealtimeGpuNodePath detail::realtime_gpu_node_path(GpuAudioNode*) noexcept;
+    friend bool
+    detail::configure_gpu_convolver_trial(GpuConvolver&,
+                                          const detail::GpuConvolverTrialConfig&) noexcept;
+    friend bool
+    detail::drain_gpu_convolver_trial_records(GpuConvolver&,
+                                              std::vector<detail::SharedIoTraceRecord>&) noexcept;
+
+    struct SharedIoState;
 
     uint32_t channels_;
     uint32_t block_;
     uint32_t sample_rate_;
+    // Fixed before prepare(); this value is shared by descriptor PDC, the
+    // shared-I/O bridge lead, and the CPU fallback delay.
+    uint32_t latency_blocks_ = kLatencyBlocks;
     std::vector<float> ir_;
     uint32_t fft_size_ = 0;
+    std::uint8_t trial_requested_path_ = 0; // detail::SharedIoRequest::Auto
+    std::uint64_t trial_generation_ = 1;
+    bool trial_configured_ = false;
+    bool trial_enable_trace_ = false;
+    bool trial_capture_admissions_ = false;
+    std::uint32_t trial_success_stride_ = 1;
+    std::uint8_t trial_completion_policy_ = 0; // Dawn completion policy enum
+    std::uint64_t trial_completion_wait_ns_ = 0;
 
     std::unique_ptr<render::GpuCompute> gpu_;
-    std::vector<float> ir_spec_;     // 2*fft_size interleaved IR spectrum
-    std::vector<std::vector<float>> carry_;   // per-channel OLA accumulator (fft_size)
+    std::unique_ptr<SharedIoState> shared_io_;
+    std::unique_ptr<detail::StagedAsyncTrialState> staged_trial_;
+    std::uint64_t staged_sequence_ = 0;
+    std::vector<float> ir_spec_;            // 2*fft_size interleaved IR spectrum
+    std::vector<std::vector<float>> carry_; // per-channel OLA accumulator (fft_size)
 
     // Per-block host scratch (allocated in prepare()). The FFT/mul/inverse
     // intermediates stay GPU-resident inside GpuCompute::convolve().
-    std::vector<float> in_pad_;      // 2*fft_size interleaved complex input
-    std::vector<float> time_;        // 2*fft_size inverse result (one readback)
+    std::vector<float> in_pad_; // 2*fft_size interleaved complex input
+    std::vector<float> time_;   // 2*fft_size inverse result (one readback)
 
     // Continuously-fed zero-latency CPU fallbacks.
-    std::vector<signal::PartitionedConvolver> fallback_;         // RT miss fallback
-    std::vector<signal::PartitionedConvolver> worker_fallback_;  // no-GPU worker path
+    std::vector<signal::PartitionedConvolver> fallback_;        // RT miss fallback
+    std::vector<signal::PartitionedConvolver> worker_fallback_; // no-GPU worker path
 
     // Latency-alignment delay for the RT miss fallback. `fb_delay_` is a
     // `fallback_delay_blocks_`-deep circular buffer of block-sized, per-channel
     // slots; `fb_out_` holds this block's due (input(t-L)-convolved) substitute.
     uint32_t fallback_delay_blocks_ = 0;
     uint32_t fb_delay_idx_ = 0;
-    std::vector<float> fb_delay_;    // [delay_blocks][channels][block]
-    std::vector<float> fb_out_;      // [channels][block]
+    std::vector<float> fb_delay_; // [delay_blocks][channels][block]
+    std::vector<float> fb_out_;   // [channels][block]
 
     bool prepared_ = false;
 };

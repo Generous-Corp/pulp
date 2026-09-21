@@ -1,0 +1,77 @@
+{
+  "id": "sample-region-design-time-capability",
+  "title": "Sample-region DSP is discoverable through the design-time capability surface",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "8cf7a19f-3b17-4d8c-b9b9-4b82cb91a2e4",
+  "owned_paths": [
+    "tools/scripts/agent_capability_surface.py"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/sample_region_authoring.hpp",
+      "needles": [
+        "struct SampleRegionDefinition {"
+      ]
+    },
+    {
+      "path": "docs/status/agent-capabilities.json",
+      "needles": [
+        "\"key\": \"signal.sample-region\"",
+        "Bounded exact-version scalar feedback regions"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The sample-region authoring and proof types are public Pulp host headers, while the delivery remains pending its complete downstream and installed-consumer evidence.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/sample_region_authoring.hpp",
+          "needles": [
+            "struct SampleRegionDefinition {"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "D4 adds the design-time capability and SDK catalog surface; it does not add a Timeline CLI operation."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "D4 adds no offline Timeline MCP operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The runtime broker and live topology operations are owned by C4, not this catalog packet."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The generated agent capability manifest publishes signal.sample-region with typed bindings for the bounded sample-region host surface.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "\"key\": \"signal.sample-region\""
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}

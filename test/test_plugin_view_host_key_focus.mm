@@ -174,8 +174,7 @@ TEST_CASE("PluginViewHost (mac CPU) — the editor takes the keyboard only while
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — key-focus contract test skipped.");
-            return;
+            SKIP("No Cocoa window — key-focus contract test skipped.");
         }
 
         FocusRecordingView root;
@@ -279,8 +278,7 @@ TEST_CASE("PluginViewHost (mac CPU) — a programmatic focus clear (no event) "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — frame-tick focus-sync test skipped.");
-            return;
+            SKIP("No Cocoa window — frame-tick focus-sync test skipped.");
         }
 
         FocusRecordingView root;
@@ -363,8 +361,7 @@ TEST_CASE("PluginViewHost (mac CPU) — a focused non-text widget does NOT steal
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — non-text-focus contract test skipped.");
-            return;
+            SKIP("No Cocoa window — non-text-focus contract test skipped.");
         }
 
         FocusRecordingView root;
@@ -420,8 +417,7 @@ TEST_CASE("PluginViewHost (mac CPU) — an open ComboBox borrows navigation keys
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — ComboBox navigation contract test skipped.");
-            return;
+            SKIP("No Cocoa window — ComboBox navigation contract test skipped.");
         }
 
         View root;
@@ -482,8 +478,7 @@ TEST_CASE("PluginViewHost (mac CPU) — focus is scoped per editor; a second "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — multi-editor focus test skipped.");
-            return;
+            SKIP("No Cocoa window — multi-editor focus test skipped.");
         }
 
         NSView* containerA =
@@ -592,8 +587,7 @@ TEST_CASE("PluginViewHost (mac CPU) — hosted key routing: arrows navigate "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted key-routing test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted key-routing test skipped.");
         }
 
         View root;
@@ -774,8 +768,7 @@ TEST_CASE("PluginViewHost (mac CPU) — unfocused keys stay with the DAW, not th
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — hosted root-key test skipped.");
-            return;
+            SKIP("No Cocoa window — hosted root-key test skipped.");
         }
         NoteCaptureRoot root;
         PluginViewHost::Options opts;
@@ -838,8 +831,7 @@ TEST_CASE("PluginViewHost (mac CPU) — a click sets the field's visual focus "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — focus-affordance test skipped.");
-            return;
+            SKIP("No Cocoa window — focus-affordance test skipped.");
         }
 
         View root;
@@ -962,8 +954,7 @@ TEST_CASE("PluginViewHost (mac CPU) — Escape dismisses a claimed overlay and "
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
         if (!window || !window.contentView) {
-            SUCCEED("No Cocoa window — overlay Escape test skipped.");
-            return;
+            SKIP("No Cocoa window — overlay Escape test skipped.");
         }
 
         View root;

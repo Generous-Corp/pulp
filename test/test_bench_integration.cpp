@@ -88,8 +88,7 @@ TEST_CASE("pulp-ui-preview --benchmark-seconds emits a schema-conformant JSON",
           "[bench][integration]") {
     const auto bin = ui_preview_binary();
     if (!fs::exists(bin)) {
-        SUCCEED("pulp-ui-preview not built for this test run; skipping");
-        return;
+        SKIP("pulp-ui-preview not built for this test run; skipping");
     }
 
     auto tmp_json = fs::temp_directory_path() / "pulp-bench-integration-test.json";

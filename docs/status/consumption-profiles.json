@@ -48,7 +48,7 @@
           {
             "exported_as": "Pulp::host",
             "closure_node_count": 86,
-            "public_header_count": 214
+            "public_header_count": 215
           },
           {
             "exported_as": "Pulp::inspect-offline-runtime",
@@ -63,17 +63,17 @@
           {
             "exported_as": "Pulp::standalone",
             "closure_node_count": 83,
-            "public_header_count": 136
+            "public_header_count": 137
           },
           {
             "exported_as": "Pulp::standalone-native",
             "closure_node_count": 83,
-            "public_header_count": 136
+            "public_header_count": 137
           },
           {
             "exported_as": "Pulp::format",
             "closure_node_count": 81,
-            "public_header_count": 136
+            "public_header_count": 137
           },
           {
             "exported_as": "Pulp::inspect-ui-runtime",
@@ -83,7 +83,7 @@
           {
             "exported_as": "Pulp::format-view",
             "closure_node_count": 80,
-            "public_header_count": 136
+            "public_header_count": 137
           },
           {
             "exported_as": "Pulp::inspect-runtime-eval",
@@ -118,7 +118,7 @@
           {
             "exported_as": "Pulp::gpu-audio",
             "closure_node_count": 70,
-            "public_header_count": 29
+            "public_header_count": 30
           },
           {
             "exported_as": "Pulp::render",
@@ -148,7 +148,7 @@
           {
             "exported_as": "Pulp::format-core",
             "closure_node_count": 38,
-            "public_header_count": 136
+            "public_header_count": 137
           },
           {
             "exported_as": "Pulp::dawproject-import",
@@ -323,7 +323,7 @@
           {
             "exported_as": "Pulp::timebase",
             "closure_node_count": 2,
-            "public_header_count": 12
+            "public_header_count": 13
           },
           {
             "exported_as": "Pulp::bundled-fonts",
@@ -1263,7 +1263,7 @@
             ]
           },
           "public_headers": {
-            "count": 136,
+            "count": 137,
             "roots": [
               "core/format/include"
             ],
@@ -1347,7 +1347,7 @@
             ]
           },
           "public_headers": {
-            "count": 136,
+            "count": 137,
             "roots": [
               "core/format/include"
             ],
@@ -1493,7 +1493,7 @@
             ]
           },
           "public_headers": {
-            "count": 136,
+            "count": 137,
             "roots": [
               "core/format/include"
             ],
@@ -1643,7 +1643,7 @@
             ]
           },
           "public_headers": {
-            "count": 29,
+            "count": 30,
             "roots": [
               "core/gpu_audio/include",
               "core/render/include"
@@ -1854,7 +1854,7 @@
             ]
           },
           "public_headers": {
-            "count": 214,
+            "count": 215,
             "roots": [
               "core/format/include",
               "core/host/include"
@@ -4499,7 +4499,7 @@
             ]
           },
           "public_headers": {
-            "count": 136,
+            "count": 137,
             "roots": [
               "core/format/include"
             ],
@@ -4640,7 +4640,7 @@
             ]
           },
           "public_headers": {
-            "count": 136,
+            "count": 137,
             "roots": [
               "core/format/include"
             ],
@@ -4741,7 +4741,7 @@
             "system_libraries": []
           },
           "public_headers": {
-            "count": 12,
+            "count": 13,
             "roots": [
               "core/timebase/include"
             ],

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stamp and verify the exact agent surface belonging to an official Pulp SDK."""
+"""Verify exact SDK capability handoffs for distinct release and development producers."""
 
 from __future__ import annotations
 
@@ -283,3 +283,91 @@ def verify_handoff(
         expected_sdk_source_sha=expected_sdk_source_sha,
         expected_platform=expected_platform,
     )
+
+
+def verify_development_identity(
+    prefix: Path, *, source_dir: Path, source_sha: str, platform: str
+) -> bytes:
+    """Validate an immutable local SDK identity without changing release status."""
+    import re
+    import subprocess
+
+    if re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
+        raise HandoffError("source SHA must be a full lowercase Git commit SHA")
+    source_dir = source_dir.resolve(strict=True)
+
+    def git(*arguments: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(source_dir), *arguments], text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        if result.returncode:
+            raise HandoffError("cannot verify immutable source snapshot: " + result.stderr.strip())
+        return result.stdout.strip()
+
+    if Path(git("rev-parse", "--show-toplevel")).resolve() != source_dir:
+        raise HandoffError("source directory must be the immutable checkout root")
+    if git("rev-parse", "HEAD") != source_sha:
+        raise HandoffError("source snapshot HEAD differs from requested source SHA")
+    if git("status", "--porcelain=v1", "--untracked-files=all"):
+        raise HandoffError("development handoff requires a clean committed source snapshot")
+    provenance_bytes = _read_bytes(prefix / "sdk-provenance.json")
+    marker = _json(provenance_bytes, "sdk-provenance.json")
+    if not isinstance(marker, dict):
+        raise HandoffError("development SDK provenance must be an object")
+    if (marker.get("schema") != "pulp.sdk-provenance.v1" or
+            marker.get("kind") != "development" or
+            marker.get("profile") not in {"forge-dev", "trace"} or
+            marker.get("distribution_eligible") is not False or
+            marker.get("source_git_dirty") is not False or
+            marker.get("build_type") != "Release"):
+        raise HandoffError("SDK must retain non-distributable Release development provenance")
+    if marker.get("source_git_sha") != source_sha or marker.get("platform") != platform:
+        raise HandoffError("development SDK provenance source/platform identity differs")
+    if _read_bytes(prefix / "sdk_build_type.txt").decode().strip() != "Release":
+        raise HandoffError("installed development SDK is not Release")
+    if _read_bytes(prefix / "version.txt").decode().strip() != marker.get("sdk_version"):
+        raise HandoffError("installed SDK version differs from development provenance")
+    return provenance_bytes
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="Stamp or verify a local SDK capability handoff.")
+    parser.add_argument("command", choices=("stamp-dev", "verify-dev"))
+    parser.add_argument("--prefix", type=Path, required=True)
+    parser.add_argument("--source-dir", type=Path, required=True)
+    parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--platform", required=True)
+    args = parser.parse_args(argv)
+    try:
+        prefix = args.prefix.resolve(strict=True)
+        marker = verify_development_identity(
+            prefix, source_dir=args.source_dir, source_sha=args.source_sha, platform=args.platform)
+        # Imported here because the official-release producer imports this module.
+        # Only its runtime-list authority is used; no official marker is emitted.
+        from sdk_provenance import _importer_runtime_paths
+        runtime_paths = _importer_runtime_paths(prefix, args.platform)
+        if args.command == "stamp-dev":
+            document = build_handoff(prefix, sdk_source_sha=args.source_sha,
+                                     platform=args.platform,
+                                     expected_importer_runtime_paths=runtime_paths)
+            write_atomically(prefix / HANDOFF_PATH, document)
+        verify_handoff(prefix, expected_sdk_source_sha=args.source_sha,
+                       expected_platform=args.platform,
+                       expected_importer_runtime_paths=runtime_paths)
+        after = verify_development_identity(
+            prefix, source_dir=args.source_dir, source_sha=args.source_sha, platform=args.platform)
+        if after != marker:
+            raise HandoffError("development provenance changed during handoff operation")
+        print(f"OK: {args.command} capability handoff; development provenance preserved")
+        return 0
+    except (RuntimeError, OSError, ValueError) as error:
+        print(f"sdk-capability-handoff: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

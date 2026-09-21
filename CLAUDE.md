@@ -129,10 +129,10 @@ cannot tell whether a leg is ephemeral or one of the shared self-hosted Studios
 (the macOS matrix leg resolves to `PULP_LOCAL_MACOS_RUNS_ON_JSON` — the shared
 Studios that host the required `macos` gate). In a workflow, bounding a
 whole-machine build is therefore the **author's** job: route a self-hosted leg
-through `tools/ci/governed-build.sh` (as `build.yml`, `examples-validation.yml`,
-`web-plugins.yml`, and `format-baseline-diff.yml` do for their macOS legs). When
-adding a build command anywhere, give `--parallel`/`-j` a bounded share (or route
-it through the governor), not the machine's core count.
+through `tools/ci/governed-build.sh` (`build.yml`'s `Build` step + intel canary,
+`examples-validation.yml`, `web-plugins.yml`, `format-baseline-diff.yml`). When
+adding a build command anywhere, derive `--parallel`/`-j` from the governor: a
+literal is a silent ceiling that survives a VM resize, a core count is the melt.
 
 **External SDKs** (not committed, cloned at configure time or manually):
 - VST3 SDK → `external/vst3sdk` (MIT, `git clone --depth 1 --branch v3.8.0_build_66`)
@@ -1005,6 +1005,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
 - Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
+- Validate complete matched GPU-audio trial captures and summarize their declared CPU, latency, transfer, and disposition evidence. → `tools/scripts/gpu_audio_p4_evidence.py`
+  - ⚠ **Cannot see:** Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
 
 **test-evidence**
@@ -1596,26 +1598,29 @@ tools/scripts/clean_worktree_builds.sh --verbose  # also explain every skip
 tools/scripts/clean_worktree_builds.sh --yes      # delete
 ```
 
-It only considers directories `git worktree list` reports for this repository,
-and deletes only when **all five** hold: the exact head is a strict ancestor of
-current `origin/main`; the exact head is proven landed - by the shared
-lineage registry recording it `merged` with a PR URL, which is the only proof
-a squash-landed head can have (on 2026-09-13, 54 provably merged worktrees
-held 947 GB because their records were still `active`; run
-`worktree_lineage.sh reconcile` to back-fill them from `origin/main`'s merge
-commits, zero API calls); the build has been idle beyond
-`PULP_WORKTREE_BUILD_IDLE_HOURS` (default 2) across its entire tree; no live
-process names, has its cwd in, or holds an open file under the worktree; and the
-physical path/common Git directory re-pass a fresh registry check at deletion
-time. Removal first renames `build/` from an already-opened physical worktree
-directory, so replacement-path races cannot redirect it. A deleted
-remote branch is not completion evidence: unique, active, unclassified, or
-stale-lineage work is preserved automatically. The mutable gates are checked
-again immediately before removal. If `origin` or process state is unavailable,
-or full Git history cannot be established, it removes nothing (exit 3). The
-main checkout is never reaped. `PULP_WORKTREES_ROOT`
-narrows the sweep and is echoed in the header, because that variable is often
-already exported and silently halves the totals. Tested by
+It only considers directories `git worktree list` reports for this repository
+(`build` and `build-*`, so coverage/sanitizer trees are in scope), and deletes
+only when **all five** hold: the exact head is a strict ancestor of current
+`origin/main`; that head is proven landed, **either** by the lineage registry
+recording it `merged` with a PR URL **or** by git ancestry alone; the build has
+been idle beyond `PULP_WORKTREE_BUILD_IDLE_HOURS` (default 2) across its entire
+tree; no live process names, has its cwd in, or holds an open file under the
+worktree; and the physical path/common Git directory re-pass a fresh registry
+check at deletion time. Removal first renames `build/` from an already-opened
+physical worktree directory, so replacement-path races cannot redirect it.
+**Absence of a registry row is not evidence of non-merge** — 54 provably merged
+worktrees held 947 GB on 2026-09-13 because nobody recorded a closeout — but a
+**squash**-landed head still needs its PR URL, that head being deliberately not
+an ancestor (`worktree_lineage.sh reconcile` back-fills them, zero API calls).
+**An explicit `active` row still vetoes, and ancestry may not overrule it**:
+ancestry proves a head *landed*, never that work there *stopped*. A deleted
+remote branch is still not completion evidence. The mutable gates are re-checked
+immediately before removal. If `origin` or process state is unavailable, or full
+Git history cannot be established, it removes nothing (exit 3). The main
+checkout is never reaped. `PULP_WORKTREES_ROOT` narrows the sweep and is echoed
+in the header, because it is often already exported and silently halves the
+totals; `PULP_REAP_SAME_DEVICE_AS=<path>` confines candidates to one filesystem,
+since free space is per-volume. Tested by
 `tools/scripts/test_clean_worktree_builds.py`.
 
 Scheduling either reaper is deliberately not wired up here — whether a machine
@@ -1878,6 +1883,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `ios` | iOS platform development for Pulp — iPhone/iPad AUv3 app extensions, iOS Simulator builds, UIKit window host, CoreAudio IO audio, touch & Apple Pencil input, XcodeBuildMCP automation. |
 | `jsfx-subset` | Work in Pulp's bounded JSFX lane using source-only examples, subset validation, and explicit exclusions like no `@gfx`. |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp package manifests. |
+| `lv2` | LV2 format adapter for Pulp — the generated Turtle manifest nothing ships, port indices as a saved-session wire format, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep. |
 | `moonbase` | Optional Moonbase license-activation integration for Pulp — load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, audio-thread gating + click-free fade, async start/pump, the interactive native (no-WebView) activation editor (frame-tick polling + the don't-rebuild-mid-event trap), loadable plugin/standalone formats, and headless screenshots. |
 | `motion` | Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. |
 | `mpe` | Build an MPE-aware Pulp synth — opt into MPE via PluginDescriptor, consume per-note pitch bend / pressure / timbre from MpeBuffer, and route voices through MpeVoiceAllocator without reinventing channel tracking. |
@@ -1900,7 +1906,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
 | `text-metrics` | Baseline, half-leading, and font-face resolution for Label and captured (browser-imported) text — the arithmetic that decides where a glyph lands and how wide the box must be, plus the measure-vs-paint divergences that make text clip or sit low without any test going red. |
 | `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
-| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, order-preserving groove kernels, coordinate randomness, streaming cursors, and quantization arithmetic. |
+| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, inline and order-preserving groove projection, coordinate randomness, streaming cursors, and quantization arithmetic. |
 | `timeline` | Build, edit, validate, explain, render, import, or integrate Pulp timeline projects through the CLI, MCP tools, or C++ SDK. |
 | `trace-analysis` | The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). |
 | `trace-sql` | SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. |
@@ -1912,7 +1918,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-This table of 66 skills is GENERATED from each
+This table of 67 skills is GENERATED from each
 `.agents/skills/<name>/SKILL.md` frontmatter by
 `tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
 <!-- generated:end id=skills-digest -->

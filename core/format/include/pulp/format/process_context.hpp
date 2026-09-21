@@ -69,6 +69,14 @@ enum class RenderSpeedHint {
 ///   `loop_end_beats` directly; `tsig_num` / `tsig_denom` for time
 ///   signature). CLAP does not provide frame rate; `frame_rate`
 ///   stays `FrameRate::unknown`.
+/// - LV2 — a `time:Position` atom on the MIDI input sequence
+///   (`time:speed` → `is_playing`, `time:beatsPerMinute` → `tempo_bpm`,
+///   `time:frame` → `position_samples`, `time:beat` scaled by
+///   `4 / time:beatUnit` → `position_beats`, `time:bar` → `bar`).
+///   LV2's time extension models no record-arm, cycle range, or host
+///   clock, so those stay unavailable; `time:framesPerSecond` is the
+///   audio sample rate rather than an SMPTE rate, so `frame_rate`
+///   stays `FrameRate::unknown`.
 /// - AAX (optional Avid SDK) — `IACFTransport` (`GetCurrentTickPosition`
 ///   for beats; `GetCurrentLoopPosition` for loop range; transport
 ///   state flags). Frame rate via `IACFTransport::GetTimeCodeInfo`

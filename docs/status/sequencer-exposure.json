@@ -6279,7 +6279,7 @@
     },
     {
       "id": "view-contextmenu-arming-and-bubbling",
-      "title": "Right-click context menus reach their handler, with keyboard navigation, within MSVC's string-literal cap",
+      "title": "Right-click context menus reach their handler, fit the surface they are drawn on, and keyboard-navigate, within MSVC's string-literal cap",
       "classification": "public_sdk",
       "delivery_state": "pending",
       "claim_id": "pulp-pr-8307-contextmenu",
@@ -6307,7 +6307,9 @@
         {
           "path": "core/view/src/context_menu.cpp",
           "needles": [
-            "void ContextMenu::move_hover_to_edge(bool last)"
+            "void ContextMenu::move_hover_to_edge(bool last)",
+            "void ContextMenu::scroll_row_into_view(int index)",
+            "lay.max_scroll = std::max(0.0f, lay.content_height - height);"
           ]
         },
         {
@@ -6316,12 +6318,19 @@
             "MSVC_LITERAL_CAP_BYTES = 16380",
             "raw string literal is"
           ]
+        },
+        {
+          "path": "test/test_context_menu.cpp",
+          "needles": [
+            "ContextMenu last row of a capped menu is reachable and selects",
+            "ContextMenu clips its rows to the panel"
+          ]
         }
       ],
       "surfaces": {
         "installed_sdk": {
           "disposition": "not_applicable",
-          "rationale": "Pointer and keyboard dispatch for a view widget; it adds no sequencer or timeline SDK API."
+          "rationale": "Pointer, keyboard and overflow handling for a view widget; it adds no sequencer or timeline SDK API."
         },
         "offline_timeline_cli": {
           "disposition": "not_applicable",
@@ -8429,7 +8438,6 @@
         "core/timeline/tools/test_schema_mcp_emit.py",
         "docs/reference/cli.md",
         "docs/status/cli-commands.yaml",
-        "docs/status/pulp-tooling-disposition.json",
         "docs/status/sequencer-exposure.json",
         "test/cmake/cli_tests.cmake",
         "test/test_cli_timeline_render_shellout.cpp",
@@ -8452,6 +8460,12 @@
           "path": "tools/cli/cmd_seq.cpp",
           "needles": [
             "parse_tail_frames",
+            "--tail-frames"
+          ]
+        },
+        {
+          "path": "docs/status/pulp-tooling-disposition.json",
+          "needles": [
             "--tail-frames"
           ]
         }

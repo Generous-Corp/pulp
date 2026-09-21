@@ -6894,6 +6894,50 @@ across commits: a retained index resolves stale paths after any reparent. The
 selector parse memo has no such concern — a parse is a pure function of the
 selector text.
 
+**The applier takes a dirty SCOPE, and only bridge traffic is scoped.**
+`__pulpApplyMaterializedImportMetadata__(scopeIds)` receives a list of native
+ids from `@pulp/react`'s `resetAfterCommit`: the subtree roots that commit
+actually mutated. A binding is in scope when its node is one of those ids or a
+descendant of one, tested by walking the binding node's parent chain. Three
+things about this are easy to get wrong:
+
+- **Absent, `null` or empty means "apply everything".** That is the safe
+  direction and the compatibility story — a checked-in runtime artifact built
+  before the argument existed ignores it and does a full pass, correctly. An
+  *unknown* id, by contrast, applies nothing; do not "helpfully" widen it,
+  because that would hide a host-config regression that stopped publishing real
+  ids behind a permanently full re-apply.
+- **A relationship change scopes to the PARENT, not the moved node.** Captured
+  paths resolve through sibling indices, so an append, removal or reorder
+  renumbers the parent's whole child list. Scoping a reorder to the moved child
+  leaves its former siblings holding another row's captured box — visibly
+  wrong, and invisible to every operation count. Container-level mutations, a
+  root resize, and a hook that arrives late all fall back to the full pass.
+- **Only bridge calls are scoped.** Every binding's path is still resolved on
+  every pass, because node identity is what decides scope membership. On an
+  877-node document a scoped pass drops bridge traffic from 10,746 operations
+  (1,753 of them `getLayoutBoxMetrics`, each of which forces a whole root
+  layout pass) to 13 for a leaf — but the pure-JS resolution that remains is
+  still O(document). Do not quote a scoped pass as an O(subtree) application.
+
+`__pulpRefreshMaterializedState__` shares the same gate for the same reason:
+its matcher resolves a selector per captured state over the registry, and a
+commit that mutated no host node cannot have changed which state answers. With
+a captured state live that was measured at one full registry scan per commit
+(877 match-tests on an 877-node document), every commit, because a positive
+match is deliberately never cached. The one exception is
+`__pulpMaterializedStateResolver__`: an embedder driving the state from its own
+signal is not a function of the registry, so a runtime that installs one keeps
+the unconditional refresh.
+
+**Scoped passes publish diagnostics under a different key.** A scoped
+application legitimately touches a fraction of the document, so writing its
+counts to `__pulpMaterializedMetadataDiagnostics__` — which import validators
+read as applied-vs-expected — would report a mass miss on a pass that was
+correct by construction. That key keeps the last **full** application; a scoped
+pass lands on `__pulpMaterializedScopedApplyDiagnostics__` with `scoped: true`
+and `*_out_of_scope` counters.
+
 **Guarding a change here:** `materializedMatches` is reachable from nearly every
 metadata binding, yet hard-breaking it leaves the dropdown arrow-traversal and
 settings cases GREEN. The case that actually catches it is *every native

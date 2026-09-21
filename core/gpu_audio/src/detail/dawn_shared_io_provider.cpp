@@ -1,4 +1,5 @@
 #include "dawn_shared_io_provider.hpp"
+#include "dawn_shared_io_convolution_session.hpp"
 
 #include "dawn_submission_tracker.hpp"
 
@@ -13,6 +14,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -32,6 +34,10 @@ namespace pulp::gpu_audio::detail {
 namespace {
 
 constexpr auto kDrainLimit = std::chrono::seconds(15);
+constexpr auto kMaxCompletionWaitNs =
+    static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
+constexpr std::size_t kWaitAnyBatchSize = 64;
+constexpr std::uint64_t kDefaultCompletionWaitNs = 1'000'000;
 
 std::string revision(const std::uint8_t* bytes) {
     if (bytes == nullptr)
@@ -177,6 +183,74 @@ std::string copy_string(wgpu::StringView value) {
 
 } // namespace
 
+constexpr auto kSharedIoFftWgsl = R"wgsl(
+// One radix-2 Stockham auto-sort FFT pass over interleaved complex data.
+// Result is naturally ordered (no separate bit-reversal pass). log2(N) passes
+// ping-pong between two buffers; `ns` doubles each pass (1, 2, 4, ... N/2).
+// sign = -1 forward, +1 inverse (the host applies the 1/N inverse scale).
+// Reference: Lloyd/Boyd/Govindaraju, "Fast Computation of General Fourier
+// Transforms on GPUs" (Stockham radix-2 formulation).
+
+struct FftParams {
+    n     : u32,
+    ns    : u32,
+    sign  : f32,
+    batch : u32,   // number of independent transforms packed back-to-back
+};
+
+@group(0) @binding(0) var<storage, read>       src    : array<f32>;
+@group(0) @binding(1) var<storage, read_write> dst    : array<f32>;
+@group(0) @binding(2) var<uniform>             params : FftParams;
+
+const PI : f32 = 3.1415926535897932;
+
+// Batched radix-2 Stockham pass. Each of `batch` transforms occupies a
+// contiguous n-complex span; thread tid maps to (transform b, butterfly j).
+// batch == 1 is bit-for-bit identical to the single-transform path.
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3u) {
+    let half = params.n / 2u;
+    let tid = gid.x;
+    if (tid >= params.batch * half) {
+        return;
+    }
+    let b = tid / half;
+    let j = tid - b * half;
+    let base = b * params.n;   // complex-element offset of this transform
+
+    let v0_re = src[2u * (base + j)];
+    let v0_im = src[2u * (base + j) + 1u];
+    let k = j + half;
+    let v1_re = src[2u * (base + k)];
+    let v1_im = src[2u * (base + k) + 1u];
+
+    let angle = params.sign * 2.0 * PI * f32(j % params.ns) / f32(params.ns * 2u);
+    let tw_re = cos(angle);
+    let tw_im = sin(angle);
+
+    // u1 = twiddle * v1
+    let u1_re = tw_re * v1_re - tw_im * v1_im;
+    let u1_im = tw_re * v1_im + tw_im * v1_re;
+
+    let y0_re = v0_re + u1_re;
+    let y0_im = v0_im + u1_im;
+    let y1_re = v0_re - u1_re;
+    let y1_im = v0_im - u1_im;
+
+    let idxD = (j / params.ns) * params.ns * 2u + (j % params.ns);
+    dst[2u * (base + idxD)]                   = y0_re;
+    dst[2u * (base + idxD) + 1u]              = y0_im;
+    dst[2u * (base + idxD + params.ns)]       = y1_re;
+    dst[2u * (base + idxD + params.ns) + 1u]  = y1_im;
+}
+)wgsl";
+
+constexpr auto kSharedIoMulWgsl = R"wgsl(
+@group(0) @binding(0) var<storage,read> a:array<f32>;
+@group(0) @binding(1) var<storage,read> ir:array<f32>;
+@group(0) @binding(2) var<storage,read_write> out:array<f32>;
+@compute @workgroup_size(256) fn main(@builtin(global_invocation_id) id:vec3u) { let i=id.x; let p=i*2u; if(p+1u>=arrayLength(&a)){return;} let k=p%(arrayLength(&ir)); let ar=a[p];let ai=a[p+1u];let br=ir[k];let bi=ir[k+1u];out[p]=ar*br-ai*bi;out[p+1u]=ar*bi+ai*br; })wgsl";
+
 struct DawnSharedIoProvider::Impl {
     struct RequestAdapter {
         std::atomic<bool> done{false};
@@ -197,13 +271,26 @@ struct DawnSharedIoProvider::Impl {
         std::atomic<bool> observed{false};
     };
     struct Submission {
+        struct ScopeCallback {
+            Submission* submission = nullptr;
+            unsigned index = 0;
+        };
+
         std::atomic<int> queue{0};
         std::atomic<int> scope{0};
         std::atomic<unsigned> scopes_pending{0};
         std::atomic<bool> scope_error{false};
+        std::array<std::atomic<bool>, 3> scope_completed{};
         DawnSubmissionTracker tracker;
         SlotToken token;
         std::shared_ptr<SharedIoTerminalInbox> inbox;
+        // Future ids are retained until their callbacks have been consumed.
+        // Dawn callbacks may be delivered by WaitAny or ProcessEvents, and a
+        // stack-local Future would otherwise leave the dispatcher with no
+        // safe way to wait for the exact submission it owns.
+        wgpu::Future queue_future{};
+        std::array<wgpu::Future, 3> scope_futures{};
+        std::array<ScopeCallback, 3> scope_callbacks{};
         std::optional<SharedIoTerminalStatus> pending_terminal;
         std::uint64_t generation = 0;
         bool queue_consumed = false;
@@ -227,16 +314,159 @@ struct DawnSharedIoProvider::Impl {
         wgpu::Buffer output_buffer;
         bool input_disposal_expected = false;
         bool output_disposal_expected = false;
+        std::uint64_t handle_generation = 1;
         wgpu::BindGroup bind_group;
         Submission submission;
         bool retired = false;
     };
 
-    explicit Impl(Options value) : options(std::move(value)) {}
+    struct ConvolutionPlan {
+        std::uint32_t fft_size = 0, channels = 0, logical_frames = 0, log2 = 0;
+        std::size_t bytes = 0;
+        wgpu::ComputePipeline fft, multiply;
+        wgpu::Buffer ir;
+        std::vector<wgpu::Buffer> forward_uniforms, inverse_uniforms;
+        struct SlotGroups {
+            // Submissions from different arena slots may overlap. Keep every
+            // writable FFT intermediate slot-local; only immutable IR and
+            // uniforms are shared by the prepared program.
+            wgpu::Buffer a, b, product;
+            std::vector<wgpu::BindGroup> forward, inverse;
+            wgpu::BindGroup multiply;
+        };
+        std::vector<SlotGroups> slots;
+    };
+    std::unique_ptr<ConvolutionPlan> convolution;
+    CompletionPolicy completion_policy = CompletionPolicy::ProcessEvents;
+    std::uint64_t completion_wait_ns = 0;
+    std::size_t wait_any_batch_cursor = 0;
+    bool wait_any_disabled = false;
+    bool wait_any_fault_consumed = false;
+
+    explicit Impl(Options value) : options(std::move(value)) {
+        completion_policy = options.completion_policy;
+        completion_wait_ns = options.completion_wait_ns;
+    }
 
     bool pump_until(const auto& done, std::chrono::steady_clock::time_point deadline) noexcept {
         while (!done() && std::chrono::steady_clock::now() < deadline) {
             instance.ProcessEvents();
+            ++stats.process_events_calls;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return done();
+    }
+
+    static wgpu::CallbackMode callback_mode() noexcept {
+        // AllowProcessEvents is deliberate.  Dawn native providers still
+        // deliver these callbacks from ProcessEvents; WaitAny is an additional
+        // wake-up policy, not a license to use arbitrary-thread callbacks.
+        return wgpu::CallbackMode::AllowProcessEvents;
+    }
+
+    void process_events() noexcept {
+        instance.ProcessEvents();
+        ++stats.process_events_calls;
+    }
+
+    wgpu::WaitStatus invoke_wait_any(std::size_t count, std::uint64_t timeout_ns) noexcept {
+        if (!wait_any_fault_consumed && (options.fault == Fault::SyntheticWaitAnyTimeout ||
+                                         options.fault == Fault::SyntheticWaitAnyError)) {
+            wait_any_fault_consumed = true;
+            ++stats.fault_injections;
+            return options.fault == Fault::SyntheticWaitAnyTimeout ? wgpu::WaitStatus::TimedOut
+                                                                   : wgpu::WaitStatus::Error;
+        }
+        return instance.WaitAny(count, wait_infos.data(), timeout_ns);
+    }
+
+    bool wait_for_queue_callbacks(std::chrono::steady_clock::time_point deadline) noexcept {
+        if (completion_policy == CompletionPolicy::ProcessEvents) {
+            process_events();
+            return true;
+        }
+        if (wait_any_disabled) {
+            process_events();
+            return true;
+        }
+
+        const auto batch_count =
+            std::max<std::size_t>(1, (slots.size() + kWaitAnyBatchSize - 1) / kWaitAnyBatchSize);
+        const auto starting_batch = wait_any_batch_cursor % batch_count;
+        std::size_t selected_batch = starting_batch;
+        std::size_t wait_count = 0;
+        for (std::size_t offset = 0; offset < batch_count; ++offset) {
+            const auto batch = (starting_batch + offset) % batch_count;
+            const auto first_slot = batch * kWaitAnyBatchSize;
+            const auto last_slot = std::min(slots.size(), first_slot + kWaitAnyBatchSize);
+            wait_count = 0;
+            for (auto slot_index = first_slot; slot_index < last_slot; ++slot_index) {
+                const auto* slot = slots[slot_index];
+                if (slot == nullptr || !slot->submission.accepted ||
+                    slot->submission.queue.load(std::memory_order_acquire) != 0 ||
+                    slot->submission.queue_future.id == 0)
+                    continue;
+                wait_infos[wait_count++] = {slot->submission.queue_future, false};
+            }
+            if (wait_count != 0) {
+                selected_batch = batch;
+                break;
+            }
+        }
+        // A device-loss callback remains AllowProcessEvents and is flushed
+        // below.  It is intentionally not included in the wait set: keeping
+        // queue futures homogeneous avoids Dawn's mixed-source timed-wait
+        // restriction, while the explicit ProcessEvents call still accounts
+        // for loss delivery before terminal state is observed.
+        if (wait_count != 0) {
+            std::uint64_t timeout_ns = 0;
+            if (completion_policy == CompletionPolicy::TimedWaitAny) {
+                const auto now = std::chrono::steady_clock::now();
+                // Dawn interprets timeoutNS == 0 as an explicit nonblocking
+                // poll. A dispatcher poll therefore remains bounded.
+                if (now < deadline) {
+                    timeout_ns = static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - now)
+                            .count());
+                    const auto configured =
+                        completion_wait_ns == 0 ? kDefaultCompletionWaitNs : completion_wait_ns;
+                    timeout_ns =
+                        std::min(timeout_ns, std::min(configured, kDefaultCompletionWaitNs));
+                }
+            }
+            ++stats.wait_any_calls;
+            stats.wait_any_timed_calls += static_cast<std::uint64_t>(timeout_ns != 0);
+            stats.wait_any_max_futures =
+                std::max(stats.wait_any_max_futures, static_cast<std::uint64_t>(wait_count));
+            stats.wait_any_max_timeout_ns = std::max(stats.wait_any_max_timeout_ns, timeout_ns);
+            const auto status = invoke_wait_any(wait_count, timeout_ns);
+            if (status == wgpu::WaitStatus::TimedOut) {
+                ++stats.wait_any_timeouts;
+            } else if (status == wgpu::WaitStatus::Error) {
+                // Error is distinct from unsupported/count failure. Keep
+                // servicing callbacks so a transient dispatcher error cannot
+                // strand an otherwise recoverable submission.
+                ++stats.wait_any_errors;
+            } else if (status != wgpu::WaitStatus::Success) {
+                ++stats.wait_any_unsupported;
+                wait_any_disabled = true;
+            }
+            wait_any_batch_cursor = (selected_batch + 1) % batch_count;
+        }
+
+        // PopErrorScope and device-lost callbacks use AllowProcessEvents too.
+        // Always pump once after WaitAny so a queue wake cannot be mistaken for
+        // a clean submission while its validation scopes or loss callback are
+        // still pending.
+        process_events();
+        return true;
+    }
+
+    bool pump_until_completion(const auto& done,
+                               std::chrono::steady_clock::time_point deadline) noexcept {
+        while (!done() && std::chrono::steady_clock::now() < deadline) {
+            if (!wait_for_queue_callbacks(deadline))
+                return false;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         return done();
@@ -280,6 +510,13 @@ struct DawnSharedIoProvider::Impl {
         }
 
         wgpu::InstanceDescriptor instance_descriptor{};
+        wgpu::InstanceFeatureName instance_features[] = {
+            wgpu::InstanceFeatureName::TimedWaitAny,
+        };
+        if (completion_policy == CompletionPolicy::TimedWaitAny) {
+            instance_descriptor.requiredFeatureCount = 1;
+            instance_descriptor.requiredFeatures = instance_features;
+        }
         native_instance = std::make_unique<dawn::native::Instance>(
             reinterpret_cast<const WGPUInstanceDescriptor*>(&instance_descriptor));
         instance = wgpu::Instance(native_instance->Get());
@@ -434,6 +671,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
                                                    : DawnSubmissionTracker::QueueResult::Error;
             submission.tracker.record_queue(submission.generation, result);
             submission.queue_consumed = true;
+            submission.queue_future = {};
         }
         const auto scope_value = submission.scope.load(std::memory_order_acquire);
         if (!submission.scope_consumed && scope_value != 0) {
@@ -442,6 +680,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
                                                 ? DawnSubmissionTracker::ScopeResult::Clean
                                                 : DawnSubmissionTracker::ScopeResult::Error);
             submission.scope_consumed = true;
+            for (auto& future : submission.scope_futures)
+                future = {};
         }
         if (!submission.pending_terminal) {
             // Every provider operation is enclosed by validation, OOM, and
@@ -515,12 +755,69 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     wgpu::ComputePipeline pipeline;
     std::uint32_t alignment = 0;
     std::vector<Slot*> slots;
+    // Keep the dispatcher wait path allocation-free. Dawn's timed wait limit
+    // is 64 futures, so larger arenas are serviced in bounded batches.
+    std::array<wgpu::FutureWaitInfo, kWaitAnyBatchSize> wait_infos{};
     bool accepting = false;
     bool reusable = true;
     bool device_destroyed = false;
     bool refusal_consumed = false;
     Stats stats;
     AdapterIdentity adapter_identity;
+    std::shared_ptr<const void> lifetime = std::make_shared<int>(0);
+};
+
+class DawnSharedIoConvolutionProgram final : public SharedIoPreparedProgram {
+  public:
+    DawnSharedIoConvolutionProgram(DawnSharedIoProvider& provider,
+                                   const SharedIoConvolutionProgramSpec& spec)
+        : provider_(&provider), fft_size_(spec.fft_size), channels_(spec.channels),
+          logical_frames_(spec.logical_frames), ir_length_(spec.ir_length),
+          normalized_ir_spectrum_(spec.normalized_ir_spectrum.begin(),
+                                  spec.normalized_ir_spectrum.end()) {}
+
+    bool prepare(SharedIoArenaProvider& provider,
+                 std::span<const SlotBufferHandle> slots) noexcept override {
+        if (&provider != provider_ || prepared_ || slots.empty())
+            return false;
+        for (const auto& slot : slots) {
+            if (slot.provider != provider_ || !provider_->validate_slot_buffers(slot))
+                return false;
+        }
+        const SharedIoConvolutionProgramSpec spec{
+            .fft_size = fft_size_,
+            .channels = channels_,
+            .logical_frames = logical_frames_,
+            .ir_length = ir_length_,
+            .normalized_ir_spectrum = normalized_ir_spectrum_,
+        };
+        prepared_ = provider_->prepare_convolution_program(spec);
+        return prepared_;
+    }
+
+    bool submit(SharedIoArenaProvider& provider, const SlotResources& resources, SlotToken token,
+                std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept override {
+        return prepared_ && &provider == provider_ &&
+               provider_->submit_convolution_program(resources, token, std::move(terminal_inbox));
+    }
+
+    bool release() noexcept override {
+        if (!prepared_)
+            return true;
+        if (!provider_->release_convolution_program())
+            return false;
+        prepared_ = false;
+        return true;
+    }
+
+  private:
+    DawnSharedIoProvider* provider_ = nullptr;
+    std::uint32_t fft_size_ = 0;
+    std::uint32_t channels_ = 0;
+    std::uint32_t logical_frames_ = 0;
+    std::uint32_t ir_length_ = 0;
+    std::vector<float> normalized_ir_spectrum_;
+    bool prepared_ = false;
 };
 
 DawnSharedIoProvider::DawnSharedIoProvider(std::unique_ptr<Impl> impl) noexcept
@@ -534,6 +831,10 @@ DawnSharedIoProvider::~DawnSharedIoProvider() {
         // Leak the complete provider state, including Dawn owners and imported
         // pages, rather than permit a late callback or GPU access to hit freed
         // storage. The arena contract makes this an invariant-failure fallback.
+        impl_.release();
+        return;
+    }
+    if (!release_convolution_program()) {
         impl_.release();
         return;
     }
@@ -561,6 +862,11 @@ DawnSharedIoProvider::~DawnSharedIoProvider() {
 
 DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& options) noexcept {
     CreateResult result;
+    if (options.completion_wait_ns > kMaxCompletionWaitNs) {
+        result.availability = Availability::Failed;
+        result.reason = "completion_wait_ns_out_of_range";
+        return result;
+    }
     try {
         auto impl = std::make_unique<Impl>(options);
         if (!impl->initialize(result.reason, result.availability))
@@ -570,6 +876,62 @@ DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& o
     } catch (...) {
         result.availability = Availability::Failed;
         result.reason = "provider_initialization_exception";
+    }
+    return result;
+}
+
+std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_convolution_program(
+    const SharedIoConvolutionProgramSpec& spec) noexcept {
+    try {
+        return std::make_unique<DawnSharedIoConvolutionProgram>(*this, spec);
+    } catch (...) {
+        return {};
+    }
+}
+
+DawnSharedIoConvolutionSessionCreateResult create_dawn_shared_io_convolution_session(
+    const DawnSharedIoConvolutionSessionOptions& options) noexcept {
+    DawnSharedIoConvolutionSessionCreateResult result;
+    try {
+        auto created = DawnSharedIoProvider::create(options.provider);
+        result.availability = created.availability;
+        if (!created.provider) {
+            result.reason = DawnSharedIoConvolutionSessionCreateResult::Reason::ProviderUnavailable;
+            return result;
+        }
+
+        const auto& config = options.session.pipeline;
+        auto program = created.provider->make_convolution_program(
+            {.fft_size = config.fft_size,
+             .channels = config.channels,
+             .logical_frames = config.block_size,
+             .ir_length = config.ir_length,
+             .normalized_ir_spectrum = options.normalized_ir_spectrum});
+        if (!program) {
+            result.availability = DawnSharedIoProvider::Availability::Failed;
+            result.reason =
+                DawnSharedIoConvolutionSessionCreateResult::Reason::ProgramConstructionFailed;
+            return result;
+        }
+
+        auto session = std::make_unique<SharedIoConvolutionSession>();
+        if (!session->prepare({std::move(created.provider), std::move(program)}, options.session)) {
+            // Preparation can retain a physically live arena after an
+            // unproven drain. Return that owner so the caller can retry its
+            // cleanup barrier; destroying it here would violate the provider
+            // lifetime transaction.
+            result.session = std::move(session);
+            result.availability = DawnSharedIoProvider::Availability::Failed;
+            result.reason =
+                DawnSharedIoConvolutionSessionCreateResult::Reason::SessionPreparationFailed;
+            return result;
+        }
+        result.session = std::move(session);
+        result.availability = DawnSharedIoProvider::Availability::Ready;
+        result.reason = DawnSharedIoConvolutionSessionCreateResult::Reason::Ready;
+    } catch (...) {
+        result.availability = DawnSharedIoProvider::Availability::Failed;
+        result.reason = DawnSharedIoConvolutionSessionCreateResult::Reason::ConstructionException;
     }
     return result;
 }
@@ -725,6 +1087,7 @@ void DawnSharedIoProvider::retire_slot(SlotResources& resources) noexcept {
     if (!slot || slot->retired)
         return;
     slot->retired = true;
+    ++slot->handle_generation;
     slot->bind_group = nullptr;
     if (slot->input_buffer) {
         slot->input_buffer.Destroy();
@@ -767,36 +1130,253 @@ void DawnSharedIoProvider::destroy_slot(SlotResources& resources) noexcept {
         impl_->accepting = true;
 }
 
+bool DawnSharedIoProvider::acquire_slot_buffers(const SlotResources& resources,
+                                                SlotBufferHandle& handle) const noexcept {
+    auto* slot = static_cast<Impl::Slot*>(resources.opaque);
+    if (!impl_ || !slot || slot->retired || !slot->input_buffer || !slot->output_buffer ||
+        resources.opaque != slot || resources.input == nullptr || resources.output == nullptr)
+        return false;
+    handle = {};
+    handle.provider = this;
+    handle.device = &impl_->device;
+    handle.input_buffer = &slot->input_buffer;
+    handle.output_buffer = &slot->output_buffer;
+    handle.slot = slot->index;
+    handle.generation = slot->handle_generation;
+    handle.lifetime = impl_->lifetime;
+    return true;
+}
+
+bool DawnSharedIoProvider::validate_slot_buffers(const SlotBufferHandle& handle) const noexcept {
+    if (!impl_ || handle.provider != this || handle.device != &impl_->device ||
+        handle.lifetime.expired() || handle.lifetime.lock() != impl_->lifetime)
+        return false;
+    for (const auto* slot : impl_->slots) {
+        if (slot->index == handle.slot && !slot->retired &&
+            handle.input_buffer == &slot->input_buffer &&
+            handle.output_buffer == &slot->output_buffer &&
+            handle.generation == slot->handle_generation)
+            return true;
+    }
+    return false;
+}
+
+bool DawnSharedIoProvider::prepare_convolution_program(
+    const SharedIoConvolutionProgramSpec& spec) noexcept {
+    if (!impl_ || !impl_->accepting || impl_->convolution || spec.fft_size < 2 ||
+        (spec.fft_size & (spec.fft_size - 1)) != 0 || spec.channels == 0 ||
+        spec.logical_frames == 0 || spec.ir_length == 0 ||
+        std::uint64_t(spec.logical_frames) + spec.ir_length - 1u > spec.fft_size ||
+        spec.normalized_ir_spectrum.size() != spec.fft_size * 2u) {
+        return false;
+    }
+    const auto bytes64 = std::uint64_t(spec.fft_size) * spec.channels * 2u * sizeof(float);
+    if (bytes64 > std::numeric_limits<std::uint32_t>::max())
+        return false;
+    for (const auto* slot : impl_->slots) {
+        if (slot == nullptr || slot->retired || slot->index >= impl_->slots.size() ||
+            slot->input_logical_bytes < bytes64 || slot->output_logical_bytes < bytes64) {
+            return false;
+        }
+    }
+
+    bool error_scopes_pushed = false;
+    try {
+        auto plan = std::make_unique<Impl::ConvolutionPlan>();
+        plan->fft_size = spec.fft_size;
+        plan->channels = spec.channels;
+        plan->logical_frames = spec.logical_frames;
+        plan->bytes = static_cast<std::size_t>(bytes64);
+        for (auto size = spec.fft_size; size > 1; size >>= 1)
+            ++plan->log2;
+
+        auto pipeline = [&](const char* source) {
+            wgpu::ShaderSourceWGSL wgsl{};
+            wgsl.code = source;
+            wgpu::ShaderModuleDescriptor shader_descriptor{};
+            shader_descriptor.nextInChain = &wgsl;
+            auto module = impl_->device.CreateShaderModule(&shader_descriptor);
+            wgpu::ComputePipelineDescriptor pipeline_descriptor{};
+            pipeline_descriptor.compute.module = module;
+            pipeline_descriptor.compute.entryPoint = "main";
+            return impl_->device.CreateComputePipeline(&pipeline_descriptor);
+        };
+
+        auto make_buffer = [&](std::size_t bytes, wgpu::BufferUsage usage) {
+            wgpu::BufferDescriptor descriptor{};
+            descriptor.size = bytes;
+            descriptor.usage = usage;
+            return impl_->device.CreateBuffer(&descriptor);
+        };
+        auto bind_three = [&](const wgpu::ComputePipeline& pipeline_value,
+                              const wgpu::Buffer& first, const wgpu::Buffer& second,
+                              const wgpu::Buffer& third) {
+            wgpu::BindGroupEntry entries[3]{};
+            for (std::uint32_t index = 0; index < 3; ++index)
+                entries[index].binding = index;
+            entries[0].buffer = first;
+            entries[0].size = first.GetSize();
+            entries[1].buffer = second;
+            entries[1].size = second.GetSize();
+            entries[2].buffer = third;
+            entries[2].size = third.GetSize();
+            wgpu::BindGroupDescriptor descriptor{};
+            descriptor.layout = pipeline_value.GetBindGroupLayout(0);
+            descriptor.entryCount = 3;
+            descriptor.entries = entries;
+            return impl_->device.CreateBindGroup(&descriptor);
+        };
+
+        impl_->push_error_scopes();
+        error_scopes_pushed = true;
+        const auto fail_preparation = [&] {
+            if (error_scopes_pushed) {
+                (void)impl_->pop_error_scopes();
+                error_scopes_pushed = false;
+            }
+            return false;
+        };
+        if (impl_->options.fault == Fault::ConvolutionPrepareAfterScopesFailure) {
+            ++impl_->stats.fault_injections;
+            return fail_preparation();
+        }
+        plan->fft = pipeline(kSharedIoFftWgsl);
+        plan->multiply = pipeline(kSharedIoMulWgsl);
+        const auto storage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+        plan->ir =
+            make_buffer(static_cast<std::size_t>(spec.fft_size) * 2u * sizeof(float), storage);
+        if (!plan->fft || !plan->multiply || !plan->ir)
+            return fail_preparation();
+
+        impl_->queue.WriteBuffer(plan->ir, 0, spec.normalized_ir_spectrum.data(),
+                                 static_cast<std::size_t>(spec.fft_size) * 2u * sizeof(float));
+        struct Params {
+            std::uint32_t n;
+            std::uint32_t ns;
+            float sign;
+            std::uint32_t batch;
+        };
+        for (std::uint32_t stage = 0; stage < plan->log2; ++stage) {
+            const auto uniform_usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+            auto forward = make_buffer(sizeof(Params), uniform_usage);
+            auto inverse = make_buffer(sizeof(Params), uniform_usage);
+            if (!forward || !inverse)
+                return fail_preparation();
+            const Params forward_params{plan->fft_size, 1u << stage, -1.0f, plan->channels};
+            const Params inverse_params{plan->fft_size, 1u << stage, 1.0f, plan->channels};
+            impl_->queue.WriteBuffer(forward, 0, &forward_params, sizeof(forward_params));
+            impl_->queue.WriteBuffer(inverse, 0, &inverse_params, sizeof(inverse_params));
+            plan->forward_uniforms.push_back(std::move(forward));
+            plan->inverse_uniforms.push_back(std::move(inverse));
+        }
+
+        plan->slots.resize(impl_->slots.size());
+        for (const auto* slot : impl_->slots) {
+            auto& groups = plan->slots[slot->index];
+            groups.a = make_buffer(plan->bytes, storage);
+            groups.b = make_buffer(plan->bytes, storage);
+            groups.product = make_buffer(plan->bytes, storage);
+            if (!groups.a || !groups.b || !groups.product)
+                return fail_preparation();
+            wgpu::Buffer source = slot->input_buffer;
+            wgpu::Buffer destination = groups.a;
+            for (std::uint32_t stage = 0; stage < plan->log2; ++stage) {
+                auto group =
+                    bind_three(plan->fft, source, destination, plan->forward_uniforms[stage]);
+                if (!group)
+                    return fail_preparation();
+                groups.forward.push_back(std::move(group));
+                source = destination;
+                destination = destination.Get() == groups.a.Get() ? groups.b : groups.a;
+            }
+            groups.multiply = bind_three(plan->multiply, source, plan->ir, groups.product);
+            if (!groups.multiply)
+                return fail_preparation();
+
+            source = groups.product;
+            destination = groups.a;
+            for (std::uint32_t stage = 0; stage < plan->log2; ++stage) {
+                if (stage + 1u == plan->log2)
+                    destination = slot->output_buffer;
+                auto group =
+                    bind_three(plan->fft, source, destination, plan->inverse_uniforms[stage]);
+                if (!group)
+                    return fail_preparation();
+                groups.inverse.push_back(std::move(group));
+                source = destination;
+                if (stage + 1u < plan->log2)
+                    destination = destination.Get() == groups.a.Get() ? groups.b : groups.a;
+            }
+        }
+
+        const bool scopes_clean = impl_->pop_error_scopes();
+        error_scopes_pushed = false;
+        if (!scopes_clean)
+            return false;
+        impl_->convolution = std::move(plan);
+        return true;
+    } catch (...) {
+        if (error_scopes_pushed)
+            (void)impl_->pop_error_scopes();
+        return false;
+    }
+}
+
+bool DawnSharedIoProvider::submit_convolution_program(
+    const SlotResources& resources, SlotToken token,
+    std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept {
+    return submit_impl(resources, token, std::move(inbox), true);
+}
+
 bool DawnSharedIoProvider::submit(const SlotResources& resources, SlotToken token,
                                   std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept {
+    return submit_impl(resources, token, std::move(terminal_inbox), false);
+}
+
+bool DawnSharedIoProvider::release_convolution_program() noexcept {
+    if (!impl_)
+        return true;
+    for (const auto* slot : impl_->slots) {
+        if (slot->submission.accepted)
+            return false;
+    }
+    impl_->convolution.reset();
+    return true;
+}
+
+bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken token,
+                                       std::shared_ptr<SharedIoTerminalInbox> terminal_inbox,
+                                       bool use_convolution) noexcept {
     auto* slot = static_cast<Impl::Slot*>(resources.opaque);
-    if (!impl_->accepting || !slot || slot->retired || slot->submission.accepted ||
+    if (!impl_ || !impl_->accepting || !terminal_inbox || !slot || slot->retired ||
+        slot->submission.accepted || resources.input != slot->input ||
+        resources.output != slot->output || resources.input_size != slot->input_logical_bytes ||
+        resources.output_size != slot->output_logical_bytes ||
         (impl_->options.fault == Fault::RejectBeforeSubmit &&
          impl_->options.fault_slot == slot->index)) {
         return false;
     }
-    auto& submission = slot->submission;
-    ++submission.generation;
-    if (!submission.tracker.begin(submission.generation, impl_->uncaptured_error_generation.load(
-                                                             std::memory_order_acquire))) {
+
+    const Impl::ConvolutionPlan* convolution = nullptr;
+    if (use_convolution) {
+        convolution = impl_->convolution.get();
+        if (convolution == nullptr || slot->index >= convolution->slots.size())
+            return false;
+        const auto& groups = convolution->slots[slot->index];
+        if (groups.forward.size() != convolution->log2 ||
+            groups.inverse.size() != convolution->log2 || !groups.multiply) {
+            return false;
+        }
+    } else if (!impl_->pipeline || !slot->bind_group) {
         return false;
     }
-    submission.queue.store(0, std::memory_order_release);
-    submission.scope.store(0, std::memory_order_release);
-    submission.scopes_pending.store(3, std::memory_order_release);
-    submission.scope_error.store(false, std::memory_order_release);
-    submission.queue_consumed = false;
-    submission.scope_consumed = false;
-    submission.token = token;
-    submission.inbox = std::move(terminal_inbox);
-    submission.pending_terminal.reset();
-    submission.forced_queue_result = impl_->options.fault == Fault::SyntheticQueueError       ? 3
-                                     : impl_->options.fault == Fault::SyntheticQueueCancelled ? 2
-                                                                                              : 0;
-    submission.held_busy_claim.reset();
-    submission.held_busy_released = false;
 
     impl_->push_error_scopes();
+    if (use_convolution && impl_->options.fault == Fault::ConvolutionSubmitAfterScopesFailure) {
+        ++impl_->stats.fault_injections;
+        (void)impl_->pop_error_scopes();
+        return false;
+    }
     if (impl_->options.fault == Fault::ForceLossBeforeSubmit)
         impl_->device.ForceLoss(wgpu::DeviceLostReason::Unknown, "P1 loss before submit");
     if (impl_->options.fault == Fault::PlantWriteBuffer) {
@@ -804,6 +1384,10 @@ bool DawnSharedIoProvider::submit(const SlotResources& resources, SlotToken toke
         impl_->queue.WriteBuffer(slot->input_buffer, 0, &planted, sizeof(planted));
     }
     auto encoder = impl_->device.CreateCommandEncoder();
+    if (!encoder) {
+        (void)impl_->pop_error_scopes();
+        return false;
+    }
     if (impl_->options.fault == Fault::PlantCopyBuffer) {
         encoder.CopyBufferToBuffer(slot->input_buffer, 0, slot->output_buffer, 0, sizeof(float));
     }
@@ -816,23 +1400,83 @@ bool DawnSharedIoProvider::submit(const SlotResources& resources, SlotToken toke
                          wgpu::CallbackMode::AllowProcessEvents,
                          [](wgpu::MapAsyncStatus, wgpu::StringView) {});
     }
-    auto pass = encoder.BeginComputePass();
-    pass.SetPipeline(impl_->pipeline);
-    pass.SetBindGroup(0, slot->bind_group);
-    const auto samples =
-        std::min(slot->input_logical_bytes, slot->output_logical_bytes) / sizeof(float);
-    pass.DispatchWorkgroups(static_cast<std::uint32_t>((samples + 63) / 64));
-    if (impl_->options.fault == Fault::InvalidCommandAfterSubmit)
-        pass.DispatchWorkgroups(std::numeric_limits<std::uint32_t>::max());
-    pass.End();
+    if (convolution != nullptr) {
+        const auto& plan = *convolution;
+        const auto& groups = plan.slots[slot->index];
+        const auto fft_wg = (plan.channels * (plan.fft_size / 2u) + 255u) / 256u;
+        for (const auto& group : groups.forward) {
+            auto pass = encoder.BeginComputePass();
+            pass.SetPipeline(plan.fft);
+            pass.SetBindGroup(0, group);
+            pass.DispatchWorkgroups(fft_wg);
+            pass.End();
+        }
+        {
+            auto pass = encoder.BeginComputePass();
+            pass.SetPipeline(plan.multiply);
+            pass.SetBindGroup(0, groups.multiply);
+            pass.DispatchWorkgroups((plan.channels * plan.fft_size + 255u) / 256u);
+            pass.End();
+        }
+        for (const auto& group : groups.inverse) {
+            auto pass = encoder.BeginComputePass();
+            pass.SetPipeline(plan.fft);
+            pass.SetBindGroup(0, group);
+            pass.DispatchWorkgroups(fft_wg);
+            pass.End();
+        }
+    } else {
+        auto pass = encoder.BeginComputePass();
+        pass.SetPipeline(impl_->pipeline);
+        pass.SetBindGroup(0, slot->bind_group);
+        const auto samples =
+            std::min(slot->input_logical_bytes, slot->output_logical_bytes) / sizeof(float);
+        pass.DispatchWorkgroups(static_cast<std::uint32_t>((samples + 63) / 64));
+        if (impl_->options.fault == Fault::InvalidCommandAfterSubmit)
+            pass.DispatchWorkgroups(std::numeric_limits<std::uint32_t>::max());
+        pass.End();
+    }
     auto commands = encoder.Finish();
+    if (!commands) {
+        (void)impl_->pop_error_scopes();
+        return false;
+    }
+
+    auto& submission = slot->submission;
+    ++submission.generation;
+    if (!submission.tracker.begin(submission.generation, impl_->uncaptured_error_generation.load(
+                                                             std::memory_order_acquire))) {
+        (void)impl_->pop_error_scopes();
+        return false;
+    }
+    submission.queue.store(0, std::memory_order_release);
+    submission.scope.store(0, std::memory_order_release);
+    submission.scopes_pending.store(3, std::memory_order_release);
+    submission.scope_error.store(false, std::memory_order_release);
+    submission.queue_consumed = false;
+    submission.scope_consumed = false;
+    for (auto& completed : submission.scope_completed)
+        completed.store(false, std::memory_order_release);
+    for (auto& future : submission.scope_futures)
+        future = {};
+    for (unsigned index = 0; index < submission.scope_callbacks.size(); ++index)
+        submission.scope_callbacks[index] = {&submission, index};
+    submission.token = token;
+    submission.inbox = std::move(terminal_inbox);
+    submission.pending_terminal.reset();
+    submission.forced_queue_result = impl_->options.fault == Fault::SyntheticQueueError       ? 3
+                                     : impl_->options.fault == Fault::SyntheticQueueCancelled ? 2
+                                                                                              : 0;
+    submission.held_busy_claim.reset();
+    submission.held_busy_released = false;
+
     impl_->queue.Submit(1, &commands);
     submission.accepted = true;
     if (impl_->options.fault == Fault::ForceLossBetweenSubmitAndCompletionRegistration)
         impl_->device.ForceLoss(wgpu::DeviceLostReason::Unknown,
                                 "P1 loss before completion registration");
-    impl_->queue.OnSubmittedWorkDone(
-        wgpu::CallbackMode::AllowProcessEvents,
+    submission.queue_future = impl_->queue.OnSubmittedWorkDone(
+        Impl::callback_mode(),
         [](wgpu::QueueWorkDoneStatus status, wgpu::StringView, Impl::Submission* state) {
             const int value = state->forced_queue_result != 0 ? state->forced_queue_result
                               : status == wgpu::QueueWorkDoneStatus::Success           ? 1
@@ -845,20 +1489,22 @@ bool DawnSharedIoProvider::submit(const SlotResources& resources, SlotToken toke
         impl_->device.ForceLoss(wgpu::DeviceLostReason::Unknown,
                                 "P1 loss after completion registration");
     for (unsigned index = 0; index < 3; ++index) {
-        impl_->device.PopErrorScope(
-            wgpu::CallbackMode::AllowProcessEvents,
+        submission.scope_futures[index] = impl_->device.PopErrorScope(
+            Impl::callback_mode(),
             [](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type, wgpu::StringView,
-               Impl::Submission* state) {
+               Impl::Submission::ScopeCallback* callback) {
+                auto* state = callback->submission;
                 const bool clean = status == wgpu::PopErrorScopeStatus::Success &&
                                    type == wgpu::ErrorType::NoError;
                 if (!clean)
                     state->scope_error.store(true, std::memory_order_release);
+                state->scope_completed[callback->index].store(true, std::memory_order_release);
                 if (state->scopes_pending.fetch_sub(1, std::memory_order_acq_rel) == 1) {
                     state->scope.store(state->scope_error.load(std::memory_order_acquire) ? 2 : 1,
                                        std::memory_order_release);
                 }
             },
-            &submission);
+            &submission.scope_callbacks[index]);
     }
     if (impl_->options.fault == Fault::PoisonAfterSubmit &&
         impl_->options.fault_slot == slot->index) {
@@ -870,7 +1516,11 @@ bool DawnSharedIoProvider::submit(const SlotResources& resources, SlotToken toke
 void DawnSharedIoProvider::poll() noexcept {
     if (!impl_)
         return;
-    impl_->instance.ProcessEvents();
+    // poll() is the nonblocking dispatcher hook. Timed waits are reserved for
+    // the serialized drain barrier; WaitAny(0) is Dawn's explicit nonblocking
+    // path and TimedWaitAny sees an expired deadline here.
+    const auto deadline = std::chrono::steady_clock::now();
+    (void)impl_->wait_for_queue_callbacks(deadline);
     for (auto* slot : impl_->slots) {
         if (impl_->options.fault == Fault::DelayCompletion &&
             impl_->options.fault_slot == slot->index) {
@@ -886,7 +1536,7 @@ bool DawnSharedIoProvider::drain() noexcept {
     impl_->accepting = false;
     ++impl_->stats.drain_calls;
     const auto deadline = std::chrono::steady_clock::now() + kDrainLimit;
-    const bool physically_drained = impl_->pump_until(
+    const bool physically_drained = impl_->pump_until_completion(
         [&] {
             for (const auto* slot : impl_->slots) {
                 if (slot->submission.accepted &&
@@ -921,7 +1571,7 @@ bool DawnSharedIoProvider::drain() noexcept {
         return false;
     }
 
-    const bool terminals_published = impl_->pump_until(
+    const bool terminals_published = impl_->pump_until_completion(
         [&] {
             bool complete = true;
             for (auto* slot : impl_->slots) {
@@ -963,6 +1613,12 @@ bool DawnSharedIoProvider::drain() noexcept {
     return physically_drained;
 }
 
+bool DawnSharedIoProvider::device_lost() const noexcept {
+    return impl_ &&
+           (impl_->device_destroyed || impl_->device_lost.load(std::memory_order_acquire) ||
+            dawn::native::IsDeviceLost(impl_->device.Get()));
+}
+
 std::uint32_t DawnSharedIoProvider::alignment() const noexcept {
     return impl_ ? impl_->alignment : 0;
 }
@@ -975,6 +1631,10 @@ std::uint64_t DawnSharedIoProvider::proc_table_install_count() const noexcept {
 
 DawnSharedIoProvider::Stats DawnSharedIoProvider::stats() const noexcept {
     return impl_ ? impl_->stats : Stats{};
+}
+
+DawnSharedIoProvider::CompletionPolicy DawnSharedIoProvider::completion_policy() const noexcept {
+    return impl_ ? impl_->completion_policy : CompletionPolicy::ProcessEvents;
 }
 
 DawnSharedIoProvider::AdapterIdentity DawnSharedIoProvider::adapter_identity() const {

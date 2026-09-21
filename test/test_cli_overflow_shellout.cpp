@@ -5,8 +5,7 @@ namespace fs = std::filesystem;
 
 TEST_CASE("pulp overflow validates non-mutating operator arguments", "[cli][shellout][overflow]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
 
     ScopedEnvVar update_disabled("PULP_UPDATE_CHECK_DISABLED");
@@ -75,8 +74,7 @@ TEST_CASE("pulp overflow validates non-mutating operator arguments", "[cli][shel
 TEST_CASE("pulp overflow disable writes the bare local-only sentinel",
           "[cli][shellout][overflow]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
 
     auto fixture = unique_temp_dir("pulp-overflow-gh");

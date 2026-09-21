@@ -28,6 +28,18 @@ pulp_cli_version_check
 
 Advisory only. Full release-discovery contract in the `upgrade` skill.
 
+## Aligned DSP allocation at the Android API floor
+
+Bionic exposes `aligned_alloc` from API 28, but the app supports API 26.
+Using `std::aligned_alloc` in a public DSP header fails compilation against
+that floor even on NDK 30. Use `posix_memalign` on Android and release its
+allocation with `free`; raising minSdk to hide the failure changes product
+compatibility. `tools/scripts/test_android_aligned_buffer.py --ndk <path>`
+compiles and links float/double buffers for arm64 and x86_64 at API 26 and 28.
+The API 28 cases are positive controls for the original compiler failure.
+This is compile/link evidence; the existing aligned-buffer tests cover runtime
+alignment, initialization, and resizing.
+
 ## Architecture Overview
 
 ```

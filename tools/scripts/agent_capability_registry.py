@@ -9,6 +9,14 @@ from agent_capability_catalog_signal import EXPORTS as SIGNAL_EXPORTS
 from agent_capability_catalog_timing import EXPORTS as TIMING_EXPORTS
 
 REVIEWED_MINIMAL_TARGETS = {
+    "pulp/host/signal_graph.hpp": "Pulp::host",
+    "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
+    "pulp/host/signal_graph_prepared_topology_edit.hpp": "Pulp::host",
+    "pulp/host/custom_node_type.hpp": "Pulp::host",
+    "pulp/host/sample_region_authoring.hpp": "Pulp::host",
+    "pulp/host/sample_region_proof.hpp": "Pulp::host",
+    "pulp/host/sample_region_parameters.hpp": "Pulp::host",
+
     "pulp/format/processor.hpp": "Pulp::format",
     "pulp/format/processor_node_adapter.hpp": "Pulp::format",
     "pulp/audio/instrument_voice_allocator.hpp": "Pulp::audio",
@@ -42,6 +50,9 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/music/voicing.hpp": "Pulp::music",
     "pulp/playback/program.hpp": "Pulp::playback",
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
+    "pulp/timeline/compile_context.hpp": "Pulp::timeline",
+    "pulp/timeline/model.hpp": "Pulp::timeline",
+    "pulp/timeline/note_modifier.hpp": "Pulp::timeline",
     "pulp/signal/saturator.hpp": "Pulp::signal",
     "pulp/signal/analysis_frontends.hpp": "Pulp::signal",
     "pulp/signal/additive_bank.hpp": "Pulp::signal",
@@ -123,6 +134,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/timebase/coordinate_random.hpp": "Pulp::timebase",
     "pulp/timebase/grid_projection.hpp": "Pulp::timebase",
     "pulp/timebase/groove_kernel.hpp": "Pulp::timebase",
+    "pulp/timebase/inline_groove_projector.hpp": "Pulp::timebase",
     "pulp/timebase/ratchet.hpp": "Pulp::timebase",
     "pulp/timebase/trigger_grid.hpp": "Pulp::timebase",
     "pulp/timebase/compiled_tempo_map.hpp": "Pulp::timebase",
@@ -144,18 +156,6 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # Public headers can leave the frozen legacy bucket only through one of these
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
-    {
-        "include": "pulp/signal/unit_delay.hpp",
-        "fingerprint": "sha256:7e91b280e5a3a83b78ed1f84301990eee1b6dcaa8b7736f07287452896d22726",
-        "disposition": "infrastructure",
-        "capability_keys": [],
-        "rationale": (
-            "Exact one-sample state primitive for ordinary Processor composition and the "
-            "sample-region causal cut. The complete sample-region capability is published "
-            "only after its graph authoring, runtime, persistence, and control surfaces land; "
-            "this helper makes no standalone generator capability claim."
-        ),
-    },
     {
         "include": "pulp/signal/character_delay/reverse.hpp",
         "fingerprint": "sha256:8ffe9c4341a734e18aeae9900554cb042acfc3dd0982b243cde8705067140c91",
@@ -179,6 +179,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "shaping and a finite tail; it is a bounded buffering primitive intended for "
             "composition inside effects rather than an advertised generator DSP claim. "
             "It has no in-tree consumer today beyond the signal umbrella header."
+        ),
+    },
+    {
+        "include": "pulp/signal/simd_buffer.hpp",
+        "fingerprint": "sha256:7780d3b9a8e734dbacd9b2d7d06c5d07328fe167da4d8d3ea88938c71ae5a973",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "SIMD-width-aligned sample storage and its aligned allocate/free pair, used "
+            "for composition inside DSP kernels rather than advertised as a capability of "
+            "its own. Its allocator branches per platform because the C11 aligned_alloc "
+            "it wraps is unavailable below Android API 28, which is a portability detail "
+            "of the primitive and not a change to the surface it presents."
         ),
     },
     {
@@ -274,6 +287,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             ("pulp/signal/vca_compressor.hpp", "sha256:2f484f202dc2d75d2e87fc5683d8a6efa34f4143b120c761f5c16c330877077c"),
         ]
     ],
+    {
+        "include": "pulp/signal/lofi_chain.hpp",
+        "fingerprint": "sha256:1b4def5ba6eb434e0ec7b46a350990f5356a54dc4215d5e21d262a4d55594024",
+        "disposition": "capability_support",
+        "capability_keys": ["signal.dither-quantizer"],
+        "rationale": (
+            "Publishes floor_shape, the dead-zone geometry the header's saturator already "
+            "used, as a reusable transfer curve so a caller no longer has to reimplement it "
+            "to get the same shape without the tanh."
+        ),
+    },
     *[
         {
             "include": include,
@@ -287,7 +311,6 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         }
         for include, fingerprint in [
             ("pulp/signal/character_delay/vintage.hpp", "sha256:b7a48feafacc26cd0329f97b7d898fbb8921dbb7e779498dc1eabd178ed2ab32"),
-            ("pulp/signal/lofi_chain.hpp", "sha256:8c3ed2535478714195f46f13591c90b3b7c63affc6a6e8a7407ebedbf9f1799b"),
         ]
     ],
     *[

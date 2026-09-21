@@ -5,9 +5,14 @@
 #include <pulp/format/lv2_adapter.hpp>
 #include <pulp/runtime/log.hpp>
 
-#include <sstream>
-#include <iomanip>
+#include <lv2/atom/atom.h>
+#include <lv2/buf-size/buf-size.h>
+#include <lv2/state/state.h>
+
 #include <cstring>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 
 namespace pulp::format::lv2_adapter {
 
@@ -21,6 +26,48 @@ LV2_URID_Map* find_urid_map(const LV2_Feature* const* features) {
         }
     }
     return nullptr;
+}
+
+const LV2_Options_Option* find_options(const LV2_Feature* const* features) {
+    if (!features)
+        return nullptr;
+    for (const LV2_Feature* const* f = features; *f != nullptr; ++f) {
+        if ((*f)->URI && std::strcmp((*f)->URI, LV2_OPTIONS__options) == 0) {
+            return static_cast<const LV2_Options_Option*>((*f)->data);
+        }
+    }
+    return nullptr;
+}
+
+int max_block_length_from_options(const LV2_Options_Option* options, LV2_URID key_max_block_length,
+                                  LV2_URID urid_atom_int, LV2_URID urid_atom_long, int fallback) {
+    if (!options || key_max_block_length == 0)
+        return fallback;
+    // The array is terminated by a zeroed option, whose `key` is 0.
+    for (const LV2_Options_Option* o = options; o->key != 0; ++o) {
+        if (o->key != key_max_block_length || !o->value)
+            continue;
+        int64_t value = 0;
+        if (urid_atom_int != 0 && o->type == urid_atom_int && o->size == sizeof(int32_t)) {
+            int32_t raw = 0;
+            std::memcpy(&raw, o->value, sizeof(raw));
+            value = raw;
+        } else if (urid_atom_long != 0 && o->type == urid_atom_long && o->size == sizeof(int64_t)) {
+            std::memcpy(&value, o->value, sizeof(value));
+        } else {
+            continue;
+        }
+        if (value <= 0)
+            continue;
+        // A block ceiling wider than int is not a block size a renderer can
+        // honor; treat it as absent rather than truncating it to something
+        // smaller than the host will actually ask for.
+        if (value > static_cast<int64_t>(std::numeric_limits<int>::max())) {
+            continue;
+        }
+        return static_cast<int>(value);
+    }
+    return fallback;
 }
 
 // ── TTL Generation ───────────────────────────────────────────────────────
@@ -38,6 +85,10 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
     ttl << "@prefix atom: <http://lv2plug.in/ns/ext/atom#> .\n";
     ttl << "@prefix midi: <http://lv2plug.in/ns/ext/midi#> .\n";
     ttl << "@prefix urid: <http://lv2plug.in/ns/ext/urid#> .\n";
+    ttl << "@prefix state: <http://lv2plug.in/ns/ext/state#> .\n";
+    ttl << "@prefix time: <http://lv2plug.in/ns/ext/time#> .\n";
+    ttl << "@prefix bufsz: <http://lv2plug.in/ns/ext/buf-size#> .\n";
+    ttl << "@prefix opts: <http://lv2plug.in/ns/ext/options#> .\n";
     ttl << "\n";
 
     // Plugin declaration
@@ -70,14 +121,63 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
     // Required features
     ttl << "    lv2:requiredFeature urid:map ;\n";
 
-    int port_index = 0;
+    // Optional features.
+    //
+    // lv2:hardRTCapable — run() is wrapped in ScopedNoAlloc and calls no
+    // allocating, locking, or blocking API, so it satisfies the LV2 hard
+    // real-time contract. Hosts such as Ardour and Reaper flag a plugin that
+    // does not declare it as unsafe for real-time use.
+    //
+    // bufsz:boundedBlockLength + opts:options — the block ceiling is read from
+    // the host's bufsz:maxBlockLength option at instantiation and handed to
+    // Processor::prepare(). Both are optional: a host that supplies neither
+    // gets the kDefaultMaxBlockLength floor, and run() clamps to whichever
+    // value prepare() was given.
+    ttl << "    lv2:optionalFeature lv2:hardRTCapable ,\n";
+    ttl << "                        bufsz:boundedBlockLength ,\n";
+    ttl << "                        opts:options ;\n";
+    ttl << "    opts:supportedOption bufsz:maxBlockLength ;\n";
+
+    // Plugin-owned state beyond the control ports (sampler buffers, file
+    // references, arbitrary blobs) round-trips through state:interface as one
+    // atom:Chunk property. Without this declaration a host saves only the
+    // control-port values and everything else is lost on reload.
+    ttl << "    lv2:extensionData state:interface ;\n";
+
+    // Every port index below comes from one Lv2PortLayout, the same type
+    // connect_port() classifies a host-supplied index with. A host identifies
+    // a port by this integer alone, so the manifest and the runtime wiring
+    // have to agree on it or the host connects a `float*` to the slot the
+    // adapter reads as an LV2_Atom_Sequence.
+    auto params = store.all_params();
+
+    Lv2PortLayout layout;
+    for (const auto& bus : desc.input_buses) {
+        layout.num_audio_inputs += bus.default_channels;
+    }
+    for (const auto& bus : desc.output_buses) {
+        layout.num_audio_outputs += bus.default_channels;
+    }
+    layout.num_params = static_cast<int>(params.size());
+    layout.accepts_midi = desc.accepts_midi;
+    layout.produces_midi = desc.produces_midi;
+
+    // The first port opens the `lv2:port` predicate and every later one is a
+    // comma continuation of it. Which port comes first depends on the shape of
+    // the plugin — a MIDI effect with no audio and no parameters opens with its
+    // atom port — so the decision lives here rather than in each emitter.
+    bool any_port_emitted = false;
+    auto open_port = [&]() {
+        ttl << (any_port_emitted ? " ,\n" : "    lv2:port\n");
+        any_port_emitted = true;
+        ttl << "    [\n";
+    };
 
     // Audio input ports
+    int port_index = layout.audio_in_begin();
     for (const auto& bus : desc.input_buses) {
         for (int ch = 0; ch < bus.default_channels; ++ch) {
-            if (port_index > 0) ttl << " ,\n";
-            else ttl << "    lv2:port\n";
-            ttl << "    [\n";
+            open_port();
             ttl << "        a lv2:InputPort , lv2:AudioPort ;\n";
             ttl << "        lv2:index " << port_index << " ;\n";
             ttl << "        lv2:symbol \"audio_in_" << port_index << "\" ;\n";
@@ -88,11 +188,10 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
     }
 
     // Audio output ports
+    port_index = layout.audio_out_begin();
     for (const auto& bus : desc.output_buses) {
         for (int ch = 0; ch < bus.default_channels; ++ch) {
-            if (port_index > 0) ttl << " ,\n";
-            else ttl << "    lv2:port\n";
-            ttl << "    [\n";
+            open_port();
             ttl << "        a lv2:OutputPort , lv2:AudioPort ;\n";
             ttl << "        lv2:index " << port_index << " ;\n";
             ttl << "        lv2:symbol \"audio_out_" << port_index << "\" ;\n";
@@ -103,10 +202,9 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
     }
 
     // Control ports for parameters
-    auto params = store.all_params();
+    port_index = layout.control_begin();
     for (const auto& param : params) {
-        ttl << " ,\n";
-        ttl << "    [\n";
+        open_port();
         ttl << "        a lv2:InputPort , lv2:ControlPort ;\n";
         ttl << "        lv2:index " << port_index << " ;\n";
 
@@ -144,40 +242,40 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
 
     // MIDI input port (if plugin accepts MIDI)
     if (desc.accepts_midi) {
-        ttl << " ,\n";
-        ttl << "    [\n";
+        open_port();
         ttl << "        a lv2:InputPort , atom:AtomPort ;\n";
-        ttl << "        lv2:index " << port_index << " ;\n";
+        ttl << "        lv2:index " << layout.atom_in_begin() << " ;\n";
         ttl << "        lv2:symbol \"midi_in\" ;\n";
         ttl << "        lv2:name \"MIDI In\" ;\n";
+        ttl << "        lv2:minimumSize " << kAtomPortMinimumSize << " ;\n";
         ttl << "        atom:bufferType atom:Sequence ;\n";
-        ttl << "        atom:supports midi:MidiEvent\n";
+        // The host writes its per-cycle time:Position object into this same
+        // sequence; run() decodes it into ProcessContext's transport fields.
+        ttl << "        atom:supports midi:MidiEvent ,\n";
+        ttl << "                      time:Position\n";
         ttl << "    ]";
-        port_index++;
     }
 
     // MIDI output port (if plugin produces MIDI)
     if (desc.produces_midi) {
-        ttl << " ,\n";
-        ttl << "    [\n";
+        open_port();
         ttl << "        a lv2:OutputPort , atom:AtomPort ;\n";
-        ttl << "        lv2:index " << port_index << " ;\n";
+        ttl << "        lv2:index " << layout.atom_out_begin() << " ;\n";
         ttl << "        lv2:symbol \"midi_out\" ;\n";
         ttl << "        lv2:name \"MIDI Out\" ;\n";
+        ttl << "        lv2:minimumSize " << kAtomPortMinimumSize << " ;\n";
         ttl << "        atom:bufferType atom:Sequence ;\n";
         ttl << "        atom:supports midi:MidiEvent\n";
         ttl << "    ]";
-        port_index++;
     }
 
     // Latency-reporting output control port (always last). The host reads the
     // value run() writes here each block for plugin delay compensation, so a
     // latent processor is PDC-compensated under LV2 like every other format.
     // Emitted unconditionally; connect_port() reserves this fixed final index.
-    ttl << " ,\n";
-    ttl << "    [\n";
+    open_port();
     ttl << "        a lv2:OutputPort , lv2:ControlPort ;\n";
-    ttl << "        lv2:index " << port_index << " ;\n";
+    ttl << "        lv2:index " << layout.latency_index() << " ;\n";
     ttl << "        lv2:symbol \"latency\" ;\n";
     ttl << "        lv2:name \"Latency\" ;\n";
     ttl << "        lv2:minimum 0 ;\n";
@@ -185,7 +283,6 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
     ttl << "        lv2:portProperty lv2:reportsLatency , lv2:integer ;\n";
     ttl << "        lv2:designation lv2:latency\n";
     ttl << "    ]";
-    port_index++;
 
     ttl << " .\n";
 

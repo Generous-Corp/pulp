@@ -1463,8 +1463,7 @@ std::vector<uint8_t> render_lottie_frame_rgba(const std::string& json, int px) {
 TEST_CASE("LottieAnimation composites skottie frames onto a SkiaCanvas",
           "[canvas][skia][lottie]") {
     if (!LottieAnimation::supported()) {
-        SUCCEED("Lottie not compiled in (PULP_LOTTIE off) — render is a no-op");
-        return;
+        SKIP("Lottie not compiled in (PULP_LOTTIE off) — render is a no-op");
     }
     const int px = 100;
     const auto rgba = render_lottie_frame_rgba(kLottieRedSolid, px);

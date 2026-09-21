@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pulp forge catalog with optional sample-region v1 metadata",
+  "type": "object",
+  "$defs": {
+    "sample_region_v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dsp_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sample_kernel_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "placement": {
+          "enum": [
+            "region_builder_only",
+            "normal_node"
+          ]
+        },
+        "builder_role": {
+          "enum": [
+            "input_boundary",
+            "output_boundary",
+            "constant",
+            "parameter",
+            "add",
+            "multiply",
+            "unit_delay"
+          ]
+        }
+      },
+      "required": [
+        "dsp_key",
+        "type_version",
+        "sample_kernel_version",
+        "placement",
+        "builder_role"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "builder_role": {
+              "enum": [
+                "input_boundary",
+                "output_boundary"
+              ]
+            },
+            "placement": {
+              "const": "region_builder_only"
+            }
+          }
+        },
+        {
+          "properties": {
+            "builder_role": {
+              "enum": [
+                "constant",
+                "parameter",
+                "add",
+                "multiply",
+                "unit_delay"
+              ]
+            },
+            "placement": {
+              "const": "normal_node"
+            }
+          }
+        }
+      ]
+    },
+    "realization": {
+      "type": "object",
+      "properties": {
+        "type_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sample_kernel_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sample_region_v1": {
+          "$ref": "#/$defs/sample_region_v1"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "sample_region_v1": false
+          }
+        },
+        {
+          "required": [
+            "sample_region_v1",
+            "type_version",
+            "sample_kernel_version"
+          ]
+        }
+      ]
+    }
+  },
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "realizations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/realization"
+            }
+          }
+        }
+      }
+    }
+  }
+}

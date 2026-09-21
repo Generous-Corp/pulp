@@ -431,7 +431,9 @@ if(PULP_HAS_LV2)
     add_executable(pulp-test-lv2-adapter test_lv2_adapter.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/lv2_adapter.cpp
     )
-    target_link_libraries(pulp-test-lv2-adapter PRIVATE pulp::format lv2-headers Catch2::Catch2WithMain)
+    target_link_libraries(pulp-test-lv2-adapter PRIVATE pulp::format pulp::host lv2-headers Catch2::Catch2WithMain)
+    target_include_directories(pulp-test-lv2-adapter PRIVATE
+        "${PULP_ROOT_DIR}/examples/sample-region-allpass")
     catch_discover_tests(pulp-test-lv2-adapter)
 
     # LV2 run() RT-safety guard (MF-2): asserts the render path neither

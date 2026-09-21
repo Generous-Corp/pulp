@@ -41,6 +41,21 @@
     catch_discover_tests(pulp-test-headless-surface
         ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # Direct native Metal availability/timing probe. This is test-only: it
+    # establishes the host capability before any production backend integration.
+    if(APPLE AND NOT IOS AND NOT PULP_IOS)
+        add_executable(pulp-test-native-metal-compute
+            test_metal_native_compute.mm)
+        target_link_libraries(pulp-test-native-metal-compute PRIVATE
+            "-framework Metal" "-framework Foundation")
+        add_test(NAME pulp-test-native-metal-compute
+            COMMAND pulp-test-native-metal-compute)
+        set_tests_properties(pulp-test-native-metal-compute PROPERTIES
+            RESOURCE_LOCK pulp_gpu
+            SKIP_RETURN_CODE 77
+            TIMEOUT 20)
+    endif()
+
     # GPU compute tests.
     add_executable(pulp-test-gpu-compute test_gpu_compute.cpp)
     target_link_libraries(pulp-test-gpu-compute PRIVATE pulp::render pulp::signal Catch2::Catch2WithMain)
@@ -129,6 +144,9 @@
             set(_pulp_gpu_audio_dawn_archive_sha256
                 "${PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256}")
         endif()
+
+        target_compile_definitions(pulp-gpu-audio PRIVATE
+            PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
 
         add_executable(pulp-gpu-host-mapped-pointer-probe
             test_gpu_host_mapped_pointer_probe.cpp)
@@ -338,10 +356,46 @@
                 TIMEOUT 60)
             add_test(NAME pulp-gpu-dawn-shared-io-provider-probe
                 COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-wait-any
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict
+                    --completion-policy=wait-any)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-timed-wait-any
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict
+                    --completion-policy=timed-wait-any --completion-wait-ns=1000000)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-wait-any-delay
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict
+                    --scenario=delay-completion --completion-policy=wait-any)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-wait-any-timeout-recovery
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict
+                    --scenario=wait-any-timeout --completion-policy=wait-any)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-wait-any-error-recovery
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict
+                    --scenario=wait-any-error --completion-policy=wait-any)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-wait-any-batch
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe --strict
+                    --scenario=wait-any-batch --completion-policy=wait-any)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-completion-wait-bound
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe
+                    --verify-completion-wait-bound)
             set_tests_properties(pulp-gpu-dawn-shared-io-provider-probe PROPERTIES
                 FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                 RESOURCE_LOCK pulp_gpu
                 TIMEOUT 20)
+            set_tests_properties(
+                pulp-gpu-dawn-shared-io-provider-wait-any
+                pulp-gpu-dawn-shared-io-provider-timed-wait-any
+                pulp-gpu-dawn-shared-io-provider-wait-any-delay
+                pulp-gpu-dawn-shared-io-provider-wait-any-timeout-recovery
+                pulp-gpu-dawn-shared-io-provider-wait-any-error-recovery
+                pulp-gpu-dawn-shared-io-provider-completion-wait-bound
+                PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 20)
+            set_tests_properties(pulp-gpu-dawn-shared-io-provider-wait-any-batch PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                TIMEOUT 60)
 
             add_test(NAME pulp-gpu-dawn-shared-io-provider-lifecycle
                 COMMAND "${Python3_EXECUTABLE}"
@@ -384,6 +438,110 @@
                     "${PROJECT_SOURCE_DIR}/test/test_gpu_dawn_vellum_d15_source.py")
             set_tests_properties(pulp-gpu-dawn-vellum-d15-source PROPERTIES
                 TIMEOUT 20)
+
+            add_executable(pulp-gpu-shared-io-private-convolution-probe
+                test_gpu_shared_io_private_convolution_probe.cpp)
+            target_link_libraries(pulp-gpu-shared-io-private-convolution-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-shared-io-private-convolution-probe PRIVATE
+                ../core/gpu_audio/src)
+            add_dependencies(pulp-gpu-shared-io-private-convolution-probe
+                pulp-gpu-dawn-shared-io-provider-probe)
+            add_test(NAME pulp-gpu-shared-io-private-convolution-probe
+                COMMAND pulp-gpu-shared-io-private-convolution-probe)
+            add_test(NAME pulp-gpu-shared-io-private-convolution-prepare-scope-negative-control
+                COMMAND pulp-gpu-shared-io-private-convolution-probe
+                    --scenario=prepare-scope-failure)
+            add_test(NAME pulp-gpu-shared-io-private-convolution-submit-scope-negative-control
+                COMMAND pulp-gpu-shared-io-private-convolution-probe
+                    --scenario=submit-scope-failure)
+            set_tests_properties(pulp-gpu-shared-io-private-convolution-probe PROPERTIES
+                FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                RESOURCE_LOCK pulp_gpu
+                TIMEOUT 60)
+            set_tests_properties(
+                pulp-gpu-shared-io-private-convolution-prepare-scope-negative-control
+                pulp-gpu-shared-io-private-convolution-submit-scope-negative-control
+                PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 60)
+
+            if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
+                add_executable(pulp-gpu-shared-io-paced-convolution-probe
+                    test_gpu_shared_io_paced_convolution_probe.cpp)
+                target_link_libraries(pulp-gpu-shared-io-paced-convolution-probe PRIVATE
+                    pulp::gpu-audio)
+                target_include_directories(pulp-gpu-shared-io-paced-convolution-probe PRIVATE
+                    ../core/gpu_audio/src)
+                add_dependencies(pulp-gpu-shared-io-paced-convolution-probe
+                    pulp-gpu-dawn-shared-io-provider-probe)
+                add_test(NAME pulp-gpu-shared-io-paced-convolution-probe
+                    COMMAND "${Python3_EXECUTABLE}"
+                        "${PROJECT_SOURCE_DIR}/test/verify_gpu_shared_io_paced_convolution.py"
+                        --probe "$<TARGET_FILE:pulp-gpu-shared-io-paced-convolution-probe>")
+                set_tests_properties(pulp-gpu-shared-io-paced-convolution-probe PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 150)
+            endif()
+
+            # This goes through the private session factory rather than
+            # driving the plan and executor separately: one real provider
+            # creates its paired program, the session owns both, and callback
+            # ingress/egress stays free of GPU transfers.
+            add_executable(pulp-gpu-shared-io-convolution-session-probe
+                test_gpu_shared_io_convolution_session_probe.cpp)
+            target_link_libraries(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                pulp::gpu-audio)
+            target_include_directories(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                ../core/gpu_audio/src)
+            target_compile_definitions(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
+            if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
+                target_link_libraries(pulp-gpu-shared-io-convolution-session-probe PRIVATE
+                    Vellum::Gpu Vellum::DawnHeaders)
+            endif()
+            add_dependencies(pulp-gpu-shared-io-convolution-session-probe
+                pulp-gpu-dawn-shared-io-provider-probe)
+            add_test(NAME pulp-gpu-shared-io-convolution-session-probe
+                COMMAND pulp-gpu-shared-io-convolution-session-probe)
+            add_test(NAME pulp-gpu-shared-io-convolution-session-prepare-scope-negative-control
+                COMMAND pulp-gpu-shared-io-convolution-session-probe
+                    --scenario=prepare-scope-failure)
+            add_test(NAME pulp-gpu-shared-io-convolution-session-submit-scope-negative-control
+                COMMAND pulp-gpu-shared-io-convolution-session-probe
+                    --scenario=submit-scope-failure)
+            set_tests_properties(
+                pulp-gpu-shared-io-convolution-session-probe
+                pulp-gpu-shared-io-convolution-session-prepare-scope-negative-control
+                pulp-gpu-shared-io-convolution-session-submit-scope-negative-control
+                PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 60)
+
+            if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
+                # Matched staged/shared lifecycle screening. This is deliberately
+                # an intermediate p4.matched.v1 diagnostic and never emits p4.raw.v1:
+                # callback/result-visible timing and transfer provenance remain
+                # explicit unavailable fields until the strict campaign seam lands.
+                add_executable(pulp-gpu-audio-p4-matched-convolution-benchmark
+                    test_gpu_audio_p4_matched_convolution_benchmark.cpp)
+                target_link_libraries(pulp-gpu-audio-p4-matched-convolution-benchmark PRIVATE
+                    pulp::gpu-audio)
+                target_include_directories(pulp-gpu-audio-p4-matched-convolution-benchmark PRIVATE
+                    ../core/gpu_audio/src)
+                add_dependencies(pulp-gpu-audio-p4-matched-convolution-benchmark
+                    pulp-gpu-dawn-shared-io-provider-probe)
+                add_test(NAME pulp-gpu-audio-p4-matched-convolution-benchmark
+                    COMMAND pulp-gpu-audio-p4-matched-convolution-benchmark)
+                set_tests_properties(pulp-gpu-audio-p4-matched-convolution-benchmark PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    SKIP_RETURN_CODE 77
+                    TIMEOUT 120)
+            endif()
         endif()
 
         unset(_pulp_gpu_audio_asset_sha256)

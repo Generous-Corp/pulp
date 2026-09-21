@@ -65,8 +65,7 @@ std::size_t mono_float32_wav_frames(std::string_view bytes) {
 TEST_CASE("audio heritage help, arity, and unknown verbs have stable exits",
           "[cli][shellout][audio-heritage]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
     const auto help = run_pulp({"audio", "heritage", "--help"});
     REQUIRE(help.exit_code == 0);
@@ -84,8 +83,7 @@ TEST_CASE("audio heritage help, arity, and unknown verbs have stable exits",
 TEST_CASE("audio heritage validate reports version and strict parse failures",
           "[cli][shellout][audio-heritage]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
     const auto directory = unique_temp_dir("pulp-cli-heritage-validate");
     auto profile = make_profile(directory);
@@ -111,8 +109,7 @@ TEST_CASE("audio heritage validate reports version and strict parse failures",
 TEST_CASE("audio heritage canonicalization is deterministic and bare-output safe",
           "[cli][shellout][audio-heritage]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
     const auto directory = unique_temp_dir("pulp-cli-heritage-canonical");
     const auto profile = make_profile(directory, std::string(" \n") + profile_json + "\n");
@@ -133,8 +130,7 @@ TEST_CASE("audio heritage canonicalization is deterministic and bare-output safe
 
 TEST_CASE("audio heritage inspect is neutral and stable JSON", "[cli][shellout][audio-heritage]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
     const auto directory = unique_temp_dir("pulp-cli-heritage-inspect");
     const auto profile = make_profile(directory);
@@ -158,8 +154,7 @@ TEST_CASE("audio heritage inspect is neutral and stable JSON", "[cli][shellout][
 TEST_CASE("audio heritage fixture render and report are deterministic",
           "[cli][shellout][audio-heritage]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
     const auto directory = unique_temp_dir("pulp-cli-heritage-render");
     const auto profile = make_profile(directory);
@@ -186,8 +181,7 @@ TEST_CASE("audio heritage fixture render and report are deterministic",
 TEST_CASE("audio heritage live cyclic render ends at exact rounded source duration",
           "[cli][shellout][audio-heritage]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
     const auto directory = unique_temp_dir("pulp-cli-heritage-live-duration");
     const auto profile = make_profile(directory, stretched_profile_json);
@@ -206,8 +200,7 @@ TEST_CASE("audio heritage live cyclic render ends at exact rounded source durati
 TEST_CASE("audio heritage output staging cannot collide with destination-like paths",
           "[cli][shellout][audio-heritage]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
     const auto directory = unique_temp_dir("pulp-cli-heritage-temp-collision");
     const auto profile = make_profile(directory);
@@ -225,8 +218,7 @@ TEST_CASE("audio heritage output staging cannot collide with destination-like pa
 TEST_CASE("audio heritage failed atomic publish preserves the old destination",
           "[cli][shellout][audio-heritage]") {
     if (!binary_exists()) {
-        SUCCEED("skipped: pulp not built");
-        return;
+        SKIP("pulp not built");
     }
     const auto directory = unique_temp_dir("pulp-cli-heritage-publish-rollback");
     const auto profile = make_profile(directory);

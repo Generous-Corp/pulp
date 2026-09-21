@@ -71,8 +71,7 @@ TEST_CASE("ALSA: capture open/start/stop is leak-free and terminates",
     cfg.input_channels = 2;
     cfg.output_channels = 0;
     if (!device.open(cfg)) {
-        SUCCEED("no ALSA capture endpoint on this host; skipping");
-        return;
+        SKIP("no ALSA capture endpoint on this host; skipping");
     }
     REQUIRE(device.is_open());
     REQUIRE(device.stream() == SND_PCM_STREAM_CAPTURE);

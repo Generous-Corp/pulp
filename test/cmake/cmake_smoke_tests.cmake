@@ -261,6 +261,7 @@ add_test(NAME cmake-installed-sdk-runtime-staging
         "-DPULP_PARENT_INSTRUMENTATION_CXX_FLAGS=${_sdk_consumer_instrumentation_compile_flags}"
         "-DPULP_PARENT_INSTRUMENTATION_LINKER_FLAGS=${_sdk_consumer_instrumentation_link_flags}"
         "-DPULP_PARENT_GPU_AUDIO_HAS_VELLUM_D15=${PULP_GPU_AUDIO_HAS_VELLUM_D15}"
+        -DPULP_PARENT_GPU_AUDIO_AVAILABLE=$<BOOL:$<TARGET_EXISTS:pulp-gpu-audio>>
         "-DPULP_PARENT_GPU_AUDIO_VELLUM_RUNTIME_NAME=${PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME}"
         "-DPULP_PARENT_GPU_AUDIO_VELLUM_NOTICE_DIR=${PULP_GPU_AUDIO_VELLUM_NOTICE_DIR}"
         "-DPULP_PARENT_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE=${PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE}"
@@ -268,6 +269,16 @@ add_test(NAME cmake-installed-sdk-runtime-staging
 set_tests_properties(cmake-installed-sdk-runtime-staging PROPERTIES
     LABELS "cmake;sdk;skia;windows;runtime;slow"
     TIMEOUT 1800)
+
+# Installed GPU-audio SDK consumer: compile a minimal CLAP plugin against the
+# exported transport and custom GpuAudioNode contract.
+add_test(NAME cmake-gpu-audio-sdk-consumer
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_gpu_audio_sdk_consumer.cmake)
+set_tests_properties(cmake-gpu-audio-sdk-consumer PROPERTIES
+    LABELS "cmake;sdk;gpu-audio;clap;slow"
+    TIMEOUT 600)
 # Install-layout regression: when the SDK is
 # installed via `cmake --install`, the Python encoder MUST be bundled
 # alongside PulpUtils.cmake so find_package(Pulp) consumers can call

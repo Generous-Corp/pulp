@@ -119,13 +119,35 @@ GENERATED_ARTIFACT_PATHS = {
     "docs/validation/gpu-handoff-provenance/receipt.json",
     "tools/agent-capabilities/contract-history.json",
 }
+# Repository-wide registries that a rule outside this gate compels many
+# unrelated authors to append to: every slice that registers a skill appends to
+# skill_path_map.json under the Skill Maintenance Rule, and every author who
+# adds a skill, CLI command or MCP tool appends to the tooling disposition
+# inventory, which pulp_tooling_disposition.py fails until they do. No ledger
+# row owns one whole -- a row owns the entry it added, and its evidence needles
+# are the instrument for an entry, exactly as a CMake registration manifest is
+# governed. Annexing one to a single row turns every unrelated registration
+# into a required-gate failure with no trailer that resolves it: the author is
+# compelled to edit the file by one required gate and forbidden to by this one.
+# That unsatisfiable pair is the condition GENERATED_ARTIFACT_PATHS and the
+# build-manifest predicate already exist to prevent; a shared registry is
+# neither a regenerated pin nor a build manifest, so it needs its own name and
+# the same treatment.
+SHARED_REGISTRY_PATHS = {
+    "docs/status/pulp-tooling-disposition.json",
+    "tools/scripts/skill_path_map.json",
+}
 # Files the version bot rewrites wholesale on every bump, mapped to the keys it
 # may rewrite. Excluding one WHOLE would drop real coverage, because the
 # semantic scan below only reaches core/state, core/view, core/midi and
 # inspect -- a docs/ artifact has no semantic backstop. So the exemption is
 # scoped to the transition instead of the path: a diff confined to these keys
 # with version-shaped values is mechanical and needs no ledger row, while any
-# other edit to the same file stays watched and still demands one.
+# other edit to the same file stays watched and still demands one. An entry that
+# is also a shared registry path is unreachable while that exclusion stands,
+# because the file is then not watched whole for any edit. It is kept rather
+# than deleted so that re-watching such a file cannot silently re-break the
+# version bot.
 MECHANICAL_VERSION_ARTIFACTS: dict[str, frozenset[str]] = {
     "docs/status/pulp-tooling-disposition.json": frozenset(
         {"version", "catalog_version", "catalog_metadata_version", "min_cli_version"}
@@ -592,6 +614,13 @@ def validate_document(document: Any, repo_root: Path) -> list[str]:
                 _safe_repo_path(
                     repo_root, path, f"{where}.owned_paths[{path_index}]", errors
                 )
+                if path in SHARED_REGISTRY_PATHS:
+                    errors.append(
+                        f"{where}.owned_paths[{path_index}]: "
+                        "a shared registry is appended to by many unrelated authors and cannot "
+                        "be exclusively owned; own the entry with an evidence needle "
+                        f"instead: {path}"
+                    )
         if row.get("classification") not in CLASSIFICATIONS:
             errors.append(f"{where}.classification: missing or invalid classification")
         release = row.get("release")
@@ -666,6 +695,13 @@ def validate_document(document: Any, repo_root: Path) -> list[str]:
                 _safe_repo_path(
                     repo_root, path, f"{where}.owned_paths[{path_index}]", errors
                 )
+                if path in SHARED_REGISTRY_PATHS:
+                    errors.append(
+                        f"{where}.owned_paths[{path_index}]: "
+                        "a shared registry is appended to by many unrelated authors and cannot "
+                        "be exclusively owned; own the entry with an evidence needle "
+                        f"instead: {path}"
+                    )
         state = tombstone.get("delivery_state")
         removed_in_merge = tombstone.get("removed_in_merge")
         if state not in DELIVERY_STATES:
@@ -695,6 +731,43 @@ def validate_document(document: Any, repo_root: Path) -> list[str]:
     for where, replacement in replacements:
         if replacement not in known_ids:
             errors.append(f"{where}.replaced_by: unknown ledger ID {replacement!r}")
+    return errors
+
+
+def validate_dependency_references(document: Any) -> list[str]:
+    """Optionally validate active dependency IDs against the ledger itself.
+
+    Dependency strings historically include external project and architecture
+    references, so the ordinary ledger gate deliberately checks only shape. This
+    opt-in pass is for reconciliation work: pending rows must point at another
+    live row or an explicit tombstone, while released history remains untouched.
+    """
+    rows = document.get("rows", []) if isinstance(document, dict) else []
+    tombstones = document.get("tombstones", []) if isinstance(document, dict) else []
+    known = {
+        item.get("id")
+        for item in [*rows, *tombstones]
+        if isinstance(item, dict) and _is_nonempty_string(item.get("id"))
+    }
+    errors: list[str] = []
+    for row_index, row in enumerate(rows):
+        if not isinstance(row, dict) or row.get("delivery_state") != "pending":
+            continue
+        surfaces = row.get("surfaces", {})
+        if not isinstance(surfaces, dict):
+            continue
+        for surface_name, surface in surfaces.items():
+            if not isinstance(surface, dict):
+                continue
+            dependencies = surface.get("dependencies", [])
+            if not isinstance(dependencies, list):
+                continue
+            for dependency in dependencies:
+                if dependency not in known:
+                    errors.append(
+                        f"ledger.rows[{row_index}].surfaces.{surface_name}.dependencies: "
+                        f"active dependency {dependency!r} has no ledger row or tombstone"
+                    )
     return errors
 
 
@@ -1130,7 +1203,10 @@ def _exclusively_owned_paths(base: Any | None, current: Any) -> set[str]:
     transition, so de-annexation is its own reviewable ledger change rather
     than a way to change a file unrecorded. A wholesale-regenerated artifact is
     never watched whole: another required gate compels its refresh, so watching
-    it would leave the author no way to satisfy both.
+    it would leave the author no way to satisfy both. A shared registry is
+    never watched whole for the same reason: a rule outside this gate compels
+    many unrelated authors to append to it, so annexing it to one row would
+    leave all of them the same unsatisfiable pair.
     """
     base_owners = _declared_owners(base)
     current_owners = _declared_owners(current)
@@ -1141,6 +1217,7 @@ def _exclusively_owned_paths(base: Any | None, current: Any) -> set[str]:
         and len(current_owners.get(path, ())) <= 1
         and not _is_build_manifest(path)
         and path not in GENERATED_ARTIFACT_PATHS
+        and path not in SHARED_REGISTRY_PATHS
     }
 
 
@@ -1745,6 +1822,11 @@ def main(argv: list[str] | None = None) -> int:
         "--base",
         help="git revision used to enforce ledger updates and append-only history",
     )
+    parser.add_argument(
+        "--strict-dependencies",
+        action="store_true",
+        help="require pending-row dependencies to resolve to a ledger row or tombstone",
+    )
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
     schema_path = args.schema or repo_root / "docs/status/sequencer-exposure.schema.json"
@@ -1762,6 +1844,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sequencer exposure check: cannot read {schema_path}: {error}", file=sys.stderr)
         return 1
     errors = validate_document(document, repo_root)
+    if args.strict_dependencies:
+        errors.extend(validate_dependency_references(document))
     errors.extend(validate_schema_contract(schema))
     comparison: GitComparisonProvenance | None = None
     if args.base:

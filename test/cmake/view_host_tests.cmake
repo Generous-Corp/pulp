@@ -190,9 +190,10 @@ if(APPLE AND NOT PULP_IOS)
     add_executable(pulp-test-plugin-view-host-design-viewport
         test_plugin_view_host_design_viewport.mm
         test_plugin_view_host_key_focus.mm
+        test_plugin_view_host_script_keys.mm
         test_plugin_view_host_text_input.mm)
     target_link_libraries(pulp-test-plugin-view-host-design-viewport PRIVATE
-        pulp::view pulp::canvas Catch2::Catch2WithMain "-framework AppKit")
+        pulp::view pulp::view-script pulp::canvas Catch2::Catch2WithMain "-framework AppKit")
     if(PULP_HAS_SKIA)
         target_link_libraries(pulp-test-plugin-view-host-design-viewport
             PRIVATE pulp::render skia::skia)

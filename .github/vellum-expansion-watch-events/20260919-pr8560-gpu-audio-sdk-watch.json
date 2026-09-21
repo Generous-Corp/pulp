@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260919-pr8560-gpu-audio-sdk-watch",
+  "created_at": "2026-09-19T18:20:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "The P5 GPU-audio SDK composition adds the installed consumer and lifecycle checks needed to verify that the shared-memory GPU-audio target is exported and usable from a staged SDK. The design-output-and-packaging family is crossed by exactly one selector path: test/cmake/test_installed_sdk_runtime_staging.cmake, which registers the installed SDK consumer. The remaining GPU-audio implementation, provider, tracing, transport, convolution, validation, and documentation paths match no Vellum watch selector. This changes no importer, DesignIR schema, generated design output, template, package authority, release workflow, Vellum artifact, or ownership boundary. Registered as watch-only so selector coverage remains explicit.",
+  "tests": [
+    "installed SDK GPU-audio lifecycle consumer",
+    "pulp-gpu-audio focused Release suites",
+    "consumption census and SDK package checks",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

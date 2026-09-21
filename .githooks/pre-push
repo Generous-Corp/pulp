@@ -154,7 +154,9 @@ COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
+GPU_PIN_FRESHNESS="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 GPU_LEDGER_SENTINEL="$ROOT/tools/scripts/gpu_ledger_sentinel_check.py"
+GPU_PROVENANCE_VERIFY="$ROOT/tools/scripts/hydrate_gpu_provenance_commits.py"
 YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
@@ -512,6 +514,29 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
     esac
 fi
 
+# GPU-handoff pin freshness. The version bot's bump commit now regenerates
+# docs/status/gpu-vellum-handoff.yaml and its receipt
+# (version_at_land._refresh_derived), so a PR that re-pins them by hand is
+# redoing work main is about to redo — and re-creating the collision that
+# motivated the move, because the pulp-gpu-ledger merge driver cannot run on
+# github.com. This rejects an identity-only re-pin, and separately rejects a
+# pinned path deleted or renamed while the inventory still lists it, which is
+# the one shape that still turns the required gate red. Diff-scoped,
+# sub-second; PULP_DISABLE_PREPUSH_GATES=1 demotes it like the rest.
+if [ -f "$GPU_PIN_FRESHNESS" ]; then
+    run_gate_captured "$PYTHON" "$GPU_PIN_FRESHNESS" --base "$BASE" --root "$ROOT" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        # 2 is "git could not answer, so nothing was checked" — not a pass.
+        # Leaving it unmapped would land it in the message below, which prints
+        # a line and lets the push through, restoring the blind spot one layer
+        # out from the script that just closed it.
+        2) fail=1 ;;
+        *) echo "[pre-push] gpu_handoff_pin_freshness: internal error" >&2 ;;
+    esac
+fi
+
 # GPU-ledger sentinel. The pulp-gpu-ledger merge driver resolves a generated
 # ledger collision to an identity that is invalid on purpose, because a merged
 # value that still looks like an identity passes the always-on provenance tier
@@ -528,6 +553,24 @@ if [ -f "$GPU_LEDGER_SENTINEL" ]; then
         0) ;;
         1) fail=1 ;;
         *) echo "[pre-push] gpu_ledger_sentinel_check: internal error" >&2 ;;
+    esac
+fi
+
+# GPU-provenance reachability. A ledger can name a commit that exists in this
+# object store and still will not exist on the remote: an amend or rebase
+# rewrites the commit CARRYING the ledger after the ledger named it, orphaning
+# the sha recorded inside. Presence cannot see that, because the orphan is
+# still an object here; the question is reachability from HEAD or a
+# remote-tracking ref. The rewrite happens after authoring, so this is the only
+# place that can catch it. A truncated clone cannot tell an orphan from history
+# it never fetched, and skips rather than inventing a finding. Two git reads,
+# no network, sub-second.
+if [ -f "$GPU_PROVENANCE_VERIFY" ]; then
+    run_gate_captured "$PYTHON" "$GPU_PROVENANCE_VERIFY" --root "$ROOT" --verify-only
+    case $? in
+        0) ;;
+        1) echo "[pre-push] gpu-provenance: a pinned commit is reachable from neither HEAD nor any remote-tracking branch; regenerate the ledger against the commit that replaced it" >&2; fail=1 ;;
+        *) echo "[pre-push] hydrate_gpu_provenance_commits: internal error" >&2 ;;
     esac
 fi
 

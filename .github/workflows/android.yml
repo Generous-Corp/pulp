@@ -14,6 +14,8 @@ on:
       - 'tools/deps/manifest.json'
       - 'tools/cmake/PulpAndroid.cmake'
       - 'tools/cmake/PulpDependencies.cmake'
+      - 'tools/scripts/test_android_aligned_buffer.py'
+      - '.github/workflows/android.yml'
       - 'CMakeLists.txt'
 
   schedule:
@@ -89,6 +91,10 @@ jobs:
 
       - name: Install NDK
         run: sdkmanager "ndk;30.0.14904198"
+
+      - name: Compile DSP buffers at the supported Android API floor
+        shell: bash
+        run: python3 tools/scripts/test_android_aligned_buffer.py --ndk "$ANDROID_HOME/ndk/30.0.14904198"
 
       - name: Cache Gradle
         uses: actions/cache@v5
@@ -255,9 +261,12 @@ jobs:
         if: always()
         run: adb emu kill 2>/dev/null || true
 
-  # This stable required context classifies its dependency closure on every PR
-  # and merge group, then runs the expensive Linux/KVM lane only when affected.
-  # The APK jobs above intentionally remain outside those event types.
+  # This stable context classifies its dependency closure on every PR and
+  # merge group, then runs the Android API-floor compile probe and the
+  # expensive Linux/KVM fixture lane only when affected. It is the only
+  # Android job that runs pre-merge: the APK jobs above are push/schedule
+  # only, so a PR's Android signal proves the API floor and the fixtures,
+  # not a packaged APK.
   android-run-fixtures:
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
@@ -289,7 +298,8 @@ jobs:
               .github/workflows/android.yml|CMakeLists.txt|\
               core/*|\
               test/fixtures/timeline/*|tools/ci/android-fixture-lane.sh|\
-              tools/cmake/*|tools/deps/manifest.json)
+              tools/cmake/*|tools/deps/manifest.json|\
+              tools/scripts/test_android_aligned_buffer.py)
                 affected=true
                 break
                 ;;
@@ -318,6 +328,17 @@ jobs:
         run: |
           sdkmanager "ndk;30.0.14904198" "platform-tools" "emulator" \
             "platforms;android-34" "system-images;android-34;google_apis;x86_64"
+
+      # The fixture runners below are cross-compiled, but their target
+      # closure is narrower than the APK's, so a core header can use a libc
+      # symbol above the app's API floor and still build here. That is how
+      # `std::aligned_alloc` (Bionic: API 28+, app floor: API 26) reached
+      # `main` while every pre-merge Android signal was green. This probe
+      # compiles the DSP buffer headers at both the floor and API 28 for
+      # both ABIs in seconds, on the NDK this job already installed.
+      - name: Compile DSP buffers at the supported Android API floor
+        if: steps.fixture-scope.outputs.affected == 'true'
+        run: python3 tools/scripts/test_android_aligned_buffer.py --ndk "$ANDROID_HOME/ndk/30.0.14904198"
 
       - name: Enable KVM
         if: steps.fixture-scope.outputs.affected == 'true'

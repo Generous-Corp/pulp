@@ -84,6 +84,7 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/test_android_premerge_probe.py'
       - 'tools/scripts/shell_portability_check.py'
       - 'tools/scripts/test_shell_portability_check.py'
       - 'tools/scripts/shell_portability_rules.json'
@@ -322,6 +323,16 @@ jobs:
           python3 tools/scripts/test_coverage_surface_contract.py
           python3 tools/scripts/test_generated_version_bump_check.py
 
+      - name: Android pre-merge probe contract
+        # `android-build` is push/schedule only, so `android-run-fixtures` is
+        # the only Android job a PR runs. Keep its API-floor compile probe and
+        # the dependency closure that reaches it from silently going away.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'pyyaml>=6'
+          python3 tools/scripts/test_android_premerge_probe.py
+
       - name: Workflow lint regression contract
         shell: bash
         run: |
@@ -372,6 +383,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/scripts/test_release_workflow_test_step.py
+          # auto-release.yml's bypass-trailer guard, run as the step body
+          # extracted from the workflow: a quoted trailer must not
+          # withhold a release tag, a declared one must.
+          python3 tools/scripts/test_release_trailer_guard.py
           python3 tools/scripts/test_release_checksum_manifest.py
           python3 tools/scripts/test_release_artifact_contents.py
           # The active_platforms shipping knob: matrix-leg derivation and the

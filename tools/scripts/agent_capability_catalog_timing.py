@@ -506,6 +506,62 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="timebase.inline-groove-projector",
+        domain="timebase",
+        summary=(
+            "Trivially copyable fixed-capacity groove projection that admits "
+            "reordering tables."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "factory-validation-on-control",
+            "process": "audio",
+            "reset": "replace-trivially-copyable-value",
+            "release": "none",
+        },
+        state_model=(
+            "Inline fixed-capacity groove table copied by value; projection reads it "
+            "without allocating and without mutating it."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "authored event ticks, rational swing, and at most sixteen groove steps "
+            "whose offsets are smaller than one table entry"
+        ),
+        output_domain=(
+            "projected event ticks that may reorder, and velocity scale"
+        ),
+        units=["ticks", "rational ratio", "per-thousand scale"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="validated-factory",
+                kind="cpp_function",
+                include="pulp/timebase/inline_groove_projector.hpp",
+                qualified_name="pulp::timebase::InlineGrooveProjector::create",
+                target="Pulp::timebase",
+                header_fingerprint=(
+                    "sha256:1008649e2c45404205bb6f525a32b6c91dd7c881e97bb768c4037fbf0253c4cb"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "validated-factory",
+            "binding": "pulp::timebase::InlineGrooveProjector::create",
+            "operation": "function_call",
+            "arguments": "pulp::timebase::InlineGrooveInput{}",
+        }],
+    ),
+    capability(
         key="timebase.trigger-grid",
         domain="timebase",
         summary="Fixed-capacity authored trigger grid with block-invariant window projection.",
@@ -727,6 +783,505 @@ EXPORTS = [
                     "pulp::playback::ControllerProgramEvent{}, "
                     "pulp::playback::ControllerProgramEvent{}"
                 ),
+            },
+        ],
+    ),
+    capability(
+        key="timeline.groove-template",
+        domain="timeline",
+        summary=(
+            "Immutable sequence-owned authored feel: rational swing over a "
+            "subdivision grid plus a repeating timing and accent table, each "
+            "attenuated by its own strength."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "factory-validation-on-control",
+            "process": "audio-while-the-caller-pins-the-owning-snapshot",
+            "reset": "replace-immutable-value",
+            "release": "control-when-the-last-handle-drops",
+        },
+        state_model=(
+            "One immutable groove record behind a shared handle. Construction "
+            "allocates and validates on the control thread; timing and accent "
+            "lookup read the record without allocating and never mutate it. "
+            "This is the canonical authored model and it may reorder events; "
+            "timebase.groove-kernel is the fixed-capacity non-reordering subset "
+            "for a realtime path, and the two are not interchangeable."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "authored event ticks, rational swing over a subdivision grid, and a "
+            "bounded repeating table of per-step timing offsets and per-mille accents"
+        ),
+        output_domain=(
+            "sounding event ticks, which the table half may reorder because step "
+            "offsets are bounded to under one step rather than to monotonicity, "
+            "and a per-mille velocity scale"
+        ),
+        units=["ticks", "rational ratio", "per-thousand scale"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="validated-factory",
+                kind="cpp_function",
+                include="pulp/timeline/model.hpp",
+                qualified_name="pulp::timeline::GrooveTemplate::create",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
+                ),
+                address_expression=(
+                    "static_cast<pulp::runtime::Result<pulp::timeline::GrooveTemplate, "
+                    "pulp::timeline::ModelError> (*)(pulp::timeline::GrooveTemplateInput)>("
+                    "&pulp::timeline::GrooveTemplate::create)"
+                ),
+            ),
+            binding(
+                role="timing-projection",
+                kind="cpp_function",
+                include="pulp/timeline/model.hpp",
+                qualified_name="pulp::timeline::GrooveTemplate::apply_timing",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
+                ),
+                address_expression=(
+                    "static_cast<pulp::timebase::TickPosition "
+                    "(pulp::timeline::GrooveTemplate::*)(pulp::timebase::TickPosition) "
+                    "const noexcept>(&pulp::timeline::GrooveTemplate::apply_timing)"
+                ),
+            ),
+            binding(
+                role="accent-lookup",
+                kind="cpp_function",
+                include="pulp/timeline/model.hpp",
+                qualified_name="pulp::timeline::GrooveTemplate::velocity_scale_at",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
+                ),
+                address_expression=(
+                    "static_cast<std::int32_t "
+                    "(pulp::timeline::GrooveTemplate::*)(pulp::timebase::TickPosition) "
+                    "const noexcept>(&pulp::timeline::GrooveTemplate::velocity_scale_at)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "validated-factory",
+                "binding": "pulp::timeline::GrooveTemplate::create",
+                "operation": "function_call",
+                "arguments": "pulp::timeline::GrooveTemplateInput{}",
+            },
+            {
+                "role": "timing-projection",
+                "binding": "pulp::timeline::GrooveTemplate::apply_timing",
+                "operation": "member_function_call",
+                "object": (
+                    "pulp::timeline::GrooveTemplate::create("
+                    "pulp::timeline::GrooveTemplateInput{}).value()"
+                ),
+                "arguments": "pulp::timebase::TickPosition{0}",
+            },
+            {
+                "role": "accent-lookup",
+                "binding": "pulp::timeline::GrooveTemplate::velocity_scale_at",
+                "operation": "member_function_call",
+                "object": (
+                    "pulp::timeline::GrooveTemplate::create("
+                    "pulp::timeline::GrooveTemplateInput{}).value()"
+                ),
+                "arguments": "pulp::timebase::TickPosition{0}",
+            },
+        ],
+    ),
+    capability(
+        key="timeline.compile-context-subscription",
+        domain="timeline",
+        summary=(
+            "Declared vocabulary for the sequence-owned context a content "
+            "renderer may read beyond its own clip."
+        ),
+        rt_class="any",
+        lifecycle={
+            "construction": "any",
+            "prepare": "none",
+            "process": "any",
+            "reset": "value-initialization",
+            "release": "none",
+        },
+        state_model=(
+            "Constexpr bitset value, one bit per context kind, declared at "
+            "renderer registration. The compiler keeps the reverse index from "
+            "kind to declared readers and constructs the matching read-side "
+            "view, so the view is received rather than authored by a consumer."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "not_applicable",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="context kinds a renderer declares it reads",
+        output_domain=(
+            "a declared-kind set that both dirties exactly its readers on a lane "
+            "edit and narrows the read side, so an undeclared kind reads as absent"
+        ),
+        units=["context kind"],
+        latency="zero",
+        tail="none",
+        scheduling="pure",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/timeline/compile_context.hpp",
+                qualified_name="pulp::timeline::CompileContextSubscriptions",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:a081fae4f53800166cd07d644408aa85922c817d3b4c6fe6d3f10558e6d25713"
+                ),
+            ),
+            binding(
+                role="context-kind",
+                kind="cpp_type",
+                include="pulp/timeline/compile_context.hpp",
+                qualified_name="pulp::timeline::CompileContextKind",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:a081fae4f53800166cd07d644408aa85922c817d3b4c6fe6d3f10558e6d25713"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "entrypoint",
+                "binding": "pulp::timeline::CompileContextSubscriptions",
+                "operation": "member_call",
+                "member": "subscribe",
+                "arguments": "pulp::timeline::CompileContextKind::Groove",
+            },
+            {
+                "role": "context-kind",
+                "binding": "pulp::timeline::CompileContextKind",
+                "operation": "construct",
+                "arguments": "",
+            },
+        ],
+    ),
+    capability(
+        key="timeline.chord-scale-lane",
+        domain="timeline",
+        summary=(
+            "Immutable sequence-owned harmonic context lane with ordered events "
+            "and allocation-free lookup."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "factory-validation-on-control",
+            "process": "audio-while-the-caller-pins-the-owning-snapshot",
+            "reset": "replace-immutable-value",
+            "release": "control-when-the-last-handle-drops",
+        },
+        state_model=(
+            "One immutable strictly ordered event vector behind a shared handle. "
+            "Construction allocates, orders, and validates on the control thread; "
+            "lookup reads it without allocating."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="authored chord and scale events at canonical tick positions",
+        output_domain=(
+            "the harmony in force at a position, or absent before the first "
+            "event because no default harmony is invented"
+        ),
+        units=["ticks", "pitch class", "chord-extension bitmask"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="validated-factory",
+                kind="cpp_function",
+                include="pulp/timeline/model.hpp",
+                qualified_name="pulp::timeline::ChordScaleLane::create",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
+                ),
+                address_expression=(
+                    "static_cast<pulp::runtime::Result<pulp::timeline::ChordScaleLane, "
+                    "pulp::timeline::ModelError> (*)("
+                    "std::vector<pulp::timeline::ChordScaleEvent>)>("
+                    "&pulp::timeline::ChordScaleLane::create)"
+                ),
+            ),
+            binding(
+                role="harmony-lookup",
+                kind="cpp_function",
+                include="pulp/timeline/model.hpp",
+                qualified_name="pulp::timeline::ChordScaleLane::at",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
+                ),
+                address_expression=(
+                    "static_cast<const pulp::timeline::ChordScaleEvent* "
+                    "(pulp::timeline::ChordScaleLane::*)(pulp::timebase::TickPosition) "
+                    "const noexcept>(&pulp::timeline::ChordScaleLane::at)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "validated-factory",
+                "binding": "pulp::timeline::ChordScaleLane::create",
+                "operation": "function_call",
+                "arguments": "std::vector<pulp::timeline::ChordScaleEvent>{}",
+            },
+            {
+                "role": "harmony-lookup",
+                "binding": "pulp::timeline::ChordScaleLane::at",
+                "operation": "member_function_call",
+                "object": (
+                    "pulp::timeline::ChordScaleLane::create("
+                    "std::vector<pulp::timeline::ChordScaleEvent>{}).value()"
+                ),
+                "arguments": "pulp::timebase::TickPosition{0}",
+            },
+        ],
+    ),
+    capability(
+        key="timeline.dynamics-lane",
+        domain="timeline",
+        summary=(
+            "Immutable sequence-owned intensity context lane with interpolated, "
+            "allocation-free lookup."
+        ),
+        rt_class="mixed",
+        lifecycle={
+            "construction": "control",
+            "prepare": "factory-validation-on-control",
+            "process": "audio-while-the-caller-pins-the-owning-snapshot",
+            "reset": "replace-immutable-value",
+            "release": "control-when-the-last-handle-drops",
+        },
+        state_model=(
+            "One immutable strictly ordered event vector behind a shared handle. "
+            "Construction allocates, orders, and validates on the control thread; "
+            "lookup reads it without allocating."
+        ),
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "authored normalized intensity events at canonical tick positions, "
+            "each stating how the segment leaving it reaches the next"
+        ),
+        output_domain=(
+            "the interpolated intensity at a position, or absent before the "
+            "first event because not-yet-stated is not silence"
+        ),
+        units=["ticks", "normalized intensity"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="validated-factory",
+                kind="cpp_function",
+                include="pulp/timeline/model.hpp",
+                qualified_name="pulp::timeline::DynamicsLane::create",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
+                ),
+                address_expression=(
+                    "static_cast<pulp::runtime::Result<pulp::timeline::DynamicsLane, "
+                    "pulp::timeline::ModelError> (*)("
+                    "std::vector<pulp::timeline::DynamicsEvent>)>("
+                    "&pulp::timeline::DynamicsLane::create)"
+                ),
+            ),
+            binding(
+                role="intensity-lookup",
+                kind="cpp_function",
+                include="pulp/timeline/model.hpp",
+                qualified_name="pulp::timeline::DynamicsLane::value_at",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:3f632b1b36057228373fbc62f7abb27151b689b026e9a5e457c923e48def66a6"
+                ),
+                address_expression=(
+                    "static_cast<std::optional<float> "
+                    "(pulp::timeline::DynamicsLane::*)(pulp::timebase::TickPosition) "
+                    "const noexcept>(&pulp::timeline::DynamicsLane::value_at)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "validated-factory",
+                "binding": "pulp::timeline::DynamicsLane::create",
+                "operation": "function_call",
+                "arguments": "std::vector<pulp::timeline::DynamicsEvent>{}",
+            },
+            {
+                "role": "intensity-lookup",
+                "binding": "pulp::timeline::DynamicsLane::value_at",
+                "operation": "member_function_call",
+                "object": (
+                    "pulp::timeline::DynamicsLane::create("
+                    "std::vector<pulp::timeline::DynamicsEvent>{}).value()"
+                ),
+                "arguments": "pulp::timebase::TickPosition{0}",
+            },
+        ],
+    ),
+    capability(
+        key="timeline.note-modifier",
+        domain="timeline",
+        summary=(
+            "Pure per-note probability, pass condition, and ratchet gate with a "
+            "replayable authored seed."
+        ),
+        rt_class="any",
+        lifecycle={
+            "construction": "any",
+            "prepare": "none",
+            "process": "any",
+            "reset": "value-initialization",
+            "release": "none",
+        },
+        state_model=(
+            "Stateless constexpr value algebra over an authored modifier record. "
+            "A note with no record plays unconditionally and once, so absence is "
+            "a stated default rather than an unknown."
+        ),
+        seed_model=(
+            "caller supplies one authored 64-bit content seed; the draw key is a "
+            "pure mix of that seed and the note identity, and the ratchet count "
+            "is authored rather than drawn, so it does not move with the seed"
+        ),
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain=(
+            "an authored note modifier, a seed-and-identity draw key, and a loop "
+            "pass index"
+        ),
+        output_domain=(
+            "whether the note sounds on that pass, and whether the authored "
+            "record is structurally well formed"
+        ),
+        units=["probability out of 65535", "pass index", "retrigger count"],
+        latency="zero",
+        tail="none",
+        scheduling="pure",
+        bindings=[
+            binding(
+                role="entrypoint",
+                kind="cpp_type",
+                include="pulp/timeline/note_modifier.hpp",
+                qualified_name="pulp::timeline::NoteModifier",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:59c03e00e6e8609d64386afeb49e1bb986d420b94d31c3769d176e2d666be3fd"
+                ),
+            ),
+            binding(
+                role="draw-key",
+                kind="cpp_function",
+                include="pulp/timeline/note_modifier.hpp",
+                qualified_name="pulp::timeline::note_modifier_draw_key",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:59c03e00e6e8609d64386afeb49e1bb986d420b94d31c3769d176e2d666be3fd"
+                ),
+                address_expression=(
+                    "static_cast<std::uint64_t (*)(std::uint64_t, pulp::timeline::ItemId) "
+                    "noexcept>(&pulp::timeline::note_modifier_draw_key)"
+                ),
+            ),
+            binding(
+                role="sounding-gate",
+                kind="cpp_function",
+                include="pulp/timeline/note_modifier.hpp",
+                qualified_name="pulp::timeline::note_modifier_sounds",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:59c03e00e6e8609d64386afeb49e1bb986d420b94d31c3769d176e2d666be3fd"
+                ),
+                address_expression=(
+                    "static_cast<bool (*)(const pulp::timeline::NoteModifier&, "
+                    "std::uint64_t, std::uint64_t) noexcept>("
+                    "&pulp::timeline::note_modifier_sounds)"
+                ),
+            ),
+            binding(
+                role="structural-validity",
+                kind="cpp_function",
+                include="pulp/timeline/note_modifier.hpp",
+                qualified_name="pulp::timeline::note_modifier_well_formed",
+                target="Pulp::timeline",
+                header_fingerprint=(
+                    "sha256:59c03e00e6e8609d64386afeb49e1bb986d420b94d31c3769d176e2d666be3fd"
+                ),
+                address_expression=(
+                    "static_cast<bool (*)(const pulp::timeline::NoteModifier&) noexcept>("
+                    "&pulp::timeline::note_modifier_well_formed)"
+                ),
+            ),
+        ],
+        _link_probes=[
+            {
+                "role": "entrypoint",
+                "binding": "pulp::timeline::NoteModifier",
+                "operation": "construct",
+                "arguments": "",
+            },
+            {
+                "role": "draw-key",
+                "binding": "pulp::timeline::note_modifier_draw_key",
+                "operation": "function_call",
+                "arguments": "0, pulp::timeline::ItemId{1}",
+            },
+            {
+                "role": "sounding-gate",
+                "binding": "pulp::timeline::note_modifier_sounds",
+                "operation": "function_call",
+                "arguments": "pulp::timeline::NoteModifier{}, 0, 0",
+            },
+            {
+                "role": "structural-validity",
+                "binding": "pulp::timeline::note_modifier_well_formed",
+                "operation": "function_call",
+                "arguments": "pulp::timeline::NoteModifier{}",
             },
         ],
     ),

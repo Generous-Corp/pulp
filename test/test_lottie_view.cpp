@@ -67,8 +67,7 @@ TEST_CASE("LottieView paints a placeholder when Lottie is not compiled in",
 TEST_CASE("LottieView parses and advances when Lottie is compiled in",
           "[view][lottie]") {
     if (!LottieView::supported()) {
-        SUCCEED("Lottie not compiled in (PULP_LOTTIE off)");
-        return;
+        SKIP("Lottie not compiled in (PULP_LOTTIE off)");
     }
 
     LottieView v;
@@ -113,8 +112,7 @@ TEST_CASE("LottieView parses and advances when Lottie is compiled in",
 TEST_CASE("LottieView resubscribes to the clock after pause/resume",
           "[view][lottie]") {
     if (!LottieView::supported()) {
-        SUCCEED("Lottie not compiled in (PULP_LOTTIE off)");
-        return;
+        SKIP("Lottie not compiled in (PULP_LOTTIE off)");
     }
     // Regression: when the FrameClock auto-removes the subscription (pause, or a
     // non-looping animation reaching its end), the view must be able to

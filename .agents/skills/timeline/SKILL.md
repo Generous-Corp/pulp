@@ -1325,6 +1325,38 @@ the child groove exactly once rather than composing it with the parent. A
 trimmed nested MIDI leaf with authored groove is currently refused because the
 source-window chase rule for displaced notes is intentionally undefined.
 
+### Timing transforms are two halves, and zero depth is not bypass
+
+More than one stage moves a sequenced note, and the ordering is a contract:
+[`docs/policies/event-stream-timing-transform.md`](../../../docs/policies/event-stream-timing-transform.md).
+Read it before adding anything that displaces a note. The split that matters:
+authored groove and the tempo-map conversion are **compile time** and bake into
+the immutable `PlaybackProgram`, so a displacement there survives save, bounce
+and re-open. The humaniser device and delay compensation are **render time** and
+never rewrite program data, so their displacement is a property of this playback
+only. Each coordinate gets exactly one transform stage — one in ticks, one in
+samples — which is what keeps two engines from becoming two competing global
+timing engines.
+
+**Putting the humaniser in a chain at depth 0 is not the same as leaving it
+out.** The kernel is attack-only. It delays each attack by
+`minimum_timing_samples`, which at depth 0 is the whole
+`kEventHumaniserWindowSamples` (512) window and exactly cancels the compensated
+early read — so attacks land tuple-identically, velocity included. A release is
+forwarded unchanged (`humanize.hpp`), so nothing delays it back and it lands a
+full window early. The net effect is that **every note is 512 samples shorter**
+(10.7 ms at 48 kHz) merely because the device is present. Zero depth is a
+deterministic control setting, not render identity; a caller wanting true bypass
+must omit the device rather than zero its depths.
+
+Two further deviations are declared in that contract rather than fixed, so do
+not "repair" either without deciding to change what every existing render
+sounds like: `GrooveTemplate` performs no joint order validation across adjacent
+steps (the order-preserving kernel that does is unwired), and the humaniser
+device keys its draw on a device-local frame counter rather than document
+position — partition-invariant, but the same note draws differently depending on
+where playback started and how many times it looped.
+
 ### A tick edit finer than a frame is authorable and real, but renders as nothing
 
 Ticks resolve far finer than frames. `kTicksPerQuarter` is 705'600, which at

@@ -13,6 +13,10 @@ inputs:
     description: Codecov token; public fork uploads may omit it
     required: false
     default: ''
+  required:
+    description: Fail the calling job when Codecov transport fails
+    required: false
+    default: 'false'
   receipt-name:
     description: Unique artifact name proving that Codecov accepted the upload command
     required: true
@@ -64,10 +68,15 @@ runs:
         PULP_CODECOV_FILES: ${{ inputs.files }}
         PULP_CODECOV_FLAGS: ${{ inputs.flags }}
         PULP_CODECOV_RECEIPT: ${{ inputs.receipt-name }}
+        PULP_CODECOV_REQUIRED: ${{ inputs.required }}
       run: |
         set -euo pipefail
         if [ "${PULP_CODECOV_OUTCOME}" != "success" ]; then
           echo "uploaded=false" >> "${GITHUB_OUTPUT}"
+          if [ "${PULP_CODECOV_REQUIRED}" = "true" ]; then
+            echo "::error::Codecov transport failed after local reports were verified; required upload has no receipt."
+            exit 1
+          fi
           echo "::warning::Codecov transport failed after local reports were verified."
           exit 0
         fi

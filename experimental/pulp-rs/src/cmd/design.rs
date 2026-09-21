@@ -28,6 +28,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::build_parallelism;
 use crate::error::{CliError, Result};
 use crate::proc::{Invocation, Spawner};
 use crate::project;
@@ -228,11 +229,14 @@ pub fn run<S: Spawner>(
             return Ok(rc);
         }
     }
-    let build = Invocation::new("cmake")
-        .arg("--build")
-        .arg(binding.build_dir.to_string_lossy().into_owned())
-        .arg("--target")
-        .arg("pulp-design-tool");
+    let build = build_parallelism::finish_build_command(
+        Invocation::new("cmake")
+            .arg("--build")
+            .arg(binding.build_dir.to_string_lossy().into_owned())
+            .arg("--target")
+            .arg("pulp-design-tool"),
+        &[],
+    );
     let rc = spawner.run(&build)?;
     if rc != 0 {
         return Ok(rc);

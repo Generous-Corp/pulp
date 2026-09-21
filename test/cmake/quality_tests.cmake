@@ -23,10 +23,18 @@ target_link_libraries(pulp-test-agent-capability-compile PRIVATE
     pulp::playback
     pulp::sequence
     pulp::signal
-    pulp::timebase)
+    pulp::timebase
+    pulp::timeline)
 add_test(NAME agent-capability-symbols-compile COMMAND pulp-test-agent-capability-compile)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME gpu-audio-p4-evidence-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_audio_p4_evidence.py")
+    set_tests_properties(gpu-audio-p4-evidence-selftest PROPERTIES
+        LABELS "audio;gpu;evidence"
+        TIMEOUT 120)
+
     add_test(NAME dsp-provenance-audit
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/dsp_provenance_audit.py")
@@ -235,6 +243,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
 
+    # The selftest is the load-bearing half. The guard's lexical scan once
+    # exited 0 on a vector<std::thread> + emplace_back body holding a REQUIRE
+    # while correctly flagging the direct std::thread form, so a clean tree and
+    # an unchecked shape produced identical output. These fixtures pair every
+    # unsafe spelling with its safe twin, so the guard is proven to distinguish
+    # them rather than proven to be quiet.
+    add_test(NAME thread-safe-assertions-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_thread_assert_check.py")
+
     # Unbounded-wait lint: a test wait that cannot time out turns a real
     # regression into a CI job timeout with no output. The selftest is the
     # load-bearing part — it scans the SAME wait unbounded and bounded, so the
@@ -266,20 +283,26 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME canvas-path-flush-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_canvas_path_flush.py")
 
-    # GPU skip-not-pass lint: a GPU case that finds no adapter must report
+    # Skip-not-pass lint: a case that cannot meet its precondition must report
     # Catch2's SKIP(), which ctest surfaces as ***Skipped. SUCCEED(), WARN(),
     # and a bare `return;` all leave the case PASSING, so the suite's pass count
-    # is identical whether the GPU lane ran or the adapter vanished -- the day
-    # the hardware goes away, nothing changes colour. The selftest is the
-    # load-bearing half: it proves the rule tells `if (!gpu) return;` (skip
-    # because the device is missing) from `if (node.gpu_available()) return;`
-    # (skip because it is present), so the gate cannot force a conversion that
-    # would delete a real assertion.
-    add_test(NAME gpu-skip-not-pass-lint COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/tools/scripts/check_gpu_skip_not_pass.py"
+    # is identical whether the lane ran or the precondition vanished -- the day
+    # the hardware, the SDK or the built binary goes away, nothing changes
+    # colour. Scoped to the whole test tree: the defect is not GPU-specific and
+    # recurred in file families no GPU-shaped glob reaches.
+    #
+    # The selftest is the load-bearing half. It proves two discriminations the
+    # gate would otherwise get wrong in opposite directions: `if (!gpu) return;`
+    # (skip because the device is missing) versus `if (node.gpu_available())
+    # return;` (skip because it is present), so the gate cannot force a
+    # conversion that deletes a real assertion; and a message stating an
+    # observed outcome versus one stating that nothing was observed, without
+    # which a whole-tree scan reports every informational assertion in the tree.
+    add_test(NAME skip-not-pass-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/check_skip_not_pass.py"
         --root "${CMAKE_SOURCE_DIR}")
-    add_test(NAME gpu-skip-not-pass-lint-selftest COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_gpu_skip_not_pass.py")
+    add_test(NAME skip-not-pass-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_check_skip_not_pass.py")
 
     # Build-parallelism guard: fail on a bare `--parallel` / `-j` (no job count)
     # in any tracked build command. Bare `--parallel` maps to unbounded `make
@@ -558,6 +581,13 @@ if(Python3_Interpreter_FOUND)
     # updated; registering the file directly covers it either way.
     add_test(NAME gate-common-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_common.py")
+
+    # The bypass trailers that withhold a release tag, classified through the
+    # same parse the pre-merge gates use. A tag that is withheld by a trailer
+    # nobody declared reports nothing at all, so this failure mode has no other
+    # observer; the shell half runs auto-release.yml's own step body.
+    add_test(NAME release-trailer-guard-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_release_trailer_guard.py")
 
     # Runner-topology guard: pure reconciliation logic (label matching, the
     # black-hole / offline / ephemeral-idle distinction, contract drift) plus a
