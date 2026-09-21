@@ -469,15 +469,104 @@ TEST_CASE("an outside press fires the overlay's native dismiss event too",
     REQUIRE(count_overlay_triggers(h.root) == 1);
 }
 
-// ── aria-haspopup marks the trigger too ────────────────────────────────────
+// ── ARIA marks BOTH halves of the pair ─────────────────────────────────────
 //
-// Same mark, reached from the vocabulary a document that cares about
-// assistive technology has already written. It is the exact counterpart of
-// the ARIA the overlay side above already reads: `role="menu"|"listbox"|
-// "dialog"` and `aria-modal` say "I AM a dismissable overlay",
-// `aria-haspopup` says "I OPEN one". Honouring only the first half is what
-// makes a correctly-authored app pay two presses to switch menus — the first
-// spent closing, the second opening.
+// Same marks, reached from the vocabulary a document that cares about
+// assistive technology has already written. `role="menu"|"listbox"|"tree"|
+// "grid"|"dialog"|"alertdialog"` and `aria-modal="true"` say "I AM a
+// dismissable overlay"; `aria-haspopup` says "I OPEN one". Honouring only the
+// trigger half made a correctly-authored app pay two presses to switch menus
+// — the first spent closing, the second opening — and left the panel itself to
+// the CSS-shape inference, which claims click-through by design, so a press
+// outside the menu both closed it and operated whatever sat under the press.
+//
+// A STATEMENT, not an inference, so it claims with the same outside-click
+// consumption `data-overlay="true"` does.
+
+TEST_CASE("an ARIA overlay role claims and consumes its outside press",
+          "[view][web-compat][auto-overlay]") {
+    // Deliberately WITHOUT the CSS shape: no position:absolute, no z-index. A
+    // pass here is about the role, not about the heuristic that already
+    // claimed every high-z absolute box.
+    for (const std::string role :
+         {"menu", "listbox", "tree", "grid", "dialog", "alertdialog"}) {
+        OverlayGuard g;
+        Harness h;
+        h.eval("var d = document.createElement('div');"
+               "document.body.appendChild(d);"
+               "d.setAttribute('role', '" + role + "');");
+        INFO("role=" << role);
+        REQUIRE(h.root.interaction().active_overlay != nullptr);
+        REQUIRE(h.root.interaction().active_overlay
+                    ->overlay_consumes_outside_click());
+    }
+}
+
+TEST_CASE("a non-overlay ARIA role does not claim",
+          "[view][web-compat][auto-overlay]") {
+    // The control for the case above: if every role claimed, that test would
+    // pass without reading the token at all.
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.setAttribute('role', 'button');
+    )");
+    REQUIRE(h.root.interaction().active_overlay == nullptr);
+}
+
+TEST_CASE("aria-modal=\"true\" claims and \"false\" does not",
+          "[view][web-compat][auto-overlay]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var yes = document.createElement('div');
+        document.body.appendChild(yes);
+        yes.setAttribute('aria-modal', 'true');
+    )");
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+
+    OverlayGuard g2;
+    Harness h2;
+    h2.eval(R"(
+        var no = document.createElement('div');
+        document.body.appendChild(no);
+        no.setAttribute('aria-modal', 'false');
+    )");
+    REQUIRE(h2.root.interaction().active_overlay == nullptr);
+}
+
+TEST_CASE("an ARIA overlay role claims when the role is written BEFORE mount",
+          "[view][web-compat][auto-overlay]") {
+    // React's commit order is setAttribute, THEN appendChild, so the attribute
+    // lands while `_nativeCreated` is still false and the immediate
+    // re-evaluation is a no-op. Every materialized menu in a React document is
+    // in exactly that state, so a claim that only works post-mount does not
+    // work at all on the real path.
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        d.setAttribute('role', 'menu');
+        document.body.appendChild(d);
+    )");
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+}
+
+TEST_CASE("removing the ARIA overlay role releases the claim",
+          "[view][web-compat][auto-overlay]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var d = document.createElement('div');
+        document.body.appendChild(d);
+        d.setAttribute('role', 'menu');
+    )");
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+    h.eval("document.body.children[0].removeAttribute('role');");
+    REQUIRE(h.root.interaction().active_overlay == nullptr);
+}
 
 TEST_CASE("aria-haspopup marks the view as an overlay trigger",
           "[view][web-compat][auto-overlay][trigger]") {

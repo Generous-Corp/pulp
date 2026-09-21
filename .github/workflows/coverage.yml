@@ -387,7 +387,7 @@ jobs:
     # self-hosted legs are handled by the explicit queue watchdog below,
     # because job-level timeouts do not start while GitHub is still waiting
     # for a matching runner.
-    timeout-minutes: 210
+    timeout-minutes: 300
     strategy:
       # Don't cancel other OSes when one fails — coverage is advisory
       # and we want every OS to attempt an upload independently so the
@@ -548,7 +548,7 @@ jobs:
           df -h /
           free_kib="$(df -Pk / | awk 'NR==2 {print $4}')"
           if [ "${free_kib}" -lt $((10 * 1024 * 1024)) ]; then
-            echo "::error::Hosted macOS coverage has less than 10 GiB free after safe image cleanup. Refusing a predictably truncated coverage build."
+            echo "::error::Hosted macOS coverage has less than 10 GiB free after safe image cleanup, so this runner arrived short. NOTE: this is an ARRIVAL floor, not a capacity guarantee — a full coverage run needs tens of GiB and has historically exhausted the disk roughly 110 minutes AFTER passing this check. Disk pressure during the run is bounded by run_coverage.sh's incremental profile reclamation, not by this threshold."
             exit 1
           fi
 
@@ -586,7 +586,16 @@ jobs:
           # graph intact; hosted macOS disk is handled by safe image cleanup and
           # lower linker parallelism instead.
           PULP_COVERAGE_CMAKE_ARGS: ${{ matrix.os == 'linux' && '-DPULP_BUILD_PYTHON=ON -DPULP_BUILD_EXAMPLES=ON' || '-DPULP_BUILD_EXAMPLES=ON' }}
-          PULP_COVERAGE_JOBS: ${{ matrix.os == 'macos' && runner.environment == 'github-hosted' && '2' || '' }}
+          # Coverage processes are memory-heavy. Keep the advisory producer
+          # within hosted-runner limits so it reaches report/upload stages.
+          PULP_COVERAGE_JOBS: '2'
+          # Linux hosted runners have less memory than the macOS arm64 image;
+          # two instrumented test workers avoid the runner-loss/OOM class seen
+          # after the full suite while keeping macOS throughput unchanged.
+          PULP_COVERAGE_TEST_JOBS: ${{ matrix.os == 'linux' && '2' || '4' }}
+          # HTML drilldowns are useful locally but can consume several GB on
+          # hosted runners; Codecov only needs the Cobertura/LCOV producers.
+          PULP_COVERAGE_SKIP_HTML: '1'
           # scripts/run_coverage.sh owns the bounded CTest policy so SSH and
           # self-hosted coverage callers use the same exclusions as this lane.
           # Coverage workflow targets C++ source coverage. The Rust CLI
@@ -596,7 +605,7 @@ jobs:
           # failure (#785) without losing C++ coverage data.
           PULP_SKIP_RUST_CLI: '1'
         # Bound the native suite with an INTERNAL budget that reserves 30
-        # minutes inside the job's `timeout-minutes: 210` for post-suite
+        # minutes inside the job's `timeout-minutes: 300` for post-suite
         # report verification, Python/Swift coverage, artifacts, and uploads.
         # The os-windows instrumented build + ~9k tests
         # + llvm-cov over 1000+ objects legitimately can't finish in the cap on
@@ -610,7 +619,7 @@ jobs:
         # finishes in ~1h; macOS now needs roughly 90 minutes as the suite has
         # grown to nearly 20k tests, so the budget preserves measured headroom.
         run: |
-          budget=$(( 180 * 60 ))  # leaves 30 min for post-suite work
+          budget=$(( 240 * 60 ))  # leaves 60 min for post-suite work
           budget_hit="${RUNNER_TEMP:-/tmp}/coverage-budget-hit"
           rm -f "${budget_hit}" 2>/dev/null || true
           coverage_args=()
@@ -730,10 +739,42 @@ jobs:
         if: matrix.os == 'macos' && needs.changed-files.outputs.ios == 'true'
         continue-on-error: true
         shell: bash
-        run: python3 tools/scripts/run_swift_coverage.py
+        run: |
+          # Swift coverage is advisory and must never strand the native
+          # Cobertura producer behind an unbounded iOS toolchain/test run.
+          # Keep enough time for a normal run, but let the later native
+          # verification and Codecov upload steps execute when Swift stalls.
+          python3 - <<'PY'
+          import os
+          import signal
+          import subprocess
+          import sys
+
+          timeout_seconds = 10 * 60
+          process = subprocess.Popen(
+              [sys.executable, "tools/scripts/run_swift_coverage.py"],
+              start_new_session=True,
+              stdout=subprocess.DEVNULL,
+              stderr=subprocess.DEVNULL,
+          )
+          try:
+              raise SystemExit(process.wait(timeout=timeout_seconds))
+          except subprocess.TimeoutExpired:
+              os.killpg(process.pid, signal.SIGTERM)
+              try:
+                  process.wait(timeout=15)
+              except subprocess.TimeoutExpired:
+                  os.killpg(process.pid, signal.SIGKILL)
+                  process.wait()
+              print(
+                  f"::warning::Swift Apple coverage exceeded {timeout_seconds}s; "
+                  "continuing so native coverage can upload."
+              )
+              raise SystemExit(124)
+          PY
 
       - name: Upload HTML report
-        if: always()
+        if: always() && env.PULP_COVERAGE_SKIP_HTML != '1'
         uses: actions/upload-artifact@v6
         with:
           name: coverage-report-${{ matrix.os }}-${{ github.sha }}
@@ -931,6 +972,7 @@ jobs:
           files: build-coverage/coverage.cobertura.xml
           flags: ${{ matrix.flag }}
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: ${{ matrix.os != 'windows' }}
           receipt-name: codecov-upload-${{ matrix.os }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
       - name: Upload Apple Swift coverage to Codecov
@@ -943,6 +985,7 @@ jobs:
           files: build-coverage/apple/coverage.apple.lcov
           flags: apple-swift
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: true
           receipt-name: codecov-upload-apple-swift-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
       - name: Upload Python tools coverage to Codecov
@@ -956,6 +999,7 @@ jobs:
           files: build-coverage/python/coverage.python.xml
           flags: python-tools
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: true
           receipt-name: codecov-upload-python-tools-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   # ── Queued-leg watchdog ────────────────────────────────────────────────
@@ -1161,6 +1205,51 @@ jobs:
 
           echo "Watchdog window elapsed (${MAX_POLLS} polls) with no native coverage leg past the ${QUEUED_GRACE_MINUTES}-min grace — nothing reaped."
 
+  coverage_publish_barrier:
+    # Do not let a fast ancillary producer (Android or React) become the
+    # first report Codecov sees for a main SHA.  Codecov aggregates uploads
+    # incrementally, so those producers can otherwise publish a tiny
+    # 4k-line report while the native legs are still running (or after they
+    # wedge).  Downloading the two canonical native artifacts is cheap and
+    # makes the publish order explicit: if either native surface is absent,
+    # the ancillary uploads stay skipped and Codecov keeps the prior broad
+    # report/carryforward instead of replacing it with partial data.
+    name: Coverage publish barrier (native reports complete)
+    needs: [classify, coverage]
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true' && needs.coverage.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download Linux native coverage artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: coverage-cobertura-${{ github.sha }}
+          path: native-coverage/linux
+
+      - name: Download macOS native coverage artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: coverage-cobertura-macos-${{ github.sha }}
+          path: native-coverage/macos
+
+      - name: Require Linux and macOS native reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for report in \
+            native-coverage/linux/coverage.cobertura.xml \
+            native-coverage/macos/coverage.cobertura.xml; do
+            if [ ! -s "${report}" ]; then
+              echo "::error::Missing native coverage artifact: ${report}"
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Native coverage publish barrier satisfied (Linux + macOS reports)."
+
   android-kotlin-coverage:
     # Keep Android JVM coverage on the always-on Coverage workflow so
     # Codecov's main-branch head never drops back to `android: null`
@@ -1168,12 +1257,12 @@ jobs:
     # This lane measures Kotlin unit-testable source only; APK build and
     # emulator/device smoke remain in android.yml.
     name: Coverage report (Android, Kotlin)
-    needs: [resolve-runners, classify]
+    needs: [resolve-runners, classify, coverage_publish_barrier]
     # PR coverage is macOS-only; Linux / Windows / Android coverage is
     # supplied by the nightly cross-platform lane. Keep this Kotlin upload
     # for canonical main/manual runs only so PRs do not allocate an Android
     # coverage runner after the native matrix has already been narrowed.
-    if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native_build_required == 'true' && needs.coverage_publish_barrier.result == 'success'
     runs-on: ${{ fromJSON(needs.resolve-runners.outputs.android_kotlin_runs_on) }}
     timeout-minutes: 30
     steps:
@@ -1276,6 +1365,7 @@ jobs:
           files: android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml
           flags: android-kotlin
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: true
           receipt-name: codecov-upload-android-kotlin-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   pulp-react-coverage:
@@ -1284,7 +1374,8 @@ jobs:
     # validates PRs, but it must not be the only main upload for a SHA whose
     # native Coverage run was superseded before any OS legs uploaded.
     name: Coverage report (@pulp/react, Vitest)
-    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && (github.event_name != 'pull_request')
+    needs: [classify, coverage_publish_barrier]
+    if: (github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO) && (github.event_name != 'pull_request') && needs.classify.outputs.native_build_required == 'true' && needs.coverage_publish_barrier.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1345,6 +1436,7 @@ jobs:
           files: packages/pulp-react/coverage/cobertura-coverage.xml
           flags: pulp-react
           token: ${{ secrets.CODECOV_TOKEN }}
+          required: true
           receipt-name: codecov-upload-pulp-react-${{ github.sha }}-attempt-${{ github.run_attempt }}
 
   coverage-diff-gate:

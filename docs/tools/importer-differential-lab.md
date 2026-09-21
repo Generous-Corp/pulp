@@ -74,6 +74,7 @@ comparison/
 Every report has `schema: "pulp-importer-differential-report-v1"` and records
 source hash, browser provenance, source recognition, dynamic blockers, timings,
 layer scores, likely root causes with confidence, an `observability` receipt,
+and an opt-in `timing_budget` verdict,
 and an advisory promotion classification. The receipt paths are relative to
 each fixture output, so they can be copied under `/tmp/pulp-p0a-8458/receipts/`
 without exposing machine-local paths.
@@ -98,6 +99,23 @@ python3 tools/import-validation/importer_differential_lab.py benchmark \
   --runs 5 \
   --output /tmp/importer-differential/benchmark
 ```
+
+Timing numbers become load-bearing only when a caller supplies a frozen budget
+file. The keys are measured importer-lab timings in milliseconds; omitted keys
+are not gated:
+
+```json
+{
+  "native_total_ms": 100,
+  "native_render_ms": 80
+}
+```
+
+Pass it to `compare`, `analyze-corpus`, or `benchmark` with
+`--timing-budget budget.json`. The command exits nonzero when any measured
+value exceeds its caller-supplied budget and records the failing runs in the
+receipt. No default is inferred from a host or from cache state, and this gate
+does not promote a headless readback to TTFP, TTNI, or IFNF evidence.
 
 Corpus output aggregates promotion shares, average latency and fidelity,
 zero-false-promotion tracking, and recurring gaps ranked by affected fixtures,

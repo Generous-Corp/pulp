@@ -23,6 +23,7 @@ import {
     applyAllProps,
     applyChangedProps,
     clearMaterializedEventCallbacks,
+    isEventHandler,
     normalizeHostProps,
 } from './prop-applier.js';
 
@@ -80,7 +81,21 @@ const domRegistry = (): DomRegistry => {
 //
 // React already knows the answer. A commit that mutated no host node left the
 // native tree, and therefore the captured geometry, exactly as it was.
-let materializedTreeDirty = true;
+//
+// The same argument runs one level deeper. A commit that mutated ONE node left
+// every other captured node's geometry exactly as it was, so re-applying the
+// whole captured document is O(document) work for an O(subtree) change. React
+// knows which host nodes it touched, so each mark records the id of the
+// subtree root whose descendants-or-self may have moved, and the re-apply is
+// restricted to that scope.
+//
+// `materializedTreeDirtyAll` is the escape hatch: a mutation whose blast
+// radius is not a single subtree (a container-level append, reorder or clear,
+// whose sibling indices feed every captured path) falls back to the full pass.
+// The two are deliberately separate rather than a set containing a sentinel --
+// an unscoped mark must never be silently narrowed by a later scoped one.
+let materializedTreeDirtyAll = true;
+const materializedDirtyIds = new Set<string>();
 let materializedRootSignature = '';
 // The importer installs its hook during module init, before React mounts, so in
 // practice it is always present by the first commit. Tracking its identity
@@ -88,6 +103,10 @@ let materializedRootSignature = '';
 // swapped -- would otherwise wait for the next host mutation to be applied at
 // all, and before this gate existed it simply ran on the following commit.
 let materializedHookApplied: unknown;
+// The captured-state refresh hook is tracked the same way and for the same
+// reason: it is now gated, so a hook installed after the first commits would
+// otherwise never run until something happened to mutate the tree.
+let materializedStateHookApplied: unknown;
 // Monotonic mutation counter published to the importer runtime. It starts at 0
 // and is published on the first mark, so a runtime that reads it before any
 // commit sees `undefined` and declines to cache rather than trusting an epoch
@@ -102,8 +121,21 @@ let materializedTreeEpoch = 0;
 // editor, and skipping the re-apply there leaves the replacement without its
 // captured geometry. A missed mark is invisible: the API, the return values
 // and the rendered tree all still look correct.
-function markMaterializedTreeDirty(): void {
-    materializedTreeDirty = true;
+//
+// `scopeId` names the subtree root whose descendants-or-self may have moved.
+// Omitting it means "blast radius unknown" and forces the full re-apply; a
+// WRONG id is the dangerous direction, because a captured node outside the
+// scope keeps stale geometry and simply renders wrong. When a method mutates
+// a relationship rather than a node -- an append, a reorder, a removal -- the
+// PARENT is the correct scope: its sibling indices are what captured paths
+// resolve through, so every sibling must be re-applied, not just the one that
+// moved.
+function markMaterializedTreeDirty(scopeId?: string | null): void {
+    if (typeof scopeId === 'string' && scopeId.length > 0) {
+        materializedDirtyIds.add(scopeId);
+    } else {
+        materializedTreeDirtyAll = true;
+    }
     // Publish the mutation as a monotonic epoch as well as a boolean.
     //
     // The boolean answers "should this commit re-apply metadata" and is
@@ -580,6 +612,10 @@ function isFixedTextOnlyUpdate(type: Type, oldProps: Props, newProps: Props): bo
     nonTextKeys.delete('children');
     nonTextKeys.delete('text');
     for (const key of nonTextKeys) {
+        // A re-created inline handler is not a geometry change -- see
+        // isPaintOnlyUpdate. Without this, a label whose parent passes an
+        // arrow-function handler never qualifies as text-only.
+        if (isEventHandler(key)) continue;
         if (oldProps[key] !== newProps[key]) return false;
     }
     return true;
@@ -625,13 +661,20 @@ const PAINT_ONLY_KEYS: ReadonlySet<string> = new Set([
 ///
 /// Whitelist, not blacklist: an unrecognised key means "assume geometric" and
 /// the caller falls through to the full re-apply. A key is only skipped when
-/// it appears in PAINT_ONLY_KEYS.
+/// it appears in PAINT_ONLY_KEYS or is an `onX` event handler.
+///
+/// Handlers are exempt because their payload is a function identity. React
+/// recreates every inline closure on each render, so a component that renders
+/// `onPointerMove={(e) => ...}` emits a "changed" handler on every pointer
+/// sample -- and that alone was enough to disqualify the commit and re-apply
+/// the whole captured document. The handler is still re-registered through the
+/// bridge; only the dirty mark is suppressed.
 function isPaintOnlyUpdate(oldProps: Props, newProps: Props): boolean {
     let changed = 0;
     const keys = new Set([...Object.keys(oldProps), ...Object.keys(newProps)]);
     for (const key of keys) {
         if (Object.is(oldProps[key], newProps[key])) continue;
-        if (!PAINT_ONLY_KEYS.has(key)) return false;
+        if (!PAINT_ONLY_KEYS.has(key) && !isEventHandler(key)) return false;
         changed += 1;
     }
     // A commit that changed nothing is not evidence that a repaint is safe;
@@ -797,7 +840,8 @@ export const PulpHostConfig: HostConfig<
 
     // ── First-mount attachment ──────────────────────────────────────
     appendInitialChild(parentInstance, child) {
-        markMaterializedTreeDirty();
+        markMaterializedTreeDirty(parentInstance.id);
+        markMaterializedTreeDirty(child.id);
         attach(parentInstance, child);
     },
 
@@ -809,16 +853,25 @@ export const PulpHostConfig: HostConfig<
 
     // ── Mutation: append / insert / remove ──────────────────────────
     appendChild(parentInstance, child) {
-        markMaterializedTreeDirty();
+        markMaterializedTreeDirty(parentInstance.id);
+        markMaterializedTreeDirty(child.id);
         attach(parentInstance, child);
     },
     appendChildToContainer(container, child) {
+        // Root-level children have no captured parent node to scope through:
+        // their paths resolve against the registry's parentless roots, so an
+        // append can renumber any of them. Full re-apply.
         markMaterializedTreeDirty();
         attachToRoot(container, child);
     },
 
     insertBefore(parentInstance, child, beforeChild) {
-        markMaterializedTreeDirty();
+        // A reorder renumbers the parent's whole child list, so the scope is
+        // the parent -- not the moved child. `child` is marked too because a
+        // cross-parent insert moves it out of a subtree the parent no longer
+        // contains.
+        markMaterializedTreeDirty(parentInstance.id);
+        markMaterializedTreeDirty(child.id);
         const beforeIdx = parentInstance.childIds.indexOf(beforeChild.id);
         const sameParent = child.parentId === parentInstance.id && child.onBridge;
         if (sameParent) {
@@ -849,7 +902,8 @@ export const PulpHostConfig: HostConfig<
     },
 
     removeChild(parentInstance, child) {
-        markMaterializedTreeDirty();
+        // The child is leaving; its former siblings are what renumber.
+        markMaterializedTreeDirty(parentInstance.id);
         detach(parentInstance, child);
     },
     removeChildFromContainer(_container, child) {
@@ -880,7 +934,9 @@ export const PulpHostConfig: HostConfig<
         const oldN = normalizeHostProps(type, oldProps as Record<string, unknown>);
         const newN = normalizeHostProps(type, newProps as Record<string, unknown>);
         if (!isFixedTextOnlyUpdate(type, oldN, newN)
-            && !isPaintOnlyUpdate(oldN, newN)) markMaterializedTreeDirty();
+            && !isPaintOnlyUpdate(oldN, newN)) {
+            markMaterializedTreeDirty(instance.id);
+        }
         applyChangedProps(instance, oldN, newN);
         instance.props = { ...newN };
         if (instance._dom && typeof instance._dom === 'object') {
@@ -926,7 +982,7 @@ export const PulpHostConfig: HostConfig<
     // <span><em>hi</em></span>. Clear stale text before the new child
     // element mounts.
     resetTextContent(instance) {
-        markMaterializedTreeDirty();
+        markMaterializedTreeDirty(instance.id);
         if (typeof g.setText === 'function') {
             call('setText', instance.textTargetId ?? instance.id, '');
         }
@@ -960,21 +1016,49 @@ export const PulpHostConfig: HostConfig<
             if (size) rootSignature = `${size.width}x${size.height}`;
         }
         const metadataHook = g.__pulpApplyMaterializedImportMetadata__;
-        const shouldReapply = materializedTreeDirty
+        const stateHook = g.__pulpRefreshMaterializedState__;
+        // A reason OTHER than the per-node marks -- a root resize, or a hook
+        // that arrived or was swapped -- invalidates evidence the marks say
+        // nothing about, so those force the full pass.
+        const unscopedReason = materializedTreeDirtyAll
             || rootSignature !== materializedRootSignature
-            || metadataHook !== materializedHookApplied;
+            || metadataHook !== materializedHookApplied
+            // Only an ARRIVING hook is a reason. Comparing raw identity would
+            // also fire when a hook is torn down, spending a full re-apply to
+            // notice that nothing is listening any more.
+            || (typeof stateHook === 'function'
+                && stateHook !== materializedStateHookApplied);
+        const shouldReapply = unscopedReason || materializedDirtyIds.size > 0;
+        // `null` means "no scope, re-apply everything". An importer runtime
+        // that predates the scope argument ignores it and does exactly that,
+        // which is the safe direction: slow, never wrong.
+        const scope = unscopedReason ? null : Array.from(materializedDirtyIds);
         materializedRootSignature = rootSignature;
-        materializedTreeDirty = false;
+        materializedTreeDirtyAll = false;
+        materializedDirtyIds.clear();
         if (shouldReapply) {
             materializedHookApplied = metadataHook;
-            if (typeof metadataHook === 'function') metadataHook();
+            if (typeof metadataHook === 'function') metadataHook(scope);
         }
         // Semantic captured-state matching is commit-driven: menus, dialogs,
         // and selected controls only change after a React commit. Let the
         // importer refresh here instead of walking every selector on every
         // animation frame while the editor is idle.
-        const stateHook = g.__pulpRefreshMaterializedState__;
-        if (typeof stateHook === 'function') stateHook();
+        //
+        // It is gated on the same evidence as the metadata pass, for the same
+        // reason: the matcher resolves selectors over the registry, and a
+        // commit that mutated no host node cannot have changed which selector
+        // answers. `__pulpMaterializedStateResolver__` is the one input that
+        // is NOT a function of the registry -- an embedder may drive the state
+        // from its own signal -- so a runtime that installs one keeps the
+        // unconditional refresh it had before.
+        const stateResolverInstalled =
+            typeof g.__pulpMaterializedStateResolver__ === 'function';
+        if (typeof stateHook === 'function'
+            && (shouldReapply || stateResolverInstalled)) {
+            materializedStateHookApplied = stateHook;
+            stateHook();
+        }
         // Own commit-time layout/repaint flush. A state-only React commit has
         // not changed native geometry, so forcing `layout()` here would walk
         // the entire tree despite the generation still being current. A real
