@@ -872,6 +872,8 @@ TEST_CASE("staged async ledger emits one authenticated terminal record per reque
     const auto records = ledger.take_completed();
     REQUIRE(records.size() == 1);
     const auto& record = records.front();
+    CHECK(record.generation == 1);
+    CHECK(record.valid());
     CHECK(record.sequence == sequence);
     CHECK(record.gpu_work_admitted);
     CHECK(record.gpu_terminal == SharedIoGpuTerminalDisposition::CompletedAccepted);
@@ -912,6 +914,18 @@ TEST_CASE("staged async trial state atomically owns request slot and sequence",
     REQUIRE(records.size() == 1);
     CHECK(records.front().sequence == 4);
     CHECK(records.front().gpu_terminal == SharedIoGpuTerminalDisposition::LateRejected);
+}
+
+TEST_CASE("staged async trial state preserves the configured preparation generation",
+          "[gpu_audio][trace][staged_async][generation]") {
+    StagedAsyncTrialState state(1, 9);
+    REQUIRE(state.admit(51, 3, 0, 5000, 1000));
+    REQUIRE(state.submitted(51, 1100));
+    REQUIRE(state.complete(51, StagedAsyncTraceLedger::CompletionStatus::Success, 1200));
+    const auto records = state.take_completed();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().generation == 9);
+    CHECK(records.front().valid());
 }
 
 TEST_CASE("staged async ownership abandon releases slot with one cancellation terminal",
