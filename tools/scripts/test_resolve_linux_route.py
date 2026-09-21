@@ -315,7 +315,14 @@ def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:
     assert (
         'cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4' in text
     )
-    assert 'cmake --build "$PULP_BUILD_DIR" --config Release\n' not in text
+    # The fleet-wide path is wrapped by governed-build.sh; reject only an
+    # unbounded direct invocation while allowing the Windows branch's explicit
+    # --parallel 4 command.
+    assert not re.search(
+        r'(?m)^\s*(?!tools/ci/governed-build\.sh )'
+        r'cmake --build "\$PULP_BUILD_DIR" --config Release\n',
+        text,
+    )
 
 
 def test_every_runs_on_json_selector_is_parsed_not_interpolated() -> None:
