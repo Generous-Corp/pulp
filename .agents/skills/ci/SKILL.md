@@ -8816,6 +8816,50 @@ pushes: it refuses a **detached-HEAD** push and an **empty-diff-vs-base** push (
 catches a rebase that flattened a branch to zero files). Root cause + the four-fix plan:
 `planning/friction/2026-07-15-git-state-in-shared-worktree-hell.md`.
 
+## Hosted macOS coverage dies of DISK, and the pre-flight check cannot see it
+
+A hosted `macos-15` coverage job that fails with **zero failed steps** — `Run coverage suite`
+reports success (it carries `continue-on-error`), then every later step is `null` — has **two
+different causes, and the step shape cannot tell them apart.** Read the check-run annotation
+(`ghapp api repos/<owner>/<repo>/check-runs/<job_id>/annotations`), never the step list, and
+never a log grep — the logs truncate around 17.6k lines and return false zeros:
+
+| annotation | cause | job duration |
+|---|---|---|
+| `Process completed with exit code 1` | **disk**: `No space left on device` mid-suite | 123-147 min |
+| `The hosted runner lost communication with the server` | **time**: the 180-minute suite budget (`coverage.yml`), i.e. the suite is simply too slow | 150-182 min, clustered at ~181 |
+
+The two duration ranges do not overlap, so elapsed time alone is a reliable second opinion.
+Sampling 35 recent macOS coverage failures found 21 of the time kind against 7 of the disk kind,
+so **do not assume disk** — over a longer 46-day window the disk kind dominated, and the mix
+moves as the suite grows.
+
+For the disk kind: the runner exhausts its filesystem mid-suite and dies before the lane's own
+`Verify Cobertura XML exists` detector can fire, so nothing in the step list names the cause.
+
+**Do not "fix" this by raising the 10 GiB threshold** in the "Reclaim hosted macOS coverage
+disk" step. That check runs ONCE, before the Skia fetch and before the build, and it answers
+only *did the Xcode cleanup free anything / did this runner arrive short?* Measured across ten
+failing and ten succeeding jobs, free space at that checkpoint was **75-76 GiB in all twenty** —
+failing and succeeding runners are indistinguishable there. No threshold between 10 and 76
+changes an outcome, and anything above 76 refuses every run. The disk is consumed by the run
+itself, a median ~109 minutes later.
+
+Disk pressure is bounded in `scripts/run_coverage.sh` instead: `%p-%m` per-process profiles are
+absorbed into a running profdata **while the suite runs** and deleted as absorbed. If you touch
+that loop, the safety rule is that a shard may be reclaimed **iff `kill -0` on the PID in its
+filename fails**. Never gate on mtime — a slow test's shard looks stale while its process is
+still writing, and reclaiming it drops that test's coverage with no error, which is the same
+silent under-reporting that moving off the shared `%Nm` pool already fixed once.
+
+**Counting these failures: log grep UNDERCOUNTS.** Large job logs truncate (~17.6k lines), so a
+confirmed ENOSPC job can return zero hits, and a further population fails with the annotation
+"The hosted runner lost communication with the server" and no usable log. Count with check-run
+annotations plus step shape (step 12 success, later steps `null`, zero failed steps), not `grep`.
+Also note the guard's own message text appears in EVERY hosted coverage log, because the workflow
+echoes the shell source — grepping the message string reports a guard firing on every run. Match
+the emitted annotation at line start (`##[error]Hosted macOS coverage has less than 10 GiB`).
+
 ## Coverage-on-main can go red from a time-budget kill (not a code failure) (2026-07-15)
 
 The `Coverage` workflow (`coverage.yml`) is **advisory** — never a merge gate (the
