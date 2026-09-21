@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 66 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 67 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -48,6 +48,7 @@ for its complete, authoritative guidance.
 | `ios` | iOS platform development for Pulp — iPhone/iPad AUv3 app extensions, iOS Simulator builds, UIKit window host, CoreAudio IO audio, touch & Apple Pencil input, XcodeBuildMCP automation. |
 | `jsfx-subset` | Work in Pulp's bounded JSFX lane using source-only examples, subset validation, and explicit exclusions like no `@gfx`. |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp package manifests. |
+| `lv2` | LV2 format adapter for Pulp — the generated Turtle manifest nothing ships, port indices as a saved-session wire format, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep. |
 | `moonbase` | Optional Moonbase license-activation integration for Pulp — load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, audio-thread gating + click-free fade, async start/pump, the interactive native (no-WebView) activation editor (frame-tick polling + the don't-rebuild-mid-event trap), loadable plugin/standalone formats, and headless screenshots. |
 | `motion` | Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. |
 | `mpe` | Build an MPE-aware Pulp synth — opt into MPE via PluginDescriptor, consume per-note pitch bend / pressure / timbre from MpeBuffer, and route voices through MpeVoiceAllocator without reinventing channel tracking. |
@@ -70,7 +71,7 @@ for its complete, authoritative guidance.
 | `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
 | `text-metrics` | Baseline, half-leading, and font-face resolution for Label and captured (browser-imported) text — the arithmetic that decides where a glyph lands and how wide the box must be, plus the measure-vs-paint divergences that make text clip or sit low without any test going red. |
 | `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
-| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, order-preserving groove kernels, coordinate randomness, streaming cursors, and quantization arithmetic. |
+| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, inline and order-preserving groove projection, coordinate randomness, streaming cursors, and quantization arithmetic. |
 | `timeline` | Build, edit, validate, explain, render, import, or integrate Pulp timeline projects through the CLI, MCP tools, or C++ SDK. |
 | `trace-analysis` | The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). |
 | `trace-sql` | SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. |

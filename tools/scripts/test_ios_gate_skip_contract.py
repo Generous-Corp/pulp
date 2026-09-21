@@ -89,7 +89,18 @@ def workflow_build_step() -> str:
         raise AssertionError("expected exactly one iOS compile-gate call")
     body = body.replace(gate_call, "bash @GATE@")
     body, build_count = re.subn(
-        r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR".*$',
+        r'(?m)^\s*tools/ci/governed-build\.sh cmake --build "\$PULP_BUILD_DIR".*$',
+        'echo "BUILD_RAN"',
+        body,
+    )
+    body, governed_build_count = re.subn(
+        r'(?m)^\s*tools/ci/governed-build\.sh cmake --build '
+        r'"\$PULP_BUILD_DIR" --config Release$',
+        'echo "BUILD_RAN"',
+        body,
+    )
+    body, windows_build_count = re.subn(
+        r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR" --config Release --parallel 4$',
         'echo "BUILD_RAN"',
         body,
     )
@@ -98,7 +109,7 @@ def workflow_build_step() -> str:
         ':',
         body,
     )
-    if (build_count, cleanup_count) != (1, 1):
+    if (build_count, governed_build_count, windows_build_count, cleanup_count) != (1, 0, 1, 1):
         raise AssertionError("Build step shape changed; update the focused stubs")
     return body
 

@@ -187,6 +187,13 @@ function actionError(index, action, detail) {
   return error;
 }
 
+function expectedStateSatisfied(expect, result) {
+  if (expect.state === "attached") return result?.ok === true;
+  if (expect.state === "detached") return result?.state === "detached";
+  if (expect.state === "visible") return result?.state === "visible";
+  return result?.state === "hidden" || result?.state === "detached";
+}
+
 async function probeUntil(cdp, action, index, operation, predicate, wait) {
   const deadline = Date.now() + action.timeout_ms;
   let last;
@@ -216,6 +223,13 @@ function publicActionEvidence(action) {
   }
   if (action.text !== undefined) {
     evidence.text_length = action.text.length;
+  }
+  if (action.expect !== undefined) {
+    evidence.expected_state = {
+      selector: action.expect.selector,
+      state: action.expect.state,
+      timeout_ms: action.expect.timeout_ms,
+    };
   }
   evidence.status = "completed";
   return evidence;
@@ -325,6 +339,14 @@ export async function executeInteractionPlan(cdp, plan, options = {}) {
 
   for (let index = 0; index < plan.actions.length; index += 1) {
     const action = plan.actions[index];
+    let beforeState;
+    if (action.expect) {
+      beforeState = await evaluate(
+        cdp, selectorProbeExpression(action.expect.selector, "observe"));
+      if (beforeState?.permanent || !beforeState?.state) {
+        throw actionError(index, action, beforeState?.error ?? "missing initial state");
+      }
+    }
     if (action.action === "wait-ms") {
       await wait(action.milliseconds);
     } else if (action.action === "wait-for") {
@@ -365,8 +387,26 @@ export async function executeInteractionPlan(cdp, plan, options = {}) {
       await cdp.call("Input.insertText", { text: action.text });
       await settle();
     }
+    let expectedState;
+    if (action.expect) {
+      expectedState = await probeUntil(
+        cdp,
+        { action: action.action, selector: action.expect.selector, timeout_ms: action.expect.timeout_ms },
+        index,
+        "observe",
+        (result) => expectedStateSatisfied(action.expect, result),
+        wait);
+    }
+    if (action.expect && expectedStateSatisfied(action.expect, beforeState)
+        && expectedStateSatisfied(action.expect, expectedState)) {
+      throw actionError(index, action, "expected state did not change from before the action");
+    }
     await navigationGuard?.assertUnchanged();
-    completed.push(publicActionEvidence(action));
+    const evidence = publicActionEvidence(action);
+    if (beforeState) evidence.before_state = beforeState.state;
+    if (expectedState) evidence.observed_state = action.expect.state === "attached"
+      ? "attached" : (expectedState.state ?? "unknown");
+    completed.push(evidence);
   }
 
   return {

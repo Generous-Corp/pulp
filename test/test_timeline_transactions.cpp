@@ -139,18 +139,29 @@ TEST_CASE("Writer token ID allocation is race-free and unique") {
     auto writer = std::move(session->register_writer()).value();
     std::mutex mutex;
     std::unordered_set<std::uint64_t> ids;
-    auto allocate = [&] {
+    // Catch2 assertion macros are not thread-safe, and REQUIRE throws on
+    // failure — an exception escaping a std::thread body is std::terminate,
+    // which would abort the process with no diagnosis. Each worker tallies
+    // into its own counter; the test thread asserts after join(). The mutex
+    // guards the shared `ids` container, not the assertions.
+    auto allocate = [&](int& invalid) {
         for (int i = 0; i < 2000; ++i) {
             const auto id = writer.allocate_command_id();
+            if (!id.valid()) {
+                ++invalid;
+            }
             std::lock_guard lock(mutex);
-            REQUIRE(id.valid());
             ids.insert(id.sequence);
         }
     };
-    std::thread a(allocate);
-    std::thread b(allocate);
+    int invalid_a = 0;
+    int invalid_b = 0;
+    std::thread a(allocate, std::ref(invalid_a));
+    std::thread b(allocate, std::ref(invalid_b));
     a.join();
     b.join();
+    REQUIRE(invalid_a == 0);
+    REQUIRE(invalid_b == 0);
     REQUIRE(ids.size() == 4000);
 }
 

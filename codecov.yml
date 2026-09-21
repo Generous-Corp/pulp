@@ -185,23 +185,25 @@ comment:
 # filter, so the exact seven producer flags are pinned by
 # `ci/coverage-surfaces.yaml` and its semantic contract test.
 #
-# Every producer flag is non-carryforward. A failed or missing current upload
-# must remain visible rather than borrowing a green report from an older SHA.
+# Producer flags carry forward the last successful report when a scheduled or
+# advisory run misses. Stale coverage is preferable to an empty dashboard;
+# the in-repo receipt watchdog still records the missing current upload so the
+# failure cannot be mistaken for fresh data.
 flags:
   os-linux:
-    carryforward: false
+    carryforward: true
   os-macos:
-    carryforward: false
+    carryforward: true
   os-windows:
-    carryforward: false
+    carryforward: true
   python-tools:
-    carryforward: false
+    carryforward: true
   android-kotlin:
-    carryforward: false
+    carryforward: true
   apple-swift:
-    carryforward: false
+    carryforward: true
   pulp-react:
-    carryforward: false
+    carryforward: true
 
 # Components are Codecov's canonical mechanism for path-based coverage
 # slicing driven by a single upload. Flags (above) are ultimately keyed
