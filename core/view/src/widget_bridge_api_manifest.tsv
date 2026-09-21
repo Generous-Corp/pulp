@@ -327,6 +327,7 @@ setBoxShadow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 addBoxShadow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 clearBoxShadow	css_style	function	core/view/src/widget_bridge/style_visual_api.cpp
 beginPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
+canvasDrawSdf	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 drawPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 compileShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
 setWidgetShader	shader	function	core/view/src/widget_bridge/shader_api.cpp

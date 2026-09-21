@@ -491,6 +491,29 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
     REQUIRE_FALSE(paint->visible());
 }
 
+TEST_CASE("canvasDrawSdf records a validated retained command",
+          "[view][bridge][canvas][sdf]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createCanvas('canvas', 'root');
+        globalThis.draw = canvasDrawSdf('canvas',
+          { shape: 'circle', x: 2, y: 3, w: 40, h: 40 },
+          'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }',
+          { gain: 0.75 });
+        globalThis.bad = canvasDrawSdf('canvas', 'not-an-object');
+    )");
+    REQUIRE(engine.evaluate("draw.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("bad.success").getWithDefault<bool>(true));
+    auto* canvas = dynamic_cast<CanvasWidget*>(bridge.widget("canvas"));
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+    REQUIRE(canvas->commands()[0].type == CanvasDrawCmd::Type::draw_sdf);
+    REQUIRE(canvas->commands()[0].shader_uniforms.size() == 1);
+}
+
 TEST_CASE("WidgetBridge rejects self-owned retained canvas bindings", "[view][bridge][canvas-binding]") {
     ScriptEngine engine;
     View root;

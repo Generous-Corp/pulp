@@ -373,6 +373,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "bindWidgetShaderScope": "(id: string, source: string) => PulpBridgeJsonObject",
     "clearWidgetShaderScope": "(id: string) => PulpBridgeJsonObject",
     "clearWidgetShader": "(id: string) => PulpBridgeJsonObject",
+    "canvasDrawSdf": "(canvasId: string, geometry: PulpBridgeJsonObject, sksl?: string, uniforms?: PulpBridgeJsonObject) => PulpBridgeJsonObject",
     "setScale": "(id: string, scale: number) => void",
     "setSkew": "(id: string, xDegrees: number, yDegrees: number) => void",
     "setSpectrumData": "(id: string, samples: PulpBridgeArrayLikeNumber) => void",

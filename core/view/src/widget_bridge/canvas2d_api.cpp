@@ -23,6 +23,13 @@ namespace pulp::view {
 
 namespace {
 
+choc::value::Value canvas_sdf_result(bool success, std::string error = {}) {
+    auto result = choc::value::createObject("");
+    result.addMember("success", choc::value::createBool(success));
+    result.addMember("error", choc::value::createString(std::move(error)));
+    return result;
+}
+
 std::string bridge_base64_encode(const std::vector<uint8_t>& data) {
     static const char* table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
@@ -61,6 +68,36 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, ""))))
             c->clear_commands();
         return choc::value::Value();
+    });
+
+    register_bridge_function(api, "canvasDrawSdf", [&self](choc::javascript::ArgumentList args) {
+        auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")));
+        if (!c) return canvas_sdf_result(false, "No CanvasWidget with that id");
+        if (args.numArgs < 2 || args[1] == nullptr || !args[1]->isObject())
+            return canvas_sdf_result(false, "SDF geometry must be an object");
+        CanvasDrawCmd cmd;
+        cmd.type = CanvasDrawCmd::Type::draw_sdf;
+        cmd.text = choc::json::toString(*args[1], false);
+        cmd.shader_sksl = args.get<std::string>(2, "");
+        if (args.numArgs >= 4 && args[3] != nullptr && args[3]->isObject()) {
+            args[3]->getView().visitObjectMembers([&](std::string_view name,
+                                                       const choc::value::ValueView& value) {
+                canvas::Canvas::NamedUniform uniform;
+                uniform.name = std::string(name);
+                if (value.isArray()) {
+                    uniform.count = static_cast<int>(value.size());
+                    if (uniform.count < 1 || uniform.count > 4) return;
+                    for (int i = 0; i < uniform.count; ++i)
+                        uniform.v[i] = static_cast<float>(value[i].getWithDefault<double>(0.0));
+                } else {
+                    uniform.count = 1;
+                    uniform.v[0] = static_cast<float>(value.getWithDefault<double>(0.0));
+                }
+                cmd.shader_uniforms.push_back(std::move(uniform));
+            });
+        }
+        c->add_command(std::move(cmd));
+        return canvas_sdf_result(true);
     });
     // Canvas 2D API — full CanvasRenderingContext2D equivalent
     // Two registered names for the same handler:
