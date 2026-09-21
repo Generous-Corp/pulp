@@ -64,6 +64,21 @@
 
 namespace pulp::canvas {
 
+static bool sdf_shape_has_chart(Canvas::SDFShape shape) {
+    switch (shape) {
+        case Canvas::SDFShape::arc:
+        case Canvas::SDFShape::ring:
+        case Canvas::SDFShape::stadium:
+        case Canvas::SDFShape::flat_segment:
+        case Canvas::SDFShape::rounded_segment:
+        case Canvas::SDFShape::flat_arc:
+        case Canvas::SDFShape::quadratic_bezier:
+            return true;
+        default:
+            return false;
+    }
+}
+
 namespace {
 // IEEE-754 float32 -> binary16 conversion for the RGBA_F16 raster upload.
 std::uint16_t shader_float_to_half(float value) {
@@ -500,8 +515,12 @@ half4 main(float2 coord) {
 )";
 }
 
-std::string Canvas::compile_sdf_chart_sksl(SDFShape, const std::string& sksl) {
+std::string Canvas::compile_sdf_chart_sksl(SDFShape shape, const std::string& sksl) {
     if (sksl.empty()) return "Empty shader code";
+    if (!sdf_shape_has_chart(shape) &&
+        (sksl.find("PulpChart") != std::string::npos ||
+         sksl.find("pulp_chart") != std::string::npos))
+        return "Shape has no stroke chart (t/d/side); chart shaders exist only for band shapes";
     std::string error;
     const bool structured = sksl.find("PulpFragment shade") != std::string::npos;
     const auto source = structured

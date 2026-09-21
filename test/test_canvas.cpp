@@ -898,6 +898,19 @@ TEST_CASE("SDF geometry composer exposes PulpGeom and PulpFragment",
     REQUIRE(error.empty());
 }
 
+TEST_CASE("SDF chart is absent for non-band shapes",
+          "[canvas][sdf][shader]") {
+    const auto error = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::circle,
+        "half4 shade(PulpChart g) { return half4(g.t); }");
+#ifdef PULP_HAS_SKIA
+    REQUIRE_FALSE(error.empty());
+    REQUIRE(error.find("no stroke chart") != std::string::npos);
+#else
+    REQUIRE_FALSE(error.empty());
+#endif
+}
+
 TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
     RecordingCanvas rc;
     Canvas::SDFStyle style;
