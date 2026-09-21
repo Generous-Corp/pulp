@@ -13,9 +13,13 @@ would commit without a word.
 An invalid value only helps if something invalid-aware is looking, and the
 guards that already exist do not look here:
 
-* ``gpu_handoff_pin_freshness.py`` fires when a pinned path changes and the
-  ledger does *not*. A sentinel merge changes the ledger, so it reads the
-  sentinel as the refresh it was waiting for and stays quiet.
+* ``gpu_handoff_pin_freshness.py`` asks whether a PR re-pins the ledger and
+  whether it orphaned a pinned path. It compares the two sides' *editorial*
+  content and never reads an identity value, so ``regenerate-me`` is not
+  something it can see. A sentinel merge that moved nothing else does trip its
+  identity-only branch, but only incidentally and only while nothing else in
+  the ledger moved: carry any editorial change in the same merge and that
+  branch correctly stands down, leaving the sentinel unremarked.
 * ``conflict_marker_check.py`` looks for ``<<<<<<<``. The driver's entire
   purpose is that there are none.
 

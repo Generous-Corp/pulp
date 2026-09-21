@@ -23,6 +23,9 @@ SCHEMA_VERSION = 1
 REPORT_SCHEMA = "pulp-importer-differential-report-v1"
 CORPUS_SCHEMA = "pulp-importer-differential-corpus-v1"
 OBSERVABILITY_SCHEMA = "pulp-importer-observability-v1"
+TIMING_BUDGET_KEYS = (
+    "browser_import_ms", "native_import_ms", "native_render_ms", "native_total_ms",
+)
 
 # `layout.styles` rows are positional, so a row is unreadable without the
 # request order that produced it. The capture writes that order into the
@@ -77,6 +80,31 @@ ROOT_CAUSE_ORDER = [
 
 class LabError(RuntimeError):
     pass
+
+
+def timing_budget_result(
+    timings: dict[str, Any], budgets_ms: dict[str, int] | None,
+) -> dict[str, Any]:
+    """Compare measured importer timings with caller-supplied budgets.
+
+    Budgets are deliberately opt-in and apply only to this headless lab. They
+    do not turn a readback into TTFP, TTNI, or IFNF evidence.
+    """
+    if not budgets_ms:
+        return {"status": "not-requested", "budgets_ms": {}, "violations": []}
+    violations = [
+        {"metric": key, "value_ms": timings.get(key), "budget_ms": budget}
+        for key, budget in budgets_ms.items()
+        if (not isinstance(timings.get(key), (int, float))
+            or isinstance(timings.get(key), bool)
+            or not math.isfinite(timings[key])
+            or timings[key] < 0 or timings[key] > budget)
+    ]
+    return {
+        "status": "fail" if violations else "pass",
+        "budgets_ms": dict(budgets_ms),
+        "violations": violations,
+    }
 
 
 def percentile(values: list[int], fraction: float) -> int:
@@ -673,6 +701,7 @@ def compare_one(
     browser_path: Path | None,
     fixture_metadata: dict[str, Any] | None = None,
     cache_state: str = "unknown",
+    timing_budgets_ms: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=True)
     source_copy_dir = output / "source"
@@ -825,6 +854,7 @@ def compare_one(
         "browser_to_native_import_speedup": round(
             browser_run.elapsed_ms / max(1, native_run.elapsed_ms), 3),
     }
+    timing_budget = timing_budget_result(timings, timing_budgets_ms)
     # These timings deliberately keep presentation claims fail-closed. The
     # importer and observer run headlessly and the observer emits a readback;
     # neither is proof of a real GPU present or native interaction event.
@@ -893,6 +923,7 @@ def compare_one(
         "source_recognition": recognition,
         "unsupported_dynamic_features": blockers,
         "timings": timings,
+        "timing_budget": timing_budget,
         "observability": observability,
         "receipt_paths": {
             "fixture_report": "comparison/report.json",
@@ -981,6 +1012,10 @@ def aggregate_reports(
         1 for report in reports
         if report["promotion"]["classification"] == "native-authoritative"
         and not report["promotion"]["threshold_eligible"])
+    budget_reports = [report.get("timing_budget", {}) for report in reports]
+    budget_requested = any(
+        report.get("status") in ("pass", "fail") for report in budget_reports)
+    budget_failed = any(report.get("status") == "fail" for report in budget_reports)
     return {
         "schema": CORPUS_SCHEMA,
         "version": SCHEMA_VERSION,
@@ -1011,6 +1046,14 @@ def aggregate_reports(
                 report["promotion"].get("production_promotion_enabled", False)
                 for report in reports)
             else "evaluated"),
+        "timing_budget": {
+            "status": "fail" if budget_failed else
+                ("pass" if budget_requested else "not-requested"),
+            "budgets_ms": next((report.get("budgets_ms", {}) for report in budget_reports
+                                if report.get("budgets_ms")), {}),
+            "failed_fixture_count": sum(
+                report.get("status") == "fail" for report in budget_reports),
+        },
         "observability": {
             "ttfp": {"value_ms": None, "status": "unverified"},
             "ttni": {"p50_ms": None, "p95_ms": None, "status": "unverified"},

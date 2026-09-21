@@ -243,6 +243,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
 
+    # The selftest is the load-bearing half. The guard's lexical scan once
+    # exited 0 on a vector<std::thread> + emplace_back body holding a REQUIRE
+    # while correctly flagging the direct std::thread form, so a clean tree and
+    # an unchecked shape produced identical output. These fixtures pair every
+    # unsafe spelling with its safe twin, so the guard is proven to distinguish
+    # them rather than proven to be quiet.
+    add_test(NAME thread-safe-assertions-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_thread_assert_check.py")
+
     # Unbounded-wait lint: a test wait that cannot time out turns a real
     # regression into a CI job timeout with no output. The selftest is the
     # load-bearing part — it scans the SAME wait unbounded and bounded, so the

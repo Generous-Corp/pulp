@@ -70,6 +70,21 @@ name: Runner health check
 # What IS visible is that the tracking issues stop being updated and the
 # workflow's own run list goes quiet in public.
 #
+# Why a stalled job's labels ARE reconciled, despite the argument above
+# ---------------------------------------------------------------------
+# The census objection at the top is about a SCHEDULED probe of the whole
+# fleet, and it still stands. What this sweep also does is narrower: for a
+# label set some job has already been queued on past the alarm threshold, it
+# compares that set against the labels online self-hosted runners advertise,
+# in BOTH the repo and org scopes, and reports the exact label nothing carries.
+# On 2026-09-21 three queued `macos` jobs asked for `pulp-build-merge-group`
+# while every online runner advertised `pulp-build-pr-head`; the merge queue
+# deadlocked for 5h30m and nothing named the label. With nothing queued there
+# is no label set to evaluate, so the idle-night false alarm cannot occur.
+# A runner that advertises the set but is busy is saturation and stays silent.
+# An unreadable scope or an empty census is reported as an evidence gap, never
+# as a missing label -- an absence claim off a failed read is worse than none.
+#
 # A pull-request Build and Test run can also stall before job expansion, while
 # its jobs API remains empty and no requested labels exist to compare. The same
 # age thresholds cover that scheduler/concurrency-layer symptom independently
@@ -134,7 +149,12 @@ jobs:
       # required macOS gate. Unset falls back to the built-in list rather than
       # disarming the check; see queue_age_watchdog.py.
       EXPECTED_MACOS_HOSTS: ${{ vars.PULP_FLEET_EXPECTED_MACOS_HOSTS }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The org-scoped runners API needs Administration: Read, which
+      # GITHUB_TOKEN does not carry. Without the bot token the org scope
+      # refuses, the runner census records the refusal, and label
+      # reconciliation reports an evidence gap instead of naming a label --
+      # correct, but disarmed. Same fallback runner-topology-check.yml uses.
+      GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v5
