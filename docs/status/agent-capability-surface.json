@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 84,
+  "inventory_version": 88,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,12 +42,12 @@
     }
   ],
   "counts": {
-    "public_headers": 495,
-    "reviewed_headers": 207,
+    "public_headers": 496,
+    "reviewed_headers": 208,
     "legacy_unreviewed_headers": 288,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 116,
+      "capability_entrypoint": 117,
       "capability_support": 44,
       "infrastructure": 45,
       "legacy_unreviewed": 288,
@@ -91,8 +91,8 @@
         "unsupported_headers": 2
       },
       "timebase": {
-        "public_headers": 12,
-        "reviewed_headers": 9,
+        "public_headers": 13,
+        "reviewed_headers": 10,
         "legacy_unreviewed_headers": 3,
         "unsupported_headers": 0
       }
@@ -3471,13 +3471,13 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/lofi_chain.hpp",
-      "fingerprint": "sha256:8c3ed2535478714195f46f13591c90b3b7c63affc6a6e8a7407ebedbf9f1799b",
+      "fingerprint": "sha256:1b4def5ba6eb434e0ec7b46a350990f5356a54dc4215d5e21d262a4d55594024",
       "include": "pulp/signal/lofi_chain.hpp",
       "disposition": "capability_support",
       "capability_keys": [
         "signal.dither-quantizer"
       ],
-      "rationale": "Existing processor now consumes the deterministic dither and noise-shaping primitive while preserving its established default processing contract."
+      "rationale": "Publishes floor_shape, the dead-zone geometry the header's saturator already used, as a reusable transfer curve so a caller no longer has to reimplement it to get the same shape without the tanh."
     },
     {
       "domain": "signal",
@@ -4854,6 +4854,17 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "timebase.groove-kernel"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "timebase",
+      "source": "core/timebase/include/pulp/timebase/inline_groove_projector.hpp",
+      "fingerprint": "sha256:1008649e2c45404205bb6f525a32b6c91dd7c881e97bb768c4037fbf0253c4cb",
+      "include": "pulp/timebase/inline_groove_projector.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.inline-groove-projector"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },

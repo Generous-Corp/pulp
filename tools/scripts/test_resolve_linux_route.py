@@ -315,7 +315,16 @@ def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:
     assert (
         'cmake --build "$PULP_BUILD_DIR" --config Release --parallel 4' in text
     )
-    assert 'cmake --build "$PULP_BUILD_DIR" --config Release\n' not in text
+    assert (
+        'tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" '
+        '--config Release' in text
+    )
+    # Shared hosts use the governed wrapper, which derives the cap at runtime;
+    # only the fixed-shape Windows leg keeps its literal four-way build.
+    assert not re.search(
+        r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR" --config Release\s*$',
+        text,
+    )
 
 
 def test_every_runs_on_json_selector_is_parsed_not_interpolated() -> None:

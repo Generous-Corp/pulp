@@ -49,6 +49,100 @@ static constexpr uint32_t kAtomPortMinimumSize = 32768;
 // `plugin_state_io::serialize()` hands every other format.
 inline constexpr const char* kStateBlobUri = "http://pulp.audio/ns/state#blob";
 
+/// What a host-supplied LV2 port index addresses on a Pulp instance.
+enum class Lv2PortKind {
+    None, ///< Outside this instance's declared port range.
+    AudioIn,
+    AudioOut,
+    Control,
+    AtomIn,
+    AtomOut,
+    Latency,
+};
+
+/// The single definition of a Pulp LV2 plugin's port ordering.
+///
+/// LV2 names a port by a bare integer and nothing else: the manifest writes it
+/// as `lv2:index N` and the host hands the same integer back to
+/// `connect_port()`. `generate_plugin_ttl()` and `connect_port()` both derive
+/// their indices from this type, so the manifest a host reads and the slot the
+/// adapter wires cannot disagree — a disagreement delivers a `float*` where an
+/// `LV2_Atom_Sequence` is read, which compiles, links and loads.
+///
+/// The order is: every audio input channel, every audio output channel, one
+/// control port per parameter, the atom input port when the plugin accepts
+/// MIDI, the atom output port when it produces MIDI, then the latency output
+/// control port, always last. A host saves a session's port connections by
+/// index, so inserting a port renumbers every port after it and reconnects an
+/// existing session's ports to the wrong slots. Changing this order is a
+/// compatibility event.
+struct Lv2PortLayout {
+    int num_audio_inputs = 0;
+    int num_audio_outputs = 0;
+    int num_params = 0;
+    bool accepts_midi = false;
+    bool produces_midi = false;
+
+    [[nodiscard]] constexpr int audio_in_begin() const noexcept {
+        return 0;
+    }
+    [[nodiscard]] constexpr int audio_out_begin() const noexcept {
+        return num_audio_inputs;
+    }
+    [[nodiscard]] constexpr int control_begin() const noexcept {
+        return audio_out_begin() + num_audio_outputs;
+    }
+    [[nodiscard]] constexpr int atom_in_begin() const noexcept {
+        return control_begin() + num_params;
+    }
+    [[nodiscard]] constexpr int atom_out_begin() const noexcept {
+        return atom_in_begin() + (accepts_midi ? 1 : 0);
+    }
+    [[nodiscard]] constexpr int latency_index() const noexcept {
+        return atom_out_begin() + (produces_midi ? 1 : 0);
+    }
+    /// Total ports this plugin declares, latency port included.
+    [[nodiscard]] constexpr int port_count() const noexcept {
+        return latency_index() + 1;
+    }
+
+    /// Classify a port number. Every range is checked at both ends, so a
+    /// negative or past-the-end index resolves to `None` rather than to a slot.
+    [[nodiscard]] constexpr Lv2PortKind kind_of(int port) const noexcept {
+        if (port < 0)
+            return Lv2PortKind::None;
+        if (port >= audio_in_begin() && port < audio_out_begin())
+            return Lv2PortKind::AudioIn;
+        if (port >= audio_out_begin() && port < control_begin())
+            return Lv2PortKind::AudioOut;
+        if (port >= control_begin() && port < atom_in_begin())
+            return Lv2PortKind::Control;
+        if (accepts_midi && port == atom_in_begin())
+            return Lv2PortKind::AtomIn;
+        if (produces_midi && port == atom_out_begin())
+            return Lv2PortKind::AtomOut;
+        if (port == latency_index())
+            return Lv2PortKind::Latency;
+        return Lv2PortKind::None;
+    }
+
+    /// Offset of @p port within its own kind — the array index for the
+    /// multi-slot kinds, and 0 for the single-slot ones. Meaningless for a
+    /// port `kind_of()` calls `None`.
+    [[nodiscard]] constexpr int slot_of(int port) const noexcept {
+        switch (kind_of(port)) {
+        case Lv2PortKind::AudioIn:
+            return port - audio_in_begin();
+        case Lv2PortKind::AudioOut:
+            return port - audio_out_begin();
+        case Lv2PortKind::Control:
+            return port - control_begin();
+        default:
+            return 0;
+        }
+    }
+};
+
 /// URIDs the `time:Position` decode needs, resolved once in instantiate().
 /// All zero when the host provides no URID map, in which case the decode is a
 /// no-op — every comparison against a zero URID fails.
@@ -136,8 +230,10 @@ struct PulpLv2Instance {
     // overrun scratch sized by prepare().
     int max_block_length = kDefaultMaxBlockLength;
 
-    // Port connections (set by connect_port)
-    // Layout: [audio_in_0..N, audio_out_0..M, control_in_0..P, control_out_0..P]
+    // Port connections (set by connect_port). `Lv2PortLayout` above owns the
+    // index → slot mapping; the audio arrays are fixed at kMaxChannels, and
+    // instantiate() refuses a descriptor whose buses sum past that ceiling in
+    // either direction, so a declared port index can never run off them.
     float* audio_in_ports[kMaxChannels] = {};
     float* audio_out_ports[kMaxChannels] = {};
     float** control_in_ports = nullptr;   // One per parameter
@@ -196,6 +292,12 @@ struct PulpLv2Instance {
     // latency_samples() into it each block, so a latent Pulp processor is
     // PDC-compensated under LV2 like it is under every other format.
     float* latency_port = nullptr;
+
+    /// This instance's port ordering — the same one `generate_plugin_ttl()`
+    /// numbered the manifest with.
+    [[nodiscard]] Lv2PortLayout port_layout() const noexcept {
+        return {num_audio_inputs, num_audio_outputs, num_params, accepts_midi, produces_midi};
+    }
 };
 
 /// Resolve LV2_URID_Map from a features array.

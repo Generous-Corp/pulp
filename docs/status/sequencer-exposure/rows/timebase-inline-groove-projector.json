@@ -1,0 +1,80 @@
+{
+  "id": "timebase-inline-groove-projector",
+  "title": "A trivially copyable groove projection is reachable from the design-time capability surface",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "5c9467df-5764-4abd-850e-fc71dacbf373",
+  "owned_paths": [
+    "tools/scripts/agent_capability_catalog_timing.py",
+    "docs/status/sequencer-exposure/rows/timebase-inline-groove-projector.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/timebase/include/pulp/timebase/inline_groove_projector.hpp",
+      "needles": [
+        "class InlineGrooveProjector {",
+        "static_assert(std::is_trivially_copyable_v<InlineGrooveProjector>);",
+        "ORDER PRESERVATION IS EXPLICITLY NOT PROVIDED"
+      ]
+    },
+    {
+      "path": "test/test_timebase_groove_kernels.cpp",
+      "needles": [
+        "inline groove projection admits the authored table the strict kernel refuses",
+        "zero inline groove strength is exact identity including swing"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "core/timebase/include is one of the subsystem header directories PulpInstallRules.cmake installs wholesale, so the new public header ships with the SDK under the already-exported Pulp::timebase target.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/timebase/include/pulp/timebase/inline_groove_projector.hpp",
+          "needles": [
+            "class InlineGrooveProjector {"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No Timeline CLI verb, flag, or handler is added or changed; the projector is a header-only value type with no command surface."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline MCP tool definition or handler is added or changed."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No runtime control capability, operation, executor binding, or profile policy changes. The projector is constructed and copied by a consumer; it registers nothing with the control platform."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The generated manifest publishes timebase.inline-groove-projector with a typed validated-factory binding, which is what makes the non-order-preserving projection findable by a capability search that would otherwise only surface the strict kernel.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "\"key\": \"timebase.inline-groove-projector\""
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}
