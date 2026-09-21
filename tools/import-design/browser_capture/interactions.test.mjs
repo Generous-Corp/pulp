@@ -29,7 +29,9 @@ function plan(actions) {
 
 test("interaction plan accepts the bounded public action vocabulary", () => {
   const parsed = plan([
-    { action: "click", selector: "#open" },
+    { action: "click", selector: "#open", expect: {
+      selector: "#working", state: "visible", timeout_ms: 9000,
+    } },
     { action: "context-click", selector: "#band" },
     { action: "dispatch-event", selector: "#band", event: "contextmenu" },
     { action: "dispatch-event", selector: "#surface", event: "pointerdown" },
@@ -44,6 +46,9 @@ test("interaction plan accepts the bounded public action vocabulary", () => {
   ]);
   assert.equal(parsed.actions.length, 7);
   assert.equal(parsed.actions[0].timeout_ms, 5000);
+  assert.deepEqual(parsed.actions[0].expect, {
+    selector: "#working", state: "visible", timeout_ms: 9000,
+  });
   assert.match(parsed.sha256, /^[0-9a-f]{64}$/);
 });
 
@@ -99,6 +104,11 @@ test("interaction plan rejects executable or unbounded inputs", () => {
   assert.throws(() => plan([
     { action: "type", selector: "input", text: "x".repeat(4097) },
   ]), /no longer than 4096/);
+  assert.throws(() => plan([
+    { action: "click", selector: "#open", expect: {
+      selector: "#working", state: "maybe",
+    } },
+  ]), /expect\.state must be attached, detached, visible, or hidden/);
   assert.throws(() => parseInteractionPlan(JSON.stringify({
     schema: "pulp-browser-interactions-v1",
     version: 1,
@@ -162,6 +172,54 @@ test("executor records reproducible evidence without typed plaintext", async () 
   assert.deepEqual(
     calls.find(({ method }) => method === "Input.insertText").params,
     { text: "private draft" });
+});
+
+test("executor records and enforces an expected post-action state", async () => {
+  let observations = 0;
+  const cdp = {
+    async call(method, params) {
+      if (method === "Runtime.evaluate") {
+        const expression = params.expression;
+        if (expression.includes('"#working"')) {
+          observations += 1;
+          return { result: { value: { ok: true, state: observations === 1 ? "hidden" : "visible" } } };
+        }
+        return { result: { value: { ok: true, state: "visible", x: 20, y: 30 } } };
+      }
+      return {};
+    },
+  };
+  const report = await executeInteractionPlan(cdp, plan([
+    { action: "click", selector: "#open", expect: {
+      selector: "#working", state: "visible",
+    } },
+  ]), { delay: async () => {}, settle: async () => {} });
+  assert.deepEqual(report.actions[0].expected_state, {
+    selector: "#working", state: "visible", timeout_ms: 5000,
+  });
+  assert.equal(report.actions[0].observed_state, "visible");
+});
+
+test("attached expectation permits detached-to-attached transition", async () => {
+  let workingProbes = 0;
+  const cdp = {
+    async call(method, params) {
+      if (method !== "Runtime.evaluate") return {};
+      if (params.expression.includes('"#working"')) {
+        workingProbes += 1;
+        return { result: { value: workingProbes === 1
+          ? { ok: false, state: "detached" }
+          : { ok: true, state: "visible" } } };
+      }
+      return { result: { value: { ok: true, state: "visible", x: 1, y: 1 } } };
+    },
+  };
+  const report = await executeInteractionPlan(cdp, plan([
+    { action: "click", selector: "#open", expect: {
+      selector: "#working", state: "attached",
+    } },
+  ]), { delay: async () => {}, settle: async () => {} });
+  assert.equal(report.actions[0].observed_state, "attached");
 });
 
 test("published plan identity redacts typed plaintext", () => {
@@ -344,3 +402,36 @@ test("main-frame navigation guard closes popup pages before they run",
         sessionId: "popup-session-1",
       });
   });
+
+test("expect refuses an unchanged state and an unmet expectation", async () => {
+  for (const state of ["visible", "hidden"]) {
+    const cdp = { async call(method, params) {
+      if (method !== "Runtime.evaluate") return {};
+      return { result: { value: params.expression.includes('"#working"')
+        ? { ok: true, state } : { ok: true, x: 10, y: 10 } } };
+    } };
+    await assert.rejects(executeInteractionPlan(cdp, plan([
+      { action: "click", selector: "#open", expect: {
+        selector: "#working", state: "visible", timeout_ms: 1,
+      } },
+    ])), /browser interaction 1 \(click\) failed/);
+  }
+});
+
+test("hidden expectation treats detached as the same non-visible state", async () => {
+  let workingProbes = 0;
+  const cdp = { async call(method, params) {
+    if (method !== "Runtime.evaluate") return {};
+    if (params.expression.includes('"#working"')) {
+      workingProbes += 1;
+      return { result: { value: workingProbes === 1
+        ? { ok: true, state: "hidden" } : { ok: false, state: "detached" } } };
+    }
+    return { result: { value: { ok: true, state: "visible", x: 1, y: 1 } } };
+  } };
+  await assert.rejects(executeInteractionPlan(cdp, plan([
+    { action: "click", selector: "#open", expect: {
+      selector: "#working", state: "hidden",
+    } },
+  ])), /expected state did not change/);
+});
