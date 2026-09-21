@@ -183,9 +183,9 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
 }
 
 std::size_t terminal_record_count(const TrialResult& result) {
-    return static_cast<std::size_t>(std::count_if(
-        result.records.begin(), result.records.end(),
-        [](const auto& record) { return record.gpu_work_admitted; }));
+    return static_cast<std::size_t>(
+        std::count_if(result.records.begin(), result.records.end(),
+                      [](const auto& record) { return record.gpu_work_admitted; }));
 }
 
 } // namespace
@@ -212,8 +212,7 @@ int main() {
     const auto staged_terminal_records = terminal_record_count(staged);
     const auto shared_terminal_records = terminal_record_count(shared);
     const bool matched = staged.records_valid && shared.records_valid &&
-                         staged_terminal_records == kBlocks &&
-                         shared_terminal_records == kBlocks;
+                         staged_terminal_records == kBlocks && shared_terminal_records == kBlocks;
     std::cout << "{\"schema\":\"pulp.gpu-audio.p4.matched.v1\",\"status\":\""
               << (matched ? "screening_complete" : "screening_failed")
               << "\",\"performance_verdict\":\"unassigned\",\"pair_id\":" << kPairId
