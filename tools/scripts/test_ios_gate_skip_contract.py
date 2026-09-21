@@ -89,7 +89,7 @@ def workflow_build_step() -> str:
         raise AssertionError("expected exactly one iOS compile-gate call")
     body = body.replace(gate_call, "bash @GATE@")
     body, build_count = re.subn(
-        r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR".*$',
+        r'(?m)^\s*tools/ci/governed-build\.sh cmake --build "\$PULP_BUILD_DIR".*$',
         'echo "BUILD_RAN"',
         body,
     )
