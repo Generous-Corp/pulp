@@ -93,12 +93,23 @@ def workflow_build_step() -> str:
         'echo "BUILD_RAN"',
         body,
     )
+    # The build step is routed through the governed wrapper on shared hosts.
+    # Stub the wrapper invocation as well; the test deliberately supplies a
+    # minimal PATH without cmake, so leaving this command live turns a valid
+    # gate result into an unrelated exit-127 failure.
+    body, governed_build_count = re.subn(
+        r'(?m)^\s*tools/ci/governed-build\.sh cmake --build "\$PULP_BUILD_DIR".*$',
+        'echo "BUILD_RAN"',
+        body,
+    )
     body, cleanup_count = re.subn(
         r'(?m)^\s*rm -f "\$PULP_BUILD_DIR/\.pulp-build-incomplete"$',
         ':',
         body,
     )
-    if (build_count, cleanup_count) != (1, 1):
+    # Windows keeps the direct command while every other runner uses the
+    # governed wrapper, so both mutually exclusive branches must be stubbed.
+    if (build_count + governed_build_count, cleanup_count) != (2, 1):
         raise AssertionError("Build step shape changed; update the focused stubs")
     return body
 
