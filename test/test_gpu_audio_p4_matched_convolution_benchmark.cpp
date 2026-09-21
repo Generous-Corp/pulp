@@ -33,6 +33,12 @@ constexpr std::uint32_t kBlocks = 12;
 constexpr std::uint64_t kPairId = 1;
 constexpr std::uint64_t kGeneration = 1;
 constexpr std::chrono::milliseconds kTerminalDrainTimeout{500};
+// The matched trial drives the callback from this process rather than from a
+// host audio clock. Pace it at one real block period so the two-slot provider
+// is screened under the declared realtime cadence instead of an artificial
+// burst that fills the fixed ingress queue before GPU completions can arrive.
+constexpr auto kCallbackPeriod =
+    std::chrono::nanoseconds{(std::uint64_t{1'000'000'000} * kFrames) / kSampleRate};
 
 struct TrialResult {
     GpuConvolverTrialPath path = GpuConvolverTrialPath::SharedAsync;
@@ -150,6 +156,7 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
         BufferView<float> output_view(output_ptrs.data(), kChannels, kFrames);
         transport.process(input_view, output_view, kFrames);
         transport.pump(1);
+        std::this_thread::sleep_for(kCallbackPeriod);
     }
 
     // Shared-I/O completions arrive through Dawn's non-RT ProcessEvents
