@@ -40,6 +40,7 @@ TRUSTED_WRITER_PATHS = (
     "tools/scripts/version_bump_surfaces.py",
     "tools/scripts/gate_common.py",
     "tools/scripts/versioning.json",
+    "tools/scripts/gpu_handoff_provenance.py",
     # `_write_plan` executes this derived-file generator. Bind its executable
     # to the protected base below and pin its complete local import closure.
     "tools/scripts/pulp_tooling_disposition.py",
