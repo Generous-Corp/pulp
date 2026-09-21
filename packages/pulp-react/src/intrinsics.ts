@@ -5,7 +5,7 @@
 // component that React forwards to the host config; the type strings
 // match what host-config.ts's createWidget switch dispatches on.
 
-import { Fragment, createElement, useState } from 'react';
+import { Fragment, createElement, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { createPortal, createRoot } from './index.js';
 import { withSuppressedLayoutFlush } from './layout-flush.js';
@@ -14,7 +14,7 @@ import type {
     LabelProps, ButtonProps, TextEditorProps,
     KnobProps, FaderProps, SpectrumProps, WaveformProps, MeterProps,
     ProgressProps, XYPadProps, CheckboxProps, ToggleProps, ComboProps,
-    ListBoxProps, VirtualListProps, CanvasProps, ImageProps, IconProps, SvgPathProps,
+    ListBoxProps, VirtualListProps, CanvasProps, CanvasFrameContext, CanvasFrameInfo, ImageProps, IconProps, SvgPathProps,
     SvgRectProps, SvgLineProps,
     BadgeProps, StepperProps, PanProps,
     PulpContainer,
@@ -130,7 +130,43 @@ export const VirtualList = (props: VirtualListProps): ReactElement => {
         )),
     );
 };
-export const Canvas = (props: CanvasProps): ReactElement => createElement('Canvas' as unknown as 'div', props as unknown as object);
+export const Canvas = (props: CanvasProps): ReactElement => {
+    const { onFrame, id, width, height, ...hostProps } = props;
+    useEffect(() => {
+        if (!onFrame || !id) return undefined;
+        let handle: number | undefined;
+        let active = true;
+        const globals = globalThis as unknown as {
+            requestAnimationFrame?: (callback: (time: number) => void) => number;
+            cancelAnimationFrame?: (handle: number) => void;
+            canvasDrawSdf?: (canvasId: string, geometry: Record<string, unknown>,
+                             sksl?: string, uniforms?: Record<string, number | number[]>) => unknown;
+        };
+        const context: CanvasFrameContext = {
+            drawSdf(geometry, sksl, uniforms) {
+                return globals.canvasDrawSdf?.(id, geometry, sksl, uniforms);
+            },
+        };
+        const raf = globals.requestAnimationFrame;
+        if (!raf) return undefined;
+        const frame = (time: number) => {
+            if (!active) return;
+            const info: CanvasFrameInfo = {
+                time: time / 1000,
+                width: typeof width === 'number' ? width : 0,
+                height: typeof height === 'number' ? height : 0,
+            };
+            onFrame(context, info);
+            handle = raf(frame);
+        };
+        handle = raf(frame);
+        return () => {
+            active = false;
+            if (handle !== undefined) globals.cancelAnimationFrame?.(handle);
+        };
+    }, [onFrame, id, width, height]);
+    return createElement('Canvas' as unknown as 'div', { ...hostProps, id, width, height });
+};
 export const Image = (props: ImageProps): ReactElement => createElement('Image' as unknown as 'div', props as unknown as object);
 export const Icon = (props: IconProps): ReactElement => createElement('Icon' as unknown as 'div', props as unknown as object);
 export const SvgPath = (props: SvgPathProps): ReactElement => createElement('SvgPath' as unknown as 'div', props as unknown as object);
