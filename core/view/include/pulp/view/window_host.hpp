@@ -615,16 +615,24 @@ public:
     virtual bool supports_back_buffer_capture() const { return false; }
 
     /// True when this host can report whether the last rendered frame's GPU
-    /// work actually reached its intended output. Appended at the public vtable
-    /// tail for downstream WindowHost ABI safety.
+    /// work was submitted toward its intended output. Appended at the public
+    /// vtable tail for downstream WindowHost ABI safety.
     virtual bool supports_gpu_submission_evidence() const {
         return false;
     }
 
-    /// True when the most recent frame rendered by this host reached its
-    /// intended output (a presentable drawable, or the offscreen target when
-    /// that IS the output). Hosts that cannot observe submission keep the
-    /// `false` default, so an absent producer is never read as evidence.
+    /// True when the most recent frame rendered by this host was submitted
+    /// toward its intended output (a presentable drawable, or the offscreen
+    /// target when that IS the output). Hosts that cannot observe submission
+    /// keep the `false` default, so an absent producer is never read as
+    /// evidence.
+    ///
+    /// Submitted is not displayed, and the name is the honest bound: it means
+    /// the recording was accepted and the queue submit was issued, NOT that the
+    /// GPU executed the command buffer or that a viewer saw the pixels. A
+    /// backend can still reject the buffer at its queue after a successful
+    /// insert. Display evidence needs a presented-drawable producer, which no
+    /// Pulp backend has.
     virtual bool last_frame_gpu_submission_observed() const {
         return false;
     }
