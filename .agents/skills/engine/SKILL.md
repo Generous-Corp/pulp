@@ -839,6 +839,13 @@ not interchangeable:
 | `role=menu\|listbox\|tree\|grid\|dialog\|alertdialog`, `aria-modal="true"` | statement | outside-click **consumed** |
 | `position:absolute` + `z-index >= 10` | inference | click-**through** |
 
+A fourth signal does not claim at all — it *qualifies* a claim:
+
+| Signal | Kind | Effect |
+|---|---|---|
+| `data-overlay-parent="<id>"` on the overlay | statement | the claim NESTS on that overlay instead of dismissing it |
+| `aria-owns="<overlay id>"` on its parent | statement | same, stated from the other end |
+
 The inference stays click-through on purpose — a false positive that consumes
 swallows a real click, whereas one that clicks through merely closes something
 that should not have claimed. The statements consume, because an author who
@@ -859,6 +866,27 @@ Two traps:
   nothing on a static panel, because no unrelated style write ever arrives to
   drive the heuristic. Adding a signal means adding its attribute name to BOTH
   branches there, not only to the heuristic.
+- **A lifted submenu that claims without naming its menu DISMISSES that menu.**
+  `role="menu"` is equally true of a menu and of its submenu, and a submenu
+  positioned to escape its menu's box — `position: fixed`, a portal, a returned
+  fragment — is emitted as a SIBLING of that menu. Native stacking recognises a
+  submenu by descent, so a sibling reads as a rival: the menu underneath is
+  dismissed the moment the submenu opens and every row on both of them goes
+  with it. Nothing in the markup that already claims can supply the missing
+  fact, so `_resolveOverlayParent` reads it from `data-overlay-parent` on the
+  submenu or `aria-owns` on the menu and passes it as `claimOverlay`'s third
+  argument. Deliberately never inferred — an inferred parent would let any
+  panel nest on whatever happened to be open, which is what the descent rule
+  exists to prevent — and a name that resolves to no live, currently-open
+  overlay under the same root is ignored natively, leaving the ordinary claim.
+- **`aria-owns` changes a claim that is not on the element it was written on.**
+  It lands on the menu and names the submenu, so re-evaluating only the element
+  that received the attribute leaves the submenu still claiming as a rival.
+  `__pulpReevaluateOwnedOverlays__` in `web-compat-element.js` walks the token
+  list and re-evaluates each named element, from `setAttribute`, from
+  `removeAttribute` (reading the OLD value, since the attribute is already
+  gone), and from the pre-mount replay for a menu that mounts after the panel it
+  owns.
 
 A consumer that marks its overlays in its own private vocabulary
 (`data-<product>-overlay`) is invisible to all three rows above. The attribute

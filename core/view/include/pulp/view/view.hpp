@@ -1539,7 +1539,29 @@ public:
     /// so the open one is dismissed first (firing `on_overlay_dismissed`) and
     /// two sibling menus can never be on screen at once. Re-claiming a view
     /// already on the stack closes everything above it.
-    void claim_overlay();
+    ///
+    /// `stacks_on` DECLARES the overlay this claim nests on, for a submenu the
+    /// tree cannot describe. A submenu positioned to escape its menu's box is
+    /// lifted out of that menu's subtree — `position: fixed`, a portal, a
+    /// returned fragment — so it is a SIBLING of the menu it belongs to and can
+    /// never satisfy the parent-chain test above. Without a way to say which
+    /// overlay it belongs to it reads as a different menu: the menu underneath
+    /// is dismissed and the submenu's own rows go with it. Naming the overlay
+    /// makes the relationship a statement rather than something inferred from
+    /// the tree. The sweep then stops at `stacks_on`, and everything above it
+    /// still closes, so two sibling submenus of one menu keep replacing each
+    /// other while the menu they belong to survives.
+    ///
+    /// Naming cannot be used to nest on an arbitrary open overlay, because the
+    /// sweep compares `stacks_on` against the TOP OF THIS VIEW'S OWN ROOT
+    /// STACK on every pass. A name that is not open, that belongs to another
+    /// hosted editor's root, or that is this view itself never becomes that
+    /// top, so the claim falls back to the undeclared behaviour and dismisses
+    /// the rival — never to "nest on whatever happened to be open". A name
+    /// reaches here only from an authoring surface carrying an explicit author
+    /// declaration; the CSS-shape overlay heuristic and a bare `role="menu"`
+    /// statement never synthesize one.
+    void claim_overlay(const View* stacks_on = nullptr);
     /// Number of overlays currently open under this view's root. Never
     /// allocates interaction state, so it is safe to ask on any tree.
     std::size_t overlay_depth() const;

@@ -15,7 +15,7 @@ import { applyLayoutProp } from './prop-applier-layout.js';
 import { applyPaintProp } from './prop-applier-paint.js';
 import { applyTypographyProp } from './prop-applier-typography.js';
 import { applyTransformProp } from './prop-applier-transform.js';
-import { applyEventProp } from './prop-applier-events.js';
+import { applyEventProp, reclaimOverlayForMovedParent } from './prop-applier-events.js';
 
 // Per-domain handler modules own layout, paint, typography, transform,
 // and declarative event-routing props. `applyOne` below is the thin
@@ -460,7 +460,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
     if (applyPaintProp(id, key, value)) return;
     if (applyTypographyProp(id, key, value, props)) return;
     if (applyTransformProp(id, key, value)) return;
-    if (applyEventProp(id, key, value)) return;
+    if (applyEventProp(id, key, value, props)) return;
 
     // `<img src="…">` / `<Image src="…">` must forward to the ImageView
     // bridge via setImageSource, mirroring the non-React web-compat path
@@ -808,6 +808,12 @@ export function applyChangedProps(
         applySvgPathStrokeState(id, newProps, true);
         mutated = true;
     }
+
+    // An overlay's declared parent and the props that claim it are one
+    // compound state, and only the claim reaches the bridge. A re-pointed
+    // declaration whose claiming key did not move would otherwise change
+    // nothing, leaving a lifted submenu nested on the menu it just left.
+    if (reclaimOverlayForMovedParent(id, oldProps, newProps)) mutated = true;
 
     // Visual props hoisted out of `style`/`className` are DERIVED, not
     // authored. When a render arrives without its style source — the style

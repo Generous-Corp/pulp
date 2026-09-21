@@ -931,6 +931,15 @@ sits under the click. `_reevaluateOverlay` therefore re-runs on those two
 attributes as well as on `position` / `zIndex`, and reads them outside the
 shape branch.
 
+Nor does the heuristic decide which overlay a claim STACKS ON. A submenu
+positioned to escape its menu's box is lifted out of that menu's subtree, so it
+is a sibling of the menu it belongs to and reads as a rival that dismisses it;
+`position: fixed` is what causes that, so the shape cannot also resolve it. The
+relationship comes from `data-overlay-parent` on the overlay or `aria-owns` on
+its parent, and like the trigger mark it is a statement rather than an
+inference — `_reevaluateOverlay` re-runs on those attributes too, and the
+shape branch supplies no parent.
+
 The same is true of the ARIA statements on the CLAIM side —
 `role="menu" | "listbox" | "tree" | "grid" | "dialog" | "alertdialog"` and
 `aria-modal="true"` (see [HTML / DOM-lite compat](html.md#pulp-specific-author-hints)).

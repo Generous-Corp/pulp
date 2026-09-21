@@ -243,6 +243,25 @@ the panel itself to the CSS-shape inference, which claims click-through. `data-o
 documents that do not author ARIA. (`@pulp/react` reads the same
 `aria-haspopup` prop, plus an explicit `overlayTrigger` prop.)
 
+A third hint does not claim at all — it QUALIFIES a claim:
+
+- **`data-overlay-parent="<id>"`** on the overlay, or **`aria-owns="<overlay
+  id>"`** on its parent — this overlay STACKS ON that one instead of replacing
+  it. A claim nests on the open overlay only when it DESCENDS from it, and a
+  submenu positioned to escape its menu's box is lifted out of that menu's
+  subtree (`position: fixed`, a portal, a returned fragment), so it is a sibling
+  and reads as a rival: opening it dismisses the menu underneath and takes every
+  row on both panels with it. `role="menu"` cannot supply the missing fact,
+  being equally true of a menu and of its submenu, so the relationship is
+  declared. `aria-owns` is read because it is precisely what ARIA provides for a
+  parent/child relationship the DOM hierarchy cannot represent, and it changes
+  the claim of the element it NAMES rather than the one it is written on, so
+  setting, removing, or replaying it re-evaluates each named element. Never
+  inferred: an inferred parent would let any panel nest on whatever happened to
+  be open, which is what the descent rule exists to prevent, and a name that is
+  not a live overlay open under the same root is ignored, leaving the ordinary
+  claim. (`@pulp/react` reads an `overlayParent` prop for the same purpose.)
+
 ## Notable gaps
 
 1. **`html/ARIA`** state routing — `aria-label` and `role` route

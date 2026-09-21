@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260921-overlay-declared-parent-lifted-submenu",
+  "created_at": "2026-09-21T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Crosses the render-assets-and-backends watch family only through the broad core/view/** selector. The Pulp-owned change lets an overlay claim NAME the already-open overlay it stacks on, so a submenu that is lifted out of its menu's subtree to escape that menu's box is no longer read as a rival menu and no longer dismisses the menu underneath it. The parent-chain stacking rule is untouched and remains the only rule that applies to an undeclared claim; naming is an additional break condition in the same dismissal sweep, compared against the top of the claiming view's own root stack, so a name that is not open, names another hosted editor's root, or names the claimant never matches and the claim falls back to the existing behavior. Paint, hit-testing, asset, layout, renderer, canvas, Skia, Dawn, and authority behavior are unchanged, as is per-root ownership; the only new code path runs when an author supplies a name. The two JS authoring surfaces that already claim on an app's behalf carry the name through (a data-overlay-parent / aria-owns declaration in web-compat, an overlayParent prop in @pulp/react), and the widget-bridge claimOverlay signature gains one optional trailing argument, with the regenerated bridge API artifacts. Regressions are confined to test/test_overlay_routing.cpp, test/test_web_compat_overlay.cpp, and packages/pulp-react/test/prop-applier-overlay.test.ts. No accepted expansion boundary moves, no Vellum implementation is changed, and no generated artifact or manifest row moves other than the bridge signature regeneration. Registered watch-only so the family's coverage stays explicit about this core/view overlay-semantics change.",
+  "tests": [
+    "build/test/pulp-test-overlay-routing",
+    "build/test/pulp-test-web-compat-overlay",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

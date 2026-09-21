@@ -745,3 +745,203 @@ TEST_CASE("a press on ordinary content still consumes the dismissal",
     CHECK(on_plain.routing == pulp::view::OverlayPressRouting::dismissed);
     CHECK(on_plain.consume_press);
 }
+
+// ── A lifted submenu declares the overlay it stacks on ────────────────────
+//
+// `role="menu"` is an author STATEMENT and claims for it, which is what makes
+// a correctly-described menu dismissable without any Pulp-specific attribute.
+// But the statement is equally true of a menu and of its submenu, and a
+// submenu placed to escape its menu's box is emitted as a SIBLING of that menu
+// (`position: fixed`, a portal, a returned fragment), so the native
+// parent-chain test reads it as a rival: opening the submenu dismisses the
+// menu underneath, taking every row on both with it.
+//
+// The missing fact is which overlay the submenu belongs to, and nothing in the
+// markup that already claims can supply it. So it is declared — in Pulp's own
+// vocabulary with `data-overlay-parent` on the submenu, or in ARIA's with
+// `aria-owns` on the menu, which is the attribute ARIA provides for exactly
+// this case: a parent/child relationship the DOM hierarchy cannot represent.
+
+TEST_CASE("a lifted role=menu panel that declares data-overlay-parent stacks",
+          "[view][web-compat][auto-overlay][lifted]") {
+    OverlayGuard g;
+    Harness h;
+    h.eval(R"(
+        var menu = document.createElement('div');
+        menu.id = 'band-menu';
+        menu.setAttribute('role', 'menu');
+        document.body.appendChild(menu);
+
+        var sub = document.createElement('div');
+        sub.setAttribute('role', 'menu');
+        sub.setAttribute('data-overlay-parent', 'band-menu');
+        document.body.appendChild(sub);
+    )");
+    // Both are children of body, so neither is an ancestor of the other.
+    REQUIRE(h.root.overlay_depth() == 2);
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+    REQUIRE(h.root.interaction().active_overlay->overlay_consumes_outside_click());
+}
+
+TEST_CASE("a lifted role=menu panel that declares nothing replaces the menu",
+          "[view][web-compat][auto-overlay][lifted]") {
+    OverlayGuard g;
+    Harness h;
+    // The control. Identical markup minus the declaration — so the case above
+    // cannot pass by claiming twice, by never claiming, or by the ARIA role
+    // having stopped claiming at all. This is also the exact shape of the
+    // reported bug: two sibling `role="menu"` panels, and the first is gone.
+    h.eval(R"(
+        var menu = document.createElement('div');
+        menu.id = 'band-menu';
+        menu.setAttribute('role', 'menu');
+        document.body.appendChild(menu);
+
+        var sub = document.createElement('div');
+        sub.setAttribute('role', 'menu');
+        document.body.appendChild(sub);
+    )");
+    REQUIRE(h.root.overlay_depth() == 1);
+}
+
+TEST_CASE("a declared overlay parent that names no element does not stack",
+          "[view][web-compat][auto-overlay][lifted]") {
+    OverlayGuard g;
+    Harness h;
+    // A typo, or an id that has since unmounted, resolves to no widget on the
+    // native side. That is the undeclared claim, never a licence to sit on top
+    // of whatever happened to be open.
+    h.eval(R"(
+        var menu = document.createElement('div');
+        menu.id = 'band-menu';
+        menu.setAttribute('role', 'menu');
+        document.body.appendChild(menu);
+
+        var sub = document.createElement('div');
+        sub.setAttribute('role', 'menu');
+        sub.setAttribute('data-overlay-parent', 'no-such-menu');
+        document.body.appendChild(sub);
+    )");
+    REQUIRE(h.root.overlay_depth() == 1);
+}
+
+TEST_CASE("aria-owns on the menu is enough for a lifted submenu to stack",
+          "[view][web-compat][auto-overlay][lifted]") {
+    OverlayGuard g;
+    Harness h;
+    // No Pulp-specific attribute anywhere: a document that lifted its submenu
+    // out of the menu's subtree AND repaired that for assistive technology has
+    // already said everything the stacking rule needs.
+    h.eval(R"(
+        var menu = document.createElement('div');
+        menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-owns', 'mod-panel');
+        document.body.appendChild(menu);
+
+        var sub = document.createElement('div');
+        sub.id = 'mod-panel';
+        sub.setAttribute('role', 'menu');
+        document.body.appendChild(sub);
+    )");
+    REQUIRE(h.root.overlay_depth() == 2);
+}
+
+TEST_CASE("aria-owns naming a different id does not stack",
+          "[view][web-compat][auto-overlay][lifted]") {
+    OverlayGuard g;
+    Harness h;
+    // The control for the case above: if the reverse lookup matched any
+    // element carrying `aria-owns` at all, that test would pass without ever
+    // comparing the token to the submenu's id.
+    h.eval(R"(
+        var menu = document.createElement('div');
+        menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-owns', 'some-other-panel');
+        document.body.appendChild(menu);
+
+        var sub = document.createElement('div');
+        sub.id = 'mod-panel';
+        sub.setAttribute('role', 'menu');
+        document.body.appendChild(sub);
+    )");
+    REQUIRE(h.root.overlay_depth() == 1);
+}
+
+TEST_CASE("declaring a parent is not itself a claim and survives to one",
+          "[view][web-compat][auto-overlay][lifted]") {
+    OverlayGuard g;
+    Harness h;
+    // Two things at once, both about the declaration being inert on its own.
+    // It must not claim: a panel that names its menu before it is an overlay
+    // would start routing clicks for a box the author has not opened yet. And
+    // it must still be readable by the claim that eventually arrives, on the
+    // post-mount `setAttribute` path rather than the pre-mount replay.
+    h.eval(R"(
+        var menu = document.createElement('div');
+        menu.id = 'band-menu';
+        menu.setAttribute('role', 'menu');
+        document.body.appendChild(menu);
+
+        var sub = document.createElement('div');
+        sub.setAttribute('data-overlay-parent', 'band-menu');
+        document.body.appendChild(sub);
+    )");
+    REQUIRE(h.root.overlay_depth() == 1);
+    REQUIRE(h.root.interaction().active_overlay != nullptr);
+
+    h.eval("document.body.children[1].setAttribute('role', 'menu');");
+    REQUIRE(h.root.overlay_depth() == 2);
+}
+
+TEST_CASE("aria-owns recovers a lifted submenu that mounted before its menu",
+          "[view][web-compat][auto-overlay][lifted]") {
+    OverlayGuard g;
+    Harness h;
+    // `aria-owns` lands on the MENU and names the panel, so the claim it
+    // changes belongs to a DIFFERENT element. Re-evaluating only the element
+    // that received the attribute leaves the panel still claiming as a rival,
+    // which is why mounting the menu re-evaluates everything it owns.
+    //
+    // Honest about what this recovers: the panel's dismiss callback does fire
+    // once as the menu claims, before the re-evaluation puts the nest back. The
+    // native stack ends correct, which is strictly better than ending wrong,
+    // but it is not a substitute for mounting the menu first.
+    h.eval(R"(
+        var sub = document.createElement('div');
+        sub.id = 'mod-panel';
+        sub.setAttribute('role', 'menu');
+        document.body.appendChild(sub);
+    )");
+    REQUIRE(h.root.overlay_depth() == 1);
+
+    h.eval(R"(
+        var menu = document.createElement('div');
+        menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-owns', 'mod-panel');
+        document.body.appendChild(menu);
+    )");
+    REQUIRE(h.root.overlay_depth() == 2);
+}
+
+TEST_CASE("a menu mounted after its panel and owning nothing replaces it",
+          "[view][web-compat][auto-overlay][lifted]") {
+    OverlayGuard g;
+    Harness h;
+    // The control for the case above, same order and same markup minus the
+    // `aria-owns`. Without it there is nothing to recover from, so the later
+    // menu is just a rival and the panel is gone.
+    h.eval(R"(
+        var sub = document.createElement('div');
+        sub.id = 'mod-panel';
+        sub.setAttribute('role', 'menu');
+        document.body.appendChild(sub);
+    )");
+    REQUIRE(h.root.overlay_depth() == 1);
+
+    h.eval(R"(
+        var menu = document.createElement('div');
+        menu.setAttribute('role', 'menu');
+        document.body.appendChild(menu);
+    )");
+    REQUIRE(h.root.overlay_depth() == 1);
+}
