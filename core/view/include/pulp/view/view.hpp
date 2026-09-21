@@ -1500,6 +1500,16 @@ public:
         View* active_overlay = nullptr;
         ComboBox* active_popup = nullptr;   // wired from ui_components (migrated last)
         std::vector<OverlayRequest> overlay_queue;
+        /// Open overlays, bottom-first; `active_overlay` mirrors `.back()`.
+        ///
+        /// A slot could only ever describe ONE open popover, so a submenu and
+        /// the menu that opened it could not both be described: claiming the
+        /// submenu silently overwrote its parent, which then stayed on screen
+        /// with nothing tracking it, unreachable by Escape or an outside
+        /// click. The stack is what lets a nest of menus close one level at a
+        /// time. Which claims nest and which replace is decided in
+        /// `claim_overlay()`.
+        std::vector<View*> overlay_stack;
     };
     /// Root-owned interaction state for this view's tree. Root-aware code should
     /// prefer this over the process-global shim statics below.
@@ -1528,7 +1538,18 @@ public:
     /// Claim focus / overlay for this view's tree. Writes the root-owned slot
     /// AND the process-global shim mirror. Defined out-of-line (needs tree_root).
     void claim_input_focus();
+    /// Open this view as an overlay under its root.
+    ///
+    /// A claim that DESCENDS from the currently open overlay nests on it: a
+    /// submenu leaves its parent menu open and, when the submenu is dismissed,
+    /// the parent becomes active again. Any other claim is a different menu,
+    /// so the open one is dismissed first (firing `on_overlay_dismissed`) and
+    /// two sibling menus can never be on screen at once. Re-claiming a view
+    /// already on the stack closes everything above it.
     void claim_overlay();
+    /// Number of overlays currently open under this view's root. Never
+    /// allocates interaction state, so it is safe to ask on any tree.
+    std::size_t overlay_depth() const;
     void set_overlay_consumes_outside_click(bool consume) {
         overlay_consumes_outside_click_ = consume;
     }
@@ -2531,6 +2552,24 @@ public:
     UserSelect user_select() const { return user_select_; }
 
 private:
+    /// Live overlay claims process-wide. Zero — the overwhelmingly common
+    /// state — lets the paint path skip the hoist test with one integer
+    /// compare. An over-count only costs the slower (still correct) branch.
+    static std::uint32_t overlay_claims_live_;
+    /// Erase `victim` from `state`'s overlay stack and re-publish the active
+    /// slot + the process shim. True when it was on the stack.
+    static bool detach_overlay(RootInteractionState& state, View* victim);
+    /// Re-point `active_overlay` (and the shim, when it was following this
+    /// root) at the stack top.
+    static void republish_overlay(RootInteractionState& state);
+    /// True when `ancestor` is a strict ancestor of this view. Decides whether
+    /// a claim nests on the open overlay or replaces it.
+    bool is_overlay_descendant_of(const View* ancestor) const;
+    /// Paint children with the open-overlay chain last, so an overlay outranks
+    /// sibling order and z-index at every level between it and the root.
+    /// False when no child of this view leads to an open overlay, in which
+    /// case the caller paints normally.
+    bool paint_children_overlay_last(canvas::Canvas& canvas);
     friend class WidgetBridge;
     friend class ViewCapture;
     friend class ScrollView;

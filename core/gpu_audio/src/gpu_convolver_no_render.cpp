@@ -1,6 +1,8 @@
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 #include <pulp/gpu_audio/gpu_multi_convolver.hpp>
 
+#include "detail/staged_async_trace_ledger.hpp"
+
 #include <algorithm>
 #include <limits>
 #include <utility>

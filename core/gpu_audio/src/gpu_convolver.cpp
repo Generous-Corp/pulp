@@ -3,7 +3,9 @@
 
 #include <pulp/gpu_audio/detail/gpu_ola.hpp>
 
+#include "detail/gpu_convolver_trial_config.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/staged_async_trace_ledger.hpp"
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #include "detail/dawn_shared_io_convolution_session.hpp"
@@ -12,6 +14,7 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
@@ -63,6 +66,63 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
 
 GpuConvolver::~GpuConvolver() = default;
 
+namespace detail {
+bool configure_gpu_convolver_trial(GpuConvolver& convolver,
+                                   const GpuConvolverTrialConfig& config) noexcept {
+    if (convolver.prepared_)
+        return false;
+    if (config.generation == 0)
+        return false;
+    convolver.trial_requested_path_ = static_cast<std::uint8_t>(config.requested_path);
+    convolver.trial_generation_ = config.generation;
+    convolver.trial_configured_ = true;
+    convolver.trial_enable_trace_ = config.enable_trace;
+    convolver.trial_capture_admissions_ = config.capture_admissions;
+    convolver.trial_success_stride_ = std::max<std::uint32_t>(1, config.success_stride);
+    convolver.trial_completion_policy_ = static_cast<std::uint8_t>(config.completion_policy);
+    convolver.trial_completion_wait_ns_ = config.completion_wait_ns;
+    return true;
+}
+
+bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
+                                       std::vector<SharedIoTraceRecord>& records) noexcept {
+    records.clear();
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    // The staged adapter has no callback-side trace queue. Its worker ledger
+    // is the authenticated source of terminal outcomes, and may only be
+    // observed once every request has reached a terminal state. Keep this
+    // accessor quiescent-only so a producer cannot serialize a partial trial
+    // and accidentally treat missing blocks as successful delivery.
+    if (convolver.staged_trial_) {
+        if (!convolver.staged_trial_->quiescent())
+            return false;
+        try {
+            records = convolver.staged_trial_->take_completed();
+            return true;
+        } catch (...) {
+            records.clear();
+            return false;
+        }
+    }
+    if (!convolver.shared_io_ || !convolver.shared_io_->session ||
+        !convolver.shared_io_->session->trace_recording_enabled())
+        return false;
+    try {
+        convolver.shared_io_->session->drain_trace_records(
+            static_cast<std::uint32_t>(SharedIoTraceRecorder::capacity),
+            [&](const SharedIoTraceRecord& record) { records.push_back(record); });
+        return true;
+    } catch (...) {
+        records.clear();
+        return false;
+    }
+#else
+    (void)convolver;
+    return false;
+#endif
+}
+} // namespace detail
+
 GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
     GpuAudioNodeDescriptor d;
     d.name = "gpu-convolver";
@@ -88,6 +148,8 @@ bool GpuConvolver::prepare() {
         return false;
 #endif
     shared_io_.reset();
+    staged_trial_.reset();
+    staged_sequence_ = 0;
     if (channels_ == 0 || block_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
         latency_blocks_ > kMaxLatencyBlocks)
         return false;
@@ -119,7 +181,12 @@ bool GpuConvolver::prepare() {
     init_fallback();
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    if (expected_dawn_revision_available()) {
+    const auto requested_path = static_cast<detail::SharedIoRequest>(trial_requested_path_);
+#endif
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (expected_dawn_revision_available() &&
+        requested_path != detail::SharedIoRequest::RequireStaged) {
         try {
             constexpr uint32_t kSharedIoCapacity = 8;
             constexpr uint32_t kSharedIoSlots = 2;
@@ -145,7 +212,16 @@ bool GpuConvolver::prepare() {
                     }
 
                     auto created = detail::create_dawn_shared_io_convolution_session(
-                        {.provider = {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA},
+                        {.provider =
+                             {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+                              .completion_policy =
+                                  trial_configured_
+                                      ? static_cast<detail::DawnSharedIoProvider::CompletionPolicy>(
+                                            trial_completion_policy_)
+                                      : detail::DawnSharedIoProvider::CompletionPolicy::
+                                            ProcessEvents,
+                              .completion_wait_ns =
+                                  trial_configured_ ? trial_completion_wait_ns_ : 0},
                          .session = {.pipeline = {.capacity = shared_capacity,
                                                   .channels = channels_,
                                                   .block_size = block_,
@@ -154,7 +230,10 @@ bool GpuConvolver::prepare() {
                                                   .lead_blocks = latency_blocks_},
                                      .slots = kSharedIoSlots,
                                      .sample_rate = sample_rate_,
-                                     .trace = {.enabled = pulp::runtime::kTracingEnabled}},
+                                     .trace = {.success_stride = trial_success_stride_,
+                                               .capture_admissions = trial_capture_admissions_,
+                                               .enabled = pulp::runtime::kTracingEnabled ||
+                                                          trial_enable_trace_}},
                          .normalized_ir_spectrum = state->normalized_ir_spectrum});
                     // A failed preparation may still own physically live
                     // storage. Retain that session even when it cannot run.
@@ -192,6 +271,11 @@ bool GpuConvolver::prepare() {
     } else {
         gpu_.reset();
     }
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (trial_configured_ && requested_path == detail::SharedIoRequest::RequireStaged && gpu_)
+        staged_trial_ = std::make_unique<detail::StagedAsyncTrialState>(2, trial_generation_);
+#endif
 
     prepared_ = true;
     return true;
@@ -256,7 +340,12 @@ std::uint32_t GpuConvolver::service_realtime_shared_io(void* self, std::uint64_t
         !convolver->shared_io_->session || !convolver->shared_io_->session->prepared())
         return detail::kRealtimeGpuServiceInactive;
     const auto result = convolver->shared_io_->session->service(now_ns);
-    (void)convolver->shared_io_->session->drain_trace();
+    // A configured private trial owns the authenticated trace queue until its
+    // quiescent accessor drains it. The normal runtime path may continue to
+    // mirror records into Perfetto here, but consuming trial records would
+    // make the matched benchmark observe an empty shared path.
+    if (!convolver->trial_configured_)
+        (void)convolver->shared_io_->session->drain_trace();
     return static_cast<std::uint32_t>(
         std::min<std::size_t>(result.terminal_records,
                               static_cast<std::size_t>(detail::kRealtimeGpuServiceInactive - 1u)));
@@ -324,6 +413,90 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
     }
 
     const uint32_t cplx = fft_size_ * 2u;
+
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    // Private P4 adapter path. It intentionally waits on the worker thread,
+    // preserving the existing blocking process_block contract while attaching
+    // one request to an authenticated request/slot/sequence ledger. The public
+    // default path never constructs staged_trial_.
+    if (staged_trial_) {
+        std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
+        for (uint32_t ch = 0; ch < channels_; ++ch) {
+            const float* x = input.channel_ptr(ch);
+            float* slot = in_pad_.data() + static_cast<std::size_t>(ch) * cplx;
+            for (uint32_t i = 0; i < n; ++i)
+                slot[2u * i] = x[i];
+        }
+
+        const auto sequence = staged_sequence_++;
+        const auto slot = static_cast<std::uint32_t>(sequence % 2u);
+        const auto now = std::chrono::steady_clock::now();
+        const auto now_ns = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
+        const auto deadline_ns = std::max<std::uint64_t>(
+            1'000'000ull, static_cast<std::uint64_t>(block_) * 1'000'000'000ull / sample_rate_);
+        const auto deadline = std::chrono::microseconds(deadline_ns / 1000ull);
+        struct Completion {
+            bool done = false;
+            render::GpuCompute::ReadbackStatus status = render::GpuCompute::ReadbackStatus::Failed;
+            std::uint64_t id = 0;
+        };
+        auto completion = std::make_shared<Completion>();
+        const auto request = gpu_->convolve_batch_async(
+            in_pad_.data(), time_.data(), fft_size_, channels_, deadline,
+            [completion](const render::GpuCompute::ReadbackResult& result) {
+                completion->status = result.status;
+                completion->id = result.id;
+                completion->done = true;
+            });
+        if (request == 0) {
+            output.clear();
+            return;
+        }
+        const bool admitted =
+            staged_trial_->admit(request, sequence, slot, now_ns + deadline_ns, now_ns);
+        if (!admitted) {
+            // GpuCompute has no cancellation API. The callback owns only the
+            // heap completion state, so a provider callback that arrives after
+            // this failed admission cannot dereference the stack.
+            output.clear();
+            return;
+        }
+        if (!staged_trial_->submitted(request, now_ns)) {
+            // Admission created an authenticated sequence/slot reservation.
+            // If submission cannot attach to that reservation, close it with
+            // one cancellation terminal so the producer's ledger remains
+            // exactly-once even on this provider-side failure.
+            (void)staged_trial_->abandon(request, now_ns);
+            output.clear();
+            return;
+        }
+        // GpuCompute guarantees that poll_readbacks() resolves every request at
+        // success or at its deadline, so this worker loop is bounded by the
+        // provider deadline rather than an unbounded wait on GPU progress.
+        while (!completion->done)
+            (void)gpu_->poll_readbacks();
+        (void)staged_trial_->complete(
+            completion->id,
+            completion->status == render::GpuCompute::ReadbackStatus::Success
+                ? detail::StagedAsyncTraceLedger::CompletionStatus::Success
+            : completion->status == render::GpuCompute::ReadbackStatus::Expired
+                ? detail::StagedAsyncTraceLedger::CompletionStatus::Expired
+                : detail::StagedAsyncTraceLedger::CompletionStatus::Failed,
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now().time_since_epoch())
+                                           .count()));
+        if (completion->status != render::GpuCompute::ReadbackStatus::Success) {
+            output.clear();
+            return;
+        }
+        for (uint32_t ch = 0; ch < channels_; ++ch)
+            detail::overlap_add_block(carry_[ch].data(),
+                                      time_.data() + static_cast<std::size_t>(ch) * cplx,
+                                      /*src_stride=*/2, output.channel_ptr(ch), fft_size_, n);
+        return;
+    }
+#endif
 
     // Pack every channel's zero-padded complex block back to back.
     std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);

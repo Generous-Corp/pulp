@@ -128,6 +128,25 @@ public:
                     const AudioTimeStamp& inTimeStamp,
                     UInt32 inNumberFrames) override;
 
+    /// `kAudioUnitProperty_FactoryPresets` — the presets bundled with the
+    /// plug-in, discovered from its `Resources/Presets` folder. Reports
+    /// `kAudioUnitErr_InvalidProperty` when the plug-in ships none, so a host
+    /// hides the menu rather than showing an empty one.
+    OSStatus GetPresets(CFArrayRef* outData) const override;
+
+    /// `kAudioUnitProperty_PresentPreset` carrying a non-negative preset
+    /// number. Loads that factory preset into the StateStore, so a host's
+    /// selection changes what the plug-in sounds like instead of only
+    /// relabelling the menu.
+    OSStatus NewFactoryPresetSet(const AUPreset& inNewFactoryPreset) override;
+
+    /// The factory-preset table this instance serves. Exposed so a plug-in
+    /// whose presets live outside the default bundle folder can re-point
+    /// discovery before the host scans.
+    FactoryPresetTable& factory_preset_table() noexcept {
+        return factory_presets_;
+    }
+
     OSStatus SaveState(CFPropertyListRef* outData) override;
     OSStatus RestoreState(CFPropertyListRef plist) override;
 
@@ -146,6 +165,10 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Factory presets, bound to store_ in the constructor. Declared after
+    // store_ so reverse member destruction retires the PresetManager while the
+    // store it holds a reference to is still alive.
+    FactoryPresetTable factory_presets_;
     // Keeps a host class-info restore off the processor while Render() is
     // inside it. Declared after processor_ so it outlives every render that
     // consults it.
