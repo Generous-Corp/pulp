@@ -99,12 +99,17 @@ def workflow_build_step() -> str:
         'echo "BUILD_RAN"',
         body,
     )
+    body, windows_build_count = re.subn(
+        r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR" --config Release --parallel 4$',
+        'echo "BUILD_RAN"',
+        body,
+    )
     body, cleanup_count = re.subn(
         r'(?m)^\s*rm -f "\$PULP_BUILD_DIR/\.pulp-build-incomplete"$',
         ':',
         body,
     )
-    if (build_count, governed_build_count, cleanup_count) != (1, 1, 1):
+    if (build_count, governed_build_count, windows_build_count, cleanup_count) != (1, 0, 1, 1):
         raise AssertionError("Build step shape changed; update the focused stubs")
     return body
 

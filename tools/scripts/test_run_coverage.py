@@ -352,24 +352,22 @@ class ObjectDiscoveryTests(unittest.TestCase):
 
     def test_profraw_shards_are_reclaimed_after_merge(self) -> None:
         text = SCRIPT.read_text()
-        marker = 'echo "=== Merged ${PROFILE_SHARDS} raw profile shard(s); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="'
+        marker = 'echo "=== Merged ${PROFILE_SHARDS_SEEN} raw profile shard(s) (${RECLAIMED_SHARDS} absorbed during the run); ignored ${INVALID_PROFILE_SHARDS} invalid shard(s) ==="'
         self.assertIn(marker, text)
         self.assertIn('find "${PROFRAW_DIR}" -name \'*.profraw\' -type f -delete', text[text.index(marker):])
 
-    def test_profraw_pattern_is_bounded_merge_pool(self) -> None:
-        """Use a bounded, module-scoped pool instead of one file per process."""
+    def test_profraw_pattern_is_per_process_with_incremental_reclamation(self) -> None:
+        """Preserve every binary's counters while bounding disk incrementally."""
         text = SCRIPT.read_text()
         self.assertIn(
-            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%${CTEST_JOBS}m.profraw"',
+            'LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"',
             text,
-            "run_coverage.sh should bound raw profiles with LLVM's module-scoped "
-            "merge pool so hosted runners cannot exhaust disk.",
+            "each process needs an isolated merge-enabled profile so binaries "
+            "with different counter layouts cannot overwrite one another.",
         )
-        self.assertNotIn(
-            'pulp-%p-%m.profraw',
-            text,
-            "per-process profile files grow without bound on the full suite.",
-        )
+        self.assertIn("coverage_reclaim_loop &", text)
+        self.assertIn("coverage_absorb_finished_shards()", text)
+        self.assertIn('kill -0 "${pid}"', text)
 
     def test_merge_tolerates_isolated_bad_shards_but_has_a_mass_guard(self) -> None:
         text = SCRIPT.read_text()

@@ -325,7 +325,6 @@ def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:
         r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR" --config Release\s*$',
         text,
     )
-    )
 
 
 def test_every_runs_on_json_selector_is_parsed_not_interpolated() -> None:

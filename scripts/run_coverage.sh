@@ -318,18 +318,31 @@ export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 echo "=== Free space before tests: $(coverage_free_kib) KiB (reclaim below ${COVERAGE_RECLAIM_FREE_KIB} KiB) ==="
 coverage_reclaim_loop &
 RECLAIM_PID=$!
-if [[ -n "${TESTS_REGEX}" ]]; then
-    ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
-else
-    ctest "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || CTEST_RC=$?
-fi
+# CTest writes a progress line for every test. With nearly 22,000 tests this
+# can fill the hosted runner's Actions log pager (and its root disk) before
+# coverage generation starts, producing an ENOSPC failure with no receipt.
+# Keep the normal path quiet; if the suite fails, replay only failed tests so
+# useful diagnostics remain visible without retaining the full progress log.
+run_ctest() {
+    if [[ -n "${TESTS_REGEX}" ]]; then
+        ctest -R "${TESTS_REGEX}" "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure \
+            --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" \
+            >/dev/null
+    else
+        ctest "${EXTRA_CTEST_ARGS[@]}" --quiet --output-on-failure \
+            --repeat until-pass:2 -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" \
+            >/dev/null
+    fi
+}
+run_ctest || CTEST_RC=$?
 touch "${RECLAIM_STOP_FILE}"
 wait "${RECLAIM_PID}" 2>/dev/null || true
 rm -f "${RECLAIM_STOP_FILE}"
 RECLAIMED_SHARDS=$(cat "${RECLAIM_COUNT_FILE}" 2>/dev/null || echo 0)
 echo "=== Free space after tests: $(coverage_free_kib) KiB; ${RECLAIMED_SHARDS} shard(s) absorbed during the run ==="
 if [[ "${CTEST_RC}" -ne 0 ]]; then
-    echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="
+    echo "=== ctest failed with exit ${CTEST_RC}; replaying failed tests for diagnostics. Coverage report WILL be generated from partial profile data. ==="
+    ctest --rerun-failed --output-on-failure -j"${CTEST_JOBS}" --timeout "${CTEST_PER_TEST_TIMEOUT}" || true
 fi
 
 echo "=== Merging profiles ==="
@@ -593,13 +606,17 @@ llvm-cov report \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     | tee "${REPORT_DIR}/summary.txt"
 
-echo "=== llvm-cov show (HTML drilldown) ==="
-llvm-cov show \
-    "@${OBJ_RSP}" \
-    -instr-profile="${PROFDATA}" \
-    -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
-    -format=html \
-    -output-dir="${REPORT_DIR}"
+if [[ "${PULP_COVERAGE_SKIP_HTML:-0}" == "1" ]]; then
+    echo "=== Skipping llvm-cov HTML drilldown (report XML/LCOV remain enabled) ==="
+else
+    echo "=== llvm-cov show (HTML drilldown) ==="
+    llvm-cov show \
+        "@${OBJ_RSP}" \
+        -instr-profile="${PROFDATA}" \
+        -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
+        -format=html \
+        -output-dir="${REPORT_DIR}"
+fi
 
 # Emit Cobertura XML for Codecov + diff-cover via
 #   llvm-cov export --format=lcov  →  lcov_cobertura.py  →  Cobertura XML
