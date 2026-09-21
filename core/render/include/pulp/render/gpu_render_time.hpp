@@ -51,8 +51,7 @@ inline constexpr double kGpuRenderNanosecondsPerMillisecond = 1.0e6;
 ///
 /// Apple contributes no coarsening of its own: Apple Silicon GPU timestamps
 /// are already nanoseconds, with a 41.67 ns (24 MHz) hardware granularity.
-inline constexpr const char* kDawnTimestampQuantizationToggle =
-    "timestamp_quantization";
+inline constexpr const char* kDawnTimestampQuantizationToggle = "timestamp_quantization";
 
 /// Dawn toggles that must be DISABLED for the requested device features.
 ///

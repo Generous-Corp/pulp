@@ -1,8 +1,8 @@
-#include <pulp/render/gpu_surface.hpp>
-#include <pulp/render/gpu_render_time.hpp>
 #include <array>
-#include <vector>
+#include <pulp/render/gpu_render_time.hpp>
+#include <pulp/render/gpu_surface.hpp>
 #include <string>
+#include <vector>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
