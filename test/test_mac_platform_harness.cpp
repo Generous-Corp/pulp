@@ -11,20 +11,20 @@
 #include "mac_window_harness.hpp"
 
 #include <catch2/catch_test_macros.hpp>
-#include <pulp/view/input_events.hpp>
-#include <pulp/view/script_engine.hpp>
+#include <pulp/render/gpu_surface.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/design_import.hpp>
-#include <pulp/view/gesture.hpp>
 #include <pulp/view/design_sources.hpp>
+#include <pulp/view/gesture.hpp>
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/screenshot_compare.hpp>
+#include <pulp/view/script_engine.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
-#include <pulp/view/widgets.hpp>
-#include <pulp/view/buttons.hpp>
-#include <pulp/view/window_host.hpp>
-#include <pulp/render/gpu_surface.hpp>
 #include <pulp/view/widget_bridge.hpp>
-#include <pulp/state/store.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -741,7 +741,6 @@ TEST_CASE("mac GPU host reports submission evidence only after it presents a fra
     const auto png = pt::capture_back_buffer_png(*host);
     REQUIRE_FALSE(png.empty());
     REQUIRE(host->last_frame_gpu_submission_observed());
-
 }
 
 class ResizePaintProbe final : public View {
