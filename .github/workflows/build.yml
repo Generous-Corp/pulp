@@ -60,9 +60,15 @@ on:
 
 # Cancel superseded runs when a new commit lands on the same PR.
 # Stops stale build matrix runs (20-30 min each) from eating runner
-# capacity when a PR accumulates fixup commits. workflow_dispatch
-# runs share the same group so a manual retrigger cancels any
-# auto-triggered run in flight.
+# capacity when a PR accumulates fixup commits.
+#
+# A workflow_dispatch run does NOT share a group with the PR runs for the
+# same branch: the group keys on `github.ref`, which is `refs/heads/<branch>`
+# for workflow_dispatch but `refs/pull/<n>/merge` for pull_request. The two
+# therefore run side by side and neither cancels the other. Anything that
+# reaps duplicate runs must key on the event as well as the branch, or it
+# will cancel a deliberate manual dispatch as a phantom duplicate of the
+# PR run it never competed with.
 #
 # Push runs on main are exempt: they all share the `refs/heads/main` group, so
 # cancel-in-progress would let a rapid second merge kill the first run's

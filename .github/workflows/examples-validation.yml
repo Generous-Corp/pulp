@@ -233,7 +233,12 @@ jobs:
   gate:
     name: example-validation
     needs: [changes, validate, build-linux]
-    if: always()
+    # `!cancelled()` rather than `always()`: this workflow cancels in progress,
+    # and a job that keeps running through a cancellation holds the
+    # example-validation-<ref> group open so the superseding run can never
+    # start. Under `always()` a cancelled run also reports a spurious FAIL,
+    # because every upstream result reads `cancelled`.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Report validation outcome

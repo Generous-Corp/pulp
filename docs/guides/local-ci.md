@@ -1474,6 +1474,13 @@ Push runs are also exempt from `cancel-in-progress`: they share the
 `refs/heads/main` concurrency group, so cancelling a superseded one would kill
 its cache-save step exactly when main is busiest. PR runs still cancel.
 
+A `workflow_dispatch` run of `build.yml` does **not** share a group with that
+branch's PR runs. The group keys on `github.ref`, which is
+`refs/heads/<branch>` for a dispatch but `refs/pull/<n>/merge` for a
+`pull_request`, so the two coexist and neither cancels the other. Anything that
+sweeps duplicate runs must key on the event as well as the branch, or it will
+cancel a deliberate manual dispatch as a phantom duplicate.
+
 The `classify` job diffs an **event-dependent base**
 (`tools/scripts/resolve_classify_base.py`): a PR diffs
 `github.event.pull_request.base.sha`, a merge group diffs
@@ -1741,7 +1748,11 @@ The alias lane makes that worse than a slow check. It is the **last** job in a
 run and does one terminal jobs-API read, so a starved alias means the run never
 reaches a terminal state, holds its ref's `concurrency` group, and leaves the
 next push's run at `pending` with **zero jobs** — a wedge that survives
-re-pushes and clears only by cancelling the older run by hand.
+re-pushes and clears only by cancelling the older run by hand. Cancel the run
+on the *stale* head, the one that still has jobs: a plain
+`POST /actions/runs/<id>/cancel` returns an empty `{}` either way and will not
+move a run whose jobs were never assigned, so use `.../force-cancel` and read
+the run status back instead of trusting the response.
 
 This is the failure mode decision 4 of [`.agents/contract.toml`](../../.agents/contract.toml)
 already names: *self-hosted runner names are EPHEMERAL, never static; a
