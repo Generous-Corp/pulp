@@ -432,34 +432,87 @@ them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and ex
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
 
-### Editing a `gpu-vellum-handoff.yaml`-pinned path is a TWO-commit operation
+### A PR does not re-pin `gpu-vellum-handoff.yaml` — the version bot does
 
 `docs/status/gpu-vellum-handoff.yaml` pins every referenced Pulp path to an
-exact revision, object id and object type. Change one of those files and the
-pinned row goes stale, so `gpu-recipe-catalog-selftest` and
-`gpu-handoff-provenance-selftest` fail — **in CI, ~20 minutes later**. On
-2026-09-05 three separate PRs each discovered it that way in one night, and one
-of them additionally went `DIRTY` colliding with another PR's regenerated
-receipt, because the ledger is a serialization point every such PR must pass
-through.
+exact revision, object id and object type, and
+`docs/validation/gpu-handoff-provenance/receipt.json` binds itself to that
+ledger's exact bytes. Editing any pinned path stales both. That used to make
+every such PR carry a hand-run re-pin as a second commit, and the cost was
+larger than it looked: **~148 non-merge commits in 25 days changed only those
+two files**, in 124 distinct subject spellings. They also collide on
+github.com, where the local `pulp-gpu-ledger` merge driver cannot run — so two
+PRs that both re-pinned went `DIRTY` against each other, serializing on a
+generated artifact neither author had opinions about.
 
-The repair is a tool-generated identity refresh, never a hand edit:
+`version_at_land._refresh_derived` now regenerates the pair inside the
+`chore: bump versions` commit the release bot writes to `main`. That commit
+advances `main` by itself, so a re-pin there costs nobody a rebase.
 
-```bash
-python3 tools/scripts/gpu_handoff_provenance.py write   # regenerate
-python3 tools/scripts/gpu_handoff_provenance.py check   # verify (~25s, git log per row)
-```
+**So: edit a pinned path and push. Do not re-pin.** The rows go stale, and
+stale is survivable — provenance is ancestral, and currency is opt-in behind
+`PULP_GPU_HANDOFF_REQUIRE_CURRENT`, which nothing in `.github` sets.
 
-**Hand-resolving the receipt is the trap**: it passes the merge conflict and
-then fails the receipt's own checker. Merge first, then regenerate against the
-merged tree.
+"Survivable" is about gates, not about truth. `gpu_handoff_provenance.py check`
+is the strong currency claim — the one that asserts every pinned row names the
+blob HEAD actually holds — and between a merge that touches a pinned path and
+the next `chore: bump versions` commit it is **expected to be red on `main`**.
+That is the designed steady state, not a defect and not something to repair by
+hand: the bot's next bump regenerates the pair. No gate runs `check` (nothing in
+`.github/`, `.shipyard/config.toml` or a ctest command invokes it; the
+`gpu-handoff-provenance-selftest` ctest carries the currency assertion but skips
+it unless `PULP_GPU_HANDOFF_REQUIRE_CURRENT=1`), so a red `check` blocks nothing
+— it just means the ledger is between refreshes. Run it when you want the
+stronger claim, and read a red one against the clock rather than as a bug.
 
-`gates.sh` now runs `gpu_handoff_pin_freshness.py`, which is diff-scoped and
-sub-second and fails the push when a pinned path changed without the ledger
-being touched. It deliberately proves only *that* — it does not re-verify the
-identity fields, because doing so costs ~25s per push. A green gate means "you
-did not forget", not "the pins are correct"; the `check` command above is what
-proves the latter.
+Two things still belong to the PR:
+
+- **An editorial ledger change** — adding, removing or re-stating a pinned
+  path, and equally an edit to `authorities`, `upstream`, `cutover_trigger`,
+  `self_binding`, `stop_rules`, or an entry's `vellum_paths`,
+  `terminal_evidence`, `input_receipts` or `accepted_dispositions`. The bot
+  regenerates identities; it cannot make any of those decisions. Editorial is
+  the whole document minus the three derived identity fields, and all of it is
+  a legitimate in-PR ledger edit that still owes the regeneration:
+
+  ```bash
+  python3 tools/scripts/gpu_handoff_provenance.py write --receipt   # regenerate both
+  python3 tools/scripts/gpu_handoff_provenance.py check             # verify (~25s, git log per row)
+  ```
+
+  Pass `--receipt`. A bare `write` leaves the receipt naming bytes that no
+  longer exist. **Hand-resolving either file is the trap**: it passes the merge
+  conflict and then fails the receipt's own checker. Merge first, then
+  regenerate against the merged tree.
+
+- **A pinned path you deleted or renamed.** Staleness survives; a *missing*
+  path does not — the required gate goes red on it. Drop or move the row in the
+  same PR and regenerate.
+
+`gpu_handoff_pin_freshness.py` enforces exactly those two shapes, from both
+`gates.sh` and the pre-push hook: it fails an identity-only re-pin (ledger or
+receipt moved, the ledger's editorial content did not) and a pinned path
+deleted or renamed while the inventory still lists it. Diff-scoped and
+sub-second — an `ls-tree`/`show` pair per side and one `git diff
+--name-status`. It does not re-verify the identity fields; the `check` command
+above is what proves those.
+
+**It reports three outcomes, and `2` is one of them.** `0` is checked-and-clean,
+`1` is a violation, and `2` is *git could not answer, so nothing was checked* —
+an unresolvable `--base`, a deleted branch, a shallow clone, a typo. That third
+code exists because the gate reads its subject through `git`, and an empty
+changed-path list is how it spells clean: a swallowed non-zero return therefore
+reads as a pass, and the violation sails through with the gate looking green.
+The same split is in `silent_revert_guard.py`, which prints `HISTORY
+UNAVAILABLE` and exits `2` for the same reason.
+
+That matters when wiring it, because the two local surfaces route exit codes
+differently. `gates.sh` uses `if ! "$PYTHON" …`, so every non-zero already
+fails. The **pre-push hook enumerates codes in a `case`, and its `*)` arm prints
+"internal error" WITHOUT setting `fail`** — so an unmapped `2)` would print a
+line and let the push through, putting the blind spot back one layer out from
+the script that just closed it. Map every non-zero code a gate can return, and
+when you add an outcome to a gate, add its arm to the hook in the same change.
 
 ### `gates.sh` and the pre-push hook are two lists, not one
 
@@ -1007,9 +1060,10 @@ sentinel is chosen so that nothing accepts it.
 **Why it needed its own gate.** The two guards that look closest both miss it,
 and each misses it for a structural reason rather than an oversight:
 
-* `gpu_handoff_pin_freshness.py` fires when a pinned path changes and the ledger
-  does **not**. A sentinel merge changes the ledger, so it reads the sentinel as
-  the refresh it was waiting for.
+* `gpu_handoff_pin_freshness.py` no longer looks at staleness at all — it
+  rejects an in-PR re-pin and an orphaned pinned path. A sentinel merge leaves
+  the inventory unchanged, so the most it could say is "do not re-pin", which
+  is the opposite of the repair a sentinel needs.
 * `conflict_marker_check.py` looks for `<<<<<<<`. The driver's entire purpose is
   that there are none.
 
@@ -1020,9 +1074,9 @@ remove.
 load-bearing.** `gates.sh` is run by convention; it is not invoked by
 `.githooks/pre-push`, and `.shipyard/config.toml [validation.gates]` runs its own
 explicit script list rather than the file. A rule wired only into `gates.sh`
-therefore holds only for whoever remembered to run it — which is why
-`gpu_handoff_pin_freshness.py` (gate 6b2), wired that way, does not actually gate
-a push today.
+therefore holds only for whoever remembered to run it —
+`gpu_handoff_pin_freshness.py` (gate 6b2) sat in exactly that state until it was
+wired into the hook too, so neither surface can be assumed to inherit the other.
 
 ## Gate: gpu-provenance reachability (`hydrate_gpu_provenance_commits.py --verify-only`)
 
