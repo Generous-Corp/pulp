@@ -76,6 +76,7 @@
 // to avoid suppressing real issues.
 
 pub mod build_info;
+pub mod build_parallelism;
 pub mod bump;
 pub mod cmd;
 pub mod color;
