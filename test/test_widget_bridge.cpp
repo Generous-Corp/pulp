@@ -4776,6 +4776,25 @@ TEST_CASE("WidgetBridge binds shader scalar uniforms to live value channels",
     REQUIRE(knob->shader_uniforms()[0].v[0] == Catch::Approx(0.125f));
 }
 
+TEST_CASE("Canonical shader uniform binding reuses parameter transforms",
+          "[view][bridge][shader][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    store.add_parameter({1, "Gain", "", {0.0f, 1.0f, 0.25f}});
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform float gain; half4 main(float2 p) { return half4(gain); }');
+        globalThis.bound = bindShaderUniform('knob', 'gain', 'Gain', { scale: 2, clamp: false });
+    )");
+    REQUIRE(engine.evaluate("bound.success").getWithDefault<bool>(false));
+    bridge.service_frame_callbacks();
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_uniforms()[0].v[0] == Catch::Approx(0.5f));
+}
+
 TEST_CASE("Shader uniform bindings report declaration and source failures",
           "[view][bridge][shader]") {
     ScriptEngine engine;

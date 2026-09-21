@@ -487,6 +487,20 @@ bool WidgetBridge::parameter_id_for_name(const std::string& name,
     return resolve_param_id(name, out);
 }
 
+void WidgetBridge::clear_shader_uniform_bindings(const std::string& widget_id) {
+    std::erase_if(param_bindings_, [&](const ParamBinding& binding) {
+        return binding.widget_id == widget_id &&
+               binding.target == ParamBinding::Target::uniform;
+    });
+    if (auto* host = widget(widget_id) ? dynamic_cast<CustomShaderHost*>(widget(widget_id)) : nullptr) {
+        auto metadata = host->shader_value_bindings();
+        std::erase_if(metadata, [](const auto& binding) {
+            return binding.managed_by_param_binding;
+        });
+        host->set_shader_value_bindings(std::move(metadata));
+    }
+}
+
 std::vector<std::string> WidgetBridge::unbound_params() const {
     std::unordered_set<std::string> reached;
     for (const auto& attempt : binding_attempts_) {
@@ -534,6 +548,8 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
             target == ParamBinding::Target::scope
                 ? (dynamic_cast<SpectrumView*>(view) != nullptr ||
                    dynamic_cast<WaveformView*>(view) != nullptr)
+            : target == ParamBinding::Target::uniform
+                ? dynamic_cast<CustomShaderHost*>(view) != nullptr
             : target == ParamBinding::Target::meter
                 ? dynamic_cast<Meter*>(view) != nullptr
                 : dynamic_cast<Knob*>(view) != nullptr ||
@@ -563,8 +579,11 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
         // picture instead of reporting that the channel is the wrong kind.
         visit_value_channels([&](ValueChannelSet* channels) {
             if (channels == nullptr) return;
-            value_channel_found = target == ParamBinding::Target::scope
-                                      ? channels->vector(channel) != nullptr
+        value_channel_found = target == ParamBinding::Target::scope
+                                  ? channels->vector(channel) != nullptr
+                                  : target == ParamBinding::Target::uniform
+                                      ? (channels->scalar(channel) != nullptr ||
+                                         channels->meter(channel) != nullptr)
                                       : channels->meter(channel) != nullptr;
             for (const auto& info : channels->infos()) {
                 if (info.name == channel) { neutral = info.neutral; break; }
@@ -592,6 +611,11 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
         if (binding.target == ParamBinding::Target::scope) {
             if (auto* source = channels->vector(binding.value_channel))
                 binding.last_publish_seq = source->publish_seq();
+        } else if (binding.target == ParamBinding::Target::uniform) {
+            if (auto* source = channels->scalar(binding.value_channel))
+                binding.last_publish_seq = source->publish_seq();
+            else if (auto* source = channels->meter(binding.value_channel))
+                binding.last_publish_seq = source->publish_seq();
         } else if (auto* source = channels->meter(binding.value_channel)) {
             binding.last_publish_seq = source->publish_seq();
         }
@@ -612,6 +636,38 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
     return record_binding_attempt(
         widget_id, param_name, target,
         widget_present ? BindingOutcome::ok : BindingOutcome::deferred_widget_missing);
+}
+
+bool WidgetBridge::add_shader_uniform_binding(
+    const std::string& widget_id, const std::string& uniform_name,
+    const std::string& source, const choc::value::Value* transform) {
+    if (uniform_name.empty())
+        return record_binding_attempt(widget_id, source, BindingTarget::uniform,
+                                      BindingOutcome::empty_param_name);
+    const bool bound = add_param_binding(widget_id, source,
+                                         ParamBinding::Target::uniform, transform);
+    if (!bound) return false;
+    for (auto& binding : param_bindings_) {
+        if (binding.widget_id == widget_id &&
+            binding.target == ParamBinding::Target::uniform) {
+            binding.uniform_name = uniform_name;
+            break;
+        }
+    }
+    if (auto* host = dynamic_cast<CustomShaderHost*>(widget(widget_id))) {
+        auto metadata = host->shader_value_bindings();
+        auto it = std::find_if(metadata.begin(), metadata.end(),
+                               [&](const auto& item) { return item.uniform_name == uniform_name; });
+        CustomShaderHost::ShaderValueBinding item;
+        item.uniform_name = uniform_name;
+        item.managed_by_param_binding = true;
+        if (source.rfind("value:", 0) == 0) item.channel_name = source.substr(6);
+        else item.param_name = source;
+        if (it != metadata.end()) *it = std::move(item);
+        else metadata.push_back(std::move(item));
+        host->set_shader_value_bindings(std::move(metadata));
+    }
+    return true;
 }
 
 void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {

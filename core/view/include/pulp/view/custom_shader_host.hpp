@@ -33,6 +33,7 @@ public:
         std::uint32_t last_publish_seq = 0;
         std::chrono::steady_clock::time_point last_publish_at{};
         float neutral = 0.0f;
+        bool managed_by_param_binding = false;
     };
     struct ShaderScopeBinding {
         std::string channel_name;

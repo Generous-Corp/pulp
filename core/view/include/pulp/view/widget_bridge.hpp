@@ -642,6 +642,8 @@ private:
         /// Resolve it anew during every leased read so a hot swap cannot leave
         /// a source pointer from the retired processor generation cached here.
         std::string value_channel;
+        /// Shader uniform destination when target == BindingTarget::uniform.
+        std::string uniform_name;
         /// Staleness tracking. A channel that stops PUBLISHING decays to its
         /// declared neutral; one that publishes the same number forever does
         /// not. Comparing values cannot distinguish those, so watch the
@@ -687,6 +689,10 @@ private:
                            const std::string& param_name,
                            ParamBinding::Target target,
                            const choc::value::Value* transform);
+    bool add_shader_uniform_binding(const std::string& widget_id,
+                                   const std::string& uniform_name,
+                                   const std::string& source,
+                                   const choc::value::Value* transform);
     // Parse the optional JS transform object (`{db,dbMin,dbMax,scale,offset,
     // min,max,clamp}`) into a BindingTransform. Null / non-object → identity.
     static BindingTransform parse_transform(const choc::value::Value* v);
@@ -769,6 +775,7 @@ public:
                                 BindingTarget target,
                                 BindingOutcome outcome);
     bool parameter_id_for_name(const std::string& name, state::ParamID& out) const;
+    void clear_shader_uniform_bindings(const std::string& widget_id);
 
 private:
     std::vector<BindingAttempt> binding_attempts_;

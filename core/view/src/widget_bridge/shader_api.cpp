@@ -386,20 +386,10 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
                 return fail(BindingOutcome::unknown_param,
                             "No parameter named '" + source + "'");
         }
-        auto bindings = host->shader_value_bindings();
-        auto it = std::find_if(bindings.begin(), bindings.end(), [&](const auto& binding) {
-            return binding.uniform_name == uniform_name;
-        });
-        CustomShaderHost::ShaderValueBinding binding;
-        binding.uniform_name = std::move(uniform_name);
-        if (is_channel) binding.channel_name = channel_name;
-        else binding.param_name = std::move(source);
-        binding.neutral = neutral;
-        if (it != bindings.end()) *it = std::move(binding);
-        else bindings.push_back(std::move(binding));
-        host->set_shader_value_bindings(std::move(bindings));
-        self.record_binding_attempt(id, is_channel ? channel_name : source,
-                                    BindingTarget::uniform, BindingOutcome::ok);
+        const choc::value::Value* transform =
+            args.numArgs >= 4 && args[3] != nullptr ? args[3] : nullptr;
+        if (!self.add_shader_uniform_binding(id, uniform_name, source, transform))
+            return shader_result(false, "Shader uniform binding was rejected");
         self.request_repaint();
         return shader_result(true, "");
     });
@@ -409,6 +399,7 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         auto* v = self.widget(id);
         auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
         if (!host) return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        self.clear_shader_uniform_bindings(id);
         host->set_shader_value_bindings({});
         self.request_repaint();
         return shader_result(true, "");
@@ -541,7 +532,7 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
     // without a second API shape.
     self.engine_.evaluate(
         "function bindShaderUniform(id, uniformName, source, transform) {"
-        " return bindWidgetShaderUniform(id, uniformName, source);"
+        " return bindWidgetShaderUniform(id, uniformName, source, transform);"
         "}");
 }
 

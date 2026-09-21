@@ -34,6 +34,7 @@ void WidgetBridge::service_shader_value_bindings() {
                       !host->shader_scope_binding().has_value()))
             continue;
         for (auto& binding : host->shader_value_bindings()) {
+            if (binding.managed_by_param_binding) continue;
             std::uint32_t publish_seq = 0;
             float value = binding.neutral;
             bool found = false;
@@ -210,6 +211,7 @@ void WidgetBridge::service_param_bindings() {
     }
 
     struct ValueBindingSnapshot {
+        float scalar = 0.0f;
         MeterFrame meter{};
         VectorFrame vector{};
         std::uint32_t publish_seq = 0;
@@ -245,6 +247,16 @@ void WidgetBridge::service_param_bindings() {
                     snapshot.vector = source->read();
                     snapshot.found = true;
                 }
+            } else if (binding.target == ParamBinding::Target::uniform) {
+                if (auto* source = channels->scalar(binding.value_channel)) {
+                    snapshot.publish_seq = source->publish_seq();
+                    snapshot.scalar = source->read();
+                    snapshot.found = true;
+                } else if (auto* source = channels->meter(binding.value_channel)) {
+                    snapshot.publish_seq = source->publish_seq();
+                    snapshot.scalar = source->read().rms[0];
+                    snapshot.found = true;
+                }
             } else if (auto* source = channels->meter(binding.value_channel)) {
                 snapshot.publish_seq = source->publish_seq();
                 snapshot.meter = source->read();
@@ -257,6 +269,41 @@ void WidgetBridge::service_param_bindings() {
     for (std::size_t i = 0; i < param_bindings_.size(); ++i) {
         auto& binding = param_bindings_[i];
         View* widget_view = widget(binding.widget_id);
+        if (binding.target == ParamBinding::Target::uniform) {
+            auto* host = widget_view ? dynamic_cast<CustomShaderHost*>(widget_view) : nullptr;
+            if (!host || binding.uniform_name.empty()) continue;
+            auto metadata = std::find_if(
+                host->shader_value_bindings().begin(),
+                host->shader_value_bindings().end(),
+                [&](const auto& item) { return item.uniform_name == binding.uniform_name &&
+                                                item.managed_by_param_binding; });
+            if (metadata != host->shader_value_bindings().end() &&
+                metadata->last_publish_at.time_since_epoch().count() != 0)
+                binding.last_publish_at = metadata->last_publish_at;
+            float value = binding.neutral;
+            if (binding.value_channel.empty()) {
+                value = store_.get_normalized(binding.param_id);
+            } else {
+                auto& snapshot = snapshots[i];
+                binding.neutral = snapshot.neutral;
+                if (snapshot.generation_identity != 0 &&
+                    binding.value_generation_identity != snapshot.generation_identity) {
+                    binding.value_generation_identity = snapshot.generation_identity;
+                    binding.last_publish_seq = snapshot.publish_seq;
+                    binding.last_publish_at = std::chrono::steady_clock::now();
+                }
+                if (snapshot.found && !WidgetBridge::value_channel_is_stale(binding, snapshot.publish_seq))
+                    value = snapshot.scalar;
+            }
+            value = binding.transform.apply(value);
+            if (host->set_shader_uniform_value(binding.uniform_name, value)) any_changed = true;
+            if (metadata != host->shader_value_bindings().end()) {
+                metadata->last_publish_at = binding.last_publish_at;
+                metadata->last_publish_seq = binding.last_publish_seq;
+                metadata->neutral = binding.neutral;
+            }
+            continue;
+        }
         if (!widget_view) continue;
         // Precedence: the binding owns the widget's value except while the user
         // is dragging it. Reassert the source on the first frame after release.
