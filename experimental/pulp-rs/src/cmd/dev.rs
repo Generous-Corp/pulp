@@ -401,6 +401,42 @@ mod tests {
     }
 
     #[test]
+    fn run_emits_a_bounded_job_count_on_the_build() {
+        // `pulp dev` builds through orchestrate::build_with, so the bound has
+        // to reach it there — a fix applied only to `pulp build`'s own call
+        // site would leave this path flagless.
+        //
+        // One guard for every variable: EnvVarGuard holds a single global
+        // mutex, so a second guard in the same test would deadlock.
+        let _env = EnvVarGuard::set_many(&[
+            (crate::fallthrough::DISABLE_ENV, Some("1")),
+            ("PULP_TARTCI_LEASES", Some("0")),
+            ("PULP_BUILD_JOBS", None),
+            ("CMAKE_BUILD_PARALLEL_LEVEL", None),
+            ("PULP_BUILD_MEM_BUDGET_MB", Some("1536")),
+        ]);
+        let td = tempfile::tempdir().unwrap();
+        write_standalone_fixture(td.path());
+        let rec = RecordingSpawner::ok();
+        let mut buf = Vec::new();
+        let args = parse_args(&[]);
+        run(td.path(), &args, &rec, &mut buf).unwrap();
+
+        let calls = rec.calls.borrow();
+        let build = calls
+            .iter()
+            .find(|inv| inv.program == "cmake" && inv.args.iter().any(|a| a == "--build"))
+            .expect("expected a cmake --build invocation");
+        let idx = build
+            .args
+            .iter()
+            .position(|a| a == "--parallel")
+            .unwrap_or_else(|| panic!("dev build carries no job bound: {:?}", build.args));
+        // A 1.5 GiB budget is one compile job's worth, on any host.
+        assert_eq!(build.args[idx + 1], "1");
+    }
+
+    #[test]
     fn run_emits_watch_loop_stub_when_no_launch_target() {
         let _fallthrough = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();

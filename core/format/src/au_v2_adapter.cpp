@@ -41,6 +41,10 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
             // names without a per-block copy (which would allocate on the audio
             // thread).
             descriptor_ = processor_->descriptor();
+            // Discover the plug-in's bundled factory presets. Empty for a
+            // plug-in that ships none, and for any build not loaded from a
+            // bundle (a unit-test binary, a standalone host).
+            factory_presets_.bind(store_, descriptor_.manufacturer, descriptor_.name);
 
             // Resolve host accommodations once via the runtime policy.
             const auto host_info = detect_host_info();
@@ -749,6 +753,34 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
                         kAudioUnitScope_Global, 0);
     }
 
+    return noErr;
+}
+
+// ── Factory presets ──────────────────────────────────────────────────────
+
+OSStatus PulpAUEffect::GetPresets(CFArrayRef* outData) const {
+    return factory_presets_.copy_presets(outData);
+}
+
+OSStatus PulpAUEffect::NewFactoryPresetSet(const AUPreset& inNewFactoryPreset) {
+    if (inNewFactoryPreset.presetNumber < 0)
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    const auto index = static_cast<std::size_t>(inNewFactoryPreset.presetNumber);
+    const AUPreset* canonical = factory_presets_.preset_at(index);
+    if (canonical == nullptr)
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    // Load first: the base class only records the selection, so without this
+    // the host relabels its menu and the plug-in keeps its old parameters.
+    // The store's host bridge notifies the host of every value that moved.
+    if (!factory_presets_.load(index))
+        return kAudioUnitErr_InvalidPropertyValue;
+
+    // Make OUR record current rather than the host's copy. The host may pass a
+    // name that never came from this table, and SetAFactoryPresetAsCurrent
+    // retains whatever string it is handed.
+    SetAFactoryPresetAsCurrent(*canonical);
     return noErr;
 }
 

@@ -503,11 +503,20 @@ set. Verified by span-site inspection:
 | Windows plug-in editor (`plugin_view_host_win.cpp`) | yes | yes (shared `PluginFrameRenderer`) |
 | Linux plug-in editor (`plugin_view_host_linux.cpp`) | **no** | yes (shared renderer) |
 | macOS plug-in editor (`plugin_view_host_mac.mm`) | **no** | **no** — it has its own `render_frame()` and no `PULP_TRACE` sites |
-| macOS standalone app (`window_host_mac.mm`) | yes | no |
+| macOS standalone app (`window_host_mac.mm`) | yes | yes (own span site) |
 
 `gpu_submit` comes from `core/render/src/skia_surface*.cpp` and `gpu_present`
 from `gpu_surface_dawn.cpp`, i.e. the render layer rather than the host, so they
 can appear where the host-level spans do not.
+
+That ownership is exclusive: a host must NOT bracket
+`skia_surface_->end_frame()` / `gpu_surface_->end_frame()` with a span of its
+own. The surface already opens one on every path, so a host-level wrapper emits
+the stage twice per frame — and only on the paths that reach it, since a
+bail-out that presents without submitting skips the wrapper entirely. The
+per-frame count then differs between paths, defeating any contract that counts
+one span per stage per frame. `gpu_acquire` is the one stage a host does own:
+Dawn's `begin_frame()` opens no span.
 
 The practical consequence: **do not read a missing `frame` span on a macOS
 plug-in editor as a regression** — that host has never emitted one. Instrument
@@ -660,6 +669,12 @@ manufacture a Perfetto file or native-present event. Do not collect until the
 protected product policy binds all role thresholds and the constrained adapter,
 configuration, support matrix, and authentic A1 evidence; the current canonical
 receipt is truthfully blocked on those two inputs.
+
+The DPR native adapter is **snapshot-executed**, so it must stay stdlib-only at
+module scope. `gpu_dpr_runner.run_cells` copies the adapter alone to
+`run_dir/tooling/adapters/<key>/<nonce>` and executes that lone copy, so a
+module-scope sibling import such as `import gpu_dpr_evidence` passes every in-tree
+test and still breaks the product path.
 
 The product health-transition spans are real runtime producers even though the
 macros compile out with `PULP_TRACING=OFF`. Terminal A3 separately requires the
