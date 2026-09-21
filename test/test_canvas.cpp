@@ -1763,6 +1763,35 @@ TEST_CASE("SkiaCanvas sksl post-effect binds arbitrary named uniforms",
     REQUIRE(SkColorGetR(c) < 230);
 }
 
+TEST_CASE("Shader scope texture preserves sub-8-bit F16 precision",
+          "[canvas][skia][shader][value-channel]") {
+    const auto info = SkImageInfo::Make(2, 1, kRGBA_F16_SkColorType,
+                                        kPremul_SkAlphaType,
+                                        SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    auto data = std::make_shared<Canvas::ShaderDataTexture>();
+    data->name = "scope";
+    data->samples = {0.5f, 0.5f + 1.0f / 1024.0f};
+    data->count = 2;
+    data->live = true;
+    Canvas::ShaderDrawOptions options;
+    options.data_texture = data;
+    REQUIRE(canvas.draw_with_sksl(
+        "uniform float2 resolution; uniform shader scope; uniform float scope_count; "
+        "half4 main(float2 p) { float x = (p.x + 0.5) / resolution.x; "
+        "return half4(scope.eval(float2(x, 0.5)).r, 0, 0, 1); }",
+        0, 0, 2, 1, options));
+    SkPixmap pixels;
+    REQUIRE(surface->peekPixels(&pixels));
+    const auto left = pixels.getColor4f(0, 0).fR;
+    const auto right = pixels.getColor4f(1, 0).fR;
+    REQUIRE(right > left);
+    const auto quantize8 = [](float value) { return static_cast<int>(value * 255.0f + 0.5f); };
+    REQUIRE(quantize8(data->samples[0]) == quantize8(data->samples[1]));
+}
+
 // The post-effect layer must support a composite blend mode — the additive glow
 // (`lighter`/kPlus) is the audio-UI pattern — not source-over only.
 TEST_CASE("SkiaCanvas sksl post-effect composites with an additive blend mode",
