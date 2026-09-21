@@ -319,9 +319,12 @@ def test_build_uses_a_bounded_fleet_wide_parallelism_cap() -> None:
         'tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" '
         '--config Release' in text
     )
+    # Shared hosts use the governed wrapper, which derives the cap at runtime;
+    # only the fixed-shape Windows leg keeps its literal four-way build.
     assert not re.search(
         r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR" --config Release\s*$',
         text,
+    )
     )
 
 
