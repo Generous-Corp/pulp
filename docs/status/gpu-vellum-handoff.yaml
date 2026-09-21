@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "39802043e0b2022aa8f286b30c4e76ac73bf7d75",
-          "object_id": "fe29a5aef8b2e63ff0aea126084f9892ec449ae5",
+          "revision": "c388dedf513a6c731d66988a369a322bb516890e",
+          "object_id": "9aea6f3d3a3c56e906f7305b6599351a6810d61b",
           "object_type": "blob"
         },
         {
@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "6c9e342744e538656804890368882d01ccfb2a1a",
-          "object_id": "be2147188ef751d84e4de9db726125e908c02962",
+          "revision": "c017adf4ab74efc7c37a3c11be92fab3327cd535",
+          "object_id": "f8a3aa023ab36fd696faad58043dc67d34261a52",
           "object_type": "blob"
         },
         {
