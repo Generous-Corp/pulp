@@ -1,0 +1,156 @@
+{
+  "id": "sample-region-control-operations",
+  "title": "Sample-region graph read and edit are exposed through unified live control",
+  "classification": "live_product_control",
+  "delivery_state": "pending",
+  "claim_id": "c4-sample-region-control-20260921",
+  "owned_paths": [
+    "docs/status/sequencer-exposure/rows/sample-region-control-operations.json",
+    "docs/reference/development-inspector-capabilities.md",
+    "examples/capability-control/control-examples.json",
+    "examples/capability-control/generated/cli-walkthrough.sh",
+    "examples/capability-control/generated/mcp-tools.jsonl",
+    "inspect/CMakeLists.txt",
+    "inspect/include/pulp/inspect/capability_definitions.inc",
+    "inspect/include/pulp/inspect/control_registry_digest.inc",
+    "inspect/include/pulp/inspect/control_sample_region_edit_executor.hpp",
+    "inspect/include/pulp/inspect/control_sample_region_read_executor.hpp",
+    "inspect/include/pulp/inspect/control_sample_region_target.hpp",
+    "inspect/src/control_manifest.cpp",
+    "inspect/src/control_sample_region_edit_executor.cpp",
+    "inspect/src/control_sample_region_read_executor.cpp",
+    "inspect/src/control_sample_region_schemas.hpp",
+    "inspect/src/control_sample_region_target.cpp",
+    "test/cmake/sample_region_control_tests.cmake",
+    "test/cmake/sample_region_delivery_tests.cmake",
+    "test/test_control_manifest.cpp",
+    "test/test_control_sample_region.cpp",
+    "test/test_mcp_control_adapter.cpp",
+    "tools/cmake/PulpControlShipping.cmake",
+    "tools/cmake/check_control_shipping_artifact.cmake"
+  ],
+  "evidence": [
+    {
+      "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+      "needles": [
+        "dev.pulp.graph/sample-region.read@1",
+        "dev.pulp.graph/sample-region.edit@1"
+      ]
+    },
+    {
+      "path": "inspect/src/control_manifest.cpp",
+      "needles": [
+        "GraphSampleRegionRead",
+        "GraphSampleRegionEdit"
+      ]
+    },
+    {
+      "path": "test/test_control_sample_region.cpp",
+      "needles": [
+        "sample-region",
+        "state_retained_count"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The inspect control contract and bounded schemas are shipped through the control runtime; final installed-host reachability remains gated by the standalone composition proof.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "inspect/include/pulp/inspect/control_sample_region_target.hpp",
+          "needles": [
+            "ControlSampleRegionTarget"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "These operations edit a live graph through the generic control call surface, not a persisted timeline document."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "These operations are projected by the live control MCP catalog rather than the offline timeline session tools."
+    },
+    "live_product_control": {
+      "disposition": "exposed",
+      "rationale": "The registry, bounded schemas, read/edit executors, receipt binding, generation checks, and MCP/CLI projections provide one authoritative live-control surface; standalone-host composition and protected end-to-end verification remain open until the owning host path is released.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "inspect/include/pulp/inspect/capability_definitions.inc",
+          "needles": [
+            "GraphSampleRegionRead",
+            "GraphSampleRegionEdit"
+          ]
+        },
+        {
+          "kind": "operation_definition",
+          "path": "inspect/src/control_manifest.cpp",
+          "needles": [
+            "graph/sample-region.read",
+            "graph/sample-region.edit"
+          ]
+        },
+        {
+          "kind": "executor_binding",
+          "path": "inspect/src/control_sample_region_read_executor.cpp",
+          "needles": [
+            "make_control_sample_region_read_executor",
+            "dev.pulp.graph/sample-region.read@1"
+          ]
+        },
+        {
+          "kind": "profile_policy",
+          "path": "inspect/src/control_sample_region_target.cpp",
+          "needles": [
+            "InvalidRequest",
+            "ResourceExhausted"
+          ]
+        },
+        {
+          "kind": "cli_projection",
+          "path": "tools/cli/cmd_control.cpp",
+          "needles": [
+            "resolve_control_operation",
+            "validate_control_json_schema"
+          ]
+        },
+        {
+          "kind": "mcp_projection",
+          "path": "tools/mcp/mcp_control_tool_catalog.cpp",
+          "needles": [
+            "operation_tool_name",
+            "control_operation_registry"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_control_sample_region.cpp",
+          "needles": [
+            "state_retained_count",
+            "graph_generation"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "This packet adds runtime graph-control operations; design-time sample-region discovery is carried by the separate D4 capability row."
+    }
+  }
+}
