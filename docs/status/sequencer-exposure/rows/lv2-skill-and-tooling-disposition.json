@@ -6,7 +6,6 @@
   "claim_id": "3918578f-ae7d-4a75-b358-76636d5fd691",
   "owned_paths": [
     ".agents/skills/lv2/SKILL.md",
-    "docs/status/pulp-tooling-disposition.json",
     "docs/status/sequencer-exposure/rows/lv2-skill-and-tooling-disposition.json"
   ],
   "evidence": [
