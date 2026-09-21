@@ -231,6 +231,7 @@ class GpuConvolver : public GpuAudioNode {
     std::vector<float> ir_;
     uint32_t fft_size_ = 0;
     std::uint8_t trial_requested_path_ = 0; // detail::SharedIoRequest::Auto
+    std::uint64_t trial_generation_ = 1;
     bool trial_configured_ = false;
     bool trial_enable_trace_ = false;
     bool trial_capture_admissions_ = false;
