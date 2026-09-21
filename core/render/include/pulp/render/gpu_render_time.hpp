@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace pulp::render {
 
@@ -27,15 +28,52 @@ namespace pulp::render {
 /// fallback Skia measures first-pass-begin → last-pass-end of the recording
 /// and excludes non-pass work (texture uploads/copies) and present.
 
-/// Nanoseconds per millisecond. WebGPU timestamps resolve in nanoseconds and
-/// Skia reports `results[1] - results[0]` directly, so no per-device period.
+/// Nanoseconds per millisecond. Skia reports `results[1] - results[0]`
+/// verbatim, but Dawn is not a passthrough: it scales raw ticks by a
+/// per-device period and then, unless the toggle below is disabled, masks the
+/// low 16 bits of every endpoint.
 inline constexpr double kGpuRenderNanosecondsPerMillisecond = 1.0e6;
+
+/// Dawn's `timestamp_quantization` toggle, which defaults to ON in native Dawn
+/// (not only in Chrome) and ANDs every resolved timestamp with 0xFFFF0000 —
+/// truncating each endpoint to a multiple of 65536 ns. It exists to stop
+/// untrusted web content building a high-resolution timer; Pulp runs its own
+/// shaders in its own process, so the mitigation buys nothing here and costs
+/// the metric roughly three orders of magnitude of resolution.
+///
+/// Two consequences worth knowing if you ever read a sample taken with it on:
+///   * Both endpoints truncate independently, so the error has zero mean. The
+///     MEAN of many frames converges on the true duration; a min or a median
+///     does not, at any sample count.
+///   * A frame faster than 65536 ns reports exactly 0 and is discarded below
+///     as "no sample", which preferentially drops the FAST frames and biases
+///     even the mean upward.
+///
+/// Apple contributes no coarsening of its own: Apple Silicon GPU timestamps
+/// are already nanoseconds, with a 41.67 ns (24 MHz) hardware granularity.
+inline constexpr const char* kDawnTimestampQuantizationToggle =
+    "timestamp_quantization";
+
+/// Dawn toggles that must be DISABLED for the requested device features.
+///
+/// Requesting timestamp queries without disabling quantization yields samples
+/// that are technically present and numerically useless.
+[[nodiscard]] inline std::vector<const char*>
+gpu_surface_disabled_toggles(bool timestamp_query_requested) {
+    std::vector<const char*> disabled;
+    if (timestamp_query_requested) {
+        disabled.push_back(kDawnTimestampQuantizationToggle);
+    }
+    return disabled;
+}
 
 /// Convert a Graphite `GpuStats::elapsedTime` sample into a millisecond
 /// duration. Returns `std::nullopt` — meaning "no usable sample this frame" —
 /// when the finished-with-stats callback did not succeed, or when the elapsed
-/// time is zero (Skia surfaces 0 when no pass was timestamped, the timer setup
-/// failed, or the work was effectively zero/quantized — never a real sample).
+/// time is zero (Skia surfaces 0 when no pass was timestamped or the timer
+/// setup failed — never a real sample). This guard is only correct while
+/// quantization is disabled; with it on, a genuinely fast frame also reports
+/// 0 and is wrongly discarded.
 [[nodiscard]] inline std::optional<double>
 gpu_render_ns_to_ms(std::uint64_t elapsed_ns, bool callback_ok) {
     if (!callback_ok || elapsed_ns == 0) {

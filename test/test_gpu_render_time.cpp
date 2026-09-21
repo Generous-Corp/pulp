@@ -9,6 +9,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <string>
+
 #include <pulp/render/gpu_render_time.hpp>
 #include <pulp/render/render_pass.hpp>
 
@@ -182,4 +184,20 @@ TEST_CASE("RenderPassManager handles empty pass endings and disabled budgets",
     REQUIRE(rpm.passes().front().cpu_time_ms() == 100.0f);
     REQUIRE(rpm.total_time_ms() == 100.0f);
     REQUIRE_FALSE(rpm.over_budget());
+}
+
+TEST_CASE("timestamp queries disable Dawn's quantization toggle",
+          "[render][gpu-render-time]") {
+    // Dawn defaults `timestamp_quantization` to ON, masking every resolved
+    // timestamp with 0xFFFF0000. Asking for timestamp queries while leaving it
+    // on yields samples quantized to 65536 ns — present, but useless.
+    auto with_timestamps = gpu_surface_disabled_toggles(true);
+    REQUIRE(with_timestamps.size() == 1);
+    REQUIRE(std::string(with_timestamps.front())
+            == std::string(kDawnTimestampQuantizationToggle));
+
+    // Nothing is disabled when no timestamps were requested: the toggle only
+    // matters to the timing path, so a plain render device keeps Dawn's
+    // defaults untouched.
+    REQUIRE(gpu_surface_disabled_toggles(false).empty());
 }
