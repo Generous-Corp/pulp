@@ -194,6 +194,34 @@ the shared trial as an eligible, prepared `SharedMemory` path with provider
 its 2/12 terminal completion count is a lifecycle/completion gap, not a
 provider-unavailable fallback classification.
 
+### Formatting follow-up rerun (2026-09-20)
+
+The initial receipt above is preserved as superseded evidence. The four source
+files were then normalized with the repository clang-format so the changed-line
+format gate can pass. The focused rerun produced the same screening result and
+the same benchmark executable bytes:
+
+```text
+source_sha256:
+  core/gpu_audio/src/detail/staged_async_trace_ledger.hpp 4685dfcc77fd58556e381fb4b4835f8b62aab60e08d67d4a5965eb6ca42e2c28
+  core/gpu_audio/src/gpu_convolver.cpp 27e2e5fdf766bd37a96f2b013261908088ae967d33ae7c4ee9c3bd64124a839c
+  test/test_gpu_audio_p4_matched_convolution_benchmark.cpp 6b794cc992035de7d36ed522b96efd5dae5c5be02a62eb82a36f0d46000dd542
+  test/test_gpu_audio_trace.cpp e2e1e53cae9b0d2163be9495559be9f976236dd72d4a773e29c86a1a8b884b7a
+receipt_sha256: 48f2fd9a5e327e2ecd34149c8b589900835ea1d69ce27ef00b6286d9d6076d91
+stderr_sha256: 9591e15c3c26f12180d2448eae87586ed73e841fd15db149c480b32f7c42c19e
+executable_sha256: 116b4e0ee1221ef8b548dfa63435a9bac4d6e8051cf0c930f5ad7d837a7312a7
+exit: 1
+status: screening_failed
+staged_terminal_records: 12
+shared_terminal_records: 2
+terminal_records_required: 12
+```
+
+The focused CTest run remains 8/9: all trace and exact-provider identity
+fixtures pass, while the matched benchmark intentionally fails its incomplete
+2/12 shared terminal-record gate. The formatted rerun is still a diagnostic;
+it does not emit a raw receipt or a performance verdict.
+
 ## Stop condition
 
 Until the seam and benchmark exist, the honest status is **screening only**:
