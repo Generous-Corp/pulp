@@ -429,7 +429,17 @@ function __replayAriaAttributes__(el) {
     // appendChild) leaves every freshly mounted button in. Without this the
     // mark would only ever land on an element whose author happened to write
     // the attribute after mounting it.
-    if (el._attributes["aria-haspopup"] !== undefined
+    //
+    // `role` and `aria-modal` are the OVERLAY half of the same pair —
+    // `aria-haspopup` says "I OPEN an overlay", `role=menu|listbox|tree|grid|
+    // dialog|alertdialog` and `aria-modal="true"` say "I AM one" — and they
+    // need the replay for the identical reason. A React-materialized menu
+    // writes its role before the node is mounted, so without this the claim
+    // never happens and the panel is left to the CSS-shape inference, which
+    // claims click-through by design.
+    if ((el._attributes["aria-haspopup"] !== undefined
+         || el._attributes["role"] !== undefined
+         || el._attributes["aria-modal"] !== undefined)
         && el.style && el.style._reevaluateOverlay) {
         el.style._reevaluateOverlay();
     }
@@ -1054,6 +1064,15 @@ Element.prototype.cloneNode = function(deep) {
 
 Element.prototype.setAttribute = function(name, value) {
     this._attributes[name] = String(value);
+    // Deliberately NOT part of the exclusive chain below: `role` already has a
+    // branch there that resets View::access_role_, and folding the overlay
+    // re-evaluation into an `else if` on the same name silently shadows it —
+    // the accessibility slot then stops tracking the attribute, with nothing
+    // in the overlay behaviour looking wrong.
+    if ((name === "role" || name === "aria-modal") && this.style
+        && this.style._reevaluateOverlay) {
+        this.style._reevaluateOverlay();
+    }
     if (name === "id") this.id = value;
     else if (name === "class") this.className = value;
     else if (name.indexOf("data-") === 0) {
@@ -1219,6 +1238,12 @@ Element.prototype.getAttribute = function(name) {
 Element.prototype.removeAttribute = function(name) {
     var was = this._attributes[name];
     delete this._attributes[name];
+    // Separate pass, for the same reason as in setAttribute: `role` also owns
+    // a branch in the exclusive chain below.
+    if ((name === "role" || name === "aria-modal") && was !== undefined
+        && this.style && this.style._reevaluateOverlay) {
+        this.style._reevaluateOverlay();
+    }
     if (name.indexOf("data-") === 0) {
         delete this._dataset[_camelCase(name.slice(5))];
         // Clearing `data-overlay` may release the auto-claim if no CSS shape
