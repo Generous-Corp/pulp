@@ -113,8 +113,9 @@ publish-to-consumable timing, transfer counters, and source/kernel/plan
 digests remain explicitly unavailable; `performance_verdict` is always
 `unassigned`, and the summary records `raw_receipt: "not_emitted"`. This is a
 screening diagnostic, not a P4 raw receipt or a realtime, latency, throughput,
-or CPU-load result. The producer worktree has no configured runtime/build, so
-the target has not been executed on a physical Apple Silicon provider here.
+or CPU-load result. The paced follow-up below records the exact Release
+executable, output, and provider-identity hashes used on the Apple Silicon
+host.
 
 ## Downstream GPU-NAM audit boundary
 
@@ -138,7 +139,7 @@ record provider and SDK identity, and run explicit fallback-priming and
 lifecycle checks. None of those checks may be inferred from the matched
 screening output or represented as `pulp.gpu-audio.p4.raw.v1` evidence.
 
-## Observed host screening run (2026-09-20)
+## Observed host screening run (burst diagnostic, 2026-09-20)
 
 The Release publication build completed for
 `pulp-gpu-audio-p4-matched-convolution-benchmark`,
@@ -155,7 +156,7 @@ matched executable was then run with its stdout and stderr preserved under
 
 ```text
 build-gpu-publish/test/pulp-gpu-audio-p4-matched-convolution-benchmark \
-  > docs/validation/gpu-audio-p4-matched-screening-20260920/receipt.jsonl \
+  > docs/validation/gpu-audio-p4-matched-screening-20260920/receipt-burst-screening.jsonl \
   2> docs/validation/gpu-audio-p4-matched-screening-20260920/run.stderr
 exit=1
 ```
@@ -222,11 +223,60 @@ fixtures pass, while the matched benchmark intentionally fails its incomplete
 2/12 shared terminal-record gate. The formatted rerun is still a diagnostic;
 it does not emit a raw receipt or a performance verdict.
 
+### Paced screening rerun (2026-09-20)
+
+The benchmark-only follow-up waits one declared 32-frame block period
+(`32 / 48000 s`) after each callback. This removes the artificial burst that
+filled the fixed ingress queue while leaving runtime/provider code unchanged.
+The paced JSONL is the canonical receipt at
+`docs/validation/gpu-audio-p4-matched-screening-20260920/receipt.jsonl`; the
+prior formatted burst receipt remains at
+`receipt-burst-screening.jsonl`.
+
+The direct exact-provider executable completed screening:
+
+```text
+status: screening_complete
+performance_verdict: unassigned
+staged_records: 12
+shared_records: 32
+staged_terminal_records: 12
+shared_terminal_records: 12
+terminal_records_required: 12
+staged_misses: 0
+shared_misses: 10
+raw_receipt: not_emitted
+```
+
+Receipt and identity bindings for this run are:
+
+```text
+source_commit: d619e6c6e05c247739a029a2b70a262b19966ebe
+receipt_sha256: 84d39fd73f146ef28b8a89e831b53a801829ad371cb43e0bd50570e1085dd127
+stderr_sha256: 9591e15c3c26f12180d2448eae87586ed73e841fd15db149c480b32f7c42c19e
+benchmark_executable_sha256: 63deef5ba87037cc4ca74188bd8f5aca64f4214b2be1491d0fb795a3e68e0d11
+provider_identity_receipt_sha256: 6f25b897e618813a6e4578d86f736e184ea982994f0b73fc83a94e67deb94288
+provider_identity_fixture_executable_sha256: bb28e02b3897da2dd9d2fa09ed3531c913b46f98c6b802bbe980346cb4b71ca3
+provider_asset_sha256: 0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9
+linked_dawn_archive_sha256: 73727ddf86ffc34eea6fb6392d8d688f44e317ff37b3bb421f8223c8b8815dc9
+dawn_revision: f91da75afe31d4d6f47a6da307e1fbabd1b1691a
+```
+
+The provider identity fixture was passed for the same configured build. The
+standalone benchmark was run directly because the generic CTest invocation
+requested an unavailable provider-path dependency (`provider_path_missing`);
+that CTest result is not used as screening evidence. The paced result proves
+complete terminal-record observation with ten shared realtime deadline misses;
+it does not assign a performance verdict, emit `pulp.gpu-audio.p4.raw.v1`, or
+prove strict realtime suitability.
+
 ## Stop condition
 
-Until the seam and benchmark exist, the honest status is **screening only**:
-shared-memory correctness and lifecycle/Perfetto diagnostics are available;
-strict staged-vs-shared P4 latency or realtime suitability is not yet measured.
+The seam and benchmark now produce a complete paced screening receipt:
+shared-memory terminal records are observable, but strict staged-vs-shared P4
+latency, realtime suitability, and raw-campaign verdict statistics remain
+unmeasured. Keep the status **screening only** until a strict raw writer has
+honest callback/result timing and transfer provenance.
 
 ## Raw-writer contract gap
 
