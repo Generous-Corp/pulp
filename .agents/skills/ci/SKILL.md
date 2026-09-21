@@ -1479,6 +1479,47 @@ re-introduces afternoon false alarms. Rationale + operator surface:
 [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) (the `config-doc`
 gate maps the workflow and the script to that guide).
 
+### …but the same sweep DOES name the label, once a job is already stalled on it
+
+The paragraph above forbids a *scheduled* label census, and that still holds.
+What the sweep also does now is narrower and safe for exactly one reason: it is
+**demand-gated**. Only a label set that some job has already been queued on past
+the alarm threshold is ever compared against the labels online runners
+advertise. Nothing queued means nothing to compare, so the 3am empty-runner-list
+reading is never consulted — the failure mode the paragraph above warns about
+cannot occur by construction, not by tuning. The JIT objection is bounded rather
+than waved away: a healthy lane mints a runner in seconds to minutes, so a label
+that has not appeared in 45 minutes is not a minting delay.
+
+It exists because on 2026-09-21 the merge queue deadlocked for 5h30m with zero
+merges: three queued `macos` jobs each asked for `pulp-build-merge-group` while
+every online runner advertised `pulp-build-pr-head`. Queue age could say the
+lane looked dead; nothing said which label was missing.
+
+Three things to know before reading or touching it:
+
+- **Unschedulable and saturated are different verdicts.** GitHub places a job on
+  ONE runner carrying *every* requested label, so "schedulable" means some online
+  runner's label set is a superset of the request. A superset that is **busy** is
+  a deep queue on a working lane and stays silent at any age. Only "no online
+  runner carries this set, busy or idle" is `unschedulable_labels`.
+- **It needs `Administration: Read`, and is honestly disarmed without it.** Org
+  runner groups are invisible to `repos/.../actions/runners` and this org keeps
+  online runners there, so both scopes are read. `GITHUB_TOKEN` cannot read the
+  org scope, so the workflow passes `secrets.RELEASE_BOT_TOKEN` when configured
+  (same fallback `runner-topology-check.yml` uses). Without it the org scope
+  refuses, the census records the refusal, and every reconciliation reports
+  `runner_census_blind` instead of naming a label. **If you see that finding
+  every sweep, the token is missing — the fleet is not necessarily sick.**
+- **An empty or failed runner read is a gap, never an absence claim.** Zero
+  online runners is the JIT idle state, which is precisely the reading a broken
+  census also produces, so it can never license a verdict. That gap is scoped to
+  this finding: it deliberately does not use the sweep-wide degraded predicate,
+  because the completed-run listing on this repo is always truncated and sharing
+  the predicate would leave the check permanently unable to fire. For the same
+  reason the census is collected outside `snapshot["errors"]` — a new API call
+  must not gain the power to silence the older alarms.
+
 ### The same sweep also answers "is every host still in it" — a different question
 
 Queue age is about the **lane**. It goes quiet, correctly, while a lane is
