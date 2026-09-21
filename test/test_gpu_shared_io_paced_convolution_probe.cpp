@@ -134,8 +134,7 @@ int run(Config config) {
     // it resets the transport state afterward, so a pre-release snapshot is
     // otherwise liable to report only the first provider-slot completions.
     const auto settle_deadline = Clock::now() + kPostCallbackDrainTimeout;
-    while (Clock::now() < settle_deadline &&
-           transport.stats().produced_blocks < total_blocks) {
+    while (Clock::now() < settle_deadline && transport.stats().produced_blocks < total_blocks) {
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
     const auto transport_stats = transport.stats();
