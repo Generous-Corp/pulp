@@ -12,6 +12,7 @@
 #include <functional>
 #include <cstdint>
 #include <sstream>
+#include <regex>
 #include <vector>
 
 namespace pulp::view {
@@ -470,6 +471,32 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
                 result.addMember(u.name, std::move(array));
             }
         }
+        auto declared = choc::value::createEmptyArray();
+        const std::regex uniform_pattern(R"(\buniform\s+(float[234]?|half[234]?|int|shader)\s+([A-Za-z_][A-Za-z0-9_]*))");
+        for (std::sregex_iterator it(host->custom_shader().begin(), host->custom_shader().end(), uniform_pattern),
+             end; it != end; ++it) {
+            const auto type = (*it)[1].str();
+            const auto name = (*it)[2].str();
+            auto entry = choc::value::createObject("");
+            entry.addMember("name", choc::value::createString(name));
+            entry.addMember("type", choc::value::createString(type));
+            const int count = type == "float2" || type == "half2" ? 2
+                            : type == "float3" || type == "half3" ? 3
+                            : type == "float4" || type == "half4" ? 4 : 1;
+            entry.addMember("count", count);
+            entry.addMember("bound", host->shader_uniform_bound(name));
+            entry.addMember("reserved", name == "resolution" || name == "time" ||
+                                         name == "value" || name.rfind("pulp_", 0) == 0);
+            for (const auto& binding : host->shader_value_bindings()) {
+                if (binding.uniform_name == name) {
+                    entry.addMember("source", choc::value::createString(
+                        binding.channel_name.empty() ? binding.param_name : "value:" + binding.channel_name));
+                    break;
+                }
+            }
+            declared.addArrayElement(std::move(entry));
+        }
+        result.addMember("declared", std::move(declared));
         return result;
     });
 
