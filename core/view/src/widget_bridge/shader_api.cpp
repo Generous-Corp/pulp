@@ -5,6 +5,8 @@
 #include "api_registry.hpp"
 
 #include <string>
+#include <string_view>
+#include <algorithm>
 #include <vector>
 
 namespace pulp::view {
@@ -89,6 +91,11 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         std::string failure;
         spec.getView().visitObjectMembers([&](std::string_view name, const choc::value::ValueView& value) {
             if (!valid) return;
+            if (host->shader_uniform_bound(std::string(name))) {
+                valid = false;
+                failure = "Uniform '" + std::string(name) + "' is owned by a value binding";
+                return;
+            }
             canvas::Canvas::NamedUniform u;
             u.name = std::string(name);
             if (value.isArray()) {
@@ -103,6 +110,106 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         });
         if (!valid) return shader_result(false, failure);
         host->set_shader_uniforms(std::move(uniforms));
+        self.request_repaint();
+        return shader_result(true, "");
+    });
+
+    // bindWidgetShaderUniform(id, uniform, "value:channel")
+    // Connects one scalar shader uniform to a live scalar or meter channel.
+    // The frame service owns the source lease and applies the existing
+    // publish-sequence/staleness rules; this registration only records the
+    // declarative edge.
+    register_bridge_function(api, "bindWidgetShaderUniform", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto uniform_name = args.get<std::string>(1, "");
+        auto source = args.get<std::string>(2, "");
+        auto* v = self.widget(id);
+        auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+        if (!host)
+            return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        constexpr std::string_view prefix = "value:";
+        if (uniform_name.empty()) return shader_result(false, "Uniform name must not be empty");
+        const bool is_channel = source.size() > prefix.size() && source.compare(0, prefix.size(), prefix) == 0;
+        const std::string channel_name = is_channel ? source.substr(prefix.size()) : std::string{};
+        bool found = false;
+        float neutral = 0.0f;
+        self.visit_value_channels([&](ValueChannelSet* channels) {
+            if (!is_channel) return;
+            if (!channels) return;
+            for (const auto& info : channels->infos()) {
+                if (info.name != channel_name) continue;
+                if (info.shape != ValueChannelShape::scalar &&
+                    info.shape != ValueChannelShape::meter) return;
+                found = true;
+                neutral = info.neutral;
+                return;
+            }
+        });
+        if (is_channel && !found) return shader_result(false, "No scalar or meter value channel named '" + channel_name + "'");
+        auto bindings = host->shader_value_bindings();
+        auto it = std::find_if(bindings.begin(), bindings.end(), [&](const auto& binding) {
+            return binding.uniform_name == uniform_name;
+        });
+        CustomShaderHost::ShaderValueBinding binding;
+        binding.uniform_name = std::move(uniform_name);
+        if (is_channel) binding.channel_name = channel_name;
+        else binding.param_name = std::move(source);
+        binding.neutral = neutral;
+        if (it != bindings.end()) *it = std::move(binding);
+        else bindings.push_back(std::move(binding));
+        host->set_shader_value_bindings(std::move(bindings));
+        self.request_repaint();
+        return shader_result(true, "");
+    });
+
+    register_bridge_function(api, "clearWidgetShaderUniformBindings", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = self.widget(id);
+        auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+        if (!host) return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        host->set_shader_value_bindings({});
+        self.request_repaint();
+        return shader_result(true, "");
+    });
+
+    register_bridge_function(api, "bindWidgetShaderScope", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto source = args.get<std::string>(1, "");
+        auto* v = self.widget(id);
+        auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+        if (!host)
+            return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        constexpr std::string_view prefix = "value:";
+        if (source.size() <= prefix.size() || source.compare(0, prefix.size(), prefix) != 0)
+            return shader_result(false, "Shader scope source must be value:<vector-channel>");
+        const auto channel_name = source.substr(prefix.size());
+        bool found = false;
+        float neutral = 0.0f;
+        self.visit_value_channels([&](ValueChannelSet* channels) {
+            if (!channels) return;
+            for (const auto& info : channels->infos()) {
+                if (info.name != channel_name) continue;
+                if (info.shape != ValueChannelShape::vector) return;
+                found = true;
+                neutral = info.neutral;
+                return;
+            }
+        });
+        if (!found) return shader_result(false, "No vector value channel named '" + std::string(channel_name) + "'");
+        CustomShaderHost::ShaderScopeBinding binding;
+        binding.channel_name = std::string(channel_name);
+        binding.neutral = neutral;
+        host->set_shader_scope_binding(std::move(binding));
+        self.request_repaint();
+        return shader_result(true, "");
+    });
+
+    register_bridge_function(api, "clearWidgetShaderScope", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = self.widget(id);
+        auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+        if (!host) return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        host->set_shader_scope_binding(std::nullopt);
         self.request_repaint();
         return shader_result(true, "");
     });

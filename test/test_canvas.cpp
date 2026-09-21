@@ -875,6 +875,19 @@ TEST_CASE("SDF chart shader compiles against the shared geometry prelude", "[can
     REQUIRE_FALSE(invalid.empty());
 }
 
+TEST_CASE("SDF chart prelude exposes analytic feathering and bounded operators",
+          "[canvas][sdf][shader][feather]") {
+    const auto error = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::flat_arc,
+        "half4 shade(PulpChart g) { "
+        "PulpSdf a = pulpLeaf(g.d, 0); "
+        "PulpSdf b = pulpLeaf(g.d + leaf0, 1); "
+        "PulpSdf c = pulpSmoothUnion(pulpUnion(a, b), pulpIntersect(a, b), leaf1); "
+        "return half4(pulpFeather(c.d, 1.0, 0, 0) + "
+        "pulpFeather(g, 1.0, 1, 5) + pulpFeather(g, 1.0, 0, 6)); }");
+    REQUIRE(error.empty());
+}
+
 TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
     RecordingCanvas rc;
     Canvas::SDFStyle style;

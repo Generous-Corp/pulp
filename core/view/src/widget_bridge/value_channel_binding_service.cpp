@@ -17,11 +17,120 @@
 namespace pulp::view {
 namespace {
 
+constexpr auto kShaderValueChannelStaleAfter = std::chrono::milliseconds(250);
+
 std::string event_binding_key(std::uint32_t id) {
     return "__value_events__" + std::to_string(id);
 }
 
 } // namespace
+
+void WidgetBridge::service_shader_value_bindings() {
+    bool any_changed = false;
+    for (const auto& [id, state] : widgets_) {
+        auto* view = state.view;
+        auto* host = dynamic_cast<CustomShaderHost*>(view);
+        if (!host || (host->shader_value_bindings().empty() &&
+                      !host->shader_scope_binding().has_value()))
+            continue;
+        for (auto& binding : host->shader_value_bindings()) {
+            std::uint32_t publish_seq = 0;
+            float value = binding.neutral;
+            bool found = false;
+            visit_value_channels([&](ValueChannelSet* channels) {
+                if (!channels) return;
+                if (auto* scalar = channels->scalar(binding.channel_name)) {
+                    publish_seq = scalar->publish_seq();
+                    value = scalar->read();
+                    found = true;
+                } else if (auto* meter = channels->meter(binding.channel_name)) {
+                    publish_seq = meter->publish_seq();
+                    value = meter->read().rms[0];
+                    found = true;
+                }
+                for (const auto& info : channels->infos()) {
+                    if (info.name == binding.channel_name) {
+                        binding.neutral = info.neutral;
+                        break;
+                    }
+                }
+            });
+            if (binding.channel_name.empty() && !binding.param_name.empty()) {
+                state::ParamID param_id = 0;
+                if (resolve_param_id(binding.param_name, param_id)) {
+                    value = store_.get_normalized(param_id);
+                    found = true;
+                    // Parameters are host-published state, so they do not
+                    // use channel staleness decay.
+                    binding.last_publish_at = std::chrono::steady_clock::now();
+                }
+            }
+            const auto now = std::chrono::steady_clock::now();
+            if (binding.last_publish_at.time_since_epoch().count() == 0)
+                binding.last_publish_at = now;
+            if (publish_seq != binding.last_publish_seq) {
+                binding.last_publish_seq = publish_seq;
+                binding.last_publish_at = now;
+            }
+            if (!found || now - binding.last_publish_at > kShaderValueChannelStaleAfter)
+                value = binding.neutral;
+            if (host->set_shader_uniform_value(binding.uniform_name, value))
+                any_changed = true;
+        }
+        if (auto& scope = host->shader_scope_binding()) {
+            std::uint32_t publish_seq = 0;
+            VectorFrame frame{};
+            bool found = false;
+            visit_value_channels([&](ValueChannelSet* channels) {
+                if (!channels) return;
+                if (auto* source = channels->vector(scope->channel_name)) {
+                    publish_seq = source->publish_seq();
+                    frame = source->read();
+                    found = true;
+                }
+                for (const auto& info : channels->infos()) {
+                    if (info.name == scope->channel_name) {
+                        scope->neutral = info.neutral;
+                        break;
+                    }
+                }
+            });
+            const auto now = std::chrono::steady_clock::now();
+            if (scope->last_publish_at.time_since_epoch().count() == 0)
+                scope->last_publish_at = now;
+            const bool published = publish_seq != scope->last_publish_seq;
+            if (published) {
+                scope->last_publish_seq = publish_seq;
+                scope->last_publish_at = now;
+            }
+            const bool live = found && now - scope->last_publish_at <= kShaderValueChannelStaleAfter;
+            // A neutral/stale scope still uploads exactly one texel. Zero-sized
+            // textures are rejected by several GPU backends and make a shader's
+            // sampling contract backend-dependent.
+            const bool liveness_changed = !scope->data || scope->data->live != live;
+            if (published || liveness_changed) {
+                auto data = std::make_shared<canvas::Canvas::ShaderDataTexture>();
+                data->name = scope->channel_name;
+                const int count = live ? std::clamp(frame.count, 0, VectorFrame::kMaxSamples) : 0;
+                data->samples.resize(static_cast<std::size_t>(std::max(1, count)), scope->neutral);
+                if (count > 0)
+                    std::copy_n(frame.samples.data(), count, data->samples.data());
+                // Keep the texture contract explicit: even a stale/empty
+                // scope has one neutral texel, so shaders can sample safely.
+                // `_count` describes the uploaded payload, not the source's
+                // live sample count; stale therefore reports one neutral
+                // sample together with `live = 0`.
+                data->count = static_cast<std::uint32_t>(std::max(1, count));
+                data->live = live;
+                data->neutral = scope->neutral;
+                data->publish_sequence = publish_seq;
+                scope->data = std::move(data);
+                any_changed = true;
+            }
+        }
+    }
+    if (any_changed) request_repaint();
+}
 
 std::size_t WidgetBridge::event_binding_count() const noexcept {
     return static_cast<std::size_t>(
@@ -93,7 +202,12 @@ void WidgetBridge::service_event_bindings() {
 }
 
 void WidgetBridge::service_param_bindings() {
-    if (param_bindings_.empty()) return;
+    // Shader channel bindings share this frame-tick service even when there
+    // are no ordinary widget parameter bindings.
+    if (param_bindings_.empty()) {
+        service_shader_value_bindings();
+        return;
+    }
 
     struct ValueBindingSnapshot {
         MeterFrame meter{};
@@ -175,6 +289,7 @@ void WidgetBridge::service_param_bindings() {
         if (changed) any_changed = true;
     }
     if (any_changed) request_repaint();
+    service_shader_value_bindings();
 }
 
 } // namespace pulp::view

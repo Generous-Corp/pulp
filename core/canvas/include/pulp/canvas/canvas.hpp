@@ -8,10 +8,10 @@
 #include <pulp/canvas/canvas_capability.hpp>
 #include <pulp/canvas/path.hpp>
 #include <pulp/canvas/scene_recording.hpp>
-#include <memory>
 #include <pulp/canvas/text_utf8.hpp>
 #include <string>
 #include <vector>
+#include <memory>
 #include <variant>
 #include <functional>
 
@@ -1400,6 +1400,11 @@ public:
         float arm_width = 0.3f;       ///< For cross (fraction of half-size)
         float bezier_cx = 0.0f;       ///< For quadratic_bezier: control point X (normalized -1..1)
         float bezier_cy = -1.0f;      ///< For quadratic_bezier: control point Y (normalized -1..1)
+        // Analytic chart feathering. 0=uniform, 1=glow, 2=inner,
+        // 3=outer, 4=inset, 5=radial, 6=sweep.
+        float feather_sigma = 0.0f;
+        int feather_curve = 0;        ///< 0=gaussian, 1=linear
+        int feather_mode = 0;
     };
 
     virtual void draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
@@ -1623,10 +1628,23 @@ public:
         float v[4] = {0, 0, 0, 0};
     };
 
+    /// Latest-wins audio/vector payload exposed to an SkSL child shader. The
+    /// host keeps this object stable between publications; a backend may retain
+    /// the corresponding GPU texture until `publish_sequence` changes.
+    struct ShaderDataTexture {
+        std::string name;
+        std::vector<float> samples;
+        std::uint32_t count = 0;
+        bool live = false;
+        float neutral = 0.0f;
+        std::uint32_t publish_sequence = 0;
+    };
+
     struct ShaderDrawOptions {
         ShaderUniforms uniforms;
         std::vector<NamedUniform> named_uniforms;
         float reach = 0.0f;
+        std::shared_ptr<const ShaderDataTexture> data_texture;
     };
 
     /// Validate and compile an SkSL shader without drawing. Returns error string (empty = success).

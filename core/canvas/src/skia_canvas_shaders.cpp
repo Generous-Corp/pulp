@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstring>
 #include <vector>
+#include <cstdint>
 
 #ifdef PULP_HAS_SKIA
 
@@ -62,6 +63,47 @@
 #ifdef PULP_HAS_SKIA
 
 namespace pulp::canvas {
+
+namespace {
+// IEEE-754 float32 -> binary16 conversion for the RGBA_F16 raster upload.
+std::uint16_t shader_float_to_half(float value) {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    const std::uint32_t sign = (bits >> 16) & 0x8000u;
+    const std::uint32_t exponent = (bits >> 23) & 0xffu;
+    const std::uint32_t mantissa = bits & 0x7fffffu;
+    if (exponent == 0xffu)
+        return static_cast<std::uint16_t>(sign | 0x7c00u | (mantissa ? 0x0200u : 0));
+    const int e = static_cast<int>(exponent) - 127 + 15;
+    if (e >= 31) return static_cast<std::uint16_t>(sign | 0x7c00u);
+    if (e <= 0) {
+        if (e < -10) return static_cast<std::uint16_t>(sign);
+        const std::uint32_t m = (mantissa | 0x800000u) >> static_cast<unsigned>(1 - e + 13);
+        return static_cast<std::uint16_t>(sign | m);
+    }
+    return static_cast<std::uint16_t>(sign | (static_cast<std::uint32_t>(e) << 10) |
+                                       (mantissa >> 13));
+}
+
+sk_sp<SkShader> make_shader_data_texture(
+    const std::shared_ptr<const Canvas::ShaderDataTexture>& data) {
+    if (!data) return nullptr;
+    const int width = std::max<int>(1, static_cast<int>(data->samples.size()));
+    std::vector<std::uint16_t> texels(static_cast<std::size_t>(width) * 4u, 0);
+    for (int i = 0; i < width; ++i) {
+        const float sample = data->samples[static_cast<std::size_t>(i)];
+        texels[static_cast<std::size_t>(i) * 4u + 0] = shader_float_to_half(sample);
+        texels[static_cast<std::size_t>(i) * 4u + 3] = shader_float_to_half(1.0f);
+    }
+    const auto info = SkImageInfo::Make(width, 1, kRGBA_F16_SkColorType,
+                                        kPremul_SkAlphaType);
+    auto image = SkImages::RasterFromPixmapCopy(
+        SkPixmap(info, texels.data(), static_cast<std::size_t>(width) * 8u));
+    if (!image) return nullptr;
+    return image->makeShader(SkTileMode::kClamp, SkTileMode::kClamp,
+                             SkSamplingOptions(SkFilterMode::kLinear));
+}
+} // namespace
 
 // ── GPU SDF Shape Primitives ─────────────────────────────────────────────────
 
@@ -282,6 +324,7 @@ void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float
 static std::string compose_sdf_chart_shader(const std::string& author_sksl) {
     return R"(
 struct PulpChart { float t; float d; float side; float2 tan; float px; float valid; };
+struct PulpSdf { float d; float id; };
 uniform float2 resolution;
 uniform float shapeType;
 uniform float arcStart;
@@ -289,6 +332,53 @@ uniform float arcSweep;
 uniform float innerRadius;
 uniform float strokeWidth;
 uniform float reach;
+uniform float leaf0; uniform float leaf1; uniform float leaf2; uniform float leaf3;
+uniform float leaf4; uniform float leaf5; uniform float leaf6; uniform float leaf7;
+uniform float leaf8; uniform float leaf9; uniform float leaf10; uniform float leaf11;
+uniform float leaf12; uniform float leaf13; uniform float leaf14; uniform float leaf15;
+
+// Abramowitz–Stegun erfc approximation used by the analytic feather path.
+float pulpErfc(float x) {
+    float ax = abs(x);
+    float t = 1.0 / (1.0 + 0.3275911 * ax);
+    float p = (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t
+                 - 0.284496736) * t + 0.254829592) * t);
+    float e = p * exp(-ax * ax);
+    return x >= 0.0 ? e : 2.0 - e;
+}
+float pulpFeather(float sd, float sigma, int curve, int mode) {
+    float s = max(abs(sigma), 0.0001);
+    float coverage = curve == 0
+        ? 0.5 * pulpErfc(sd / (s * 1.41421356237))
+        : clamp(0.5 - sd / (2.0 * s), 0.0, 1.0);
+    if (mode == 1) coverage *= sd > 0.0 ? 1.0 : 0.0; // glow
+    else if (mode == 2) coverage *= sd < 0.0 ? 1.0 : 0.0; // inner
+    else if (mode == 3) coverage = 1.0 - coverage; // outer
+    else if (mode == 4) coverage = sd < 0.0 ? 1.0 - coverage : 0.0; // inset
+    // Radial and sweep are chart-aware modes; the scalar form remains useful
+    // as a stable fallback when no chart is available.
+    else if (mode == 5) coverage *= sd < 0.0 ? 1.0 : 0.0;
+    else if (mode == 6) coverage *= sd > 0.0 ? 1.0 : 0.0;
+    return clamp(coverage, 0.0, 1.0);
+}
+float pulpFeather(PulpChart g, float sigma, int curve, int mode) {
+    float scale = mode == 5 ? max(abs(g.d), 0.001)
+                            : (mode == 6 ? max(abs(g.t - 0.5) * 2.0, 0.001) : 1.0);
+    return pulpFeather(g.d, sigma * scale, curve, mode == 5 || mode == 6 ? 0 : mode);
+}
+
+// Bounded analytic feathering. mode 0 is a compact linear/smooth edge,
+// mode 1 is Gaussian-like falloff, and mode 2 is an exponential glow. The
+// caller supplies pixel width in the same units as d; invalid widths are
+// clamped so a malformed author uniform cannot create NaNs.
+PulpSdf pulpLeaf(float d, float id) { return PulpSdf(d, id); }
+PulpSdf pulpUnion(PulpSdf a, PulpSdf b) { return a.d < b.d ? a : b; }
+PulpSdf pulpIntersect(PulpSdf a, PulpSdf b) { return a.d > b.d ? a : b; }
+PulpSdf pulpSubtract(PulpSdf a, PulpSdf b) { return PulpSdf(max(a.d, -b.d), a.id); }
+PulpSdf pulpSmoothUnion(PulpSdf a, PulpSdf b, float k) {
+    float h = clamp(0.5 + 0.5 * (b.d - a.d) / max(abs(k), 0.0001), 0.0, 1.0);
+    return PulpSdf(mix(b.d, a.d, h) - abs(k) * h * (1.0 - h), h < 0.5 ? b.id : a.id);
+}
 )" + author_sksl + R"(
 half4 main(float2 coord) {
     float2 center = resolution * 0.5;
@@ -348,6 +438,26 @@ bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
         else if (named.count == 2) slot = SkV2{named.v[0], named.v[1]};
         else if (named.count == 3) slot = SkV3{named.v[0], named.v[1], named.v[2]};
         else slot = SkV4{named.v[0], named.v[1], named.v[2], named.v[3]};
+    }
+    if (options.data_texture) {
+        if (auto data_shader = make_shader_data_texture(options.data_texture)) {
+            // The bridge's scope binding names the child after the channel;
+            // retain the generic aliases for hand-authored shaders.
+            std::vector<std::string> candidates = {options.data_texture->name,
+                                                   "scopeData", "scope", "valueChannel"};
+            for (const auto& candidate : candidates)
+                if (effect->findChild(candidate.c_str())) builder.child(candidate.c_str()) = data_shader;
+        }
+        const std::string suffixes[] = {"_count", "_live", "_neutral"};
+        const std::string prefix = options.data_texture->name;
+        if (effect->findUniform("_count")) builder.uniform("_count") = static_cast<float>(options.data_texture->count);
+        if (effect->findUniform("_live")) builder.uniform("_live") = options.data_texture->live ? 1.0f : 0.0f;
+        if (effect->findUniform("_neutral")) builder.uniform("_neutral") = options.data_texture->neutral;
+        if (!prefix.empty()) {
+            if (effect->findUniform((prefix + suffixes[0]).c_str())) builder.uniform((prefix + suffixes[0]).c_str()) = static_cast<float>(options.data_texture->count);
+            if (effect->findUniform((prefix + suffixes[1]).c_str())) builder.uniform((prefix + suffixes[1]).c_str()) = options.data_texture->live ? 1.0f : 0.0f;
+            if (effect->findUniform((prefix + suffixes[2]).c_str())) builder.uniform((prefix + suffixes[2]).c_str()) = options.data_texture->neutral;
+        }
     }
     auto shader = builder.makeShader();
     if (!shader) return false;
@@ -426,6 +536,26 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
     if (effect->findUniform("trackColor")) builder.uniform("trackColor") = color(u.track_color);
     if (effect->findUniform("fillColor")) builder.uniform("fillColor") = color(u.fill_color);
     if (effect->findUniform("thumbColor")) builder.uniform("thumbColor") = color(u.thumb_color);
+    if (options.data_texture) {
+        if (auto data_shader = make_shader_data_texture(options.data_texture)) {
+            std::vector<std::string> candidates = {options.data_texture->name,
+                                                   "scopeData", "scope", "valueChannel"};
+            for (const auto& candidate : candidates)
+                if (effect->findChild(candidate.c_str())) builder.child(candidate.c_str()) = data_shader;
+        }
+        if (effect->findUniform("_count"))
+            builder.uniform("_count") = static_cast<float>(options.data_texture->count);
+        if (effect->findUniform("_live"))
+            builder.uniform("_live") = options.data_texture->live ? 1.0f : 0.0f;
+        if (effect->findUniform("_neutral"))
+            builder.uniform("_neutral") = options.data_texture->neutral;
+        const std::string prefix = options.data_texture->name;
+        if (!prefix.empty()) {
+            if (effect->findUniform((prefix + "_count").c_str())) builder.uniform((prefix + "_count").c_str()) = static_cast<float>(options.data_texture->count);
+            if (effect->findUniform((prefix + "_live").c_str())) builder.uniform((prefix + "_live").c_str()) = options.data_texture->live ? 1.0f : 0.0f;
+            if (effect->findUniform((prefix + "_neutral").c_str())) builder.uniform((prefix + "_neutral").c_str()) = options.data_texture->neutral;
+        }
+    }
     for (const auto& named : options.named_uniforms) {
         auto* info = effect->findUniform(named.name.c_str());
         if (!info || named.count < 1 || named.count > 4) continue;

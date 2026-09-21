@@ -47,6 +47,9 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
     options.uniforms = u;
     options.named_uniforms = host.shader_uniforms();
     options.reach = host.shader_reach();
+    options.data_texture = host.shader_scope_binding().has_value()
+                               ? host.shader_scope_binding()->data
+                               : nullptr;
     if (!host.chart_shader().empty()) {
         if (dynamic_cast<Knob*>(&view) != nullptr) {
             canvas::Canvas::SDFStyle style;

@@ -304,6 +304,7 @@ public:
     // the user is dragging that widget — the gesture wins (View::is_gesture_active()).
     // See bind_* in state_binding_api.cpp.
     void service_param_bindings();
+    void service_shader_value_bindings();
 
     // Number of live param/meter bindings (diagnostics + tests).
     std::size_t param_binding_count() const noexcept { return param_bindings_.size(); }

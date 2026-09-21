@@ -4717,6 +4717,82 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
     REQUIRE_FALSE(knob->chart_shader().empty());
 }
 
+TEST_CASE("WidgetBridge binds shader scalar uniforms to live value channels",
+          "[view][bridge][shader][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    ValueChannelSet channels;
+    auto* source = channels.declare_scalar("drive", "", 0.125f);
+    REQUIRE(source != nullptr);
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform float audio; half4 main(float2 p) { return half4(audio); }');
+        globalThis.bound = bindWidgetShaderUniform('knob', 'audio', 'value:drive');
+    )");
+    REQUIRE(engine.evaluate("bound.success").getWithDefault<bool>(false));
+
+    source->publish(0.75f);
+    bridge.service_frame_callbacks();
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_uniforms().size() == 1);
+    REQUIRE(knob->shader_uniforms()[0].name == "audio");
+    REQUIRE(knob->shader_uniforms()[0].v[0] == Catch::Approx(0.75f));
+
+    // A stopped channel decays to its declared neutral through the same
+    // publish-sequence staleness contract used by ordinary value bindings.
+    auto& binding = knob->shader_value_bindings()[0];
+    binding.last_publish_at = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    bridge.service_frame_callbacks();
+    REQUIRE(knob->shader_uniforms()[0].v[0] == Catch::Approx(0.125f));
+}
+
+TEST_CASE("WidgetBridge publishes vector shader scope with neutral stale texel",
+          "[view][bridge][shader][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    ValueChannelSet channels;
+    auto* source = channels.declare_vector("scope", "", -0.25f);
+    REQUIRE(source != nullptr);
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform shader scope; half4 main(float2 p) { return scope.eval(p); }');
+        globalThis.bound = bindWidgetShaderScope('knob', 'value:scope');
+    )");
+    REQUIRE(engine.evaluate("bound.success").getWithDefault<bool>(false));
+
+    const float samples[] = {0.1f, 0.2f, 0.3f};
+    source->publish(samples, 3);
+    bridge.service_frame_callbacks();
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_scope_binding().has_value());
+    auto live = knob->shader_scope_binding()->data;
+    REQUIRE(live != nullptr);
+    REQUIRE(live->count == 3);
+    REQUIRE(live->live);
+    REQUIRE(live->samples.size() == 3);
+    REQUIRE(live->samples[1] == Catch::Approx(0.2f));
+
+    auto& binding = *knob->shader_scope_binding();
+    binding.last_publish_at = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    bridge.service_frame_callbacks();
+    auto stale = knob->shader_scope_binding()->data;
+    REQUIRE(stale != nullptr);
+    REQUIRE(stale->count == 1);
+    REQUIRE_FALSE(stale->live);
+    REQUIRE(stale->samples.size() == 1);
+    REQUIRE(stale->samples[0] == Catch::Approx(-0.25f));
+}
+
 // shader_uses_time() decides whether the render loop stays pinned, and is read
 // once per widget per frame. It must be a real uniform lookup: a `timeline`
 // uniform must not force continuous repaint, and a shader with no time uniform
