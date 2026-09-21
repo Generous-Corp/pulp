@@ -288,7 +288,8 @@ static const char* kSDFShapeSkSL = R"(
 // value to the author's shade() function.  Keeping this composer alongside
 // the legacy source makes the two paths share exactly the same distances.
 static std::string compose_sdf_geometry_shader(Canvas::SDFShape shape,
-                                               const std::string& author_sksl) {
+                                               const std::string& author_sksl,
+                                               const std::string& sdf_expression = {}) {
     (void)shape;
     const std::string source(kSDFShapeSkSL);
     const auto main_at = source.find("half4 main(float2 coord)");
@@ -299,9 +300,16 @@ static std::string compose_sdf_geometry_shader(Canvas::SDFShape shape,
     for (std::size_t at = primitive_prelude.find("atan2("); at != std::string::npos;
          at = primitive_prelude.find("atan2(", at + 1))
         primitive_prelude.replace(at, 6, "atan(");
-    return primitive_prelude + R"(
+    auto composed = primitive_prelude + R"(
 struct PulpGeom { float sdf; float2 grad; float2 pos; float2 uv; float coverage; };
 struct PulpFragment { half4 color; float strokeWidth; float sigma; };
+float pulp_smooth_union(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / max(abs(k), 0.0001), 0.0, 1.0);
+    return mix(b, a, h) - abs(k) * h * (1.0 - h);
+}
+float pulp_smooth_subtract(float a, float b, float k) {
+    return -pulp_smooth_union(-a, b, k);
+}
 
 float pulp_shape_distance(float2 p) {
     float2 halfSize = resolution * 0.5 - float2(2.0);
@@ -353,6 +361,13 @@ half4 main(float2 coord) {
     return f.color * half(alpha);
 }
 )";
+    if (!sdf_expression.empty()) {
+        const std::string needle = "float d = pulp_shape_distance(p);";
+        const auto at = composed.find(needle);
+        if (at != std::string::npos)
+            composed.replace(at, needle.size(), "float d = " + sdf_expression + ";");
+    }
+    return composed;
 }
 
 void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
@@ -602,7 +617,8 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
     if (!canvas_ || sksl.empty()) return false;
     std::string composed = sksl;
     if (options.geometry && sksl.find("PulpFragment shade") != std::string::npos)
-        composed = compose_sdf_geometry_shader(options.geometry->shape, sksl);
+        composed = compose_sdf_geometry_shader(options.geometry->shape, sksl,
+                                               options.geometry->sdf_expression);
     auto& cache = RuntimeEffectCache::instance();
     auto effect = cache.get_or_compile(composed);
     if (!effect) return false;

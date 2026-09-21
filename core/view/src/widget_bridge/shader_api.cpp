@@ -11,6 +11,7 @@
 #include <optional>
 #include <functional>
 #include <cstdint>
+#include <sstream>
 #include <vector>
 
 namespace pulp::view {
@@ -133,6 +134,59 @@ GeometryValidation validate_geometry_tree(const choc::value::ValueView& root) {
     return result;
 }
 
+std::string geometry_number(const choc::value::ValueView& node, const char* key,
+                            double fallback) {
+    const auto value = node.hasObjectMember(key)
+                           ? node[key].getWithDefault<double>(fallback)
+                           : fallback;
+    std::ostringstream out;
+    out.setf(std::ios::scientific);
+    out.precision(8);
+    out << value;
+    return out.str();
+}
+
+std::string emit_geometry_expression(const choc::value::ValueView& node,
+                                     std::string& error) {
+    if (node.hasObjectMember("shape")) {
+        const auto shape = node["shape"].getWithDefault<std::string>("");
+        const auto x = geometry_number(node, "x", 0.0);
+        const auto y = geometry_number(node, "y", 0.0);
+        const auto w = geometry_number(node, "w", 0.0);
+        const auto h = geometry_number(node, "h", 0.0);
+        const auto px = "(p - float2((" + x + "+" + w + "*0.5)-resolution.x*0.5, (" +
+                        y + "+" + h + "*0.5)-resolution.y*0.5))";
+        if (shape == "circle")
+            return "sdCircle(" + px + ", min(" + w + "," + h + ")*0.5)";
+        if (shape == "rect")
+            return "sdBox(" + px + ", float2(" + w + "*0.5," + h + "*0.5))";
+        if (shape == "rounded_rect")
+            return "sdRoundBox(" + px + ", float2(" + w + "*0.5," + h + "*0.5), " +
+                   geometry_number(node, "cornerRadius", 0.0) + ")";
+        if (shape == "ring")
+            return "sdRing(" + px + ", min(" + w + "," + h + ")*0.5, min(" + w + "," +
+                   h + ")*0.5*" + geometry_number(node, "innerRadius", 0.5) + ")";
+        if (shape == "stadium")
+            return "sdStadium(" + px + ", float2(" + w + "*0.5," + h + "*0.5))";
+        error = "Unsupported shader geometry leaf shape '" + shape + "'";
+        return {};
+    }
+    const auto op = node["op"].getWithDefault<std::string>("");
+    const auto left = emit_geometry_expression(node["children"][0], error);
+    const auto right = emit_geometry_expression(node["children"][1], error);
+    if (!error.empty()) return {};
+    if (op == "union") return "min(" + left + "," + right + ")";
+    if (op == "intersect") return "max(" + left + "," + right + ")";
+    if (op == "subtract") return "max(" + left + ",-((" + right + ")))";
+    const auto k = geometry_number(node, "k", 0.0);
+    if (op == "smoothUnion")
+        return "pulp_smooth_union(" + left + "," + right + "," + k + ")";
+    if (op == "smoothSubtract")
+        return "pulp_smooth_subtract(" + left + "," + right + "," + k + ")";
+    error = "Unknown shader geometry operator '" + op + "'";
+    return {};
+}
+
 } // namespace
 
 void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
@@ -212,8 +266,15 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
             return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
         const auto validation = validate_geometry_tree(*args[1]);
         if (!validation.error.empty()) return shader_result(false, validation.error);
+        std::string expression_error;
+        const auto expression = emit_geometry_expression(*args[1], expression_error);
+        if (!expression_error.empty()) return shader_result(false, expression_error);
+        canvas::Canvas::ShaderGeometry geometry;
+        geometry.sdf_expression = expression;
+        geometry.topology_hash = validation.topology_hash;
         host->set_shader_geometry_spec(choc::json::toString(*args[1], false),
                                        validation.topology_hash);
+        host->set_shader_geometry(std::move(geometry));
         self.request_repaint();
         return shader_result(true, "");
     });

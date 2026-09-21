@@ -1644,6 +1644,11 @@ public:
     struct ShaderGeometry {
         SDFShape shape = SDFShape::rect;
         SDFStyle style{};
+        // Optional generated SDF expression for a bounded operator tree.
+        // It is emitted from validated geometry JSON and evaluated per
+        // fragment alongside the primitive prelude.
+        std::string sdf_expression;
+        std::uint64_t topology_hash = 0;
     };
 
     struct ShaderDrawOptions {
