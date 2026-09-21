@@ -1,15 +1,16 @@
-#include <pulp/inspect/control_sample_region_edit_executor.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/inspect/control_sample_region_edit_executor.hpp>
 #include <utility>
 
 namespace pulp::inspect {
-ControlOperationExecutor make_control_sample_region_edit_executor(ControlSampleRegionTargetResolver resolve) {
-    return [resolve = std::move(resolve)](const ControlAdmissionPlan& plan,
-                                         const ControlRequestEnvelope& request,
-                                         const ControlExecutionContext& context) -> ControlExecutionOutcome {
+ControlOperationExecutor
+make_control_sample_region_edit_executor(ControlSampleRegionTargetResolver resolve) {
+    return [resolve = std::move(resolve)](
+               const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
+               const ControlExecutionContext& context) -> ControlExecutionOutcome {
         if (!resolve || request.operation_id != "dev.pulp.graph/sample-region.edit@1" ||
-            request.operation_version != 1 || request.registration_id != plan.registration_id.value ||
-            !context.checkpoint)
+            request.operation_version != 1 ||
+            request.registration_id != plan.registration_id.value || !context.checkpoint)
             return {.terminal_state = ControlReceiptState::Failed,
                     .result = {.result_code = ControlResultCode::InvalidRequest,
                                .explanation = "region executor request binding is invalid"}};
