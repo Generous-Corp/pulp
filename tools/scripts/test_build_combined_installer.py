@@ -8,11 +8,230 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools" / "scripts" / "build_combined_installer.sh"
+
+
+class NotarizationHeartbeatTest(unittest.TestCase):
+    """The liveness heartbeat around the notarization wait.
+
+    `xcrun notarytool submit --wait` writes its whole poll phase as one
+    unterminated line, flushed only at the verdict, and stdio block-buffers
+    once stdout is a file. The packaging wrappers also `exec` into this recipe,
+    so their name leaves the command line seconds in. Both instruments a
+    watcher can reach therefore read "dead" on a healthy run, for the 5-30
+    minutes every notarized release spends there — which is how two live
+    pipelines were declared dead and hand-"recovered" while still running.
+
+    The heartbeat is the recipe's own signal, and these tests drive the real
+    recipe through its real notarize path with a stand-in `xcrun`, so they
+    cover the product and not just the helper. Two properties, pulling
+    opposite ways: the heartbeat must be VISIBLE mid-flight, and it must not
+    weaken the `set -euo pipefail` guarantee that a failed notarization aborts
+    before `stapler staple`.
+    """
+
+    def _fixture(self, tmp: Path, notary_rc: int, notary_delay: str = "0") -> dict:
+        """A minimal signable tree plus a stand-in `xcrun`.
+
+        Returns the argv/env/capture paths for a run that takes the notarytool
+        branch (no `$CLI`, so the recipe falls through to notarytool exactly as
+        a submodule/standalone consumer does).
+        """
+        fake_bin = tmp / "bin"
+        fake_bin.mkdir()
+        staple_capture = tmp / "staple-argv.txt"
+        output = tmp / "out"
+
+        def tool(name: str, body: str) -> None:
+            path = fake_bin / name
+            path.write_text("#!/bin/bash\n" + body)
+            path.chmod(0o755)
+
+        tool("codesign", "exit 0\n")
+        tool("file", 'case "${!#}" in\n'
+                     '  */Contents/MacOS/*) echo "Mach-O 64-bit executable";;\n'
+                     '  *) /usr/bin/file "$@";;\n'
+                     'esac\n')
+        # Mirrors the graph test's shim: the recipe runs the real
+        # ensure_signing_ready.sh preflight, which reads the keychain search
+        # list and refuses to sign if it comes back empty.
+        tool("security",
+             'if [[ "${1:-}" == "find-identity" ]]; then\n'
+             '  echo \'  1) ABC "Developer ID Application: Test (TEAMID0000)"\'\n'
+             'elif [[ "${1:-}" == "list-keychains" && "$*" != *" -s "* ]]; then\n'
+             '  printf \'    "%s"\\n\' "$PULP_SIGN_KEYCHAIN"\n'
+             'fi\n'
+             'exit 0\n')
+        # Bundle relocation validation is outside what these tests cover.
+        tool("python3", "exit 0\n")
+        tool("pkgbuild", 'last=""\nfor a in "$@"; do last="$a"; done\n'
+                         'mkdir -p "$(dirname "$last")"\n: > "$last"\n')
+        tool("productbuild", 'last=""\nfor a in "$@"; do last="$a"; done\n'
+                             'mkdir -p "$(dirname "$last")"\n: > "$last"\n')
+        tool("productsign", 'last=""\nfor a in "$@"; do last="$a"; done\n'
+                            'mkdir -p "$(dirname "$last")"\n: > "$last"\n')
+        # The stand-in for Apple. `submit --wait` sleeps (standing in for the
+        # dark poll phase), prints what notarytool prints, and exits with the
+        # status under test. `staple` records that it ran at all — that record
+        # is the whole point of the failure-path test.
+        tool("xcrun",
+             'case "$1 $2" in\n'
+             '  "notarytool submit")\n'
+             f'    sleep {notary_delay}\n'
+             '    echo "  id: 00000000-0000-0000-0000-000000000000"\n'
+             '    echo "notarytool-stderr-marker" >&2\n'
+             f'    exit {notary_rc}\n'
+             '    ;;\n'
+             '  "stapler staple"|"stapler validate")\n'
+             '    printf "%s\\n" "$*" >> "$CAPTURE_STAPLE_ARGV"\n'
+             '    exit 0\n'
+             '    ;;\n'
+             'esac\n'
+             'exit 0\n')
+
+        bundle = tmp / "Fixture.clap"
+        macos = bundle / "Contents" / "MacOS"
+        macos.mkdir(parents=True)
+        (bundle / "Contents" / "Info.plist").write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<plist version="1.0"><dict>'
+            "<key>CFBundleExecutable</key><string>Fixture</string>"
+            "</dict></plist>\n"
+        )
+        executable = macos / "Fixture"
+        executable.write_text("#!/bin/bash\nexit 0\n")
+        executable.chmod(0o755)
+
+        argv = [
+            "/bin/bash", str(SCRIPT),
+            "--name", "Fixture",
+            "--version", "1.2.3",
+            "--sign-identity", "application-fixture",
+            "--installer-identity", "installer-fixture",
+            "--out", str(output),
+            "--plugin", "clap", str(bundle),
+        ]
+        env = {
+            # PULP_CPP is pointed at a path that does not exist so the recipe
+            # takes the notarytool fallback, the branch a consumer without a
+            # built pulp-cpp always takes.
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "HOME": str(tmp),
+            "TMPDIR": str(tmp),
+            "PULP_CPP": str(tmp / "no-such-cli"),
+            "CAPTURE_STAPLE_ARGV": str(staple_capture),
+            "PULP_NOTARY_KEY_ID": "FIXTUREKEY",
+            "PULP_NOTARY_ISSUER_ID": "fixture-issuer",
+            "PULP_NOTARY_KEY_PATH": str(tmp / "AuthKey_FIXTUREKEY.p8"),
+            "PULP_SIGN_KEYCHAIN": str(tmp / "signing.keychain-db"),
+            "PULP_SIGN_KEYCHAIN_PW": "test-keychain-password",
+            "PULP_SIGN_P12": str(tmp / "signing.p12"),
+            "PULP_SIGN_P12_PW": "test-p12-password",
+            "PULP_SIGN_IDENTITY_HASH": "ABC",
+            "PULP_NOTARIZE_HEARTBEAT_SECS": "1",
+        }
+        Path(env["PULP_NOTARY_KEY_PATH"]).touch()
+        Path(env["PULP_SIGN_KEYCHAIN"]).touch()
+        Path(env["PULP_SIGN_P12"]).touch()
+        return {"argv": argv, "env": env, "staple": staple_capture}
+
+    def _run(self, fixture: dict) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            fixture["argv"], cwd=ROOT, env=fixture["env"], text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+        )
+
+    def test_the_wait_is_observable_while_it_is_still_running(self) -> None:
+        """The discriminator notarytool's own output does not provide.
+
+        Read the log MID-FLIGHT, not after: a heartbeat that only appears in
+        the final transcript would leave the dark window exactly as it was.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            fixture = self._fixture(tmp, notary_rc=0, notary_delay="6")
+            log = tmp / "run.log"
+            with log.open("w") as handle:
+                proc = subprocess.Popen(
+                    fixture["argv"], cwd=ROOT, env=fixture["env"], text=True,
+                    stdout=handle, stderr=subprocess.STDOUT,
+                )
+                try:
+                    beats = 0
+                    alive_when_seen = False
+                    for _ in range(300):  # up to 30s, well inside the 6s wait
+                        time.sleep(0.1)
+                        text = log.read_text(errors="replace")
+                        if "[heartbeat] notarization in progress" in text:
+                            beats = text.count("[heartbeat] notarization in progress")
+                            alive_when_seen = proc.poll() is None
+                            break
+                    # Positive control: a heartbeat seen only after the run
+                    # finished would prove nothing about the dark window.
+                    self.assertTrue(
+                        alive_when_seen,
+                        msg="no heartbeat observed while the run was still alive; "
+                            f"log so far:\n{log.read_text(errors='replace')}",
+                    )
+                    self.assertGreaterEqual(beats, 1)
+                finally:
+                    proc.wait(timeout=120)
+            self.assertEqual(proc.returncode, 0, msg=log.read_text(errors="replace"))
+
+    def test_a_wait_shorter_than_one_interval_emits_no_heartbeat(self) -> None:
+        """Negative control for the test above.
+
+        If a heartbeat line appeared here too, that test would be asserting a
+        constant rather than measuring the wait.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            fixture = self._fixture(tmp, notary_rc=0, notary_delay="0")
+            fixture["env"]["PULP_NOTARIZE_HEARTBEAT_SECS"] = "30"
+            result = self._run(fixture)
+            self.assertEqual(result.returncode, 0, msg=result.stdout)
+            self.assertNotIn("[heartbeat]", result.stdout)
+
+    def test_a_successful_notarization_staples_and_keeps_notarytool_output(self) -> None:
+        """The success path, plus the output a human reads to check on Apple.
+
+        Wrapping the wait must not swallow notarytool's own stdout/stderr —
+        the submission ID is what someone uses to query Apple by hand, and
+        losing it would trade one dark instrument for another.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            fixture = self._fixture(tmp, notary_rc=0)
+            result = self._run(fixture)
+            self.assertEqual(result.returncode, 0, msg=result.stdout)
+            self.assertIn("id: 00000000-0000-0000-0000-000000000000", result.stdout)
+            self.assertIn("notarytool-stderr-marker", result.stdout)
+            self.assertIn("stapler staple", fixture["staple"].read_text())
+            self.assertIn("OK \u2192", result.stdout)
+
+    def test_a_failed_notarization_never_reaches_stapler_staple(self) -> None:
+        """The guarantee the heartbeat must not weaken.
+
+        An un-notarized .pkg that reached staple/validate/"OK \u2192" would look
+        finished and be rejected by Gatekeeper on the user's machine. The
+        recipe's own history has that incident: a failing `$CLI ship notarize`
+        under `set -e` once left exactly such a package.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            fixture = self._fixture(tmp, notary_rc=4)
+            result = self._run(fixture)
+            self.assertNotEqual(result.returncode, 0, msg=result.stdout)
+            self.assertFalse(
+                fixture["staple"].exists(),
+                msg=f"stapler ran after a failed notarization:\n{result.stdout}",
+            )
+            self.assertNotIn("OK \u2192", result.stdout)
 
 
 class CombinedInstallerTest(unittest.TestCase):

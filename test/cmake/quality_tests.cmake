@@ -516,6 +516,16 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_live_build_check.py")
     set_tests_properties(live-build-check-selftest PROPERTIES TIMEOUT 120)
 
+    # The advisory Vellum watch-event hint. Two things can rot independently:
+    # it can stop firing when an event IS owed (and the discovery goes back to
+    # costing a CI round trip), and it can start firing when one is not — which
+    # on a base-sensitive provenance checker means a false red on a required
+    # gate's surface. Both directions are asserted, in throwaway git repos
+    # seeded from this checkout's real acceptance artefact. No network.
+    add_test(NAME vellum-watch-preflight-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_watch_preflight.py")
+    set_tests_properties(vellum-watch-preflight-selftest PROPERTIES TIMEOUT 180)
+
     # Combined installer graph: fake the macOS signing/package tools and inspect
     # the generated Distribution XML. This pins unique plugin+format package IDs
     # and the multi-plugin nested outline without using credentials or bundles.
