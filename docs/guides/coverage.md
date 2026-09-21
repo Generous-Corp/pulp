@@ -378,6 +378,24 @@ normal proof that a tranche is ready.
 
 ## How the collection works
 
+Raw profiles are **reclaimed incrementally while the suite runs**, not only at
+the end. `%p-%m` gives every test process its own `.profraw`, which is what
+makes this lane's numbers correct (a shared `%Nm` pool discarded most binaries'
+profiles and under-reported coverage), but it also means raw profiles accumulate
+for the whole run — roughly 20k shards / ~17 GiB at peak on a full suite. Under
+disk pressure `run_coverage.sh` merges finished shards into a running profdata
+and deletes them, then feeds that profdata back in as an input to the final
+merge. Counter merging is additive and associative, so the result is identical
+to one merge over every shard.
+
+The safety rule is the interesting part: a shard is absorbed **iff no live
+process owns it**, decided by `kill -0` on the PID in the filename. A recycled
+PID only makes the check more conservative (the shard is skipped and collected
+by the final merge). An mtime-based gate would look equivalent and is not — a
+slow test's shard looks stale while its process is still writing, and reclaiming
+it would drop that test's coverage with no error.
+
+
 ```
 Native:
 Source → Clang -fprofile-instr-generate -fcoverage-mapping

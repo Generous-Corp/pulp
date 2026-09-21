@@ -88,11 +88,23 @@ def workflow_build_step() -> str:
     if body.count(gate_call) != 1:
         raise AssertionError("expected exactly one iOS compile-gate call")
     body = body.replace(gate_call, "bash @GATE@")
-    # The macOS path is governed, while the Windows path remains direct. Stub
-    # both command forms so this test exercises the iOS-gate status handling
-    # without requiring the build governor (or its host lease) in the harness.
-    body, build_count = re.subn(
-        r'(?m)^\s*(?:tools/ci/governed-build\.sh\s+)?cmake --build "\$PULP_BUILD_DIR".*$',
+    # The step branches on RUNNER_OS: Windows runs a direct `cmake --build`
+    # with a literal cap, and every other runner goes through
+    # tools/ci/governed-build.sh. Stub BOTH forms, and count them separately
+    # so this stays a shape contract: if either branch changes spelling, or
+    # one form silently becomes the other, the count no longer matches and
+    # the harness says so instead of quietly running a real build. Stubbing
+    # only one form leaves a live build command in the body, and the harness
+    # then runs it from a temp cwd where the wrapper does not resolve -- a
+    # bare exit 127 that looks like a gate failure rather than a stub gap.
+    body, governed_build_count = re.subn(
+        r'(?m)^\s*tools/ci/governed-build\.sh cmake --build '
+        r'"\$PULP_BUILD_DIR" --config Release$',
+        'echo "BUILD_RAN"',
+        body,
+    )
+    body, windows_build_count = re.subn(
+        r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR" --config Release --parallel 4$',
         'echo "BUILD_RAN"',
         body,
     )
@@ -101,7 +113,7 @@ def workflow_build_step() -> str:
         ':',
         body,
     )
-    if (build_count, cleanup_count) != (2, 1):
+    if (governed_build_count, windows_build_count, cleanup_count) != (1, 1, 1):
         raise AssertionError("Build step shape changed; update the focused stubs")
     return body
 

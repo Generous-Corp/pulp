@@ -134,6 +134,20 @@ def main(argv: list[str]) -> int:
                     file=sys.stderr,
                 )
                 return 77
+            if baseline.returncode != 0:
+                # The control feeds UNMODIFIED inputs, so its failure is not a
+                # contract failure: the committed census disagrees with this
+                # build tree, and the drift gate is already red for the same
+                # one cause. Saying so here stops the next reader debugging
+                # this driver instead. It is a note, not a reprieve — the
+                # control still fails the run below.
+                print(
+                    "consumption_census_contract_control_failed=true "
+                    "detail=the control case feeds unmodified inputs, so the census has "
+                    "drifted from this build tree; consumption-census-drift is failing for "
+                    "the same cause and is where to read it. Nothing below was proved.",
+                    file=sys.stderr,
+                )
             expect("valid-current", baseline, 0)
 
             staged_facts = json.loads((staged / FACTS_NAME).read_text())

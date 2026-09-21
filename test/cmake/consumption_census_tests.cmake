@@ -288,6 +288,16 @@ set_tests_properties(consumption-census-drift PROPERTIES
     SKIP_RETURN_CODE 77
     PASS_REGULAR_EXPRESSION "consumption_census_verified=true")
 
+# A drift gate's value is what it SAYS. `public_headers.count` is walked live
+# from each target's exported include roots, so one new header under a root a
+# target already exports drifts the census with no target, symbol or CMake
+# change — and a message calling that a closure change sends the reader to the
+# link graph, where there is nothing to find. This drives the description over
+# the committed census and needs no build tree of its own.
+add_test(NAME consumption-census-drift-description
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_consumption_census.py")
+
 add_test(NAME consumption-census-negative-contract
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/consumption_census_contract.py"
@@ -297,3 +307,17 @@ set_tests_properties(consumption-census-negative-contract PROPERTIES
     SKIP_RETURN_CODE 77
     PASS_REGULAR_EXPRESSION
         "consumption_census_contract_case=valid-current.*consumption_census_contract_case=census-missing.*consumption_census_contract_case=closure-count-drift.*consumption_census_contract_case=exported-target-removed.*consumption_census_contract_case=exported-target-added.*consumption_census_contract_case=schema-violation.*consumption_census_contract_case=profile-not-recorded.*consumption_census_contract_case=feature-roster-stale.*consumption_census_contract_case=profile-feature-mismatch.*consumption_census_contract_case=profile-not-clobbered.*consumption_census_contract_case=foreign-profile-ignored.*consumption_census_contract_case=facts-missing.*consumption_census_contract_case=unknown-generator-expression.*consumption_census_contract_case=export-without-target.*consumption_census_contract_verified=true")
+
+# The driver above opens with a control that feeds UNMODIFIED inputs, so real
+# drift takes all fourteen cases down with it and the raw failure reads as a
+# broken contract. This stages a drifted census and asserts the driver still
+# fails AND names the drift gate as the cause — the note is a note, never a
+# reprieve.
+add_test(NAME consumption-census-contract-control-note
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_consumption_census_contract_note.py"
+        --build-dir "${CMAKE_BINARY_DIR}"
+        --repo-root "${CMAKE_SOURCE_DIR}")
+set_tests_properties(consumption-census-contract-control-note PROPERTIES
+    SKIP_RETURN_CODE 77
+    PASS_REGULAR_EXPRESSION "consumption_census_contract_note_verified=true")
