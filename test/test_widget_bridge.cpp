@@ -4724,6 +4724,7 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
         globalThis.set = setWidgetShaderUniforms('knob', { gain: 0.75, tint: [1, 0.5, 0.25, 1] });
         globalThis.read = getWidgetShaderUniforms('knob');
         globalThis.reach = setWidgetShaderReach('knob', 12);
+        globalThis.badReach = setWidgetShaderReach('knob', -1);
         globalThis.chart = setWidgetShaderChart('knob', 'half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }');
         globalThis.bad = setWidgetShaderUniforms('knob', { tooWide: [1, 2, 3, 4, 5] });
     )");
@@ -4731,6 +4732,7 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
     REQUIRE(engine.evaluate("read.gain").getWithDefault<double>(0.0) == Catch::Approx(0.75));
     REQUIRE(engine.evaluate("read.tint[2]").getWithDefault<double>(0.0) == Catch::Approx(0.25));
     REQUIRE(engine.evaluate("reach.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("badReach.success").getWithDefault<bool>(true));
     REQUIRE(engine.evaluate("chart.success").getWithDefault<bool>(false));
     REQUIRE_FALSE(engine.evaluate("bad.success").getWithDefault<bool>(true));
     auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));

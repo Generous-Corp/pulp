@@ -241,6 +241,14 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
                 if (!geometry)
                     return shader_result(false, "Invalid shader geometry; expected auto or a supported shape object");
             }
+            if (options.hasObjectMember("feather") && options["feather"].isObject() &&
+                options["feather"].hasObjectMember("sigma")) {
+                const float sigma = static_cast<float>(
+                    options["feather"]["sigma"].getWithDefault<double>(0.0));
+                if (!std::isfinite(sigma) || sigma < 0.0f)
+                    return shader_result(false, "Feather sigma must be finite and non-negative");
+                reach = std::max(reach, std::ceil(3.0f * sigma));
+            }
         }
         const bool structured = sksl.find("PulpFragment shade") != std::string::npos;
         auto error = structured
@@ -471,6 +479,8 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         auto* v = self.widget(id);
         auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
         if (!host) return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        if (!std::isfinite(reach) || reach < 0.0f)
+            return shader_result(false, "Shader reach must be finite and non-negative");
         host->set_shader_reach(reach);
         self.request_repaint();
         return shader_result(true, "");
