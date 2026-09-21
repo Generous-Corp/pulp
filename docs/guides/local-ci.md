@@ -2585,6 +2585,54 @@ gh workflow run runner-health-check.yml -f alarm_minutes=60
 python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json
 ```
 
+#### Label reconciliation: *why* a stalled job is not being picked up
+
+Queue age answers *is the lane alive*. When the answer is no, it does not say
+why, and the reader is left guessing among a wedged worker, an expired token,
+an asleep host, and a label nothing serves. On 2026-09-21 it was the label: three
+queued `macos` jobs each requested `pulp-build-merge-group` while every online
+runner advertised `pulp-build-pr-head`. Those jobs were unschedulable from the
+moment they queued, the merge queue head sat in `AWAITING_CHECKS` behind them,
+and 5 h 30 min passed with zero merges and no alarm anywhere.
+
+The same sweep now reconciles the two. For each **distinct label set some job has
+already been queued on past `alarm_minutes`**, it compares the request against
+the labels online self-hosted runners advertise — across **both** the repo and
+org scopes, because runners in an org runner group are invisible to the repo
+endpoint and this org keeps online ones.
+
+| finding | level | means |
+|---|---|---|
+| `unschedulable_labels` | alarm | No online runner, busy or idle, advertises the full requested set. The finding names the labels nothing carries. |
+| `runner_census_blind` | warn | The census could not be completed (a scope refused, a listing came back short, or nothing was online), so no label can be called unserved this sweep. It reports the unconfirmed diff as a lead, never a verdict. |
+
+Three properties make this safe, and each is pinned by a test:
+
+- **Demand-gated, so an idle fleet is silent by construction.** This is *not* the
+  scheduled label-satisfiability census argued against above. That census asks
+  "does anything advertise label X?" of the whole fleet on a timer, and because
+  these runners are JIT — registered only while serving — a healthy lane answers
+  "no" every idle night until the alarm is muted. This check has nothing to
+  evaluate unless a real job is stalled on a real label set. The JIT objection is
+  bounded rather than ignored: a healthy lane mints a runner in seconds to
+  minutes, so a missing label has had 45 minutes to appear before anything fires.
+- **Saturation is not unschedulable.** GitHub places a job on one runner that
+  carries *every* requested label, so "schedulable" means some online runner's
+  label set is a superset of the request. A busy superset is a deep queue on a
+  working lane and stays silent at any age.
+- **Fails closed on blindness.** A failed or empty runner read reports an
+  evidence gap — never "unschedulable", and never a clean bill of health either.
+  That gap is scoped to this finding: it deliberately does not use the sweep-wide
+  degraded predicate, because neither a truncated run listing nor a failed jobs
+  call can falsify a queued job's own requested labels, and sharing the predicate
+  would leave the check permanently degraded on a repo busy enough to truncate.
+
+The org-scoped runners API needs `Administration: Read`, which `GITHUB_TOKEN`
+does not carry, so the workflow passes `secrets.RELEASE_BOT_TOKEN` when it is
+configured (the same fallback `runner-topology-check.yml` uses). Without it the
+org scope refuses, the census records the refusal, and every reconciliation
+reports `runner_census_blind` instead of naming a label — honest, and disarmed.
+
 #### Contribution: the host that goes quiet while the lane stays healthy
 
 Queue age answers *is the lane alive*. It cannot answer *is every host still in

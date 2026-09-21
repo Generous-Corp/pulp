@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260920-pr8458-timing-interaction-gates",
+  "created_at": "2026-09-20T16:20:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Complete the remaining #8458 importer observability contract with caller-supplied timing budgets and bounded post-action state expectations. The change is confined to Pulp-owned importer differential and browser interaction tooling; TTFP, TTNI, and IFNF remain fail-closed, the twelve-fixture corpus is unchanged, Chromium remains the oracle, and no transferred render/canvas/Skia/Dawn path or Graphite threading is modified.",
+  "tests": [
+    "python3 -m unittest discover -s test -p test_importer_differential_lab.py",
+    "node --test tools/import-design/browser_capture/interactions.test.mjs",
+    "python3 -m py_compile tools/import-validation/importer_differential/*.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -22,6 +22,7 @@ def format_summary(report: dict[str, Any]) -> str:
         f"- TTNI proxy: {report['observability']['ttni_proxy']['value_ms']} ms",
         f"- IFNF: {report['observability']['ifnf']['status']}",
         f"- Cache state: {report['observability']['cache_state']['identity']}",
+        f"- Timing budget: {report['timing_budget']['status']}",
     ]
     lines += [
         f"- {name.title()} score: {comparison[name]['score']:.3f}"
@@ -62,6 +63,7 @@ def format_corpus_summary(aggregate: dict[str, Any]) -> str:
         f"- TTNI proxy p95: {aggregate['observability']['ttni_proxy']['p95_ms']} ms",
         f"- IFNF: {aggregate['observability']['ifnf']['status']}",
         f"- Cache states: {', '.join(aggregate['observability']['cache_states']) or 'none'}",
+        f"- Timing budget: {aggregate['timing_budget']['status']}",
         f"- Native-authoritative: {counts['native-authoritative']}",
         f"- Native with browser validation: {counts['native-with-browser-validation']}",
         f"- Browser-required: {counts['browser-required']}",

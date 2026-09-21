@@ -332,22 +332,33 @@ if [ -f "$FMT" ]; then
 fi
 
 # ── 6b2. gpu-handoff pin freshness ──────────────────────────────────────────
-# docs/status/gpu-vellum-handoff.yaml pins referenced Pulp paths to an exact
-# revision, so editing one of those files is inherently a two-commit operation:
-# the change, then a tool-generated identity refresh. Nothing checked that, and
-# on 2026-09-05 three separate PRs each discovered it ~20 minutes later in CI.
-# Diff-scoped and sub-second: it only looks at whether a changed file is pinned.
-# It deliberately does NOT re-verify the identity fields — that is
-# `gpu_handoff_provenance.py check`, which costs ~25s because it runs a git log
-# per pinned path, and it is named in the failure output.
-# What CI would catch is narrower than it was when this landed: currency at
-# HEAD is now opt-in behind PULP_GPU_HANDOFF_REQUIRE_CURRENT, which nothing in
-# .github sets, so a merely-stale pin no longer turns the required gate red.
-# The always-on provenance tier still does, and so does a ledger this guard
-# never sees — which is what 6b3 below is for.
+# A PR does not re-pin docs/status/gpu-vellum-handoff.yaml or its receipt. The
+# version bot's bump commit does, inside the transaction it already writes to
+# main (version_at_land._refresh_derived), because that commit is the one place
+# a re-pin costs nobody a rebase. Re-pinning in a PR re-creates what the move
+# removed: ~148 non-merge commits in 25 days changed only those two generated
+# files, and they collide on github.com, where the local pulp-gpu-ledger merge
+# driver cannot run. So this rejects an identity-only re-pin — the ledger or
+# receipt moved while the pinned-path INVENTORY did not.
+# It separately rejects a pinned path deleted or renamed while the inventory
+# still lists it. That asymmetry is deliberate: a stale pin survives (provenance
+# is ancestral, and currency is opt-in behind PULP_GPU_HANDOFF_REQUIRE_CURRENT,
+# which nothing in .github sets), but a MISSING path turns the required gate
+# red, and no regenerator can decide whether the row should move or be dropped.
+# An inventory change is still a legitimate in-PR ledger edit, and it still owes
+# `gpu_handoff_provenance.py write --receipt`. This gate does not re-verify the
+# identity fields — that is `gpu_handoff_provenance.py check`, ~25s because it
+# runs a git log per pinned path. Diff-scoped and sub-second: an ls-tree/show
+# pair per side of the range plus one git diff --name-status. The pre-push hook
+# runs the same script, so the rule holds whether or not anyone ran this one.
+#
+# It exits 2 for "git could not answer, so nothing was checked" — distinct from
+# 0, because an empty changed-path list is how this gate spells clean and a
+# swallowed git failure would therefore read as a pass. `if !` below already
+# fails on every non-zero; the pre-push hook has to name the code explicitly.
 if [ -f "$GHP" ]; then
     echo "" >&2
-    echo "▸ gpu-handoff pin freshness (pinned path changed => refresh the ledger)" >&2
+    echo "▸ gpu-handoff pin freshness (no in-PR re-pin; no orphaned pinned path)" >&2
     if ! "$PYTHON" "$GHP" --base "$BASE" --mode=report; then
         fail=1
     fi

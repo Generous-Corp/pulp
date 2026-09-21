@@ -1216,3 +1216,276 @@ TEST_CASE("LV2 transport survives a block the host sends no position in",
     REQUIRE(g_lv2_time.position_samples == 1032);
     REQUIRE_FALSE(g_lv2_time.transport_jump);
 }
+
+// ── Port-index cross-check + channel-ceiling admission ───────────────────
+
+namespace {
+
+// Descriptor and parameter list the layout probe reports. Set before each
+// instantiate() so one probe covers every plugin shape.
+PluginDescriptor g_layout_probe_desc;
+std::vector<state::ParamInfo> g_layout_probe_params;
+
+class Lv2LayoutProbeProcessor final : public Processor {
+  public:
+    PluginDescriptor descriptor() const override {
+        return g_layout_probe_desc;
+    }
+
+    void define_parameters(state::StateStore& store) override {
+        for (const auto& info : g_layout_probe_params)
+            store.add_parameter(info);
+    }
+
+    void prepare(const PrepareContext&) override {}
+
+    void process(audio::BufferView<float>&, const audio::BufferView<const float>&,
+                 midi::MidiBuffer&, midi::MidiBuffer&, const ProcessContext&) override {}
+};
+
+std::unique_ptr<Processor> make_lv2_layout_probe() {
+    return std::make_unique<Lv2LayoutProbeProcessor>();
+}
+
+// One port block as the generated Turtle declares it. Types are read off the
+// block's `a` line rather than matched as free substrings, so a type that
+// landed on a different subject does not count.
+struct TtlPort {
+    int index = -1;
+    bool is_input = false;
+    bool is_output = false;
+    bool is_audio = false;
+    bool is_control = false;
+    bool is_atom = false;
+};
+
+// Walk the port blocks of a generated plugin.ttl. Each is a bracketed blank
+// node on its own lines; inline blank nodes (doap:developer, lv2:scalePoint)
+// are single-line and carry no lv2:index, so they are skipped.
+std::vector<TtlPort> parse_ttl_ports(const std::string& ttl) {
+    std::vector<TtlPort> ports;
+    const std::string open = "\n    [\n";
+    const std::string close = "\n    ]";
+    std::size_t pos = 0;
+    while ((pos = ttl.find(open, pos)) != std::string::npos) {
+        const std::size_t body_begin = pos + open.size();
+        const std::size_t body_end = ttl.find(close, body_begin);
+        REQUIRE(body_end != std::string::npos);
+        const std::string body = ttl.substr(body_begin, body_end - body_begin);
+        pos = body_end + close.size();
+
+        const std::size_t index_at = body.find("lv2:index ");
+        if (index_at == std::string::npos)
+            continue;
+
+        TtlPort port;
+        port.index = std::stoi(body.substr(index_at + std::strlen("lv2:index ")));
+
+        const std::size_t types_at = body.find("        a ");
+        REQUIRE(types_at != std::string::npos);
+        const std::string types = body.substr(types_at, body.find('\n', types_at) - types_at);
+        port.is_input = types.find("lv2:InputPort") != std::string::npos;
+        port.is_output = types.find("lv2:OutputPort") != std::string::npos;
+        port.is_audio = types.find("lv2:AudioPort") != std::string::npos;
+        port.is_control = types.find("lv2:ControlPort") != std::string::npos;
+        port.is_atom = types.find("atom:AtomPort") != std::string::npos;
+        ports.push_back(port);
+    }
+    return ports;
+}
+
+// What the manifest says a port is. The adapter's own classification is never
+// consulted here — that is the other side of the comparison.
+Lv2PortKind kind_declared_in_ttl(const TtlPort& port) {
+    if (port.is_audio && port.is_input)
+        return Lv2PortKind::AudioIn;
+    if (port.is_audio && port.is_output)
+        return Lv2PortKind::AudioOut;
+    if (port.is_atom && port.is_input)
+        return Lv2PortKind::AtomIn;
+    if (port.is_atom && port.is_output)
+        return Lv2PortKind::AtomOut;
+    if (port.is_control && port.is_input)
+        return Lv2PortKind::Control;
+    if (port.is_control && port.is_output)
+        return Lv2PortKind::Latency;
+    return Lv2PortKind::None;
+}
+
+PluginDescriptor make_layout_desc(std::vector<BusInfo> inputs, std::vector<BusInfo> outputs,
+                                  bool accepts_midi, bool produces_midi) {
+    PluginDescriptor desc;
+    desc.name = "Lv2LayoutProbe";
+    desc.manufacturer = "PulpTest";
+    desc.bundle_id = "com.pulp.test.lv2-layout-probe";
+    desc.version = "1.0.0";
+    desc.category = PluginCategory::Effect;
+    desc.input_buses = std::move(inputs);
+    desc.output_buses = std::move(outputs);
+    desc.accepts_midi = accepts_midi;
+    desc.produces_midi = produces_midi;
+    return desc;
+}
+
+state::ParamInfo make_layout_param(state::ParamID id, std::string name) {
+    state::ParamInfo info;
+    info.id = id;
+    info.name = std::move(name);
+    info.range = {0.0f, 1.0f, 0.5f};
+    return info;
+}
+
+} // namespace
+
+// The port number is the whole of LV2's port identity: generate_plugin_ttl()
+// writes it into the manifest and connect_port() reads the same integer back
+// from the host. This pins those two orderings against each other — a
+// disagreement hands the plugin a float* where it reads an LV2_Atom_Sequence.
+//
+// It pins the generator, which is the specification of the ordering; it is not
+// evidence that a host reads this Turtle today, because nothing in the build
+// writes a .ttl into an .lv2 bundle. Pulp's own LV2 host is the one consumer
+// that connects ports by manifest index.
+TEST_CASE("LV2 TTL port indices match the slots connect_port wires", "[format][lv2][ports]") {
+    struct Shape {
+        const char* label;
+        PluginDescriptor desc;
+        std::vector<state::ParamInfo> params;
+    };
+
+    std::vector<Shape> shapes;
+    shapes.push_back({"stereo effect with parameters",
+                      make_layout_desc({{"In", 2}}, {{"Out", 2}}, false, false),
+                      {make_layout_param(1, "Gain"), make_layout_param(2, "Mix")}});
+    shapes.push_back({"instrument with MIDI input",
+                      make_layout_desc({}, {{"Out", 2}}, true, false),
+                      {make_layout_param(1, "Level")}});
+    shapes.push_back(
+        {"MIDI effect with no audio and no parameters", make_layout_desc({}, {}, true, true), {}});
+    shapes.push_back({"multi-bus effect emitting MIDI",
+                      make_layout_desc({{"Main In", 1}, {"Side In", 2}},
+                                       {{"Main Out", 2}, {"Aux Out", 2}}, false, true),
+                      {make_layout_param(1, "Depth")}});
+
+    for (const auto& shape : shapes) {
+        CAPTURE(shape.label);
+        g_layout_probe_desc = shape.desc;
+        g_layout_probe_params = shape.params;
+
+        Lv2FactoryGuard factory(&make_lv2_layout_probe);
+        Lv2FeatureBundle features;
+        Lv2HandleGuard handle{lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "",
+                                                       features.features)};
+        REQUIRE(handle.handle != nullptr);
+        auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+
+        // Generate the manifest from exactly the inputs a shipped bundle would:
+        // the instance's own processor descriptor and parameter store.
+        const auto ttl = generate_plugin_ttl(inst->processor->descriptor(), inst->store,
+                                             "http://pulp.audio/test/lv2-layout-probe");
+        const auto ports = parse_ttl_ports(ttl);
+
+        const auto layout = inst->port_layout();
+        REQUIRE(ports.size() == static_cast<std::size_t>(layout.port_count()));
+
+        // The lv2:port predicate opens exactly once and every later port is a
+        // comma continuation of it. Which kind of port comes first depends on
+        // the plugin's shape, so this is asserted for every shape rather than
+        // for the audio-first one alone.
+        std::size_t predicate_count = 0;
+        for (std::size_t at = ttl.find("\n    lv2:port\n"); at != std::string::npos;
+             at = ttl.find("\n    lv2:port\n", at + 1)) {
+            ++predicate_count;
+        }
+        REQUIRE(predicate_count == 1);
+
+        // Indices are dense and declared once each, in ascending order — the
+        // property a host relies on when it saves connections by number.
+        for (std::size_t i = 0; i < ports.size(); ++i) {
+            REQUIRE(ports[i].index == static_cast<int>(i));
+        }
+
+        // Connect every declared port to a distinct sentinel address. Nothing
+        // dereferences these; run() is never called here, so a float address
+        // standing in for an atom buffer is only ever compared.
+        std::vector<float> sentinels(ports.size(), 0.0f);
+        for (const auto& port : ports) {
+            lv2_generic::connect_port(handle.handle, static_cast<uint32_t>(port.index),
+                                      &sentinels[static_cast<std::size_t>(port.index)]);
+        }
+
+        // Ordinals come from the manifest's declaration order, so the slot each
+        // port must land in is derived from the TTL alone.
+        int audio_in_seen = 0;
+        int audio_out_seen = 0;
+        int control_seen = 0;
+        int latency_seen = 0;
+        for (const auto& port : ports) {
+            CAPTURE(port.index);
+            void* expected = &sentinels[static_cast<std::size_t>(port.index)];
+            switch (kind_declared_in_ttl(port)) {
+            case Lv2PortKind::AudioIn:
+                REQUIRE(inst->audio_in_ports[audio_in_seen++] == expected);
+                break;
+            case Lv2PortKind::AudioOut:
+                REQUIRE(inst->audio_out_ports[audio_out_seen++] == expected);
+                break;
+            case Lv2PortKind::Control:
+                REQUIRE(inst->control_in_ports[control_seen++] == expected);
+                break;
+            case Lv2PortKind::AtomIn:
+                REQUIRE(inst->midi_in_atom == expected);
+                break;
+            case Lv2PortKind::AtomOut:
+                REQUIRE(inst->midi_out_atom == expected);
+                break;
+            case Lv2PortKind::Latency:
+                REQUIRE(inst->latency_port == expected);
+                ++latency_seen;
+                break;
+            case Lv2PortKind::None:
+                FAIL("port declares no recognized LV2 port type");
+                break;
+            }
+        }
+
+        // Every slot the adapter reads was filled by a port the manifest
+        // declared — a manifest short of a port would leave one null.
+        REQUIRE(audio_in_seen == inst->num_audio_inputs);
+        REQUIRE(audio_out_seen == inst->num_audio_outputs);
+        REQUIRE(control_seen == inst->num_params);
+        REQUIRE(latency_seen == 1);
+        REQUIRE((inst->midi_in_atom != nullptr) == inst->accepts_midi);
+        REQUIRE((inst->midi_out_atom != nullptr) == inst->produces_midi);
+    }
+}
+
+// The instance carries fixed kMaxChannels-wide audio port arrays and the
+// manifest numbers a port for every declared channel, so a descriptor wider
+// than that ceiling has no valid wiring. Refuse it at admission rather than
+// dropping connections later, where the symptom would be silence.
+TEST_CASE("LV2 instantiate refuses a descriptor past the channel ceiling", "[format][lv2][ports]") {
+    Lv2FeatureBundle features;
+
+    auto instantiate_with = [&](std::vector<BusInfo> inputs, std::vector<BusInfo> outputs) {
+        g_layout_probe_desc = make_layout_desc(std::move(inputs), std::move(outputs), false, false);
+        g_layout_probe_params = {};
+        return lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor, 48000.0, "",
+                                        features.features);
+    };
+
+    Lv2FactoryGuard factory(&make_lv2_layout_probe);
+
+    // One bus past the ceiling, and a sum over it across several buses.
+    REQUIRE(instantiate_with({{"In", kMaxChannels + 1}}, {{"Out", 2}}) == nullptr);
+    REQUIRE(instantiate_with({{"Main In", kMaxChannels}, {"Side In", 2}}, {{"Out", 2}}) == nullptr);
+    REQUIRE(instantiate_with({{"In", 2}}, {{"Main Out", kMaxChannels}, {"Aux Out", 2}}) == nullptr);
+
+    // Control: a descriptor exactly at the ceiling is still admitted, so the
+    // refusals above are the guard and not a broken instantiate().
+    Lv2HandleGuard widest{instantiate_with({{"In", kMaxChannels}}, {{"Out", kMaxChannels}})};
+    REQUIRE(widest.handle != nullptr);
+    auto* inst = static_cast<PulpLv2Instance*>(widest.handle);
+    REQUIRE(inst->num_audio_inputs == kMaxChannels);
+    REQUIRE(inst->num_audio_outputs == kMaxChannels);
+}
