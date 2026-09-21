@@ -419,6 +419,9 @@ uniform float arcSweep;
 uniform float innerRadius;
 uniform float strokeWidth;
 uniform float reach;
+uniform float featherSigma;
+uniform float featherCurve;
+uniform float featherMode;
 uniform float leaf0; uniform float leaf1; uniform float leaf2; uniform float leaf3;
 uniform float leaf4; uniform float leaf5; uniform float leaf6; uniform float leaf7;
 uniform float leaf8; uniform float leaf9; uniform float leaf10; uniform float leaf11;
@@ -485,7 +488,14 @@ half4 main(float2 coord) {
                             1.0,
                             (shapeType > 11.5 && shapeType < 12.5 &&
                              arcSweep > 0.0 && outer > inner) ? 1.0 : 0.0);
-    return shade(g);
+    half4 shaded = shade(g);
+    if (featherSigma > 0.0) {
+        float feather = pulpFeather(g, featherSigma,
+                                    int(featherCurve + 0.5),
+                                    int(featherMode + 0.5));
+        shaded.a *= half(feather);
+    }
+    return shaded;
 }
 )";
 }
@@ -525,6 +535,9 @@ bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
     builder.uniform("innerRadius") = style.inner_radius;
     builder.uniform("strokeWidth") = style.stroke_width;
     builder.uniform("reach") = options.reach;
+    builder.uniform("featherSigma") = style.feather_sigma;
+    builder.uniform("featherCurve") = static_cast<float>(style.feather_curve);
+    builder.uniform("featherMode") = static_cast<float>(style.feather_mode);
     for (const auto& named : options.named_uniforms) {
         if (!effect->findUniform(named.name.c_str()) || named.count < 1 || named.count > 4) continue;
         auto slot = builder.uniform(named.name.c_str());

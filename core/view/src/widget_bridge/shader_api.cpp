@@ -244,11 +244,27 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
             }
             if (options.hasObjectMember("feather") && options["feather"].isObject() &&
                 options["feather"].hasObjectMember("sigma")) {
+                const auto& feather = options["feather"];
                 const float sigma = static_cast<float>(
-                    options["feather"]["sigma"].getWithDefault<double>(0.0));
+                    feather["sigma"].getWithDefault<double>(0.0));
                 if (!std::isfinite(sigma) || sigma < 0.0f)
                     return shader_result(false, "Feather sigma must be finite and non-negative");
                 reach = std::max(reach, std::ceil(3.0f * sigma));
+                if (geometry) {
+                    geometry->style.feather_sigma = sigma;
+                    const auto curve = feather.hasObjectMember("curve")
+                                           ? feather["curve"].getWithDefault<std::string>("gaussian")
+                                           : "gaussian";
+                    geometry->style.feather_curve = curve == "linear" ? 1 : 0;
+                    const auto mode = feather.hasObjectMember("mode")
+                                          ? feather["mode"].getWithDefault<std::string>("uniform")
+                                          : "uniform";
+                    static constexpr const char* modes[] = {
+                        "uniform", "glow", "inner", "outer", "inset", "radial", "sweep"};
+                    geometry->style.feather_mode = 0;
+                    for (int i = 0; i < 7; ++i)
+                        if (mode == modes[i]) geometry->style.feather_mode = i;
+                }
             }
         }
         const bool structured = sksl.find("PulpFragment shade") != std::string::npos;
