@@ -1,0 +1,123 @@
+{
+  "benchmark_code_commit": "d619e6c6e05c247739a029a2b70a262b19966ebe",
+  "configuration": {
+    "callback_driver": "sleep_until_non_rt",
+    "channels": 2,
+    "completion_service": "process_events",
+    "frames": 32,
+    "ir_frames": 257,
+    "measured_blocks": 1024,
+    "provider_slots": 2,
+    "sample_rate_hz": 48000,
+    "warmup_blocks": 64
+  },
+  "date": "2026-09-20",
+  "executable_sha256": "1bb778e47394315db5787c322e4a8628ee3af42a6e5871b44e6240966b015591",
+  "interpretation": {
+    "all_runs_numerically_completed": true,
+    "all_runs_oracle_failed_blocks": 0,
+    "all_runs_produced_blocks_before_stop": 2,
+    "miss_rate_conclusion": "unassigned",
+    "reason": "The probe produced only two worker blocks before stop, so its miss counter cannot establish a sustained lead-dependent rate; use as harness diagnostic only."
+  },
+  "provider": {
+    "asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+    "dawn_revision": "f91da75afe31d4d6f47a6da307e1fbabd1b1691a",
+    "identity_receipt_sha256": "6f25b897e618813a6e4578d86f736e184ea982994f0b73fc83a94e67deb94288",
+    "linked_dawn_archive_sha256": "73727ddf86ffc34eea6fb6392d8d688f44e317ff37b3bb421f8223c8b8815dc9"
+  },
+  "runs": [
+    {
+      "blocks_sha256": "cbebb471c4cbe66a0d5c3bc6b1cc55605fd3da1b25de541fa35dfbb5f698a33e",
+      "callback_overruns": 1,
+      "id": "lead-1",
+      "late_callback_starts": 17,
+      "lead_blocks": 1,
+      "measured_blocks": 1024,
+      "measured_miss_counter_delta": 1024,
+      "oracle_failed_blocks": 0,
+      "performance_verdict": "unassigned",
+      "produced_blocks_before_stop": 2,
+      "receipt_sha256": "1a7ac42da1ef9170608345e988303e6247c220e4097bb373407761917f95fada",
+      "status": "completed",
+      "stderr_sha256": "07f3e592243197a8420c6ed8fca329948631139b89c548f12efb1c0e87494b6f",
+      "wake_on_write": false,
+      "warmup_blocks": 64
+    },
+    {
+      "blocks_sha256": "e32c615ed752bda466780722a6efbab1587f56acbca8915c43d36952653449d8",
+      "callback_overruns": 0,
+      "id": "lead-2",
+      "late_callback_starts": 15,
+      "lead_blocks": 2,
+      "measured_blocks": 1024,
+      "measured_miss_counter_delta": 1024,
+      "oracle_failed_blocks": 0,
+      "performance_verdict": "unassigned",
+      "produced_blocks_before_stop": 2,
+      "receipt_sha256": "cb62d5c6578344b9afbb584ec726b220c84262105ffd56a2adb9b9a9b6f0c883",
+      "status": "completed",
+      "stderr_sha256": "3ce4368c8a423aea6f58f693894c5b4e7ec7c849c4a7464cef7966961d8675d7",
+      "wake_on_write": false,
+      "warmup_blocks": 64
+    },
+    {
+      "blocks_sha256": "d05ad69bb52d74e98735da56782698307cda3115745eac88f7afc5570330d272",
+      "callback_overruns": 0,
+      "id": "lead-4",
+      "late_callback_starts": 33,
+      "lead_blocks": 4,
+      "measured_blocks": 1024,
+      "measured_miss_counter_delta": 1024,
+      "oracle_failed_blocks": 0,
+      "performance_verdict": "unassigned",
+      "produced_blocks_before_stop": 2,
+      "receipt_sha256": "334329a3293336071202d440664ca60f3fceabc69ab1b697851bec0a63960198",
+      "status": "completed",
+      "stderr_sha256": "294c70bbbabbd6537106f38e9a112d522e63436bf13a0518bf34716f2594874c",
+      "wake_on_write": false,
+      "warmup_blocks": 64
+    },
+    {
+      "blocks_sha256": "df5bcb16c19f86d4fb39a3072b0bfc011329a615f3ef6474835e143f7a4c6534",
+      "callback_overruns": 1,
+      "id": "lead-8",
+      "late_callback_starts": 77,
+      "lead_blocks": 8,
+      "measured_blocks": 1024,
+      "measured_miss_counter_delta": 1024,
+      "oracle_failed_blocks": 0,
+      "performance_verdict": "unassigned",
+      "produced_blocks_before_stop": 2,
+      "receipt_sha256": "12cb40f3b1053ee4ce31225e67da7e2e074d194fa3388a2c4cfca748667568c6",
+      "status": "completed",
+      "stderr_sha256": "ffe3664f4db71412e9ccc2037c12cf220ddd97d08d79c2722a3ef16811ac5e01",
+      "wake_on_write": false,
+      "warmup_blocks": 64
+    },
+    {
+      "blocks_sha256": "adf2a89fd939b553729a26ed25557db0632073f5396d1a75672f731f36ae7254",
+      "callback_overruns": 0,
+      "id": "lead-2-wake",
+      "late_callback_starts": 10,
+      "lead_blocks": 2,
+      "measured_blocks": 1024,
+      "measured_miss_counter_delta": 1024,
+      "oracle_failed_blocks": 0,
+      "performance_verdict": "unassigned",
+      "produced_blocks_before_stop": 2,
+      "receipt_sha256": "c89e9fc998c50dea74d46768e4a0bfa8eade343f6cb8b5d5adbb0194e51dbabe",
+      "status": "completed",
+      "stderr_sha256": "522ebfc25eee197d01153044896f9cf99c7c9c5012704856d7f62ba30ed25282",
+      "wake_on_write": true,
+      "warmup_blocks": 64
+    }
+  ],
+  "schema": "pulp.gpu-audio.p4.lead-sweep.v1",
+  "source_commit": "2c013d4ed85b69628b0e7c25f268214f3bc66a66",
+  "source_sha256": {
+    "core/gpu_audio/src/gpu_audio_transport.cpp": "5cae6e39aeb6a78bfb9ffbc1c07f878f8c04d140616fa5338f81c773045cedf1",
+    "core/gpu_audio/src/gpu_convolver.cpp": "27e2e5fdf766bd37a96f2b013261908088ae967d33ae7c4ee9c3bd64124a839c",
+    "test/test_gpu_shared_io_paced_convolution_probe.cpp": "ca5ac4dfd1157a7b2840b245738d36e28b9da1e78e8618f69baa2cb82b0a0322"
+  }
+}

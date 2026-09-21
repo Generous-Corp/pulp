@@ -33,6 +33,8 @@ struct Config {
     std::filesystem::path directory;
 };
 
+constexpr auto kPostCallbackDrainTimeout = std::chrono::seconds{2};
+
 bool parse(int argc, char** argv, Config& config) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument(argv[i]);
@@ -126,6 +128,14 @@ int run(Config config) {
         const auto misses = transport.stats().miss_blocks;
         record.miss_delta = misses - previous_misses;
         previous_misses = misses;
+    }
+    // Let the non-RT worker retire the callback backlog before taking the
+    // receipt snapshot. release() also joins and performs a final drain, but
+    // it resets the transport state afterward, so a pre-release snapshot is
+    // otherwise liable to report only the first provider-slot completions.
+    const auto settle_deadline = Clock::now() + kPostCallbackDrainTimeout;
+    while (Clock::now() < settle_deadline && transport.stats().produced_blocks < total_blocks) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
     const auto transport_stats = transport.stats();
     transport.release();

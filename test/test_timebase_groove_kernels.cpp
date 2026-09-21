@@ -3,6 +3,7 @@
 #include <pulp/timebase/coordinate_random.hpp>
 #include <pulp/timebase/grid_projection.hpp>
 #include <pulp/timebase/groove_kernel.hpp>
+#include <pulp/timebase/inline_groove_projector.hpp>
 #include <pulp/timeline/model.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
@@ -17,6 +18,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -844,4 +846,259 @@ TEST_CASE("valid maximum tempo can collapse several exact grid points onto one s
     REQUIRE(result.count > 1);
     for (std::size_t index = 0; index < result.count; ++index)
         REQUIRE(output[index].frame_offset == 0);
+}
+
+namespace {
+
+// A groove table shaped like a real authored one: sixteen entries on a
+// sixteenth grid, offsets of a few percent of an entry, leaning both ways.
+// Authoring granularity of one percent of a sixteenth is 1'764 ticks, which is
+// why such a table cannot fit the order-preserving kernel's admissible window.
+std::array<GrooveKernelStep, 16> authored_sixteenth_groove(std::int64_t entry) {
+    constexpr std::array<int, 16> percent{0, 4, -2, 3, 0, 5, -3, 2, 0, 4, -2, 3, 0, 5, -3, 2};
+    constexpr std::array<std::int32_t, 16> accent{1'000, 820, 1'140, 760, 1'000, 880, 1'200, 700,
+                                                  1'000, 820, 1'140, 760, 1'000, 880, 1'200, 700};
+    std::array<GrooveKernelStep, 16> steps{};
+    for (std::size_t index = 0; index < steps.size(); ++index)
+        steps[index] = GrooveKernelStep{{percent[index] * entry / 100}, accent[index]};
+    return steps;
+}
+
+pulp::timeline::GrooveTemplate canonical_groove(std::int64_t entry,
+                                                std::span<const GrooveKernelStep> steps,
+                                                TickDuration swing_grid, SwingRatio swing,
+                                                std::int32_t strength) {
+    pulp::timeline::GrooveTemplateInput input;
+    input.swing_grid = swing_grid;
+    input.swing = swing;
+    input.step = TickDuration{entry};
+    for (const auto& step : steps)
+        input.steps.push_back(pulp::timeline::GrooveStep{step.timing_offset, step.velocity_scale});
+    input.timing_strength = strength;
+    input.velocity_strength = strength;
+    auto created = pulp::timeline::GrooveTemplate::create(std::move(input));
+    REQUIRE(created);
+    return std::move(created).value();
+}
+
+} // namespace
+
+TEST_CASE("inline groove projection admits the authored table the strict kernel refuses",
+          "[timebase][groove]") {
+    static_assert(std::is_trivially_copyable_v<InlineGrooveProjector>);
+    static_assert(!std::is_trivially_copyable_v<pulp::timeline::GrooveTemplate>);
+    static_assert(sizeof(InlineGrooveProjector) < sizeof(OrderPreservingGrooveKernel) / 16);
+    static_assert(kMaximumInlineGrooveSteps == 16);
+
+    constexpr std::int64_t entry = kTicksPerQuarter / 4;
+    const auto steps = authored_sixteenth_groove(entry);
+    const std::span<const GrooveKernelStep> table{steps};
+
+    // The contrast is the reason this type exists: the same authored table, at
+    // the same strength, on the same grid.
+    const auto strict = OrderPreservingGrooveKernel::create(
+        {{}, kStraightSwing, {entry}, table, kGrooveKernelUnitScale, kGrooveKernelUnitScale});
+    REQUIRE_FALSE(strict);
+    REQUIRE(strict.error() == GrooveKernelError::ReordersEvents);
+
+    const auto created = InlineGrooveProjector::create(
+        {{}, kStraightSwing, {entry}, table, kGrooveKernelUnitScale, kGrooveKernelUnitScale});
+    REQUIRE(created);
+    const auto projector = created.value();
+
+    // Control: the strict kernel does admit a table that stays inside its
+    // window, so the refusal above is about this table and not about the call.
+    const std::array<GrooveKernelStep, 16> flat{};
+    REQUIRE(OrderPreservingGrooveKernel::create({{},
+                                                 kStraightSwing,
+                                                 {entry},
+                                                 std::span<const GrooveKernelStep>(flat),
+                                                 kGrooveKernelUnitScale,
+                                                 kGrooveKernelUnitScale}));
+
+    // The projection is the canonical authored model's arithmetic, so it agrees
+    // with it position for position and accent for accent.
+    for (const auto strength : {0, 1, 250, 999, kGrooveKernelUnitScale}) {
+        const auto canonical = canonical_groove(entry, table, {entry * 2}, kTripletSwing,
+                                                static_cast<std::int32_t>(strength));
+        const auto swung = InlineGrooveProjector::create({{entry * 2},
+                                                          kTripletSwing,
+                                                          {entry},
+                                                          table,
+                                                          static_cast<std::int32_t>(strength),
+                                                          static_cast<std::int32_t>(strength)});
+        REQUIRE(swung);
+        for (std::int64_t tick = -4 * entry; tick <= 20 * entry; tick += 617) {
+            const auto applied = swung.value().apply_timing({tick});
+            REQUIRE(applied);
+            REQUIRE(applied.value() == canonical.apply_timing({tick}));
+            REQUIRE(swung.value().velocity_scale_at({tick}) == canonical.velocity_scale_at({tick}));
+        }
+    }
+
+    // Reordering is admitted, which is the contract: the last tick of the entry
+    // carrying +5% lands after the first tick of the entry carrying -3%.
+    const auto late = projector.apply_timing({6 * entry - 1});
+    const auto early = projector.apply_timing({6 * entry});
+    REQUIRE(late);
+    REQUIRE(early);
+    REQUIRE(late.value() > early.value());
+
+    // Unauthored slots project onto themselves and leave velocity alone.
+    REQUIRE(projector.apply_timing({0}).value() == TickPosition{0});
+    REQUIRE(projector.velocity_scale_at({0}) == kGrooveKernelUnitScale);
+    REQUIRE(projector.velocity_scale_at({entry}) == 820);
+    REQUIRE_FALSE(projector.states_no_feel());
+    REQUIRE(InlineGrooveProjector{}.states_no_feel());
+}
+
+TEST_CASE("zero inline groove strength is exact identity including swing", "[timebase][groove]") {
+    constexpr std::int64_t entry = kTicksPerQuarter / 4;
+    const auto steps = authored_sixteenth_groove(entry);
+    const std::span<const GrooveKernelStep> table{steps};
+    const auto created =
+        InlineGrooveProjector::create({{entry * 2}, kTripletSwing, {entry}, table, 0, 0});
+    REQUIRE(created);
+    const auto projector = created.value();
+
+    // Control: at full strength the same swing and table displace, so the
+    // identity below is the strength and not an inert configuration.
+    const auto full = InlineGrooveProjector::create({{entry * 2},
+                                                     kTripletSwing,
+                                                     {entry},
+                                                     table,
+                                                     kGrooveKernelUnitScale,
+                                                     kGrooveKernelUnitScale});
+    REQUIRE(full);
+    std::size_t displaced = 0;
+    std::size_t scaled = 0;
+    for (std::int64_t tick = -2 * entry; tick <= 8 * entry; tick += 37) {
+        const auto applied = projector.apply_timing({tick});
+        REQUIRE(applied);
+        REQUIRE(applied.value() == TickPosition{tick});
+        REQUIRE(projector.velocity_scale_at({tick}) == kGrooveKernelUnitScale);
+        if (full.value().apply_timing({tick}).value() != TickPosition{tick})
+            ++displaced;
+        if (full.value().velocity_scale_at({tick}) != kGrooveKernelUnitScale)
+            ++scaled;
+    }
+    REQUIRE(displaced > 0);
+    REQUIRE(scaled > 0);
+
+    // Swing alone, with no table at all, is identity at zero strength too.
+    const auto swing_only =
+        InlineGrooveProjector::create({{entry * 2}, kTripletSwing, {}, {}, 0, 0});
+    REQUIRE(swing_only);
+    for (std::int64_t tick = -entry; tick <= 4 * entry; tick += 11)
+        REQUIRE(swing_only.value().apply_timing({tick}).value() == TickPosition{tick});
+}
+
+TEST_CASE("inline groove construction rejects out-of-domain tables", "[timebase][groove]") {
+    constexpr std::int64_t entry = kTicksPerQuarter / 4;
+    const std::array<GrooveKernelStep, 1> one{};
+    const std::span<const GrooveKernelStep> single{one};
+
+    std::array<GrooveKernelStep, kMaximumInlineGrooveSteps + 1> too_many{};
+    REQUIRE(InlineGrooveProjector::create({{},
+                                           kStraightSwing,
+                                           {entry},
+                                           std::span<const GrooveKernelStep>(too_many),
+                                           kGrooveKernelUnitScale,
+                                           kGrooveKernelUnitScale})
+                .error() == InlineGrooveError::TooManySteps);
+
+    // The largest admitted table is accepted, so the refusal above is the
+    // capacity bound and not the table shape.
+    std::array<GrooveKernelStep, kMaximumInlineGrooveSteps> at_capacity{};
+    REQUIRE(InlineGrooveProjector::create({{},
+                                           kStraightSwing,
+                                           {entry},
+                                           std::span<const GrooveKernelStep>(at_capacity),
+                                           kGrooveKernelUnitScale,
+                                           kGrooveKernelUnitScale}));
+
+    const std::array<GrooveKernelStep, 1> over_entry{GrooveKernelStep{{entry}, 1'000}};
+    REQUIRE(InlineGrooveProjector::create({{},
+                                           kStraightSwing,
+                                           {entry},
+                                           std::span<const GrooveKernelStep>(over_entry),
+                                           kGrooveKernelUnitScale,
+                                           kGrooveKernelUnitScale})
+                .error() == InlineGrooveError::InvalidTable);
+
+    const std::array<GrooveKernelStep, 1> loud{
+        GrooveKernelStep{{0}, kMaximumGrooveKernelVelocityScale + 1}};
+    REQUIRE(InlineGrooveProjector::create({{},
+                                           kStraightSwing,
+                                           {entry},
+                                           std::span<const GrooveKernelStep>(loud),
+                                           kGrooveKernelUnitScale,
+                                           kGrooveKernelUnitScale})
+                .error() == InlineGrooveError::InvalidVelocityScale);
+
+    REQUIRE(InlineGrooveProjector::create(
+                {{}, kStraightSwing, {entry}, single, kGrooveKernelUnitScale + 1, 0})
+                .error() == InlineGrooveError::InvalidStrength);
+    REQUIRE(InlineGrooveProjector::create({{-1}, kStraightSwing, {entry}, single, 0, 0}).error() ==
+            InlineGrooveError::InvalidSwingGrid);
+    REQUIRE(InlineGrooveProjector::create({{entry}, {3, 2}, {entry}, single, 0, 0}).error() ==
+            InlineGrooveError::InvalidSwing);
+    // A table width with no entries names nothing, and entries with no width
+    // have no position to be read at.
+    REQUIRE(InlineGrooveProjector::create({{}, kStraightSwing, {entry}, {}, 0, 0}).error() ==
+            InlineGrooveError::InvalidTable);
+    REQUIRE(InlineGrooveProjector::create({{}, kStraightSwing, {}, single, 0, 0}).error() ==
+            InlineGrooveError::InvalidTable);
+
+    const std::array<GrooveKernelStep, 1> nudge{GrooveKernelStep{{1}, 1'000}};
+    const auto edge = InlineGrooveProjector::create({{},
+                                                     kStraightSwing,
+                                                     {entry},
+                                                     std::span<const GrooveKernelStep>(nudge),
+                                                     kGrooveKernelUnitScale,
+                                                     kGrooveKernelUnitScale});
+    REQUIRE(edge);
+    REQUIRE(edge.value().apply_timing({std::numeric_limits<std::int64_t>::max()}).error() ==
+            InlineGrooveError::RangeExceeded);
+}
+
+TEST_CASE("inline groove projection remains allocation-free", "[timebase][groove][rt-safety]") {
+    constexpr std::int64_t entry = kTicksPerQuarter / 4;
+    const auto steps = authored_sixteenth_groove(entry);
+    const std::span<const GrooveKernelStep> table{steps};
+
+    bool created_ok = false;
+    bool projected_ok = false;
+    std::int64_t accumulated = 0;
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        const auto created = InlineGrooveProjector::create({{entry * 2},
+                                                            kTripletSwing,
+                                                            {entry},
+                                                            table,
+                                                            kGrooveKernelUnitScale,
+                                                            kGrooveKernelUnitScale});
+        created_ok = static_cast<bool>(created);
+        if (created) {
+            // Hot-swapping the whole projector by value is part of the path
+            // under test, so the copy happens inside the probe too.
+            const auto projector = created.value();
+            projected_ok = true;
+            for (std::int64_t tick = 0; tick < 64 * entry; tick += entry / 8) {
+                const auto applied = projector.apply_timing({tick});
+                if (!applied) {
+                    projected_ok = false;
+                    break;
+                }
+                accumulated += applied.value().value + projector.velocity_scale_at({tick});
+            }
+        }
+        allocations = probe.allocation_count();
+    }
+
+    REQUIRE(created_ok);
+    REQUIRE(projected_ok);
+    REQUIRE(accumulated != 0);
+    REQUIRE(allocations == 0);
 }

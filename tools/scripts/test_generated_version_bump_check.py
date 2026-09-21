@@ -286,6 +286,18 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         with self.assertRaisesRegex(CHECK.NotGeneratedBump, "non-array page"):
             CHECK._flatten_pages([[{"number": 1}], {"number": 2}])
 
+    def test_current_derived_generators_are_pinned(self) -> None:
+        scripts = ROOT / "tools" / "scripts"
+        sys.path.insert(0, str(scripts))
+        try:
+            sys.modules.pop("version_at_land", None)
+            version_at_land = __import__("version_at_land")
+            CHECK._bind_trusted_regenerators(version_at_land, ROOT)
+            for _output, command in version_at_land._DERIVED_REGENERATORS:
+                self.assertEqual(command[0], sys.executable)
+        finally:
+            sys.path.remove(str(scripts))
+
     def test_unpinned_derived_generator_fails_closed(self) -> None:
         module = types.SimpleNamespace(
             _DERIVED_REGENERATORS=[
