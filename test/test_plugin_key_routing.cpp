@@ -100,6 +100,25 @@ PluginKeyOffer with_hook(KeyCode key, std::uint16_t modifiers = 0) {
     return offer;
 }
 
+// The chord that means "select all" is ⌘A on macOS and ⌃A on Windows/Linux.
+// `kModCmd` is not that chord everywhere: off Apple it is the Super / Windows
+// key (`key_sequence_modifier_from_name` maps "super" onto it), and
+// `is_main_modifier()` deliberately reports it false there — a contract its own
+// case in test_events_keyboard.cpp asserts on both branches. So an editing
+// chord spelled with a fixed bit asserts a chord the platform's text fields
+// never receive, which is a statement about the test rather than about routing.
+std::uint16_t primary_modifier() {
+    return pulp::view::is_main_modifier(pulp::view::kModCmd) ? pulp::view::kModCmd
+                                                             : pulp::view::kModCtrl;
+}
+
+// The same bit seen from the other platform: Super+A off Apple, ⌃A on macOS.
+// Neither is a text-editing chord where it lands, so a field must hand it back.
+std::uint16_t non_primary_modifier() {
+    return pulp::view::is_main_modifier(pulp::view::kModCmd) ? pulp::view::kModCtrl
+                                                             : pulp::view::kModCmd;
+}
+
 PluginKeyOffer function_key(KeyCode key) {
     PluginKeyOffer offer = plain(key);
     offer.is_function_key = true;
@@ -135,10 +154,30 @@ TEST_CASE("a focused text field consumes the editing chords it handles",
     field->set_text("hello");
     field->claim_input_focus();
 
-    // ⌘A selects all inside the field — the host must not also see it.
-    REQUIRE(route_plugin_key(root, plain(KeyCode::a, pulp::view::kModCmd)) ==
+    // Select-all inside the field — the host must not also see it. The chord
+    // is ⌘A on macOS and ⌃A elsewhere, so it is spelled from the platform
+    // primary; a fixed kModCmd asserts a chord no Linux text field is sent.
+    REQUIRE(route_plugin_key(root, plain(KeyCode::a, primary_modifier())) ==
             PluginKeyDisposition::consumed);
     REQUIRE(field->has_selection());
+}
+
+TEST_CASE("a focused text field hands back the other platform's A chord",
+          "[view][plugin-key-routing][host-forward]") {
+    RoutingGuard g;
+    TestView root;
+    auto* field = attach<pulp::view::TextEditor>(root);
+    field->set_text("hello");
+    field->claim_input_focus();
+
+    // The paired half, and the reason the case above cannot be spelled with a
+    // fixed bit: Super+A off Apple and ⌃A on macOS are window-manager or
+    // emacs-style chords, not editing ones, so a real TextEditor declines them
+    // and the host keeps the key. The case above proves the SAME key with the
+    // primary modifier is consumed, so this is a contrast, not a dead reading.
+    REQUIRE(route_plugin_key(root, plain(KeyCode::a, non_primary_modifier())) ==
+            PluginKeyDisposition::forward_to_host);
+    REQUIRE_FALSE(field->has_selection());
 }
 
 TEST_CASE("a focused text field takes Space as text, not transport", "[view][plugin-key-routing]") {
