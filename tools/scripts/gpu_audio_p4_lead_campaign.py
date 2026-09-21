@@ -244,7 +244,10 @@ def run(args: argparse.Namespace) -> int:
     try:
         for lead in LEADS:
             trial_dir = args.output_dir / f"lead-{lead}"
-            trial_dir.mkdir()
+            # The paced probe insists that its output directory is new and
+            # creates it itself.  Keep only the campaign root under our
+            # control; pre-creating this child makes every real trial fail
+            # closed with "output directory must be new".
             trial = run_trial(args, lead, trial_dir)
             write_trial_logs(trial_dir, trial)
             trial["command_sha256"] = sha256(trial_dir / "command.json")

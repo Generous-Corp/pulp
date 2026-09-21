@@ -20,7 +20,9 @@ import sys
 
 args = {item.split("=", 1)[0]: item.split("=", 1)[1] for item in sys.argv[1:] if "=" in item}
 out = pathlib.Path(args["--output-dir"])
-out.mkdir(exist_ok=True)
+if out.exists():
+    raise SystemExit("driver pre-created trial output directory")
+out.mkdir()
 lead = int(args["--lead"])
 receipt = {
     "schema": "pulp.gpu-audio-paced-convolution.v1",
