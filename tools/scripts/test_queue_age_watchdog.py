@@ -1278,5 +1278,476 @@ class TestContributionCollection(unittest.TestCase):
         self.assertIn("cadence_error", snap)
 
 
+# --------------------------------------------------------------------------
+# Label reconciliation: why a stalled job cannot be scheduled
+# --------------------------------------------------------------------------
+# Label sets verified against the live runners API on 2026-09-21: five online
+# self-hosted runners on the repo scope carrying GATE_LABELS plus one of
+# MERGE_GROUP / PR_HEAD, and an online org-scope runner outside the repo
+# listing entirely.
+REPO_SCOPE = "repos/o/r/actions/runners"
+ORG_SCOPE = "orgs/o/actions/runners"
+MERGE_GROUP_REQUEST = [*GATE_LABELS, MERGE_GROUP]
+
+
+def runner(name, labels, status="online", busy=False, scope=REPO_SCOPE):
+    return {
+        "name": name,
+        "scope": scope,
+        "status": status,
+        "busy": busy,
+        "labels": sorted(labels),
+    }
+
+
+def census(runners, errors=None, scopes_read=(REPO_SCOPE, ORG_SCOPE)):
+    return {
+        "runners": list(runners),
+        "errors": [dict(e) for e in errors or []],
+        "scopes_read": list(scopes_read),
+    }
+
+
+def reconcile(snapshot, **kw):
+    return qaw.analyze_label_reconciliation(snapshot, NOW, **kw)
+
+
+class TestLabelReconciliationAlarmCases(unittest.TestCase):
+    def test_the_measured_outage_names_the_label_nothing_advertises(self) -> None:
+        """Three merge-group jobs, three online runners, none carrying the label.
+
+        The queue sat 5h30m with zero merges in exactly this state. A generic
+        "lane looks dead" is not what a human needed; the label is.
+        """
+        snap = {
+            "queued_jobs": [
+                queued(330, labels=MERGE_GROUP_REQUEST, name="macos"),
+                queued(320, labels=MERGE_GROUP_REQUEST, name="macos"),
+                queued(310, labels=MERGE_GROUP_REQUEST, name="macos"),
+            ],
+            "runner_census": census(
+                [
+                    runner("m5-pulp-gate-01", [*GATE_LABELS, PR_HEAD], busy=True),
+                    runner("studio-pulp-gate-01", [*GATE_LABELS, PR_HEAD], busy=True),
+                    runner("studio-pulp-gate-slot2", [*GATE_LABELS, PR_HEAD]),
+                ]
+            ),
+        }
+        findings = reconcile(snap)
+        self.assertEqual(levels(findings), ["alarm"])
+        self.assertEqual(findings[0]["kind"], "unschedulable_labels")
+        self.assertEqual(findings[0]["missing_labels"], [MERGE_GROUP])
+        # One row for three jobs, and it says three.
+        self.assertEqual(findings[0]["stalled_jobs"], 3)
+        self.assertEqual(findings[0]["online_runners"], 3)
+        self.assertIn(MERGE_GROUP, findings[0]["lane_evidence"])
+
+        # Control on the same instrument: mint one runner that carries the
+        # label and the same snapshot must go quiet. Without this the alarm
+        # above could be firing on something incidental to the fixture.
+        snap["runner_census"]["runners"].append(
+            runner("m1-pulp-gate-01", MERGE_GROUP_REQUEST)
+        )
+        self.assertEqual(reconcile(snap), [])
+
+    def test_an_offline_runner_carrying_the_label_does_not_rescue_it(self) -> None:
+        # A registered-but-offline host keeps advertising its labels for hours.
+        # Counting it answers "was this configured", not "can it serve".
+        snap = {
+            "queued_jobs": [queued(60, labels=MERGE_GROUP_REQUEST)],
+            "runner_census": census(
+                [
+                    runner("m5-online", [*GATE_LABELS, PR_HEAD]),
+                    runner("m1-offline", MERGE_GROUP_REQUEST, status="offline"),
+                ]
+            ),
+        }
+        findings = reconcile(snap)
+        self.assertEqual(levels(findings), ["alarm"])
+        self.assertEqual(findings[0]["missing_labels"], [MERGE_GROUP])
+
+    def test_labels_split_across_two_runners_still_cannot_be_scheduled(self) -> None:
+        # GitHub places a job on ONE runner that carries every requested label.
+        # Each label existing somewhere is not the same thing.
+        snap = {
+            "queued_jobs": [queued(60, labels=["self-hosted", "macOS", "ARM64"])],
+            "runner_census": census(
+                [
+                    runner("a", ["self-hosted", "macOS"]),
+                    runner("b", ["self-hosted", "ARM64"]),
+                ]
+            ),
+        }
+        findings = reconcile(snap)
+        self.assertEqual(levels(findings), ["alarm"])
+        self.assertEqual(findings[0]["missing_labels"], [])
+        self.assertIn("no single online runner", findings[0]["lane_evidence"])
+
+    def test_it_sees_the_stall_that_loose_lane_matching_calls_alive(self) -> None:
+        """The blind spot this check exists to close.
+
+        lanes_are_comparable() matches on subset in either direction, so a live
+        job requesting a SUBSET of a stalled job's labels reads as proof the
+        lane is alive. It is not: the extra label is exactly the one nothing
+        advertises.
+        """
+        snap = {
+            "queued_jobs": [queued(60, labels=MERGE_GROUP_REQUEST, name="macos")],
+            "live_jobs": [live(5, labels=["self-hosted", "macOS"])],
+            "runner_census": census(
+                [runner("m5-pulp-gate-01", [*GATE_LABELS, PR_HEAD], busy=True)]
+            ),
+        }
+        # Queue age alone is satisfied that the lane lives.
+        self.assertEqual(levels(qaw.analyze(snap, NOW)), ["warn"])
+        # Reconciliation says why it never will be served.
+        findings = reconcile(snap)
+        self.assertEqual(levels(findings), ["alarm"])
+        self.assertEqual(findings[0]["missing_labels"], [MERGE_GROUP])
+
+
+class TestLabelReconciliationQuietCases(unittest.TestCase):
+    """The load-bearing half: a census-based check dies of false alarms."""
+
+    def test_a_busy_runner_that_carries_the_set_is_saturation(self) -> None:
+        # Every carrier busy is a deep queue on a working lane. Unschedulable
+        # is a different verdict with a different remedy, and conflating them
+        # is what would make this check worthless.
+        snap = {
+            "queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST)],
+            "runner_census": census(
+                [runner("m1-pulp-gate-01", MERGE_GROUP_REQUEST, busy=True)]
+            ),
+        }
+        self.assertEqual(reconcile(snap), [])
+
+        # Control: the only thing separating this from the alarm case is which
+        # class label that busy runner carries.
+        snap["runner_census"]["runners"] = [
+            runner("m1-pulp-gate-01", [*GATE_LABELS, PR_HEAD], busy=True)
+        ]
+        self.assertEqual(levels(reconcile(snap)), ["alarm"])
+
+    def test_an_idle_repo_with_nothing_queued_says_nothing(self) -> None:
+        """Silent by construction, not by tuning — the whole safety argument.
+
+        The census here advertises nothing a Pulp gate job would ask for, which
+        is the state that would make a scheduled label-satisfiability probe
+        alarm every idle night.
+        """
+        snap = {
+            "queued_jobs": [],
+            "live_jobs": [],
+            "runner_census": census([runner("unrelated", ["self-hosted", "X64"])]),
+        }
+        self.assertEqual(reconcile(snap), [])
+
+        # Control: the same census the moment demand appears.
+        snap["queued_jobs"] = [queued(60, labels=MERGE_GROUP_REQUEST)]
+        self.assertEqual(levels(reconcile(snap)), ["alarm"])
+
+    def test_a_fleet_with_zero_registered_runners_is_never_an_alarm(self) -> None:
+        # JIT runners register only while serving, so an idle lane genuinely
+        # has none. That reading must never become a verdict.
+        snap = {"queued_jobs": [], "runner_census": census([])}
+        self.assertEqual(reconcile(snap), [])
+
+    def test_the_measured_healthy_baseline_produces_no_finding(self) -> None:
+        # Same distribution the queue-age baseline pins: median 5 min, oldest
+        # 31 min. Every one of these is below the demand gate.
+        ages = [1, 2, 3, 4, 5, 5, 5, 6, 8, 12, 19, 27, 30.5, 31, 30.2]
+        snap = {
+            "queued_jobs": [queued(a, labels=MERGE_GROUP_REQUEST) for a in ages],
+            "runner_census": census(
+                [runner("m5-pulp-gate-01", [*GATE_LABELS, PR_HEAD], busy=True)]
+            ),
+        }
+        self.assertEqual(reconcile(snap), [])
+
+        # Control: one job past the gate, same census, and it speaks.
+        snap["queued_jobs"].append(queued(46, labels=MERGE_GROUP_REQUEST))
+        self.assertEqual(levels(reconcile(snap)), ["alarm"])
+
+    def test_a_job_with_no_reported_labels_is_not_reconciled(self) -> None:
+        # An unknown request is not an unserved one.
+        snap = {
+            "queued_jobs": [queued(90, labels=[])],
+            "runner_census": census([runner("m1", MERGE_GROUP_REQUEST)]),
+        }
+        self.assertEqual(reconcile(snap), [])
+
+    def test_the_demand_gate_follows_the_alarm_threshold(self) -> None:
+        snap = {
+            "queued_jobs": [queued(35, labels=MERGE_GROUP_REQUEST)],
+            "runner_census": census([runner("m5", [*GATE_LABELS, PR_HEAD])]),
+        }
+        self.assertEqual(reconcile(snap), [])
+        self.assertEqual(levels(reconcile(snap, alarm_minutes=30)), ["alarm"])
+
+
+class TestLabelReconciliationBlindness(unittest.TestCase):
+    """A failed measurement must invent neither a failure nor a clean bill."""
+
+    def _blind(self, snapshot):
+        findings = reconcile(snapshot)
+        self.assertEqual(levels(findings), ["warn"])
+        self.assertEqual(findings[0]["kind"], "runner_census_blind")
+        return findings[0]
+
+    def test_an_unauthorized_org_read_is_a_gap_not_an_absence_claim(self) -> None:
+        # Org-group runners are invisible to the repo endpoint, and this org
+        # keeps online ones. Calling a label unserved while blind to that scope
+        # is the alarm inventing a failure out of a failed measurement.
+        snap = {
+            "queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST)],
+            "runner_census": census(
+                [runner("m5-pulp-gate-01", [*GATE_LABELS, PR_HEAD])],
+                errors=[{"scope": ORG_SCOPE, "error": "HTTP 403: Must have admin rights"}],
+                scopes_read=(REPO_SCOPE,),
+            ),
+        }
+        finding = self._blind(snap)
+        self.assertEqual(finding["unconfirmed_missing_labels"], [MERGE_GROUP])
+        self.assertIn("incomplete", finding["lane_evidence"])
+        self.assertIn("lead, not a verdict", finding["lane_evidence"])
+
+        # Control: the identical snapshot once the org scope answers.
+        snap["runner_census"]["errors"] = []
+        snap["runner_census"]["scopes_read"] = [REPO_SCOPE, ORG_SCOPE]
+        self.assertEqual(levels(reconcile(snap)), ["alarm"])
+
+    def test_an_empty_runner_read_is_a_gap_not_unschedulable(self) -> None:
+        snap = {
+            "queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST)],
+            "runner_census": census([]),
+        }
+        finding = self._blind(snap)
+        self.assertIn("none online", finding["lane_evidence"])
+
+        # Control: one online runner is the difference between blind and a
+        # verdict.
+        snap["runner_census"]["runners"] = [
+            runner("m5-pulp-gate-01", [*GATE_LABELS, PR_HEAD])
+        ]
+        self.assertEqual(levels(reconcile(snap)), ["alarm"])
+
+    def test_a_census_of_only_offline_runners_is_blindness(self) -> None:
+        snap = {
+            "queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST)],
+            "runner_census": census(
+                [runner("m1-pulp-gate-01", MERGE_GROUP_REQUEST, status="offline")]
+            ),
+        }
+        self.assertIn("none online", self._blind(snap)["lane_evidence"])
+
+    def test_a_snapshot_with_no_census_at_all_is_blind(self) -> None:
+        snap = {"queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST)]}
+        self.assertIn("no runner census", self._blind(snap)["lane_evidence"])
+
+    def test_blindness_on_an_idle_repo_says_nothing_at_all(self) -> None:
+        # A scope nobody can read must not produce a warn every 30 minutes
+        # forever. It speaks only while it is withholding a verdict.
+        snap = {
+            "queued_jobs": [],
+            "runner_census": census(
+                [], errors=[{"scope": ORG_SCOPE, "error": "HTTP 403"}]
+            ),
+        }
+        self.assertEqual(reconcile(snap), [])
+
+    def test_a_blind_reconciliation_never_reads_as_healthy(self) -> None:
+        snap = {
+            "queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST)],
+            "runner_census": census([]),
+        }
+        summary = qaw.render_summary(reconcile(snap), qaw.ALARM_MINUTES)
+        self.assertNotIn("Fleet looks healthy", summary)
+        self.assertNotIn("unschedulable_labels", summary)
+        self.assertIn("runner_census_blind", summary)
+
+    def test_a_truncated_run_listing_does_not_degrade_this_check(self) -> None:
+        """Sharing evidence_gaps() would disarm it permanently.
+
+        The completed-run listing on this repo is always truncated, and neither
+        truncation nor a failed jobs call can falsify a queued job's own
+        requested labels or the runner census.
+        """
+        snap = {
+            "queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST)],
+            "truncated": ["completed"],
+            "errors": [{"run_id": 7, "error": "HTTP 502"}],
+            "runner_census": census(
+                [runner("m5-pulp-gate-01", [*GATE_LABELS, PR_HEAD])]
+            ),
+        }
+        self.assertNotEqual(qaw.evidence_gaps(snap), [])
+        self.assertEqual(levels(reconcile(snap)), ["alarm"])
+
+
+class TestRunnerCensusCollection(unittest.TestCase):
+    def test_both_runner_scopes_are_read_and_unioned(self) -> None:
+        payloads = {
+            "/repos/o/r/actions/runners": {
+                "total_count": 1,
+                "runners": [
+                    {
+                        "name": "m1-pulp-gate-01",
+                        "status": "online",
+                        "busy": True,
+                        "labels": [{"name": n} for n in MERGE_GROUP_REQUEST],
+                    }
+                ],
+            },
+            "/orgs/o/actions/runners": {
+                "total_count": 1,
+                "runners": [
+                    {
+                        "name": "pulp-intel-macmini",
+                        "status": "online",
+                        "busy": False,
+                        "labels": [{"name": "self-hosted"}, {"name": "pulp-intel-native"}],
+                    }
+                ],
+            },
+        }
+        asked = []
+
+        def fake_api(path: str):
+            asked.append(path)
+            return payloads[path.split("?")[0]]
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=fake_api):
+            got = qaw.collect_runner_census("o/r")
+
+        self.assertEqual(got["errors"], [])
+        self.assertEqual(
+            sorted(r["name"] for r in got["runners"]),
+            ["m1-pulp-gate-01", "pulp-intel-macmini"],
+        )
+        # An org-scope runner is invisible to the repo endpoint; asking only
+        # the repo scope would report its labels as served by nothing.
+        self.assertTrue(any(p.startswith("/orgs/o/") for p in asked))
+        self.assertTrue(any(p.startswith("/repos/o/r/") for p in asked))
+        self.assertTrue(got["runners"][0]["busy"])
+
+    def test_an_unauthorized_org_read_is_recorded_not_swallowed(self) -> None:
+        def fake_api(path: str):
+            if path.startswith("/orgs/"):
+                raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 403")
+            return {
+                "total_count": 1,
+                "runners": [
+                    {"name": "m1", "status": "online", "busy": False, "labels": ["self-hosted"]}
+                ],
+            }
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=fake_api):
+            got = qaw.collect_runner_census("o/r")
+
+        self.assertEqual([e["scope"] for e in got["errors"]], ["orgs/o/actions/runners"])
+        self.assertEqual(got["scopes_read"], ["repos/o/r/actions/runners"])
+        # And the recorded gap is what stops a verdict being issued off it.
+        snap = {
+            "queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST)],
+            "runner_census": got,
+        }
+        self.assertEqual(levels(reconcile(snap)), ["warn"])
+
+    def test_a_short_listing_is_an_error_not_a_small_fleet(self) -> None:
+        """Fewer rows than total_count may have dropped the carrier."""
+
+        def fake_api(path: str):
+            return {
+                "total_count": 9,
+                "runners": [
+                    {"name": "m1", "status": "online", "busy": False, "labels": ["self-hosted"]}
+                ],
+            }
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=fake_api):
+            got = qaw.collect_runner_census("o/r")
+
+        self.assertEqual(got["runners"], [])
+        self.assertEqual(len(got["errors"]), 2)
+        self.assertIn("received 5 of 9", got["errors"][0]["error"])
+
+    def test_a_census_failure_does_not_degrade_the_rest_of_the_sweep(self) -> None:
+        """A new API call must not gain the power to silence the old alarms."""
+
+        def fake_api(path: str):
+            if "/actions/runners" in path:
+                raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 403")
+            if "/workflows/" in path:
+                return {"workflow_runs": []}
+            return {"workflow_runs": []}
+
+        with mock.patch.object(qaw, "_gh_api", side_effect=fake_api):
+            snap = qaw.collect_snapshot("o/r", NOW)
+
+        self.assertEqual(snap["errors"], [])
+        self.assertEqual(qaw.evidence_gaps(snap), [])
+        self.assertEqual(len(snap["runner_census"]["errors"]), 2)
+
+
+class TestLabelReconciliationReporting(unittest.TestCase):
+    def test_the_body_names_the_missing_label_and_does_not_double_count_lanes(self) -> None:
+        snap = {
+            "queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST, name="macos")],
+            "runner_census": census(
+                [runner("m5-pulp-gate-01", [*GATE_LABELS, PR_HEAD], busy=True)]
+            ),
+        }
+        findings = qaw.analyze(snap, NOW) + reconcile(snap)
+        body = qaw.render_body(findings, qaw.ALARM_MINUTES, NOW)
+        self.assertIn("Unschedulable label sets", body)
+        self.assertIn(MERGE_GROUP, body)
+        # One queued job, counted once in the lane rollup.
+        rows = qaw.group_by_lane([f for f in findings if f["level"] == "alarm"])
+        self.assertEqual([r["count"] for r in rows], [1])
+
+    def test_the_cli_counts_an_unschedulable_set_as_an_alarm(self) -> None:
+        snap = {
+            "generated_at": NOW.isoformat(),
+            "queued_jobs": [queued(330, labels=MERGE_GROUP_REQUEST, name="macos")],
+            "live_jobs": [live(3, labels=MERGE_GROUP_REQUEST)],
+            "runner_census": census(
+                [runner("m5-pulp-gate-01", [*GATE_LABELS, PR_HEAD], busy=True)]
+            ),
+        }
+        tmp = Path(tempfile.mkdtemp())
+        snap_path = tmp / "snapshot.json"
+        snap_path.write_text(json.dumps(snap), encoding="utf-8")
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parent / "queue_age_watchdog.py"),
+                "--snapshot",
+                str(snap_path),
+                "--findings-out",
+                str(tmp / "findings.json"),
+                "--body-out",
+                str(tmp / "body.md"),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        # The live job proves the lane serves work, so queue age alone is a
+        # warn; the alarm is entirely this check's.
+        self.assertIn("alarm_count=1", proc.stdout)
+        self.assertIn(MERGE_GROUP, (tmp / "body.md").read_text(encoding="utf-8"))
+
+    def test_the_jit_census_reasoning_is_extended_not_contradicted(self) -> None:
+        """The argument against a scheduled label census must survive.
+
+        It is still correct, and it is the reason this check is demand-gated
+        rather than periodic. A later rewrite that deletes it loses the only
+        record of why the obvious version is the wrong one.
+        """
+        self.assertIn("healthy-idle state", WATCHDOG_SOURCE)
+        self.assertIn("it false-alarms every idle night", WATCHDOG_SOURCE)
+        self.assertIn("Demand-gated", qaw.analyze_label_reconciliation.__doc__)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
