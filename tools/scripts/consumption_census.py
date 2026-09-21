@@ -30,6 +30,7 @@ Modes:
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import platform
 import re
@@ -831,6 +832,134 @@ def report(profile: dict) -> str:
     return "\n".join(lines)
 
 
+# A drift line naming every member of a large closure is a wall of text nobody
+# reads. Naming the first few and counting the rest keeps the cause visible.
+MEMBERSHIP_NAMES_SHOWN = 6
+
+# Membership lists a target row carries, as (path-into-the-row, what one entry
+# is). Each is diffed by name so a drift says which entry arrived or left.
+MEMBERSHIP_FIELDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("closure", "pulp_targets"), "closure Pulp target"),
+    (("closure", "third_party_targets"), "closure third-party target"),
+    (("external_dependencies", "prebuilt_archives"), "prebuilt archive"),
+    (("external_dependencies", "imported_targets"), "imported target"),
+    (("external_dependencies", "frameworks"), "framework"),
+    (("external_dependencies", "system_libraries"), "system library"),
+    (("public_headers", "roots"), "exported include root"),
+    (("direct_dependencies",), "direct dependency"),
+)
+
+# Scalars whose change is a finding on its own, as (path, how to say it).
+SCALAR_FIELDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("closure", "node_count"), "closure node count"),
+    (("external_dependencies", "count"), "external dependency count"),
+    (("public_headers", "generated_include_roots"), "generated include root count"),
+    (("type",), "target type"),
+    (("source_dir",), "source directory"),
+)
+
+HEADER_COUNT_PATH = ("public_headers", "count")
+
+
+def dig(row: dict, path: tuple[str, ...]):
+    """Read a nested value, or None where the row does not carry it."""
+    value: object = row
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            return None
+        value = value[key]
+    return value
+
+
+def name_list(entries: list[str]) -> str:
+    if len(entries) <= MEMBERSHIP_NAMES_SHOWN:
+        return ", ".join(entries)
+    shown = ", ".join(entries[:MEMBERSHIP_NAMES_SHOWN])
+    return f"{shown} (+{len(entries) - MEMBERSHIP_NAMES_SHOWN} more)"
+
+
+def describe_membership(old: object, new: object, label: str) -> list[str]:
+    """Which entries arrived and which left, counted rather than set-compared.
+
+    A list that gained a SECOND copy of an entry it already carried differs
+    without either set differing, and reporting that as "order changed" would
+    hide a duplicate edge.
+    """
+    if not isinstance(old, list) or not isinstance(new, list) or old == new:
+        return []
+    old_counts = collections.Counter(old)
+    new_counts = collections.Counter(new)
+    added = list((new_counts - old_counts).elements())
+    removed = list((old_counts - new_counts).elements())
+    lines = []
+    if added:
+        lines.append(f"{label} added: {name_list(added)}")
+    if removed:
+        lines.append(f"{label} removed: {name_list(removed)}")
+    if not lines:
+        lines.append(f"{label} order changed")
+    return lines
+
+
+def header_root_detail(row: dict) -> str:
+    """Where to look for a header-count change: the roots the target exports."""
+    roots = dig(row, ("public_headers", "roots"))
+    if not roots:
+        return ""
+    if len(roots) == 1:
+        return f", under exported include root {roots[0]}"
+    return f", across exported include roots {name_list(list(roots))}"
+
+
+def describe_target_drift(old: dict, new: dict) -> list[str]:
+    """Every recorded field this target disagrees about, named.
+
+    A blanket "closure detail changed" is worse than no detail: a header added
+    under an already-exported include root changes only `public_headers.count`,
+    and calling that a closure change sends the reader to the link graph.
+    """
+    reasons: list[str] = []
+    old_headers = dig(old, HEADER_COUNT_PATH)
+    new_headers = dig(new, HEADER_COUNT_PATH)
+    if old_headers != new_headers:
+        reasons.append(
+            f"public header count {old_headers} -> {new_headers}{header_root_detail(new)}"
+        )
+    for path, label in SCALAR_FIELDS:
+        old_value = dig(old, path)
+        new_value = dig(new, path)
+        if old_value != new_value:
+            reasons.append(f"{label} {old_value} -> {new_value}")
+    for path, label in MEMBERSHIP_FIELDS:
+        reasons.extend(describe_membership(dig(old, path), dig(new, path), label))
+    if not reasons:
+        changed = sorted(
+            key for key in set(old) | set(new) if old.get(key) != new.get(key)
+        )
+        reasons.append(f"recorded detail changed: {name_list(changed)}")
+    return reasons
+
+
+def header_count_drifted(committed: dict, current: dict) -> bool:
+    """Whether any shared target's public header count moved."""
+    old_targets = committed.get("targets", {})
+    new_targets = current.get("targets", {})
+    return any(
+        dig(old_targets[name], HEADER_COUNT_PATH) != dig(new_targets[name], HEADER_COUNT_PATH)
+        for name in set(old_targets) & set(new_targets)
+    )
+
+
+# Said once when a header count moved. The census counts headers by walking the
+# exported include roots, so this drift needs no target, symbol or CMake edit —
+# which is exactly why it reads as a mystery when the message does not say so.
+HEADER_DRIFT_CAUSE = (
+    "a public header added, removed or renamed under an already-exported include "
+    "root moves these counts on its own: no target, symbol or CMake change is "
+    "involved, and the census records the count rather than the file names"
+)
+
+
 def describe_drift(committed: dict, current: dict) -> list[str]:
     """Name what changed, so the failure says more than "they differ"."""
     lines: list[str] = []
@@ -843,14 +972,12 @@ def describe_drift(committed: dict, current: dict) -> list[str]:
     for name in sorted(set(old_targets) & set(new_targets)):
         if old_targets[name] == new_targets[name]:
             continue
-        old_count = old_targets[name].get("closure", {}).get("node_count")
-        new_count = new_targets[name]["closure"]["node_count"]
-        if old_count != new_count:
-            lines.append(f"Pulp::{name}: closure {old_count} -> {new_count}")
-        else:
-            lines.append(f"Pulp::{name}: closure detail changed")
+        for reason in describe_target_drift(old_targets[name], new_targets[name]):
+            lines.append(f"Pulp::{name}: {reason}")
     if committed.get("features") != current.get("features"):
         lines.append("the profile's feature set changed")
+    if header_count_drifted(committed, current):
+        lines.append(HEADER_DRIFT_CAUSE)
     return lines or ["the profile differs from the build tree"]
 
 

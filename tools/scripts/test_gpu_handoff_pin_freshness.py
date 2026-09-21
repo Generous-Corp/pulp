@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""A branch may edit the ledger's content; it may not regenerate its identities.
+"""A PR must not re-pin the generated ledger; the version bot does that.
 
-Both directions are asserted, and the permissive one matters more. A guard that
-rejected every change to these files would be easy to write and would recreate
-the two defects that killed the blunt version of this design: it would outlaw
-the inventory edits the generator explicitly leaves to humans, and it would
-strand a branch whose only way to turn the required gate green is to correct
-``route_set_sha256`` or ``expansion_id``, neither of which any tool regenerates.
+Every assertion here is paired with a control on the same instrument, because
+the failures this guard exists to catch and the state where it is simply inert
+produce the same exit code.
 """
 from __future__ import annotations
 
-import copy
-import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,380 +17,453 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import gpu_handoff_pin_freshness as guard  # noqa: E402
-import gpu_ledger_merge_driver as driver  # noqa: E402
 
 REPO = Path(__file__).parents[2]
 
-SHA_A = "a" * 40
-SHA_B = "b" * 40
-SHA_C = "c" * 40
-
 
 def git(*args: str, cwd: Path) -> None:
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+    subprocess.run(["git", *args], cwd=cwd, check=True,
+                   capture_output=True, text=True)
 
 
-def row(path: str, revision: str, object_id: str) -> dict:
-    return {
-        "repo": "Generous-Corp/pulp",
-        "path": path,
-        "state": "pulp-owned-retained",
-        "revision": revision,
-        "object_id": object_id,
-        "object_type": "blob",
-    }
+class PinFreshnessTests(unittest.TestCase):
+    def test_the_real_ledger_parses_and_is_not_empty(self) -> None:
+        """POSITIVE CONTROL: without this, every other assertion is vacuous."""
+        pins = guard.pinned_paths(REPO)
+        self.assertGreater(len(pins), 50, "parser found no rows; the gate is inert")
+        self.assertIn("docs/status/gpu-vellum-handoff.yaml", str(guard.HANDOFF))
 
+    def test_the_real_ledgers_editorial_key_strips_identity_and_nothing_else(self) -> None:
+        """The editorial key must be blind to the three derived fields and
+        sensitive to everything else, measured on the SHIPPED ledger.
 
-def ledger() -> dict:
-    """A document with the real one's shape: rows, constants, and free fields."""
+        Both halves are load-bearing and each is the other's control. If the
+        strip missed a field, an identity-only re-pin would read as editorial
+        and the gate would be inert; if the strip took too much, a real
+        editorial edit would read as a re-pin and be rejected — which is the
+        bug this key replaced.
+        """
+        text = (REPO / guard.HANDOFF).read_text(encoding="utf-8")
+        baseline = guard._inventory_from_text(text)
+        self.assertIsNotNone(baseline, "the shipped ledger does not parse")
 
-    return {
-        "schema": "pulp.gpu-vellum-handoff.v2",
-        "expansion_id": "full-design-import-render-v1",
-        "route_set_sha256": "5" * 64,
-        "authorities": {"pulp": {"repo": "Generous-Corp/pulp", "revision": SHA_A}},
-        "upstream": {"issue": {"number": 26}, "current_comment_id": 5464003821},
-        "entries": [{
-            "id": "e0",
-            "pulp_paths": [
-                row("core/render/src/skia_surface.cpp", SHA_A, "1" * 40),
-                row("core/view/src/view.cpp", SHA_A, "2" * 40),
-            ],
-            # Pinned to a foreign revision and never regenerated, so the driver
-            # leaves them alone and so must the guard.
-            "vellum_paths": [
-                {"repo": "Generous-Corp/vellum", "path": "graphics/src/x.mm",
-                 "revision": SHA_C, "object_id": "9" * 40, "object_type": "blob"},
-            ],
-            "retained_paths": ["core/render/src/skia_surface.cpp", "core/view/src/view.cpp"],
-        }],
-    }
+        doc = json.loads(text)
+        rows = [row for entry in doc["entries"]
+                for row in (entry.get("pulp_paths") or [])]
+        self.assertGreater(len(rows), 50, "no pinned rows; the gate is inert")
+        for field in guard.IDENTITY_FIELDS:
+            self.assertTrue(any(field in row for row in rows),
+                            f"no row carries {field}; the strip is vacuous")
 
+        # Blind to identity: rewrite every derived field and the key must not move.
+        repinned = json.loads(text)
+        for entry in repinned["entries"]:
+            for row in entry.get("pulp_paths") or []:
+                for field in guard.IDENTITY_FIELDS:
+                    if field in row:
+                        row[field] = "0" * 40
+        self.assertEqual(
+            guard._inventory_from_text(json.dumps(repinned)), baseline,
+            "the key moved on an identity-only rewrite; the gate would be inert")
 
-def receipt_for(document: dict, source_commit: str) -> dict:
-    paths = sorted(r["path"] for e in document["entries"] for r in e["pulp_paths"])
-    rendered = json.dumps(document, indent=2, ensure_ascii=True, separators=(",", ": ")) + "\n"
-    return {
-        "schema": "pulp.gpu-handoff-provenance-receipt.v1",
-        "generator": "tools/scripts/gpu_handoff_provenance.py",
-        "handoff_path": str(guard.HANDOFF),
-        "source_commit": source_commit,
-        "source_repository": "Generous-Corp/pulp",
-        "canonical_path_count": len(paths),
-        "canonical_paths": paths,
-        "canonical_path_sha256": hashlib.sha256(
-            ("\n".join(paths) + "\n").encode()).hexdigest(),
-        "handoff_sha256": hashlib.sha256(rendered.encode()).hexdigest(),
-    }
-
-
-def repin(document: dict, revision: str, object_suffix: str) -> dict:
-    """Exactly what `gpu_handoff_provenance.py write` does: identities, nothing else."""
-
-    updated = copy.deepcopy(document)
-    for index, pinned in enumerate(updated["entries"][0]["pulp_paths"]):
-        pinned["revision"] = revision
-        pinned["object_id"] = (object_suffix * 40)[:39] + str(index)
-    return updated
-
-
-class ChurnGuardTests(unittest.TestCase):
-
-    # ---- positive control -------------------------------------------------
-
-    def test_the_real_ledger_and_receipt_are_visible_to_the_differ(self) -> None:
-        """Without this, every rejection below could be an inert comparison."""
-
-        for relative in guard.WATCHED:
-            raw = (REPO / relative).read_text()
-            self.assertIsNotNone(guard.neutralized(raw), f"{relative} did not parse")
-            self.assertNotEqual(
-                json.loads(raw), guard.neutralized(raw),
-                f"neutralizing {relative} changed nothing; the differ sees no churn "
-                "and would accept a re-pin of the real file",
-            )
-
-    def test_the_guard_reads_the_fields_the_driver_owns(self) -> None:
-        """The two must not drift into separate definitions of churn."""
-
-        self.assertEqual(driver.LEDGER_IDENTITY_FIELDS, ("revision", "object_id"))
-        self.assertEqual(driver.RECEIPT_REGENERABLE_FIELDS,
-                         ("source_commit", "handoff_sha256"))
-
-    # ---- fixtures ---------------------------------------------------------
-
-    def _write(self, root: Path, document: dict, source_commit: str) -> None:
-        for relative, payload in (
-            (guard.HANDOFF, document),
-            (guard.RECEIPT, receipt_for(document, source_commit)),
+        # Sensitive to editorial: each of these must move the key. They are the
+        # fields the row-set key could not see.
+        for mutate in (
+            lambda d: d.__setitem__("authorities", {"probe": "added"}),
+            lambda d: d.__setitem__("upstream", {"probe": "added"}),
+            lambda d: d.__setitem__("cutover_trigger", "probe"),
+            lambda d: d.__setitem__("self_binding", {"probe": "added"}),
+            lambda d: d.__setitem__("stop_rules", ["probe"]),
+            lambda d: d["entries"][0].__setitem__("vellum_paths", ["probe"]),
+            lambda d: d["entries"][0].__setitem__("terminal_evidence", "probe"),
+            lambda d: d["entries"][0].__setitem__("input_receipts", ["probe"]),
+            lambda d: d["entries"][0].__setitem__("accepted_dispositions", ["probe"]),
+            lambda d: d["entries"][0]["pulp_paths"][0].__setitem__("state", "probe"),
+            lambda d: d["entries"][0]["pulp_paths"][0].__setitem__("repo", "probe"),
         ):
-            target = root / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(json.dumps(payload, indent=2) + "\n")
+            edited = json.loads(text)
+            mutate(edited)
+            self.assertNotEqual(
+                guard._inventory_from_text(json.dumps(edited)), baseline,
+                f"an editorial edit left the key unmoved: {mutate}")
 
-    def _repo(self, td: str, document: dict | None = None) -> tuple[Path, dict]:
+    # ── fixture ────────────────────────────────────────────────────────────
+
+    LEDGER_ROWS = [
+        {"repo": "pulp", "path": "core/view/src/view.cpp", "state": "shared"},
+        {"repo": "pulp", "path": "tools/scripts/pinned_tool.py", "state": "shared"},
+    ]
+
+    def _write_ledger(self, root: Path, rows: list[dict], identity: str,
+                      **editorial: object) -> None:
+        doc = root / guard.HANDOFF
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        body: dict = {
+            "authorities": {"vellum": "unchanged"},
+            "entries": [{"pulp_paths": [dict(r, revision=identity) for r in rows]}],
+        }
+        body.update(editorial)
+        doc.write_text(json.dumps(body, indent=2) + "\n")
+        receipt = root / guard.RECEIPT
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        receipt.write_text(json.dumps({"source_commit": identity}) + "\n")
+
+    def _repo(self, td: str) -> Path:
         root = Path(td)
-        document = document or ledger()
-        git("init", "-q", "-b", "main", cwd=root)
+        git("init", "-q", cwd=root)
         git("config", "user.email", "t@e.st", cwd=root)
         git("config", "user.name", "t", cwd=root)
-        self._write(root, document, SHA_A)
-        (root / "unrelated.txt").write_text("a\n")
-        git("add", str(guard.HANDOFF), str(guard.RECEIPT), "unrelated.txt", cwd=root)
+        self._write_ledger(root, self.LEDGER_ROWS, "aaaaaaa")
+        for rel in ("core/view/src/view.cpp", "tools/scripts/pinned_tool.py"):
+            p = root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("a\n")
+        (root / "unpinned.txt").write_text("a\n")
+        git("add", "-A", cwd=root)
         git("commit", "-qm", "base", cwd=root)
-        git("checkout", "-q", "-b", "feature", cwd=root)
-        return root, document
+        git("branch", "-f", "base", cwd=root)
+        return root
 
-    def _commit(self, root: Path, message: str) -> None:
-        git("add", str(guard.HANDOFF), str(guard.RECEIPT), "unrelated.txt", cwd=root)
-        git("commit", "-qm", message, cwd=root)
-
-    def run_guard(self, root: Path, *extra: str) -> subprocess.CompletedProcess:
+    def run_guard(self, root: Path, mode: str = "report",
+                  base: str = "base") -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-B",
+            [sys.executable,
              str(Path(__file__).parent / "gpu_handoff_pin_freshness.py"),
-             "--base", "main", "--root", str(root), *extra],
+             "--base", base, "--root", str(root), "--mode", mode],
             cwd=root, capture_output=True, text=True,
         )
 
-    # ---- reject: the churn ------------------------------------------------
+    # ── (i) identity-only re-pin ───────────────────────────────────────────
 
-    def test_an_identity_only_regeneration_is_rejected(self) -> None:
+    def test_identity_only_repin_fails(self) -> None:
+        """The work the bump commit now carries must not also happen in a PR."""
         with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            self._write(root, repin(document, SHA_B, "7"), SHA_B)
-            self._commit(root, "refresh ledger")
+            root = self._repo(td)
+            (root / "core/view/src/view.cpp").write_text("b\n")
+            self._write_ledger(root, self.LEDGER_ROWS, "bbbbbbb")
+            git("add", "-A", cwd=root); git("commit", "-qm", "edit + repin", cwd=root)
             proc = self.run_guard(root)
             self.assertEqual(proc.returncode, 1, proc.stderr)
             self.assertIn(str(guard.HANDOFF), proc.stderr)
-            self.assertIn(str(guard.RECEIPT), proc.stderr)
-            self.assertIn("git restore --source", proc.stderr)
+            self.assertIn("identity-only", proc.stderr)
 
-    def test_a_receipt_only_source_commit_move_is_rejected(self) -> None:
-        """The unconditional half of the collision, on its own."""
-
+    def test_receipt_only_repin_fails(self) -> None:
+        """The receipt binds to the ledger's bytes, so moving it alone is the
+        same in-PR re-pin wearing one file instead of two."""
         with tempfile.TemporaryDirectory() as td:
-            root, _ = self._repo(td)
-            target = root / guard.RECEIPT
-            payload = json.loads(target.read_text())
-            payload["source_commit"] = SHA_B
-            target.write_text(json.dumps(payload, indent=2) + "\n")
-            self._commit(root, "receipt only")
+            root = self._repo(td)
+            (root / guard.RECEIPT).write_text(json.dumps({"source_commit": "ccc"}) + "\n")
+            git("add", "-A", cwd=root); git("commit", "-qm", "receipt only", cwd=root)
             proc = self.run_guard(root)
             self.assertEqual(proc.returncode, 1, proc.stderr)
             self.assertIn(str(guard.RECEIPT), proc.stderr)
 
-    def test_a_ledger_only_repin_is_rejected(self) -> None:
+    def test_inventory_change_with_a_repin_passes(self) -> None:
+        """POSITIVE CONTROL for the case above: same two files, same identity
+        move, but the row set changed — which is the one ledger edit a PR still
+        owns. If this failed, the guard would reject the legitimate shape."""
         with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            (root / guard.HANDOFF).write_text(
-                json.dumps(repin(document, SHA_B, "7"), indent=2) + "\n")
-            self._commit(root, "ledger only")
-            self.assertEqual(self.run_guard(root).returncode, 1)
-
-    # ---- permit: the content ----------------------------------------------
-
-    def test_adding_a_pinned_path_is_permitted(self) -> None:
-        """R1: the generator never adds rows, so every addition is a human edit."""
-
-        with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            grown = copy.deepcopy(document)
-            grown["entries"][0]["pulp_paths"].append(
-                row("core/render/src/dawn_surface.cpp", SHA_B, "3" * 40))
-            grown["entries"][0]["retained_paths"].append("core/render/src/dawn_surface.cpp")
-            self._write(root, grown, SHA_B)
-            self._commit(root, "pin a new path")
+            root = self._repo(td)
+            added = root / "core/view/src/added.cpp"
+            added.write_text("a\n")
+            rows = self.LEDGER_ROWS + [
+                {"repo": "pulp", "path": "core/view/src/added.cpp", "state": "shared"},
+            ]
+            self._write_ledger(root, rows, "bbbbbbb")
+            git("add", "-A", cwd=root); git("commit", "-qm", "add pinned path", cwd=root)
             proc = self.run_guard(root)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(proc.stderr, "")
 
-    def test_removing_a_pinned_path_is_permitted(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            shrunk = copy.deepcopy(document)
-            shrunk["entries"][0]["pulp_paths"].pop()
-            shrunk["entries"][0]["retained_paths"].pop()
-            self._write(root, shrunk, SHA_B)
-            self._commit(root, "unpin a path")
-            self.assertEqual(self.run_guard(root).returncode, 0)
+    def test_an_authorities_only_edit_passes(self) -> None:
+        """The ledger carries editorial content no regenerator writes, and the
+        row set cannot see it.
 
-    def test_an_inventory_edit_carries_its_identity_refresh_with_it(self) -> None:
-        """The mixed case: a new row AND every other row re-pinned, together.
-
-        This is what regenerating after a real edit produces, and rejecting it
-        would leave the edit unlandable.
+        Keying on `(repo, path, state)` rows called this shape an identity-only
+        re-pin and rejected it. Seven commits on `main` in 25 days have it —
+        `docs(gpu): bind current Vellum adoption authority` among them — so it
+        is a live PR shape, not a hypothetical.
         """
-
         with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            grown = copy.deepcopy(document)
-            grown["entries"][0]["pulp_paths"].append(
-                row("core/render/src/dawn_surface.cpp", SHA_B, "3" * 40))
-            grown["entries"][0]["retained_paths"].append("core/render/src/dawn_surface.cpp")
-            self._write(root, repin(grown, SHA_B, "7"), SHA_B)
-            self._commit(root, "pin a new path and regenerate")
-            self.assertEqual(self.run_guard(root).returncode, 0)
-
-    def test_a_route_set_correction_is_permitted(self) -> None:
-        """R2: validate_handoff_routing checks this unconditionally and no tool
-        regenerates it, so forbidding the edit would make the gate unfixable."""
-
-        with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            corrected = copy.deepcopy(document)
-            corrected["route_set_sha256"] = "6" * 64
-            self._write(root, corrected, SHA_B)
-            self._commit(root, "route set moved")
-            self.assertEqual(self.run_guard(root).returncode, 0)
-
-    def test_an_expansion_id_correction_is_permitted(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            corrected = copy.deepcopy(document)
-            corrected["expansion_id"] = "full-design-import-render-v2"
-            self._write(root, corrected, SHA_B)
-            self._commit(root, "expansion moved")
-            self.assertEqual(self.run_guard(root).returncode, 0)
-
-    def test_an_upstream_update_is_permitted(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            updated = copy.deepcopy(document)
-            updated["upstream"]["current_comment_id"] = 5464003822
-            self._write(root, updated, SHA_B)
-            self._commit(root, "upstream comment superseded")
-            self.assertEqual(self.run_guard(root).returncode, 0)
-
-    def test_an_object_type_change_is_content(self) -> None:
-        """The driver leaves object_type to merge on purpose; so does the guard."""
-
-        with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            retyped = copy.deepcopy(document)
-            retyped["entries"][0]["pulp_paths"][0]["object_type"] = "tree"
-            self._write(root, retyped, SHA_B)
-            self._commit(root, "path became a directory")
-            self.assertEqual(self.run_guard(root).returncode, 0)
-
-    def test_a_vellum_row_identity_is_content(self) -> None:
-        """Foreign pins are constants, not generated output."""
-
-        with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            moved = copy.deepcopy(document)
-            moved["entries"][0]["vellum_paths"][0]["revision"] = SHA_B
-            self._write(root, moved, SHA_B)
-            self._commit(root, "vellum pin moved")
-            self.assertEqual(self.run_guard(root).returncode, 0)
-
-    # ---- scope ------------------------------------------------------------
-
-    def test_an_untouched_ledger_is_ignored(self) -> None:
-        """NEGATIVE CONTROL: the guard must not fire on unrelated work."""
-
-        with tempfile.TemporaryDirectory() as td:
-            root, _ = self._repo(td)
-            (root / "unrelated.txt").write_text("b\n")
-            self._commit(root, "unrelated")
-            proc = self.run_guard(root)
-            self.assertEqual(proc.returncode, 0)
-            self.assertEqual(proc.stderr, "")
-
-    def test_editing_a_pinned_path_without_refreshing_is_now_permitted(self) -> None:
-        """The exact shape the old polarity rejected."""
-
-        with tempfile.TemporaryDirectory() as td:
-            root, _ = self._repo(td)
-            target = root / "core/view/src"
-            target.mkdir(parents=True)
-            (target / "view.cpp").write_text("b\n")
-            git("add", "core/view/src/view.cpp", cwd=root)
-            git("commit", "-qm", "edit a pinned path", cwd=root)
+            root = self._repo(td)
+            self._write_ledger(root, self.LEDGER_ROWS, "bbbbbbb",
+                               authorities={"vellum": "rebound"})
+            git("add", "-A", cwd=root)
+            git("commit", "-qm", "rebind the authority", cwd=root)
             proc = self.run_guard(root)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(proc.stderr, "")
 
-    def test_the_before_side_is_the_merge_base_not_the_base_ref(self) -> None:
-        """Main's own content move must not mask this branch's churn.
+    def test_a_per_entry_editorial_edit_passes(self) -> None:
+        """POSITIVE CONTROL for the case above at the other nesting level: the
+        editorial fields the row set cannot see are not all top-level —
+        `vellum_paths`, `terminal_evidence`, `input_receipts` and
+        `accepted_dispositions` live inside an entry, beside `pulp_paths`."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+            doc = root / guard.HANDOFF
+            body = json.loads(doc.read_text())
+            body["entries"][0]["terminal_evidence"] = "recorded"
+            for row in body["entries"][0]["pulp_paths"]:
+                row["revision"] = "bbbbbbb"
+            doc.write_text(json.dumps(body, indent=2) + "\n")
+            git("add", "-A", cwd=root)
+            git("commit", "-qm", "record terminal evidence", cwd=root)
+            proc = self.run_guard(root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
 
-        Read against the base ref, main's added row would show as a difference
-        the branch never made, the range would read as content, and the churn
-        would land. Silent under-firing, which is the failure a reviewer cannot
-        see.
+    def test_a_state_only_inventory_change_is_not_an_identity_repin(self) -> None:
+        """`state` is editorial, not derived, so moving it is an inventory
+        change even though no path was added or removed."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+            rows = [dict(r) for r in self.LEDGER_ROWS]
+            rows[0]["state"] = "pulp-owned"
+            self._write_ledger(root, rows, "bbbbbbb")
+            git("add", "-A", cwd=root); git("commit", "-qm", "restate row", cwd=root)
+            self.assertEqual(self.run_guard(root).returncode, 0)
+
+    # ── (ii) a pinned path that stops existing ─────────────────────────────
+
+    def test_deleting_a_pinned_path_without_updating_the_inventory_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+            (root / "core/view/src/view.cpp").unlink()
+            git("add", "-A", cwd=root); git("commit", "-qm", "delete pinned", cwd=root)
+            proc = self.run_guard(root)
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            self.assertIn("core/view/src/view.cpp", proc.stderr)
+            self.assertIn("deleted or renamed", proc.stderr)
+
+    def test_renaming_a_pinned_path_without_updating_the_inventory_fails(self) -> None:
+        """A rename removes the pinned path exactly as a delete does, and the
+        ledger keeps naming the source side."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+            git("mv", "core/view/src/view.cpp", "core/view/src/renamed.cpp", cwd=root)
+            git("commit", "-qm", "rename pinned", cwd=root)
+            proc = self.run_guard(root)
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            self.assertIn("core/view/src/view.cpp", proc.stderr)
+
+    def test_deleting_a_pinned_path_and_dropping_its_row_passes(self) -> None:
+        """POSITIVE CONTROL for the case above: the same deletion, correctly
+        accompanied by the inventory decision the bot cannot make."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+            (root / "core/view/src/view.cpp").unlink()
+            self._write_ledger(root, self.LEDGER_ROWS[1:], "bbbbbbb")
+            git("add", "-A", cwd=root); git("commit", "-qm", "drop pinned row", cwd=root)
+            proc = self.run_guard(root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    # ── everything else ────────────────────────────────────────────────────
+
+    def test_an_ordinary_edit_to_a_pinned_path_passes(self) -> None:
+        """The inversion itself: editing a pinned path and NOT re-pinning is
+        now the correct shape. Under the previous rule this exact case failed."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+            (root / "core/view/src/view.cpp").write_text("b\n")
+            git("add", "-A", cwd=root); git("commit", "-qm", "edit pinned", cwd=root)
+            proc = self.run_guard(root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_unrelated_diff_passes(self) -> None:
+        """NEGATIVE CONTROL: the gate must not fire on unrelated work."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+            (root / "unpinned.txt").write_text("b\n")
+            git("add", "-A", cwd=root); git("commit", "-qm", "unrelated", cwd=root)
+            self.assertEqual(self.run_guard(root).returncode, 0)
+
+    def test_an_unreadable_ledger_says_so_rather_than_passing_quietly(self) -> None:
+        """A present-but-unparseable ledger is a guard that cannot see its
+        subject, so it takes the could-not-check exit rather than the clean
+        one. Sharing an exit code with clean is what made the swallow invisible.
         """
-
         with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            self._write(root, repin(document, SHA_B, "7"), SHA_B)
-            self._commit(root, "refresh ledger")
-
-            git("checkout", "-q", "main", cwd=root)
-            grown = copy.deepcopy(document)
-            grown["entries"][0]["pulp_paths"].append(
-                row("core/render/src/dawn_surface.cpp", SHA_C, "4" * 40))
-            grown["entries"][0]["retained_paths"].append("core/render/src/dawn_surface.cpp")
-            self._write(root, grown, SHA_C)
-            self._commit(root, "main pins a new path")
-            git("checkout", "-q", "feature", cwd=root)
-
-            self.assertEqual(self.run_guard(root).returncode, 1)
-
-    # ---- fail-visible, never fail-silent ----------------------------------
-
-    def test_an_unparseable_ledger_says_so_rather_than_passing_quietly(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            root, _ = self._repo(td)
+            root = self._repo(td)
             (root / guard.HANDOFF).write_text("{ not json")
-            self._commit(root, "broken")
+            git("add", "-A", cwd=root); git("commit", "-qm", "broken", cwd=root)
             proc = self.run_guard(root)
-            self.assertEqual(proc.returncode, 0)
-            self.assertIn("nothing checked", proc.stderr)
+            self.assertEqual(proc.returncode, guard.NO_VERDICT, proc.stderr)
+            self.assertIn("COULD NOT CHECK", proc.stderr)
 
-    def test_a_deleted_ledger_says_so_rather_than_passing_quietly(self) -> None:
+    def test_hint_mode_never_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            root, _ = self._repo(td)
-            (root / guard.HANDOFF).unlink()
-            git("add", "-u", str(guard.HANDOFF), cwd=root)
-            git("commit", "-qm", "delete", cwd=root)
-            proc = self.run_guard(root)
+            root = self._repo(td)
+            (root / "core/view/src/view.cpp").write_text("b\n")
+            self._write_ledger(root, self.LEDGER_ROWS, "bbbbbbb")
+            git("add", "-A", cwd=root); git("commit", "-qm", "edit + repin", cwd=root)
+            proc = self.run_guard(root, mode="hint")
             self.assertEqual(proc.returncode, 0)
-            self.assertIn("nothing checked", proc.stderr)
+            self.assertIn("identity-only", proc.stderr)
 
-    def test_an_unreadable_range_says_so_rather_than_passing_quietly(self) -> None:
+    # ── the guard cannot see its subject ───────────────────────────────────
+    #
+    # Every case below carries its own positive control on the SAME repo state,
+    # because the outcome being asserted — "this did not check" — and the
+    # outcome it must not be confused with — "this checked and found nothing" —
+    # were the same exit code until the reads were checked. A test that only
+    # observes the failing run cannot tell a fixed guard from one that rejects
+    # everything.
+
+    def _repo_with_a_live_violation(self, td: str) -> Path:
+        """A repo whose HEAD carries a real identity-only re-pin.
+
+        Shared by the cases below so the control and the subject differ in
+        exactly one thing: whether git can answer.
+        """
+        root = self._repo(td)
+        (root / "core/view/src/view.cpp").write_text("b\n")
+        self._write_ledger(root, self.LEDGER_ROWS, "bbbbbbb")
+        git("add", "-A", cwd=root)
+        git("commit", "-qm", "edit + repin", cwd=root)
+        return root
+
+    def test_an_unresolvable_base_produces_no_verdict_rather_than_a_pass(self) -> None:
+        """A deleted branch, a stale ref, a typo: the base does not resolve, so
+        the diff is empty, and an empty diff is how this gate spells clean."""
         with tempfile.TemporaryDirectory() as td:
-            root, _ = self._repo(td)
-            proc = subprocess.run(
-                [sys.executable, "-B",
-                 str(Path(__file__).parent / "gpu_handoff_pin_freshness.py"),
-                 "--base", "no-such-ref", "--root", str(root)],
-                cwd=root, capture_output=True, text=True,
-            )
-            self.assertEqual(proc.returncode, 0)
-            self.assertIn("nothing checked", proc.stderr)
+            root = self._repo_with_a_live_violation(td)
 
-    def test_a_scalar_where_the_rows_belong_does_not_traceback(self) -> None:
-        """`poison` walks with `or []`, which survives None and not a scalar."""
+            # POSITIVE CONTROL, same repo, same HEAD: with a base git can
+            # resolve, the violation is found and reported.
+            control = self.run_guard(root)
+            self.assertEqual(control.returncode, 1, control.stderr)
+            self.assertIn("identity-only", control.stderr)
 
-        self.assertIsNone(guard.neutralized('{"entries": 7}'))
+            blind = self.run_guard(root, base="refs/heads/never-existed")
+            self.assertEqual(blind.returncode, guard.NO_VERDICT, blind.stderr)
+            self.assertIn("COULD NOT CHECK", blind.stderr)
+            self.assertNotIn("checked, clean", blind.stderr)
 
-    def test_hint_mode_reports_without_failing(self) -> None:
+    def test_an_unresolvable_base_in_hint_mode_still_says_so(self) -> None:
+        """Hint mode must not fail a push, but silence there would leave the
+        same blind spot with no trace at all."""
         with tempfile.TemporaryDirectory() as td:
-            root, document = self._repo(td)
-            self._write(root, repin(document, SHA_B, "7"), SHA_B)
-            self._commit(root, "refresh ledger")
-            proc = self.run_guard(root, "--mode", "hint")
-            self.assertEqual(proc.returncode, 0)
-            self.assertIn("gpu-handoff-churn", proc.stderr)
+            root = self._repo_with_a_live_violation(td)
+            hint = self.run_guard(root, base="refs/heads/never-existed", mode="hint")
+            self.assertEqual(hint.returncode, 0, hint.stderr)
+            self.assertIn("COULD NOT CHECK", hint.stderr)
 
-    def test_both_push_paths_run_this_guard(self) -> None:
-        """Wiring only gates.sh leaves the churn reaching CI for anyone who
-        pushes without running it by hand, which is the normal case."""
+            # POSITIVE CONTROL: hint mode on a resolvable base still reports the
+            # violation, so the message above is not simply what hint mode says.
+            control = self.run_guard(root, mode="hint")
+            self.assertEqual(control.returncode, 0, control.stderr)
+            self.assertIn("identity-only", control.stderr)
 
+    def test_a_ledger_git_cannot_show_produces_no_verdict(self) -> None:
+        """The base resolves and its tree lists the ledger, but the blob itself
+        is unreadable — a truncated or corrupted object store. Reading only the
+        `git show` exit would call that "no ledger here" and pass."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_with_a_live_violation(td)
+
+            # POSITIVE CONTROL first, while the object store is intact.
+            control = self.run_guard(root)
+            self.assertEqual(control.returncode, 1, control.stderr)
+            self.assertIn("identity-only", control.stderr)
+
+            blob = subprocess.run(
+                ["git", "rev-parse", f"base:{guard.HANDOFF}"],
+                cwd=root, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            loose = root / ".git" / "objects" / blob[:2] / blob[2:]
+            self.assertTrue(loose.is_file(),
+                            f"fixture never wrote a loose object for {blob}")
+            loose.unlink()
+
+            blind = self.run_guard(root)
+            self.assertEqual(blind.returncode, guard.NO_VERDICT, blind.stderr)
+            self.assertIn("COULD NOT CHECK", blind.stderr)
+
+    def test_name_status_reports_a_git_failure_instead_of_an_empty_diff(self) -> None:
+        """The swallow at the diff: a non-zero `git diff` returned [], and []
+        is indistinguishable from a branch that changed nothing."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_with_a_live_violation(td)
+
+            # POSITIVE CONTROL: the same call on a resolvable base returns real
+            # rows and no error, so an empty list below means something.
+            rows, detail = guard.name_status("base", root)
+            self.assertEqual(detail, "")
+            self.assertTrue(rows, "control found no changed paths; the probe is dead")
+
+            blind_rows, blind_detail = guard.name_status("never-existed", root)
+            self.assertEqual(blind_rows, [])
+            self.assertTrue(blind_detail,
+                            "a failed diff reported no error; callers will read "
+                            "the empty row list as 'nothing changed'")
+
+    def test_pinned_paths_raises_instead_of_returning_an_empty_inventory(self) -> None:
+        """An empty pinned-path set means "the ledger pins nothing", which is a
+        claim about the inventory. A failed read must not be able to make it."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+
+            # POSITIVE CONTROL on the same instrument and the same repo.
+            pins = guard.pinned_paths(root, "base")
+            self.assertEqual(
+                pins,
+                {"core/view/src/view.cpp", "tools/scripts/pinned_tool.py"})
+
+            with self.assertRaises(guard.LedgerUnavailable):
+                guard.pinned_paths(root, "never-existed")
+
+    def test_both_push_paths_fail_closed_on_a_no_verdict(self) -> None:
+        """Routing the new exit code is half the fix.
+
+        `gates.sh` treats any non-zero as a failure, but the pre-push hook
+        enumerates exit codes and sends anything unlisted to a message that does
+        NOT set `fail`. An unmapped 2 there would print a line and let the push
+        through — the identical blind spot, moved one layer out.
+        """
+        hook = (REPO / ".githooks/pre-push").read_text(encoding="utf-8")
+        block = re.search(
+            r'if \[ -f "\$GPU_PIN_FRESHNESS" \].*?\n    esac', hook, re.DOTALL)
+        self.assertIsNotNone(block, "pre-push no longer runs the freshness gate")
+        body = block.group(0)
+        self.assertRegex(
+            body, r"\n\s*2\)\s*fail=1",
+            "pre-push does not map the no-verdict exit to a failure")
+
+        gates = (REPO / "tools/scripts/gates.sh").read_text(encoding="utf-8")
+        gates_block = re.search(
+            r'if \[ -f "\$GHP" \].*?\nfi', gates, re.DOTALL)
+        self.assertIsNotNone(gates_block, "gates.sh no longer runs the freshness gate")
+        self.assertIn("fail=1", gates_block.group(0))
+        self.assertRegex(
+            gates_block.group(0), r'if ! "\$PYTHON" "\$GHP"',
+            "gates.sh no longer fails on every non-zero exit")
+
+    def test_both_push_paths_run_the_freshness_check(self) -> None:
+        """`gates.sh` is run by convention; the hook is run by git.
+
+        Wiring only `gates.sh` would leave the rule holding for whoever
+        remembered to run it -- which is exactly the state this guard was in
+        before the inversion. Asserting the script *name* appears cannot prove
+        it, because both surfaces hold the path in a shell variable and the
+        name survives the line that runs it being deleted. Find the
+        assignment, then require a live command that executes that variable.
+        """
         script = "gpu_handoff_pin_freshness.py"
-        for surface in (".githooks/pre-push", "tools/scripts/gates.sh"):
-            self.assertIn(script, (REPO / surface).read_text(),
-                          f"{surface} does not run {script}")
+        for surface in ("tools/scripts/gates.sh", ".githooks/pre-push"):
+            text = (REPO / surface).read_text(encoding="utf-8")
+            assigned = re.findall(
+                rf'^\s*(\w+)="[^"]*{re.escape(script)}"', text, re.MULTILINE)
+            self.assertEqual(
+                len(assigned), 1,
+                f"{surface} does not name {script} exactly once")
+            variable = assigned[0]
+            invocations = [
+                line for line in text.splitlines()
+                if not line.lstrip().startswith("#")
+                and f'"${variable}"' in line
+                and "--mode" in line
+            ]
+            self.assertTrue(
+                invocations,
+                f"{surface} never runs ${variable}: the gate is registered but dead")
 
 
 if __name__ == "__main__":

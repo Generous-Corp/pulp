@@ -152,29 +152,49 @@ generic DPR policy, render-lifecycle instrumentation, or framework adapter
 needed to act on that result originates in Vellum; do not implement it in this
 Pulp evidence lane.
 
-## Editing a pinned file stales its handoff row
+## Editing a pinned file stales its handoff row — and that is now fine
 
 `docs/status/gpu-vellum-handoff.yaml` pins a `revision` and an `object_id` per
 path. `revision` is the most recent commit touching that path; `object_id` is
 `git rev-parse <revision>:<path>`. Change a pinned file and its row still names
-the previous blob, so `gpu_recipe_catalog.py` reports:
+the previous blob.
 
-```
-gpu-recipe-catalog: INVALID: handoff entries[N].pulp_paths[M] has stale revision/blob/tree identity
-```
+**Do not re-pin it in your PR.** `version_at_land._refresh_derived` regenerates
+the ledger and its receipt inside the `chore: bump versions` commit the release
+bot writes to `main`, which is the one place a re-pin costs nobody a rebase.
+Doing it in a PR instead re-creates the cost the move removed: ~148 non-merge
+commits in 25 days changed **only** those two generated files, and they collide
+on github.com, where the local `pulp-gpu-ledger` merge driver cannot run.
+`gpu_handoff_pin_freshness.py` — in `gates.sh` and the pre-push hook — fails an
+identity-only re-pin for that reason.
 
-The failure surfaces through `gpu-recipe-catalog-selftest`, far from the file you
-edited. It is easy to misread as someone else's flake: the test is named for the
-GPU recipe catalog and the change that broke it may have nothing to do with GPU.
-Do not expect it on one specific lane — it is an ordinary ctest, so it fails on
-whichever full-suite lane finishes first, and it has been observed reddening both
-the required `macos` gate and `Linux (x64) [github-hosted]`. A green macOS gate is
-therefore not evidence that your pins are fresh. Run
-`python3 tools/scripts/gpu_recipe_catalog.py` locally before pushing; it takes a
-second and answers the question outright.
+Staleness is survivable while you wait for the bot: provenance is ancestral, so
+the always-on tier accepts a stale-but-real pin, and currency at HEAD is opt-in
+behind `PULP_GPU_HANDOFF_REQUIRE_CURRENT`, which nothing in `.github` sets.
 
-`gpu_recipe_catalog.py` has no `--write` mode and is deliberately validate-only.
-The generator that owns those identities is a separate tool:
+Survivable means no gate goes red, not that the pins are right.
+`gpu_handoff_provenance.py check` is the strong currency claim, and on `main` it
+is **expected to be red between a merge that touched a pinned path and the next
+`chore: bump versions` commit** — that window is the designed steady state now
+that the bot owns the refresh. Nothing runs `check` for you (the
+`gpu-handoff-provenance-selftest` ctest holds the currency assertion but skips
+it without `PULP_GPU_HANDOFF_REQUIRE_CURRENT=1`), so a red `check` is a reading
+of where `main` sits in that cycle, not a task. Do not hand-regenerate to clear
+it; that is the re-pin the guard rejects.
+
+**Two shapes still belong to the PR**, because no regenerator can decide them:
+
+- **An editorial ledger change** — adding, removing or re-stating a pinned
+  path, and equally an edit to `authorities`, `upstream`, `cutover_trigger`,
+  `self_binding`, `stop_rules`, or an entry's `vellum_paths`,
+  `terminal_evidence`, `input_receipts` or `accepted_dispositions`. The guard
+  keys on the whole document minus the three derived identity fields, so any
+  of these passes; only a move confined to those three fields is a re-pin.
+- **A pinned path you deleted or renamed.** Unlike staleness this is *not*
+  survivable: the ledger names a path that is not there and the required gate
+  goes red. Drop or move the row in the same PR.
+
+Either one owes the regeneration, in the same commit as the inventory edit:
 
 ```bash
 python3 tools/scripts/gpu_handoff_provenance.py check                       # every stale row, and the repair command
@@ -183,6 +203,23 @@ python3 tools/scripts/gpu_handoff_provenance.py write --receipt             # re
 
 Pass `--receipt`. The published receipt is asserted against the ledger's bytes,
 so regenerating without it leaves a second gate red for the next reader.
+
+When a stale identity *does* surface, it surfaces through
+`gpu-recipe-catalog-selftest`, far from the file you edited:
+
+```
+gpu-recipe-catalog: INVALID: handoff entries[N].pulp_paths[M] has stale revision/blob/tree identity
+```
+
+It is easy to misread as someone else's flake: the test is named for the GPU
+recipe catalog and the change that broke it may have nothing to do with GPU. Do
+not expect it on one specific lane — it is an ordinary ctest, so it fails on
+whichever full-suite lane finishes first, and it has been observed reddening
+both the required `macos` gate and `Linux (x64) [github-hosted]`. A green macOS
+gate is therefore not evidence about your pins. Run
+`python3 tools/scripts/gpu_recipe_catalog.py` locally; it takes a second and
+answers the question outright. It has no `--write` mode and is deliberately
+validate-only — the generator above owns those identities.
 
 `gpu_recipe_catalog.py` will not catch that omission. It validates the ledger's
 own identities and reports `OK` while the receipt still names the previous
@@ -213,42 +250,26 @@ into dozens of stale identities: the rows are denormalized, one path can appear
 in several packages, and a path's owning revision moves whenever any commit
 touches it.
 
-**Land the refresh as its own commit, never as an amend.** The pinned revision
-is the commit that holds the edited file, so amending changes that SHA and
-re-stales the pin you just fixed.
+**When you do regenerate — for an inventory change — land it as its own
+commit, never as an amend.** The pinned revision is the commit that holds the
+edited file, so amending changes that SHA and re-stales the pin you just fixed.
 
-**Do not refresh a pin on a feature branch. That is the cascade's off switch.**
-Editing a pinned path stales its row, and the reflex is to regenerate. The
-reflex is now wrong, and `gpu_handoff_pin_freshness.py` rejects it at push. A
-regeneration rewrites `source_commit` and the `handoff_sha256` over the whole
-ledger whatever else it changed, and neither GitHub's mergeability check nor the
-merge queue can run the `pulp-gpu-ledger` merge driver — both do a plain text
-merge — so every branch carrying a refresh conflicts with every other one, and
-each merge re-conflicts the rest. What the refresh buys is *currency*, which is
-opt-in behind `PULP_GPU_HANDOFF_REQUIRE_CURRENT` and set by nothing. What it
-does not buy is provenance or coherence: a pin that has merely fallen behind is
-still an ancestor of HEAD and still resolves `revision:path` to the object id it
-recorded, so the always-on tier stays green. Leave the row behind; main carries
-the refresh.
+**The cascade that made this expensive is gone.** It used to run: a fix in
+`core/` touches a skill-mapped source path, `skill_sync_check.py` demands a
+SKILL.md edit, a SKILL.md is frequently a pinned path, so satisfying skill-sync
+stales a handoff row, and the refresh commit touches the YAML — which is itself
+mapped to *this* skill, re-arming skill-sync. A one-line source fix could
+therefore require two skills and a ledger refresh. Both links are cut now: the
+ledger and receipt are `generated_globs` in `tools/scripts/versioning.json`, so
+touching them arms nothing, and an ordinary PR does not touch them in the first
+place. Satisfy skill-sync with a real gotcha where you genuinely learned one,
+and stop — there is no ledger step to chase.
 
-The cascade this ends used to run three deep. A fix in `core/` touching a
-skill-mapped source path made `skill_sync_check.py` demand a SKILL.md edit; a
-SKILL.md is frequently a pinned path, so satisfying skill-sync staled a handoff
-row; and the refresh commit touched the YAML, which was itself mapped to *this*
-skill and so re-armed skill-sync — and because `.agents/skills/**` is the
-`plugin` version surface, that last hop put a Claude-plugin version bump and a
-release tag on the end of a mechanical regeneration. The YAML is no longer in
-`skill_path_map.json` for exactly that reason, and the refresh is no longer owed
-in the first place.
-
-**When you DO regenerate, re-run the checker after the refresh, not before.**
-Regeneration is still the right move for an inventory edit — adding or removing
-a pinned path — and for landing the refresh on `main`. Land the file edits
-first, then regenerate in a single following commit; `gpu_recipe_catalog.py` run
-before the refresh reports the row you are about to fix and hides the one you
-are about to create. And `gates: ✓ all gates pass` never proves the 100+
-identities are *correct*: only `gpu_handoff_provenance.py check` proves that,
-and it is not run by any gate.
+`gates: ✓ all gates pass` still proves nothing about whether the 100+ identities
+are *correct*. `gpu_handoff_pin_freshness.py` only asks whether this PR re-pins
+and whether it orphaned a pinned path; only `gpu_handoff_provenance.py check`
+verifies the identity fields, and no gate runs it. Run it yourself after any
+regeneration you do land.
 
 The drift check is also a ctest, `gpu-handoff-provenance-selftest`, so an
 unregenerated ledger fails locally and in CI with the repair command in the
@@ -266,11 +287,11 @@ then commit the ledger and the receipt together. To recover from a bare `write`
 that already landed, `git reset --soft` back to the commit that owns the edited
 files, restore the ledger, and regenerate with `--receipt`.
 
-Nothing in the fast path catches that omission. `gates.sh`'s `gpu-handoff
-identity churn` gate reads both files but asks a different question — is this
-change anything but a re-pin? — and a bare `write` plus a stale receipt is still
-a re-pin, so it stays green. `gpu_recipe_catalog.py` validates the ledger's own
-identities and also reports `OK`. The stale receipt surfaces only in
+Nothing in the fast path catches that omission. `gates.sh`'s `gpu-handoff pin
+freshness` gate asks only whether this PR re-pins and whether it orphaned a
+pinned path, so a bare `write` alongside an inventory change turns it green, and
+`gpu_recipe_catalog.py` validates the ledger's own identities and also reports
+`OK`. The stale receipt surfaces only in
 `gpu-handoff-provenance-selftest`. Run it directly before pushing:
 
 ```bash
@@ -305,10 +326,10 @@ Currency is off by default because the required per-commit gate validates every
 pinned row, not just the rows a branch touched. Asserting currency there means
 one commit landing on a pinned path turns that gate red for every other PR in
 flight until each repins, which serializes concurrent work across the whole
-pinned set. A stale pin is no longer something a branch is
-expected to catch at all: `gpu_handoff_provenance.py check` reports it for
-whoever asks, and the diff-scoped guard at 6b2 now rejects the *refresh* rather
-than demanding it, so the staleness rides to `main` and is repaired there.
+pinned set. What catches a stale pin instead is
+`gpu_handoff_provenance.py check` and the diff-scoped freshness guard, which
+fires only for the branch that actually moved a pinned path and prints the
+repair command with it.
 
 ## A red `gpu-handoff-provenance-selftest` names a fixture, not your file
 
@@ -327,11 +348,10 @@ run on a clean checkout.
 Currency is also not this suite's to reject. The currency tier is opt-in behind
 `PULP_GPU_HANDOFF_REQUIRE_CURRENT=1` and nothing in `.github` sets it, so a
 stale ledger must not redden the required gate twenty minutes after a push —
-and a branch is not expected to regenerate either:
-`gpu_handoff_pin_freshness.py` rejects an identity-only refresh at push, in
-under a second. A `gpu-handoff-provenance-selftest` that goes red only because a
-branch edited a pinned path is a defect in the suite, not a demand to
-regenerate.
+`gpu_handoff_pin_freshness.py` catches the missing regeneration at push instead,
+in under a second, with the repair command attached. A `gpu-handoff-provenance-selftest`
+that goes red only because a branch edited a pinned path is a defect in the
+suite, not a demand to regenerate.
 
 One such defect is worth knowing because its shape recurs: `resolve` **writes**
 its repair into the same two files `check` reads, so a `check` run after
@@ -591,23 +611,22 @@ claiming the affected families sorted. Coverage is compared for **equality**,
 not containment: claiming a family the diff does not touch fails the same way
 omitting one does.
 
-## Refreshing the ledger pulls this skill into skill-sync
+## Refreshing the ledger no longer pulls this skill into skill-sync
 
-The repair for a stale pin edits `docs/status/gpu-vellum-handoff.yaml`, and that
-path is mapped to this skill in `tools/scripts/skill_path_map.json`. So a change
-that never intended to touch Vellum routing — refreshing one registry-digest
-literal inside a pinned validator script such as
-`tools/scripts/test_release_artifact_contents.py` — fails three gates in a chain,
-each naming something further from the edit than the last:
+`docs/status/gpu-vellum-handoff.yaml` is mapped to this skill in
+`tools/scripts/skill_path_map.json`, so touching it used to arm `skill-sync` on
+top of everything else. A change that never intended to touch Vellum routing —
+refreshing one registry-digest literal inside a pinned validator script such as
+`tools/scripts/test_release_artifact_contents.py` — failed three gates in a
+chain, each naming something further from the edit than the last: the ctest for
+a stale row, the pin guard for an unrefreshed ledger, then `skill-sync` for the
+refresh itself.
 
-1. the ctest, as `gpu-recipe-catalog-selftest`, for a stale row;
-2. nothing, if you leave the row stale — which is now the correct response;
-3. the pre-push `gpu-handoff-churn` guard, if you regenerate anyway.
-
-Steps 2 and 3 used to be the reverse, and the chain used to have a fourth link:
-regenerating re-armed `skill-sync` for `pulp-vellum-change-routing`, whose
-SKILL.md is under `.agents/skills/**` and therefore the `plugin` version
-surface, so a mechanical re-pin ended in a plugin release tag. The YAML is no
-longer mapped to this skill and the refresh is no longer owed, so the chain
-stops at step 1: a stale row on a feature branch is expected, and `main`
-carries the repair.
+Both ends of that chain are cut. The ledger and its receipt are
+`generated_globs` in `tools/scripts/versioning.json`, so `skill_sync_check.py`
+filters them out before the map is consulted — the *generator*
+(`tools/scripts/gpu_handoff_provenance.py`) is still mapped here, which is the
+right place for the demand, since changing it is a routing decision and
+regenerating its output is not. And the refresh itself has moved to the version
+bot's bump commit, so an ordinary PR does not produce one. There is no
+`Skill-Update: skip` ritual left to perform for a ledger refresh.

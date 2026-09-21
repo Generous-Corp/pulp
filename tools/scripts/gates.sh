@@ -331,28 +331,35 @@ if [ -f "$FMT" ]; then
     esac
 fi
 
-# ── 6b2. gpu-handoff identity churn ─────────────────────────────────────────
-# This gate used to demand the opposite: a pinned path changed, so refresh the
-# ledger. The refresh turned out to cost more than the staleness it repaired.
-# The receipt's source_commit and the handoff_sha256 over the whole ledger move
-# on EVERY regeneration, and neither GitHub's mergeability check nor the merge
-# queue can run the pulp-gpu-ledger merge driver — both do a plain text merge —
-# so every branch carrying a refresh conflicts with every other one, and each
-# merge re-conflicts the rest. What the refresh bought was currency at HEAD,
-# which is opt-in behind PULP_GPU_HANDOFF_REQUIRE_CURRENT and set by nothing:
-# provenance and coherence hold either way, because a pin that has merely
-# fallen behind is still ancestral and still resolves to the object id it
-# recorded. So the gate rejects the churn instead of requiring it.
-# Scoped to the transition rather than the path, because the ledger is a hybrid:
-# the generator never adds, removes or reorders rows, so an inventory edit is a
-# human edit and stays permitted — as do route_set_sha256 and expansion_id,
-# which validate_handoff_routing checks unconditionally and no tool regenerates.
-# Diff-scoped against the merge base and sub-second. The pre-push hook runs the
-# same script, so the rule holds whether or not anyone ran this one.
+# ── 6b2. gpu-handoff pin freshness ──────────────────────────────────────────
+# A PR does not re-pin docs/status/gpu-vellum-handoff.yaml or its receipt. The
+# version bot's bump commit does, inside the transaction it already writes to
+# main (version_at_land._refresh_derived), because that commit is the one place
+# a re-pin costs nobody a rebase. Re-pinning in a PR re-creates what the move
+# removed: ~148 non-merge commits in 25 days changed only those two generated
+# files, and they collide on github.com, where the local pulp-gpu-ledger merge
+# driver cannot run. So this rejects an identity-only re-pin — the ledger or
+# receipt moved while the pinned-path INVENTORY did not.
+# It separately rejects a pinned path deleted or renamed while the inventory
+# still lists it. That asymmetry is deliberate: a stale pin survives (provenance
+# is ancestral, and currency is opt-in behind PULP_GPU_HANDOFF_REQUIRE_CURRENT,
+# which nothing in .github sets), but a MISSING path turns the required gate
+# red, and no regenerator can decide whether the row should move or be dropped.
+# An inventory change is still a legitimate in-PR ledger edit, and it still owes
+# `gpu_handoff_provenance.py write --receipt`. This gate does not re-verify the
+# identity fields — that is `gpu_handoff_provenance.py check`, ~25s because it
+# runs a git log per pinned path. Diff-scoped and sub-second: an ls-tree/show
+# pair per side of the range plus one git diff --name-status. The pre-push hook
+# runs the same script, so the rule holds whether or not anyone ran this one.
+#
+# It exits 2 for "git could not answer, so nothing was checked" — distinct from
+# 0, because an empty changed-path list is how this gate spells clean and a
+# swallowed git failure would therefore read as a pass. `if !` below already
+# fails on every non-zero; the pre-push hook has to name the code explicitly.
 if [ -f "$GHP" ]; then
     echo "" >&2
-    echo "▸ gpu-handoff identity churn (no identity-only ledger regeneration)" >&2
-    if ! "$PYTHON" "$GHP" --base "$BASE" --root "$ROOT" --mode=report; then
+    echo "▸ gpu-handoff pin freshness (no in-PR re-pin; no orphaned pinned path)" >&2
+    if ! "$PYTHON" "$GHP" --base "$BASE" --mode=report; then
         fail=1
     fi
 fi
@@ -360,12 +367,9 @@ fi
 # ── 6b3. gpu-handoff merge sentinel ─────────────────────────────────────────
 # The pulp-gpu-ledger merge driver resolves a ledger/receipt collision to an
 # identity that is invalid on purpose, so it cannot be committed in silence the
-# way a merged-looking pin would be. 6b2 above sees a sentinel-resolved ledger
-# too, and the two agree: when the resolution is all the range did to the file,
-# 6b2's repair — restore the merge base — clears the sentinel and is exactly what
-# a clean merge of an untouched file would have produced. When the range also
-# carries real content, 6b2 stays silent and this gate's regenerate is the only
-# repair. The pre-push hook runs the same script, so the rule holds whether or
+# way a merged-looking pin would be. Nothing else catches it: 6b2 fires when a
+# pinned path changes and the ledger does NOT, and a sentinel merge changes the
+# ledger. The pre-push hook runs the same script, so the rule holds whether or
 # not anyone ran this one.
 if [ -f "$GLS" ]; then
     echo "" >&2

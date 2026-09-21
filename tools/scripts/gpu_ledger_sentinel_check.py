@@ -13,12 +13,13 @@ would commit without a word.
 An invalid value only helps if something invalid-aware is looking, and the
 guards that already exist do not look here:
 
-* ``gpu_handoff_pin_freshness.py`` rejects an identity-only ledger change, and
-  a sentinel resolution is one. It fires here and its repair is the right one --
-  restoring the merge base clears the sentinel and is what a clean merge of an
-  untouched file would have produced -- but it cannot say *why* the file is that
-  way, and it goes quiet the moment the branch also carries a real content
-  change, which is the case that genuinely needs regenerating.
+* ``gpu_handoff_pin_freshness.py`` asks whether a PR re-pins the ledger and
+  whether it orphaned a pinned path. It compares the two sides' *editorial*
+  content and never reads an identity value, so ``regenerate-me`` is not
+  something it can see. A sentinel merge that moved nothing else does trip its
+  identity-only branch, but only incidentally and only while nothing else in
+  the ledger moved: carry any editorial change in the same merge and that
+  branch correctly stands down, leaving the sentinel unremarked.
 * ``conflict_marker_check.py`` looks for ``<<<<<<<``. The driver's entire
   purpose is that there are none.
 
@@ -214,17 +215,8 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
     print("  silence, and this cannot be.", file=sys.stderr)
-    print("  If this resolution is the only thing the branch did to these files, do", file=sys.stderr)
-    print("  not regenerate: restore the merge base instead. That clears the sentinel", file=sys.stderr)
-    print("  and leaves main's own identities in place, and regenerating here would", file=sys.stderr)
-    print("  only produce the identity churn gpu_handoff_pin_freshness.py rejects.", file=sys.stderr)
-    print("    git restore --source=$(git merge-base origin/main HEAD) -- \\", file=sys.stderr)
-    for index, relative in enumerate(LEDGERS):
-        trailer = " \\" if index + 1 < len(LEDGERS) else ""
-        print(f"        {relative}{trailer}", file=sys.stderr)
-    print("  If the branch also edits the ledger's content, regenerate — and land the", file=sys.stderr)
-    print("  result as its own commit, because amending a commit that touches a", file=sys.stderr)
-    print("  pinned path re-stales the row it just repaired.", file=sys.stderr)
+    print("  Regenerate, and land the result as its own commit — amending a commit", file=sys.stderr)
+    print("  that touches a pinned path re-stales the row it just repaired.", file=sys.stderr)
     print(f"  Repair:  {REPAIR}", file=sys.stderr)
     print(f"  Verify:  {VERIFY}", file=sys.stderr)
     return 0 if args.mode == "hint" else 1
