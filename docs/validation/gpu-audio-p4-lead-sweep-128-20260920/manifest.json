@@ -14,7 +14,7 @@
   },
   "date": "2026-09-20",
   "executable_sha256": "536b88abcd38dc1c9c436055689998050a729046da1d3da00919257d8e8736bc",
-  "harness_fix_commit": "4d3f7756a0f9e0f4d2cb22a3f5c70f7d3ff5d2f9",
+  "harness_fix_commit": "4d3f7756a0d96cd5d6e344cb2dbce41a1c67aacc",
   "interpretation": {
     "all_runs_measured_misses_zero": true,
     "all_runs_numerically_completed": true,
@@ -116,7 +116,7 @@
     }
   ],
   "schema": "pulp.gpu-audio.p4.lead-sweep.v1",
-  "source_commit": "4d3f7756a0f9e0f4d2cb22a3f5c70f7d3ff5d2f9",
+  "source_commit": "4d3f7756a0d96cd5d6e344cb2dbce41a1c67aacc",
   "source_sha256": {
     "core/gpu_audio/src/gpu_audio_transport.cpp": "5cae6e39aeb6a78bfb9ffbc1c07f878f8c04d140616fa5338f81c773045cedf1",
     "core/gpu_audio/src/gpu_convolver.cpp": "27e2e5fdf766bd37a96f2b013261908088ae967d33a7b2840b245738d36e28b9da1e78e8618f69baa2cb82b0a0322",
