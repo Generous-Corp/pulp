@@ -46,19 +46,20 @@ def check_structure(failures: list[str]) -> int:
         r'^\s*\*\) gate_could_not_run "([\w-]+)" "\$gate_rc"; fail=1 ;;$',
         source, re.M,
     )
-    # Control: this scan must match real sites. A regex that silently stops
-    # matching would report "no fall-open branches" over zero coverage — the
-    # exact failure mode this file exists to prevent.
-    if len(blocking) < 20:
-        failures.append(
-            f"scan matched only {len(blocking)} blocking branches; the pattern "
-            "has drifted from the hook and is measuring nothing"
-        )
-        return len(blocking)
-
     fall_open = re.findall(
         r'^\s*\*\) echo "\[pre-push\] ([\w-]+): internal error', source, re.M
     )
+
+    # Control, on the TOTAL of both halves. A regex that silently stopped
+    # matching would report "no fall-open branches" over zero coverage — the
+    # exact failure mode this file exists to prevent. Counting both halves
+    # means a gate moving between them cannot fake the control.
+    if len(blocking) + len(fall_open) < 20:
+        failures.append(
+            f"scan found only {len(blocking) + len(fall_open)} gate branches; "
+            "the pattern has drifted from the hook and is measuring nothing"
+        )
+        return len(blocking)
     unexpected = sorted(set(fall_open) - ADVISORY_EXEMPT)
     if unexpected:
         failures.append(
