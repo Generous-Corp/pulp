@@ -4770,6 +4770,25 @@ TEST_CASE("Shader uniform bindings report declaration and source failures",
     REQUIRE(bridge.binding_attempts()[1].outcome == BindingOutcome::unknown_param);
 }
 
+TEST_CASE("WidgetBridge installs structured SDF shader geometry options",
+          "[view][bridge][shader][sdf]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        globalThis.installed = setWidgetShader('knob',
+          'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }',
+          { geometry: 'auto', reach: 4 });
+    )");
+#ifdef PULP_HAS_SKIA
+    REQUIRE(engine.evaluate("installed.success").getWithDefault<bool>(false));
+#else
+    REQUIRE_FALSE(engine.evaluate("installed.success").getWithDefault<bool>(true));
+#endif
+}
+
 TEST_CASE("WidgetBridge publishes vector shader scope with neutral stale texel",
           "[view][bridge][shader][value-channel]") {
     ScriptEngine engine;

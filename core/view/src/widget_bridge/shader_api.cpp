@@ -7,6 +7,8 @@
 #include <string>
 #include <string_view>
 #include <algorithm>
+#include <cmath>
+#include <optional>
 #include <vector>
 
 namespace pulp::view {
@@ -17,6 +19,52 @@ choc::value::Value shader_result(bool success, const std::string& error) {
     result.addMember("success", choc::value::createBool(success));
     result.addMember("error", choc::value::createString(error));
     return result;
+}
+
+std::optional<canvas::Canvas::ShaderGeometry>
+parse_shader_geometry(const choc::value::ValueView& options) {
+    if (!options.isObject() || !options.hasObjectMember("geometry")) return std::nullopt;
+    const auto& value = options["geometry"];
+    canvas::Canvas::ShaderGeometry geometry;
+    if (value.isString()) {
+        const auto name = value.getWithDefault<std::string>("");
+        if (name != "auto") return std::nullopt;
+        geometry.shape = canvas::Canvas::SDFShape::flat_arc;
+    } else if (value.isObject()) {
+        const auto shape = value.hasObjectMember("shape")
+                               ? value["shape"].getWithDefault<std::string>("flat_arc")
+                               : "flat_arc";
+        const std::pair<const char*, canvas::Canvas::SDFShape> shapes[] = {
+            {"rect", canvas::Canvas::SDFShape::rect},
+            {"circle", canvas::Canvas::SDFShape::circle},
+            {"rounded_rect", canvas::Canvas::SDFShape::rounded_rect},
+            {"flat_arc", canvas::Canvas::SDFShape::flat_arc},
+            {"ring", canvas::Canvas::SDFShape::ring},
+            {"stadium", canvas::Canvas::SDFShape::stadium},
+        };
+        bool found = false;
+        for (const auto& candidate : shapes) {
+            if (shape == candidate.first) {
+                geometry.shape = candidate.second;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return std::nullopt;
+        auto number = [&](const char* key, float fallback) {
+            return value.hasObjectMember(key)
+                       ? static_cast<float>(value[key].getWithDefault<double>(fallback))
+                       : fallback;
+        };
+        geometry.style.corner_radius = number("cornerRadius", geometry.style.corner_radius);
+        geometry.style.stroke_width = number("strokeWidth", geometry.style.stroke_width);
+        geometry.style.arc_start = number("arcStart", geometry.style.arc_start);
+        geometry.style.arc_sweep = number("arcSweep", geometry.style.arc_sweep);
+        geometry.style.inner_radius = number("innerRadius", geometry.style.inner_radius);
+    } else {
+        return std::nullopt;
+    }
+    return geometry;
 }
 
 } // namespace
@@ -44,6 +92,7 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
     register_bridge_function(api, "setWidgetShader", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto sksl = args.get<std::string>(1, "");
+        const bool has_options = args.numArgs >= 3 && args[2] != nullptr;
 
         auto* v = self.widget(id);
         if (!v) return shader_result(false, "No widget with id '" + id + "'");
@@ -57,10 +106,32 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
             return shader_result(
                 false, "Empty shader code — use clearWidgetShader() to remove a shader");
 
-        auto error = canvas::Canvas::compile_sksl(sksl);
+        std::optional<canvas::Canvas::ShaderGeometry> geometry;
+        float reach = 0.0f;
+        if (has_options) {
+            const auto& options = *args[2];
+            if (!options.isObject()) return shader_result(false, "Shader options must be an object");
+            if (options.hasObjectMember("reach")) {
+                reach = static_cast<float>(options["reach"].getWithDefault<double>(0.0));
+                if (!std::isfinite(reach) || reach < 0.0f)
+                    return shader_result(false, "Shader reach must be finite and non-negative");
+            }
+            if (options.hasObjectMember("geometry")) {
+                geometry = parse_shader_geometry(options);
+                if (!geometry)
+                    return shader_result(false, "Invalid shader geometry; expected auto or a supported shape object");
+            }
+        }
+        const bool structured = sksl.find("PulpFragment shade") != std::string::npos;
+        auto error = structured
+                         ? canvas::Canvas::compile_sdf_chart_sksl(
+                               geometry ? geometry->shape : canvas::Canvas::SDFShape::flat_arc, sksl)
+                         : canvas::Canvas::compile_sksl(sksl);
         if (!error.empty()) return shader_result(false, error);
 
         host->set_custom_shader(std::move(sksl));
+        host->set_shader_geometry(std::move(geometry));
+        host->set_shader_reach(reach);
         self.request_repaint();
         return shader_result(true, "");
     });
