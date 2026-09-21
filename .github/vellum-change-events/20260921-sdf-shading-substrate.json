@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20260921-sdf-shading-substrate",
+  "kind": "change",
+  "created_at": "2026-09-21T22:00:00Z",
+  "slices": [
+    "canvas-kernel",
+    "retained-ui-kernel"
+  ],
+  "rationale": "Pulp's existing SkSL widget path already compiles and paints custom shaders, but agents cannot provide named uniforms or an explicit damage reach. This additive slice carries validated scalar and vector uniform values plus an optional reach from the Pulp widget bridge through the retained widget host into the existing SkSL draw. It preserves the existing shader and draw fallback contracts, does not change generic framework authority or add an alternate rendering implementation, and has no counterpart Vellum commit to backport. The capability is Pulp-only because Pulp still builds and ships this implementation independently.",
+  "tests": [
+    "pulp-test-widget-bridge",
+    "pulp-test-widget-bridge-animation",
+    "Vellum freeze",
+    "Vellum trusted freeze"
+  ],
+  "disposition": "pulp-only"
+}

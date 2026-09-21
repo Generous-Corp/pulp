@@ -4689,6 +4689,31 @@ TEST_CASE("WidgetBridge setWidgetShader does not install un-compilable SkSL",
     REQUIRE_FALSE(knob->has_custom_shader());
 }
 
+TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
+          "[view][bridge][shader]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        globalThis.set = setWidgetShaderUniforms('knob', { gain: 0.75, tint: [1, 0.5, 0.25, 1] });
+        globalThis.read = getWidgetShaderUniforms('knob');
+        globalThis.reach = setWidgetShaderReach('knob', 12);
+        globalThis.bad = setWidgetShaderUniforms('knob', { tooWide: [1, 2, 3, 4, 5] });
+    )");
+    REQUIRE(engine.evaluate("set.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("read.gain").getWithDefault<double>(0.0) == Catch::Approx(0.75));
+    REQUIRE(engine.evaluate("read.tint[2]").getWithDefault<double>(0.0) == Catch::Approx(0.25));
+    REQUIRE(engine.evaluate("reach.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("bad.success").getWithDefault<bool>(true));
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_reach() == Catch::Approx(12.0f));
+    REQUIRE(knob->shader_uniforms().size() == 2);
+}
+
 // shader_uses_time() decides whether the render loop stays pinned, and is read
 // once per widget per frame. It must be a real uniform lookup: a `timeline`
 // uniform must not force continuous repaint, and a shader with no time uniform

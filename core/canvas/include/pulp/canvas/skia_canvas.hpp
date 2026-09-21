@@ -418,6 +418,9 @@ public:
     bool draw_with_sksl(const std::string& sksl,
                         float x, float y, float w, float h,
                         const ShaderUniforms& uniforms) override;
+    bool draw_with_sksl(const std::string& sksl,
+                        float x, float y, float w, float h,
+                        const ShaderDrawOptions& options) override;
 
     // Child-shader compositor: post-process an already-painted layer with a
     // custom SkSL shader (declares `uniform shader content`).

@@ -1608,6 +1608,12 @@ public:
         float v[4] = {0, 0, 0, 0};
     };
 
+    struct ShaderDrawOptions {
+        ShaderUniforms uniforms;
+        std::vector<NamedUniform> named_uniforms;
+        float reach = 0.0f;
+    };
+
     /// Validate and compile an SkSL shader without drawing. Returns error string (empty = success).
     /// Static so it can be called without a Canvas instance.
     /// Non-Skia builds return a non-empty "Skia not available" error rather than
@@ -1635,6 +1641,12 @@ public:
         set_fill_color(uniforms.fill_color.a > 0.0f ? uniforms.fill_color : Color::rgba(0.314f, 0.314f, 0.392f, 0.784f));
         fill_rect(x, y, w, h);
         return false; // shader not rendered
+    }
+
+    virtual bool draw_with_sksl(const std::string& sksl,
+                                float x, float y, float w, float h,
+                                const ShaderDrawOptions& options) {
+        return draw_with_sksl(sksl, x, y, w, h, options.uniforms);
     }
 
     /// Save a compositing layer whose ALREADY-PAINTED content is post-processed

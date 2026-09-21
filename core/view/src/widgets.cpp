@@ -43,7 +43,11 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
     u.track_color = view.resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
     u.fill_color = view.resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
     u.thumb_color = view.resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-    if (canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, u)) {
+    canvas::Canvas::ShaderDrawOptions options;
+    options.uniforms = u;
+    options.named_uniforms = host.shader_uniforms();
+    options.reach = host.shader_reach();
+    if (canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, options)) {
         return true;
     }
     if (!host.shader_draw_failure_logged()) {

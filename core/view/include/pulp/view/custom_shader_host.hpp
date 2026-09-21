@@ -1,6 +1,9 @@
 #pragma once
 
 #include <string>
+#include <utility>
+#include <vector>
+#include <pulp/canvas/canvas.hpp>
 
 namespace pulp::view {
 
@@ -33,6 +36,13 @@ public:
     bool has_custom_shader() const { return !custom_sksl_.empty(); }
     const std::string& custom_shader() const { return custom_sksl_; }
 
+    void set_shader_uniforms(std::vector<canvas::Canvas::NamedUniform> uniforms) {
+        shader_uniforms_ = std::move(uniforms);
+    }
+    const std::vector<canvas::Canvas::NamedUniform>& shader_uniforms() const { return shader_uniforms_; }
+    void set_shader_reach(float reach) { shader_reach_ = reach < 0.0f ? 0.0f : reach; }
+    float shader_reach() const { return shader_reach_; }
+
     /// True when the shader actually declares a `time` uniform, and therefore
     /// needs a continuous repaint to animate.
     ///
@@ -57,6 +67,8 @@ private:
     std::string custom_sksl_;
     bool shader_uses_time_ = false;
     bool shader_draw_failure_logged_ = false;
+    std::vector<canvas::Canvas::NamedUniform> shader_uniforms_;
+    float shader_reach_ = 0.0f;
 };
 
 } // namespace pulp::view

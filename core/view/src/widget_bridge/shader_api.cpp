@@ -5,6 +5,7 @@
 #include "api_registry.hpp"
 
 #include <string>
+#include <vector>
 
 namespace pulp::view {
 namespace {
@@ -58,6 +59,66 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         if (!error.empty()) return shader_result(false, error);
 
         host->set_custom_shader(std::move(sksl));
+        self.request_repaint();
+        return shader_result(true, "");
+    });
+
+    register_bridge_function(api, "setWidgetShaderUniforms", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        if (args.numArgs < 2 || args[1] == nullptr) return shader_result(false, "Uniforms must be an object");
+        const auto& spec = *args[1];
+        auto* v = self.widget(id);
+        auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+        if (!host) return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        if (!spec.isObject()) return shader_result(false, "Uniforms must be an object");
+        std::vector<canvas::Canvas::NamedUniform> uniforms;
+        bool valid = true;
+        std::string failure;
+        spec.getView().visitObjectMembers([&](std::string_view name, const choc::value::ValueView& value) {
+            if (!valid) return;
+            canvas::Canvas::NamedUniform u;
+            u.name = std::string(name);
+            if (value.isArray()) {
+                u.count = static_cast<int>(value.size());
+                if (u.count < 1 || u.count > 4) { valid = false; failure = "Uniform '" + u.name + "' must have 1 to 4 components"; return; }
+                for (int i = 0; i < u.count; ++i) u.v[i] = static_cast<float>(value[i].getWithDefault<double>(0.0));
+            } else {
+                u.count = 1;
+                u.v[0] = static_cast<float>(value.getWithDefault<double>(0.0));
+            }
+            uniforms.push_back(std::move(u));
+        });
+        if (!valid) return shader_result(false, failure);
+        host->set_shader_uniforms(std::move(uniforms));
+        self.request_repaint();
+        return shader_result(true, "");
+    });
+
+    register_bridge_function(api, "getWidgetShaderUniforms", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = self.widget(id);
+        auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+        if (!host) return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        auto result = choc::value::createObject("");
+        for (const auto& u : host->shader_uniforms()) {
+            if (u.count == 1) result.addMember(u.name, choc::value::createFloat64(u.v[0]));
+            else {
+                std::vector<double> values;
+                for (int i = 0; i < u.count; ++i) values.push_back(u.v[i]);
+                auto array = choc::value::createArray(values);
+                result.addMember(u.name, std::move(array));
+            }
+        }
+        return result;
+    });
+
+    register_bridge_function(api, "setWidgetShaderReach", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto reach = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = self.widget(id);
+        auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
+        if (!host) return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        host->set_shader_reach(reach);
         self.request_repaint();
         return shader_result(true, "");
     });

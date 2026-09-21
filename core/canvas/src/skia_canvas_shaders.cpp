@@ -329,6 +329,42 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
     return true;
 }
 
+bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
+                                 float x, float y, float w, float h,
+                                 const ShaderDrawOptions& options) {
+    if (!canvas_ || sksl.empty()) return false;
+    auto& cache = RuntimeEffectCache::instance();
+    auto effect = cache.get_or_compile(sksl);
+    if (!effect) return false;
+    SkRuntimeShaderBuilder builder(effect);
+    if (effect->findUniform("resolution")) builder.uniform("resolution") = SkV2{w, h};
+    if (effect->findUniform("reach")) builder.uniform("reach") = options.reach;
+    const auto& u = options.uniforms;
+    if (effect->findUniform("value")) builder.uniform("value") = u.value;
+    if (effect->findUniform("time")) builder.uniform("time") = u.time;
+    auto color = [](Color c) -> SkV4 { return {c.r, c.g, c.b, c.a}; };
+    if (effect->findUniform("accentColor")) builder.uniform("accentColor") = color(u.accent_color);
+    if (effect->findUniform("bgColor")) builder.uniform("bgColor") = color(u.bg_color);
+    if (effect->findUniform("trackColor")) builder.uniform("trackColor") = color(u.track_color);
+    if (effect->findUniform("fillColor")) builder.uniform("fillColor") = color(u.fill_color);
+    if (effect->findUniform("thumbColor")) builder.uniform("thumbColor") = color(u.thumb_color);
+    for (const auto& named : options.named_uniforms) {
+        auto* info = effect->findUniform(named.name.c_str());
+        if (!info || named.count < 1 || named.count > 4) continue;
+        auto slot = builder.uniform(named.name.c_str());
+        if (named.count == 1) slot = named.v[0];
+        else if (named.count == 2) slot = SkV2{named.v[0], named.v[1]};
+        else if (named.count == 3) slot = SkV3{named.v[0], named.v[1], named.v[2]};
+        else slot = SkV4{named.v[0], named.v[1], named.v[2], named.v[3]};
+    }
+    auto shader = builder.makeShader();
+    if (!shader) return false;
+    SkPaint paint; paint.setShader(std::move(shader));
+    canvas_->save(); canvas_->translate(x, y);
+    canvas_->drawRect(SkRect::MakeXYWH(0, 0, w, h), paint); canvas_->restore();
+    return true;
+}
+
 bool SkiaCanvas::save_layer_with_sksl_post_effect(
         float x, float y, float w, float h,
         const std::string& sksl, const ShaderUniforms& uniforms,
