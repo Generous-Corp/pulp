@@ -1,0 +1,44 @@
+{
+  "id": "timeline-transaction-test-thread-safety",
+  "title": "Writer-token allocation test records on its workers and asserts after join",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "3143a6a5-0341-4220-99e8-2501b72d16e2",
+  "owned_paths": [
+    "test/test_timeline_transactions.cpp",
+    "docs/status/sequencer-exposure/rows/timeline-transaction-test-thread-safety.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/test_timeline_transactions.cpp",
+      "needles": [
+        "auto allocate = [&](int& invalid) {",
+        "std::thread a(allocate, std::ref(invalid_a));",
+        "REQUIRE(invalid_a == 0);",
+        "REQUIRE(invalid_b == 0);"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No installed header, target, or exported symbol changes. The edit is confined to a Catch2 test translation unit that ships in no SDK artifact."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler is added or changed. The test drives WriterToken directly and is never invoked as a shipped command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler is added or changed. Nothing under tools/mcp reads or registers this test."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, or profile policy changes. Concurrent command-id allocation behaviour is unchanged; only where the test asserts moved."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged. Relocating a test assertion off a worker thread publishes no design-time capability."
+    }
+  }
+}

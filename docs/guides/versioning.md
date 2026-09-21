@@ -502,6 +502,30 @@ receipts, avoiding a hard job cancellation after a nominal budget hit.
 
 ---
 
+### The hosted coverage disk check is an arrival floor, not a capacity gate
+
+`coverage.yml`'s "Reclaim hosted macOS coverage disk" step deletes inactive
+Xcode bundles and then refuses to continue below **10 GiB** free. That threshold
+answers exactly one question — *did the cleanup free anything, or did this
+runner arrive short?* — and it is checked **once, before the Skia fetch and
+before the build**.
+
+It cannot see a build that consumes the disk itself, and that is the failure
+that actually occurs. Measured across ten failing and ten succeeding hosted
+macOS coverage jobs, free space at that checkpoint was **75-76 GiB in all
+twenty**: failing and succeeding runners are indistinguishable there. So no
+threshold between 10 and 76 GiB changes any outcome, and anything above 76
+refuses every run. Do not "fix" this by raising the number.
+
+Run-time disk pressure is bounded where it is actually created, in
+`scripts/run_coverage.sh`: per-process `%p-%m` profiles are absorbed into a
+running profdata **while the suite runs** and deleted as they are absorbed, so
+the raw-profile peak stops growing monotonically with the test count. A shard is
+absorbed only when `kill -0` on the PID embedded in its filename fails — never
+on mtime, which would eventually reclaim a slow test's live shard and drop its
+coverage silently.
+
+
 ## Shipyard-binary pin bumps
 
 When a new Shipyard release drops, the pin lives in `tools/shipyard.toml`
