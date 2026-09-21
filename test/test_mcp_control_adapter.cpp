@@ -626,6 +626,26 @@ TEST_CASE("MCP protocol advertises control resources and removed Inspector tools
     reset_control_mcp_session_factory_for_test();
 }
 
+TEST_CASE("MCP dynamically projects sample-region operations from the control registry",
+          "[mcp][control][sample-region][schema]") {
+    auto state = std::make_shared<FakeState>();
+    set_control_mcp_session_factory_for_test(factory(state));
+    const auto tools = pulp_mcp::server::handle_request(
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
+    INFO(tools);
+    const auto read = tools.find("\"name\":\"pulp_control_graph_sample_region_read\"");
+    const auto edit = tools.find("\"name\":\"pulp_control_graph_sample_region_edit\"");
+    REQUIRE(read != std::string::npos);
+    REQUIRE(edit != std::string::npos);
+    REQUIRE(tools.find("dev.pulp.graph/sample-region.read@1", read) != std::string::npos);
+    REQUIRE(tools.find("dev.pulp.graph/sample-region.edit@1", edit) != std::string::npos);
+    REQUIRE(tools.find("\"additionalProperties\":false", read) != std::string::npos);
+    REQUIRE(tools.find("\"additionalProperties\":false", edit) != std::string::npos);
+    REQUIRE(tools.find("\"readOnlyHint\":true", read) != std::string::npos);
+    REQUIRE(tools.find("\"readOnlyHint\":false", edit) != std::string::npos);
+    reset_control_mcp_session_factory_for_test();
+}
+
 TEST_CASE("MCP trace compatibility tools use an authorized canonical control session",
           "[mcp][control][trace][authorized]") {
     auto state = std::make_shared<FakeState>();
