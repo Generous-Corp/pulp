@@ -6,12 +6,14 @@
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <span>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -30,6 +32,7 @@ constexpr std::uint32_t kLeadBlocks = 2;
 constexpr std::uint32_t kBlocks = 12;
 constexpr std::uint64_t kPairId = 1;
 constexpr std::uint64_t kGeneration = 1;
+constexpr std::chrono::milliseconds kTerminalDrainTimeout{500};
 
 struct TrialResult {
     GpuConvolverTrialPath path = GpuConvolverTrialPath::SharedAsync;
@@ -148,6 +151,21 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
         transport.process(input_view, output_view, kFrames);
         transport.pump(1);
     }
+
+    // Shared-I/O completions arrive through Dawn's non-RT ProcessEvents
+    // dispatcher. Keep servicing the provider until every submitted block has
+    // a terminal record (or the bounded diagnostic timeout expires) before
+    // stopping the transport and reading the authenticated trace queue. The
+    // callback path is already quiescent here; this wait is not benchmark
+    // timing evidence.
+    const auto drain_deadline = std::chrono::steady_clock::now() + kTerminalDrainTimeout;
+    while (transport.stats().produced_blocks < kBlocks &&
+           std::chrono::steady_clock::now() < drain_deadline) {
+        transport.pump(0);
+        if (transport.stats().produced_blocks >= kBlocks)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     transport.pump(0);
     result.misses = transport.stats().miss_blocks;
     transport.release();
@@ -162,6 +180,12 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
             emit_record(result, i, result.records[i], input_digest, ir_digest);
     }
     return result;
+}
+
+std::size_t terminal_record_count(const TrialResult& result) {
+    return static_cast<std::size_t>(std::count_if(
+        result.records.begin(), result.records.end(),
+        [](const auto& record) { return record.gpu_work_admitted; }));
 }
 
 } // namespace
@@ -185,7 +209,11 @@ int main() {
                      "unavailable\"}\n";
         return 77;
     }
-    const bool matched = staged.records_valid && shared.records_valid;
+    const auto staged_terminal_records = terminal_record_count(staged);
+    const auto shared_terminal_records = terminal_record_count(shared);
+    const bool matched = staged.records_valid && shared.records_valid &&
+                         staged_terminal_records == kBlocks &&
+                         shared_terminal_records == kBlocks;
     std::cout << "{\"schema\":\"pulp.gpu-audio.p4.matched.v1\",\"status\":\""
               << (matched ? "screening_complete" : "screening_failed")
               << "\",\"performance_verdict\":\"unassigned\",\"pair_id\":" << kPairId
@@ -195,6 +223,9 @@ int main() {
               << "},\"input_digest\":" << input_digest << ",\"ir_digest\":" << ir_digest
               << ",\"staged_records\":" << staged.records.size()
               << ",\"shared_records\":" << shared.records.size()
+              << ",\"staged_terminal_records\":" << staged_terminal_records
+              << ",\"shared_terminal_records\":" << shared_terminal_records
+              << ",\"terminal_records_required\":" << kBlocks
               << ",\"staged_misses\":" << staged.misses << ",\"shared_misses\":" << shared.misses
               << ",\"raw_receipt\":\"not_emitted\"}\n";
     return matched ? 0 : 1;
