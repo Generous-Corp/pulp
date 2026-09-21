@@ -171,6 +171,17 @@ such as `aligned_alloc`. The probe accepts the NDK host's `clang++` or
 path expands on both macOS and Windows. A passing probe is not APK or emulator
 acceptance; the following Gradle build and artifact checks remain required.
 
+`android-run-fixtures` runs the same probe on the NDK it already installs, so
+the API floor is one of the few Android facts a pull request actually proves.
+That job's cross-compiled fixture runners are **not** a substitute: their target
+closure is narrower than the APK's, so they compiled clean throughout the
+API-26 `aligned_alloc` outage. Anything that keeps a core header out of the
+fixture runners' closure keeps it out of the pre-merge signal too, and the probe
+covers only `simd_buffer.hpp`. `tools/scripts/test_android_premerge_probe.py`
+(run from `workflow-lint.yml`) fails if the probe step, its `affected` gate, or
+the dependency closure that reaches it is dropped, or if the job stops running
+on `pull_request`.
+
 ## A green "Android Build" on a PR does not mean the APK compiles
 
 `android-build` declares `needs: resolve-runners`, and `resolve-runners` is
@@ -183,10 +194,12 @@ conclusion comes from `android-run-fixtures` alone. The check named
 The APK build runs only on `push` to `main` (behind the `paths` filter), on the
 nightly `schedule`, and on `workflow_dispatch`. Consequences worth holding:
 
-- A compile break in `core/**` reaches `main` with every pre-merge signal green,
-  and only the post-merge push run turns red. That is how an API-26
-  `std::aligned_alloc` break sat on `main` from 2026-07-29 to 2026-09-19 with
-  nobody assigned to it.
+- A compile break in `core/**` can still reach `main` with every pre-merge
+  signal green, and only the post-merge push run turns red. That is how an
+  API-26 `std::aligned_alloc` break sat on `main` from 2026-07-29 to 2026-09-19
+  with nobody assigned to it. The API-floor probe now runs pre-merge in
+  `android-run-fixtures`, which closes that specific class; a general Android
+  compile break still has no pre-merge gate.
 - To validate an Android fix BEFORE merging, dispatch the workflow on the branch
   (`workflow_dispatch`) and read `android-build` there. A PR run cannot tell you.
 - When reading history, filter runs by `event` — mixing `pull_request` runs into
@@ -1192,6 +1205,55 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    filling the concurrency group.
 
    After a new push the head SHA changes — re-read the runs on the **new** SHA.
+
+   **1b. The run EXISTS but never becomes jobs — a cancelled predecessor is
+   still running and holding the concurrency group.** A run stuck at `pending`
+   with `jobs.total_count` of **0** has no jobs to schedule, so the required
+   check is never *created* — `macos` reads as `NOT REPORTED` rather than red,
+   and free runner capacity does nothing for it.
+   ```bash
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>" --jq '.status'
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<id>/jobs?per_page=1" --jq '.total_count'
+   ```
+   The cause is **job-level `if: always()`**, not the concurrency expression and
+   not the runner. `build.yml` groups on `build-${{ github.ref }}`, which is
+   `refs/pull/N/merge` for every run of that PR. `cancel-in-progress` is on and
+   *does* fire — but a job gated on `always()` keeps running after its run has
+   been cancelled. So the superseded run is marked `cancelled` and **carries on
+   building**: it stays `in_progress`, goes on holding the group, and every newer
+   head sits at `pending` with zero jobs.
+
+   **Check the predecessor's `conclusion`, not its `status` or its timing** —
+   that is the discriminating field:
+   ```bash
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>" --jq '.status, .conclusion'
+   ```
+   A wedged predecessor reads `in_progress` / `cancelled`. Reading only `status`
+   invites the wrong mechanism: an earlier revision of this entry claimed GitHub
+   never cancels a queued predecessor, which is false — it is cancelled, it just
+   does not stop.
+
+   This also explains the two symptoms a "never cancelled" story cannot:
+   `POST actions/runs/{id}/cancel` is accepted (`{}`) and changes nothing, while
+   **force-cancel** clears it instantly — force-cancel is documented to bypass
+   "conditions that would otherwise cause a workflow execution to continue, such
+   as an `always()` condition on a job". Use it, then confirm the successor
+   expands:
+   ```bash
+   ghapp api -X POST "repos/Generous-Corp/pulp/actions/runs/<old-id>/force-cancel"
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<new-id>/jobs?per_page=1" --jq '.total_count'
+   ```
+   The symptom is indistinguishable from ordinary queue congestion from the
+   outside, which is the trap: on 2026-09-20 pulp#8611 and #8613 each sat hours
+   behind a wedged predecessor while capacity was demonstrably draining
+   (in-flight runs fell 16 to 10 and other PRs merged). Before blaming the pool,
+   check whether **this PR** has more than one live run.
+
+   The source fix landed in pulp#8644; the population was far larger than it
+   looked from one PR — 46 wedged supersessions across three sampled weeks. The
+   control that settles the mechanism: of 12 wedged supersessions whose
+   predecessor had started jobs, the conclusion tally was `{'cancelled': 12}`,
+   which a dead `cancel-in-progress` cannot produce.
 2. **Is it a version-bump race?** The other concurrent agent re-bumping `main`'s
    `CMakeLists.txt VERSION` makes the PR `DIRTY` (conflict on the VERSION line).
    Merge `origin/main` in, re-resolve the VERSION to one above main, push,
@@ -1635,6 +1697,43 @@ in the validation build, and committing moves HEAD underneath it. Run mutation
 controls in a throwaway worktree, or wait for the lane to finish. Note that a
 `shipyard` process sitting in the worktree is usually just waiting on GitHub;
 confirm an actual compiler is running before concluding a build is in flight.
+
+## The gate VM's build parallelism is bounded by its RAM, not its vCPUs
+
+tartci sizes a macOS gate VM's cores from its lane lease (`vm_cores` — 12 for
+Pulp's gate lane on the Studio, 6 on a slot2 clone) but **never sets the VM's
+memory**: `tart set --memory` appears only in the Linux provider, so every macOS
+gate VM boots at the golden image's **8 GiB** regardless of how many cores it
+leased.
+
+`tools/ci/governed-build.sh` bounds a build by `min(cores, RAM x 0.75 / 1.5 GiB)`
+when no tartci store is reachable — which is always, inside the VM, because
+tartci is not installed in the guest. At 8 GiB the memory axis wins:
+
+| VM shape | derived `-j` |
+|---|---|
+| 12 vCPU / 8 GiB (Studio gate) | **4** |
+| 6 vCPU / 8 GiB (slot2) | **4** |
+| 4 vCPU / 8 GiB (golden base) | **4** |
+
+So **raising `vm_cores` alone cannot speed up the Build step.** The extra cores
+are unusable by any memory-safe bound, and the resulting no-op reads as "more
+cores did not help" rather than "the build was never asked to use them". If the
+Build step's wall time is the target, the VM's RAM has to move with its cores —
+a tartci profile change, not a Pulp one.
+
+Two practical consequences:
+
+- **Never read a leg's parallelism off the lease.** Read the `[governed-build]`
+  line in the job log; it prints the branch taken and the chosen `-j`. A lease
+  of 12 cores and a build at `-j4` is the expected, correct pairing today.
+- **Never bound a workflow build with a literal `--parallel N`.** It is a silent
+  ceiling: it keeps its value across a VM resize, so the fix above would land and
+  buy nothing. `build.yml`'s `Build` step carried `--parallel 4` fleet-wide on
+  exactly this reasoning until it was routed through the governor. The
+  `build_parallelism_guard.py` gate deliberately does **not** scan
+  `.github/workflows/**` (a `runs-on` resolves dynamically), so nothing catches
+  this for you — it is the workflow author's job.
 
 ## Host-vitals preflight — back off before a saturating CI host reboots
 
@@ -8722,6 +8821,50 @@ loud on a no-op. The pre-push hook (`.githooks/pre-push`) adds two backstop guar
 pushes: it refuses a **detached-HEAD** push and an **empty-diff-vs-base** push (the latter
 catches a rebase that flattened a branch to zero files). Root cause + the four-fix plan:
 `planning/friction/2026-07-15-git-state-in-shared-worktree-hell.md`.
+
+## Hosted macOS coverage dies of DISK, and the pre-flight check cannot see it
+
+A hosted `macos-15` coverage job that fails with **zero failed steps** — `Run coverage suite`
+reports success (it carries `continue-on-error`), then every later step is `null` — has **two
+different causes, and the step shape cannot tell them apart.** Read the check-run annotation
+(`ghapp api repos/<owner>/<repo>/check-runs/<job_id>/annotations`), never the step list, and
+never a log grep — the logs truncate around 17.6k lines and return false zeros:
+
+| annotation | cause | job duration |
+|---|---|---|
+| `Process completed with exit code 1` | **disk**: `No space left on device` mid-suite | 123-147 min |
+| `The hosted runner lost communication with the server` | **time**: the 180-minute suite budget (`coverage.yml`), i.e. the suite is simply too slow | 150-182 min, clustered at ~181 |
+
+The two duration ranges do not overlap, so elapsed time alone is a reliable second opinion.
+Sampling 35 recent macOS coverage failures found 21 of the time kind against 7 of the disk kind,
+so **do not assume disk** — over a longer 46-day window the disk kind dominated, and the mix
+moves as the suite grows.
+
+For the disk kind: the runner exhausts its filesystem mid-suite and dies before the lane's own
+`Verify Cobertura XML exists` detector can fire, so nothing in the step list names the cause.
+
+**Do not "fix" this by raising the 10 GiB threshold** in the "Reclaim hosted macOS coverage
+disk" step. That check runs ONCE, before the Skia fetch and before the build, and it answers
+only *did the Xcode cleanup free anything / did this runner arrive short?* Measured across ten
+failing and ten succeeding jobs, free space at that checkpoint was **75-76 GiB in all twenty** —
+failing and succeeding runners are indistinguishable there. No threshold between 10 and 76
+changes an outcome, and anything above 76 refuses every run. The disk is consumed by the run
+itself, a median ~109 minutes later.
+
+Disk pressure is bounded in `scripts/run_coverage.sh` instead: `%p-%m` per-process profiles are
+absorbed into a running profdata **while the suite runs** and deleted as absorbed. If you touch
+that loop, the safety rule is that a shard may be reclaimed **iff `kill -0` on the PID in its
+filename fails**. Never gate on mtime — a slow test's shard looks stale while its process is
+still writing, and reclaiming it drops that test's coverage with no error, which is the same
+silent under-reporting that moving off the shared `%Nm` pool already fixed once.
+
+**Counting these failures: log grep UNDERCOUNTS.** Large job logs truncate (~17.6k lines), so a
+confirmed ENOSPC job can return zero hits, and a further population fails with the annotation
+"The hosted runner lost communication with the server" and no usable log. Count with check-run
+annotations plus step shape (step 12 success, later steps `null`, zero failed steps), not `grep`.
+Also note the guard's own message text appears in EVERY hosted coverage log, because the workflow
+echoes the shell source — grepping the message string reports a guard firing on every run. Match
+the emitted annotation at line start (`##[error]Hosted macOS coverage has less than 10 GiB`).
 
 ## Coverage-on-main can go red from a time-budget kill (not a code failure) (2026-07-15)
 

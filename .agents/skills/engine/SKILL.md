@@ -827,6 +827,43 @@ must not silently cancel its independent compatibility `mousedown`. Level 1
 (`stopPropagation`) still allows remaining same-target listeners; level 2
 (`stopImmediatePropagation`) does not.
 
+### ARIA is a PAIR, and the overlay half is easy to leave unread
+
+`_reevaluateOverlay` (in `web-compat-style-decl.js`) decides whether an element
+claims the native overlay slot. It reads three kinds of signal, and they are
+not interchangeable:
+
+| Signal | Kind | Claims with |
+|---|---|---|
+| `data-overlay="true"` | statement | outside-click **consumed** |
+| `role=menu\|listbox\|tree\|grid\|dialog\|alertdialog`, `aria-modal="true"` | statement | outside-click **consumed** |
+| `position:absolute` + `z-index >= 10` | inference | click-**through** |
+
+The inference stays click-through on purpose — a false positive that consumes
+swallows a real click, whereas one that clicks through merely closes something
+that should not have claimed. The statements consume, because an author who
+wrote `role="menu"` meant a menu, and a menu that lets the press through keeps
+operating whatever sits under it.
+
+Two traps:
+
+- **The trigger half is not the overlay half.** `aria-haspopup` says "I OPEN an
+  overlay" and marks `set_overlay_trigger`; `role`/`aria-modal` say "I AM one".
+  For a while only the trigger half was read, so a correctly-authored
+  `role="menu"` panel fell through to the CSS-shape inference and claimed
+  click-through — visible to the user as a menu that closes but also draws on
+  whatever was behind it.
+- **A claim needs a re-evaluation trigger.** `_reevaluateOverlay` runs on
+  `position`/`zIndex` writes and on specific `setAttribute`/`removeAttribute`
+  names in `web-compat-element.js`. An attribute that is not in that list marks
+  nothing on a static panel, because no unrelated style write ever arrives to
+  drive the heuristic. Adding a signal means adding its attribute name to BOTH
+  branches there, not only to the heuristic.
+
+A consumer that marks its overlays in its own private vocabulary
+(`data-<product>-overlay`) is invisible to all three rows above. The attribute
+name is the contract; nothing infers intent from a product-specific prefix.
+
 ### The popup owner claims from the click, not from focus — and must ignore its own clicks
 
 `__pulpPopupDefaultHandle__` (in `web-compat-document.js`) is the default
