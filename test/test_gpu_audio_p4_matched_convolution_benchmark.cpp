@@ -88,10 +88,9 @@ void emit_record(const TrialResult& result, std::size_t ordinal, const SharedIoT
         pulp::gpu_audio::detail::SharedIoTraceStage::CompletionObserved);
     std::cout << "{\"schema\":\"pulp.gpu-audio.p4.matched.v1\",\"record_kind\":\"block\""
               << ",\"pair_id\":" << kPairId << ",\"path\":\"" << path_name(result.path)
-              << "\",\"block_ordinal\":" << ordinal << ",\"generation\":"
-              << record.generation << ",\"sequence\":" << record.sequence
-              << ",\"input_digest\":" << input_digest << ",\"ir_digest\":" << ir_digest
-              << ",\"gpu_terminal\":\""
+              << "\",\"block_ordinal\":" << ordinal << ",\"generation\":" << record.generation
+              << ",\"sequence\":" << record.sequence << ",\"input_digest\":" << input_digest
+              << ",\"ir_digest\":" << ir_digest << ",\"gpu_terminal\":\""
               << pulp::gpu_audio::detail::shared_io_gpu_terminal_name(record.gpu_terminal)
               << "\",\"delivery\":\""
               << pulp::gpu_audio::detail::shared_io_delivery_name(record.delivery)
@@ -105,7 +104,8 @@ void emit_record(const TrialResult& result, std::size_t ordinal, const SharedIoT
     if (completion.available)
         std::cout << ",\"value_ns\":" << completion.ns;
     std::cout << "},\"publish_to_consumable\":{\"availability\":\"unavailable\"}}"
-                 ",\"provenance\":{\"transfer_counters\":\"unavailable\",\"timings\":\"worker_direct\"}}\n";
+                 ",\"provenance\":{\"transfer_counters\":\"unavailable\",\"timings\":\"worker_"
+                 "direct\"}}\n";
 }
 
 TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<float>>& input,
@@ -127,8 +127,7 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
 
     // A shared trial must prove that the shared provider actually won path
     // selection; a staged trial must prove it did not silently use shared I/O.
-    const bool shared_active =
-        pulp::gpu_audio::detail::realtime_gpu_node_path(&node).active();
+    const bool shared_active = pulp::gpu_audio::detail::realtime_gpu_node_path(&node).active();
     if ((path == GpuConvolverTrialPath::SharedAsync) != shared_active || !node.gpu_available())
         return result;
 
@@ -153,8 +152,8 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
     result.misses = transport.stats().miss_blocks;
     transport.release();
 
-    result.available = pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(
-        node, result.records);
+    result.available =
+        pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, result.records);
     result.records_valid = result.available && !result.records.empty() &&
                            std::all_of(result.records.begin(), result.records.end(),
                                        [](const auto& record) { return record.valid(); });
@@ -176,13 +175,14 @@ int main() {
     const auto input_digest = digest(flattened);
     const auto ir_digest = digest(ir);
 
-    const auto staged = run_trial(GpuConvolverTrialPath::StagedAsync, input, ir, input_digest,
-                                  ir_digest);
-    const auto shared = run_trial(GpuConvolverTrialPath::SharedAsync, input, ir, input_digest,
-                                  ir_digest);
+    const auto staged =
+        run_trial(GpuConvolverTrialPath::StagedAsync, input, ir, input_digest, ir_digest);
+    const auto shared =
+        run_trial(GpuConvolverTrialPath::SharedAsync, input, ir, input_digest, ir_digest);
     if (!staged.available || !shared.available) {
         std::cout << "{\"schema\":\"pulp.gpu-audio.p4.matched.v1\",\"status\":\"unavailable\""
-                     ",\"performance_verdict\":\"unassigned\",\"reason\":\"required_path_unavailable\"}\n";
+                     ",\"performance_verdict\":\"unassigned\",\"reason\":\"required_path_"
+                     "unavailable\"}\n";
         return 77;
     }
     const bool matched = staged.records_valid && shared.records_valid;
@@ -195,7 +195,7 @@ int main() {
               << "},\"input_digest\":" << input_digest << ",\"ir_digest\":" << ir_digest
               << ",\"staged_records\":" << staged.records.size()
               << ",\"shared_records\":" << shared.records.size()
-              << ",\"staged_misses\":" << staged.misses << ",\"shared_misses\":"
-              << shared.misses << ",\"raw_receipt\":\"not_emitted\"}\n";
+              << ",\"staged_misses\":" << staged.misses << ",\"shared_misses\":" << shared.misses
+              << ",\"raw_receipt\":\"not_emitted\"}\n";
     return matched ? 0 : 1;
 }

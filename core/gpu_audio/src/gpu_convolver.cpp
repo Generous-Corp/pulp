@@ -274,8 +274,7 @@ bool GpuConvolver::prepare() {
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (trial_configured_ && requested_path == detail::SharedIoRequest::RequireStaged && gpu_)
-        staged_trial_ =
-            std::make_unique<detail::StagedAsyncTrialState>(2, trial_generation_);
+        staged_trial_ = std::make_unique<detail::StagedAsyncTrialState>(2, trial_generation_);
 #endif
 
     prepared_ = true;
