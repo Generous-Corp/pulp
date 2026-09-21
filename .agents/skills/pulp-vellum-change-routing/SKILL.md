@@ -340,7 +340,19 @@ has to be read before it runs.
 authority transition is affected") and fails the second, so reading the job name
 sends you to the wrong script. Open the log and find which one raised.
 
-Three non-obvious rules of the expansion-watch checker, none derivable from a
+A local **advisory** hint now surfaces this before the push rather than after
+it. `tools/scripts/vellum_watch_preflight.py` runs from both `gates.sh` and
+`.githooks/pre-push`; when the pushed range touches a watched glob it names the
+affected families, prints the reproduce command, and repeats the commit-range
+trap below. It **never blocks**, and it must not be promoted to blocking: the
+authoritative check runs from a trusted root in two required contexts
+specifically so a branch's own copy of the checker holds no veto, and it
+compares against the merge-base for the same reason the reproduce command
+below does. It is silent for a range that touches nothing watched, so silence
+from it is not proof — run the checker by hand if you want a verdict on the
+record.
+
+Four non-obvious rules of the expansion-watch checker, none derivable from a
 skim of the source:
 
 - **Both `--base` and `--head` must be full 40-char SHAs.** A ref name fails with
@@ -357,6 +369,14 @@ skim of the source:
   comparison base, not a real append-only violation — `git merge-base origin/main
   HEAD` makes it disappear. CI compares against the PR base, so a branch that is
   merely stale never sees this.
+- **It reads the COMMIT RANGE, never the working tree.** `_changes()` is a
+  `git diff --name-status <base> <head>`, so an event file you have written but
+  not committed is invisible to it: the run still reports
+  `affected=[...] covered=[]`, identical to having written no file at all. That
+  reads as "my JSON is malformed" and sends you to debug a correct file. Commit
+  the event (amend is fine) and re-run — a green result is only meaningful once
+  the file is in the range being measured. The same applies to `--head HEAD`
+  after editing but before committing.
 
 The event itself is an append-only JSON file directly under
 `.github/vellum-expansion-watch-events/`, named exactly `<event_id>.json`, with
@@ -576,6 +596,10 @@ which reads like a broken invocation rather than a real answer:
 python3 tools/scripts/vellum_expansion_watch_check.py \
   --repo . --base "$(git rev-parse origin/main)" --head "$(git rev-parse HEAD)"
 ```
+
+Commit the event file before you re-run. The checker measures the commit range,
+so an uncommitted event scores `covered=[]` exactly like a missing one, and the
+identical error message makes a correct file look broken.
 
 The event is a new JSON file directly under
 `.github/vellum-expansion-watch-events/`, named exactly for its `event_id`,

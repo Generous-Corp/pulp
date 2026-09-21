@@ -461,6 +461,44 @@ identity fields, because doing so costs ~25s per push. A green gate means "you
 did not forget", not "the pins are correct"; the `check` command above is what
 proves the latter.
 
+### The Vellum watch-event hint is ADVISORY, and that is load-bearing
+
+`gates.sh` and `.githooks/pre-push` both run
+`tools/scripts/vellum_watch_preflight.py`, which prints — and never blocks — a
+warning when the pushed range owes a `.github/vellum-expansion-watch-events/*.json`
+file that it does not carry. Three pull requests discovered that requirement the
+expensive way in one evening, each by failing the required `Vellum freeze`
+check after a push.
+
+The trigger is **changed paths, not intent**: the checker globs the changed-file
+list against pinned capability-family selectors and reads nothing of the diff,
+so a one-line `#include` under `test/test_browser_capture*`, or an ordinary edit
+under `tools/import-design/**`, owes a hand-authored event.
+
+**Do not promote this to a blocking gate, and do not move the authoritative
+check local.** `.github/workflows/vellum-trusted-gate.yml` runs the checker from
+a *trusted root* rather than from the pull request's copy, and
+`.github/CODEOWNERS` locks the events directory, the checker and the checker's
+test. A local gate would execute the branch's own copy of a script that exists
+precisely so the branch's copy is not trusted. Two required contexts
+(`Vellum freeze`, `Vellum trusted freeze`) stay the authority; this only moves
+discovery earlier.
+
+Two things the hint must keep doing, both asserted by
+`tools/scripts/test_vellum_watch_preflight.py`:
+
+- **It compares against the MERGE-BASE, never `origin/main`'s tip.** Using the
+  tip manufactures `watch events are append-only` on any branch that is merely
+  stale — a false red on a required gate's surface, which is worse than the
+  friction being fixed.
+- **Neither call site may set `fail`.** The test resolves the `$VELLUM_HINT`
+  variable rather than grepping for the filename, because the literal path
+  appears only in the assignment: a scan for the filename finds no invocation
+  line at all and passes whatever the call sites do.
+
+Its exit codes (0 nothing owed · 10 event owed · 20 no verdict) are
+informational; both callers discard them with `|| true`.
+
 ### `gates.sh` and the pre-push hook are two lists, not one
 
 `gates.sh` describes itself as running the gates `.githooks/pre-push` runs, and

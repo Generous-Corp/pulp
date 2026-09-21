@@ -46,6 +46,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 VALIDATOR="$ROOT/tools/cmake/scripts/check_bundle_relocatable.py"
 CLI="${PULP_CPP:-$ROOT/build/tools/cli/pulp-cpp}"
+# Liveness heartbeat for the notarization wait. See the header of the library
+# for why the wait needs one: notarytool's poll phase is a single unterminated
+# line and the wrapper has exec'd, so neither the log nor the process name can
+# distinguish a live run from a dead one for 5-30 minutes.
+# shellcheck source=tools/scripts/lib/heartbeat_wait.sh
+. "$HERE/lib/heartbeat_wait.sh"
+NOTARIZE_HEARTBEAT_SECS="${PULP_NOTARIZE_HEARTBEAT_SECS:-30}"
 
 NAME=""; VERSION=""; APP_ID=""; INST_ID=""; OUT=""; NOTARIZE=1
 HOST_ARCHITECTURES=""
@@ -570,7 +577,8 @@ if [[ "$NOTARIZE" == 1 ]]; then
     # Developer ID, which surfaces to a user as a broken installer rather than
     # a build that stopped. Falling through to notarytool is strictly better:
     # it needs no project, only the key.
-    if "$CLI" ship notarize --path "$PKG"; then
+    if pulp_run_with_heartbeat "notarization ($CLI)" "$NOTARIZE_HEARTBEAT_SECS" \
+         "$CLI" ship notarize --path "$PKG"; then
       _notarized=1
     else
       echo "  note: '$CLI ship notarize' declined here (it resolves a project" >&2
@@ -591,7 +599,8 @@ if [[ "$NOTARIZE" == 1 ]]; then
       echo "  and place the .p8 in ~/.config/pulp/secrets/ (see 'pulp ship doctor'). Or pass --no-notarize." >&2
       exit 1
     fi
-    xcrun notarytool submit "$PKG" \
+    pulp_run_with_heartbeat "notarization" "$NOTARIZE_HEARTBEAT_SECS" \
+      xcrun notarytool submit "$PKG" \
       --key "$PULP_NOTARY_KEY_PATH" --key-id "$PULP_NOTARY_KEY_ID" \
       --issuer "$PULP_NOTARY_ISSUER_ID" --wait
     xcrun stapler staple "$PKG"
