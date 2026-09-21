@@ -18,6 +18,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from .core import (
     LabError,
+    TIMING_BUDGET_KEYS,
     aggregate_reports,
     compare_one,
     sha256_file,
@@ -37,10 +38,12 @@ def positive_int(value: str) -> int:
 
 def command_compare(args: argparse.Namespace) -> int:
     try:
+        budgets = read_timing_budgets(getattr(args, "timing_budget", None))
         report = compare_one(
             args.importer.resolve(), args.observer.resolve(),
             args.file.resolve(), args.output.resolve(), args.timeout_seconds,
-            args.from_source, args.browser.resolve() if args.browser else None)
+            args.from_source, args.browser.resolve() if args.browser else None,
+            cache_state=args.cache_state, timing_budgets_ms=budgets)
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -48,7 +51,7 @@ def command_compare(args: argparse.Namespace) -> int:
         print(f"importer_differential_lab: {error}", file=sys.stderr)
         return 2
     print(format_summary(report))
-    return 0
+    return 1 if report["timing_budget"]["status"] == "fail" else 0
 
 
 def command_corpus(args: argparse.Namespace) -> int:
@@ -73,6 +76,11 @@ def command_corpus(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
     output = args.output.resolve()
+    try:
+        budgets = read_timing_budgets(getattr(args, "timing_budget", None))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"importer_differential_lab: {exc}", file=sys.stderr)
+        return 2
     output.mkdir(parents=True, exist_ok=True)
     reports: list[dict] = []
     failures: list[dict[str, str]] = []
@@ -86,7 +94,9 @@ def command_corpus(args: argparse.Namespace) -> int:
                 args.importer.resolve(), args.observer.resolve(), source,
                 fixture_output, args.timeout_seconds,
                 metadata.get("from", args.from_source) if metadata else args.from_source,
-                args.browser.resolve() if args.browser else None, metadata))
+                args.browser.resolve() if args.browser else None, metadata,
+                metadata.get("cache_state", args.cache_state) if metadata else args.cache_state,
+                budgets))
         except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
             failures.append({
                 "fixture_id": fixture_id,
@@ -130,7 +140,10 @@ def command_corpus(args: argparse.Namespace) -> int:
     print(format_corpus_summary(aggregate))
     if failures:
         print(f"{len(failures)} fixture(s) failed; see report.json", file=sys.stderr)
-    return 1 if failures else 0
+    budget_failed = any(
+        report.get("timing_budget", {}).get("status") == "fail"
+        for report in reports)
+    return 1 if failures or budget_failed else 0
 
 
 def percentile(values: list[int], fraction: float) -> int:
@@ -149,13 +162,16 @@ def command_benchmark(args: argparse.Namespace) -> int:
     output = args.output.resolve()
     reports = []
     try:
+        budgets = read_timing_budgets(getattr(args, "timing_budget", None))
         for index in range(args.runs):
             print(f"[{index + 1}/{args.runs}] benchmark", flush=True)
             reports.append(compare_one(
                 args.importer.resolve(), args.observer.resolve(),
                 args.file.resolve(), output / "runs" / str(index + 1),
                 args.timeout_seconds, args.from_source,
-                args.browser.resolve() if args.browser else None))
+                args.browser.resolve() if args.browser else None,
+                cache_state="cold" if index == 0 else "warm",
+                timing_budgets_ms=budgets))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -178,10 +194,48 @@ def command_benchmark(args: argparse.Namespace) -> int:
             "p50_ms_saved": round(
                 statistics.median(browser) - statistics.median(native), 1),
         },
+        "observability": {
+            "ttfp": {"value_ms": None, "status": "unverified"},
+            "ttni": {"p50_ms": None, "p95_ms": None, "status": "unverified"},
+            "ttni_proxy": {"p50_ms": round(statistics.median(
+                [report["observability"]["ttni_proxy"]["value_ms"] for report in warm]), 1),
+                     "p95_ms": percentile(
+                         [report["observability"]["ttni_proxy"]["value_ms"] for report in warm], 0.95),
+                     "status": "measured"},
+            "ifnf": {"value_ms": None, "status": "readback-only"},
+            "cache_states": [report["observability"]["cache_state"]["identity"] for report in reports],
+        },
+        "timing_budget": {
+            "status": "fail" if any(
+                report["timing_budget"]["status"] == "fail" for report in reports)
+                else ("pass" if budgets else "not-requested"),
+            "budgets_ms": budgets or {},
+            "failed_runs": [index + 1 for index, report in enumerate(reports)
+                            if report["timing_budget"]["status"] == "fail"],
+        },
     }
     write_json(output / "benchmark.json", benchmark)
     print(json.dumps(benchmark, indent=2))
-    return 0
+    return 1 if benchmark["timing_budget"]["status"] == "fail" else 0
+
+
+def read_timing_budgets(path: Path | None) -> dict[str, int] | None:
+    if path is None:
+        return None
+    document = json.loads(path.resolve().read_text())
+    if not isinstance(document, dict):
+        raise ValueError("timing budget must be a JSON object")
+    unknown = sorted(set(document) - set(TIMING_BUDGET_KEYS))
+    if unknown:
+        raise ValueError(f"timing budget has unknown metric(s): {', '.join(unknown)}")
+    budgets: dict[str, int] = {}
+    for key, value in document.items():
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError(f"timing budget {key} must be a positive integer in milliseconds")
+        budgets[key] = value
+    if not budgets:
+        raise ValueError("timing budget must contain at least one metric")
+    return budgets
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -197,6 +251,12 @@ def build_parser() -> argparse.ArgumentParser:
             "--from", dest="from_source", default="claude",
             choices=("claude", "html", "stitch"))
         subparser.add_argument("--timeout-seconds", type=positive_int, default=60)
+        subparser.add_argument(
+            "--cache-state", choices=("cold", "warm", "unknown"), default="unknown",
+            help="caller-declared cache state; never inferred from timing")
+        subparser.add_argument(
+            "--timing-budget", type=Path,
+            help="JSON object of caller-supplied importer timing budgets in milliseconds")
 
     compare = subparsers.add_parser("compare")
     shared(compare)
