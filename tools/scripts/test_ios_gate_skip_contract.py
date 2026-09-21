@@ -88,8 +88,12 @@ def workflow_build_step() -> str:
     if body.count(gate_call) != 1:
         raise AssertionError("expected exactly one iOS compile-gate call")
     body = body.replace(gate_call, "bash @GATE@")
+    # The macOS/Linux branch now routes through the governed wrapper.  Keep
+    # the Windows literal untouched: this test executes with RUNNER_OS=macOS,
+    # so replacing the selected branch is enough and avoids hiding a future
+    # Windows command-shape regression.
     body, build_count = re.subn(
-        r'(?m)^\s*cmake --build "\$PULP_BUILD_DIR".*$',
+        r'(?m)^\s*tools/ci/governed-build\.sh cmake --build "\$PULP_BUILD_DIR".*$',
         'echo "BUILD_RAN"',
         body,
     )
