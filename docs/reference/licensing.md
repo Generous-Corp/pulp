@@ -370,6 +370,16 @@ permission basis Pulp relies on. They are also recorded in `NOTICE.md`.
 | [signalsmith-clap-cpp](https://github.com/geraintluff/signalsmith-clap-cpp) | MIT | WCLAP build pipeline, webview extension patterns |
 | [Visage](https://github.com/VitalAudio/visage) | MIT | SDF-first rendering, dirty region tracking, shape batching, and a high bar for visual quality in audio plugin interfaces |
 
+## Further Reading
+
+Not dependencies, and nothing here is adapted into Pulp source — these are
+references for understanding the musical ideas some of Pulp's primitives can
+express.
+
+| Work | Why it is listed |
+|------|------------------|
+| [*Dilla Time*](https://www.dancharnas.com/dilla-time) by Dan Charnas (MCD/Farrar, Straus and Giroux, 2022) | A book-length analysis of the rhythmic language of J Dilla (James Dewitt Yancey), and the clearest published account of the kind of deliberate, exact timing relationships — parts pulling against each other rather than drifting randomly — that Pulp's groove, swing and rhythm-relationship primitives are built to express. Pulp adapts no material from it; it is recommended reading for anyone working on feel, and the reason our documentation is careful to keep *groove* and *humanisation* separate concepts. |
+
 ## Discipline
 
 Pulp follows strict rules. Implementation is from specs, SDK documentation, and original design — never from studying proprietary or restrictively-licensed source code. For optional AAX support, that means no Avid SDK files or example sources in the repo and no copied implementation text from the SDK examples. See [CLAUDE.md](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md) for the full policy.

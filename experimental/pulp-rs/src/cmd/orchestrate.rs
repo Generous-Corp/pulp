@@ -45,6 +45,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use super::aax_sdk;
+use crate::build_parallelism;
 use crate::config::pulp_home;
 use crate::error::{CliError, Result};
 use crate::proc::{Invocation, Spawner};
@@ -408,12 +409,12 @@ fn build_with_dependency_policy<S: Spawner>(
         }
     }
 
-    let mut build = Invocation::new("cmake")
-        .arg("--build")
-        .arg(build_dir.to_string_lossy().into_owned());
-    for a in &args.passthrough {
-        build = build.arg(a.clone());
-    }
+    let build = build_parallelism::finish_build_command(
+        Invocation::new("cmake")
+            .arg("--build")
+            .arg(build_dir.to_string_lossy().into_owned()),
+        &args.passthrough,
+    );
     let rc = spawner.run(&build)?;
     if rc != 0 {
         return Ok(rc);
@@ -579,12 +580,12 @@ fn build_web<S: Spawner>(
         }
     }
 
-    let mut build = Invocation::new("cmake")
-        .arg("--build")
-        .arg(build_dir.to_string_lossy().into_owned());
-    for a in &args.passthrough {
-        build = build.arg(a.clone());
-    }
+    let build = build_parallelism::finish_build_command(
+        Invocation::new("cmake")
+            .arg("--build")
+            .arg(build_dir.to_string_lossy().into_owned()),
+        &args.passthrough,
+    );
     spawner.run(&build)
 }
 
@@ -1905,6 +1906,170 @@ mod tests {
         assert_eq!(calls[0].program, "cmake");
         assert!(calls[0].args.iter().any(|a| a == "-B"));
         assert!(calls[1].args.iter().any(|a| a == "--build"));
+    }
+
+    // ── emitted build parallelism ───────────────────────────────────────
+    //
+    // A `cmake --build` with no job flag does not mean "one job" — it means
+    // "ask the generator", and the generator picks: serial under Unix
+    // Makefiles, cores + 2 under Ninja. Both are wrong for a shared host, and
+    // neither shows up in the argv, so these assert on what is actually
+    // emitted. Every case pins the environment to the Tier-0 fallback so the
+    // result does not depend on whether the machine running the tests happens
+    // to have a tartci lease store.
+
+    /// Neutralize every input that could move the bound, so a test observes the
+    /// Tier-0 computation and nothing else.
+    fn tier0_env(mem_budget_mb: Option<&str>) -> EnvVarGuard {
+        EnvVarGuard::set_many(&[
+            ("PULP_TARTCI_LEASES", Some("0")),
+            ("PULP_BUILD_JOBS", None),
+            ("CMAKE_BUILD_PARALLEL_LEVEL", None),
+            ("PULP_BUILD_MEM_BUDGET_MB", mem_budget_mb),
+        ])
+    }
+
+    /// The count following `--parallel` in an emitted argv, if any.
+    fn emitted_parallel(inv: &Invocation) -> Option<u32> {
+        let idx = inv.args.iter().position(|a| a == "--parallel")?;
+        inv.args.get(idx + 1).and_then(|v| v.parse().ok())
+    }
+
+    #[test]
+    fn build_emits_a_bounded_job_count() {
+        let _env = tier0_env(None);
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+
+        let calls = spawner.calls.borrow();
+        let build = &calls[0];
+        assert!(build.args.iter().any(|a| a == "--build"));
+        let jobs = emitted_parallel(build)
+            .unwrap_or_else(|| panic!("build command carries no job bound: {:?}", build.args));
+        let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+        assert!(jobs >= 1, "bound must allow progress: {jobs}");
+        assert!(
+            jobs as usize <= cores,
+            "emitted bound {jobs} claims more than this host's {cores} cores"
+        );
+        // Nested cmake invocations inherit the same bound.
+        assert_eq!(
+            build
+                .envs
+                .iter()
+                .find(|(k, _)| k == "CMAKE_BUILD_PARALLEL_LEVEL")
+                .map(|(_, v)| v.as_str()),
+            Some(jobs.to_string().as_str())
+        );
+    }
+
+    #[test]
+    fn build_leaves_a_caller_supplied_job_count_alone() {
+        let _env = tier0_env(None);
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let args = BuildArgs {
+            passthrough: vec!["-j8".to_owned()],
+            ..Default::default()
+        };
+        build_with(&proj, &args, &spawner, &mut out).unwrap();
+
+        let calls = spawner.calls.borrow();
+        let build = &calls[0];
+        assert!(build.args.iter().any(|a| a == "-j8"), "{:?}", build.args);
+        assert!(
+            !build.args.iter().any(|a| a == "--parallel" || a == "-j"),
+            "a second, conflicting job flag was added: {:?}",
+            build.args
+        );
+        assert!(
+            !build
+                .envs
+                .iter()
+                .any(|(k, _)| k == "CMAKE_BUILD_PARALLEL_LEVEL"),
+            "the caller's -j8 was undercut by an exported level: {:?}",
+            build.envs
+        );
+    }
+
+    #[test]
+    fn build_memory_budget_lowers_the_emitted_bound() {
+        let _env = tier0_env(Some("1536"));
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+
+        // One compile job's worth of RAM admits exactly one job, on any host.
+        let calls = spawner.calls.borrow();
+        assert_eq!(emitted_parallel(&calls[0]), Some(1), "{:?}", calls[0].args);
+    }
+
+    #[test]
+    fn build_puts_the_bound_ahead_of_the_native_tool_separator() {
+        let _env = tier0_env(None);
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let args = BuildArgs {
+            passthrough: vec!["--".to_owned(), "-v".to_owned()],
+            ..Default::default()
+        };
+        build_with(&proj, &args, &spawner, &mut out).unwrap();
+
+        // Everything after `--` is handed to make/ninja; a `--parallel` there
+        // is not a bound, it is an argument the native tool rejects.
+        let calls = spawner.calls.borrow();
+        let build = &calls[0];
+        let flag = build
+            .args
+            .iter()
+            .position(|a| a == "--parallel")
+            .unwrap_or_else(|| panic!("build carries no job bound: {:?}", build.args));
+        let sep = build
+            .args
+            .iter()
+            .position(|a| a == "--")
+            .expect("separator kept");
+        assert!(
+            flag < sep,
+            "bound landed past the separator: {:?}",
+            build.args
+        );
+    }
+
+    #[test]
+    fn web_build_emits_a_bounded_job_count() {
+        let _env = tier0_env(None);
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let spawner = RecordingSpawner::with_codes(vec![0, 0]);
+        let mut out = Vec::new();
+        let args = BuildArgs {
+            web_format: Some("wam".to_owned()),
+            ..Default::default()
+        };
+        build_with(&proj, &args, &spawner, &mut out).unwrap();
+
+        let calls = spawner.calls.borrow();
+        let build = &calls[1];
+        assert!(build.args.iter().any(|a| a == "--build"));
+        assert!(
+            emitted_parallel(build).is_some_and(|jobs| jobs >= 1),
+            "web build command carries no job bound: {:?}",
+            build.args
+        );
     }
 
     #[test]
