@@ -77,6 +77,7 @@
 
 pub mod build_info;
 pub mod build_context;
+pub mod build_parallelism;
 pub mod bump;
 pub mod build_governor;
 pub mod cmd;

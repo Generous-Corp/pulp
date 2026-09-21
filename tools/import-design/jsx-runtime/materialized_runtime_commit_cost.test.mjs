@@ -269,3 +269,191 @@ test('a positive match is not served from the miss cache', () => {
   assert.equal(sandbox.__pulpFindMaterializedElement__('span.live'), null,
     'a stale hit was served after the node stopped matching');
 });
+
+// ── Scoped re-apply ────────────────────────────────────────────────
+//
+// The applier is called once per qualifying React commit, so its cost is
+// multiplied by the commit rate; a drag emits hundreds. The host config now
+// hands it the ids whose subtrees the commit actually touched, and a binding
+// outside that scope keeps the geometry it already has.
+//
+// Two directions have to hold, and only one of them is a perf number. A scope
+// that skips too MUCH renders visibly wrong -- captured nodes keep stale
+// boxes -- and no operation count would notice, so every case below pairs the
+// saving with an explicit claim about what still got applied.
+
+// A small captured document with two sibling subtrees. Bindings cover every
+// node, so "the scope worked" and "the scope dropped work it owed" are both
+// observable from which ids received bridge calls.
+function twoSubtreeDocument() {
+  const make = (id, tag = 'div') => ({
+    tagName: tag.toUpperCase(), __pulpId: id, id, _children: [],
+    parentElement: null, className: '', getAttribute: () => null,
+  });
+  const root = make('root');
+  const a = make('a');
+  const b = make('b');
+  const a0 = make('a0');
+  const a1 = make('a1');
+  const b0 = make('b0');
+  const b1 = make('b1');
+  const link = (parent, children) => {
+    parent._children = children;
+    for (const child of children) child.parentElement = parent;
+  };
+  link(root, [a, b]);
+  link(a, [a0, a1]);
+  link(b, [b0, b1]);
+  const nodes = [root, a, b, a0, a1, b0, b1];
+  const step = { index: 0, tag: 'div' };
+  const path = (...indices) =>
+    [step, ...indices.map((index) => ({ index, tag: 'div' }))];
+  const layoutBindings = [
+    { index: 0, tag: 'div', path: path(), box: box(0) },
+    { index: 1, tag: 'div', path: path(0), box: box(1) },
+    { index: 2, tag: 'div', path: path(1), box: box(2) },
+    { index: 3, tag: 'div', path: path(0, 0), box: box(3) },
+    { index: 4, tag: 'div', path: path(0, 1), box: box(4) },
+    { index: 5, tag: 'div', path: path(1, 0), box: box(5) },
+    { index: 6, tag: 'div', path: path(1, 1), box: box(6) },
+  ];
+  // Binding order matches `nodes` order, which is what the id assertions read.
+  const expectedIds = ['root', 'a', 'b', 'a0', 'a1', 'b0', 'b1'];
+  return { nodes, layoutBindings, expectedIds };
+}
+
+function box(seed) {
+  return { width: 10 + seed, height: 10 + seed, left: seed, top: seed };
+}
+
+// Records which ids the applier actually wrote geometry to. An operation count
+// alone cannot distinguish "skipped the right nodes" from "skipped the wrong
+// ones", and the wrong one is invisible in every green perf assertion.
+function applyWithRecorder(sandbox, scope) {
+  const writes = [];
+  let metricReads = 0;
+  for (const name of ['setPosition', 'setLeft', 'setTop']) {
+    sandbox[name] = (id) => { writes.push(`${name}:${id}`); };
+  }
+  sandbox.setFlex = (id, axis) => { writes.push(`setFlex.${axis}:${id}`); };
+  sandbox.getLayoutBoxMetrics = () => { ++metricReads; return null; };
+  // The applier returns before publishing diagnostics when the text bridge is
+  // absent, so a document with no text bindings still needs the stub present.
+  sandbox.setCapturedLineBoxes = () => {};
+  const applied = scope === undefined
+    ? sandbox.__pulpApplyMaterializedImportMetadata__()
+    : sandbox.__pulpApplyMaterializedImportMetadata__(scope);
+  const ids = new Set(writes.map((write) => write.split(':')[1]));
+  return { applied, writes, ids, metricReads };
+}
+
+test('an unscoped application still writes every captured binding', () => {
+  // The control for every scoped case below. If this ever reads short, the
+  // fixture is broken and the savings measured against it mean nothing.
+  const doc = twoSubtreeDocument();
+  const sandbox = evaluateEntry({
+    registryNodes: doc.nodes, layoutBindings: doc.layoutBindings,
+  });
+  const full = applyWithRecorder(sandbox, undefined);
+
+  assert.equal(full.applied, doc.layoutBindings.length);
+  assert.deepEqual([...full.ids].sort(), [...doc.expectedIds].sort());
+});
+
+test('a scoped application skips bindings outside the changed subtree', () => {
+  const doc = twoSubtreeDocument();
+  const sandbox = evaluateEntry({
+    registryNodes: doc.nodes, layoutBindings: doc.layoutBindings,
+  });
+  const full = applyWithRecorder(sandbox, undefined);
+  const scoped = applyWithRecorder(sandbox, ['a']);
+
+  // The saving. Every write and every forced layout read the applier avoids is
+  // paid once per qualifying commit in production.
+  assert.ok(scoped.writes.length < full.writes.length,
+    `scope saved nothing: ${scoped.writes.length} of ${full.writes.length}`);
+  assert.ok(scoped.metricReads < full.metricReads,
+    'scope did not reduce forced layout metric reads');
+
+  // The correctness half: a scope naming `a` owes `a` AND its descendants, and
+  // owes nothing for `b`'s subtree or the untouched root.
+  assert.deepEqual([...scoped.ids].sort(), ['a', 'a0', 'a1']);
+  assert.equal(scoped.applied, 3);
+});
+
+test('a scope naming a parent still re-applies its whole subtree', () => {
+  // The failure this guards is silent and visual: a scope that resolved only
+  // the named node would leave freshly reordered children with stale captured
+  // boxes, and every operation count would look better for it.
+  const doc = twoSubtreeDocument();
+  const sandbox = evaluateEntry({
+    registryNodes: doc.nodes, layoutBindings: doc.layoutBindings,
+  });
+  const scoped = applyWithRecorder(sandbox, ['root']);
+
+  assert.deepEqual([...scoped.ids].sort(), [...doc.expectedIds].sort());
+  assert.equal(scoped.applied, doc.layoutBindings.length);
+});
+
+test('several scoped ids from one commit are applied together', () => {
+  const doc = twoSubtreeDocument();
+  const sandbox = evaluateEntry({
+    registryNodes: doc.nodes, layoutBindings: doc.layoutBindings,
+  });
+  const scoped = applyWithRecorder(sandbox, ['a1', 'b0']);
+
+  assert.deepEqual([...scoped.ids].sort(), ['a1', 'b0']);
+});
+
+test('an absent or empty scope falls back to applying everything', () => {
+  // A runtime that predates the scope argument, and a commit whose blast
+  // radius the host config could not name, both arrive here as nothing. The
+  // fallback has to be the slow-but-correct direction.
+  const doc = twoSubtreeDocument();
+  const sandbox = evaluateEntry({
+    registryNodes: doc.nodes, layoutBindings: doc.layoutBindings,
+  });
+
+  for (const scope of [null, [], undefined]) {
+    const result = applyWithRecorder(sandbox, scope);
+    assert.equal(result.applied, doc.layoutBindings.length,
+      `scope ${JSON.stringify(scope)} did not fall back to a full pass`);
+  }
+});
+
+test('a scope naming an id that is not in the registry applies nothing', () => {
+  // Deliberately pinned rather than left undefined. An unknown id must not
+  // degrade to "apply everything" -- that would hide a host-config regression
+  // that stopped publishing real ids behind a permanently full re-apply.
+  const doc = twoSubtreeDocument();
+  const sandbox = evaluateEntry({
+    registryNodes: doc.nodes, layoutBindings: doc.layoutBindings,
+  });
+  const scoped = applyWithRecorder(sandbox, ['not-a-node']);
+
+  assert.equal(scoped.applied, 0);
+  assert.equal(scoped.writes.length, 0);
+});
+
+test('a scoped pass does not overwrite the full-application diagnostics', () => {
+  // Import validators read `__pulpMaterializedMetadataDiagnostics__` and
+  // compare applied against expected. A scoped pass legitimately applies a
+  // fraction of the document, so publishing its counts under that key would
+  // report a mass miss on a pass that was correct by construction.
+  const doc = twoSubtreeDocument();
+  const sandbox = evaluateEntry({
+    registryNodes: doc.nodes, layoutBindings: doc.layoutBindings,
+  });
+  applyWithRecorder(sandbox, undefined);
+  const full = sandbox.__pulpMaterializedMetadataDiagnostics__;
+  assert.equal(full.layout_applied, doc.layoutBindings.length,
+    'full diagnostics were not published, so this case proves nothing');
+
+  applyWithRecorder(sandbox, ['a']);
+  assert.equal(sandbox.__pulpMaterializedMetadataDiagnostics__.layout_applied,
+    doc.layoutBindings.length, 'a scoped pass clobbered the full diagnostics');
+  const scoped = sandbox.__pulpMaterializedScopedApplyDiagnostics__;
+  assert.equal(scoped.scoped, true);
+  assert.equal(scoped.layout_applied, 3);
+  assert.equal(scoped.layout_out_of_scope, 4);
+});
