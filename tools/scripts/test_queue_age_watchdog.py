@@ -1469,12 +1469,22 @@ class TestLabelReconciliationQuietCases(unittest.TestCase):
         self.assertEqual(levels(reconcile(snap)), ["alarm"])
 
     def test_a_job_with_no_reported_labels_is_not_reconciled(self) -> None:
-        # An unknown request is not an unserved one.
+        """An unknown request is not an unserved one.
+
+        The census here is blind on purpose: an empty request set is a subset
+        of every runner's labels, so a healthy census would call it schedulable
+        and hide the omission. Only the blind path can show it was skipped
+        rather than silently satisfied.
+        """
         snap = {
             "queued_jobs": [queued(90, labels=[])],
-            "runner_census": census([runner("m1", MERGE_GROUP_REQUEST)]),
+            "runner_census": census([]),
         }
         self.assertEqual(reconcile(snap), [])
+
+        # Control: a labelled job in the same blind sweep does speak.
+        snap["queued_jobs"].append(queued(90, labels=MERGE_GROUP_REQUEST))
+        self.assertEqual(levels(reconcile(snap)), ["warn"])
 
     def test_the_demand_gate_follows_the_alarm_threshold(self) -> None:
         snap = {
