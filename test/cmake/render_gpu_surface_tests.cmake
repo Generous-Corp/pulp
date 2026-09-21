@@ -505,6 +505,28 @@
                     FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                     RESOURCE_LOCK pulp_gpu
                     TIMEOUT 60)
+
+            if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
+                # Matched staged/shared lifecycle screening. This is deliberately
+                # an intermediate p4.matched.v1 diagnostic and never emits p4.raw.v1:
+                # callback/result-visible timing and transfer provenance remain
+                # explicit unavailable fields until the strict campaign seam lands.
+                add_executable(pulp-gpu-audio-p4-matched-convolution-benchmark
+                    test_gpu_audio_p4_matched_convolution_benchmark.cpp)
+                target_link_libraries(pulp-gpu-audio-p4-matched-convolution-benchmark PRIVATE
+                    pulp::gpu-audio)
+                target_include_directories(pulp-gpu-audio-p4-matched-convolution-benchmark PRIVATE
+                    ../core/gpu_audio/src)
+                add_dependencies(pulp-gpu-audio-p4-matched-convolution-benchmark
+                    pulp-gpu-dawn-shared-io-provider-probe)
+                add_test(NAME pulp-gpu-audio-p4-matched-convolution-benchmark
+                    COMMAND pulp-gpu-audio-p4-matched-convolution-benchmark)
+                set_tests_properties(pulp-gpu-audio-p4-matched-convolution-benchmark PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    SKIP_RETURN_CODE 77
+                    TIMEOUT 120)
+            endif()
         endif()
 
         unset(_pulp_gpu_audio_asset_sha256)
