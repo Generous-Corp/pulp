@@ -41,6 +41,21 @@
     catch_discover_tests(pulp-test-headless-surface
         ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
+    # Direct native Metal availability/timing probe. This is test-only: it
+    # establishes the host capability before any production backend integration.
+    if(APPLE AND NOT IOS AND NOT PULP_IOS)
+        add_executable(pulp-test-native-metal-compute
+            test_metal_native_compute.mm)
+        target_link_libraries(pulp-test-native-metal-compute PRIVATE
+            "-framework Metal" "-framework Foundation")
+        add_test(NAME pulp-test-native-metal-compute
+            COMMAND pulp-test-native-metal-compute)
+        set_tests_properties(pulp-test-native-metal-compute PROPERTIES
+            RESOURCE_LOCK pulp_gpu
+            SKIP_RETURN_CODE 77
+            TIMEOUT 20)
+    endif()
+
     # GPU compute tests.
     add_executable(pulp-test-gpu-compute test_gpu_compute.cpp)
     target_link_libraries(pulp-test-gpu-compute PRIVATE pulp::render pulp::signal Catch2::Catch2WithMain)
