@@ -47,10 +47,27 @@ of which a regenerator writes. Judging by the row set alone would reject those
 edits as re-pins: across 25 days of ``main``, seven ledger commits moved an
 editorial field while leaving the row set untouched.
 
-Diff-scoped and sub-second by construction: two ``git show`` reads of the
-ledger and one ``git diff --name-status``. It does not re-verify identity
-fields — that is ``gpu_handoff_provenance.py check``, which costs ~25s because
-it runs a ``git log`` per pinned path.
+Diff-scoped and sub-second by construction: one ``ls-tree``/``show`` pair per
+side of the range and one ``git diff --name-status``. It does not re-verify
+identity fields — that is ``gpu_handoff_provenance.py check``, which costs ~25s
+because it runs a ``git log`` per pinned path.
+
+**A guard that cannot see its subject must never look like one that checked
+it.** Every git read here is checked, and a failure is reported as its own
+outcome rather than degraded into an empty answer. An empty changed-path list
+means "nothing changed", so a swallowed ``git diff`` failure — an unresolvable
+base, a deleted branch, a shallow clone, a typo — would exit clean while the
+violation it exists to catch sailed through. Absence is still an answer where
+it genuinely is one: a ledger that simply post-dates one side of the range is
+nothing to compare, not a broken instrument.
+
+Exit codes:
+    0 — checked and clean, or nothing to compare; also every hint-mode run
+    1 — a violation was found (report mode)
+    2 — git could not answer, so NO VERDICT was produced (report mode)
+
+Two is deliberately not zero. "Could not check" and "checked and clean" are
+different findings and must never be spelled the same way.
 """
 from __future__ import annotations
 
@@ -59,6 +76,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+
+from gate_common import git_comparison_receipt, resolve_git_comparison
 
 HANDOFF = Path("docs/status/gpu-vellum-handoff.yaml")
 RECEIPT = Path("docs/validation/gpu-handoff-provenance/receipt.json")
@@ -71,12 +90,35 @@ IDENTITY_FIELDS = ("revision", "object_id", "object_type")
 REPAIR = "python3 tools/scripts/gpu_handoff_provenance.py write --receipt"
 VERIFY = "python3 tools/scripts/gpu_handoff_provenance.py check"
 
+# The verdict this gate could not produce, kept distinct from both a clean run
+# and a violation so a caller can route it deliberately.
+NO_VERDICT = 2
 
-def _git(root: Path, *args: str) -> tuple[int, str]:
-    proc = subprocess.run(
+# How a read of the ledger at a revision turned out. `path_absent` is an
+# ANSWER — the ledger may simply post-date that revision. `command_failed` is
+# the absence of one.
+LEDGER_AVAILABLE = "available"
+LEDGER_ABSENT = "path_absent"
+LEDGER_UNREADABLE = "command_failed"
+
+
+class LedgerUnavailable(RuntimeError):
+    """Git could not answer, so no statement about the ledger is possible.
+
+    Raised instead of returning an empty set, because an empty inventory is
+    indistinguishable from a ledger that pins nothing — and the caller would
+    read the second meaning.
+    """
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
         ["git", *args], cwd=root, capture_output=True, text=True, check=False,
     )
-    return proc.returncode, proc.stdout
+
+
+def _detail(proc: subprocess.CompletedProcess) -> str:
+    return " ".join((proc.stderr or "").strip().split())[:512]
 
 
 def _inventory_from_text(text: str) -> str | None:
@@ -150,46 +192,77 @@ def _pinned_paths_from_text(text: str) -> set[str] | None:
     return paths
 
 
-def _ledger_text_at(root: Path, rev: str) -> str | None:
-    code, out = _git(root, "show", f"{rev}:{HANDOFF}")
-    return out if code == 0 else None
+def read_ledger_at(root: Path, rev: str) -> tuple[str | None, str, str]:
+    """``(text, status, detail)`` for the ledger as of ``rev``.
+
+    ``ls-tree`` first, then ``show``, so a ledger that is genuinely absent at
+    ``rev`` is distinguishable from a revision git cannot read at all. Reading
+    only ``show`` collapses the two into one non-zero exit, and treating that
+    as "no ledger here" is exactly how an unresolvable base passes for clean.
+    """
+    listed = _git(root, "ls-tree", "-z", rev, "--", str(HANDOFF))
+    if listed.returncode != 0:
+        return None, LEDGER_UNREADABLE, _detail(listed) or f"git ls-tree {rev} failed"
+    if not listed.stdout:
+        return None, LEDGER_ABSENT, ""
+    shown = _git(root, "show", f"{rev}:{HANDOFF}")
+    if shown.returncode != 0:
+        return None, LEDGER_UNREADABLE, (
+            _detail(shown) or f"git show {rev}:{HANDOFF} failed"
+        )
+    return shown.stdout, LEDGER_AVAILABLE, ""
 
 
 def pinned_paths(root: Path, rev: str | None = None) -> set[str]:
-    """Every ``entries[*].pulp_paths[*].path``, from ``rev`` or the worktree."""
+    """Every ``entries[*].pulp_paths[*].path``, from ``rev`` or the worktree.
+
+    Raises ``LedgerUnavailable`` when the ledger is there but cannot be read.
+    An empty set is returned only when the ledger genuinely does not exist,
+    which is a statement about the inventory rather than about the instrument.
+    """
     if rev is None:
         doc = root / HANDOFF
         if not doc.is_file():
             return set()
         try:
-            text = doc.read_text()
-        except OSError:
-            return set()
+            text: str | None = doc.read_text()
+        except OSError as error:
+            raise LedgerUnavailable(f"cannot read {HANDOFF}: {error}") from error
     else:
-        text = _ledger_text_at(root, rev)
-        if text is None:
+        text, status, detail = read_ledger_at(root, rev)
+        if status == LEDGER_UNREADABLE:
+            raise LedgerUnavailable(f"cannot read {HANDOFF} at {rev}: {detail}")
+        if status == LEDGER_ABSENT:
             return set()
-    return _pinned_paths_from_text(text) or set()
+    rows = _pinned_paths_from_text(text or "")
+    if rows is None:
+        where = rev or "the worktree"
+        raise LedgerUnavailable(f"{HANDOFF} does not parse at {where}")
+    return rows
 
 
-def name_status(base: str, root: Path) -> list[tuple[str, str]]:
-    """``(status, path)`` for the range, with a rename reported at its source.
+def name_status(base: str, root: Path, head: str = "HEAD") -> tuple[list[tuple[str, str]], str]:
+    """``(rows, detail)`` for the range, with a rename reported at its source.
 
     A rename is the shape that matters here: the ledger pins the old path, and
     a rename removes it just as surely as a delete does.
+
+    A non-empty ``detail`` means git did not answer, and the empty row list
+    that accompanies it means nothing. The caller must not read it as "no
+    paths changed" — an empty changed-path list is how this gate spells clean.
     """
-    code, out = _git(root, "diff", "--name-status", "-M", f"{base}...HEAD")
-    if code != 0:
-        return []
+    proc = _git(root, "diff", "--name-status", "-M", f"{base}...{head}")
+    if proc.returncode != 0:
+        return [], _detail(proc) or f"git diff {base}...{head} failed"
     rows: list[tuple[str, str]] = []
-    for line in out.splitlines():
+    for line in proc.stdout.splitlines():
         if not line.strip():
             continue
         parts = line.split("\t")
         if len(parts) < 2:
             continue
         rows.append((parts[0].strip(), parts[1].strip()))
-    return rows
+    return rows, ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -200,19 +273,63 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     root = Path(args.root).resolve()
 
-    before_text = _ledger_text_at(root, args.base)
-    after_text = _ledger_text_at(root, "HEAD")
-    before = _inventory_from_text(before_text) if before_text is not None else None
-    after = _inventory_from_text(after_text) if after_text is not None else None
-    if before is None or after is None:
-        # No ledger on one side of the range, or a shape this guard cannot
-        # read. Say so rather than passing silently, because a guard that
-        # cannot see its subject must never look like one that checked it.
-        print("gpu-handoff-pin: ledger unreadable on one side of the range; "
-              "nothing checked", file=sys.stderr)
+    def no_verdict(detail: str, receipt: str = "") -> int:
+        print("", file=sys.stderr)
+        print("gpu-handoff-pin: COULD NOT CHECK — no verdict produced", file=sys.stderr)
+        print(f"    {detail}", file=sys.stderr)
+        if receipt:
+            print(f"    comparison receipt={receipt}", file=sys.stderr)
+        print("  This is NOT a clean result. The guard could not see its subject,", file=sys.stderr)
+        print("  so an in-PR re-pin or an orphaned pinned path would be invisible", file=sys.stderr)
+        print("  to it either way. Give it a base it can resolve — fetch the ref,", file=sys.stderr)
+        print("  unshallow the clone, or correct the spelling — and run it again:", file=sys.stderr)
+        print("      python3 tools/scripts/gpu_handoff_pin_freshness.py \\", file=sys.stderr)
+        print("          --base <ref> --mode=report", file=sys.stderr)
+        return NO_VERDICT if args.mode == "report" else 0
+
+    comparison = resolve_git_comparison(
+        root, args.base, "HEAD", source="gpu_handoff_pin_freshness",
+    )
+    receipt = git_comparison_receipt(comparison)
+    if (
+        comparison.status != "available"
+        or comparison.comparison_anchor is None
+        or comparison.resolved_head is None
+    ):
+        return no_verdict(
+            f"git cannot resolve {args.base}...HEAD ({comparison.status}): "
+            f"{comparison.stderr or 'no detail reported'}",
+            receipt,
+        )
+    anchor = comparison.comparison_anchor
+    head = comparison.resolved_head
+
+    before_text, before_status, before_detail = read_ledger_at(root, anchor)
+    if before_status == LEDGER_UNREADABLE:
+        return no_verdict(f"cannot read {HANDOFF} at {anchor}: {before_detail}", receipt)
+    after_text, after_status, after_detail = read_ledger_at(root, head)
+    if after_status == LEDGER_UNREADABLE:
+        return no_verdict(f"cannot read {HANDOFF} at {head}: {after_detail}", receipt)
+    if before_status == LEDGER_ABSENT or after_status == LEDGER_ABSENT:
+        # A real answer, not a failed read: the ledger post-dates one side of
+        # the range, so there is no editorial comparison to make.
+        print(f"gpu-handoff-pin: no {HANDOFF} on one side of the range; "
+              "nothing to compare", file=sys.stderr)
         return 0
 
-    rows = name_status(args.base, root)
+    before = _inventory_from_text(before_text or "")
+    after = _inventory_from_text(after_text or "")
+    if before is None or after is None:
+        return no_verdict(
+            f"{HANDOFF} is present but does not parse on one side of the "
+            "range, so its editorial content cannot be compared",
+            receipt,
+        )
+
+    rows, diff_detail = name_status(anchor, root, head)
+    if diff_detail:
+        return no_verdict(f"cannot diff {anchor}..{head}: {diff_detail}", receipt)
+
     touched = {path for _, path in rows}
     editorial_changed = before != after
     failed = False
@@ -249,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
     gone = sorted({
         path for status, path in rows
         if status.startswith(("D", "R"))
-    } & (_pinned_paths_from_text(after_text) or set()))
+    } & (_pinned_paths_from_text(after_text or "") or set()))
     if gone:
         failed = True
         print("", file=sys.stderr)
@@ -265,6 +382,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"      {VERIFY}", file=sys.stderr)
 
     if not failed:
+        print("gpu-handoff-pin: checked, clean — no in-PR re-pin, no orphaned "
+              "pinned path", file=sys.stderr)
         return 0
     return 0 if args.mode == "hint" else 1
 

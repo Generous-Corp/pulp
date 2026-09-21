@@ -348,9 +348,14 @@ fi
 # An inventory change is still a legitimate in-PR ledger edit, and it still owes
 # `gpu_handoff_provenance.py write --receipt`. This gate does not re-verify the
 # identity fields — that is `gpu_handoff_provenance.py check`, ~25s because it
-# runs a git log per pinned path. Diff-scoped and sub-second: two git show reads
-# of the ledger plus one git diff --name-status. The pre-push hook runs the same
-# script, so the rule holds whether or not anyone ran this one.
+# runs a git log per pinned path. Diff-scoped and sub-second: an ls-tree/show
+# pair per side of the range plus one git diff --name-status. The pre-push hook
+# runs the same script, so the rule holds whether or not anyone ran this one.
+#
+# It exits 2 for "git could not answer, so nothing was checked" — distinct from
+# 0, because an empty changed-path list is how this gate spells clean and a
+# swallowed git failure would therefore read as a pass. `if !` below already
+# fails on every non-zero; the pre-push hook has to name the code explicitly.
 if [ -f "$GHP" ]; then
     echo "" >&2
     echo "▸ gpu-handoff pin freshness (no in-PR re-pin; no orphaned pinned path)" >&2

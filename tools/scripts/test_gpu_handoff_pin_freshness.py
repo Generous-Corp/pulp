@@ -124,11 +124,12 @@ class PinFreshnessTests(unittest.TestCase):
         git("branch", "-f", "base", cwd=root)
         return root
 
-    def run_guard(self, root: Path, mode: str = "report") -> subprocess.CompletedProcess:
+    def run_guard(self, root: Path, mode: str = "report",
+                  base: str = "base") -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable,
              str(Path(__file__).parent / "gpu_handoff_pin_freshness.py"),
-             "--base", "base", "--root", str(root), "--mode", mode],
+             "--base", base, "--root", str(root), "--mode", mode],
             cwd=root, capture_output=True, text=True,
         )
 
@@ -275,13 +276,17 @@ class PinFreshnessTests(unittest.TestCase):
             self.assertEqual(self.run_guard(root).returncode, 0)
 
     def test_an_unreadable_ledger_says_so_rather_than_passing_quietly(self) -> None:
+        """A present-but-unparseable ledger is a guard that cannot see its
+        subject, so it takes the could-not-check exit rather than the clean
+        one. Sharing an exit code with clean is what made the swallow invisible.
+        """
         with tempfile.TemporaryDirectory() as td:
             root = self._repo(td)
             (root / guard.HANDOFF).write_text("{ not json")
             git("add", "-A", cwd=root); git("commit", "-qm", "broken", cwd=root)
             proc = self.run_guard(root)
-            self.assertEqual(proc.returncode, 0)
-            self.assertIn("nothing checked", proc.stderr)
+            self.assertEqual(proc.returncode, guard.NO_VERDICT, proc.stderr)
+            self.assertIn("COULD NOT CHECK", proc.stderr)
 
     def test_hint_mode_never_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -292,6 +297,144 @@ class PinFreshnessTests(unittest.TestCase):
             proc = self.run_guard(root, mode="hint")
             self.assertEqual(proc.returncode, 0)
             self.assertIn("identity-only", proc.stderr)
+
+    # ── the guard cannot see its subject ───────────────────────────────────
+    #
+    # Every case below carries its own positive control on the SAME repo state,
+    # because the outcome being asserted — "this did not check" — and the
+    # outcome it must not be confused with — "this checked and found nothing" —
+    # were the same exit code until the reads were checked. A test that only
+    # observes the failing run cannot tell a fixed guard from one that rejects
+    # everything.
+
+    def _repo_with_a_live_violation(self, td: str) -> Path:
+        """A repo whose HEAD carries a real identity-only re-pin.
+
+        Shared by the cases below so the control and the subject differ in
+        exactly one thing: whether git can answer.
+        """
+        root = self._repo(td)
+        (root / "core/view/src/view.cpp").write_text("b\n")
+        self._write_ledger(root, self.LEDGER_ROWS, "bbbbbbb")
+        git("add", "-A", cwd=root)
+        git("commit", "-qm", "edit + repin", cwd=root)
+        return root
+
+    def test_an_unresolvable_base_produces_no_verdict_rather_than_a_pass(self) -> None:
+        """A deleted branch, a stale ref, a typo: the base does not resolve, so
+        the diff is empty, and an empty diff is how this gate spells clean."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_with_a_live_violation(td)
+
+            # POSITIVE CONTROL, same repo, same HEAD: with a base git can
+            # resolve, the violation is found and reported.
+            control = self.run_guard(root)
+            self.assertEqual(control.returncode, 1, control.stderr)
+            self.assertIn("identity-only", control.stderr)
+
+            blind = self.run_guard(root, base="refs/heads/never-existed")
+            self.assertEqual(blind.returncode, guard.NO_VERDICT, blind.stderr)
+            self.assertIn("COULD NOT CHECK", blind.stderr)
+            self.assertNotIn("checked, clean", blind.stderr)
+
+    def test_an_unresolvable_base_in_hint_mode_still_says_so(self) -> None:
+        """Hint mode must not fail a push, but silence there would leave the
+        same blind spot with no trace at all."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_with_a_live_violation(td)
+            hint = self.run_guard(root, base="refs/heads/never-existed", mode="hint")
+            self.assertEqual(hint.returncode, 0, hint.stderr)
+            self.assertIn("COULD NOT CHECK", hint.stderr)
+
+            # POSITIVE CONTROL: hint mode on a resolvable base still reports the
+            # violation, so the message above is not simply what hint mode says.
+            control = self.run_guard(root, mode="hint")
+            self.assertEqual(control.returncode, 0, control.stderr)
+            self.assertIn("identity-only", control.stderr)
+
+    def test_a_ledger_git_cannot_show_produces_no_verdict(self) -> None:
+        """The base resolves and its tree lists the ledger, but the blob itself
+        is unreadable — a truncated or corrupted object store. Reading only the
+        `git show` exit would call that "no ledger here" and pass."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_with_a_live_violation(td)
+
+            # POSITIVE CONTROL first, while the object store is intact.
+            control = self.run_guard(root)
+            self.assertEqual(control.returncode, 1, control.stderr)
+            self.assertIn("identity-only", control.stderr)
+
+            blob = subprocess.run(
+                ["git", "rev-parse", f"base:{guard.HANDOFF}"],
+                cwd=root, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            loose = root / ".git" / "objects" / blob[:2] / blob[2:]
+            self.assertTrue(loose.is_file(),
+                            f"fixture never wrote a loose object for {blob}")
+            loose.unlink()
+
+            blind = self.run_guard(root)
+            self.assertEqual(blind.returncode, guard.NO_VERDICT, blind.stderr)
+            self.assertIn("COULD NOT CHECK", blind.stderr)
+
+    def test_name_status_reports_a_git_failure_instead_of_an_empty_diff(self) -> None:
+        """The swallow at the diff: a non-zero `git diff` returned [], and []
+        is indistinguishable from a branch that changed nothing."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo_with_a_live_violation(td)
+
+            # POSITIVE CONTROL: the same call on a resolvable base returns real
+            # rows and no error, so an empty list below means something.
+            rows, detail = guard.name_status("base", root)
+            self.assertEqual(detail, "")
+            self.assertTrue(rows, "control found no changed paths; the probe is dead")
+
+            blind_rows, blind_detail = guard.name_status("never-existed", root)
+            self.assertEqual(blind_rows, [])
+            self.assertTrue(blind_detail,
+                            "a failed diff reported no error; callers will read "
+                            "the empty row list as 'nothing changed'")
+
+    def test_pinned_paths_raises_instead_of_returning_an_empty_inventory(self) -> None:
+        """An empty pinned-path set means "the ledger pins nothing", which is a
+        claim about the inventory. A failed read must not be able to make it."""
+        with tempfile.TemporaryDirectory() as td:
+            root = self._repo(td)
+
+            # POSITIVE CONTROL on the same instrument and the same repo.
+            pins = guard.pinned_paths(root, "base")
+            self.assertEqual(
+                pins,
+                {"core/view/src/view.cpp", "tools/scripts/pinned_tool.py"})
+
+            with self.assertRaises(guard.LedgerUnavailable):
+                guard.pinned_paths(root, "never-existed")
+
+    def test_both_push_paths_fail_closed_on_a_no_verdict(self) -> None:
+        """Routing the new exit code is half the fix.
+
+        `gates.sh` treats any non-zero as a failure, but the pre-push hook
+        enumerates exit codes and sends anything unlisted to a message that does
+        NOT set `fail`. An unmapped 2 there would print a line and let the push
+        through — the identical blind spot, moved one layer out.
+        """
+        hook = (REPO / ".githooks/pre-push").read_text(encoding="utf-8")
+        block = re.search(
+            r'if \[ -f "\$GPU_PIN_FRESHNESS" \].*?\n    esac', hook, re.DOTALL)
+        self.assertIsNotNone(block, "pre-push no longer runs the freshness gate")
+        body = block.group(0)
+        self.assertRegex(
+            body, r"\n\s*2\)\s*fail=1",
+            "pre-push does not map the no-verdict exit to a failure")
+
+        gates = (REPO / "tools/scripts/gates.sh").read_text(encoding="utf-8")
+        gates_block = re.search(
+            r'if \[ -f "\$GHP" \].*?\nfi', gates, re.DOTALL)
+        self.assertIsNotNone(gates_block, "gates.sh no longer runs the freshness gate")
+        self.assertIn("fail=1", gates_block.group(0))
+        self.assertRegex(
+            gates_block.group(0), r'if ! "\$PYTHON" "\$GHP"',
+            "gates.sh no longer fails on every non-zero exit")
 
     def test_both_push_paths_run_the_freshness_check(self) -> None:
         """`gates.sh` is run by convention; the hook is run by git.

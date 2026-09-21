@@ -479,9 +479,27 @@ Two things still belong to the PR:
 `gpu_handoff_pin_freshness.py` enforces exactly those two shapes, from both
 `gates.sh` and the pre-push hook: it fails an identity-only re-pin (ledger or
 receipt moved, the ledger's editorial content did not) and a pinned path
-deleted or renamed while the inventory still lists it. Diff-scoped and sub-second — two `git show` reads
-and one `git diff --name-status`. It does not re-verify the identity fields;
-the `check` command above is what proves those.
+deleted or renamed while the inventory still lists it. Diff-scoped and
+sub-second — an `ls-tree`/`show` pair per side and one `git diff
+--name-status`. It does not re-verify the identity fields; the `check` command
+above is what proves those.
+
+**It reports three outcomes, and `2` is one of them.** `0` is checked-and-clean,
+`1` is a violation, and `2` is *git could not answer, so nothing was checked* —
+an unresolvable `--base`, a deleted branch, a shallow clone, a typo. That third
+code exists because the gate reads its subject through `git`, and an empty
+changed-path list is how it spells clean: a swallowed non-zero return therefore
+reads as a pass, and the violation sails through with the gate looking green.
+The same split is in `silent_revert_guard.py`, which prints `HISTORY
+UNAVAILABLE` and exits `2` for the same reason.
+
+That matters when wiring it, because the two local surfaces route exit codes
+differently. `gates.sh` uses `if ! "$PYTHON" …`, so every non-zero already
+fails. The **pre-push hook enumerates codes in a `case`, and its `*)` arm prints
+"internal error" WITHOUT setting `fail`** — so an unmapped `2)` would print a
+line and let the push through, putting the blind spot back one layer out from
+the script that just closed it. Map every non-zero code a gate can return, and
+when you add an outcome to a gate, add its arm to the hook in the same change.
 
 ### `gates.sh` and the pre-push hook are two lists, not one
 

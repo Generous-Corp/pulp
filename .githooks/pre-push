@@ -528,6 +528,11 @@ if [ -f "$GPU_PIN_FRESHNESS" ]; then
     case $? in
         0) ;;
         1) fail=1 ;;
+        # 2 is "git could not answer, so nothing was checked" — not a pass.
+        # Leaving it unmapped would land it in the message below, which prints
+        # a line and lets the push through, restoring the blind spot one layer
+        # out from the script that just closed it.
+        2) fail=1 ;;
         *) echo "[pre-push] gpu_handoff_pin_freshness: internal error" >&2 ;;
     esac
 fi
