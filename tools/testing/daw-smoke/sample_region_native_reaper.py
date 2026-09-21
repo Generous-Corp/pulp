@@ -23,6 +23,12 @@ def tree_sha(path):
         if child.is_file() and not child.is_symlink(): h.update(child.relative_to(path).as_posix().encode()+b'\0'+child.read_bytes())
     return h.hexdigest()
 
+def bundle_executable(bundle):
+    macos = bundle / 'Contents' / 'MacOS'
+    candidates = [p for p in macos.iterdir()
+                  if p.is_file() and os.access(p, os.X_OK) and p.suffix != '.dylib'] if macos.is_dir() else []
+    return candidates[0] if len(candidates) == 1 else None
+
 def audio_peak(path):
     import wave
     try:
@@ -35,6 +41,41 @@ def audio_peak(path):
     elif bits==32: vals=struct.unpack('<%df'%(len(raw)//4),raw)
     else: vals=[]
     return max((abs(v) for v in vals),default=0.0)
+
+def strip_parameter_envelopes(text):
+    """Remove FX parameter envelopes from the render-project copy.
+
+    The render proves a fixed-coefficient null against the reference, so an
+    armed host envelope is an uncontrolled input. REAPER stores a VST3
+    parameter envelope in the normalized 0..1 domain and an AU/CLAP envelope in
+    the plug-in's own range, so a single envelope value does not denote the same
+    coefficient in every format, and an armed envelope point overrides the
+    serialized parameter state during -renderproject. Automation is evidenced
+    from the live instance receipt, never from this copy.
+
+    Returns (text, removed) so the caller can assert the strip was not vacuous.
+    """
+    kept = []
+    depth = 0
+    removed = 0
+    for line in text.splitlines():
+        stripped = line.strip()
+        if depth == 0:
+            if stripped.startswith('<PARMENV'):
+                depth = 1
+                removed += 1
+                continue
+            kept.append(line)
+            continue
+        if stripped.startswith('<'):
+            depth += 1
+        elif stripped == '>':
+            depth -= 1
+    out = '\n'.join(kept)
+    if text.endswith('\n'):
+        out += '\n'
+    return out, removed
+
 
 def normalized_state(data):
     text=data.decode('utf-8','ignore')
@@ -58,13 +99,18 @@ def normalized_state(data):
     return '\n'.join(kept).encode()
 
 def run(fmt,bundle,out,timeout):
+    bundle=bundle.resolve()
+    executable=bundle_executable(bundle)
+    if executable is None:
+        return {'format':fmt,'status':'inconclusive','reason':'bundle executable missing or ambiguous','plugin_path':str(bundle)}
+    executable_sha256_before=hashlib.sha256(executable.read_bytes()).hexdigest()
     out.mkdir(parents=True,exist_ok=True); receipt=out/f'{fmt}-receipt.log'; wav=out/f'{fmt}-impulse-output.wav'; project=out/f'{fmt}.rpp'
     wav.unlink(missing_ok=True)
     state_before=out/f'{fmt}-state-before.bin'; state_after=out/f'{fmt}-state-after.bin'; input_wav=out/f'{fmt}-impulse-input.wav'
     with wave.open(str(input_wav),'wb') as w:
         w.setnchannels(1); w.setsampwidth(4); w.setframerate(48000); samples=[1.0]+[0.0]*16383; w.writeframes(struct.pack('<16384f',*samples))
     trace=out/f'{fmt}-trace.log'
-    env=os.environ.copy(); env.update(PULP_F4_FORMAT=fmt,PULP_F4_FX_NAME='Sample Region Allpass',PULP_F4_PLUGIN_PATH=str(bundle),PULP_F4_WAV=str(wav),PULP_F4_PROJECT=str(project),PULP_F4_RECEIPT=str(receipt),PULP_F4_STATE_BEFORE=str(state_before),PULP_F4_STATE_AFTER=str(state_after),PULP_F4_INPUT_WAV=str(input_wav),PULP_F4_TRACE=str(trace),PULP_F4_DEFER_RENDER='1')
+    env=os.environ.copy(); env.update(PULP_F4_FORMAT=fmt,PULP_F4_FX_NAME='Sample Region Allpass',PULP_F4_PLUGIN_PATH=str(bundle),PULP_F4_WAV=str(wav),PULP_F4_PROJECT=str(project),PULP_F4_RECEIPT=str(receipt),PULP_F4_STATE_BEFORE=str(state_before),PULP_F4_STATE_AFTER=str(state_after),PULP_F4_INPUT_WAV=str(input_wav),PULP_F4_TRACE=str(trace),PULP_F4_DEFER_RENDER=os.getenv('PULP_F4_DEFER_RENDER','1'))
     reaper=env.get('REAPER_BIN','/Applications/REAPER.app/Contents/MacOS/REAPER')
     if not Path(reaper).is_file(): return {'format':fmt,'status':'inconclusive','reason':'REAPER unavailable'}
     # Force a disposable REAPER process.  Without -newinst, an already open
@@ -75,21 +121,50 @@ def run(fmt,bundle,out,timeout):
     cmd=[reaper,'-newinst','-new','-nosplash',str(LUA)]
     try: p=subprocess.run(cmd,env=env,text=True,capture_output=True,timeout=timeout,check=False)
     except subprocess.TimeoutExpired: return {'format':fmt,'status':'inconclusive','reason':'REAPER timeout'}
+    (out/f'{fmt}-reaper-stdout.log').write_text(p.stdout or '')
+    (out/f'{fmt}-reaper-stderr.log').write_text(p.stderr or '')
     # Render the saved project in REAPER's documented command-line render
     # mode.  Invoking action 41824 from a headless Lua script opens the modal
     # render window on some installations; -renderproject performs the same
     # host render without synthetic audio or UI automation.
+    envelope_strip=None; envelope_residual=None
     if project.exists() and not wav.exists():
-        if fmt in ('au','vst3'):
-            # The format adapters declare one mono bus; REAPER's default new
-            # track is stereo. Normalize the saved project before command-line
-            # render so AU/VST3 receive the declared mono layout.
-            text=project.read_text()
+        # Render from a disposable copy. REAPER may rewrite the saved project
+        # while the first headless instance is shutting down; editing that file
+        # in place races the project writer and silently restores its default
+        # resampler setting. The copy gives the render process a stable input.
+        render_project=out/f'{fmt}-render.rpp'
+        shutil.copy2(project,render_project)
+        text=render_project.read_text()
+        if fmt == 'vst3':
+            # REAPER's default track is stereo; route the mono plug-in through
+            # its channel-zero compatibility path.
+            text=re.sub(r'(?m)^(\s*)NCHAN 1\s*$',r'\g<1>NCHAN 2',text,count=1)
+        elif fmt == 'au':
             text=re.sub(r'(?m)^(\s*)NCHAN 2\s*$',r'\g<1>NCHAN 1',text,count=1)
-            text=text.replace('<IN_PINS\n        >','<IN_PINS\n          PIN 0 0 1\n        >',1)
-            project.write_text(text)
-        render_cmd=[reaper,'-newinst','-new','-nosplash','-renderproject',str(project)]
-        try: subprocess.run(render_cmd,env=env,text=True,capture_output=True,timeout=timeout,check=False)
+        # Source and project are both 48 kHz. The default resampler trims the
+        # final 16 frames, so disable it for an exact 16,384-frame comparison.
+        text=re.sub(r'(?m)^(\s*)RENDER_RESAMPLE\s+\d+',r'\g<1>RENDER_RESAMPLE 0',text,count=1)
+        # Bind REAPER's generic wet/dry control in the serialized FX state.
+        # The host drops WET when it is set through the pseudo-parameter API
+        # during the setup process; SAMPLE_ACCURATE_WETDRY is required for the
+        # saved project to honor the serialized value in -renderproject.
+        wet_mode = '1' if fmt == 'au' else '0'
+        text=re.sub(r'(?m)^(\s*)FLOATPOS 0 0 0 0$',
+                    r'\g<1>SAMPLE_ACCURATE_WETDRY 1\n\g<1>WET 1.000000 ' + wet_mode + r'\n\g<1>FLOATPOS 0 0 0 0',
+                    text,count=1)
+        # A surviving armed envelope silently renders at the wrong coefficient,
+        # which only the audio oracle catches and only when it is unlucky. Strip
+        # the envelopes and prove the strip actually fired.
+        text, envelope_strip = strip_parameter_envelopes(text)
+        envelope_residual = sum(1 for line in text.splitlines()
+                                if line.strip().startswith('<PARMENV'))
+        render_project.write_text(text)
+        render_cmd=[reaper,'-newinst','-new','-nosplash','-renderproject',str(render_project)]
+        try:
+            render=subprocess.run(render_cmd,env=env,text=True,capture_output=True,timeout=timeout,check=False)
+            (out/f'{fmt}-render-stdout.log').write_text(render.stdout or '')
+            (out/f'{fmt}-render-stderr.log').write_text(render.stderr or '')
         except subprocess.TimeoutExpired: pass
     lines=[x[len('[sample-region-f4] '):] for x in (p.stdout+'\n'+p.stderr).splitlines() if x.startswith('[sample-region-f4] ')]
     if not lines and receipt.exists():
@@ -112,14 +187,28 @@ def run(fmt,bundle,out,timeout):
             values=struct.unpack('<%df'%(len(raw)//4),raw) if raw else ()
             rec['audio_peak']=audio_peak(wav)
     if wav.exists(): rec['audio_peak']=audio_peak(wav)
+    # The signed/installed claim must describe the bundle actually under test.
+    # Keyed by format alone it would report "signed installed" for any path,
+    # including an uninstalled build output.
     package=Path('/tmp/pulp-f4-pub04/package.json')
+    rec['bundle_is_installed_path']=False
     if package.exists():
         try:
             item=json.loads(package.read_text()).get('bundles',{}).get(fmt,{})
-            rec['installed']=Path(item.get('installed','')).exists()
-            rec['signed']=item.get('signing',{}).get('status')=='passed'
+            declared=Path(item.get('installed','')) if item.get('installed') else None
+            same=bool(declared and declared.exists()
+                      and declared.resolve()==bundle.resolve())
+            rec['bundle_is_installed_path']=same
+            rec['installed']=same
+            rec['signed']=same and item.get('signing',{}).get('status')=='passed'
         except Exception: pass
     rec['bundle_sha256']=tree_sha(bundle) if bundle.is_dir() else hashlib.sha256(bundle.read_bytes()).hexdigest()
+    rec['bundle_executable']=str(executable)
+    rec['bundle_executable_sha256_before']=executable_sha256_before
+    rec['bundle_executable_sha256_after']=hashlib.sha256(executable.read_bytes()).hexdigest()
+    rec['bundle_executable_stable']=rec['bundle_executable_sha256_before']==rec['bundle_executable_sha256_after']
+    rec['render_envelope_stripped']=envelope_strip
+    rec['render_envelope_residual']=envelope_residual
     rec['audio_oracle_pass']=False
     receipt.write_text('[sample-region-f4] '+json.dumps(rec)+'\n')
     return rec
@@ -142,6 +231,11 @@ def main(argv=None):
         code, reason = receipt_verdict(rec)
         rec['status']='passed' if code == 0 else ('failed' if code == 1 else 'inconclusive')
         rec['verdict_reason']=reason
+        if rec['status']=='passed' and not (rec.get('render_envelope_stripped') and not rec.get('render_envelope_residual')):
+            rec['status']='inconclusive'
+            rec['verdict_reason']=('render-project parameter-envelope strip control failed '
+                                   f"(stripped={rec.get('render_envelope_stripped')}, "
+                                   f"residual={rec.get('render_envelope_residual')})")
         receipt=a.out/f'{fmt}-receipt.log'; receipt.write_text('[sample-region-f4] '+json.dumps(rec)+'\n')
         results.append(rec)
     summary={'packet':'PKT-F4-01','acceptance':'PUB-04','results':results,'status':'passed' if all(r.get('status')=='passed' for r in results) else 'inconclusive'}

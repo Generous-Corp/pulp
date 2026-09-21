@@ -1161,6 +1161,11 @@ struct ScopedAuV3HostWriting {
             PULP_DBG_ASSERT(bridge->input_storage.size() >= input_samples,
                 "AU render: input_storage undersized; allocateRenderResources "
                 "must pre-size to kMaxChannels * max_frames");
+            // A pull source is allowed to return a silent block by leaving
+            // mData null. Clear the adapter-owned fallback first so a stateful
+            // Processor still receives explicit zero input and can emit its
+            // recursive tail; no host allocation is required.
+            std::fill_n(bridge->input_storage.begin(), input_samples, 0.0f);
             for (UInt32 i = 0; i < inChans; ++i) {
                 abl.mBuffers[i].mNumberChannels = 1;
                 abl.mBuffers[i].mDataByteSize = frameCount * sizeof(float);
@@ -1174,21 +1179,31 @@ struct ScopedAuV3HostWriting {
                 reinterpret_cast<AudioBufferList*>(&abl));
             if (status == noErr) {
                 auto* inputAbl = reinterpret_cast<AudioBufferList*>(&abl);
-                if (!pulp::format::detail::audio_buffer_list_shape_matches(
-                        inputAbl, inChans) ||
-                    !pulp::format::detail::audio_buffer_list_has_storage(
-                        inputAbl, frameCount, sizeof(float))) {
+                const bool silent_pull = inputAbl->mNumberBuffers == 0;
+                if (!silent_pull &&
+                    !pulp::format::detail::audio_buffer_list_shape_matches(inputAbl, inChans)) {
                     return failClosed();
                 }
-                for (UInt32 i = 0; i < inChans; ++i)
-                    bridge->input_ptrs[i] = static_cast<const float*>(abl.mBuffers[i].mData);
+                for (UInt32 i = 0; i < inChans; ++i) {
+                    auto& buffer = abl.mBuffers[i];
+                    const bool usable =
+                        buffer.mData && buffer.mDataByteSize >= frameCount * sizeof(float);
+                    bridge->input_ptrs[i] = usable ? static_cast<const float*>(buffer.mData)
+                                                   : bridge->input_storage.data() +
+                                                         static_cast<std::size_t>(i) * frameCount;
+                }
                 input_view = pulp::audio::BufferView<const float>(
                     bridge->input_ptrs, inChans, frameCount);
             } else {
-                // A declared main input that cannot be pulled is a malformed
-                // active render, not an invitation to run effect DSP with an
-                // empty input view.
-                return failClosed();
+                // A host may report a silent upstream block as a failed pull
+                // while the source has no storage left. Treat that block as
+                // zero input so stateful effects can emit their tail; output
+                // storage is still validated above and remains fail-closed.
+                for (UInt32 i = 0; i < inChans; ++i)
+                    bridge->input_ptrs[i] =
+                        bridge->input_storage.data() + static_cast<std::size_t>(i) * frameCount;
+                input_view =
+                    pulp::audio::BufferView<const float>(bridge->input_ptrs, inChans, frameCount);
             }
         }
 
