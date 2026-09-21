@@ -859,6 +859,22 @@ TEST_CASE("SDFStyle defaults are valid", "[canvas][sdf]") {
     REQUIRE(style.arm_width == Catch::Approx(0.3f));
 }
 
+TEST_CASE("SDF chart shader compiles against the shared geometry prelude", "[canvas][sdf][shader]") {
+    const auto valid = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::flat_arc,
+        "half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }");
+#ifdef PULP_HAS_SKIA
+    INFO(valid);
+    REQUIRE(valid.empty());
+#else
+    REQUIRE_FALSE(valid.empty());
+#endif
+    const auto invalid = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::flat_arc,
+        "half4 shade(PulpChart g) { return nope(g); }");
+    REQUIRE_FALSE(invalid.empty());
+}
+
 TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
     RecordingCanvas rc;
     Canvas::SDFStyle style;

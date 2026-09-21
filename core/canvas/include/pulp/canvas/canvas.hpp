@@ -236,6 +236,7 @@ enum class TextDirection { left_to_right, right_to_left, top_to_bottom, bottom_t
 // software) implement the virtual methods.
 class Canvas {
 public:
+    struct ShaderDrawOptions;
     virtual ~Canvas() = default;
 
     /// Identity of the renderer this canvas actually wraps.
@@ -1424,6 +1425,20 @@ public:
         }
     }
 
+    /// Draw a shape through an author-supplied geometry chart shader. The
+    /// shader must define `half4 shade(PulpChart g)`. `g.valid` is zero for
+    /// shapes without a chart (and for degenerate geometry); callers must not
+    /// interpret chart fields when it is zero.
+    virtual bool draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
+                                             float w, float h,
+                                             const SDFStyle& style,
+                                             const std::string& sksl,
+                                             const ShaderDrawOptions& options) {
+        (void)sksl; (void)options;
+        draw_sdf_shape(shape, x, y, w, h, style);
+        return false;
+    }
+
     // ── Blur / Backdrop filter ─────────────────────────────────────────
     /// Save a blurred snapshot of the current canvas content as a backdrop.
     /// Call before painting the overlay content.
@@ -1619,6 +1634,10 @@ public:
     /// Non-Skia builds return a non-empty "Skia not available" error rather than
     /// reporting a false success — there is no compiler to ask.
     static std::string compile_sksl(const std::string& sksl);
+
+    /// Compile an author chart shader against the geometry prelude used by
+    /// draw_sdf_shape_with_shader. The author source must define shade(PulpChart).
+    static std::string compile_sdf_chart_sksl(SDFShape shape, const std::string& sksl);
 
     /// Whether an SkSL shader declares a uniform of the given name. Compiles via
     /// the same process-lifetime cache as `compile_sksl`, so repeat queries are

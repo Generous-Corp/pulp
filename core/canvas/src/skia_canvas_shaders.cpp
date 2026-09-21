@@ -279,6 +279,84 @@ void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float
     canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
 }
 
+static std::string compose_sdf_chart_shader(const std::string& author_sksl) {
+    return R"(
+struct PulpChart { float t; float d; float side; float2 tan; float px; float valid; };
+uniform float2 resolution;
+uniform float shapeType;
+uniform float arcStart;
+uniform float arcSweep;
+uniform float innerRadius;
+uniform float strokeWidth;
+uniform float reach;
+)" + author_sksl + R"(
+half4 main(float2 coord) {
+    float2 center = resolution * 0.5;
+    float2 p = coord - center;
+    float radius = min(center.x, center.y) - 2.0;
+    float angle = atan(p.y, p.x);
+    float halfSweep = arcSweep * 0.5;
+    float mid = arcStart + halfSweep;
+    float diff = angle - mid;
+    diff = diff - 6.2831853 * floor((diff + 3.1415926) / 6.2831853);
+    float outer = radius;
+    float inner = radius * innerRadius;
+    float d = abs(length(p) - (outer + inner) * 0.5) - (outer - inner) * 0.5;
+    float t = clamp((diff + halfSweep) / max(2.0 * halfSweep, 0.0001), 0.0, 1.0);
+    float2 tan = float2(-sin(angle), cos(angle));
+    PulpChart g = PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, tan,
+                            1.0,
+                            (shapeType > 11.5 && shapeType < 12.5 &&
+                             arcSweep > 0.0 && outer > inner) ? 1.0 : 0.0);
+    return shade(g);
+}
+)";
+}
+
+std::string Canvas::compile_sdf_chart_sksl(SDFShape, const std::string& sksl) {
+    if (sksl.empty()) return "Empty shader code";
+    std::string error;
+    auto effect = RuntimeEffectCache::instance().get_or_compile(compose_sdf_chart_shader(sksl), error);
+    return effect ? std::string() : error;
+}
+
+bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
+                                              float w, float h,
+                                              const SDFStyle& style,
+                                              const std::string& author_sksl,
+                                              const ShaderDrawOptions& options) {
+    if (!canvas_ || author_sksl.empty()) return false;
+    // Keep the chart prelude deliberately small and explicit. It is emitted
+    // before the author function so the same source can be compiled at draw
+    // time and by the bridge's normal SkSL compiler.
+    const std::string source = compose_sdf_chart_shader(author_sksl);
+    std::string error;
+    auto effect = RuntimeEffectCache::instance().get_or_compile(source, error);
+    if (!effect) return false;
+    SkRuntimeShaderBuilder builder(effect);
+    builder.uniform("resolution") = SkV2{w, h};
+    builder.uniform("shapeType") = static_cast<float>(shape);
+    builder.uniform("arcStart") = style.arc_start;
+    builder.uniform("arcSweep") = style.arc_sweep;
+    builder.uniform("innerRadius") = style.inner_radius;
+    builder.uniform("strokeWidth") = style.stroke_width;
+    builder.uniform("reach") = options.reach;
+    for (const auto& named : options.named_uniforms) {
+        if (!effect->findUniform(named.name.c_str()) || named.count < 1 || named.count > 4) continue;
+        auto slot = builder.uniform(named.name.c_str());
+        if (named.count == 1) slot = named.v[0];
+        else if (named.count == 2) slot = SkV2{named.v[0], named.v[1]};
+        else if (named.count == 3) slot = SkV3{named.v[0], named.v[1], named.v[2]};
+        else slot = SkV4{named.v[0], named.v[1], named.v[2], named.v[3]};
+    }
+    auto shader = builder.makeShader();
+    if (!shader) return false;
+    SkPaint paint; paint.setShader(std::move(shader));
+    canvas_->save(); canvas_->translate(x, y);
+    canvas_->drawRect(SkRect::MakeXYWH(0, 0, w, h), paint); canvas_->restore();
+    return true;
+}
+
 // ── Custom SkSL shader rendering ─────────────────────────────────────────────
 
 bool SkiaCanvas::draw_with_sksl(const std::string& sksl,

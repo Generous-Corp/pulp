@@ -381,6 +381,10 @@ public:
     // SDF shapes
     void draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
                         const SDFStyle& style) override;
+    bool draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
+                                    float w, float h, const SDFStyle& style,
+                                    const std::string& sksl,
+                                    const ShaderDrawOptions& options) override;
     void draw_blurred_backdrop(float x, float y, float w, float h,
                                float blur_radius, float corner_radius,
                                Color tint) override;
