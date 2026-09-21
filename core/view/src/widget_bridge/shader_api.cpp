@@ -410,6 +410,28 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         return shader_result(true, "");
     });
 
+    register_bridge_function(api, "bindShaderUniform", [&self](choc::javascript::ArgumentList args) {
+        const auto id = args.get<std::string>(0, "");
+        const auto uniform_name = args.get<std::string>(1, "");
+        const auto source = args.get<std::string>(2, "");
+        auto* view = self.widget(id);
+        auto* host = view ? dynamic_cast<CustomShaderHost*>(view) : nullptr;
+        if (!host) return shader_result(false, view ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+        if (uniform_name.empty()) return shader_result(false, "Uniform name must not be empty");
+        if (!host->custom_shader().empty() &&
+            !canvas::Canvas::sksl_declares_uniform(host->custom_shader(), uniform_name)) {
+            self.record_binding_attempt(id, source, BindingTarget::uniform,
+                                        BindingOutcome::undeclared_uniform);
+            return shader_result(false, "Shader does not declare uniform '" + uniform_name + "'");
+        }
+        const choc::value::Value* transform =
+            args.numArgs >= 4 && args[3] != nullptr ? args[3] : nullptr;
+        if (!self.add_shader_uniform_binding(id, uniform_name, source, transform))
+            return shader_result(false, "Shader uniform binding was rejected");
+        self.request_repaint();
+        return shader_result(true, "");
+    });
+
     register_bridge_function(api, "clearWidgetShaderUniformBindings", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto* v = self.widget(id);
@@ -541,15 +563,6 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         return shader_result(true, "");
     });
 
-    // Canonical Phase-C spelling.  Keep the older widget-prefixed name as a
-    // compatibility alias while both route through the same native binding
-    // implementation.  The optional transform is reserved for the unified
-    // ParamBinding path and is accepted here so authored code can migrate
-    // without a second API shape.
-    self.engine_.evaluate(
-        "function bindShaderUniform(id, uniformName, source, transform) {"
-        " return bindWidgetShaderUniform(id, uniformName, source, transform);"
-        "}");
 }
 
 void BridgeRegistrars::register_shader_canvas_api(WidgetBridge& self) {
