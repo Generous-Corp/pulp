@@ -494,6 +494,16 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         self.request_repaint();
         return shader_result(true, "");
     });
+
+    // Canonical Phase-C spelling.  Keep the older widget-prefixed name as a
+    // compatibility alias while both route through the same native binding
+    // implementation.  The optional transform is reserved for the unified
+    // ParamBinding path and is accepted here so authored code can migrate
+    // without a second API shape.
+    self.engine_.evaluate(
+        "function bindShaderUniform(id, uniformName, source, transform) {"
+        " return bindWidgetShaderUniform(id, uniformName, source);"
+        "}");
 }
 
 void BridgeRegistrars::register_shader_canvas_api(WidgetBridge& self) {
