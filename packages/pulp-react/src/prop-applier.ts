@@ -79,7 +79,12 @@ function isReactInternal(key: string): boolean {
 
 /// Returns true if the prop is an event handler (onX) that we route
 /// through the bridge's global `on(id, eventName, fn)` registrar.
-function isEventHandler(key: string): boolean {
+///
+/// Exported because the commit-time metadata gate needs the same answer: React
+/// recreates every inline handler on every render, so a handler-only diff is
+/// the most common commit there is, and its payload is a function identity --
+/// never geometry.
+export function isEventHandler(key: string): boolean {
     return key.startsWith('on') && key.length > 2 && key[2] === key[2]?.toUpperCase();
 }
 

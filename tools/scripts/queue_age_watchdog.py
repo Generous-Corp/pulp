@@ -57,6 +57,20 @@ job's ``labels`` are what it *requested*, not what the serving runner carries.
 Loose matching biases toward calling a lane live, i.e. toward staying quiet --
 the correct direction for a monitor whose credibility dies on false alarms.
 
+Queue age answers "is the lane alive"; it cannot answer "why is it not"
+----------------------------------------------------------------------
+GitHub schedules a job only when ONE runner carries every label the job
+requested. Reconciling those two sets -- but only for a label set some job has
+already been waiting on past the alarm threshold -- names the missing label
+instead of leaving a reader to guess which of the usual suspects it was this
+time.
+
+That is not the label-satisfiability census argued against above, and the
+difference is the whole safety argument. The census interrogates the fleet on
+a schedule, so a healthy idle JIT lane answers "nothing carries X" and the
+alarm gets muted. This check has nothing to interrogate unless a real job is
+stalled on a real label set right now. See analyze_label_reconciliation().
+
 The analysis is pure: ``analyze()`` takes a snapshot dict and returns findings.
 ``--snapshot`` feeds it a recorded snapshot (tests, dry runs, replaying an
 incident); the default path collects a live one via ``gh api``.
@@ -136,6 +150,55 @@ DEFAULT_FLEET_CLASS_LABELS = ("pulp-build-merge-group", "pulp-build-pr-head")
 SWEEP_WORKFLOW_FILE = "runner-health-check.yml"
 SWEEP_CADENCE_PROMISED_MINUTES = 30.0
 SWEEP_CADENCE_ALARM_MINUTES = 150.0
+
+# --------------------------------------------------------------------------
+# Label reconciliation: why a stalled job cannot be scheduled
+# --------------------------------------------------------------------------
+# Queue age above answers "is the lane alive?". It does not answer "why is
+# nothing picking this up?", and on 2026-09-21 that gap cost 5h30m of zero
+# merges: three queued `macos` jobs each asked for `pulp-build-merge-group`
+# while every online runner advertised `pulp-build-pr-head` instead. Those
+# jobs were unschedulable from the moment they queued, the queue head sat in
+# AWAITING_CHECKS behind them, and nothing anywhere said which label was
+# missing.
+#
+# This is NOT the label-satisfiability census the module docstring argues
+# against, and the difference is the only thing that makes it safe. That
+# census asks "does any runner advertise label X?" of the whole fleet on a
+# schedule; because these runners are JIT and register only while serving, the
+# honest answer at 3am on a healthy lane is "no", and the alarm is muted within
+# a week. This check never asks that question. It only ever evaluates a label
+# set that a real job is RIGHT NOW queued on and has already waited past the
+# stall threshold. Nothing queued means nothing to evaluate, so an idle fleet
+# is silent by construction rather than by tuning.
+#
+# The JIT objection does not vanish, it is bounded: a healthy lane mints a
+# runner for a queued job in seconds to minutes. Gating on the same threshold
+# the queue-age alarm uses gives a missing label 45 minutes to show up, which
+# is far outside mint latency.
+#
+# The verdict is deliberately narrow, because conflating its two failure modes
+# would make it useless. GitHub requires ONE runner to carry every requested
+# label, so "schedulable" means some online runner's label set is a superset of
+# the request. A superset that is busy is SATURATION -- the lane works, the
+# queue is just deep -- and stays silent at any age. Only "no online runner
+# carries this set, busy or idle" is unschedulable.
+#
+# Value here is attribution, not detection: it upgrades a generic "this lane
+# looks dead" into "these jobs ask for `X` and nothing online advertises `X`".
+#
+# Both runner scopes are read. A repo-scoped listing is structurally blind to
+# runners registered in an ORG runner group, and this org has online ones, so a
+# repo-only census would call their labels unserved. An org read needs a token
+# with Administration: Read and can legitimately refuse; when it does, the
+# census is incomplete and this check must not claim anything is missing.
+UNSCHEDULABLE_KIND = "unschedulable_labels"
+RUNNER_CENSUS_BLIND_KIND = "runner_census_blind"
+LABEL_RECONCILIATION_KINDS = {UNSCHEDULABLE_KIND, RUNNER_CENSUS_BLIND_KIND}
+# Two extra API calls per sweep against a ~245-call budget, plus pagination
+# only if a scope ever reports more runners than one page holds.
+RUNNER_CENSUS_PER_PAGE = 100
+MAX_RUNNER_PAGES = 5
 
 
 def parse_ts(value: str) -> dt.datetime:
@@ -302,6 +365,192 @@ def analyze(
         )
 
     findings.sort(key=lambda f: (f["level"] != "alarm", -f["age_minutes"]))
+    return findings
+
+
+def runner_census_gaps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the reasons this sweep cannot prove a requested label is unserved.
+
+    Deliberately NOT evidence_gaps(). That predicate covers the run and jobs
+    listings, and neither a truncated listing nor a failed jobs call can
+    falsify either input this check actually uses: a queued job's own requested
+    labels, and the runner census. Sharing the predicate would leave this
+    permanently degraded on a repo busy enough to truncate -- i.e. permanently
+    unable to fire, which is the shape of guard it exists to replace.
+
+    An EMPTY census counts as a gap rather than as "nothing advertises
+    anything". A zero here is far more often the instrument than the world: an
+    unauthorized scope, a listing that paginated away, a scope nobody asked.
+    The one reading that would license an absence claim is the same reading a
+    broken census produces, so it is never allowed to license one.
+    """
+    census = snapshot.get("runner_census")
+    if not isinstance(census, dict):
+        return [{"scope": "(none)", "error": "no runner census was collected"}]
+    gaps = [dict(gap) for gap in census.get("errors") or []]
+    runners = census.get("runners") or []
+    if not any(r.get("status") == "online" for r in runners):
+        gaps.append(
+            {
+                "scope": ", ".join(census.get("scopes_read") or []) or "(none)",
+                "error": (
+                    f"census returned {len(runners)} runner(s) and none online; "
+                    "an empty census cannot tell an unserved label from an "
+                    "unread one"
+                ),
+            }
+        )
+    return gaps
+
+
+def _stalled_label_sets(
+    snapshot: dict[str, Any], now: dt.datetime, alarm_minutes: float
+) -> list[dict[str, Any]]:
+    """Group jobs queued past ``alarm_minutes`` by the label set they asked for.
+
+    One row per distinct request, because a lane that loses a label loses it
+    for every job at once and three findings saying the same sentence is how a
+    tracker gets skimmed.
+    """
+    rows: dict[frozenset[str], dict[str, Any]] = {}
+    for job in snapshot.get("queued_jobs", []):
+        labels = set(job.get("labels") or [])
+        if not labels:
+            # Nothing to reconcile: the request is unknown, not unserved.
+            continue
+        age = _minutes_between(now, parse_ts(job["queued_at"]))
+        if age < alarm_minutes:
+            continue
+        row = rows.setdefault(
+            frozenset(labels),
+            {
+                "labels": sorted(labels),
+                "count": 0,
+                "oldest": 0.0,
+                "queued_at": job["queued_at"],
+                "run_url": job.get("run_url", ""),
+                "workflows": set(),
+            },
+        )
+        row["count"] += 1
+        if age > row["oldest"]:
+            row["oldest"] = age
+            row["queued_at"] = job["queued_at"]
+            row["run_url"] = job.get("run_url", "")
+        if job.get("workflow"):
+            row["workflows"].add(job["workflow"])
+    return sorted(rows.values(), key=lambda r: -r["oldest"])
+
+
+def _label_finding(
+    kind: str, level: str, row: dict[str, Any], evidence: str
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "level": level,
+        "age_minutes": round(row["oldest"], 1),
+        "labels": list(row["labels"]),
+        "lane": ", ".join(row["labels"]),
+        "workflow": ", ".join(sorted(row["workflows"])),
+        "job": f"{row['count']} queued job(s)",
+        "run_url": row["run_url"],
+        "queued_at": row["queued_at"],
+        "stalled_jobs": row["count"],
+        "lane_evidence": evidence,
+    }
+
+
+def analyze_label_reconciliation(
+    snapshot: dict[str, Any],
+    now: dt.datetime,
+    alarm_minutes: float = ALARM_MINUTES,
+) -> list[dict[str, Any]]:
+    """Findings for stalled jobs whose requested labels nothing online serves.
+
+    Demand-gated: the census is consulted only for a label set some job has
+    already waited on past ``alarm_minutes``. No such job, no finding -- not
+    even an evidence-gap one, so an unreadable scope stays quiet on an idle
+    repo and speaks up only when it is withholding a verdict somebody needs.
+    """
+    stalled = _stalled_label_sets(snapshot, now, alarm_minutes)
+    if not stalled:
+        return []
+
+    census = snapshot.get("runner_census") or {}
+    # Offline registrations keep advertising their labels for as long as they
+    # stay registered, so counting one would answer "was this label ever
+    # configured" rather than "can anything serve it now".
+    online = [
+        r for r in census.get("runners") or [] if r.get("status") == "online"
+    ]
+    advertised: set[str] = set()
+    for runner in online:
+        advertised |= set(runner.get("labels") or [])
+    busy = sum(1 for r in online if r.get("busy"))
+
+    gaps = runner_census_gaps(snapshot)
+    if gaps:
+        # Blind, not healthy, and not unschedulable either. Reporting the
+        # partial diff is still worth doing -- it is the actionable half -- as
+        # long as it is labelled as the unconfirmed reading it is.
+        reasons = "; ".join(
+            f"{gap.get('scope', '?')}: {gap.get('error', 'unknown')}"
+            for gap in gaps
+        )
+        findings = []
+        for row in stalled:
+            unconfirmed = sorted(set(row["labels"]) - advertised)
+            suffix = (
+                " the partial census does not advertise "
+                + ", ".join(f"`{x}`" for x in unconfirmed)
+                + ", which is a lead, not a verdict"
+                if unconfirmed
+                else " the partial census advertises every requested label"
+            )
+            finding = _label_finding(
+                RUNNER_CENSUS_BLIND_KIND,
+                "warn",
+                row,
+                f"runner census incomplete ({reasons}), so no label can be "
+                f"called unserved this sweep;{suffix}",
+            )
+            finding["census_gaps"] = gaps
+            finding["unconfirmed_missing_labels"] = unconfirmed
+            finding["online_runners"] = len(online)
+            findings.append(finding)
+        return findings
+
+    findings = []
+    for row in stalled:
+        requested = set(row["labels"])
+        # GitHub needs ONE runner to carry the whole set, so a superset is the
+        # only thing that makes this schedulable. A busy superset is a deep
+        # queue on a working lane; that is saturation, and it stays silent.
+        if any(requested <= set(r.get("labels") or []) for r in online):
+            continue
+        missing = sorted(requested - advertised)
+        census_note = (
+            f"{row['count']} job(s) waiting, oldest {row['oldest']:.0f} min; "
+            f"{len(online)} online self-hosted runner(s) observed, {busy} busy"
+        )
+        if missing:
+            evidence = (
+                "no online self-hosted runner advertises "
+                + ", ".join(f"`{x}`" for x in missing)
+                + f" — {census_note}"
+            )
+        else:
+            evidence = (
+                "every requested label is advertised somewhere, but no single "
+                "online runner carries the whole set, which is what GitHub "
+                f"requires — {census_note}"
+            )
+        finding = _label_finding(UNSCHEDULABLE_KIND, "alarm", row, evidence)
+        finding["missing_labels"] = missing
+        finding["online_runners"] = len(online)
+        finding["online_busy"] = busy
+        finding["advertised_labels"] = sorted(advertised)
+        findings.append(finding)
     return findings
 
 
@@ -585,6 +834,11 @@ def group_by_lane(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         if f.get("kind") in CONTRIBUTION_KINDS:
             continue
+        if f.get("kind") in LABEL_RECONCILIATION_KINDS:
+            # Already reported as its own lane row, with the missing label
+            # named. Counting it here too would double the "N job(s) stalled"
+            # figure for jobs this sweep only observed once.
+            continue
         lane = lanes.setdefault(
             f["lane"],
             {"lane": f["lane"], "count": 0, "oldest": 0.0, "workflows": set()},
@@ -623,6 +877,83 @@ def _gh_api(path: str) -> dict[str, Any]:
         check=True,
     )
     return json.loads(proc.stdout)
+
+
+def _read_runner_scope(path: str) -> tuple[list[dict[str, Any]], str]:
+    """Read one runner scope. Returns ``(rows, error)`` — never both populated.
+
+    Partial is an error, not a result. A listing that renders fewer rows than
+    its own ``total_count`` may have paginated away exactly the runner that
+    carries the label in question, and a short read is indistinguishable from
+    a small fleet once the rows are in hand.
+    """
+    rows: list[dict[str, Any]] = []
+    total: int | None = None
+    for page in range(1, MAX_RUNNER_PAGES + 1):
+        try:
+            payload = _gh_api(
+                f"/{path}?per_page={RUNNER_CENSUS_PER_PAGE}&page={page}"
+            )
+        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+            return ([], str(exc)[:200])
+        if not isinstance(payload, dict):
+            return ([], "runner listing response is not an object")
+        batch = payload.get("runners")
+        if not isinstance(batch, list):
+            return ([], "runner listing has no runners array")
+        total = payload.get("total_count")
+        if type(total) is not int:
+            return ([], "runner listing has no integer total_count")
+        rows.extend(batch)
+        if len(rows) >= total or not batch:
+            break
+    if total is not None and len(rows) < total:
+        return ([], f"received {len(rows)} of {total} runner rows")
+    return (rows, "")
+
+
+def collect_runner_census(repo: str) -> dict[str, Any]:
+    """Census every self-hosted runner that could serve this repo, both scopes.
+
+    The org scope is not optional cover: runners in an org runner group are
+    invisible to the repo endpoint, and this org keeps online ones. Reading
+    only the repo scope would report their labels as served by nothing.
+    """
+    census: dict[str, Any] = {"runners": [], "scopes_read": [], "errors": []}
+    scopes = [f"repos/{repo}/actions/runners"]
+    org = repo.split("/", 1)[0] if "/" in repo else ""
+    if org:
+        scopes.append(f"orgs/{org}/actions/runners")
+    seen: set[str] = set()
+    for scope in scopes:
+        rows, error = _read_runner_scope(scope)
+        if error:
+            # Usually a token without Administration: Read on the org. Record
+            # it; a silent fallback to repo-only is how a partial inventory
+            # gets read as a complete one.
+            census["errors"].append({"scope": scope, "error": error})
+            continue
+        census["scopes_read"].append(scope)
+        for row in rows:
+            name = row.get("name") or ""
+            if name in seen:
+                continue
+            seen.add(name)
+            census["runners"].append(
+                {
+                    "name": name,
+                    "scope": scope,
+                    "status": row.get("status", "offline"),
+                    "busy": bool(row.get("busy")),
+                    "labels": sorted(
+                        {
+                            label["name"] if isinstance(label, dict) else label
+                            for label in row.get("labels") or []
+                        }
+                    ),
+                }
+            )
+    return census
 
 
 def collect_snapshot(repo: str, now: dt.datetime) -> dict[str, Any]:
@@ -864,6 +1195,10 @@ def collect_snapshot(repo: str, now: dt.datetime) -> dict[str, Any]:
         if e.get("started_at")
     ]
     snapshot["coverage_since"] = min(starts).isoformat() if starts else ""
+    # Kept out of snapshot["errors"] on purpose: a failure of this census
+    # must not suppress the queue-age or contribution alarms, which do not
+    # depend on it. runner_census_gaps() is its own evidence predicate.
+    snapshot["runner_census"] = collect_runner_census(repo)
     snapshot["previous_sweep_at"] = _previous_sweep_at(repo, snapshot)
     return snapshot
 
@@ -908,8 +1243,14 @@ def render_body(
     now: dt.datetime,
 ) -> str:
     alarms = [f for f in findings if f["level"] == "alarm"]
-    lane_alarms = [f for f in alarms if f.get("kind") != "unexpanded_workflow_run"]
+    lane_alarms = [
+        f
+        for f in alarms
+        if f.get("kind") != "unexpanded_workflow_run"
+        and f.get("kind") not in LABEL_RECONCILIATION_KINDS
+    ]
     run_alarms = [f for f in alarms if f.get("kind") == "unexpanded_workflow_run"]
+    label_alarms = [f for f in alarms if f.get("kind") in LABEL_RECONCILIATION_KINDS]
     lines: list[str] = []
     lines.append(
         "_Auto-generated by `.github/workflows/runner-health-check.yml` on "
@@ -935,6 +1276,26 @@ def render_body(
             )
             if f["run_url"]:
                 lines.append(f"  - run: {f['run_url']}")
+    if label_alarms:
+        lines.append("")
+        lines.append("### Unschedulable label sets")
+        lines.append("")
+        lines.append(
+            "No online self-hosted runner — busy or idle — advertises the full "
+            "label set these jobs requested, so waiting longer cannot place "
+            "them. This is reported only for label sets a job is already "
+            "stalled on, which is why an idle fleet never produces it."
+        )
+        lines.append("")
+        for f in label_alarms:
+            lines.append(f"- **`{f['lane']}`** — {f['lane_evidence']}")
+            if f.get("missing_labels"):
+                lines.append(
+                    "  - advertised by nothing online: "
+                    + ", ".join(f"`{x}`" for x in f["missing_labels"])
+                )
+            if f.get("run_url"):
+                lines.append(f"  - oldest run: {f['run_url']}")
     if lane_alarms:
         lines.append("")
         lines.append("### Sick lanes")
@@ -1200,7 +1561,11 @@ def main(argv: list[str] | None = None) -> int:
         min_fleet_jobs=args.contribution_min_fleet_jobs,
     )
     contribution += analyze_sweep_cadence(snapshot, now)
-    findings = contribution + findings
+    findings = (
+        contribution
+        + findings
+        + analyze_label_reconciliation(snapshot, now, args.alarm_minutes)
+    )
     queue_alarms = [
         f
         for f in findings
