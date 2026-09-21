@@ -270,6 +270,62 @@ complete terminal-record observation with ten shared realtime deadline misses;
 it does not assign a performance verdict, emit `pulp.gpu-audio.p4.raw.v1`, or
 prove strict realtime suitability.
 
+### 32-frame lead probe saturation diagnostic (2026-09-20)
+
+The separate `pulp-gpu-shared-io-paced-convolution-probe` was run directly
+against the same configured Release provider with 32-frame blocks, 64 warmup
+blocks, and 1,024 measured blocks. Four runs varied the declared lead; a
+lead-2 control enabled the transport's `wake_on_write` semaphore:
+
+| run | lead | wake-on-write | status | measured misses | callback overruns | late starts | produced before stop |
+| --- | ---: | :---: | --- | ---: | ---: | ---: | ---: |
+| lead-1 | 1 | false | completed | 1,024 | 1 | 17 | 2 |
+| lead-2 | 2 | false | completed | 1,024 | 0 | 15 | 2 |
+| lead-4 | 4 | false | completed | 1,024 | 0 | 33 | 2 |
+| lead-8 | 8 | false | completed | 1,024 | 1 | 77 | 2 |
+| lead-2-wake | 2 | true | completed | 1,024 | 0 | 10 | 2 |
+
+All five runs had zero oracle failures and `performance_verdict:
+"unassigned"`. The exact receipt, block CSV, stderr, source, executable, and
+provider bindings are in
+`docs/validation/gpu-audio-p4-lead-sweep-20260920/manifest.json`; the
+individual receipts and CSVs are retained beside it.
+
+These 32-frame runs do not establish a lead-dependent miss rate or a wakeup
+win. Every run stopped with only two worker-produced blocks even though it
+requested 1,024 measured callbacks. The probe's completion condition accepts
+any positive `produced_blocks_before_stop`, so these runs are harness
+diagnostics showing shared ingress saturation and fail-closed admission, not
+sustained lead trials. The earlier matched benchmark's paced run independently
+observed all 12 staged and 12 shared terminal records; that lifecycle result
+must not be conflated with this probe's two-block output.
+
+### 128-frame sustained lead and wakeup sweep (2026-09-20)
+
+To separate that saturation from a cadence the worker can sustain, the same
+probe was rerun at 128 frames (2.667 ms per callback), with 16 warmup and 128
+measured blocks:
+
+| run | lead | wake-on-write | status | measured misses | callback overruns | late starts | produced before stop |
+| --- | ---: | :---: | --- | ---: | ---: | ---: | ---: |
+| lead-1 | 1 | false | completed | 0 | 0 | 0 | 145 |
+| lead-2 | 2 | false | completed | 0 | 0 | 0 | 146 |
+| lead-4 | 4 | false | completed | 0 | 0 | 0 | 148 |
+| lead-8 | 8 | false | completed | 0 | 0 | 0 | 152 |
+| lead-2-wake | 2 | true | completed | 0 | 0 | 0 | 146 |
+
+All five runs had zero numerical-oracle failures and
+`performance_verdict: "unassigned"`. The exact receipts, block CSVs, stderr,
+source, executable, and provider bindings are retained in
+`docs/validation/gpu-audio-p4-lead-sweep-128-20260920/manifest.json` and its
+run directories. The executable SHA-256 is
+`536b88abcd38dc1c9c436055689998050a729046da1d3da00919257d8e8736bc`.
+
+This is a bounded diagnostic comparison at a sustainable simulated callback
+cadence. It does not prove strict realtime suitability, compare staged against
+shared performance, or assign a P4 verdict; the matched lifecycle receipt and
+the strict raw-writer contract remain separate gates.
+
 ## Stop condition
 
 The seam and benchmark now produce a complete paced screening receipt:
