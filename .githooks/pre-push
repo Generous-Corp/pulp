@@ -271,28 +271,28 @@ fi
 
 # Skill-sync first — it fails fast and the output is the most actionable.
 run_gate_captured "$PYTHON" "$SSC" --base "$BASE" --config "$CFG" --mode=report
-case $? in
+gate_rc=$?; case $gate_rc in
     0) ;;
     1) fail=1 ;;
-    *) echo "[pre-push] skill_sync_check: internal error" >&2 ;;
+    *) gate_could_not_run "skill_sync_check" "$gate_rc"; fail=1 ;;
 esac
 
 # The map skill-sync reads is itself checkable: a pattern matching no tracked
 # file reports nothing, which looks exactly like a clean run.
 if [ -f "$SPML" ]; then
     run_gate_captured "$PYTHON" "$SPML" --base "$BASE" --mode=report
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] skill_path_map_lint: internal error" >&2 ;;
+        *) gate_could_not_run "skill_path_map_lint" "$gate_rc"; fail=1 ;;
     esac
 fi
 
 run_gate_captured "$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report
-case $? in
+gate_rc=$?; case $gate_rc in
     0) ;;
     1) fail=1 ;;
-    *) echo "[pre-push] version_bump_check: internal error" >&2 ;;
+    *) gate_could_not_run "version_bump_check" "$gate_rc"; fail=1 ;;
 esac
 
 # Screenshot-sync. No-op unless this repo carries .pulp/screenshots.toml
@@ -301,20 +301,20 @@ esac
 SSCS="$ROOT/tools/scripts/screenshot_sync_check.py"
 if [ -f "$SSCS" ]; then
     run_gate_captured "$PYTHON" "$SSCS" --base "$BASE" --mode=report
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] screenshot_sync_check: internal error" >&2 ;;
+        *) gate_could_not_run "screenshot_sync_check" "$gate_rc"; fail=1 ;;
     esac
 fi
 
 # Compat-sync.
 if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
     run_gate_captured "$PYTHON" "$CSC" --base "$BASE" --mode=report --enforce
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] compat_sync_check: internal error" >&2 ;;
+        *) gate_could_not_run "compat_sync_check" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -324,20 +324,20 @@ fi
 # commit in the range with a `Config-Doc: skip reason="..."` trailer.
 if [ -f "$CDC" ] && [ -f "$CDC_MAP" ]; then
     run_gate_captured "$PYTHON" "$CDC" --base "$BASE" --mode=report
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] config_doc_check: internal error" >&2 ;;
+        *) gate_could_not_run "config_doc_check" "$gate_rc"; fail=1 ;;
     esac
 fi
 
 # Compat aggregate/part consistency.
 if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; then
     run_gate_captured "$PYTHON" "$COMPAT_AGG" check
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] compat_aggregate: internal error" >&2 ;;
+        *) gate_could_not_run "compat_aggregate" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -347,10 +347,10 @@ fi
 # and archival/report/policy/contract paths allowlisted by the script.
 if [ -f "$DNL" ]; then
     run_gate_captured "$PYTHON" "$DNL" --base "$BASE" --mode=report
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] docs_noise_lint: internal error" >&2 ;;
+        *) gate_could_not_run "docs_noise_lint" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -382,10 +382,10 @@ fi
 # polymorphic surfaces; virtual methods may only be appended within ABI v1.
 if [ -f "$NAG" ]; then
     run_gate_captured "$PYTHON" "$NAG" --base "$BASE" --mode=report
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] node_abi_gate: internal error" >&2 ;;
+        *) gate_could_not_run "node_abi_gate" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -394,10 +394,10 @@ fi
 if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     run_gate_captured "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
         --require-ceiling-reduction
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] hotspot_size_guard: internal error" >&2 ;;
+        *) gate_could_not_run "hotspot_size_guard" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -406,10 +406,10 @@ fi
 # deliberate re-pins pass with a `Planning-Bump:` trailer.
 if [ -f "$PGL" ]; then
     run_gate_captured "$PYTHON" "$PGL" --base "$BASE" --mode=report
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] planning_gitlink_guard: internal error" >&2 ;;
+        *) gate_could_not_run "planning_gitlink_guard" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -421,11 +421,11 @@ fi
 # subject or a `Silent-Revert: skip` trailer.
 if [ -f "$SRG" ]; then
     run_gate_captured "$PYTHON" "$SRG" --base "$BASE" --mode=report
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
         2) fail=1 ;;
-        *) echo "[pre-push] silent_revert_guard: internal error" >&2 ;;
+        *) gate_could_not_run "silent_revert_guard" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -434,18 +434,18 @@ fi
 # paths remain informational so normal worktree checkouts can run it.
 if [ -f "$SCC" ]; then
     run_gate_captured "$PYTHON" "$SCC" --strict
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] check-source-contracts: internal error" >&2 ;;
+        *) gate_could_not_run "check-source-contracts" "$gate_rc"; fail=1 ;;
     esac
 fi
 if [ -f "$SCT" ]; then
     run_gate_captured "$PYTHON" "$SCT"
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] test_source_contracts: internal error" >&2 ;;
+        *) gate_could_not_run "test_source_contracts" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -487,18 +487,18 @@ fi
 # Whole-tree (not diff-scoped), sub-second.
 if [ -f "$TERMS_LINT" ]; then
     "$PYTHON" "$TERMS_LINT" >/dev/null
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) echo "[pre-push] terminology lint: reserved-phrase violation — run \`python3 tools/scripts/processing_model_terms_lint.py\` for details." >&2; fail=1 ;;
-        *) echo "[pre-push] processing_model_terms_lint: internal error" >&2 ;;
+        *) gate_could_not_run "processing_model_terms_lint" "$gate_rc"; fail=1 ;;
     esac
 fi
 if [ -f "$SINGLE_BACKEND_GUARD" ]; then
     run_gate_captured "$PYTHON" "$SINGLE_BACKEND_GUARD"
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] single_backend_guard: internal error" >&2 ;;
+        *) gate_could_not_run "single_backend_guard" "$gate_rc"; fail=1 ;;
     esac
 fi
 # Conflict-marker guard — no tracked file may carry a committed git conflict
@@ -506,10 +506,10 @@ fi
 # write one straight onto main). Whole-tree, sub-second, zero-false-positive.
 if [ -f "$CONFLICT_MARKER_GUARD" ]; then
     run_gate_captured "$PYTHON" "$CONFLICT_MARKER_GUARD"
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) echo "[pre-push] conflict-marker guard: committed conflict marker(s) — run \`python3 tools/scripts/conflict_marker_check.py\` for the file:line list." >&2; fail=1 ;;
-        *) echo "[pre-push] conflict_marker_check: internal error" >&2 ;;
+        *) gate_could_not_run "conflict_marker_check" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -525,10 +525,10 @@ if [ -f "$GPU_LEDGER_SENTINEL" ]; then
     # without committing has a clean tree over a sentinel tip, which a
     # working-tree scan calls clean and CI rejects twenty minutes later.
     run_gate_captured "$PYTHON" "$GPU_LEDGER_SENTINEL" --root "$ROOT" --rev HEAD --mode=report
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
-        *) echo "[pre-push] gpu_ledger_sentinel_check: internal error" >&2 ;;
+        *) gate_could_not_run "gpu_ledger_sentinel_check" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -543,10 +543,10 @@ fi
 # no network, sub-second.
 if [ -f "$GPU_PROVENANCE_VERIFY" ]; then
     run_gate_captured "$PYTHON" "$GPU_PROVENANCE_VERIFY" --root "$ROOT" --verify-only
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) echo "[pre-push] gpu-provenance: a pinned commit is reachable from neither HEAD nor any remote-tracking branch; regenerate the ledger against the commit that replaced it" >&2; fail=1 ;;
-        *) echo "[pre-push] hydrate_gpu_provenance_commits: internal error" >&2 ;;
+        *) gate_could_not_run "hydrate_gpu_provenance_commits" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -556,10 +556,10 @@ fi
 # coverage number. Whole-tree, offline, sub-second.
 if [ -f "$YOGA_ORACLE_PIN" ]; then
     run_gate_captured "$PYTHON" "$YOGA_ORACLE_PIN"
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) echo "[pre-push] yoga-oracle lockstep: the compat oracle no longer describes the pinned Yoga — run \`python3 tools/scripts/check_yoga_oracle_pin.py\` for both values." >&2; fail=1 ;;
-        *) echo "[pre-push] check_yoga_oracle_pin: internal error" >&2 ;;
+        *) gate_could_not_run "check_yoga_oracle_pin" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -572,10 +572,10 @@ fi
 # catches evidence that no longer exists.
 if [ -f "$SEQ_EXPOSURE" ]; then
     run_gate_captured "$PYTHON" "$SEQ_EXPOSURE" --base "$BASE"
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) echo "[pre-push] sequencer-exposure ledger: the ledger is invalid or a delivery slice is unclassified — run \`python3 tools/scripts/sequencer_exposure_check.py --base $BASE\` for the offending row(s)." >&2; fail=1 ;;
-        *) echo "[pre-push] sequencer_exposure_check: internal error" >&2 ;;
+        *) gate_could_not_run "sequencer_exposure_check" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -585,10 +585,10 @@ fi
 # Whole-tree, sub-second. Previously reachable only from a full ctest run.
 if [ -f "$NEG_CAPABILITY" ]; then
     run_gate_captured "$PYTHON" "$NEG_CAPABILITY" --repo-root "$ROOT"
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) echo "[pre-push] negative-capability registry: an authorable compile refusal lacks a reason, or an allowlist entry has no raise site — run \`python3 tools/scripts/negative_capability_check.py\` for details." >&2; fail=1 ;;
-        *) echo "[pre-push] negative_capability_check: internal error" >&2 ;;
+        *) gate_could_not_run "negative_capability_check" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -600,10 +600,10 @@ fi
 # in a manifest this push never touched. Sub-second, offline.
 if [ -f "$LABEL_EXCLUSION" ]; then
     run_gate_captured "$PYTHON" "$LABEL_EXCLUSION"
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; fail=1 ;;
-        *) echo "[pre-push] ctest_label_exclusion_guard: internal error" >&2 ;;
+        *) gate_could_not_run "ctest_label_exclusion_guard" "$gate_rc"; fail=1 ;;
     esac
 fi
 

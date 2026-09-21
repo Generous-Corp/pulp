@@ -11,6 +11,16 @@ needs a version bump (patch/minor/major). Three modes:
             Used by `pulp pr` to make bumps automatic.
     hint    advisory text only; always exits 0. Used by agent hooks.
 
+Exit codes (the caller MUST distinguish these):
+
+    0  the gate ran and the check PASSED
+    1  the gate ran and the check FAILED — a real verdict to act on
+    2  the gate COULD NOT RUN: its config was missing or unreadable, so it
+       checked nothing. This is not a pass. A caller that treats 2 as a pass
+       reports a false green — which is exactly how a missing version bump
+       once rode to main with no tag and no release. "I could not measure"
+       is not "it is fine".
+
 Additional flag:
 
     --require-bump-for-fix-feat
@@ -914,7 +924,10 @@ def main(argv: list[str]) -> int:
         }))
         return 0
 
-    parser = argparse.ArgumentParser(description="Version-bump gate")
+    parser = argparse.ArgumentParser(
+        description="Version-bump gate",
+        epilog="exit codes: 0 = ran and passed; 1 = ran and FAILED; 2 = COULD NOT RUN (config missing/unreadable — it checked nothing, which is NOT a pass)",
+    )
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--config", default=None)
