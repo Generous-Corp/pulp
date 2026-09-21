@@ -1,6 +1,6 @@
 ---
 name: timebase
-description: Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, order-preserving groove kernels, coordinate randomness, streaming cursors, and quantization arithmetic.
+description: Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, inline and order-preserving groove projection, coordinate randomness, streaming cursors, and quantization arithmetic.
 ---
 
 # Timebase
@@ -143,13 +143,37 @@ validates, and a bad setting must not silently move music.
 
 The canonical authored groove remains `timeline::GrooveTemplate`: it owns the
 name, persistence, independent swing/table grids, strengths, and 0..4x accent
-domain. `timebase::OrderPreservingGrooveKernel` is deliberately narrower: a
-fixed-capacity, allocation-free projection of the non-reordering subset. Keep
-its numeric domains aligned with timeline (strength 0..1000, velocity 0..4000,
-at most 1024 steps), but do not call it a template or add a second persistence
-model. Timing strength scales both swing and table displacement; zero must be
-exact identity, including swing. Validate the joint swing/table period
-within the documented bound and reject either reorder or an unbounded period.
+domain. Timebase carries two projections of it, and picking the wrong one is
+the mistake this section exists to prevent.
+
+`timebase::InlineGrooveProjector` is the general one, and the default choice
+for a realtime consumer. It is trivially copyable, holds at most
+`kMaximumInlineGrooveSteps` (16) entries inline, and applies no order
+validation whatsoever, so it admits any table the canonical model admits --
+including one whose adjacent entries lean in opposite directions, which is what
+an ordinary groove is. Reach for it whenever a groove table has to live inside a
+value a realtime consumer swaps wholesale, or whenever the consumer emits by
+displaced position and therefore needs no ordering guarantee.
+
+`timebase::OrderPreservingGrooveKernel` is the strict subset, and is narrow on
+purpose. It refuses at `create()` any table whose scaled offsets fall by more
+than one tick between adjacent entries, which is a far tighter bound than it
+reads as: a 16-entry table's admissible offsets must fit a descending staircase
+spanning at most 15 ticks, while one percent of a 1/16 entry is already 1,764
+ticks. An ordinary authored groove is therefore refused outright, at every
+non-zero strength. Reach for it only when a consumer walks events in authored
+order and cannot re-sort them, so a reordering feel would be a correctness bug
+rather than a feel. Its 1,024-entry inline table also costs 16,432 bytes, which
+is what keeps it out of a spec struct; `InlineGrooveProjector` is 304.
+
+Both keep their numeric domains aligned with timeline (strength 0..1000,
+velocity 0..4000, offsets smaller than one entry), and neither is a template or
+a second persistence model -- do not call them one. Timing strength scales both
+swing and table displacement; zero must be exact identity, including swing. The
+strict kernel additionally validates the joint swing/table period within the
+documented bound and rejects either reorder or an unbounded period; the inline
+projector deliberately has no such pass, and its absence is a stated contract
+rather than an omission to be repaired.
 
 `coordinate_random()` is a pure hash of seed plus stable musical coordinates
 (tick, lane, loop pass/cycle, stream). Never replace it with callback-local RNG
