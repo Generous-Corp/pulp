@@ -468,6 +468,8 @@ const char* describe(BindingOutcome o) noexcept {
             return "widget type cannot accept this binding target";
         case BindingOutcome::unknown_param:
             return "no parameter with that name is declared";
+        case BindingOutcome::undeclared_uniform:
+            return "shader does not declare this uniform";
     }
     return "unknown outcome";
 }
@@ -478,6 +480,11 @@ bool WidgetBridge::record_binding_attempt(const std::string& widget_id,
                                           BindingOutcome outcome) {
     binding_attempts_.push_back(BindingAttempt{widget_id, param_name, target, outcome});
     return is_bound(outcome);
+}
+
+bool WidgetBridge::parameter_id_for_name(const std::string& name,
+                                         state::ParamID& out) const {
+    return resolve_param_id(name, out);
 }
 
 std::vector<std::string> WidgetBridge::unbound_params() const {

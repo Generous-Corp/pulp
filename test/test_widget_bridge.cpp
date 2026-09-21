@@ -4751,6 +4751,25 @@ TEST_CASE("WidgetBridge binds shader scalar uniforms to live value channels",
     REQUIRE(knob->shader_uniforms()[0].v[0] == Catch::Approx(0.125f));
 }
 
+TEST_CASE("Shader uniform bindings report declaration and source failures",
+          "[view][bridge][shader]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform float gain; half4 main(float2 p) { return half4(gain); }');
+        globalThis.missing = bindWidgetShaderUniform('knob', 'other', 'value:drive');
+        globalThis.unknown = bindWidgetShaderUniform('knob', 'gain', 'NoSuchParameter');
+    )");
+    REQUIRE_FALSE(engine.evaluate("missing.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("unknown.success").getWithDefault<bool>(true));
+    REQUIRE(bridge.binding_attempts().size() == 2);
+    REQUIRE(bridge.binding_attempts()[0].outcome == BindingOutcome::undeclared_uniform);
+    REQUIRE(bridge.binding_attempts()[1].outcome == BindingOutcome::unknown_param);
+}
+
 TEST_CASE("WidgetBridge publishes vector shader scope with neutral stale texel",
           "[view][bridge][shader][value-channel]") {
     ScriptEngine engine;

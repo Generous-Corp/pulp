@@ -123,12 +123,21 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         auto id = args.get<std::string>(0, "");
         auto uniform_name = args.get<std::string>(1, "");
         auto source = args.get<std::string>(2, "");
+        const auto fail = [&](BindingOutcome outcome, const std::string& message) {
+            self.record_binding_attempt(id, source, BindingTarget::uniform, outcome);
+            return shader_result(false, message);
+        };
         auto* v = self.widget(id);
         auto* host = v ? dynamic_cast<CustomShaderHost*>(v) : nullptr;
         if (!host)
-            return shader_result(false, v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
+            return fail(v ? BindingOutcome::incompatible_widget : BindingOutcome::null_widget,
+                        v ? "Widget does not support custom shaders" : "No widget with id '" + id + "'");
         constexpr std::string_view prefix = "value:";
-        if (uniform_name.empty()) return shader_result(false, "Uniform name must not be empty");
+        if (uniform_name.empty()) return fail(BindingOutcome::empty_param_name, "Uniform name must not be empty");
+        if (!host->custom_shader().empty() &&
+            !canvas::Canvas::sksl_declares_uniform(host->custom_shader(), uniform_name))
+            return fail(BindingOutcome::undeclared_uniform,
+                        "Shader does not declare uniform '" + uniform_name + "'");
         const bool is_channel = source.size() > prefix.size() && source.compare(0, prefix.size(), prefix) == 0;
         const std::string channel_name = is_channel ? source.substr(prefix.size()) : std::string{};
         bool found = false;
@@ -145,7 +154,15 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
                 return;
             }
         });
-        if (is_channel && !found) return shader_result(false, "No scalar or meter value channel named '" + channel_name + "'");
+        if (is_channel && !found)
+            return fail(BindingOutcome::unknown_value_channel,
+                        "No scalar or meter value channel named '" + channel_name + "'");
+        if (!is_channel) {
+            state::ParamID param_id = 0;
+            if (!self.parameter_id_for_name(source, param_id))
+                return fail(BindingOutcome::unknown_param,
+                            "No parameter named '" + source + "'");
+        }
         auto bindings = host->shader_value_bindings();
         auto it = std::find_if(bindings.begin(), bindings.end(), [&](const auto& binding) {
             return binding.uniform_name == uniform_name;
@@ -158,6 +175,8 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         if (it != bindings.end()) *it = std::move(binding);
         else bindings.push_back(std::move(binding));
         host->set_shader_value_bindings(std::move(bindings));
+        self.record_binding_attempt(id, is_channel ? channel_name : source,
+                                    BindingTarget::uniform, BindingOutcome::ok);
         self.request_repaint();
         return shader_result(true, "");
     });

@@ -761,10 +761,17 @@ public:
     /// Excludes Bypass/Reset designations and triggers, which the host surfaces.
     std::vector<std::string> unbound_params() const;
 
+    /// Record a binding attempt from an extension API such as shader uniforms.
+    /// Keeping it on the bridge preserves one diagnostic stream for all
+    /// declarative binding surfaces.
+    bool record_binding_attempt(const std::string& widget_id,
+                                const std::string& param_name,
+                                BindingTarget target,
+                                BindingOutcome outcome);
+    bool parameter_id_for_name(const std::string& name, state::ParamID& out) const;
+
 private:
     std::vector<BindingAttempt> binding_attempts_;
-    bool record_binding_attempt(const std::string& widget_id, const std::string& param_name,
-                                BindingTarget target, BindingOutcome outcome);
 
     std::function<void()> repaint_callback_;
     std::uint64_t repaint_request_generation_ = 0;
