@@ -46,7 +46,7 @@ namespace pulp::view {
 /// Timing still belongs to the caller. There is no clock here: the host calls
 /// `submit` per raw event and `flush_frame` once per PRESENTED frame.
 class HostDragCoalescer {
-public:
+  public:
     /// Delivers one sample to the view tree. Called synchronously, and the
     /// host may deliver to a target that has since been unmounted, so the
     /// callable is responsible for its own liveness re-check.
@@ -89,7 +89,9 @@ public:
     /// release. Call `discard` first when the target may already be gone.
     void set_frame_driver_running(bool running, const Deliver& deliver);
 
-    bool frame_driver_running() const { return frame_driver_running_; }
+    bool frame_driver_running() const {
+        return frame_driver_running_;
+    }
 
     /// Feed one raw pointer sample.
     SubmitResult submit(const PointerSample& sample, const Deliver& deliver);
@@ -104,13 +106,16 @@ public:
     /// mid-gesture where the target may already be freed.
     void discard();
 
-    bool has_pending() const { return coalescer_.has_pending(); }
+    bool has_pending() const {
+        return coalescer_.has_pending();
+    }
 
-    const Stats& stats() const { return stats_; }
+    const Stats& stats() const {
+        return stats_;
+    }
 
-private:
-    std::size_t deliver_all_(std::vector<PointerSample>& samples,
-                             const Deliver& deliver);
+  private:
+    std::size_t deliver_all_(std::vector<PointerSample>& samples, const Deliver& deliver);
     /// Move the accumulated relative delta onto the first motion sample about
     /// to be dispatched, and reset the accumulator. A dispatched motion sample
     /// stands for every sample merged into it, so it must carry their summed
@@ -126,4 +131,4 @@ private:
     bool pending_has_movement_ = false;
 };
 
-}  // namespace pulp::view
+} // namespace pulp::view

@@ -9,22 +9,22 @@
 #include "pulp_mac_objc_names.h"
 #include "accessibility_mac_host_lifetime.hpp"
 
+#import <Cocoa/Cocoa.h>
 #include <pulp/canvas/cg_canvas.hpp>
 #include <pulp/runtime/log.hpp>
-#include <pulp/view/input_events.hpp>
-#include <pulp/view/text_editor.hpp>  // focus-release affordance: single-line check
-#include <pulp/view/widgets.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/script_event_dispatch.hpp>
-#include <pulp/view/continuous_frames.hpp>  // needs_continuous_frames (CPU + GPU host repaint gate)
-#include <pulp/view/platform/ns_role_mapping.hpp>
-#include <pulp/view/accessibility.hpp>
-#include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
-#include <pulp/view/overlay_dismissal.hpp>
-#include <pulp/view/pointer_dispatch.hpp>  // dispatch_context_menu (no-Skia builds too)
-#include <pulp/view/host_drag_coalescer.hpp>  // per-presented-frame drag coalescing
 #include <pulp/runtime/trace.hpp>
-#import <Cocoa/Cocoa.h>
+#include <pulp/view/accessibility.hpp>
+#include <pulp/view/continuous_frames.hpp> // needs_continuous_frames (CPU + GPU host repaint gate)
+#include <pulp/view/host_drag_coalescer.hpp> // per-presented-frame drag coalescing
+#include <pulp/view/input_events.hpp>
+#include <pulp/view/overlay_dismissal.hpp>
+#include <pulp/view/platform/ns_role_mapping.hpp>
+#include <pulp/view/pointer_dispatch.hpp> // dispatch_context_menu (no-Skia builds too)
+#include <pulp/view/script_event_dispatch.hpp>
+#include <pulp/view/text_editor.hpp> // focus-release affordance: single-line check
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp> // compute_design_viewport_transform
 // CoreVideo is used unconditionally now: the CPU (CoreGraphics, no-Skia)
 // plugin host also drives a CVDisplayLink for continuous frames + the idle
 // pump, not just the GPU host. Must be outside the PULP_HAS_SKIA guard.
@@ -431,28 +431,28 @@ pulp::view::ContextPressResult pulp_plugin_context_press(
 // Routing itself is the portable pulp::view::deliver_mouse_drag (shared with
 // the window host, and headlessly testable) — see pointer_dispatch.hpp for the
 // ordering contract.
-void pulp_plugin_deliver_drag(pulp::view::View* root,
-                              const pulp::view::PointerSample& sample,
+void pulp_plugin_deliver_drag(pulp::view::View* root, const pulp::view::PointerSample& sample,
                               pulp::view::ViewCapture* drag_target) {
-  try {
-    if (!root || !drag_target) return;
-    auto* live_target = drag_target->live_in(*root);
-    if (!live_target) return;
-    pulp::view::deliver_mouse_drag(*root, live_target, sample.position,
-                                   sample.modifiers, sample.click_count,
-                                   sample.button, sample.pointer);
-    if (auto* target = drag_target->live_in(*root))
-        pulp::view::mac_geometry::set_ns_cursor_for_style(target->cursor());
-  } catch (const std::exception& e) {
-    std::fprintf(stderr, "[plugin-view-host] drag delivery threw: %s\n", e.what());
-  } catch (...) {
-    std::fprintf(stderr, "[plugin-view-host] drag delivery threw (unknown)\n");
-  }
+    try {
+        if (!root || !drag_target)
+            return;
+        auto* live_target = drag_target->live_in(*root);
+        if (!live_target)
+            return;
+        pulp::view::deliver_mouse_drag(*root, live_target, sample.position, sample.modifiers,
+                                       sample.click_count, sample.button, sample.pointer);
+        if (auto* target = drag_target->live_in(*root))
+            pulp::view::mac_geometry::set_ns_cursor_for_style(target->cursor());
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[plugin-view-host] drag delivery threw: %s\n", e.what());
+    } catch (...) {
+        std::fprintf(stderr, "[plugin-view-host] drag delivery threw (unknown)\n");
+    }
 }
 
 // Build the deliver callback a HostDragCoalescer hands each released sample.
-pulp::view::HostDragCoalescer::Deliver pulp_plugin_drag_deliverer(
-    pulp::view::View* root, pulp::view::ViewCapture* drag_target) {
+pulp::view::HostDragCoalescer::Deliver
+pulp_plugin_drag_deliverer(pulp::view::View* root, pulp::view::ViewCapture* drag_target) {
     return [root, drag_target](const pulp::view::PointerSample& s) {
         pulp_plugin_deliver_drag(root, s, drag_target);
     };
@@ -469,134 +469,140 @@ pulp::view::HostDragCoalescer::Deliver pulp_plugin_drag_deliverer(
 // request per frame marks the surface dirty and keeps the frame driver's
 // dispatch gate open, which is all a flush needs; one per sample is precisely
 // the O(events) cost coalescing exists to remove.
-bool pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
-                            pulp::view::Point pt,
+bool pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event, pulp::view::Point pt,
                             pulp::view::ViewCapture* drag_target,
                             pulp::view::HostDragCoalescer* coalescer) {
-  try {
-    using namespace pulp::view::mac_geometry;
-    if (!root) return false;
-    const uint16_t mods = modifiers_from_ns_flags(event.modifierFlags);
-    pulp::view::MouseEvent gesture_event;
-    gesture_event.position = pt;
-    gesture_event.window_position = pt;
-    gesture_event.button = pulp::view::MouseButton::left;
-    gesture_event.modifiers = mods;
-    gesture_event.is_down = true;
-    gesture_event.phase = pulp::view::MousePhase::drag;
-    if (!drag_target->live_in(*root)) drag_target->reset();
-    if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
-        // Claim landed mid-drag: hand the pointer to the gesture, but close the
-        // bracket the delivered press opened, and drop the target so the widget
-        // cannot silently resume dragging (with a position jump) if the gesture
-        // later goes terminal.
-        //
-        // FLUSH BEFORE THE HANDOFF, and specifically before the capture is
-        // reset below. The handoff CLOSES this target's bracket; motion held
-        // from before the claim belongs inside it, so it has to be delivered
-        // while the capture still resolves. Flushing after the reset would drop
-        // it; not flushing would strand it until a later frame delivered it to
-        // a target whose gesture had already ended.
-        if (coalescer)
-            coalescer->flush_frame(pulp_plugin_drag_deliverer(root, drag_target));
-        auto* handoff_target = drag_target->live_in(*root);
-        drag_target->reset();
-        pulp::view::deliver_gesture_handoff(*root, handoff_target, pt, mods,
-                                            static_cast<int>(event.clickCount));
+    try {
+        using namespace pulp::view::mac_geometry;
+        if (!root)
+            return false;
+        const uint16_t mods = modifiers_from_ns_flags(event.modifierFlags);
+        pulp::view::MouseEvent gesture_event;
+        gesture_event.position = pt;
+        gesture_event.window_position = pt;
+        gesture_event.button = pulp::view::MouseButton::left;
+        gesture_event.modifiers = mods;
+        gesture_event.is_down = true;
+        gesture_event.phase = pulp::view::MousePhase::drag;
+        if (!drag_target->live_in(*root))
+            drag_target->reset();
+        if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
+            // Claim landed mid-drag: hand the pointer to the gesture, but close the
+            // bracket the delivered press opened, and drop the target so the widget
+            // cannot silently resume dragging (with a position jump) if the gesture
+            // later goes terminal.
+            //
+            // FLUSH BEFORE THE HANDOFF, and specifically before the capture is
+            // reset below. The handoff CLOSES this target's bracket; motion held
+            // from before the claim belongs inside it, so it has to be delivered
+            // while the capture still resolves. Flushing after the reset would drop
+            // it; not flushing would strand it until a later frame delivered it to
+            // a target whose gesture had already ended.
+            if (coalescer)
+                coalescer->flush_frame(pulp_plugin_drag_deliverer(root, drag_target));
+            auto* handoff_target = drag_target->live_in(*root);
+            drag_target->reset();
+            pulp::view::deliver_gesture_handoff(*root, handoff_target, pt, mods,
+                                                static_cast<int>(event.clickCount));
+            return true;
+        }
+        pulp::view::PointerSample sample;
+        sample.position = pt;
+        sample.modifiers = mods;
+        sample.click_count = static_cast<int>(event.clickCount);
+        sample.phase = pulp::view::MousePhase::drag;
+        sample.button = pulp::view::MouseButton::left;
+        sample.pointer.movement_x = static_cast<float>(event.deltaX);
+        // Preserve the established macOS relative-input contract: AppKit's raw
+        // deltaY is already the signed movement Pulp widgets consume. Negating it
+        // here makes bottom-right resize handles shrink on a physical downward
+        // drag and disagrees with MacWindowHost's relative-mouse path.
+        sample.pointer.movement_y = static_cast<float>(event.deltaY);
+        sample.pointer.has_movement_delta = true;
+        if (!coalescer) {
+            pulp_plugin_deliver_drag(root, sample, drag_target);
+            return true;
+        }
+        return coalescer->submit(sample, pulp_plugin_drag_deliverer(root, drag_target)).arm_repaint;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw: %s\n", e.what());
+        return true;
+    } catch (...) {
+        std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw (unknown)\n");
         return true;
     }
-    pulp::view::PointerSample sample;
-    sample.position = pt;
-    sample.modifiers = mods;
-    sample.click_count = static_cast<int>(event.clickCount);
-    sample.phase = pulp::view::MousePhase::drag;
-    sample.button = pulp::view::MouseButton::left;
-    sample.pointer.movement_x = static_cast<float>(event.deltaX);
-    // Preserve the established macOS relative-input contract: AppKit's raw
-    // deltaY is already the signed movement Pulp widgets consume. Negating it
-    // here makes bottom-right resize handles shrink on a physical downward
-    // drag and disagrees with MacWindowHost's relative-mouse path.
-    sample.pointer.movement_y = static_cast<float>(event.deltaY);
-    sample.pointer.has_movement_delta = true;
-    if (!coalescer) {
-        pulp_plugin_deliver_drag(root, sample, drag_target);
-        return true;
-    }
-    return coalescer->submit(sample, pulp_plugin_drag_deliverer(root, drag_target))
-        .arm_repaint;
-  } catch (const std::exception& e) {
-    std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw: %s\n", e.what());
-    return true;
-  } catch (...) {
-    std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw (unknown)\n");
-    return true;
-  }
 }
 
-void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
-                          pulp::view::Point pt, pulp::view::ViewCapture* drag_target,
+void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event, pulp::view::Point pt,
+                          pulp::view::ViewCapture* drag_target,
                           pulp::view::HostDragCoalescer* coalescer) {
-  try {
-    using namespace pulp::view::mac_geometry;
-    if (!root) return;
-    // A release must never reach a handler before the motion that preceded it,
-    // and must never swallow it. Flush FIRST — ahead of the gesture-yield check
-    // below — so every consumer sees the same order regardless of which path
-    // claims the release. A widget whose gesture protocol rejects a terminal
-    // that arrives without its preceding motion then fails loudly rather than
-    // silently.
-    if (coalescer)
-        coalescer->flush_frame(pulp_plugin_drag_deliverer(root, drag_target));
-    pulp::view::MouseEvent gesture_event;
-    gesture_event.position = pt;
-    gesture_event.window_position = pt;
-    gesture_event.button = pulp::view::MouseButton::left;
-    gesture_event.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-    gesture_event.is_down = false;
-    gesture_event.phase = pulp::view::MousePhase::release;
-    gesture_event.click_count = static_cast<int>(event.clickCount);
-    if (!drag_target->live_in(*root)) drag_target->reset();
-    if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
-        // A recognizer can only claim on this release (a double-tap reaches
-        // `ended` on the SECOND release), by which point the press was already
-        // delivered — the widget is mid-gesture. Dropping the up here leaves
-        // that bracket open: Knob::on_mouse_down fired on_gesture_begin and
-        // enabled relative-mouse mode, and only on_mouse_up clears them, so the
-        // host keeps beginEdit open with no endEdit and the DAW holds an
-        // automation touch. Close it before bailing.
-        auto* handoff_target = drag_target->live_in(*root);
+    try {
+        using namespace pulp::view::mac_geometry;
+        if (!root)
+            return;
+        // A release must never reach a handler before the motion that preceded it,
+        // and must never swallow it. Flush FIRST — ahead of the gesture-yield check
+        // below — so every consumer sees the same order regardless of which path
+        // claims the release. A widget whose gesture protocol rejects a terminal
+        // that arrives without its preceding motion then fails loudly rather than
+        // silently.
+        if (coalescer)
+            coalescer->flush_frame(pulp_plugin_drag_deliverer(root, drag_target));
+        pulp::view::MouseEvent gesture_event;
+        gesture_event.position = pt;
+        gesture_event.window_position = pt;
+        gesture_event.button = pulp::view::MouseButton::left;
+        gesture_event.modifiers = modifiers_from_ns_flags(event.modifierFlags);
+        gesture_event.is_down = false;
+        gesture_event.phase = pulp::view::MousePhase::release;
+        gesture_event.click_count = static_cast<int>(event.clickCount);
+        if (!drag_target->live_in(*root))
+            drag_target->reset();
+        if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
+            // A recognizer can only claim on this release (a double-tap reaches
+            // `ended` on the SECOND release), by which point the press was already
+            // delivered — the widget is mid-gesture. Dropping the up here leaves
+            // that bracket open: Knob::on_mouse_down fired on_gesture_begin and
+            // enabled relative-mouse mode, and only on_mouse_up clears them, so the
+            // host keeps beginEdit open with no endEdit and the DAW holds an
+            // automation touch. Close it before bailing.
+            auto* handoff_target = drag_target->live_in(*root);
+            drag_target->reset();
+            pulp::view::deliver_gesture_handoff(*root, handoff_target, pt,
+                                                modifiers_from_ns_flags(event.modifierFlags),
+                                                static_cast<int>(event.clickCount));
+            return;
+        }
+        auto* live_target = drag_target->live_in(*root);
+        if (!live_target)
+            return;
+        // Routing — legacy up, modern release, the W3C pointerup bubble, and the
+        // same-target click-suppression decision — is the portable
+        // pulp::view::deliver_mouse_up, shared with the standalone host. The plug-in
+        // host fires the click SYNCHRONOUSLY (no deferred liveness token) and has no
+        // global-click report; both differences live entirely in this fire_click
+        // hook, so the routing stays identical across hosts.
+        pulp::view::MouseUpHost up_host;
+        up_host.fire_click = [](const std::function<void()>& click_handler,
+                                const std::string& /*clicked_id*/, uint16_t /*mods*/) {
+            if (click_handler)
+                click_handler();
+        };
+        pulp::view::deliver_mouse_up(*root, live_target, pt,
+                                     modifiers_from_ns_flags(event.modifierFlags),
+                                     static_cast<int>(event.clickCount), up_host);
+        if (auto* target = drag_target->live_in(*root))
+            set_ns_cursor_for_style(target->cursor());
         drag_target->reset();
-        pulp::view::deliver_gesture_handoff(
-            *root, handoff_target, pt, modifiers_from_ns_flags(event.modifierFlags),
-            static_cast<int>(event.clickCount));
-        return;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw: %s\n", e.what());
+        if (drag_target)
+            drag_target->reset();
+    } catch (...) {
+        std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw (unknown)\n");
+        if (drag_target)
+            drag_target->reset();
     }
-    auto* live_target = drag_target->live_in(*root);
-    if (!live_target) return;
-    // Routing — legacy up, modern release, the W3C pointerup bubble, and the
-    // same-target click-suppression decision — is the portable
-    // pulp::view::deliver_mouse_up, shared with the standalone host. The plug-in
-    // host fires the click SYNCHRONOUSLY (no deferred liveness token) and has no
-    // global-click report; both differences live entirely in this fire_click
-    // hook, so the routing stays identical across hosts.
-    pulp::view::MouseUpHost up_host;
-    up_host.fire_click = [](const std::function<void()>& click_handler,
-                            const std::string& /*clicked_id*/, uint16_t /*mods*/) {
-        if (click_handler) click_handler();
-    };
-    pulp::view::deliver_mouse_up(*root, live_target, pt,
-                                 modifiers_from_ns_flags(event.modifierFlags),
-                                 static_cast<int>(event.clickCount), up_host);
-    if (auto* target = drag_target->live_in(*root))
-        set_ns_cursor_for_style(target->cursor());
-    drag_target->reset();
-  } catch (const std::exception& e) {
-    std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw: %s\n", e.what());
-    if (drag_target) drag_target->reset();
-  } catch (...) {
-    std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw (unknown)\n");
-    if (drag_target) drag_target->reset();
-  }
 }
 
 void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* event) {
@@ -1221,12 +1227,10 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 
 - (void)setCoalescePointerInput:(BOOL)enabled {
     _dragCoalescer.set_frame_driver_running(
-        enabled ? true : false,
-        pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
+        enabled ? true : false, pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
 }
 - (void)flushCoalescedPointerInput {
-    _dragCoalescer.flush_frame(
-        pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
+    _dragCoalescer.flush_frame(pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
 }
 - (void)discardCoalescedPointerInput {
     _dragCoalescer.discard();
@@ -1238,8 +1242,8 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     // One dirty signal per HELD RUN, not per raw AppKit event: -setNeedsDisplay:
     // both marks the surface dirty and re-opens the display link's dispatch
     // gate, and one request per frame is enough for both.
-    if (pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event],
-                               &_dragTarget, &_dragCoalescer))
+    if (pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget,
+                               &_dragCoalescer))
         [self setNeedsDisplay:YES];
 }
 - (void)mouseUp:(NSEvent*)event {
@@ -1656,10 +1660,9 @@ public:
                 if (self->view_ && ![self->view_ coalescingPointerInput]) {
                     static std::once_flag warned_no_coalescing;
                     std::call_once(warned_no_coalescing, [] {
-                        std::fprintf(stderr,
-                                     "[plugin-view-host] pointer coalescing is OFF "
-                                     "while a frame driver is running — drag motion "
-                                     "will dispatch per event.\n");
+                        std::fprintf(stderr, "[plugin-view-host] pointer coalescing is OFF "
+                                             "while a frame driver is running — drag motion "
+                                             "will dispatch per event.\n");
                     });
                 }
                 [self->view_ flushCoalescedPointerInput];
@@ -2106,12 +2109,10 @@ private:
 
 - (void)setCoalescePointerInput:(BOOL)enabled {
     _dragCoalescer.set_frame_driver_running(
-        enabled ? true : false,
-        pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
+        enabled ? true : false, pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
 }
 - (void)flushCoalescedPointerInput {
-    _dragCoalescer.flush_frame(
-        pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
+    _dragCoalescer.flush_frame(pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
 }
 - (void)discardCoalescedPointerInput {
     _dragCoalescer.discard();
@@ -2124,9 +2125,10 @@ private:
     // dirty AND keeps the display link's dispatch gate open, so a flush is
     // guaranteed to come; issuing one per sample is the O(events) cost this
     // exists to remove.
-    if (pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event],
-                               &_dragTarget, &_dragCoalescer)) {
-        if (self.rootView) self.rootView->request_repaint();
+    if (pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget,
+                               &_dragCoalescer)) {
+        if (self.rootView)
+            self.rootView->request_repaint();
     }
 }
 - (void)mouseUp:(NSEvent*)event {
@@ -2818,10 +2820,9 @@ private:
                     if (self->metal_view_ && ![self->metal_view_ coalescingPointerInput]) {
                         static std::once_flag warned_no_coalescing;
                         std::call_once(warned_no_coalescing, [] {
-                            std::fprintf(stderr,
-                                         "[plugin-gpu-host] pointer coalescing is OFF "
-                                         "while a frame driver is running — drag motion "
-                                         "will dispatch per event.\n");
+                            std::fprintf(stderr, "[plugin-gpu-host] pointer coalescing is OFF "
+                                                 "while a frame driver is running — drag motion "
+                                                 "will dispatch per event.\n");
                         });
                     }
                     [self->metal_view_ flushCoalescedPointerInput];

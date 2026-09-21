@@ -69,7 +69,7 @@ struct Recorder {
     }
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("A frame's worth of raw drag events reaches the tree once",
           "[view][pointer][coalesce][plugin-host]") {
@@ -82,12 +82,12 @@ TEST_CASE("A frame's worth of raw drag events reaches the tree once",
     for (int i = 1; i <= 60; ++i)
         c.submit(drag(static_cast<float>(i), 0.0f), rec.deliver());
 
-    REQUIRE(rec.seen.empty());          // nothing dispatched yet
+    REQUIRE(rec.seen.empty()); // nothing dispatched yet
     REQUIRE(c.stats().raw_samples == 60);
 
     REQUIRE(c.flush_frame(rec.deliver()) == 1);
     REQUIRE(rec.seen.size() == 1);
-    REQUIRE(rec.seen[0].position.x == 60.0f);   // the newest position survives
+    REQUIRE(rec.seen[0].position.x == 60.0f); // the newest position survives
 
     const auto& s = c.stats();
     REQUIRE(s.raw_samples == 60);
@@ -129,7 +129,7 @@ TEST_CASE("The host is told to arm exactly one repaint per held run",
     for (int i = 0; i < 40; ++i)
         if (c.submit(drag(static_cast<float>(i), 0.0f), rec.deliver()).arm_repaint)
             ++armed;
-    REQUIRE(armed == 1);   // the idle -> pending edge, and only that
+    REQUIRE(armed == 1); // the idle -> pending edge, and only that
 
     c.flush_frame(rec.deliver());
 
@@ -167,8 +167,7 @@ TEST_CASE("Merged relative movement deltas are summed, not replaced",
     // Ten one-pixel hops. A widget that integrates movement_x (a knob in
     // relative-mouse mode) must see the full travel, not the last hop.
     for (int i = 1; i <= 10; ++i)
-        c.submit(drag_with_delta(static_cast<float>(i), static_cast<float>(2 * i),
-                                 1.0f, 2.0f),
+        c.submit(drag_with_delta(static_cast<float>(i), static_cast<float>(2 * i), 1.0f, 2.0f),
                  rec.deliver());
 
     REQUIRE(c.flush_frame(rec.deliver()) == 1);
@@ -195,11 +194,11 @@ TEST_CASE("Leaving the frame driver flushes; a later sample dispatches at once",
     REQUIRE(rec.seen.empty());
 
     c.set_frame_driver_running(false, rec.deliver());
-    REQUIRE(rec.seen.size() == 1);            // held motion is not stranded
+    REQUIRE(rec.seen.size() == 1); // held motion is not stranded
     REQUIRE(rec.seen[0].position.x == 5.0f);
 
     c.submit(drag(6.0f, 0.0f), rec.deliver());
-    REQUIRE(rec.seen.size() == 2);            // fail-safe, delivered immediately
+    REQUIRE(rec.seen.size() == 2); // fail-safe, delivered immediately
 }
 
 TEST_CASE("Teardown drops held motion instead of delivering it",
