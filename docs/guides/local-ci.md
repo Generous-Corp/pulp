@@ -1100,10 +1100,30 @@ It is tiered:
   `PULP_LOCAL_MACOS_RUNS_ON_JSON`, the Studios that host the required `macos`
   gate. A file scan cannot resolve that, so in a workflow the bound is the
   **author's** responsibility: route a self-hosted macOS leg through
-  `tools/ci/governed-build.sh` (as `build.yml`'s intel-canary compile,
-  `examples-validation.yml`, `web-plugins.yml`'s `gpu-audio-macos` job, and
-  `format-baseline-diff.yml` now do). The steer everywhere is `pulp build` /
+  `tools/ci/governed-build.sh` (as `build.yml`'s matrix `Build` step on its
+  macOS and Linux legs and its intel-canary compile, `examples-validation.yml`,
+  `web-plugins.yml`'s `gpu-audio-macos` job, and `format-baseline-diff.yml` now
+  do; `build.yml`'s Windows leg keeps a literal, because a GitHub-hosted
+  ephemeral runner shares with nobody and no lane runs the wrapper under MSYS
+  bash today). The steer everywhere is `pulp build` /
   `tools/ci/governed-build.sh`, which take their `-j` from the governor.
+
+  A **literal** `--parallel N` in a workflow is the specific anti-pattern here,
+  and not only because no one number fits every runner. It is also a silent
+  ceiling: it keeps its value when a VM is resized, so the resize buys nothing
+  and the no-op reads as "more cores did not help" rather than "the build was
+  never asked to use them". `build.yml`'s `Build` step carried `--parallel 4`
+  fleet-wide for this reason until it was replaced by the governor.
+
+  **The gate VM's bound is RAM, not vCPU.** tartci sizes a macOS VM's cores
+  from the lane's lease (`vm_cores`, 12 for Pulp's gate lane on the Studio) but
+  never sets `--memory` — only the Linux provider does — so every macOS gate VM
+  runs at the golden image's 8 GiB whatever its core count. The Tier-0 bound is
+  `min(cores, RAM x 0.75 / 1.5 GiB)`, so at 8 GiB the memory axis pins the build
+  to **4 jobs** on a 12-, 6- or 4-vCPU VM alike. Raising `vm_cores` alone
+  therefore does not speed up the build step; the VM's memory has to move with
+  it. Read a leg's actual share from its `[governed-build]` log line rather than
+  inferring it from the lease.
 - **Tier 1 — tartci per-host lease governor.** On a host running a tartci lease
   store, builds and VM runners acquire a weighted core+memory lease before
   starting; admission is `min(core-budget, memory-budget)`, so a build that

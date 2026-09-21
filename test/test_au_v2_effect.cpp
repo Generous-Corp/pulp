@@ -36,8 +36,12 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 using namespace pulp;
@@ -1398,4 +1402,242 @@ TEST_CASE("AU v2 fires PropertyChanged for a processor latency/tail change",
     REQUIRE(count(kAudioUnitProperty_TailTime) == 1);
 
     effect.DoCleanup();
+}
+
+// ===========================================================================
+// Factory presets.
+//
+// `PresetManager` has always modelled factory-versus-user presets, but nothing
+// pointed it at a bundle and no AU adapter advertised the result, so Logic /
+// GarageBand / MainStage showed only "Factory Default". These cover the whole
+// path a host walks: discover the bank, select an entry, and — the part a list
+// of names alone would not prove — land its values in the StateStore.
+// ===========================================================================
+namespace {
+
+class PresetEffectProcessor : public pulp::format::Processor {
+  public:
+    static constexpr pulp::state::ParamID kGainId = 1;
+    static constexpr pulp::state::ParamID kMixId = 2;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "AUPresetTest",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.au-presets",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2}},
+            .output_buses = {{"Main Out", 2}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter({.id = kGainId, .name = "Gain", .range = {-24.0f, 24.0f, 0.0f, 0.01f}});
+        store.add_parameter({.id = kMixId, .name = "Mix", .range = {0.0f, 1.0f, 0.5f, 0.001f}});
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>&, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        for (std::size_t c = 0; c < output.num_channels(); ++c) {
+            float* dst = output.channel_ptr(c);
+            for (std::size_t n = 0; n < output.num_samples(); ++n)
+                dst[n] = 0.0f;
+        }
+    }
+
+    void process(pulp::format::ProcessBuffers& audio, pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        if (auto* out = audio.main_output()) {
+            pulp::audio::BufferView<const float> empty_input;
+            process(*out, empty_input, midi_in, midi_out, context);
+        }
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> create_preset_effect() {
+    return std::make_unique<PresetEffectProcessor>();
+}
+
+struct ScopedPresetFactory {
+    ScopedPresetFactory() : previous(pulp::format::registered_factory()) {
+        pulp::format::register_plugin(create_preset_effect);
+    }
+    ~ScopedPresetFactory() {
+        pulp::format::register_plugin(previous);
+    }
+    pulp::format::ProcessorFactory previous;
+};
+
+// A staged factory-preset folder. The JSON mirrors what `PresetManager::save`
+// writes, so the fixture exercises the real reader rather than a shape only
+// this test knows how to produce.
+class ScopedPresetDirectory {
+  public:
+    ScopedPresetDirectory() {
+        dir_ = std::filesystem::temp_directory_path() /
+               ("pulp-au-presets-" + std::to_string(::getpid()) + "-" +
+                std::to_string(reinterpret_cast<std::uintptr_t>(this)));
+        std::filesystem::create_directories(dir_);
+    }
+    ~ScopedPresetDirectory() {
+        std::error_code ec;
+        std::filesystem::remove_all(dir_, ec);
+    }
+
+    ScopedPresetDirectory(const ScopedPresetDirectory&) = delete;
+    ScopedPresetDirectory& operator=(const ScopedPresetDirectory&) = delete;
+
+    void write(const std::string& name, float gain, float mix) const {
+        std::ofstream f(dir_ / (name + ".json"));
+        f << "{\n  \"name\": \"" << name << "\",\n"
+          << "  \"manufacturer\": \"PulpTest\",\n"
+          << "  \"plugin\": \"AUPresetTest\",\n"
+          << "  \"version\": 1,\n"
+          << "  \"parameters\": {\n"
+          << "    \"Gain\": " << gain << ",\n"
+          << "    \"Mix\": " << mix << "\n"
+          << "  }\n}\n";
+    }
+
+    const std::filesystem::path& path() const {
+        return dir_;
+    }
+
+  private:
+    std::filesystem::path dir_;
+};
+
+} // namespace
+
+TEST_CASE("AU v2 derives the factory-preset folder from the bundle shape", "[au][au-v2][presets]") {
+    using pulp::format::au::factory_presets_dir_for_binary;
+
+    // macOS component / VST3 / standalone-app layout.
+    REQUIRE(factory_presets_dir_for_binary("/P/Foo.component/Contents/MacOS/Foo") ==
+            std::filesystem::path("/P/Foo.component/Contents/Resources/Presets"));
+
+    // Flat iOS app-extension bundle: the binary sits at the bundle root, and
+    // `Resources/` is a macOS-only path that does not exist there.
+    REQUIRE(factory_presets_dir_for_binary("/P/Foo.appex/Foo") ==
+            std::filesystem::path("/P/Foo.appex/Presets"));
+
+    // Not inside a bundle: discovery must yield nothing rather than scan a
+    // neighbouring directory. This is the case every unit-test binary hits.
+    REQUIRE(factory_presets_dir_for_binary("/P/build/test/pulp-test-au").empty());
+    REQUIRE(factory_presets_dir_for_binary("").empty());
+    // `MacOS` without the enclosing `Contents` is not a bundle either.
+    REQUIRE(factory_presets_dir_for_binary("/P/MacOS/Foo").empty());
+}
+
+TEST_CASE("AU v2 advertises bundled factory presets and selecting one moves state",
+          "[au][au-v2][presets]") {
+    ScopedPresetFactory factory;
+    ScopedPresetDirectory presets;
+    // Written out of alphabetical order on purpose: the table sorts by name, so
+    // "Bright" must be index 0 regardless of creation order. A host stores the
+    // index in its session, so that ordering is a compatibility contract.
+    presets.write("Warm", 6.0f, 0.75f);
+    presets.write("Bright", -9.0f, 0.25f);
+
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    effect.factory_preset_table().set_directory(presets.path());
+
+    // GetPropertyInfo is what makes a host ask for the value at all.
+    UInt32 size = 0;
+    bool writable = true;
+    REQUIRE(effect.DispatchGetPropertyInfo(kAudioUnitProperty_FactoryPresets,
+                                           kAudioUnitScope_Global, 0, size, writable) == noErr);
+    REQUIRE(size == sizeof(CFArrayRef));
+    REQUIRE(writable == false);
+
+    CFArrayRef list = nullptr;
+    REQUIRE(effect.DispatchGetProperty(kAudioUnitProperty_FactoryPresets, kAudioUnitScope_Global, 0,
+                                       &list) == noErr);
+    REQUIRE(list != nullptr);
+    REQUIRE(CFArrayGetCount(list) == 2);
+
+    auto name_at = [&](CFIndex i) {
+        const auto* preset = static_cast<const AUPreset*>(CFArrayGetValueAtIndex(list, i));
+        REQUIRE(preset != nullptr);
+        REQUIRE(preset->presetName != nullptr);
+        char buffer[64] = {};
+        REQUIRE(
+            CFStringGetCString(preset->presetName, buffer, sizeof(buffer), kCFStringEncodingUTF8));
+        return std::string(buffer);
+    };
+    REQUIRE(name_at(0) == "Bright");
+    REQUIRE(name_at(1) == "Warm");
+    CFRelease(list);
+
+    // Park both parameters away from either preset so a no-op "load" cannot
+    // pass by accident.
+    REQUIRE(effect.SetParameter(PresetEffectProcessor::kGainId, kAudioUnitScope_Global, 0, 0.0f,
+                                0) == noErr);
+    REQUIRE(effect.SetParameter(PresetEffectProcessor::kMixId, kAudioUnitScope_Global, 0, 0.5f,
+                                0) == noErr);
+
+    AUPreset selection{};
+    selection.presetNumber = 1; // "Warm"
+    selection.presetName = CFSTR("Warm");
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                                       &selection, sizeof(selection)) == noErr);
+
+    // The point of the whole feature: the host's selection changed the plug-in,
+    // not just the menu label.
+    Float32 gain = 0.0f;
+    Float32 mix = 0.0f;
+    REQUIRE(effect.GetParameter(PresetEffectProcessor::kGainId, kAudioUnitScope_Global, 0, gain) ==
+            noErr);
+    REQUIRE(effect.GetParameter(PresetEffectProcessor::kMixId, kAudioUnitScope_Global, 0, mix) ==
+            noErr);
+    REQUIRE(gain == Catch::Approx(6.0f));
+    REQUIRE(mix == Catch::Approx(0.75f));
+
+    // And the host can read the selection back.
+    AUPreset current{};
+    REQUIRE(effect.DispatchGetProperty(kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                                       &current) == noErr);
+    REQUIRE(current.presetNumber == 1);
+    REQUIRE(current.presetName != nullptr);
+    REQUIRE(CFStringCompare(current.presetName, CFSTR("Warm"), 0) == kCFCompareEqualTo);
+    CFRelease(current.presetName);
+
+    // Switching to the other entry moves state again — one successful load is
+    // not proof the index is honoured.
+    selection.presetNumber = 0;
+    selection.presetName = CFSTR("Bright");
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                                       &selection, sizeof(selection)) == noErr);
+    REQUIRE(effect.GetParameter(PresetEffectProcessor::kGainId, kAudioUnitScope_Global, 0, gain) ==
+            noErr);
+    REQUIRE(gain == Catch::Approx(-9.0f));
+
+    // An out-of-range number is rejected and leaves the plug-in alone.
+    selection.presetNumber = 7;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                                       &selection, sizeof(selection)) != noErr);
+    REQUIRE(effect.GetParameter(PresetEffectProcessor::kGainId, kAudioUnitScope_Global, 0, gain) ==
+            noErr);
+    REQUIRE(gain == Catch::Approx(-9.0f));
+}
+
+TEST_CASE("AU v2 reports no factory-preset property when the plug-in ships none",
+          "[au][au-v2][presets]") {
+    ScopedPresetFactory factory;
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    // No directory staged: a unit-test binary is not inside a bundle, so
+    // discovery finds nothing.
+    REQUIRE(effect.factory_preset_table().size() == 0);
+
+    UInt32 size = 0;
+    bool writable = false;
+    // Must FAIL, not answer with an empty array — a host that gets an empty
+    // bank still draws the menu.
+    REQUIRE(effect.DispatchGetPropertyInfo(kAudioUnitProperty_FactoryPresets,
+                                           kAudioUnitScope_Global, 0, size, writable) != noErr);
 }
