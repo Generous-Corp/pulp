@@ -138,6 +138,51 @@ record provider and SDK identity, and run explicit fallback-priming and
 lifecycle checks. None of those checks may be inferred from the matched
 screening output or represented as `pulp.gpu-audio.p4.raw.v1` evidence.
 
+## Observed host screening run (2026-09-20)
+
+The Release publication build completed for
+`pulp-gpu-audio-p4-matched-convolution-benchmark`,
+`pulp-test-gpu-audio-trace`, and the provider-identity fixture target. The
+focused command was:
+
+```text
+ctest --test-dir build-gpu-publish/test --output-on-failure -R 'pulp-gpu-audio-p4-matched-convolution-benchmark|GPU audio trace'
+```
+
+The trace tests and both exact-provider identity fixtures passed. The direct
+matched executable was then run with its stdout and stderr preserved under
+`docs/validation/gpu-audio-p4-matched-screening-20260920/`:
+
+```text
+build-gpu-publish/test/pulp-gpu-audio-p4-matched-convolution-benchmark \
+  > docs/validation/gpu-audio-p4-matched-screening-20260920/receipt.jsonl \
+  2> docs/validation/gpu-audio-p4-matched-screening-20260920/run.stderr
+exit=1
+```
+
+The terminal record is `status: "screening_failed"`,
+`performance_verdict: "unassigned"`, with `staged_records: 12`,
+`shared_records: 0`, `staged_misses: 0`, and `shared_misses: 10`.
+The receipt SHA-256 is
+`db347e39169708fb8916fd5adcdb13dc46a0b0b9f568b4f1cda39b3f2127a7da`;
+the preserved stderr SHA-256 is
+`9591e15c3c26f12180d2448eae87586ed73e841fd15db149c480b32f7c42c19e`;
+the benchmark executable SHA-256 is
+`025f656efe45b90c8fecd86e260820a51d755096fcd859c0b659f2a153f95869`.
+
+This is not an unavailable-provider result. The standalone
+`pulp-gpu-dawn-shared-io-provider-probe` passed on the same host and reported
+an Apple M5 Max Metal adapter (`hardware_model: "Mac17,7"`,
+`adapter_name: "Apple M5 Max"`, `process_events_calls: 147`), and the exact
+provider identity fixtures passed. The zero shared records therefore expose a
+benchmark lifecycle gap: `run_trial` makes only bounded `pump()` calls and
+then drains the trace queue, while `drain_gpu_convolver_trial_records` does not
+service or fence the asynchronous provider. The provider probe's successful
+completion requires a bounded `ProcessEvents` wait loop. Until the benchmark
+adds that quiescent service/fence step, keep this capture as a failed
+intermediate diagnostic and do not treat it as a completed matched screening,
+performance result, or raw receipt.
+
 ## Stop condition
 
 Until the seam and benchmark exist, the honest status is **screening only**:
