@@ -600,8 +600,11 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
                                  float x, float y, float w, float h,
                                  const ShaderDrawOptions& options) {
     if (!canvas_ || sksl.empty()) return false;
+    std::string composed = sksl;
+    if (options.geometry && sksl.find("PulpFragment shade") != std::string::npos)
+        composed = compose_sdf_geometry_shader(options.geometry->shape, sksl);
     auto& cache = RuntimeEffectCache::instance();
-    auto effect = cache.get_or_compile(sksl);
+    auto effect = cache.get_or_compile(composed);
     if (!effect) return false;
     SkRuntimeShaderBuilder builder(effect);
     if (effect->findUniform("resolution")) builder.uniform("resolution") = SkV2{w, h};
@@ -615,6 +618,19 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
     if (effect->findUniform("trackColor")) builder.uniform("trackColor") = color(u.track_color);
     if (effect->findUniform("fillColor")) builder.uniform("fillColor") = color(u.fill_color);
     if (effect->findUniform("thumbColor")) builder.uniform("thumbColor") = color(u.thumb_color);
+    if (options.geometry) {
+        const auto& style = options.geometry->style;
+        if (effect->findUniform("shapeType")) builder.uniform("shapeType") = static_cast<float>(options.geometry->shape);
+        if (effect->findUniform("cornerRadius")) builder.uniform("cornerRadius") = style.corner_radius;
+        if (effect->findUniform("strokeWidth")) builder.uniform("strokeWidth") = style.stroke_width;
+        if (effect->findUniform("arcStart")) builder.uniform("arcStart") = style.arc_start;
+        if (effect->findUniform("arcSweep")) builder.uniform("arcSweep") = style.arc_sweep;
+        if (effect->findUniform("squirclePower")) builder.uniform("squirclePower") = style.squircle_power;
+        if (effect->findUniform("innerRadius")) builder.uniform("innerRadius") = style.inner_radius;
+        if (effect->findUniform("armWidth")) builder.uniform("armWidth") = style.arm_width;
+        if (effect->findUniform("bezierCX")) builder.uniform("bezierCX") = style.bezier_cx;
+        if (effect->findUniform("bezierCY")) builder.uniform("bezierCY") = style.bezier_cy;
+    }
     if (options.data_texture) {
         if (auto data_shader = make_shader_data_texture(options.data_texture)) {
             std::vector<std::string> candidates = {options.data_texture->name,
@@ -648,7 +664,9 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
     if (!shader) return false;
     SkPaint paint; paint.setShader(std::move(shader));
     canvas_->save(); canvas_->translate(x, y);
-    canvas_->drawRect(SkRect::MakeXYWH(0, 0, w, h), paint); canvas_->restore();
+    canvas_->drawRect(SkRect::MakeXYWH(-options.reach, -options.reach,
+                                       w + 2.0f * options.reach,
+                                       h + 2.0f * options.reach), paint); canvas_->restore();
     return true;
 }
 

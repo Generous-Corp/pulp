@@ -50,6 +50,7 @@ bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
     options.data_texture = host.shader_scope_binding().has_value()
                                ? host.shader_scope_binding()->data
                                : nullptr;
+    options.geometry = host.shader_geometry();
     if (!host.chart_shader().empty()) {
         if (dynamic_cast<Knob*>(&view) != nullptr) {
             canvas::Canvas::SDFStyle style;

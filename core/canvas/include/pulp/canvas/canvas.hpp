@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <optional>
 #include <variant>
 #include <functional>
 
@@ -1640,11 +1641,17 @@ public:
         std::uint32_t publish_sequence = 0;
     };
 
+    struct ShaderGeometry {
+        SDFShape shape = SDFShape::rect;
+        SDFStyle style{};
+    };
+
     struct ShaderDrawOptions {
         ShaderUniforms uniforms;
         std::vector<NamedUniform> named_uniforms;
         float reach = 0.0f;
         std::shared_ptr<const ShaderDataTexture> data_texture;
+        std::optional<ShaderGeometry> geometry;
     };
 
     /// Validate and compile an SkSL shader without drawing. Returns error string (empty = success).

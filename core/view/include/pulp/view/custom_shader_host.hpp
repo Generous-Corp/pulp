@@ -96,6 +96,12 @@ public:
     }
     void set_shader_reach(float reach) { shader_reach_ = reach < 0.0f ? 0.0f : reach; }
     float shader_reach() const { return shader_reach_; }
+    void set_shader_geometry(std::optional<canvas::Canvas::ShaderGeometry> geometry) {
+        shader_geometry_ = std::move(geometry);
+    }
+    const std::optional<canvas::Canvas::ShaderGeometry>& shader_geometry() const {
+        return shader_geometry_;
+    }
 
     /// True when the shader actually declares a `time` uniform, and therefore
     /// needs a continuous repaint to animate.
@@ -126,6 +132,7 @@ private:
     std::vector<ShaderValueBinding> shader_value_bindings_;
     std::optional<ShaderScopeBinding> shader_scope_binding_;
     float shader_reach_ = 0.0f;
+    std::optional<canvas::Canvas::ShaderGeometry> shader_geometry_;
 };
 
 } // namespace pulp::view
