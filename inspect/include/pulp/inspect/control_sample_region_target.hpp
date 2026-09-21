@@ -1,16 +1,18 @@
 #pragma once
 
-#include <pulp/inspect/control_execution.hpp>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <pulp/inspect/control_execution.hpp>
 
 namespace pulp::host {
 class SignalGraph;
 struct BakedPlan;
 struct SampleRegionProof;
+} // namespace pulp::host
+namespace pulp::state {
+class StateStore;
 }
-namespace pulp::state { class StateStore; }
 
 namespace pulp::inspect {
 
@@ -23,13 +25,13 @@ struct ControlSampleRegionGeneration {
 class ControlSampleRegionTarget final {
   public:
     using FrozenProof = std::function<host::SampleRegionProof(std::uint32_t, int)>;
-    static std::shared_ptr<ControlSampleRegionTarget> editable(
-        host::SignalGraph&, state::StateStore&, ControlSampleRegionGeneration&);
+    static std::shared_ptr<ControlSampleRegionTarget>
+    editable(host::SignalGraph&, state::StateStore&, ControlSampleRegionGeneration&);
     /// The plan and proof provider belong to the admitted signed processor.
     /// They must remain alive until the Standalone executor has drained.
-    static std::shared_ptr<ControlSampleRegionTarget> frozen(
-        const host::BakedPlan&, state::StateStore&, ControlSampleRegionGeneration&,
-        FrozenProof, std::function<bool()> prepared);
+    static std::shared_ptr<ControlSampleRegionTarget>
+    frozen(const host::BakedPlan&, state::StateStore&, ControlSampleRegionGeneration&, FrozenProof,
+           std::function<bool()> prepared);
     ~ControlSampleRegionTarget();
     bool can_read() const noexcept;
     bool can_edit() const noexcept;

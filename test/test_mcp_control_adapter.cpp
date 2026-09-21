@@ -630,8 +630,8 @@ TEST_CASE("MCP dynamically projects sample-region operations from the control re
           "[mcp][control][sample-region][schema]") {
     auto state = std::make_shared<FakeState>();
     set_control_mcp_session_factory_for_test(factory(state));
-    const auto tools = pulp_mcp::server::handle_request(
-        R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
+    const auto tools =
+        pulp_mcp::server::handle_request(R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
     INFO(tools);
     const auto read = tools.find("\"name\":\"pulp_control_graph_sample_region_read\"");
     const auto edit = tools.find("\"name\":\"pulp_control_graph_sample_region_edit\"");
