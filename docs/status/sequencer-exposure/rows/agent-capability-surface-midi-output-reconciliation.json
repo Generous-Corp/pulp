@@ -26,7 +26,7 @@
     {
       "path": "tools/scripts/agent_capability_manifest.py",
       "needles": [
-        "SURFACE_INVENTORY_VERSION = 82"
+        "SURFACE_INVENTORY_VERSION = 87"
       ]
     }
   ],
@@ -49,7 +49,7 @@
     },
     "design_time_agent_manifest": {
       "disposition": "not_applicable",
-      "rationale": "docs/status/agent-capabilities.json is byte-identical: the same 110 capabilities, none added, removed, or re-keyed. What moves is the public-surface ledger — two header digests and the inventory version — which records which headers exist, not which capabilities are published. pulp/midi/message.hpp graduates out of the frozen legacy baseline into REVIEWED_HEADERS as infrastructure with no capability keys, because a frozen digest must never be restamped to match an edit; all 337 frozen rows stay intact and the reviewed entry shadows the stale one."
+      "rationale": "docs/status/agent-capabilities.json is byte-identical: the same 111 capabilities, none added, removed, or re-keyed. What moves is the public-surface ledger — two header digests and the inventory version — which records which headers exist, not which capabilities are published. pulp/midi/message.hpp graduates out of the frozen legacy baseline into REVIEWED_HEADERS as infrastructure with no capability keys, because a frozen digest must never be restamped to match an edit; all 337 frozen rows stay intact and the reviewed entry shadows the stale one."
     }
   }
 }
