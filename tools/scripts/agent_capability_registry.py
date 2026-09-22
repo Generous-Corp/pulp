@@ -462,17 +462,6 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
-        "include": "pulp/midi/ump_conversion.hpp",
-        "fingerprint": "sha256:ce867f25f6a66e6764a8729df9e13cd0f37fd0f8f630e9d8ac219b3542f9891d",
-        "disposition": "infrastructure",
-        "capability_keys": [],
-        "rationale": (
-            "Transport-boundary translation between a host or device MIDI 1.0 byte "
-            "stream and the UMP sidecar; the CoreMIDI, WinRT, CLAP and AU adapters "
-            "are its only callers and no capability kernel includes it."
-        ),
-    },
-    {
         "include": "pulp/midi/ump_buffer.hpp",
         "fingerprint": "sha256:bc5816405c9ef8a2fdf9336d86212319dd70a83a9633c7d515b6c3010c5019e6",
         "disposition": "capability_support",
@@ -489,7 +478,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/ump_conversion.hpp",
-        "fingerprint": "sha256:bdabd201b0a1e36cc4e8df2d4162d521a041b316e695f4b8a3bb8988938d5f38",
+        "fingerprint": "sha256:195165e672d94148898e03111e1a0fa9fa95b5b91997920bb64889f9067d3e50",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
