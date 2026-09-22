@@ -984,6 +984,36 @@ TEST_CASE("analytic SDF feather modes render finite chart coverage",
 #endif
 }
 
+TEST_CASE("SDF tree leaf uniforms drive the composed field",
+          "[canvas][sdf][shader][geometry]") {
+#ifdef PULP_HAS_SKIA
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    Canvas::ShaderGeometry geometry;
+    geometry.leaf_count = 1;
+    geometry.sdf_expression =
+        "sdCircle(p - float2(pulp_leaf0_x, 0), pulp_leaf0_w)";
+    Canvas::NamedUniform x;
+    x.name = "pulp_leaf0_x"; x.count = 1; x.v[0] = 0.0f;
+    geometry.leaf_uniforms.push_back(x);
+    Canvas::NamedUniform radius;
+    radius.name = "pulp_leaf0_w"; radius.count = 1; radius.v[0] = 10.0f;
+    geometry.leaf_uniforms.push_back(radius);
+    Canvas::ShaderDrawOptions options;
+    options.geometry = geometry;
+    REQUIRE(canvas.draw_with_sksl(
+        "PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1,1,1,1), 0, 0); }",
+        0, 0, 64, 64, options));
+    SkPixmap pixels;
+    REQUIRE(surface->peekPixels(&pixels));
+    REQUIRE(SkColorGetA(pixels.getColor(32, 32)) > 200);
+    REQUIRE(SkColorGetA(pixels.getColor(50, 32)) == 0);
+#else
+    SUCCEED("Skia leaf-uniform probe requires PULP_HAS_SKIA");
+#endif
+}
+
 TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
     RecordingCanvas rc;
     Canvas::SDFStyle style;
