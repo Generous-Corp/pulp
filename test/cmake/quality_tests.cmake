@@ -347,6 +347,21 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME ctest-label-exclusion-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_label_exclusion_guard.py")
 
+    # Capability-contract gate wiring: `agent_capability_manifest.py --check`
+    # answers a different question depending on which base it resolves -- left
+    # alone it takes the merge base, CI forces the base tip, and the two have
+    # disagreed by enough to send a pull request into the merge queue holding a
+    # counter that was already taken. This is also the one push gate whose
+    # failure cannot be repaired afterwards: it is visible only once the merge
+    # group builds, and a queued pull request refuses a push with GH006, so the
+    # fix is locked out by the queue that is about to reject the branch. The
+    # test asserts both push surfaces run the check against a resolved commit
+    # and share one relevance predicate, because a surface silently narrowing
+    # its predicate stops covering installed headers while still printing a
+    # gate line.
+    add_test(NAME capability-contract-gate-wiring COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_capability_contract_gate.py")
+
     # GPU span categories: a span named `gpu_*` must be emitted under the `gpu`
     # category. The trace-SQL GPU queries select `category GLOB 'gpu*'`, so a
     # `gpu_*` span filed elsewhere is invisible to them rather than merely
