@@ -748,8 +748,17 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                                        : "rect";
                 if (shape == "circle") geometry.shape = canvas::Canvas::SDFShape::circle;
                 else if (shape == "rounded_rect") geometry.shape = canvas::Canvas::SDFShape::rounded_rect;
+                else if (shape == "diamond") geometry.shape = canvas::Canvas::SDFShape::diamond;
+                else if (shape == "squircle") geometry.shape = canvas::Canvas::SDFShape::squircle;
+                else if (shape == "triangle") geometry.shape = canvas::Canvas::SDFShape::triangle;
+                else if (shape == "arc") geometry.shape = canvas::Canvas::SDFShape::arc;
                 else if (shape == "flat_arc") geometry.shape = canvas::Canvas::SDFShape::flat_arc;
                 else if (shape == "ring") geometry.shape = canvas::Canvas::SDFShape::ring;
+                else if (shape == "stadium") geometry.shape = canvas::Canvas::SDFShape::stadium;
+                else if (shape == "cross") geometry.shape = canvas::Canvas::SDFShape::cross;
+                else if (shape == "flat_segment") geometry.shape = canvas::Canvas::SDFShape::flat_segment;
+                else if (shape == "rounded_segment") geometry.shape = canvas::Canvas::SDFShape::rounded_segment;
+                else if (shape == "quadratic_bezier") geometry.shape = canvas::Canvas::SDFShape::quadratic_bezier;
                 gx = spec.hasObjectMember("x") ? static_cast<float>(spec["x"].getWithDefault<double>(gx)) : gx;
                 gy = spec.hasObjectMember("y") ? static_cast<float>(spec["y"].getWithDefault<double>(gy)) : gy;
                 gw = spec.hasObjectMember("w") ? static_cast<float>(spec["w"].getWithDefault<double>(gw)) : gw;
@@ -758,6 +767,20 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                     ? static_cast<float>(spec["strokeWidth"].getWithDefault<double>(0.0)) : 0.0f;
                 geometry.style.corner_radius = spec.hasObjectMember("cornerRadius")
                     ? static_cast<float>(spec["cornerRadius"].getWithDefault<double>(0.0)) : 0.0f;
+                geometry.style.inner_radius = spec.hasObjectMember("innerRadius")
+                    ? static_cast<float>(spec["innerRadius"].getWithDefault<double>(0.5)) : 0.5f;
+                geometry.style.arc_start = spec.hasObjectMember("arcStart")
+                    ? static_cast<float>(spec["arcStart"].getWithDefault<double>(0.0)) : 0.0f;
+                geometry.style.arc_sweep = spec.hasObjectMember("arcSweep")
+                    ? static_cast<float>(spec["arcSweep"].getWithDefault<double>(4.712)) : 4.712f;
+                geometry.style.squircle_power = spec.hasObjectMember("squirclePower")
+                    ? static_cast<float>(spec["squirclePower"].getWithDefault<double>(4.0)) : 4.0f;
+                geometry.style.arm_width = spec.hasObjectMember("armWidth")
+                    ? static_cast<float>(spec["armWidth"].getWithDefault<double>(0.3)) : 0.3f;
+                geometry.style.bezier_cx = spec.hasObjectMember("bezierCX")
+                    ? static_cast<float>(spec["bezierCX"].getWithDefault<double>(0.0)) : 0.0f;
+                geometry.style.bezier_cy = spec.hasObjectMember("bezierCY")
+                    ? static_cast<float>(spec["bezierCY"].getWithDefault<double>(-1.0)) : -1.0f;
             } catch (...) {
                 // The bridge validates JSON before recording; a malformed
                 // retained command degrades to the normal rect fallback.
