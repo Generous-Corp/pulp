@@ -161,6 +161,16 @@ For an existing capability change:
 
   Skip past any claimed integer rather than racing for it; the values only have
   to be distinct and increasing, not contiguous.
+- A byte change to a header still classified `legacy_unreviewed` cannot be
+  repaired by restamping `tools/agent-capabilities/legacy-unreviewed-baseline.json`.
+  `FROZEN_LEGACY_COUNT` and `FROZEN_LEGACY_DIGEST` in
+  `agent_capability_surface.py` pin that file, so editing a fingerprint there
+  and moving the constants to match is exactly the laundering the frozen
+  baseline exists to prevent. Graduate the header instead: add a reviewed
+  disposition for it to `agent_capability_registry.py` with the measured
+  fingerprint and a durable rationale, and leave the baseline untouched. The
+  reviewed branch is consulted ahead of the baseline, so the stale baseline
+  entry is simply no longer read; dozens of headers already sit in both.
 - `--write` also appends a full snapshot to
   `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
   that dwarf the change that caused them. `--check` does not require it, so for

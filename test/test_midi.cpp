@@ -773,16 +773,56 @@ TEST_CASE("UMP conversion covers note-off cc and unsupported packet paths",
 
 TEST_CASE("UMP conversion rejects unsupported MIDI 2.0 channel statuses",
           "[midi][ump]") {
-    UmpPacket channel_pressure{};
-    channel_pressure.word_count = 2;
-    channel_pressure.words[0] = (0x4u << 28) | (uint32_t(3) << 24)
-                              | (uint32_t(0xD2) << 16);
-    channel_pressure.words[1] = 0x12345678u;
-
+    // Per-note statuses carry a note dimension that no single MIDI 1.0 event
+    // can express, so they stay unconvertible and callers that need them read
+    // the MPE sidecar instead. A rejected packet must also leave the caller's
+    // out-param untouched rather than half-write it.
     MidiEvent out = MidiEvent::note_on(0, 60, 100);
-    REQUIRE_FALSE(ump_to_midi1_event(channel_pressure, out));
+
+    REQUIRE_FALSE(
+        ump_to_midi1_event(UmpPacket::registered_per_note_cc(0, 2, 64, 74, 0x40000000u), out));
+    REQUIRE_FALSE(
+        ump_to_midi1_event(UmpPacket::assignable_per_note_cc(0, 2, 64, 3, 0x40000000u), out));
+    REQUIRE_FALSE(ump_to_midi1_event(
+        UmpPacket::per_note_management(0, 2, 64, UmpPacket::kPerNoteResetControllers), out));
+
     REQUIRE(out.is_note_on());
     REQUIRE(out.note() == 60);
+    REQUIRE(out.velocity() == 100);
+}
+
+TEST_CASE("UMP conversion carries both MIDI 2.0 pressure axes into MIDI 1.0", "[midi][ump][mpe]") {
+    // Channel pressure is the MPE pressure axis. Dropping it would leave a
+    // plug-in receiving note-on and CC74 timbre with pressure silently gone
+    // the moment a host negotiates MIDI 2.0.
+    const auto channel_voice = [](uint8_t status, uint8_t channel, uint8_t byte2, uint32_t data) {
+        UmpPacket p{};
+        p.word_count = 2;
+        p.words[0] = (0x4u << 28) | (uint32_t(3) << 24) |
+                     (uint32_t(status | (channel & 0x0F)) << 16) | (uint32_t(byte2 & 0x7F) << 8);
+        p.words[1] = data;
+        return p;
+    };
+
+    MidiEvent out;
+
+    REQUIRE(ump_to_midi1_event(channel_voice(0xD0, 2, 0, 0xFFFFFFFFu), out));
+    REQUIRE(out.size() == 2);
+    REQUIRE(out.data()[0] == static_cast<uint8_t>(0xD0 | 2));
+    REQUIRE(out.data()[1] == 0x7F);
+
+    REQUIRE(ump_to_midi1_event(channel_voice(0xD0, 5, 0, 0u), out));
+    REQUIRE(out.data()[0] == static_cast<uint8_t>(0xD0 | 5));
+    REQUIRE(out.data()[1] == 0);
+
+    REQUIRE(ump_to_midi1_event(channel_voice(0xA0, 7, 64, 0xFFFFFFFFu), out));
+    REQUIRE(out.size() == 3);
+    REQUIRE(out.data()[0] == static_cast<uint8_t>(0xA0 | 7));
+    REQUIRE(out.data()[1] == 64);
+    REQUIRE(out.data()[2] == 0x7F);
+
+    REQUIRE(ump_to_midi1_event(channel_voice(0xA0, 7, 64, 0x02000000u), out));
+    REQUIRE(out.data()[2] == 1);
 }
 
 TEST_CASE("UMP MIDI 2.0 program change converts to a two-byte MIDI 1.0 event", "[midi][ump]") {

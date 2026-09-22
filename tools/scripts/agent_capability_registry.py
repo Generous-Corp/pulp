@@ -478,7 +478,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/midi/ump_conversion.hpp",
-        "fingerprint": "sha256:bdabd201b0a1e36cc4e8df2d4162d521a041b316e695f4b8a3bb8988938d5f38",
+        "fingerprint": "sha256:195165e672d94148898e03111e1a0fa9fa95b5b91997920bb64889f9067d3e50",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

@@ -180,6 +180,15 @@ forward plain MIDI only; an MPE synth loaded through one of those formats sees
 MIDI events but the `MpeBuffer` will be empty unless the processor derives
 per-note state from `MidiBuffer` itself.
 
+Populating the buffer is only half of it — **the host has to offer the stream
+first.** MPE is negotiated: Logic reads AUv3's `supportsMPE` /
+`kAudioUnitProperty_SupportsMPE` (both now answered from
+`effective_capabilities().supports_mpe`) and VST3/CLAP have their own
+declarations. A unit with a fully wired tracker that advertises nothing is
+never routed an MPE zone, and the failure looks like "MPE does not work"
+with nothing wrong in the tracker. When adding an adapter, wire the
+capability advertisement in the same change as the sidecar.
+
 ### Realtime sidecar buffers are capacity-limited
 
 `MpeBuffer` and `UmpBuffer` support the same adapter-owned realtime
@@ -311,6 +320,15 @@ clock/transport events, not channel-voice-only — don't assume a
 flattened buffer is note data. (SysEx Type 0x3 still routes through
 `UmpSysex7Reassembler`, above; per-note expression still goes through
 the MpeBuffer sidecar, not these converters.)
+
+`ump_to_midi1_event` also covers MIDI 2.0 **poly key pressure (`0xA0`)** and
+**channel pressure (`0xD0`)**, narrowing each 32-bit value the same way the
+control-change case does. Both were absent until a host actually spoke MIDI
+2.0 to an AU: channel pressure is the MPE *pressure* axis, so on a Type-0x4
+stream it returned false and the axis silently disappeared — with the note-on
+and CC74 timbre still arriving, which makes the symptom read as a tracker bug
+rather than a missing conversion case. When adding a MIDI 2.0 status here,
+check whether an MPE axis rides on it.
 
 ### MIDI 2.0 program change is not shaped like CC or pressure
 
