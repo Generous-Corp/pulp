@@ -514,6 +514,37 @@ TEST_CASE("canvasDrawSdf records a validated retained command",
     REQUIRE(canvas->commands()[0].shader_uniforms.size() == 1);
 }
 
+TEST_CASE("canvasDrawSdf retains composite geometry for replay",
+          "[view][bridge][canvas][sdf][operators]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"js(
+        createCanvas('canvas', 'root');
+        globalThis.draw = canvasDrawSdf('canvas', {
+          op: 'smoothUnion', k: 8,
+          children: [
+            { shape: 'circle', x: 4, y: 8, w: 24, h: 24 },
+            { shape: 'circle', x: 20, y: 8, w: 24, h: 24 }
+          ]
+        }, 'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }');
+    )js");
+    REQUIRE(engine.evaluate("draw.success").getWithDefault<bool>(false));
+    auto* canvas = dynamic_cast<CanvasWidget*>(bridge.widget("canvas"));
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+    const auto& command = canvas->commands()[0];
+    REQUIRE(command.shader_geometry.has_value());
+    REQUIRE(command.shader_geometry->leaf_count == 2);
+    REQUIRE(command.shader_geometry->sdf_expression.find("pulp_leaf0_x") != std::string::npos);
+    REQUIRE(command.shader_geometry->sdf_expression.find("pulp_smooth_union") != std::string::npos);
+    REQUIRE(command.x == Catch::Approx(4.0f));
+    REQUIRE(command.y == Catch::Approx(8.0f));
+    REQUIRE(command.w == Catch::Approx(40.0f));
+    REQUIRE(command.h == Catch::Approx(24.0f));
+}
+
 TEST_CASE("WidgetBridge rejects self-owned retained canvas bindings", "[view][bridge][canvas-binding]") {
     ScriptEngine engine;
     View root;

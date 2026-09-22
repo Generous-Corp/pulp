@@ -186,6 +186,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/value_channel_binding_service.cpp
     src/widget_bridge/storage_assets_api.cpp
     src/widget_bridge/shader_api.cpp
+    src/widget_bridge/retained_shader_geometry.cpp
     src/widget_bridge/svg_api.cpp
     src/widget_bridge/theme_api.cpp
     src/widget_bridge/tokens_api.cpp

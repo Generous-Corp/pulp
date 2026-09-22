@@ -11,6 +11,7 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -177,6 +178,7 @@ struct CanvasDrawCmd {
     std::string text;           // for fill_text, set_font family
     std::string shader_sksl;
     std::vector<canvas::Canvas::NamedUniform> shader_uniforms;
+    std::optional<canvas::Canvas::ShaderGeometry> shader_geometry;
     int int_val = 0;            // for enum values (text align, baseline, blend mode, cap, join)
     std::vector<canvas::Color> gradient_colors;    // for gradient stops
     std::vector<float> gradient_positions;          // gradient stop positions

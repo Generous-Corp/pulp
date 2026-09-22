@@ -5,6 +5,7 @@
 #include "css_color.hpp"
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/runtime/base64.hpp>
+#include "retained_shader_geometry.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -79,6 +80,14 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         cmd.type = CanvasDrawCmd::Type::draw_sdf;
         cmd.text = choc::json::toString(*args[1], false);
         cmd.shader_sksl = args.get<std::string>(2, "");
+        std::string geometry_error;
+        if (auto parsed = parse_retained_shader_geometry(*args[1], geometry_error)) {
+            cmd.shader_geometry = std::move(parsed->geometry);
+            cmd.x = parsed->x; cmd.y = parsed->y;
+            cmd.w = parsed->w; cmd.h = parsed->h;
+        } else if (!geometry_error.empty()) {
+            return canvas_sdf_result(false, geometry_error);
+        }
         if (args.numArgs >= 4 && args[3] != nullptr && args[3]->isObject()) {
             args[3]->getView().visitObjectMembers([&](std::string_view name,
                                                        const choc::value::ValueView& value) {

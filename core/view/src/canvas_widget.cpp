@@ -787,8 +787,9 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             }
             canvas::Canvas::ShaderDrawOptions options;
             options.named_uniforms = cmd.shader_uniforms;
+            options.geometry = cmd.shader_geometry;
             if (!cmd.shader_sksl.empty()) {
-                options.geometry = geometry;
+                if (!options.geometry) options.geometry = geometry;
                 if (canvas.draw_with_sksl(cmd.shader_sksl, gx, gy, gw, gh, options))
                     break;
             }
