@@ -4863,15 +4863,23 @@ TEST_CASE("WidgetBridge validates bounded left leaning geometry trees",
           op: 'union', children: [{ shape: 'circle' },
             { op: 'union', children: [{ shape: 'rect' }, { shape: 'circle' }] }]
         });
+        globalThis.sameTopology = setWidgetShaderGeometry('knob', {
+          op: 'union', children: [
+            { op: 'union', children: [{ shape: 'circle', x: 10 }, { shape: 'rect' }] },
+            { shape: 'circle' }
+          ]
+        });
     )");
     REQUIRE(engine.evaluate("ok.success").getWithDefault<bool>(false));
     REQUIRE_FALSE(engine.evaluate("right.success").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("sameTopology.success").getWithDefault<bool>(false));
     auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
     REQUIRE(knob != nullptr);
     REQUIRE(knob->shader_geometry().has_value());
     REQUIRE(knob->shader_geometry()->leaf_count == 3);
     REQUIRE(knob->shader_geometry()->leaf_uniforms.size() == 36);
     REQUIRE(knob->shader_geometry()->sdf_expression.find("pulp_leaf0_x") != std::string::npos);
+    REQUIRE(knob->shader_geometry()->leaf_uniforms[0].v[0] == Catch::Approx(10.0f));
 }
 
 TEST_CASE("WidgetBridge accepts every bounded SDF leaf shape",
