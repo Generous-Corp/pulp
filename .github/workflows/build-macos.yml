@@ -700,7 +700,14 @@ jobs:
     permissions:
       pull-requests: read
       checks: write
-    if: always()
+    # `!cancelled()` rather than `always()`: this workflow cancels in progress,
+    # and a job that keeps running through a cancellation holds the
+    # build-macos-<ref> group open, so the superseding run can never start. It
+    # would also stamp the exact-head `macos` check `failure` on behalf of a run
+    # that was deliberately replaced. A cancelled run is build-macos-reconcile's
+    # to terminalize — it reads the uploaded identity and records `cancelled`,
+    # which is the honest conclusion this completer cannot express.
+    if: ${{ !cancelled() }}
     steps:
       - name: Publish exact-head macos result
         env:

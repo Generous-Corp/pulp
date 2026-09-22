@@ -2017,6 +2017,19 @@ App-authored and its trigger was evaluated exactly as documented, correctly
 refusing on `branches: [main]`.) Also note a run's `pull_requests[]` array can
 be **empty** on a genuine `pull_request` run, so never filter on it — key on
 `head_sha` + `event`;
+(1b) if a run **does** exist on the head SHA but sits `pending` with **zero
+jobs**, the trigger admitted the PR and a superseded run is still holding the
+`build-<ref>` concurrency group. The required check is absent because its JOB
+was never created, not because the trigger refused — so a `synchronize` push
+only stacks another run behind the same squatter. Do **not** push. Sweep the
+repo instead (`actions/runs?status=pending` and `?status=queued`, filter
+`name=="Build and Test"`, group by `head_branch`), confirm the live head with
+`git ls-remote origin refs/heads/<branch>`, then force-cancel the run on the
+*stale* head — the one that still has jobs:
+`ghapp api --method POST 'repos/Generous-Corp/pulp/actions/runs/<id>/force-cancel'`.
+Plain `/cancel` returns an empty `{}` either way and will not move a run whose
+jobs were never assigned, so read the run status back instead of trusting the
+response;
 (2) check for a version-bump race (PR goes `DIRTY` on the `CMakeLists.txt`
 VERSION line — re-merge `main`); (3) only then verify capacity from queue age,
 host supervisor/lease state, and an exact repository-visible job assignment.

@@ -1365,6 +1365,19 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    (in-flight runs fell 16 to 10 and other PRs merged). Before blaming the pool,
    check whether **this PR** has more than one live run.
 
+   Two structural details decide whether this state is reachable at all. A
+   **`workflow_dispatch` run is not in the PR's group**: the group keys on
+   `github.ref`, which is `refs/heads/<branch>` for a dispatch but
+   `refs/pull/N/merge` for a `pull_request`, so the two coexist and neither
+   cancels the other. Never read a dispatch run as the squatter, and never let
+   a duplicate-run sweeper treat the pair as duplicates — it would cancel a
+   deliberate manual dispatch. Second, a job guarded `if: always()` **keeps
+   running through a cancellation**, so a workflow that sets
+   `cancel-in-progress` while holding an `always()` job at JOB level can be
+   cancelled and still hold its group until that job ends — which is the wedge
+   itself. Job-level guards in a cancelling workflow use `!cancelled()`;
+   step-level `always()` is unaffected and should stay.
+
    The source fix landed in pulp#8644; the population was far larger than it
    looked from one PR — 46 wedged supersessions across three sampled weeks. The
    control that settles the mechanism: of 12 wedged supersessions whose
