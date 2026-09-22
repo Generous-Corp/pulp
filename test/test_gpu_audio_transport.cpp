@@ -119,7 +119,8 @@ class RealtimeHookNode : public GpuAudioNode {
   private:
     static std::uint8_t process_realtime(void* self, const BufferView<const float>& input,
                                          BufferView<float>& output, std::uint32_t n,
-                                         std::uint64_t sequence, bool input_valid) noexcept {
+                                         std::uint64_t sequence, bool input_valid,
+                                         std::uint64_t /*callback_start_ns*/) noexcept {
         auto* node = static_cast<RealtimeHookNode*>(self);
         node->last_sequence = sequence;
         ++node->realtime_calls;
@@ -166,7 +167,8 @@ class RealtimeHookNode : public GpuAudioNode {
     }
 
     static void delivered_realtime(void* self, std::uint64_t sequence,
-                                   std::uint8_t disposition) noexcept {
+                                   std::uint8_t disposition, std::uint64_t /*callback_end_ns*/,
+                                   std::uint64_t /*result_visible_ns*/) noexcept {
         auto* node = static_cast<RealtimeHookNode*>(self);
         ++node->delivery_calls;
         node->delivered_sequence = sequence;
