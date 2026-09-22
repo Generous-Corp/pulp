@@ -81,3 +81,29 @@ The drift list is the diff between catalog `status` and the harness verdict.
 The catalog is still hand-edited, so the harness reports drift without
 rewriting `compat.json` by default. A future `--update-compat` mode is reserved
 for explicit catalog-maintenance passes.
+
+## Browser/native differential lab
+
+`tools/harness/differential` owns the execution-neutral receipt contract for
+browser-runnable Canvas and SVG imports. The bounded seed corpus is
+`test/fixtures/import-differential/canvas-svg-manifest.json`; it references
+synthetic MIT fixtures beside the existing twelve-fixture importer corpus.
+Chromium is recorded as the appearance authority and Pulp is recorded as the
+candidate native backend. Rendering remains adapter-owned: adapters emit a
+per-fixture observation JSON object keyed by fixture id, then normalize it with:
+
+```bash
+python3 -m tools.harness.differential \
+  --manifest test/fixtures/import-differential/canvas-svg-manifest.json \
+  --browser browser-observations.json \
+  --native native-observations.json \
+  --output build/canvas-svg-differential.json
+```
+
+The report is deterministic (fixture ids, findings, and JSON keys are sorted),
+content-addresses each source fixture, and uses four finding kinds:
+`dropped-material`, `wrong-geometry`, `wrong-pixels`, and
+`unsupported-behavior`. Missing adapter observations are explicit `not-run`
+rows; they are never treated as a pass. The contract is intentionally narrow so
+later gradient, mask, clipping, transform, text, and filter adapters can add
+features without changing the receipt schema.

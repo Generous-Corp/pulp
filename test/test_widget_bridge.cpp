@@ -491,6 +491,60 @@ TEST_CASE("WidgetBridge keeps live canvas as the sole paint and input owner",
     REQUIRE_FALSE(paint->visible());
 }
 
+TEST_CASE("canvasDrawSdf records a validated retained command",
+          "[view][bridge][canvas][sdf]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createCanvas('canvas', 'root');
+        globalThis.draw = canvasDrawSdf('canvas',
+          { shape: 'circle', x: 2, y: 3, w: 40, h: 40 },
+          'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }',
+          { gain: 0.75 });
+        globalThis.bad = canvasDrawSdf('canvas', 'not-an-object');
+    )");
+    REQUIRE(engine.evaluate("draw.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("bad.success").getWithDefault<bool>(true));
+    auto* canvas = dynamic_cast<CanvasWidget*>(bridge.widget("canvas"));
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+    REQUIRE(canvas->commands()[0].type == CanvasDrawCmd::Type::draw_sdf);
+    REQUIRE(canvas->commands()[0].shader_uniforms.size() == 1);
+}
+
+TEST_CASE("canvasDrawSdf retains composite geometry for replay",
+          "[view][bridge][canvas][sdf][operators]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"js(
+        createCanvas('canvas', 'root');
+        globalThis.draw = canvasDrawSdf('canvas', {
+          op: 'smoothUnion', k: 8,
+          children: [
+            { shape: 'circle', x: 4, y: 8, w: 24, h: 24 },
+            { shape: 'circle', x: 20, y: 8, w: 24, h: 24 }
+          ]
+        }, 'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }');
+    )js");
+    REQUIRE(engine.evaluate("draw.success").getWithDefault<bool>(false));
+    auto* canvas = dynamic_cast<CanvasWidget*>(bridge.widget("canvas"));
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+    const auto& command = canvas->commands()[0];
+    REQUIRE(command.shader_geometry.has_value());
+    REQUIRE(command.shader_geometry->leaf_count == 2);
+    REQUIRE(command.shader_geometry->sdf_expression.find("pulp_leaf0_x") != std::string::npos);
+    REQUIRE(command.shader_geometry->sdf_expression.find("pulp_smooth_union") != std::string::npos);
+    REQUIRE(command.x == Catch::Approx(4.0f));
+    REQUIRE(command.y == Catch::Approx(8.0f));
+    REQUIRE(command.w == Catch::Approx(40.0f));
+    REQUIRE(command.h == Catch::Approx(24.0f));
+}
+
 TEST_CASE("WidgetBridge rejects self-owned retained canvas bindings", "[view][bridge][canvas-binding]") {
     ScriptEngine engine;
     View root;
@@ -4687,6 +4741,241 @@ TEST_CASE("WidgetBridge setWidgetShader does not install un-compilable SkSL",
     auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
     REQUIRE(knob != nullptr);
     REQUIRE_FALSE(knob->has_custom_shader());
+}
+
+TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
+          "[view][bridge][shader]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform float gain; uniform float4 tint; half4 main(float2 p) { return half4(gain + tint.x); }');
+        globalThis.set = setWidgetShaderUniforms('knob', { gain: 0.75, tint: [1, 0.5, 0.25, 1] });
+        globalThis.read = getWidgetShaderUniforms('knob');
+        globalThis.reach = setWidgetShaderReach('knob', 12);
+        globalThis.badReach = setWidgetShaderReach('knob', -1);
+        globalThis.chart = setWidgetShaderChart('knob', 'half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }');
+        globalThis.badName = setWidgetShaderUniforms('knob', { missing: 1 });
+        globalThis.badArity = setWidgetShaderUniforms('knob', { gain: [1, 2] });
+        globalThis.badReserved = setWidgetShaderUniforms('knob', { time: 1 });
+        globalThis.bad = setWidgetShaderUniforms('knob', { tooWide: [1, 2, 3, 4, 5] });
+        globalThis.feathered = setWidgetShader('knob',
+          'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }',
+          { geometry: { shape: 'flat_arc' }, reach: 0,
+            feather: { sigma: 2, curve: 'gaussian', mode: 'outer' } });
+    )");
+    REQUIRE(engine.evaluate("set.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("read.gain").getWithDefault<double>(0.0) == Catch::Approx(0.75));
+    REQUIRE(engine.evaluate("read.tint[2]").getWithDefault<double>(0.0) == Catch::Approx(0.25));
+    REQUIRE(engine.evaluate("reach.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("badReach.success").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("chart.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("feathered.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("badName.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("badArity.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("badReserved.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("bad.success").getWithDefault<bool>(true));
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_reach() == Catch::Approx(6.0f));
+    REQUIRE(knob->shader_uniforms().size() == 2);
+    REQUIRE_FALSE(knob->chart_shader().empty());
+}
+
+TEST_CASE("WidgetBridge binds shader scalar uniforms to live value channels",
+          "[view][bridge][shader][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    ValueChannelSet channels;
+    auto* source = channels.declare_scalar("drive", "", 0.125f);
+    REQUIRE(source != nullptr);
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform float audio; half4 main(float2 p) { return half4(audio); }');
+        globalThis.bound = bindWidgetShaderUniform('knob', 'audio', 'value:drive');
+    )");
+    REQUIRE(engine.evaluate("bound.success").getWithDefault<bool>(false));
+
+    source->publish(0.75f);
+    bridge.service_frame_callbacks();
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_uniforms().size() == 1);
+    REQUIRE(knob->shader_uniforms()[0].name == "audio");
+    REQUIRE(knob->shader_uniforms()[0].v[0] == Catch::Approx(0.75f));
+
+    // A stopped channel decays to its declared neutral through the same
+    // publish-sequence staleness contract used by ordinary value bindings.
+    auto& binding = knob->shader_value_bindings()[0];
+    binding.last_publish_at = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    bridge.service_frame_callbacks();
+    REQUIRE(knob->shader_uniforms()[0].v[0] == Catch::Approx(0.125f));
+}
+
+TEST_CASE("Canonical shader uniform binding reuses parameter transforms",
+          "[view][bridge][shader][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    store.add_parameter({1, "Gain", "", {0.0f, 1.0f, 0.25f}});
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform float gain; half4 main(float2 p) { return half4(gain); }');
+        globalThis.bound = bindShaderUniform('knob', 'gain', 'Gain', { scale: 2, clamp: false });
+    )");
+    REQUIRE(engine.evaluate("bound.success").getWithDefault<bool>(false));
+    bridge.service_frame_callbacks();
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_uniforms()[0].v[0] == Catch::Approx(0.5f));
+}
+
+TEST_CASE("Shader uniform bindings report declaration and source failures",
+          "[view][bridge][shader]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform float gain; half4 main(float2 p) { return half4(gain); }');
+        globalThis.missing = bindWidgetShaderUniform('knob', 'other', 'value:drive');
+        globalThis.unknown = bindWidgetShaderUniform('knob', 'gain', 'NoSuchParameter');
+    )");
+    REQUIRE_FALSE(engine.evaluate("missing.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("unknown.success").getWithDefault<bool>(true));
+    REQUIRE(bridge.binding_attempts().size() == 2);
+    REQUIRE(bridge.binding_attempts()[0].outcome == BindingOutcome::undeclared_uniform);
+    REQUIRE(bridge.binding_attempts()[1].outcome == BindingOutcome::unknown_param);
+}
+
+TEST_CASE("WidgetBridge installs structured SDF shader geometry options",
+          "[view][bridge][shader][sdf]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        globalThis.installed = setWidgetShader('knob',
+          'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }',
+          { geometry: 'auto', reach: 4 });
+    )");
+#ifdef PULP_HAS_SKIA
+    REQUIRE(engine.evaluate("installed.success").getWithDefault<bool>(false));
+#else
+    REQUIRE_FALSE(engine.evaluate("installed.success").getWithDefault<bool>(true));
+#endif
+}
+
+TEST_CASE("WidgetBridge validates bounded left leaning geometry trees",
+          "[view][bridge][shader][sdf]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        globalThis.ok = setWidgetShaderGeometry('knob', {
+          op: 'union', children: [
+            { op: 'union', children: [{ shape: 'circle' }, { shape: 'rect' }] },
+            { shape: 'circle' }
+          ]
+        });
+        globalThis.right = setWidgetShaderGeometry('knob', {
+          op: 'union', children: [{ shape: 'circle' },
+            { op: 'union', children: [{ shape: 'rect' }, { shape: 'circle' }] }]
+        });
+        globalThis.sameTopology = setWidgetShaderGeometry('knob', {
+          op: 'union', children: [
+            { op: 'union', children: [{ shape: 'circle', x: 10 }, { shape: 'rect' }] },
+            { shape: 'circle' }
+          ]
+        });
+    )");
+    REQUIRE(engine.evaluate("ok.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("right.success").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("sameTopology.success").getWithDefault<bool>(false));
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_geometry().has_value());
+    REQUIRE(knob->shader_geometry()->leaf_count == 3);
+    REQUIRE(knob->shader_geometry()->leaf_uniforms.size() == 36);
+    REQUIRE(knob->shader_geometry()->sdf_expression.find("pulp_leaf0_x") != std::string::npos);
+    REQUIRE(knob->shader_geometry()->leaf_uniforms[0].v[0] == Catch::Approx(10.0f));
+}
+
+TEST_CASE("WidgetBridge accepts every bounded SDF leaf shape",
+          "[view][bridge][shader][sdf]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        globalThis.results = [
+          'rect', 'circle', 'rounded_rect', 'diamond', 'squircle', 'triangle',
+          'arc', 'ring', 'stadium', 'cross', 'flat_segment', 'rounded_segment',
+          'flat_arc', 'quadratic_bezier'
+        ].map(function(shape) {
+          return setWidgetShaderGeometry('knob', { shape: shape, x: 0, y: 0, w: 40, h: 40 });
+        });
+    )");
+    const auto results = engine.evaluate("results");
+    REQUIRE(results.isArray());
+    REQUIRE(results.size() == 14);
+    for (std::uint32_t i = 0; i < results.size(); ++i)
+        REQUIRE(results[i]["success"].getWithDefault<bool>(false));
+}
+
+TEST_CASE("WidgetBridge publishes vector shader scope with neutral stale texel",
+          "[view][bridge][shader][value-channel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    ValueChannelSet channels;
+    auto* source = channels.declare_vector("scope", "", -0.25f);
+    REQUIRE(source != nullptr);
+    WidgetBridge bridge(engine, root, store);
+    bridge.set_value_channels(&channels);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform shader scope; half4 main(float2 p) { return scope.eval(p); }');
+        globalThis.bound = bindWidgetShaderScope('knob', 'value:scope');
+    )");
+    REQUIRE(engine.evaluate("bound.success").getWithDefault<bool>(false));
+
+    const float samples[] = {0.1f, 0.2f, 0.3f};
+    source->publish(samples, 3);
+    bridge.service_frame_callbacks();
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_scope_binding().has_value());
+    auto live = knob->shader_scope_binding()->data;
+    REQUIRE(live != nullptr);
+    REQUIRE(live->count == 3);
+    REQUIRE(live->live);
+    REQUIRE(live->samples.size() == 3);
+    REQUIRE(live->samples[1] == Catch::Approx(0.2f));
+
+    auto& binding = *knob->shader_scope_binding();
+    binding.last_publish_at = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    bridge.service_frame_callbacks();
+    auto stale = knob->shader_scope_binding()->data;
+    REQUIRE(stale != nullptr);
+    REQUIRE(stale->count == 1);
+    REQUIRE_FALSE(stale->live);
+    REQUIRE(stale->samples.size() == 1);
+    REQUIRE(stale->samples[0] == Catch::Approx(-0.25f));
 }
 
 // shader_uses_time() decides whether the render loop stays pinned, and is read

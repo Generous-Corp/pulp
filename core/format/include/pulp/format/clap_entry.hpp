@@ -355,7 +355,16 @@ inline uint32_t params_count(const clap_plugin_t* plugin) {
 }
 
 inline uint32_t params_flags(const state::ParamInfo& parameter) {
-    uint32_t flags = CLAP_PARAM_IS_AUTOMATABLE;
+    uint32_t flags = 0;
+    // Automation is opt-out: an ordinary parameter keeps the AUTOMATABLE flag
+    // it has always carried, and only a parameter declared non-automatable (or
+    // read-only, which cannot be host-written) withholds it.
+    if (state::is_automatable_param(parameter))
+        flags |= CLAP_PARAM_IS_AUTOMATABLE;
+    if (state::is_hidden_param(parameter))
+        flags |= CLAP_PARAM_IS_HIDDEN;
+    if (state::is_read_only_param(parameter))
+        flags |= CLAP_PARAM_IS_READONLY;
     const bool is_bypass = state::is_bypass_param(parameter);
     if (state::is_discrete_param(parameter) || is_bypass)
         flags |= CLAP_PARAM_IS_STEPPED;

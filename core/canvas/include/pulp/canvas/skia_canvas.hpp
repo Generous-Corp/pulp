@@ -381,6 +381,10 @@ public:
     // SDF shapes
     void draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
                         const SDFStyle& style) override;
+    bool draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
+                                    float w, float h, const SDFStyle& style,
+                                    const std::string& sksl,
+                                    const ShaderDrawOptions& options) override;
     void draw_blurred_backdrop(float x, float y, float w, float h,
                                float blur_radius, float corner_radius,
                                Color tint) override;
@@ -418,6 +422,9 @@ public:
     bool draw_with_sksl(const std::string& sksl,
                         float x, float y, float w, float h,
                         const ShaderUniforms& uniforms) override;
+    bool draw_with_sksl(const std::string& sksl,
+                        float x, float y, float w, float h,
+                        const ShaderDrawOptions& options) override;
 
     // Child-shader compositor: post-process an already-painted layer with a
     // custom SkSL shader (declares `uniform shader content`).

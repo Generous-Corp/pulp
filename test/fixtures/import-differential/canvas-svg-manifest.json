@@ -1,0 +1,13 @@
+{
+  "schema": "pulp-canvas-svg-differential-manifest-v1",
+  "version": 1,
+  "license": "MIT",
+  "ownership": "Pulp synthetic fixtures",
+  "reference": {"backend": "chromium", "role": "appearance-authority"},
+  "fixtures": [
+    {"id": "canvas-primitives", "source": "13-canvas-primitives.html", "surface": "canvas", "features": ["fillRect", "arc", "stroke"], "expected_findings": []},
+    {"id": "canvas-state", "source": "14-canvas-state.html", "surface": "canvas", "features": ["save", "restore", "globalAlpha", "transform"], "expected_findings": []},
+    {"id": "svg-shapes", "source": "15-svg-shapes.html", "surface": "svg", "features": ["linearGradient", "circle", "path", "stroke"], "expected_findings": []},
+    {"id": "svg-invalid-path", "source": "16-svg-invalid.html", "surface": "svg", "features": ["invalid-path", "rect"], "expected_findings": ["unsupported-behavior"]}
+  ]
+}

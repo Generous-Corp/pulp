@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260920-pr8602-overflow-scroll-container",
+  "created_at": "2026-09-20T06:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record the scrolled-overflow container change for the watched render family. `View::Overflow::scroll` was accepted as a style value but never scrolled: paint clipping treated it like `hidden`, so a container whose content exceeded its box had no way to reach that content, and the scripted path additionally mapped CSS `auto` to `hidden` so `overflowY: auto` clipped content away rather than scrolling it. The change is confined to Pulp-owned view composition: a public scroll-offset API on View, range arithmetic and wheel handling in view.cpp, a paint translation by child_paint_offset() in view_paint.cpp that View::hit_test subtracts through the SAME function so painting and hit-testing cannot disagree at a non-zero offset, and the corrected CSS keyword mapping. It reuses the existing ScrollView mechanism and the already-documented child_paint_offset protocol rather than adding a second scroller, and collapses a duplicated content-extent walk. It does not change transferred renderer, canvas, Skia, Graphite, Dawn, or resource implementation authority, and it does not prescribe Graphite threading.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD",
+    "pulp-test-overflow-scroll: 43 assertions across 8 cases",
+    "tools/scripts/confirm_failure.sh on core/view/src/view.cpp: CONFIRMED (breaking hit_test's offset subtraction fails the owns-its-own-painted-centre assertion; recompile observed at baseline, broken and restored)",
+    "pulp-test-widget-bridge-css-per-edge: 77 assertions across 18 cases",
+    "tools/scripts/gates.sh origin/main: all gates pass",
+    "gpu_handoff_provenance.py check: 102 pinned rows, every pinned identity matches"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

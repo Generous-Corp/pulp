@@ -19,6 +19,8 @@
 #include <cmath>
 #include <cstring>
 #include <vector>
+#include <cstdint>
+#include <regex>
 
 #ifdef PULP_HAS_SKIA
 
@@ -62,6 +64,62 @@
 #ifdef PULP_HAS_SKIA
 
 namespace pulp::canvas {
+
+static bool sdf_shape_has_chart(Canvas::SDFShape shape) {
+    switch (shape) {
+        case Canvas::SDFShape::arc:
+        case Canvas::SDFShape::ring:
+        case Canvas::SDFShape::stadium:
+        case Canvas::SDFShape::flat_segment:
+        case Canvas::SDFShape::rounded_segment:
+        case Canvas::SDFShape::flat_arc:
+        case Canvas::SDFShape::quadratic_bezier:
+            return true;
+        default:
+            return false;
+    }
+}
+
+namespace {
+// IEEE-754 float32 -> binary16 conversion for the RGBA_F16 raster upload.
+std::uint16_t shader_float_to_half(float value) {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    const std::uint32_t sign = (bits >> 16) & 0x8000u;
+    const std::uint32_t exponent = (bits >> 23) & 0xffu;
+    const std::uint32_t mantissa = bits & 0x7fffffu;
+    if (exponent == 0xffu)
+        return static_cast<std::uint16_t>(sign | 0x7c00u | (mantissa ? 0x0200u : 0));
+    const int e = static_cast<int>(exponent) - 127 + 15;
+    if (e >= 31) return static_cast<std::uint16_t>(sign | 0x7c00u);
+    if (e <= 0) {
+        if (e < -10) return static_cast<std::uint16_t>(sign);
+        const std::uint32_t m = (mantissa | 0x800000u) >> static_cast<unsigned>(1 - e + 13);
+        return static_cast<std::uint16_t>(sign | m);
+    }
+    return static_cast<std::uint16_t>(sign | (static_cast<std::uint32_t>(e) << 10) |
+                                       (mantissa >> 13));
+}
+
+sk_sp<SkShader> make_shader_data_texture(
+    const std::shared_ptr<const Canvas::ShaderDataTexture>& data) {
+    if (!data) return nullptr;
+    const int width = std::max<int>(1, static_cast<int>(data->samples.size()));
+    std::vector<std::uint16_t> texels(static_cast<std::size_t>(width) * 4u, 0);
+    for (int i = 0; i < width; ++i) {
+        const float sample = data->samples[static_cast<std::size_t>(i)];
+        texels[static_cast<std::size_t>(i) * 4u + 0] = shader_float_to_half(sample);
+        texels[static_cast<std::size_t>(i) * 4u + 3] = shader_float_to_half(1.0f);
+    }
+    const auto info = SkImageInfo::Make(width, 1, kRGBA_F16_SkColorType,
+                                        kPremul_SkAlphaType);
+    auto image = SkImages::RasterFromPixmapCopy(
+        SkPixmap(info, texels.data(), static_cast<std::size_t>(width) * 8u));
+    if (!image) return nullptr;
+    return image->makeShader(SkTileMode::kClamp, SkTileMode::kClamp,
+                             SkSamplingOptions(SkFilterMode::kLinear));
+}
+} // namespace
 
 // ── GPU SDF Shape Primitives ─────────────────────────────────────────────────
 
@@ -152,7 +210,7 @@ static const char* kSDFShapeSkSL = R"(
 
     // SDF for arc with thickness (flat caps)
     float sdFlatArc(float2 p, float outerR, float innerR, float startAngle, float sweepAngle) {
-        float angle = atan2(p.y, p.x);
+        float angle = atan(p.y, p.x);
         float halfSweep = sweepAngle * 0.5;
         float midAngle = startAngle + halfSweep;
         float angleDiff = angle - midAngle;
@@ -241,6 +299,109 @@ static const char* kSDFShapeSkSL = R"(
     }
 )";
 
+// Phase-B authoring entry point.  Reuse the production primitive functions
+// above, but stop before their legacy main() and provide a structured geometry
+// value to the author's shade() function.  Keeping this composer alongside
+// the legacy source makes the two paths share exactly the same distances.
+static std::string compose_sdf_geometry_shader(Canvas::SDFShape shape,
+                                               const std::string& author_sksl,
+                                               const std::string& sdf_expression = {},
+                                               std::uint32_t leaf_count = 0) {
+    (void)shape;
+    const std::string source(kSDFShapeSkSL);
+    const auto main_at = source.find("half4 main(float2 coord)");
+    std::string primitive_prelude =
+        main_at == std::string::npos ? source : source.substr(0, main_at);
+    // SkSL exposes atan(y, x), whereas the legacy source used atan2 in a
+    // path that was not previously composed through RuntimeEffect.
+    for (std::size_t at = primitive_prelude.find("atan2("); at != std::string::npos;
+         at = primitive_prelude.find("atan2(", at + 1))
+        primitive_prelude.replace(at, 6, "atan(");
+    std::string leaf_uniforms;
+    for (std::uint32_t i = 0; i < leaf_count; ++i) {
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_x;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_y;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_w;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_h;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_cornerRadius;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_innerRadius;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_arcStart;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_arcSweep;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_squirclePower;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_armWidth;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_bezierCX;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_bezierCY;\n";
+    }
+    auto composed = primitive_prelude + leaf_uniforms + R"(
+struct PulpGeom { float sdf; float2 grad; float2 pos; float2 uv; float coverage; };
+struct PulpFragment { half4 color; float strokeWidth; float sigma; };
+float pulp_smooth_union(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / max(abs(k), 0.0001), 0.0, 1.0);
+    return mix(b, a, h) - abs(k) * h * (1.0 - h);
+}
+float pulp_smooth_subtract(float a, float b, float k) {
+    return -pulp_smooth_union(-a, b, k);
+}
+
+float pulp_shape_distance(float2 p) {
+    float2 halfSize = resolution * 0.5 - float2(2.0);
+    float r = min(halfSize.x, halfSize.y);
+    if (shapeType < 0.5) return sdBox(p, halfSize);
+    if (shapeType < 1.5) return sdCircle(p, r);
+    if (shapeType < 2.5) return sdRoundBox(p, halfSize, cornerRadius);
+    if (shapeType < 3.5) {
+        float angle = atan(p.y, p.x);
+        float halfSweep = arcSweep * 0.5;
+        float diff = angle - (arcStart + halfSweep);
+        diff -= 6.2832 * floor((diff + 3.1416) / 6.2832);
+        float ring = abs(length(p) - r * 0.8) - strokeWidth * 0.5;
+        return max(ring, (abs(diff) - halfSweep) * r * 0.5);
+    }
+    if (shapeType < 4.5) return sdDiamond(p, r);
+    if (shapeType < 5.5) return sdSquircle(p, halfSize, squirclePower);
+    if (shapeType < 6.5) return sdTriangle(p, r);
+    if (shapeType < 7.5) return sdRing(p, r, r * innerRadius);
+    if (shapeType < 8.5) return sdStadium(p, halfSize);
+    if (shapeType < 9.5) return sdCross(p, halfSize, armWidth);
+    if (shapeType < 10.5) return sdFlatSegment(p, halfSize);
+    if (shapeType < 11.5) return sdRoundedSegment(p, halfSize.x, max(strokeWidth, 2.0));
+    if (shapeType < 12.5) return sdFlatArc(p, r, r * innerRadius, arcStart, arcSweep);
+    return sdQuadBezier(p, float2(-halfSize.x, halfSize.y),
+                        float2(bezierCX * halfSize.x, bezierCY * halfSize.y),
+                        float2(halfSize.x, halfSize.y), max(strokeWidth, 2.0));
+}
+
+PulpGeom pulp_geom(float2 coord) {
+    float2 p = coord - resolution * 0.5;
+    float d = pulp_shape_distance(p);
+    // Central differences keep the gradient tied to the exact composed field
+    // and remain stable for all primitive branches.
+    float e = 0.5;
+    float2 grad = float2(pulp_shape_distance(p + float2(e, 0.0)) -
+                         pulp_shape_distance(p - float2(e, 0.0)),
+                         pulp_shape_distance(p + float2(0.0, e)) -
+                         pulp_shape_distance(p - float2(0.0, e))) / (2.0 * e);
+    return PulpGeom(d, normalize(grad), p, coord / resolution,
+                    1.0 - smoothstep(-1.0, 1.0, d));
+}
+)" + author_sksl + R"(
+half4 main(float2 coord) {
+    PulpGeom g = pulp_geom(coord);
+    PulpFragment f = shade(g, coord);
+    float sd = f.strokeWidth > 0.0 ? abs(g.sdf) - f.strokeWidth * 0.5 : g.sdf;
+    float alpha = 1.0 - smoothstep(-1.0, 1.0, sd);
+    return f.color * half(alpha);
+}
+)";
+    if (!sdf_expression.empty()) {
+        const std::string needle = "float d = pulp_shape_distance(p);";
+        const auto at = composed.find(needle);
+        if (at != std::string::npos)
+            composed.replace(at, needle.size(), "float d = " + sdf_expression + ";");
+    }
+    return composed;
+}
+
 void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
                                  const SDFStyle& style) {
     if (!canvas_) { Canvas::draw_sdf_shape(shape, x, y, w, h, style); return; }
@@ -277,6 +438,216 @@ void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float
     SkPaint paint;
     paint.setShader(std::move(shader));
     canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
+}
+
+static std::string compose_sdf_chart_shader(const std::string& author_sksl) {
+    return R"(
+struct PulpChart { float t; float d; float side; float2 tan; float px; float valid; };
+struct PulpSdf { float d; float id; };
+uniform float2 resolution;
+uniform float shapeType;
+uniform float arcStart;
+uniform float arcSweep;
+uniform float innerRadius;
+uniform float strokeWidth;
+uniform float reach;
+uniform float featherSigma;
+uniform float featherCurve;
+uniform float featherMode;
+uniform float leaf0; uniform float leaf1; uniform float leaf2; uniform float leaf3;
+uniform float leaf4; uniform float leaf5; uniform float leaf6; uniform float leaf7;
+uniform float leaf8; uniform float leaf9; uniform float leaf10; uniform float leaf11;
+uniform float leaf12; uniform float leaf13; uniform float leaf14; uniform float leaf15;
+
+// Abramowitz–Stegun erfc approximation used by the analytic feather path.
+float pulpErfc(float x) {
+    float ax = abs(x);
+    float t = 1.0 / (1.0 + 0.3275911 * ax);
+    float p = (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t
+                 - 0.284496736) * t + 0.254829592) * t);
+    float e = p * exp(-ax * ax);
+    return x >= 0.0 ? e : 2.0 - e;
+}
+
+float pulpFeather(float sd, float sigma, int curve, int mode) {
+    float s = max(abs(sigma), 0.0001);
+    float coverage = curve == 0
+        ? 0.5 * pulpErfc(sd / (s * 1.41421356237))
+        : clamp(0.5 - sd / (2.0 * s), 0.0, 1.0);
+    if (mode == 1) coverage *= sd > 0.0 ? 1.0 : 0.0; // glow
+    else if (mode == 2) coverage *= sd < 0.0 ? 1.0 : 0.0; // inner
+    else if (mode == 3) coverage = 1.0 - coverage; // outer
+    else if (mode == 4) coverage = sd < 0.0 ? 1.0 - coverage : 0.0; // inset
+    // Radial and sweep are chart-aware modes; the scalar form remains useful
+    // as a stable fallback when no chart is available.
+    else if (mode == 5) coverage *= sd < 0.0 ? 1.0 : 0.0;
+    else if (mode == 6) coverage *= sd > 0.0 ? 1.0 : 0.0;
+    return clamp(coverage, 0.0, 1.0);
+}
+float pulpFeather(PulpChart g, float sigma, int curve, int mode) {
+    float scale = mode == 5 ? max(abs(g.d), 0.001)
+                            : (mode == 6 ? max(abs(g.t - 0.5) * 2.0, 0.001) : 1.0);
+    return pulpFeather(g.d, sigma * scale, curve, mode == 5 || mode == 6 ? 0 : mode);
+}
+
+// Bounded analytic feathering. mode 0 is a compact linear/smooth edge,
+// mode 1 is Gaussian-like falloff, and mode 2 is an exponential glow. The
+// caller supplies pixel width in the same units as d; invalid widths are
+// clamped so a malformed author uniform cannot create NaNs.
+PulpSdf pulpLeaf(float d, float id) { return PulpSdf(d, id); }
+PulpSdf pulpUnion(PulpSdf a, PulpSdf b) { return a.d < b.d ? a : b; }
+PulpSdf pulpIntersect(PulpSdf a, PulpSdf b) { return a.d > b.d ? a : b; }
+PulpSdf pulpSubtract(PulpSdf a, PulpSdf b) { return PulpSdf(max(a.d, -b.d), a.id); }
+PulpSdf pulpSmoothUnion(PulpSdf a, PulpSdf b, float k) {
+    float h = clamp(0.5 + 0.5 * (b.d - a.d) / max(abs(k), 0.0001), 0.0, 1.0);
+    return PulpSdf(mix(b.d, a.d, h) - abs(k) * h * (1.0 - h), h < 0.5 ? b.id : a.id);
+}
+)" + author_sksl + R"(
+half4 main(float2 coord) {
+    float2 center = resolution * 0.5;
+    float2 p = coord - center;
+    float radius = min(center.x, center.y) - 2.0;
+    float angle = atan(p.y, p.x);
+    float halfSweep = arcSweep * 0.5;
+    float mid = arcStart + halfSweep;
+    float diff = angle - mid;
+    diff = diff - 6.2831853 * floor((diff + 3.1415926) / 6.2831853);
+    float outer = radius;
+    float inner = radius * innerRadius;
+    float d = abs(length(p) - (outer + inner) * 0.5) - (outer - inner) * 0.5;
+    float t = clamp((diff + halfSweep) / max(2.0 * halfSweep, 0.0001), 0.0, 1.0);
+    float2 tan = float2(-sin(angle), cos(angle));
+    PulpChart g = PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, tan,
+                            1.0,
+                            (shapeType > 11.5 && shapeType < 12.5 &&
+                             arcSweep > 0.0 && outer > inner) ? 1.0 : 0.0);
+    half4 shaded = shade(g);
+    if (featherSigma > 0.0) {
+        float feather = pulpFeather(g, featherSigma,
+                                    int(featherCurve + 0.5),
+                                    int(featherMode + 0.5));
+        shaded.a *= half(feather);
+    }
+    return shaded;
+}
+)";
+}
+
+// RuntimeEffect reports diagnostics against the composed source. Keep author
+// feedback stable by translating the two formats SkSL has used in practice
+// ("error: N:" and "line N") back to the author's source line.
+static std::string remap_sksl_author_lines(const std::string& error,
+                                           const std::string& composed,
+                                           const std::string& author) {
+    const auto at = composed.find(author);
+    if (at == std::string::npos || at == 0) return error;
+    const auto prefix = composed.substr(0, at);
+    const auto offset = static_cast<int>(std::count(prefix.begin(), prefix.end(), '\n'));
+    if (offset <= 0) return error;
+
+    auto remap = [offset](const std::string& input, const std::regex& pattern,
+                          bool has_suffix) {
+        std::string output;
+        std::size_t cursor = 0;
+        for (std::sregex_iterator it(input.begin(), input.end(), pattern), end;
+             it != end; ++it) {
+            const auto& match = *it;
+            output.append(input, cursor, static_cast<std::size_t>(match.position()) - cursor);
+            const int line = std::stoi(match[2].str());
+            output += match[1].str();
+            output += std::to_string(std::max(1, line - offset));
+            if (has_suffix) output += match[3].str();
+            cursor = static_cast<std::size_t>(match.position() + match.length());
+        }
+        output.append(input, cursor, std::string::npos);
+        return output;
+    };
+    const std::regex error_line(R"((error:\s*)([0-9]+)(:))");
+    auto mapped = remap(error, error_line, true);
+    const std::regex line_number(R"((\bline\s+)([0-9]+))");
+    return remap(mapped, line_number, false);
+}
+
+std::string Canvas::compile_sdf_chart_sksl(SDFShape shape, const std::string& sksl) {
+    if (sksl.empty()) return "Empty shader code";
+    if (!sdf_shape_has_chart(shape) &&
+        (sksl.find("PulpChart") != std::string::npos ||
+         sksl.find("pulp_chart") != std::string::npos))
+        return "Shape has no stroke chart (t/d/side); chart shaders exist only for band shapes";
+    std::string error;
+    const bool structured = sksl.find("PulpFragment shade") != std::string::npos;
+    const auto source = structured
+                            ? compose_sdf_geometry_shader(SDFShape::flat_arc, sksl)
+                            : compose_sdf_chart_shader(sksl);
+    auto effect = RuntimeEffectCache::instance().get_or_compile(source, error);
+    return effect ? std::string() : remap_sksl_author_lines(error, source, sksl);
+}
+
+bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
+                                              float w, float h,
+                                              const SDFStyle& style,
+                                              const std::string& author_sksl,
+                                              const ShaderDrawOptions& options) {
+    if (!canvas_ || author_sksl.empty()) return false;
+    if (!sdf_shape_has_chart(shape) &&
+        (author_sksl.find("PulpChart") != std::string::npos ||
+         author_sksl.find("pulp_chart") != std::string::npos))
+        return false;
+    // Keep the chart prelude deliberately small and explicit. It is emitted
+    // before the author function so the same source can be compiled at draw
+    // time and by the bridge's normal SkSL compiler.
+    const bool structured = author_sksl.find("PulpFragment shade") != std::string::npos;
+    const std::string source = structured
+                                   ? compose_sdf_geometry_shader(shape, author_sksl)
+                                   : compose_sdf_chart_shader(author_sksl);
+    std::string error;
+    auto effect = RuntimeEffectCache::instance().get_or_compile(source, error);
+    if (!effect) return false;
+    SkRuntimeShaderBuilder builder(effect);
+    builder.uniform("resolution") = SkV2{w, h};
+    builder.uniform("shapeType") = static_cast<float>(shape);
+    builder.uniform("arcStart") = style.arc_start;
+    builder.uniform("arcSweep") = style.arc_sweep;
+    builder.uniform("innerRadius") = style.inner_radius;
+    builder.uniform("strokeWidth") = style.stroke_width;
+    builder.uniform("reach") = options.reach;
+    builder.uniform("featherSigma") = style.feather_sigma;
+    builder.uniform("featherCurve") = static_cast<float>(style.feather_curve);
+    builder.uniform("featherMode") = static_cast<float>(style.feather_mode);
+    for (const auto& named : options.named_uniforms) {
+        if (!effect->findUniform(named.name.c_str()) || named.count < 1 || named.count > 4) continue;
+        auto slot = builder.uniform(named.name.c_str());
+        if (named.count == 1) slot = named.v[0];
+        else if (named.count == 2) slot = SkV2{named.v[0], named.v[1]};
+        else if (named.count == 3) slot = SkV3{named.v[0], named.v[1], named.v[2]};
+        else slot = SkV4{named.v[0], named.v[1], named.v[2], named.v[3]};
+    }
+    if (options.data_texture) {
+        if (auto data_shader = make_shader_data_texture(options.data_texture)) {
+            // The bridge's scope binding names the child after the channel;
+            // retain the generic aliases for hand-authored shaders.
+            std::vector<std::string> candidates = {options.data_texture->name,
+                                                   "scopeData", "scope", "valueChannel"};
+            for (const auto& candidate : candidates)
+                if (effect->findChild(candidate.c_str())) builder.child(candidate.c_str()) = data_shader;
+        }
+        const std::string suffixes[] = {"_count", "_live", "_neutral"};
+        const std::string prefix = options.data_texture->name;
+        if (effect->findUniform("_count")) builder.uniform("_count") = static_cast<float>(options.data_texture->count);
+        if (effect->findUniform("_live")) builder.uniform("_live") = options.data_texture->live ? 1.0f : 0.0f;
+        if (effect->findUniform("_neutral")) builder.uniform("_neutral") = options.data_texture->neutral;
+        if (!prefix.empty()) {
+            if (effect->findUniform((prefix + suffixes[0]).c_str())) builder.uniform((prefix + suffixes[0]).c_str()) = static_cast<float>(options.data_texture->count);
+            if (effect->findUniform((prefix + suffixes[1]).c_str())) builder.uniform((prefix + suffixes[1]).c_str()) = options.data_texture->live ? 1.0f : 0.0f;
+            if (effect->findUniform((prefix + suffixes[2]).c_str())) builder.uniform((prefix + suffixes[2]).c_str()) = options.data_texture->neutral;
+        }
+    }
+    auto shader = builder.makeShader();
+    if (!shader) return false;
+    SkPaint paint; paint.setShader(std::move(shader));
+    canvas_->save(); canvas_->translate(x, y);
+    canvas_->drawRect(SkRect::MakeXYWH(0, 0, w, h), paint); canvas_->restore();
+    return true;
 }
 
 // ── Custom SkSL shader rendering ─────────────────────────────────────────────
@@ -326,6 +697,92 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
     canvas_->translate(x, y);
     canvas_->drawRect(SkRect::MakeXYWH(0, 0, w, h), paint);
     canvas_->restore();
+    return true;
+}
+
+bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
+                                 float x, float y, float w, float h,
+                                 const ShaderDrawOptions& options) {
+    if (!canvas_ || sksl.empty()) return false;
+    std::string composed = sksl;
+    if (options.geometry && sksl.find("PulpFragment shade") != std::string::npos)
+        composed = compose_sdf_geometry_shader(options.geometry->shape, sksl,
+                                               options.geometry->sdf_expression,
+                                               options.geometry->leaf_count);
+    auto& cache = RuntimeEffectCache::instance();
+    auto effect = cache.get_or_compile(composed);
+    if (!effect) return false;
+    SkRuntimeShaderBuilder builder(effect);
+    if (effect->findUniform("resolution")) builder.uniform("resolution") = SkV2{w, h};
+    if (effect->findUniform("reach")) builder.uniform("reach") = options.reach;
+    const auto& u = options.uniforms;
+    if (effect->findUniform("value")) builder.uniform("value") = u.value;
+    if (effect->findUniform("time")) builder.uniform("time") = u.time;
+    auto color = [](Color c) -> SkV4 { return {c.r, c.g, c.b, c.a}; };
+    if (effect->findUniform("accentColor")) builder.uniform("accentColor") = color(u.accent_color);
+    if (effect->findUniform("bgColor")) builder.uniform("bgColor") = color(u.bg_color);
+    if (effect->findUniform("trackColor")) builder.uniform("trackColor") = color(u.track_color);
+    if (effect->findUniform("fillColor")) builder.uniform("fillColor") = color(u.fill_color);
+    if (effect->findUniform("thumbColor")) builder.uniform("thumbColor") = color(u.thumb_color);
+    if (options.geometry) {
+        const auto& style = options.geometry->style;
+        if (effect->findUniform("shapeType")) builder.uniform("shapeType") = static_cast<float>(options.geometry->shape);
+        if (effect->findUniform("cornerRadius")) builder.uniform("cornerRadius") = style.corner_radius;
+        if (effect->findUniform("strokeWidth")) builder.uniform("strokeWidth") = style.stroke_width;
+        if (effect->findUniform("arcStart")) builder.uniform("arcStart") = style.arc_start;
+        if (effect->findUniform("arcSweep")) builder.uniform("arcSweep") = style.arc_sweep;
+        if (effect->findUniform("squirclePower")) builder.uniform("squirclePower") = style.squircle_power;
+        if (effect->findUniform("innerRadius")) builder.uniform("innerRadius") = style.inner_radius;
+        if (effect->findUniform("armWidth")) builder.uniform("armWidth") = style.arm_width;
+        if (effect->findUniform("bezierCX")) builder.uniform("bezierCX") = style.bezier_cx;
+        if (effect->findUniform("bezierCY")) builder.uniform("bezierCY") = style.bezier_cy;
+        for (const auto& uniform : options.geometry->leaf_uniforms) {
+            if (!effect->findUniform(uniform.name.c_str())) continue;
+            switch (uniform.count) {
+                case 1: builder.uniform(uniform.name.c_str()) = uniform.v[0]; break;
+                case 2: builder.uniform(uniform.name.c_str()) = SkV2{uniform.v[0], uniform.v[1]}; break;
+                case 3: builder.uniform(uniform.name.c_str()) = SkV3{uniform.v[0], uniform.v[1], uniform.v[2]}; break;
+                case 4: builder.uniform(uniform.name.c_str()) = SkV4{uniform.v[0], uniform.v[1], uniform.v[2], uniform.v[3]}; break;
+                default: break;
+            }
+        }
+    }
+    if (options.data_texture) {
+        if (auto data_shader = make_shader_data_texture(options.data_texture)) {
+            std::vector<std::string> candidates = {options.data_texture->name,
+                                                   "scopeData", "scope", "valueChannel"};
+            for (const auto& candidate : candidates)
+                if (effect->findChild(candidate.c_str())) builder.child(candidate.c_str()) = data_shader;
+        }
+        if (effect->findUniform("_count"))
+            builder.uniform("_count") = static_cast<float>(options.data_texture->count);
+        if (effect->findUniform("_live"))
+            builder.uniform("_live") = options.data_texture->live ? 1.0f : 0.0f;
+        if (effect->findUniform("_neutral"))
+            builder.uniform("_neutral") = options.data_texture->neutral;
+        const std::string prefix = options.data_texture->name;
+        if (!prefix.empty()) {
+            if (effect->findUniform((prefix + "_count").c_str())) builder.uniform((prefix + "_count").c_str()) = static_cast<float>(options.data_texture->count);
+            if (effect->findUniform((prefix + "_live").c_str())) builder.uniform((prefix + "_live").c_str()) = options.data_texture->live ? 1.0f : 0.0f;
+            if (effect->findUniform((prefix + "_neutral").c_str())) builder.uniform((prefix + "_neutral").c_str()) = options.data_texture->neutral;
+        }
+    }
+    for (const auto& named : options.named_uniforms) {
+        auto* info = effect->findUniform(named.name.c_str());
+        if (!info || named.count < 1 || named.count > 4) continue;
+        auto slot = builder.uniform(named.name.c_str());
+        if (named.count == 1) slot = named.v[0];
+        else if (named.count == 2) slot = SkV2{named.v[0], named.v[1]};
+        else if (named.count == 3) slot = SkV3{named.v[0], named.v[1], named.v[2]};
+        else slot = SkV4{named.v[0], named.v[1], named.v[2], named.v[3]};
+    }
+    auto shader = builder.makeShader();
+    if (!shader) return false;
+    SkPaint paint; paint.setShader(std::move(shader));
+    canvas_->save(); canvas_->translate(x, y);
+    canvas_->drawRect(SkRect::MakeXYWH(-options.reach, -options.reach,
+                                       w + 2.0f * options.reach,
+                                       h + 2.0f * options.reach), paint); canvas_->restore();
     return true;
 }
 

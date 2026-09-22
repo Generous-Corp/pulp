@@ -161,6 +161,8 @@ YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
+VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
+CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
 BASE="${PULP_PREPUSH_BASE:-origin/main}"
 
@@ -340,6 +342,21 @@ if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; 
         1) fail=1 ;;
         *) echo "[pre-push] compat_aggregate: internal error" >&2 ;;
     esac
+fi
+
+# Vellum watch-event hint — ADVISORY: warns, never blocks, and is deliberately
+# not demotable because it has nothing to demote. The required `Vellum freeze`
+# check wants a hand-authored event under .github/vellum-expansion-watch-events/
+# whenever the pushed range touches a pinned capability-family path glob; the
+# trigger is the path list, not the diff's meaning, so an ordinary edit under a
+# watched tree qualifies with no warning anywhere else.
+#
+# The authoritative run stays in CI, executed from a trusted root rather than
+# from this branch's copy of the checker — that is the whole point of the gate,
+# and giving the branch's copy a local veto would undo it. This prints what CI
+# will say and the command that reproduces it, then gets out of the way.
+if [ -f "$VELLUM_HINT" ]; then
+    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" || true
 fi
 
 # Docs-noise lint (advisory-demotable in v1). Forward-looking: scans added
@@ -629,6 +646,35 @@ if [ -f "$LABEL_EXCLUSION" ]; then
         1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; fail=1 ;;
         *) echo "[pre-push] ctest_label_exclusion_guard: internal error" >&2 ;;
     esac
+fi
+
+# Agent-capability contract — the two counters a branch RESERVES while the base
+# keeps moving. This is the only gate here whose failure cannot be repaired
+# after the fact: it is detectable solely in the merge group, and a PR that has
+# entered the merge queue refuses a push with GH006, so the fix is locked out by
+# the same queue that will reject it. The worst shape is silent — two branches
+# holding the same SURFACE_INVENTORY_VERSION over different surfaces write
+# byte-identical counter lines, so git merges them with no conflict and each
+# passes --check alone. Only a run against the CURRENT base sees it.
+#
+# The base is passed explicitly because a bare run resolves `merge_base` while
+# CI forces `exact_base`, and the two disagree by enough to matter.
+# ~15s, and only when the diff touches an installed public header or the
+# capability registry/manifest — a branch that adds no surface cannot take a
+# counter.
+if [ -f "$CAPABILITY_CONTRACT" ]; then
+    capability_base="$(git rev-parse --verify --quiet "$BASE^{commit}" || true)"
+    if [ -z "$capability_base" ]; then
+        echo "[pre-push] agent-capability contract: SKIPPED — base '$BASE' does not resolve. A skip is not a pass." >&2
+    elif git diff --name-only "$capability_base"...HEAD 2>/dev/null | grep -qE '^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/agent-capabilities/|docs/status/agent-capabilit)'; then
+        run_gate_captured env PULP_AGENT_CAPABILITY_BASE_REF="$capability_base" \
+            "$PYTHON" "$CAPABILITY_CONTRACT" --check
+        case $? in
+            0) ;;
+            1) echo "[pre-push] agent-capability contract: the surface or its counters are stale against $BASE. Re-derive rather than picking a number — \`PULP_AGENT_CAPABILITY_BASE_REF=$capability_base python3 tools/scripts/agent_capability_rederive.py\`. Landing this unfixed costs a merge-group eviction AND locks the branch against the repair." >&2; fail=1 ;;
+            *) echo "[pre-push] agent_capability_manifest --check: internal error" >&2 ;;
+        esac
+    fi
 fi
 
 # Local diff-coverage check — mirror the CI `Diff coverage required` gate

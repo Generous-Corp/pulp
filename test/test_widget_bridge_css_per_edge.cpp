@@ -504,12 +504,9 @@ TEST_CASE("flex shorthand keyword forms",
 
 TEST_CASE("setOverflow accepts scroll keyword",
           "[view][bridge][diverge-pass-yoga]") {
-    // pulp DIVERGE→PASS sweep — yoga/overflow claimed `scroll` as
-    // unsupported. View::Overflow now has 3 values; the bridge accepts
-    // 'scroll' as a third keyword and yoga_layout.cpp forwards it
-    // through YGNodeStyleSetOverflow. Paint clipping treats scroll
-    // like hidden (no scrollbar UI yet), but the keyword survives the
-    // round-trip — closing the harness gap.
+    // View::Overflow has 3 values; the bridge accepts 'scroll' as a third
+    // keyword and yoga_layout.cpp forwards it through YGNodeStyleSetOverflow.
+    // `scroll` clips like `hidden` AND scrolls its children.
     ScriptEngine engine;
     View root;
     StateStore store;
@@ -527,6 +524,30 @@ TEST_CASE("setOverflow accepts scroll keyword",
     REQUIRE(bridge.widget("a")->overflow() == View::Overflow::scroll);
     REQUIRE(bridge.widget("b")->overflow() == View::Overflow::visible);
     REQUIRE(bridge.widget("c")->overflow() == View::Overflow::hidden);
+}
+
+TEST_CASE("setOverflow maps CSS auto to a scroll container", "[view][bridge][overflow-scroll]") {
+    // CSS `auto` scrolls when the content overflows. It used to fall through
+    // to `hidden`, so a script that set `overflowY: auto` on an existing
+    // element CLIPPED the overflow away instead of letting the wheel reach
+    // it — the content was unreachable and nothing reported an error.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setOverflow('a', 'auto');
+        createPanel('b', '');
+        setOverflow('b', 'clip');
+    )");
+
+    REQUIRE(bridge.widget("a")->overflow() == View::Overflow::scroll);
+    REQUIRE(bridge.widget("a")->is_scroll_container());
+    // Control: an unrelated keyword still resolves to the clipping default,
+    // so this is not simply mapping everything to scroll.
+    REQUIRE(bridge.widget("b")->overflow() == View::Overflow::hidden);
 }
 
 TEST_CASE("padding_left percent caps the layout edge",

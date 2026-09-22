@@ -456,12 +456,14 @@ export interface TextEditorProps extends BaseProps {
 export interface KnobProps extends BaseProps {
     value?: number;     // 0..1
     onChange?: (value: number) => void;
+    shader?: ShaderProps;
 }
 
 export interface FaderProps extends BaseProps {
     orientation?: 'vertical' | 'horizontal';
     value?: number;
     onChange?: (value: number) => void;
+    shader?: ShaderProps;
 }
 
 export interface SpectrumProps extends BaseProps {
@@ -494,7 +496,15 @@ export interface CheckboxProps extends BaseProps {
     onChange?: (checked: boolean) => void;
 }
 
-export interface ToggleProps extends CheckboxProps {}
+export interface ToggleProps extends CheckboxProps { shader?: ShaderProps; }
+
+export interface ShaderProps {
+    sksl: string;
+    geometry?: 'auto' | Record<string, unknown>;
+    uniforms?: Record<string, number | number[]>;
+    feather?: Record<string, unknown>;
+    reach?: number;
+}
 
 export interface ComboProps extends BaseProps {
     options?: string[];
@@ -550,8 +560,22 @@ export interface VirtualListProps extends BaseProps {
 }
 
 export interface CanvasProps extends BaseProps {
-    /// Drawing happens via the canvas* bridge ops in render callbacks.
-    /// Wire your draw function via a ref, not via children.
+    width?: number;
+    height?: number;
+    /// Imperative retained-frame callback. The native tree remains reconciled;
+    /// only the painted command stream is rebuilt per frame.
+    onFrame?: (ctx: CanvasFrameContext, frame: CanvasFrameInfo) => void;
+}
+
+export interface CanvasFrameInfo {
+    time: number;
+    width: number;
+    height: number;
+}
+
+export interface CanvasFrameContext {
+    drawSdf(geometry: Record<string, unknown>, sksl?: string,
+            uniforms?: Record<string, number | number[]>): unknown;
 }
 
 export interface ImageProps extends BaseProps {
