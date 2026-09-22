@@ -12,10 +12,10 @@ export const MAX_WAIT_MS = 5_000;
 export const MAX_TOTAL_WAIT_MS = 30_000;
 
 const ACTION_FIELDS = {
-  click: new Set(["action", "selector", "timeout_ms"]),
-  "context-click": new Set(["action", "selector", "timeout_ms"]),
-  "dispatch-event": new Set(["action", "selector", "event", "timeout_ms"]),
-  type: new Set(["action", "selector", "text", "timeout_ms"]),
+  click: new Set(["action", "selector", "timeout_ms", "expect"]),
+  "context-click": new Set(["action", "selector", "timeout_ms", "expect"]),
+  "dispatch-event": new Set(["action", "selector", "event", "timeout_ms", "expect"]),
+  type: new Set(["action", "selector", "text", "timeout_ms", "expect"]),
   "wait-for": new Set(["action", "selector", "state", "timeout_ms"]),
   "wait-ms": new Set(["action", "milliseconds"]),
 };
@@ -60,6 +60,19 @@ function selector(value, label) {
 function actionTimeout(value, label) {
   if (value === undefined) return 5_000;
   return boundedInteger(value, label, 1, MAX_ACTION_TIMEOUT_MS);
+}
+
+function expectedState(value, label) {
+  if (value === undefined) return undefined;
+  plainObject(value, label);
+  exactFields(value, new Set(["selector", "state", "timeout_ms"]), label);
+  return {
+    selector: selector(value.selector, `${label}.selector`),
+    state: WAIT_FOR_STATES.has(value.state ?? "visible")
+      ? (value.state ?? "visible")
+      : fail(`${label}.state must be attached, detached, visible, or hidden`),
+    timeout_ms: actionTimeout(value.timeout_ms, `${label}.timeout_ms`),
+  };
 }
 
 function redactedPlanIdentity(actions) {
@@ -120,6 +133,8 @@ export function parseInteractionPlan(raw) {
       selector: selector(candidate.selector, `${label}.selector`),
       timeout_ms: actionTimeout(candidate.timeout_ms, `${label}.timeout_ms`),
     };
+    const expected = expectedState(candidate.expect, `${label}.expect`);
+    if (expected) normalized.expect = expected;
     if (candidate.action === "type") {
       if (typeof candidate.text !== "string" ||
           candidate.text.length > MAX_TYPE_TEXT_LENGTH) {

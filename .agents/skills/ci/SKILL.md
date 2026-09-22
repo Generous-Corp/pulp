@@ -9639,3 +9639,48 @@ When you change that guard step, `test_release_trailer_guard.py` runs it
 **extracted from the YAML** against real commits. Do not "fix" that test by
 pasting the step into it — a transcribed copy is exactly how the shell scan
 stopped matching the parse it was supposed to mirror.
+
+## A watchdog's "all clear" and its "I could not look" are the same zero
+
+A monitoring sweep that fails to collect produces zero findings. So does a
+sweep that collects everything and finds nothing wrong. Every consumer
+downstream — the alarm count, the run conclusion, the summary prose — sees an
+identical zero, and the one that means *blind* is the one that renders as calm.
+
+`merge-stall-check.yml` demonstrated the full cost. It ran four hours into a
+total merge stall, both of its GraphQL reads having failed, and printed:
+
+```
+note: 2 collection call(s) failed.
+> **Degraded sweep** — 2 collection call(s) failed...
+No PR is merge-ready-and-stuck. Merges are flowing (or nothing is ready).
+alarm_count=0
+```
+
+The job concluded `success`. The degraded state was even detected — it just
+only gated *closing an existing tracker*, so with no tracker open a fully blind
+sweep was a silent no-op. Twenty consecutive sweeps were degraded, `merge_queue`
+null in all twenty, which means that alarm had been structurally unable to fire
+for days while reporting green every 30 minutes.
+
+When auditing any watchdog here, ask three things in this order:
+
+1. **Can it distinguish "read failed" from "found nothing"?** If a failed
+   collector leaves the same empty value an empty result would, it cannot. Give
+   the failure its own finding that names the verdicts it silenced, and count
+   that finding in whatever the workflow uses to decide it should alarm.
+2. **Does its quiet path assert it actually observed something?** Pair every
+   "nothing is wrong" with a control drawn from the same sweep that must be
+   non-zero (open PR count, queue depth). A sweep that saw zero of everything
+   has no standing to report health.
+3. **Does anything run its tests?** `test_merge_stall_watchdog.py` existed,
+   asserted real behavior, and was registered in no workflow — so none of its
+   assertions could fail a PR. Registration for these python contract suites is
+   `workflow-lint.yml`: both `paths:` lists plus the runner line in the
+   *Workflow lint regression contract* step. Three places; miss the runner line
+   and the suite is decorative.
+
+Related: a GraphQL page asking for 50 per-PR check rollups times out (HTTP 504)
+under normal load on this repo. If a collector reads open PRs with their
+rollups, keep the page small and give transient 5xx a bounded retry — a
+terminal failure must still fail closed rather than retry.

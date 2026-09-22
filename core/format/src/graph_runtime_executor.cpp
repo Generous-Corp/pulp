@@ -162,10 +162,12 @@ void gather_node_automation(const graph::GraphRuntimePlan& plan,
                             GraphRuntimeBufferPool& pool, GraphRuntimeAutomationScratch& automation,
                             const graph::GraphRuntimeNodePlan& node, std::uint32_t node_index,
                             std::uint32_t frames, double sample_rate,
-                            AudioRateModulationDelivery delivery) noexcept {
+                            AudioRateModulationDelivery delivery,
+                            bool preserve_parameter_events) noexcept {
     state::ParameterEventQueue* queue = automation.events(node_index);
     if (queue == nullptr) return;
-    queue->clear();
+    if (!preserve_parameter_events)
+        queue->clear();
     automation.set_dense_view_count(node_index, 0);
     const int last = static_cast<int>(frames) - 1;
 
@@ -473,7 +475,8 @@ GraphRuntimeExecutorErrorCode run_routed_node(
     const auto& binding = bindings[node_index];
     if (automation != nullptr) {
         gather_node_automation(plan, assignment, pool, *automation, node, node_index, frames,
-                               block.sample_rate, binding.audio_rate_modulation_delivery);
+                               block.sample_rate, binding.audio_rate_modulation_delivery,
+                               binding.preserve_parameter_events);
     }
 
     // Per-node CPU-load attribution: wrap this node's per-block produce step in
