@@ -41,7 +41,22 @@ require(
     and "needs: [build" not in pr_alias,
     "PR bootstrap must not depend on the advisory build matrix",
 )
-require("always()" in pr_alias, "PR alias must report after failed dependencies")
+# The alias must still run when `resolve-provider` or `classify` FAILED — that
+# is the whole point of a fail-closed required context. But it must NOT run when
+# the workflow run itself was cancelled: job-level `always()` outlives a
+# `cancel-in-progress`, so a superseded run kept its jobs alive, stayed
+# `in_progress`, and went on holding `build-refs/pull/N/merge` while every newer
+# head sat at `pending` with zero jobs. `!cancelled()` keeps the failed-dependency
+# half and drops the cancelled half, so assert for it and reject the bare form.
+require(
+    "!cancelled()" in pr_alias,
+    "PR alias must report after failed dependencies (`!cancelled()`)",
+)
+require(
+    not re.search(r"(?<![!\w])always\(\)", pr_alias),
+    "PR alias must not use bare `always()` — it survives cancel-in-progress and "
+    "holds the run's concurrency group against every newer head",
+)
 require(
     "github.event_name == 'pull_request'" in pr_alias
     and "github.event_name == 'workflow_dispatch'" in pr_alias
