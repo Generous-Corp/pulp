@@ -986,6 +986,56 @@ TEST_CASE("analytic SDF feather modes render finite chart coverage",
 #endif
 }
 
+TEST_CASE("SDF geometry gradient stays finite at a field extremum",
+          "[canvas][sdf][shader][geometry]") {
+#ifdef PULP_HAS_SKIA
+    // An odd extent puts a pixel centre exactly on the shape centre, which is
+    // the one place a circle's central differences cancel in both axes. That
+    // fragment is the only one that can divide by a zero-length gradient.
+    constexpr int kSize = 65;
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(kSize, kSize));
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    Canvas::SDFStyle style;
+    // Paint the gradient itself, encoded so that 0 maps to mid-grey. Reading
+    // the value back is what makes this test able to fail: a self-comparison
+    // such as `m == m` is folded to a constant by the SkSL compiler, so a NaN
+    // would sail straight through it.
+    REQUIRE(canvas.draw_sdf_shape_with_shader(
+        Canvas::SDFShape::circle, 0, 0, kSize, kSize, style,
+        "PulpFragment shade(PulpGeom g, float2 coord) {\n"
+        "    return PulpFragment(half4(half(g.grad.x * 0.5 + 0.5),\n"
+        "                              half(g.grad.y * 0.5 + 0.5),\n"
+        "                              1.0, 1.0), 0.0, 0.0);\n"
+        "}\n",
+        {}));
+
+    SkPixmap pixels;
+    REQUIRE(surface->peekPixels(&pixels));
+
+    // At the extremum the gradient is exactly zero, which encodes to mid-grey.
+    // An unguarded normalize() yields NaN there, which converts to 0.
+    const SkColor centre = pixels.getColor(kSize / 2, kSize / 2);
+    INFO("centre ARGB=" << std::hex << centre);
+    REQUIRE(SkColorGetR(centre) >= 125);
+    REQUIRE(SkColorGetR(centre) <= 131);
+    REQUIRE(SkColorGetG(centre) >= 125);
+    REQUIRE(SkColorGetG(centre) <= 131);
+
+    // Control: six pixels along the diagonal the gradient is a well-defined
+    // unit vector of about (0.707, 0.707), which encodes well above mid-grey.
+    // It must differ from the centre, or this probe is reading a constant
+    // rather than a gradient and could not detect the defect it exists for.
+    const SkColor offset = pixels.getColor(kSize / 2 + 6, kSize / 2 + 6);
+    INFO("offset ARGB=" << std::hex << offset);
+    REQUIRE(SkColorGetR(offset) > 200);
+    REQUIRE(SkColorGetG(offset) > 200);
+#else
+    SUCCEED("SDF geometry gradient test requires PULP_HAS_SKIA");
+#endif
+}
+
 TEST_CASE("analytic SDF feather tracks a Gaussian blur edge",
           "[canvas][sdf][shader][feather][measurement]") {
 #ifdef PULP_HAS_SKIA
