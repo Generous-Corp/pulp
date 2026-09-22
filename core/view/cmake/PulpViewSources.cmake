@@ -32,6 +32,7 @@ target_sources(pulp-view-core PRIVATE
     src/host_drag_coalescer.cpp
     src/pointer_coalescer.cpp
     src/overlay_dismissal.cpp
+    src/plugin_key_routing.cpp
     src/pointer_dispatch.cpp
     src/caret.cpp
     src/continuous_frames.cpp

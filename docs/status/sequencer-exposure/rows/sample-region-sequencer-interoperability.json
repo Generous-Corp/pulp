@@ -1,0 +1,54 @@
+{
+  "id": "sample-region-sequencer-interoperability",
+  "title": "Timeline automation and graph modulation reach authored ProcessorNode parameters",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "5746539377",
+  "owned_paths": [
+    "core/host/include/pulp/host/signal_graph_runtime.hpp",
+    "core/host/src/timeline_automation_delivery.cpp",
+    "test/CMakeLists.txt",
+    "test/cmake/sample_region_sequencer_tests.cmake",
+    "test/test_sample_region_sequencer.cpp",
+    "docs/status/sequencer-exposure/rows/sample-region-sequencer-interoperability.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/src/timeline_automation_delivery.cpp",
+      "needles": [
+        "processor_node_parameters",
+        "validate_timeline_automation_routes"
+      ]
+    },
+    {
+      "path": "test/test_sample_region_sequencer.cpp",
+      "needles": [
+        "S4 timeline automation reaches an authored ProcessorNode",
+        "S4 graph modulation reaches the same authored ProcessorNode parameter",
+        "kSequencerParam = 2901"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "This S4 slice makes existing graph-owned ProcessorNode parameters reachable through the host timeline binding and graph modulation routes. It adds no installed SDK header, target, or exported catalog entry."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline CLI verb, flag, handler, or wire schema changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline MCP tool definition, schema, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No live Product-A control operation, broker grant, profile policy, or executor catalog changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability manifest or agent catalog entry is added by this host interoperability slice."
+    }
+  }
+}

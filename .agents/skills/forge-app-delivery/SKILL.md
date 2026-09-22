@@ -294,8 +294,19 @@ Two rules fall out of it:
 ## Signals that have lied
 
 - **Exit code 0 from a backgrounded launcher** means the launcher exited, not
-  that the work succeeded. Wait on the process:
-  `until ! pgrep -f "<cmd>"; do sleep 10; done`
+  that the work succeeded. Wait on the process — but wait on its **PID**, not
+  its name: `until kill -0 "$PID" 2>/dev/null; do sleep 10; done` after
+  capturing `PID=$!`.
+- **`pgrep -f "<cmd>"` is a completion signal only for a command that never
+  `exec`s.** The packaging wrappers this skill documents all end with
+  `exec "$ROOT/tools/scripts/build_combined_installer.sh" ...`, which replaces
+  the process image — so `pgrep -f package.sh` returns **0 while the same PID
+  is still running**, for the entire signing + packaging + notarization phase.
+  Two live release pipelines were declared dead that way in one evening, and
+  each was "recovered" by a hand-written script that stapled a `.pkg` the
+  running pipeline had already finished. For a packaging run specifically, the
+  truthful signal is the recipe's own heartbeat
+  (`[heartbeat] notarization in progress (Ns elapsed)`); see the `ship` skill.
 - **`grep -qF` under `set -o pipefail`** exits on first match, SIGPIPEs the
   upstream command, and fails the pipeline — so a binary that *does* contain the
   marker is rejected *for* containing it. Count instead; it drains the stream.

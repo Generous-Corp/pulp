@@ -327,6 +327,61 @@ component-selectable `.pkg` — it collects every built bundle (Standalone →
 produces disk images instead. The routing lives in the `pulp ship package`
 branch of `tools/cli/cmd_ship.cpp`.
 
+### A packaging run that looks dead is almost always alive
+
+`build_combined_installer.sh` spends 5 to 30 minutes inside
+`xcrun notarytool submit --wait` on every notarized release, and for that whole
+window the two instruments anyone reaches for both report "dead":
+
+- **The log goes dark.** notarytool writes its entire poll phase as ONE
+  unterminated line, flushed only when Apple returns a verdict, and stdio
+  switches to full buffering the moment stdout is a file rather than a TTY. A
+  watcher tailing the log sees nothing between `Submission ID received` and the
+  verdict. Six status polls across half an hour can arrive as a single line.
+- **The process name disappears.** The wrapper scripts
+  (`examples/*/package.sh`) end by `exec`ing into the recipe, which replaces the
+  process image. `pgrep -f package.sh` returns **0 for a live run**, same PID,
+  from a few seconds in. `stdbuf` / `script` do not help either instrument: the
+  poll phase has no newlines to flush.
+
+So the recipe emits its own heartbeat. Every
+`PULP_NOTARIZE_HEARTBEAT_SECS` (default 30) it prints
+
+```
+[heartbeat] notarization in progress (120s elapsed) — not hung
+```
+
+to the same stream the log captures. **If you see that line, the run is alive —
+do nothing.** It is implemented in `tools/scripts/lib/heartbeat_wait.sh` and
+covered by `NotarizationHeartbeatTest` in
+`tools/scripts/test_build_combined_installer.py`, which drives the real recipe
+with a stand-in `xcrun`.
+
+**If the heartbeat is absent, ask the PID, never the name:**
+
+```sh
+ps -o pid=,etime=,command= -p "$PID"     # the wrapper exec'd; the name is gone
+xcrun notarytool history --key "$PULP_NOTARY_KEY_PATH" \
+  --key-id "$PULP_NOTARY_KEY_ID" --issuer "$PULP_NOTARY_ISSUER_ID" | head -20
+```
+
+Asking Apple costs nothing and touches no artifact. **Do not staple a `.pkg`
+another process may still own.** Two release packages once had their final
+bytes written by an ad-hoc recovery script seconds *after* the provenanced
+pipeline had already finished and validated them — the provenance guards are
+all on the recipe's inputs, and there is no custody on its output. Before
+concluding a recovery is needed, compare the `.pkg`'s mtime against the
+recipe's own completion: a write after `OK → ` came from something else.
+
+The heartbeat deliberately does **not** change what the recipe guarantees. The
+wrapped command runs in the foreground and its exit status is returned
+unchanged, so under `set -euo pipefail` a failed notarization still aborts
+before `stapler staple` — an un-notarized `.pkg` can never reach the
+staple / validate / `OK → ` path. That is asserted in both directions by
+`test_a_failed_notarization_never_reaches_stapler_staple` and its success-path
+counterpart; breaking the status propagation makes the failure test go red with
+an `OK → ` line, which is exactly the incident shape.
+
 ### Multi-product installers: group by product, ship the uninstaller
 
 `build_combined_installer.sh` gained four things a multi-product installer

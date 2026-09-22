@@ -614,6 +614,16 @@ def command_check(args: argparse.Namespace) -> int:
     )
     drifts = compare_inventory(document, inventory, identities)
     problems = validate_with_catalog(document, args.root, require_current=True)
+    # A fourth thing the reader needs: WHICH TREE was measured. The validator
+    # hashes the working tree, so an uncommitted edit to a pinned path makes a
+    # correct ledger report as a stale identity -- the pin still equals the
+    # blob at HEAD, and only the unstaged bytes differ. `write` already refuses
+    # that state by name; `check` reported it as an unrepairable contract
+    # violation and sent the reader hunting a defect that was not there. The
+    # suite has long known the failure "reads as a generator defect instead of
+    # an uncommitted edit to a pinned path" and skips around it; this says it
+    # instead of skipping it.
+    dirty = dirty_canonical_paths(args.root, canonical_paths(document))
     command = repair_command(args.handoff, commit)
     # The receipt is a third, independent claim: that THIS ledger's bytes are
     # the ones its published receipt describes. Every identity can match while
@@ -653,6 +663,7 @@ def command_check(args: argparse.Namespace) -> int:
                         for drift in drifts
                     ],
                     "validator_problems": problems,
+                    "dirty_canonical_paths": dirty,
                     "repair_command": command,
                 },
                 indent=2,
@@ -661,6 +672,19 @@ def command_check(args: argparse.Namespace) -> int:
     else:
         print(f"gpu-handoff-provenance: source commit {commit}")
         print(f"gpu-handoff-provenance: {len(inventory)} pinned rows")
+        if dirty:
+            # Printed before the verdicts, not after: it changes what they mean.
+            print(
+                f"gpu-handoff-provenance: {len(dirty)} canonical path(s) are "
+                "uncommitted; identities below are measured against these "
+                "working-tree bytes, not HEAD:"
+            )
+            for path in dirty:
+                print(f"gpu-handoff-provenance:   {path}")
+            print(
+                "gpu-handoff-provenance: commit or restore them and re-run "
+                "before treating anything below as a defect"
+            )
         for line in _iter_drift_lines(drifts):
             print(f"gpu-handoff-provenance: STALE {line}")
         for problem in problems:
@@ -680,10 +704,21 @@ def command_check(args: argparse.Namespace) -> int:
             # Contract violations are human edits, not drift. Printing the
             # regeneration command for them sends the reader to a tool that
             # cannot fix what the validator is objecting to.
-            print(
-                "gpu-handoff-provenance: every pinned identity matches; the "
-                "problems above are contract violations regeneration cannot repair"
-            )
+            if dirty:
+                # The claim "regeneration cannot repair this" is false for an
+                # uncommitted edit: committing the path repairs it. Saying so
+                # anyway is the misdirection this branch used to ship.
+                print(
+                    "gpu-handoff-provenance: every pinned identity matches; the "
+                    "problems above may be the uncommitted canonical path(s) "
+                    "named above rather than contract violations -- commit or "
+                    "restore them and re-run to see which remain"
+                )
+            else:
+                print(
+                    "gpu-handoff-provenance: every pinned identity matches; the "
+                    "problems above are contract violations regeneration cannot repair"
+                )
         elif receipt_state == "bound":
             print(
                 "gpu-handoff-provenance: OK: every pinned identity matches and "

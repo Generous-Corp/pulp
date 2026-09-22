@@ -45,6 +45,7 @@
 namespace pulp::host {
 
 class GraphSerializer;
+class SignalGraph;
 
 namespace detail {
 struct ExactParameterIngressOwner;
@@ -52,6 +53,13 @@ struct ExactParameterIngressOwner;
 // the signal-graph translation unit so its identity is owned here, not by the
 // timeline binding that claims nodes with it.
 std::shared_ptr<ExactParameterIngressOwner> make_exact_parameter_ingress_owner();
+
+// Returns the frozen host-facing parameter catalog for an authored in-process
+// ProcessorNode, or nullopt when `id` is not one of this graph's ProcessorNodes.
+// The helper is kept in the timeline delivery translation unit so the graph's
+// private lifetime map remains the sole owner of ProcessorNode reachability.
+std::optional<std::vector<HostParamInfo>> processor_node_parameters(const SignalGraph& graph,
+                                                                    NodeId id);
 }
 
 class TimelineGraphPlaybackBinding;
@@ -751,6 +759,9 @@ public:
     std::size_t custom_node_type_count() const;
 
 private:
+  friend std::optional<std::vector<HostParamInfo>>
+  detail::processor_node_parameters(const SignalGraph&, NodeId);
+
   friend class GraphSerializer;
   friend bool register_builtin_sample_region_types(SignalGraph& graph);
   friend class ExecutionSnapshot;
@@ -1097,6 +1108,11 @@ private:
         // committed to the shared mailbox's sequence_seen only after routed dispatch
         // succeeds (so a fallback to the legacy walk re-consumes the same block).
         struct RoutedMidiNode { std::uint32_t plan_index; NodeId id; std::uint64_t pending_seq = 0; };
+        struct RoutedProcessorNode {
+            std::uint32_t plan_index;
+            NodeId id;
+            std::uint64_t pending_seq = 0;
+        };
 
         // Immutable canonical-executor routing for this snapshot, built in
         // compile_() when the topology is executor-eligible (see
@@ -1131,6 +1147,7 @@ private:
             format::GraphRuntimeMidiScratch midi;
             std::vector<RoutedMidiNode> midi_inputs;
             std::vector<RoutedMidiNode> midi_outputs;
+            std::vector<RoutedProcessorNode> processor_parameter_inputs;
             // Per-node parameter-event queues + per-connection slew state for
             // routed sparse automation. Empty (node_count 0) for graphs with no
             // sparse automation.

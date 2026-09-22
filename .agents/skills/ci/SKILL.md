@@ -514,6 +514,44 @@ line and let the push through, putting the blind spot back one layer out from
 the script that just closed it. Map every non-zero code a gate can return, and
 when you add an outcome to a gate, add its arm to the hook in the same change.
 
+### The Vellum watch-event hint is ADVISORY, and that is load-bearing
+
+`gates.sh` and `.githooks/pre-push` both run
+`tools/scripts/vellum_watch_preflight.py`, which prints — and never blocks — a
+warning when the pushed range owes a `.github/vellum-expansion-watch-events/*.json`
+file that it does not carry. Three pull requests discovered that requirement the
+expensive way in one evening, each by failing the required `Vellum freeze`
+check after a push.
+
+The trigger is **changed paths, not intent**: the checker globs the changed-file
+list against pinned capability-family selectors and reads nothing of the diff,
+so a one-line `#include` under `test/test_browser_capture*`, or an ordinary edit
+under `tools/import-design/**`, owes a hand-authored event.
+
+**Do not promote this to a blocking gate, and do not move the authoritative
+check local.** `.github/workflows/vellum-trusted-gate.yml` runs the checker from
+a *trusted root* rather than from the pull request's copy, and
+`.github/CODEOWNERS` locks the events directory, the checker and the checker's
+test. A local gate would execute the branch's own copy of a script that exists
+precisely so the branch's copy is not trusted. Two required contexts
+(`Vellum freeze`, `Vellum trusted freeze`) stay the authority; this only moves
+discovery earlier.
+
+Two things the hint must keep doing, both asserted by
+`tools/scripts/test_vellum_watch_preflight.py`:
+
+- **It compares against the MERGE-BASE, never `origin/main`'s tip.** Using the
+  tip manufactures `watch events are append-only` on any branch that is merely
+  stale — a false red on a required gate's surface, which is worse than the
+  friction being fixed.
+- **Neither call site may set `fail`.** The test resolves the `$VELLUM_HINT`
+  variable rather than grepping for the filename, because the literal path
+  appears only in the assignment: a scan for the filename finds no invocation
+  line at all and passes whatever the call sites do.
+
+Its exit codes (0 nothing owed · 10 event owed · 20 no verdict) are
+informational; both callers discard them with `|| true`.
+
 ### `gates.sh` and the pre-push hook are two lists, not one
 
 `gates.sh` describes itself as running the gates `.githooks/pre-push` runs, and
@@ -1271,12 +1309,22 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    building**: it stays `in_progress`, goes on holding the group, and every newer
    head sits at `pending` with zero jobs.
 
+   Two readings that mislead here. A superseded run reporting `cancelled` with
+   `jobs.total_count` of **0** proves nothing about `cancel-in-progress`: GitHub
+   keeps at most one *pending* run per group and evicts the previous one
+   unconditionally, so those cancellations happen even when nothing else works.
+   And a self-hosted runner is rarely the culprit: a tartci macOS job that
+   receives a real cancellation cancels its step and completes in seconds.
+
    **Check the predecessor's `conclusion`, not its `status` or its timing** —
    that is the discriminating field:
    ```bash
    ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>" --jq '.status, .conclusion'
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>/jobs?per_page=100" \
+     --jq '[.jobs[] | select(.status != "completed")] | map(.name)'
    ```
-   A wedged predecessor reads `in_progress` / `cancelled`. Reading only `status`
+   A wedged predecessor reads `in_progress` / `cancelled`, and the second call
+   names the jobs still going after the cancel was delivered. Reading only `status`
    invites the wrong mechanism: an earlier revision of this entry claimed GitHub
    never cancels a queued predecessor, which is false — it is cancelled, it just
    does not stop.
@@ -9639,3 +9687,48 @@ When you change that guard step, `test_release_trailer_guard.py` runs it
 **extracted from the YAML** against real commits. Do not "fix" that test by
 pasting the step into it — a transcribed copy is exactly how the shell scan
 stopped matching the parse it was supposed to mirror.
+
+## A watchdog's "all clear" and its "I could not look" are the same zero
+
+A monitoring sweep that fails to collect produces zero findings. So does a
+sweep that collects everything and finds nothing wrong. Every consumer
+downstream — the alarm count, the run conclusion, the summary prose — sees an
+identical zero, and the one that means *blind* is the one that renders as calm.
+
+`merge-stall-check.yml` demonstrated the full cost. It ran four hours into a
+total merge stall, both of its GraphQL reads having failed, and printed:
+
+```
+note: 2 collection call(s) failed.
+> **Degraded sweep** — 2 collection call(s) failed...
+No PR is merge-ready-and-stuck. Merges are flowing (or nothing is ready).
+alarm_count=0
+```
+
+The job concluded `success`. The degraded state was even detected — it just
+only gated *closing an existing tracker*, so with no tracker open a fully blind
+sweep was a silent no-op. Twenty consecutive sweeps were degraded, `merge_queue`
+null in all twenty, which means that alarm had been structurally unable to fire
+for days while reporting green every 30 minutes.
+
+When auditing any watchdog here, ask three things in this order:
+
+1. **Can it distinguish "read failed" from "found nothing"?** If a failed
+   collector leaves the same empty value an empty result would, it cannot. Give
+   the failure its own finding that names the verdicts it silenced, and count
+   that finding in whatever the workflow uses to decide it should alarm.
+2. **Does its quiet path assert it actually observed something?** Pair every
+   "nothing is wrong" with a control drawn from the same sweep that must be
+   non-zero (open PR count, queue depth). A sweep that saw zero of everything
+   has no standing to report health.
+3. **Does anything run its tests?** `test_merge_stall_watchdog.py` existed,
+   asserted real behavior, and was registered in no workflow — so none of its
+   assertions could fail a PR. Registration for these python contract suites is
+   `workflow-lint.yml`: both `paths:` lists plus the runner line in the
+   *Workflow lint regression contract* step. Three places; miss the runner line
+   and the suite is decorative.
+
+Related: a GraphQL page asking for 50 per-PR check rollups times out (HTTP 504)
+under normal load on this repo. If a collector reads open PRs with their
+rollups, keep the page small and give transient 5xx a bounded retry — a
+terminal failure must still fail closed rather than retry.
