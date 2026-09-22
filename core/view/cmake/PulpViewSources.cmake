@@ -34,6 +34,7 @@ target_sources(pulp-view-core PRIVATE
     src/overlay_dismissal.cpp
     src/plugin_key_routing.cpp
     src/pointer_dispatch.cpp
+    src/press_reach.cpp
     src/caret.cpp
     src/continuous_frames.cpp
     src/custom_shader_host.cpp
