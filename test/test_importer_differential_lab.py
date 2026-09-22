@@ -15,8 +15,12 @@ from pathlib import Path
 try:
     from PIL import Image
 except ImportError:
-    print("SKIP: importer differential lab tests require Pillow")
-    raise SystemExit(77)
+    # Only the two visual-lens cases below need Pillow. Guarding the whole
+    # module on it stranded every other case in this file, which exercises
+    # the comparison protocol on stdlib types alone.
+    Image = None
+
+requires_pillow = unittest.skipUnless(Image is not None, "requires Pillow")
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools" / "import-validation"))
@@ -100,6 +104,7 @@ class DifferentialLabTests(unittest.TestCase):
         self.assertEqual(len(missing), 1)
         self.assertIn("title", {match[1].anchor for match in matches})
 
+    @requires_pillow
     def test_visual_similarity_is_exact_for_equal_images(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -112,6 +117,7 @@ class DifferentialLabTests(unittest.TestCase):
             self.assertEqual(metrics["differing_pixel_count"], 0)
             self.assertTrue((root / "artifacts" / "visual-diff.png").is_file())
 
+    @requires_pillow
     def test_visual_lens_rejects_dimensions_and_detects_color_change(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
