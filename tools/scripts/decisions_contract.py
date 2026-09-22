@@ -19,7 +19,8 @@ Modes (`--mode`):
               state: `--landing-json FILE` (a saved `shipyard landing --json`
               report; what ctest uses) or `--live` (shells out to
               `shipyard landing --json`; manual and advisory, never a gate,
-              because it needs network, auth, and the Shipyard binary).
+              because it needs network, auth, and Shipyard >= 0.208.0, the
+              first release with `shipyard landing`).
               exit 0 = every probe confirmed; 1 = a probe failed; 2 = bad
               contract or unreadable observation. A missing path or an
               UNKNOWN verdict FAILS: nothing unobserved counts as confirmed.
@@ -164,6 +165,10 @@ PROBE_FIELDS = ("source", "path", "equals")
 # `shipyard landing` exits 9 when a verdict is UNKNOWN; its JSON is still
 # emitted and still evaluated, and an unknown verdict fails its probe.
 LANDING_UNKNOWN_EXIT = 9
+# `shipyard landing` first ships in this release; older binaries reject the
+# subcommand with a usage error (exit 2), which is reported as unavailability
+# rather than as a contract failure.
+LANDING_MIN_SHIPYARD = "0.208.0"
 
 
 class SchemaError(Exception):
@@ -325,6 +330,15 @@ def _live_landing() -> tuple[object | None, str | None]:
     except (OSError, subprocess.SubprocessError) as exc:
         return None, f"`shipyard landing --json` failed to run: {exc}"
     if proc.returncode not in (0, LANDING_UNKNOWN_EXIT):
+        if proc.returncode == 2 and not proc.stdout.strip():
+            # clap's usage-error exit: this Shipyard predates the subcommand.
+            try:
+                version = subprocess.run([shipyard, "--version"], capture_output=True,
+                                         text=True, timeout=30).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                version = ""
+            return None, (f"shipyard landing unavailable (need >= {LANDING_MIN_SHIPYARD}; "
+                          f"found {version or 'unknown version'} at {shipyard})")
         return None, (f"`shipyard landing --json` exited {proc.returncode}: "
                       f"{proc.stderr.strip()[:300]}")
     try:
@@ -425,7 +439,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--landing-json", type=Path, default=None,
                     help="Saved `shipyard landing --json` report for --mode probe.")
     ap.add_argument("--live", action="store_true",
-                    help="--mode probe: run `shipyard landing --json` now (manual; never a gate).")
+                    help="--mode probe: run `shipyard landing --json` now (manual; never a "
+                         f"gate). Needs Shipyard >= {LANDING_MIN_SHIPYARD}.")
     ap.add_argument("--json", action="store_true", help="Machine-readable output.")
     args = ap.parse_args(argv)
 

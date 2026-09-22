@@ -29,7 +29,8 @@
 #     list     : dump rows, optionally filtered by --layer
 #     probe    : evaluate rows carrying a `probe` against observed state
 #                (`--landing-json FILE`, or `--live` to shell out to
-#                `shipyard landing --json`; manual, never a gate)
+#                `shipyard landing --json`, which needs Shipyard >= 0.208.0;
+#                manual, never a gate)
 #   A row may carry `probe`: one table or an array of tables
 #   {source = "shipyard-landing", path = ".a.b", equals = <scalar>}. A probe
 #   whose path is missing, or whose value is anything but `equals` (including

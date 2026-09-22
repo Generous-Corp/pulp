@@ -483,6 +483,36 @@ def test_claude_plugin_session_start_runs_the_pointer() -> None:
               "pointer is silent when the plugin script is missing")
 
 
+def _fake_shipyard(directory: Path, version: str, landing_body: str) -> None:
+    script = directory / "shipyard"
+    script.write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [ "$1" = --version ]; then echo "shipyard {version}"; exit 0; fi\n'
+        + landing_body, encoding="utf-8")
+    script.chmod(0o755)
+
+
+def test_live_probe_names_the_minimum_shipyard() -> None:
+    print("test_live_probe_names_the_minimum_shipyard")
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = Path(tmp)
+        _fake_shipyard(bindir, "0.205.0",
+                       "echo \"error: unrecognized subcommand 'landing'\" >&2; exit 2\n")
+        env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+        proc = subprocess.run([sys.executable, str(CHECKER), "--mode", "probe", "--live"],
+                              capture_output=True, text=True, env=env, timeout=60)
+        check(proc.returncode == 2
+              and "shipyard landing unavailable (need >= 0.208.0" in proc.stderr
+              and "0.205.0" in proc.stderr,
+              f"an old shipyard reports the minimum version (rc={proc.returncode}: {proc.stderr})")
+
+        _fake_shipyard(bindir, "0.208.0", f"cat {str(LANDING_FIXTURE)!r}\n")
+        proc = subprocess.run([sys.executable, str(CHECKER), "--mode", "probe", "--live"],
+                              capture_output=True, text=True, env=env, timeout=60)
+        check(proc.returncode == 0 and "confirmed" in proc.stdout,
+              f"a shipyard with `landing` is probed live (control; rc={proc.returncode})")
+
+
 def main() -> int:
     test_shipped_contract_is_valid()
     test_surface_matches_and_noops()
@@ -495,6 +525,7 @@ def main() -> int:
     test_candidate_list_matches_the_hook()
     test_probe_mode()
     test_claude_plugin_session_start_runs_the_pointer()
+    test_live_probe_names_the_minimum_shipyard()
     print()
     if _failures:
         print(f"FAILED: {len(_failures)} assertion(s)")

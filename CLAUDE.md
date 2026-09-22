@@ -2042,22 +2042,20 @@ stuck PR."
 #### Routing and landing digest (generated)
 
 <!-- generated:start id=ci-routing-digest -->
-Offline routing verdicts from `runner_topology_check.py --mode=static`: DECLARED supply (`tools/scripts/fleet_advertised_labels.json` @ `b120ac03905c`), never live service; `--mode=report` is the live check.
+Required routing lanes on DECLARED supply (`tools/scripts/fleet_advertised_labels.json` @ `b120ac03905c`), never live service. Workflow-name matching, advisory lanes, and undeclared selector variables: `runner_topology_check.py --mode=static`; live: `--mode=report`.
 
-Required lanes:
 - `PULP_LOCAL_MACOS_RUNS_ON_JSON`: REACHABLE on merge_group, pull_request, workflow_dispatch by m1, m5, studio
 - `PULP_ALIAS_RUNS_ON_JSON`: HOSTED
 - `PULP_PREAMBLE_RUNS_ON_JSON`: HOSTED
-- `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`: SENTINEL
-- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: REACHABLE from Release CLI, Release-path PR gate, Sign and Release by m5; its unset fallback is UNSERVED
+- `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`: SENTINEL `local-only`; override `macos-overflow-local-only`
+- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: labels advertised by m5; its unset fallback's labels are advertised by no registration
 - `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`: HOSTED
-- `PULP_VELLUM_TRUSTED_RUNS_ON_JSON`: UNKNOWN (supply for supervisor 'proxmox-systemd' is not in the advertised-labels snapshot)
-- Advisory lanes: 6 HOSTED, 11 UNKNOWN. Selector variables with no lane: 15 (UNDECLARED, info).
+- `PULP_VELLUM_TRUSTED_RUNS_ON_JSON`: UNKNOWN (supervisor `proxmox-systemd` is outside the snapshot)
 
 Active routing overrides (`runner_topology.json` `overrides`; an expired one fails every mode):
 - `macos-overflow-local-only`: `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` = `local-only`, owner daniel, since 2026-09-05, expires 2026-12-04. Revert when: Hosted overflow is re-approved, or local gate capacity proves insufficient under measured queue age.
 
-Landing API traps (verify with `decisions_contract.py --mode probe --live`, manual only):
+Landing API traps (verify with `decisions_contract.py --mode probe --live`, manual only, Shipyard >= 0.208.0):
 - REST `pulls/<n>.auto_merge` (and GraphQL `autoMergeRequest`) read null for a PR the merge queue already holds; read GraphQL `mergeQueueEntry`.
 - Classic branch protection omits a ruleset-based merge queue; query `repos/<o>/<r>/rulesets` before concluding there is no queue.
 

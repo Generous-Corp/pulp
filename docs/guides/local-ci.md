@@ -2261,7 +2261,17 @@ gate is judged on its *dispatched* label set (build.yml's event-class rewrite,
 via the same `_event_projection` the live checker uses), not the raw variable,
 which still carries a label the event-class registrations deliberately omit.
 Regenerate the snapshot whenever a fleet profile changes lanes, labels, tiers,
-or workflows.
+or workflows. The regenerate command recorded in the snapshot's
+`generated_from.regenerate`, `tartci fleet-macos advertised-labels`, is provided
+by tartci and is not in every tartci build yet; where it is missing, apply the
+`tartci.advertised-labels/v1` label rule to the checked-in profiles by hand and
+record the tartci commit in `generated_from.commit`. Pulp reads only labels,
+workflows, and repository from the snapshot, never tartci internals.
+
+`decisions_contract.py --mode probe --live` needs Shipyard >= 0.208.0, the first
+release with `shipyard landing`; an older binary is reported as
+`shipyard landing unavailable (need >= 0.208.0; found ...)` with exit 2, never
+as a contract failure. `--landing-json FILE` needs no Shipyard at all.
 
 ### Routing overrides
 

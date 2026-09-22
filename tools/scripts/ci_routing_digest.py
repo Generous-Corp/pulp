@@ -2,10 +2,11 @@
 """Generate the CI routing + landing digest inside CLAUDE.md.
 
 The block between `<!-- generated:start id=ci-routing-digest -->` and its end
-marker is rendered from checked-in state only: the routing contract
-(`runner_topology.json`), the workflows, and the advertised-labels snapshot,
-through the same offline evaluation as `runner_topology_check.py
---mode=static`. It is always in an agent's context, so a routing fact that
+marker is rendered ONLY from inputs that change deliberately: the routing
+contract (`runner_topology.json` lanes and overrides), the advertised-labels
+snapshot, and fixed trap text. Workflow files are never read, so a
+workflow-only PR (a new selector variable, a renamed workflow) cannot stale a
+required ctest; those facts stay in `runner_topology_check.py --mode=static`. It is always in an agent's context, so a routing fact that
 changes in the contract reaches the next session without anyone remembering to
 edit prose.
 
@@ -34,54 +35,68 @@ BLOCK_ID = "ci-routing-digest"
 DOC = ROOT / "CLAUDE.md"
 
 
-def _hosts(detail: str) -> list[str]:
-    handles = detail[len("by "):].split(", ") if detail.startswith("by ") else []
-    return sorted({handle.split(":")[0] for handle in handles})
+def _hosts(registrations: list[st.Registration]) -> str:
+    return ", ".join(sorted({reg.host_id for reg in registrations}))
 
 
-def _lane_line(variable: str, rows: list[st.Row]) -> str:
-    expect = [r for r in rows if r.source == "expect"]
-    verdicts = sorted({r.verdict for r in expect})
-    text = "/".join(verdicts)
-    if verdicts == [st.REACHABLE]:
-        events = sorted({r.event for r in expect if r.event != "*"})
-        workflows = sorted({r.workflow for r in expect if r.workflow})
-        hosts = sorted({h for r in expect for h in _hosts(r.detail)})
-        scope = f" on {', '.join(events)}" if events else f" from {', '.join(workflows)}"
-        text += f"{scope} by {', '.join(hosts)}"
-    elif verdicts == [st.UNKNOWN]:
-        text += f" ({expect[0].detail})"
-    fallback = [r for r in rows if r.source == "unset_fallback" and r.verdict == st.UNSERVED]
-    if fallback:
-        text += "; its unset fallback is UNSERVED"
-    return f"- `{variable}`: {text}"
+def _lane_line(lane: rtc.Lane, contract: rtc.Contract, snapshot: st.Snapshot) -> str:
+    """One required lane, from the contract and snapshot alone.
+
+    Workflow files are deliberately not read: a workflow-only PR must never
+    stale this block. Only the event-class lane names its workflow in the
+    contract, so only it gets a full reachability verdict here; every other
+    self-hosted lane reports label supply, and `--mode=static` (its own ctest)
+    adds the workflow-name match.
+    """
+    repo = rtc.DEFAULT_REPO
+    kind = rtc.classify_target(lane.expect, contract)
+    if kind == "sentinel":
+        text = f"SENTINEL `{lane.expect}`"
+    elif kind == "github-hosted":
+        text = "HOSTED"
+    elif kind != "self-hosted":
+        text = "UNSERVED (neither self-hosted nor in the hosted allowlist)"
+    elif (lane.supervisor or contract.static_default_supervisor) \
+            not in contract.static_covered_supervisors:
+        text = f"UNKNOWN (supervisor `{lane.supervisor}` is outside the snapshot)"
+    else:
+        projected, error = st._projections(lane, contract)
+        if error:
+            text = f"UNKNOWN ({error})"
+        elif projected is not None:
+            verdicts = {event: st.reach(labels, workflow, repo, snapshot)
+                        for event, labels, workflow in projected}
+            if all(v == st.REACHABLE for v, _ in verdicts.values()):
+                hosts = _hosts([reg for _e, labels, _w in projected
+                                for reg in st.label_carriers(labels, repo, snapshot)])
+                text = f"REACHABLE on {', '.join(sorted(verdicts))} by {hosts}"
+            else:
+                bad = sorted(e for e, (v, _) in verdicts.items() if v != st.REACHABLE)
+                text = f"UNSERVED on {', '.join(bad)}"
+        else:
+            carriers = st.label_carriers(lane.expect, repo, snapshot)
+            text = (f"labels advertised by {_hosts(carriers)}" if carriers
+                    else "UNSERVED (no registration advertises every label)")
+    fallback = lane.unset_fallback
+    if (rtc.classify_target(fallback, contract) == "self-hosted"
+            and not st.label_carriers(fallback, repo, snapshot)):
+        text += "; its unset fallback's labels are advertised by no registration"
+    if lane.override_id:
+        text += f"; override `{lane.override_id}`"
+    return f"- `{lane.variable}`: {text}"
 
 
-def render(contract: rtc.Contract, snapshot: st.Snapshot, workflows_dir: Path) -> str:
-    rows = st.evaluate(contract, snapshot, workflows_dir, rtc.DEFAULT_REPO)
-    by_lane: dict[str, list[st.Row]] = {}
-    for row in rows:
-        by_lane.setdefault(row.variable, []).append(row)
-    required = [lane.variable for lane in contract.lanes if lane.severity == "required"]
-    advisory = [lane.variable for lane in contract.lanes if lane.severity != "required"]
-    counts: dict[str, int] = {}
-    for variable in advisory:
-        for verdict in {r.verdict for r in by_lane[variable] if r.source == "expect"}:
-            counts[verdict] = counts.get(verdict, 0) + 1
-    undeclared = sum(1 for r in rows if r.verdict == st.UNDECLARED)
+def render(contract: rtc.Contract, snapshot: st.Snapshot) -> str:
     commit = (snapshot.generated_from.get("commit") or "unknown")[:12]
-
     lines = [
-        "Offline routing verdicts from `runner_topology_check.py --mode=static`: "
-        f"DECLARED supply (`tools/scripts/fleet_advertised_labels.json` @ `{commit}`), "
-        "never live service; `--mode=report` is the live check.",
+        "Required routing lanes on DECLARED supply "
+        f"(`tools/scripts/fleet_advertised_labels.json` @ `{commit}`), never live "
+        "service. Workflow-name matching, advisory lanes, and undeclared selector "
+        "variables: `runner_topology_check.py --mode=static`; live: `--mode=report`.",
         "",
-        "Required lanes:",
     ]
-    lines += [_lane_line(variable, by_lane[variable]) for variable in required]
-    summary = ", ".join(f"{n} {verdict}" for verdict, n in sorted(counts.items()))
-    lines.append(f"- Advisory lanes: {summary}. Selector variables with no lane: "
-                 f"{undeclared} (UNDECLARED, info).")
+    lines += [_lane_line(lane, contract, snapshot)
+              for lane in contract.lanes if lane.severity == "required"]
     lines += ["", "Active routing overrides (`runner_topology.json` `overrides`; "
                   "an expired one fails every mode):"]
     overrides = contract.raw.get("overrides", []) or []
@@ -96,7 +111,7 @@ def render(contract: rtc.Contract, snapshot: st.Snapshot, workflows_dir: Path) -
     lines += [
         "",
         "Landing API traps (verify with "
-        "`decisions_contract.py --mode probe --live`, manual only):",
+        "`decisions_contract.py --mode probe --live`, manual only, Shipyard >= 0.208.0):",
         "- REST `pulls/<n>.auto_merge` (and GraphQL `autoMergeRequest`) read null "
         "for a PR the merge queue already holds; read GraphQL `mergeQueueEntry`.",
         "- Classic branch protection omits a ruleset-based merge queue; query "
@@ -115,12 +130,11 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--check", action="store_true", help="fail when stale (default)")
     ap.add_argument("--doc", type=Path, default=DOC)
     ap.add_argument("--contract", type=Path, default=rtc.DEFAULT_CONTRACT)
-    ap.add_argument("--workflows-dir", type=Path, default=ROOT / ".github" / "workflows")
     args = ap.parse_args(argv)
 
     contract = rtc.load_contract(args.contract)
     snapshot = st.load_snapshot(args.contract.resolve().parent / contract.static_snapshot)
-    block = render(contract, snapshot, args.workflows_dir)
+    block = render(contract, snapshot)
     text = args.doc.read_text(encoding="utf-8")
     spliced = _splice(text, block, BLOCK_ID)
     if spliced is None:

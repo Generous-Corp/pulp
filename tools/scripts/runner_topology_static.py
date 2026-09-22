@@ -197,6 +197,13 @@ def referenced_variables(workflows_dir: Path) -> set[str]:
 # ── Reachability ────────────────────────────────────────────────────────
 
 
+def label_carriers(labels: list[str], repo: str, snapshot: Snapshot) -> list[Registration]:
+    """Registrations advertising every requested label (subset, GitHub's rule)."""
+    want = {label.lower() for label in labels}
+    return [reg for reg in snapshot.registrations
+            if reg.repo == repo and want <= reg.folded]
+
+
 def reach(labels: list[str], workflow: str | None, repo: str,
           snapshot: Snapshot) -> tuple[str, str]:
     """Verdict for one dispatched label set from one workflow."""
@@ -205,7 +212,7 @@ def reach(labels: list[str], workflow: str | None, repo: str,
                          "reachability depends on it, so it is not assumed")
     want = {label.lower() for label in labels}
     in_repo = [reg for reg in snapshot.registrations if reg.repo == repo]
-    carriers = [reg for reg in in_repo if want <= reg.folded]
+    carriers = label_carriers(labels, repo, snapshot)
     serving = [reg for reg in carriers if workflow in reg.workflows]
     if serving:
         return REACHABLE, "by " + ", ".join(reg.handle for reg in serving)
