@@ -330,7 +330,7 @@ beginPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasDrawSdf	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 drawPath	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 compileShader	shader	function	core/view/src/widget_bridge/shader_api.cpp
-setWidgetShader	shader	function	core/view/src/widget_bridge/shader_api.cpp	prop:Knob.shader
+setWidgetShader	shader	function	core/view/src/widget_bridge/shader_api.cpp	prop:Knob.shader|prop:Fader.shader|prop:Toggle.shader
 setWidgetShaderChart	shader	function	core/view/src/widget_bridge/shader_api.cpp
 setWidgetShaderUniforms	shader	function	core/view/src/widget_bridge/shader_api.cpp
 getWidgetShaderUniforms	shader	function	core/view/src/widget_bridge/shader_api.cpp
