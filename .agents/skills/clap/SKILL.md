@@ -183,7 +183,11 @@ and enumerated to the host by the `params` extension in
   `ParamInfo`. A valid `StateStore` group supplies its full root-to-leaf path
   in `module`, using `/` as CLAP's hierarchy separator; invalid, unknown, and
   ungrouped parameters leave `module` empty. The fixed `CLAP_PATH_SIZE` buffer
-  is safely truncated and NUL-terminated. `CLAP_PARAM_IS_AUTOMATABLE` is always set.
+  is safely truncated and NUL-terminated. `CLAP_PARAM_IS_AUTOMATABLE` is set by
+  `state::is_automatable_param` — for an ordinary parameter that is always,
+  because the attribute defaults to automatable.
+  `CLAP_PARAM_IS_HIDDEN` and `CLAP_PARAM_IS_READONLY` come from
+  `state::is_hidden_param` / `state::is_read_only_param`.
   `CLAP_PARAM_IS_STEPPED` is set for a discrete parameter — `ParamKind` other
   than `Continuous` (`state::is_discrete_param`) — or a bypass. It is NOT
   derived from `range.step`/range width; a continuous parameter may quantize
@@ -205,6 +209,31 @@ an author cannot override — not a bypass, not a discrete parameter, not an
 auto-resetting trigger. `params_flags` and `clap_param_modulation_lane` both
 call that one predicate, so the adapter can never invite modulation it then
 drops.
+
+**Hidden / read-only / non-automatable are a SHARED-MODEL concern, not a CLAP
+one.** When CLAP could not advertise `CLAP_PARAM_IS_HIDDEN` or
+`CLAP_PARAM_IS_READONLY`, the tempting read was "a CLAP adapter gap". It was
+not: VST3 and AU could not express them either, because `ParamInfo` had no
+field to express. The same hole appeared in three adapters at once because all
+three project one model. The tell was that Pulp's own CLAP *host*
+(`plugin_slot_clap.cpp`) had been reading those two flags off hosted plugins
+for a long time — Pulp consumed a concept it could not produce. **Before adding
+a per-format flag, check whether the neighbouring formats are equally blind; if
+they are, the fix belongs in `core/state`, not here.**
+
+`ParamInfo::hidden` / `read_only` / `automatable` now carry it, read through
+`is_hidden_param` / `is_read_only_param` / `is_automatable_param` — the same
+one-predicate-per-attribute shape as `is_modulatable_param`, for the same
+reason. Two consequences that are easy to get wrong:
+
+- **Read-only implies not automatable and not modulatable.** Automation and
+  modulation are both host writes, so advertising `READONLY | AUTOMATABLE`
+  would be self-contradictory. `is_automatable_param` and
+  `is_modulatable_param` both refuse a read-only parameter; do not re-derive
+  either from the raw field.
+- **A bypass control can never be hidden or frozen**, whatever the author
+  declares — a host surfaces bypass in its own chrome, and hiding it makes the
+  plugin un-bypassable. `is_hidden_param` / `is_read_only_param` enforce that.
 
 During `clap_process`, the adapter routes host events into the store:
 

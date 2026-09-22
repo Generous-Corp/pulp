@@ -173,3 +173,105 @@ TEST_CASE("VST3 param display declines to the base formatter without converters"
 
     processor.terminate();
 }
+
+namespace {
+
+constexpr pulp::state::ParamID kVisibleId = 10;
+constexpr pulp::state::ParamID kHiddenId = 11;
+constexpr pulp::state::ParamID kMeterId = 12;
+constexpr pulp::state::ParamID kNoAutoId = 13;
+
+// One processor declaring the three new attributes alongside an ordinary
+// parameter, so the projection is asserted against a live registration rather
+// than against the predicate it was built from.
+class VisibilityProcessor : public pulp::format::Processor {
+  public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "VstVisibility",
+            .manufacturer = "PulpTest",
+            .bundle_id = "com.pulp.test.vst3.visibility",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"In", 2}},
+            .output_buses = {{"Out", 2}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter({.id = kVisibleId, .name = "Gain", .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+
+        pulp::state::ParamInfo hidden{
+            .id = kHiddenId, .name = "Internal", .range = {0.0f, 1.0f, 0.0f, 0.0f}};
+        hidden.hidden = true;
+        store.add_parameter(hidden);
+
+        pulp::state::ParamInfo meter{.id = kMeterId,
+                                     .name = "Output Level",
+                                     .unit = "dB",
+                                     .range = {-60.0f, 0.0f, -60.0f, 0.0f}};
+        meter.read_only = true;
+        store.add_parameter(meter);
+
+        pulp::state::ParamInfo no_auto{
+            .id = kNoAutoId, .name = "Quality", .range = {0.0f, 1.0f, 0.0f, 0.0f}};
+        no_auto.automatable = false;
+        store.add_parameter(no_auto);
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&, const pulp::format::ProcessContext&) override {
+        for (std::size_t ch = 0; ch < out.num_channels() && ch < in.num_channels(); ++ch) {
+            auto ic = in.channel(ch);
+            auto oc = out.channel(ch);
+            for (std::size_t i = 0; i < out.num_samples(); ++i)
+                oc[i] = ic[i];
+        }
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> make_visibility_processor() {
+    return std::make_unique<VisibilityProcessor>();
+}
+
+} // namespace
+
+TEST_CASE("VST3 registers declared hidden and read-only parameters with matching flags",
+          "[vst3][params][visibility]") {
+    using Steinberg::Vst::ParameterInfo;
+
+    HostApp host;
+    pulp::format::vst3::PulpVst3Processor processor(make_visibility_processor);
+    REQUIRE(processor.initialize(&host) == Steinberg::kResultOk);
+
+    Steinberg::int32 found = 0;
+    const Steinberg::int32 count = processor.getParameterCount();
+    for (Steinberg::int32 i = 0; i < count; ++i) {
+        ParameterInfo pi{};
+        REQUIRE(processor.getParameterInfo(i, pi) == Steinberg::kResultOk);
+
+        if (pi.id == kVisibleId) {
+            ++found;
+            // Unchanged from before the attributes existed.
+            REQUIRE((pi.flags & ParameterInfo::kIsHidden) == 0);
+            REQUIRE((pi.flags & ParameterInfo::kIsReadOnly) == 0);
+            REQUIRE((pi.flags & ParameterInfo::kCanAutomate) != 0);
+        } else if (pi.id == kHiddenId) {
+            ++found;
+            REQUIRE((pi.flags & ParameterInfo::kIsHidden) != 0);
+        } else if (pi.id == kMeterId) {
+            ++found;
+            REQUIRE((pi.flags & ParameterInfo::kIsReadOnly) != 0);
+            // Automation is a host write, so read-only withholds kCanAutomate.
+            REQUIRE((pi.flags & ParameterInfo::kCanAutomate) == 0);
+        } else if (pi.id == kNoAutoId) {
+            ++found;
+            REQUIRE((pi.flags & ParameterInfo::kCanAutomate) == 0);
+            // Non-automatable is not read-only: the host may still set it.
+            REQUIRE((pi.flags & ParameterInfo::kIsReadOnly) == 0);
+        }
+    }
+    REQUIRE(found == 4);
+}
