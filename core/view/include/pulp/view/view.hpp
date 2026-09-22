@@ -1545,13 +1545,13 @@ public:
     void claim_input_focus();
     /// Open this view as an overlay under its root.
     ///
-    /// A claim that DESCENDS from the currently open overlay nests on it: a
-    /// submenu leaves its parent menu open and, when the submenu is dismissed,
-    /// the parent becomes active again. Any other claim is a different menu,
-    /// so the open one is dismissed first (firing `on_overlay_dismissed`) and
-    /// two sibling menus can never be on screen at once. Re-claiming a view
-    /// already on the stack closes everything above it.
-    void claim_overlay();
+    /// A claim that DESCENDS from the open overlay nests on it, so a submenu
+    /// leaves its menu open and dismissing it restores the menu; any other
+    /// claim dismisses the open one (firing `on_overlay_dismissed`), and
+    /// re-claiming a view on the stack closes everything above it.
+    /// `stacks_on` declares that relationship for a lifted submenu its menu's
+    /// subtree does not contain; see `view.cpp` for both rules in full.
+    void claim_overlay(const View* stacks_on = nullptr);
     /// Number of overlays currently open under this view's root. Never
     /// allocates interaction state, so it is safe to ask on any tree.
     std::size_t overlay_depth() const;

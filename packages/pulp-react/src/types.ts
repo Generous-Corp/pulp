@@ -394,6 +394,20 @@ export interface BaseProps extends FlexProps, StyleProps, GestureProps {
     /// `<View overlay style={{position: 'absolute', ...}}>` get clicks
     /// instead of whatever sibling/ancestor view sits behind the popover.
     overlay?: boolean;
+    /// Declares the already-open overlay this one STACKS ON, by widget id.
+    ///
+    /// `overlay` (and an ARIA `role` that means the same thing) nests a claim
+    /// only when the claiming view DESCENDS from the open overlay. A submenu
+    /// placed to escape its menu's box is lifted out of that menu's subtree, so
+    /// it is a sibling of the menu it belongs to: without naming the menu it
+    /// reads as a rival, and opening the submenu dismisses the menu underneath
+    /// along with the submenu's own rows.
+    ///
+    /// Read independently of JSX key order, so it may appear before or after
+    /// `overlay` / `role`. A name that is not a live overlay open under this
+    /// view's own root is ignored, leaving the ordinary claim — so this cannot
+    /// be used to nest on an overlay the author did not name.
+    overlayParent?: string;
     /// Mark this view as a control that OPENS an overlay — a dropdown field,
     /// a menu button. The counterpart of `overlay`: that prop claims the slot
     /// with consume=true so a press outside a popover cannot also operate the

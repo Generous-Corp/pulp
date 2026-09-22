@@ -258,3 +258,87 @@ describe('@pulp/react prop-applier — aria-haspopup marks an overlay trigger', 
             .toEqual(['t7', false]);
     });
 });
+
+describe('@pulp/react prop-applier — a lifted submenu declares its parent', () => {
+    // `overlay` / `role="menu"` nest a claim only when the claiming view
+    // DESCENDS from the open overlay. A submenu placed to escape its menu's box
+    // is lifted out of that menu's subtree, so it is a sibling: the native
+    // parent-chain test reads it as a rival and dismisses the menu underneath
+    // together with the submenu's own rows. `overlayParent` names the overlay
+    // the claim belongs to, which is the fact the tree does not carry.
+
+    function makeInstance(id: string): PulpInstance {
+        return {
+            id,
+            type: 'View' as PulpInstance['type'],
+            props: {},
+            childIds: [],
+            onBridge: true,
+            pendingChildren: [],
+        };
+    }
+    function withProps(id: string, props: Record<string, unknown>): PulpInstance {
+        const inst = makeInstance(id);
+        inst.props = props;
+        return inst;
+    }
+    function claimArgs(): unknown[][] {
+        return bridge.calls.filter((c) => c.fn === 'claimOverlay').map((c) => c.args);
+    }
+
+    it('overlay={true} carries the declared parent', () => {
+        applyAllProps(withProps('sub', { overlay: true, overlayParent: 'menu' }));
+        expect(claimArgs()).toEqual([['sub', true, 'menu']]);
+    });
+
+    it('role="menu" carries the declared parent', () => {
+        applyAllProps(withProps('sub', { role: 'menu', overlayParent: 'menu' }));
+        expect(claimArgs()).toEqual([['sub', true, 'menu']]);
+    });
+
+    it('aria-modal carries the declared parent', () => {
+        applyAllProps(withProps('sub', { 'aria-modal': 'true', overlayParent: 'menu' }));
+        expect(claimArgs()).toEqual([['sub', true, 'menu']]);
+    });
+
+    it('the declaration survives JSX key order', () => {
+        // The reason it is read from the whole prop bag rather than from one
+        // key: props are applied in insertion order, so a declaration written
+        // after `role` would otherwise reach the bridge after the claim it was
+        // supposed to qualify — and the menu would already be dismissed.
+        applyAllProps(withProps('a', { overlayParent: 'menu', role: 'menu' }));
+        applyAllProps(withProps('b', { role: 'menu', overlayParent: 'menu' }));
+        expect(claimArgs()).toEqual([['a', true, 'menu'], ['b', true, 'menu']]);
+    });
+
+    it('an undeclared claim still emits exactly claimOverlay(id, true)', () => {
+        // The control. If the parent argument were always appended, every
+        // existing consumer's claim would change shape, and a claim carrying an
+        // empty name would be indistinguishable from one carrying a real one.
+        applyAllProps(withProps('plain', { role: 'menu' }));
+        applyAllProps(withProps('plain2', { overlay: true, overlayParent: '' }));
+        applyAllProps(withProps('plain3', { overlay: true, overlayParent: 42 }));
+        expect(claimArgs()).toEqual([['plain', true], ['plain2', true], ['plain3', true]]);
+    });
+
+    it('overlayParent alone claims nothing', () => {
+        // A declaration is not itself a claim: a view that is not an overlay
+        // naming one is nothing at all, and must not start routing clicks.
+        applyAllProps(withProps('notanoverlay', { overlayParent: 'menu' }));
+        expect(claimArgs()).toEqual([]);
+        expect(bridge.calls.some((c) => c.fn === 'releaseOverlay')).toBe(false);
+    });
+
+    it('re-pointing overlayParent on an update re-claims with the new parent', () => {
+        // commitUpdate walks only the keys whose VALUES moved. An author who
+        // re-points a submenu at a different menu may change nothing else, so
+        // without this arm the native side would keep the old relationship.
+        const inst = withProps('sub', { role: 'menu', overlayParent: 'menu-a' });
+        applyChangedProps(
+            inst,
+            { role: 'menu', overlayParent: 'menu-a' },
+            { role: 'menu', overlayParent: 'menu-b' },
+        );
+        expect(claimArgs()).toEqual([['sub', true, 'menu-b']]);
+    });
+});

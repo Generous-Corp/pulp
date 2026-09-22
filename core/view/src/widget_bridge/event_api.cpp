@@ -139,7 +139,17 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    // claimOverlay(id) / releaseOverlay(id) - generalized overlay click routing.
+    // claimOverlay(id, consume, parentId) / releaseOverlay(id) - generalized
+    // overlay click routing.
+    //
+    // `parentId` names the already-open overlay this one STACKS ON. A submenu
+    // placed to escape its menu's box is lifted out of that menu's subtree
+    // (`position: fixed`, a portal, a returned fragment), so it is a sibling of
+    // the menu it belongs to; without a name it reads as a rival and the menu
+    // underneath is dismissed together with the submenu's own rows. An id that
+    // does not resolve to a live widget passes `nullptr`, which is exactly the
+    // undeclared claim - a stale or misspelled name can only ever be MORE
+    // conservative, never a way to nest on something the author did not name.
     register_bridge_function(api, "claimOverlay", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto it = self.widgets_.find(id);
@@ -152,7 +162,16 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
                 BridgeCallbackScope scope(alive);
                 dispatch_event(alive, engine, id, "dismiss", "0");
             };
-            it->second->claim_overlay();
+            const View* stacks_on = nullptr;
+            if (args.size() > 2) {
+                auto parent_id = args.get<std::string>(2, "");
+                if (!parent_id.empty() && parent_id != id) {
+                    auto parent = self.widgets_.find(parent_id);
+                    if (parent != self.widgets_.end())
+                        stacks_on = parent->second.view;
+                }
+            }
+            it->second->claim_overlay(stacks_on);
             it->second->set_overlay_consumes_outside_click(
                 args.size() > 1 && args.get<bool>(1, false));
         }
