@@ -84,6 +84,7 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/test_visual_python_deps_step.py'
       - 'tools/scripts/test_android_premerge_probe.py'
       - 'tools/scripts/shell_portability_check.py'
       - 'tools/scripts/test_shell_portability_check.py'
@@ -196,6 +197,7 @@ on:
       - 'tools/scripts/test_verify_control_shipping_native_evidence.py'
       - 'tools/scripts/test_control_shipping_native_workflow.py'
       - 'tools/scripts/test_workflow_lint.py'
+      - 'tools/scripts/test_visual_python_deps_step.py'
       - 'tools/scripts/shell_portability_check.py'
       - 'tools/scripts/test_shell_portability_check.py'
       - 'tools/scripts/shell_portability_rules.json'
@@ -396,6 +398,7 @@ jobs:
           python3 tools/scripts/test_sdk_provenance.py
           python3 tools/scripts/test_required_gate_liveness.py
           python3 tools/scripts/test_build_workflow.py
+          python3 tools/scripts/test_visual_python_deps_step.py
           python3 tools/scripts/test_build_macos_workflow_dispatch.py
           python3 tools/scripts/test_release_breakage_watchdog_wiring.py
           python3 tools/scripts/test_resign_macos_release_tree.py
