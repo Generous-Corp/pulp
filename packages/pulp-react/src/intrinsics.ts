@@ -20,6 +20,8 @@ import type {
     PulpContainer,
 } from './types.js';
 
+let anonymousCanvasId = 0;
+
 // Each intrinsic is a function component that emits a host element with
 // its lowercase-stringly type. The host config's createWidget switch is
 // the single source of truth for how each maps to a bridge createX call.
@@ -132,8 +134,13 @@ export const VirtualList = (props: VirtualListProps): ReactElement => {
 };
 export const Canvas = (props: CanvasProps): ReactElement => {
     const { onFrame, id, width, height, ...hostProps } = props;
+    // The native host assigns an id when one is omitted, but a frame callback
+    // runs before that host instance is observable. Give Canvas a stable
+    // explicit id so imperative draw calls can target anonymous canvases too.
+    const [generatedId] = useState(() => `canvas_${++anonymousCanvasId}`);
+    const resolvedId = id ?? generatedId;
     useEffect(() => {
-        if (!onFrame || !id) return undefined;
+        if (!onFrame) return undefined;
         let handle: number | undefined;
         let active = true;
         const globals = globalThis as unknown as {
@@ -144,7 +151,7 @@ export const Canvas = (props: CanvasProps): ReactElement => {
         };
         const context: CanvasFrameContext = {
             drawSdf(geometry, sksl, uniforms) {
-                return globals.canvasDrawSdf?.(id, geometry, sksl, uniforms);
+            return globals.canvasDrawSdf?.(resolvedId, geometry, sksl, uniforms);
             },
         };
         const raf = globals.requestAnimationFrame;
@@ -164,8 +171,8 @@ export const Canvas = (props: CanvasProps): ReactElement => {
             active = false;
             if (handle !== undefined) globals.cancelAnimationFrame?.(handle);
         };
-    }, [onFrame, id, width, height]);
-    return createElement('Canvas' as unknown as 'div', { ...hostProps, id, width, height });
+    }, [onFrame, resolvedId, width, height]);
+    return createElement('Canvas' as unknown as 'div', { ...hostProps, id: resolvedId, width, height });
 };
 export const Image = (props: ImageProps): ReactElement => createElement('Image' as unknown as 'div', props as unknown as object);
 export const Icon = (props: IconProps): ReactElement => createElement('Icon' as unknown as 'div', props as unknown as object);
