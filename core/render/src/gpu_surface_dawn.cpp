@@ -1,7 +1,8 @@
-#include <pulp/render/gpu_surface.hpp>
 #include <array>
-#include <vector>
+#include <pulp/render/gpu_render_time.hpp>
+#include <pulp/render/gpu_surface.hpp>
 #include <string>
+#include <vector>
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -238,9 +239,18 @@ public:
         if (timestamp_query_requested) needs_unsafe_apis = true;
         if (needs_unsafe_apis) enabled_toggles.push_back("allow_unsafe_apis");
 
-        if (!enabled_toggles.empty()) {
+        // Dawn quantizes timestamp-query results to 65536 ns unless this
+        // toggle is disabled, which leaves the GPU render-time metric with
+        // about four distinct values and an upward bias. See
+        // gpu_render_time.hpp for the full contract.
+        std::vector<const char*> disabled_toggles =
+            gpu_surface_disabled_toggles(timestamp_query_requested);
+
+        if (!enabled_toggles.empty() || !disabled_toggles.empty()) {
             toggles_desc.enabledToggleCount = enabled_toggles.size();
             toggles_desc.enabledToggles = enabled_toggles.data();
+            toggles_desc.disabledToggleCount = disabled_toggles.size();
+            toggles_desc.disabledToggles = disabled_toggles.data();
             device_desc.nextInChain = &toggles_desc;
         }
 
