@@ -1075,35 +1075,6 @@ bool SegmentedControl::on_key_event(const KeyEvent& event) {
 
 // ── ScrollView ───────────────────────────────────────────────────────────
 
-namespace {
-
-void accumulate_visible_descendant_extent(const View& parent,
-                                          float parent_x,
-                                          float parent_y,
-                                          float& right,
-                                          float& bottom,
-                                          bool& found) {
-    for (size_t i = 0; i < parent.child_count(); ++i) {
-        const auto* child = parent.child_at(i);
-        if (!child || !child->visible()) continue;
-
-        const auto bounds = child->bounds();
-        const float child_x = parent_x + bounds.x;
-        const float child_y = parent_y + bounds.y;
-        right = std::max(right, child_x + std::max(0.0f, bounds.width));
-        bottom = std::max(bottom, child_y + std::max(0.0f, bounds.height));
-        found = true;
-        // A nested scroll container owns its private overflow extent. The
-        // outer container measures the nested viewport box, not descendants
-        // that the nested container clips and scrolls independently.
-        if (dynamic_cast<const ScrollView*>(child)) continue;
-        accumulate_visible_descendant_extent(*child, child_x, child_y,
-                                             right, bottom, found);
-    }
-}
-
-}  // namespace
-
 float ScrollView::max_scroll_x() const {
     const float overflow = content_size_.width - local_bounds().width;
     return overflow > kOverflowEpsilon ? overflow : 0.0f;
@@ -1157,8 +1128,10 @@ void ScrollView::update_automatic_content_size() {
     float right = 0.0f;
     float bottom = 0.0f;
     bool found = false;
-    accumulate_visible_descendant_extent(*this, 0.0f, 0.0f,
-                                         right, bottom, found);
+    // Shared with View::scroll_content_size() — one content measurement, so a
+    // ScrollView and a bare `overflow: scroll` container cannot clamp to
+    // different ranges over the same children.
+    accumulate_scroll_content_extent(*this, 0.0f, 0.0f, right, bottom, found);
 
     if (found) {
         const auto& style = flex();

@@ -152,6 +152,62 @@ Debugging rule: if a plugin's text field drops a key, first determine **whether
 the key even reaches the NSView** (log in `keyDown:`). If it never arrives, the
 fix belongs at the format layer (`onKeyDown`), not the view host.
 
+### One policy answers "did the editor consume this key?" for every format
+
+`pulp::view::route_plugin_key` (`core/view/include/pulp/view/plugin_key_routing.hpp`)
+is the shared answer, and every format seam asks it rather than deciding for
+itself: the macOS `-keyDown:` path in `plugin_view_host_mac.mm` (AU v2/v3, CLAP,
+and VST3's NSView) and `PulpPlugView::onKeyDown` (VST3's own pipeline) both route
+through it. It takes no platform type, because the three seams share no code —
+only the policy.
+
+It answers in this order: an open overlay's Escape, then the focused view under
+**this** root, then `root.on_global_key`. Anything none of them claimed is
+`forward_to_host`. Forwarding is the DEFAULT and consumption is what has to be
+earned; there is no allowlist of "keys the host wants" anywhere in the policy,
+because such a list is always incomplete and fails silently when it is.
+
+Three things are easy to get wrong here, and each one is invisible until a
+musician hits it:
+
+- **A focused text field does not consume everything.** A Command/Control chord
+  or a function key it declined is not text, so there is nothing left for the
+  FIELD to do with it: the key falls through to `on_global_key` and, unclaimed
+  there, to the host. The old macOS path returned
+  "handled" unconditionally once a field held focus, which killed host chords
+  and F-key transport for exactly as long as a type-in happened to be open.
+  `PluginKeyOffer::is_function_key` is how the platform tells the policy that a
+  key carries no character (AppKit's 0xF700-0xF8FF private-use range).
+- **A merely focusable widget must not become a keyboard sink.** A view that
+  accepts navigation but not text is offered only `is_plugin_navigation_key`
+  (arrows, Home/End, Enter, Escape, and never with a chord modifier) and its own
+  `on_key_event` decides from there. That floor is not a claim about what the
+  host wants — it is what stops a focused knob from swallowing Space.
+- **AppKit delivers one press twice.** `-performKeyEquivalent:` runs before
+  `-keyDown:`, and on macOS that override owns `root.on_global_key`. So
+  `PluginKeyOffer::offer_global_hook` is OFF by default and the NSView seam
+  leaves it off: consulting the hook from both passes fires an editor-wide
+  shortcut — and the script `keydown` listener behind it — twice for one press.
+  A seam with a single delivery point (VST3 `onKeyDown`) sets it, and is then
+  the only place the hook is consulted for that press.
+
+One documented place the macOS seam does NOT forward what the policy calls
+unclaimed: a view holding the focus slot that claims neither text nor
+navigation. `acceptsFirstResponder` is already false for it, so the DAW owns
+the keyboard and there is nothing to hand back — but forwarding would still
+move first responder to the host view, and `resignFirstResponder` ends that
+widget's focus out from under it. A custom control that uses Escape for its own
+purpose would lose focus on the first press. That is a first-responder fact, so
+it lives in the platform file rather than in the policy.
+
+`plugin_key_focus(root)` is the scoped focus read every seam must use:
+`View::focused_input_` is process-global, so with two editors open it may name
+the *other* editor's field, and answering from it reports the key handled — so
+the host never sees it either and the spacebar dies with no visible cause.
+
+Pinned headlessly by `test/test_plugin_key_routing.cpp`, where every case that
+asserts consumption has a sibling asserting the key it must hand back.
+
 ## `release_view()` — for containers that own the view
 
 `TabPanel::add_tab` and similar widgets take `std::unique_ptr<view::View>`.
@@ -425,6 +481,29 @@ the Apple Event the OS sends.
 like every other Pulp ObjC class. ObjC class names are process-global, and an
 `NSApplication` delegate is the most dangerous kind to have shadowed across two
 co-loaded Pulp binaries.
+
+## Editor-only state changes must tell the host, or the user loses them
+
+A parameter edit from the editor reaches the host through the parameter system,
+so the host knows the project changed and will offer to save. Anything the
+editor changes *outside* that system leaves no such trace — a loaded sample or
+impulse response, an imported wavetable, a UI-only setting that rides in the
+plugin's own `getState` payload. The editor looks like it worked, the state
+round-trips correctly through save/load, and the user still loses the work by
+closing a project the host believed was clean.
+
+`Processor::flag_state_dirty()` raises that edge. It is an atomic with the same
+shape as `flag_latency_changed()` / `flag_note_names_changed()` — safe to call
+from `process()`, though an editor or a file load on the main thread is the
+usual caller. The adapter republishes it by whatever route the format
+sanctions; the VST3 adapter is wired (`IComponentHandler2::setDirty(true)`,
+delivered on its main-thread drain), CLAP's equivalent is
+`clap_host_state::mark_dirty`, and the other adapters do not consume the flag
+today — raising it there is harmless but inert.
+
+The habit worth forming: whenever an editor writes something that only exists
+in the plugin's own state payload, raise the flag in the same code path. It is
+cheap, and the failure it prevents is silent and unrecoverable.
 
 ## Secondary views
 

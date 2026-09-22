@@ -157,6 +157,19 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/midi/message.hpp",
+        "fingerprint": "sha256:3b3e65207b2467e835cade6fd5ed82d9c22c5ac5515715528cb85dcdf62ee716",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "The shared MIDI message value type every format adapter builds and reads. "
+            "It underpins the whole midi.* capability family rather than any single "
+            "member, so it carries no installed capability claim of its own: a "
+            "capability is a behavior, and this is the vocabulary those behaviors are "
+            "written in."
+        ),
+    },
+    {
         "include": "pulp/signal/character_delay/reverse.hpp",
         "fingerprint": "sha256:8ffe9c4341a734e18aeae9900554cb042acfc3dd0982b243cde8705067140c91",
         "disposition": "infrastructure",
@@ -472,6 +485,17 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "rationale": (
             "Prepared UMP sidecar storage and overflow accounting support the complete-block "
             "contracts; semantic routing remains in the bound utility kernels."
+        ),
+    },
+    {
+        "include": "pulp/midi/ump_conversion.hpp",
+        "fingerprint": "sha256:bdabd201b0a1e36cc4e8df2d4162d521a041b316e695f4b8a3bb8988938d5f38",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Bidirectional MIDI 1.0 / MIDI 2.0 UMP translation and the spec data-value "
+            "scaling it rests on; it is shared plumbing beneath the bound MIDI kernels "
+            "rather than a capability of its own."
         ),
     },
     {

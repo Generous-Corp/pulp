@@ -1,0 +1,55 @@
+{
+  "id": "agent-capability-surface-midi-output-reconciliation",
+  "title": "The installed capability contract describes the MIDI headers it claims",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "4242664b-82ce-44dd-a5ba-3764d334f71b",
+  "owned_paths": [
+    "tools/scripts/agent_capability_catalog_performance.py",
+    "docs/status/sequencer-exposure/rows/agent-capability-surface-midi-output-reconciliation.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/scripts/agent_capability_catalog_performance.py",
+      "needles": [
+        "sha256:ceb35d2c676d21a4271c32eb5f0a943a33ae90eaeb127892afce92d8b4bf2228"
+      ]
+    },
+    {
+      "path": "tools/scripts/agent_capability_registry.py",
+      "needles": [
+        "\"include\": \"pulp/midi/message.hpp\"",
+        "sha256:3b3e65207b2467e835cade6fd5ed82d9c22c5ac5515715528cb85dcdf62ee716",
+        "the vocabulary those behaviors are"
+      ]
+    },
+    {
+      "path": "tools/scripts/agent_capability_manifest.py",
+      "needles": [
+        "SURFACE_INVENTORY_VERSION = 89"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No installed header, target, or exported symbol changes here. The two headers whose fingerprints moved are changed elsewhere in this branch; this row only reconciles the contract that describes them, so the contract stops disagreeing with the tree."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler is added or changed. The registry and catalog are read by a repository gate, not by a shipped command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler is added or changed. Nothing under tools/mcp reads the capability registry."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, or profile policy changes. Nothing a live product can invoke is added, removed, or re-gated."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is byte-identical: the same 111 capabilities, none added, removed, or re-keyed. What moves is the public-surface ledger — two header digests and the inventory version — which records which headers exist, not which capabilities are published. pulp/midi/message.hpp graduates out of the frozen legacy baseline into REVIEWED_HEADERS as infrastructure with no capability keys, because a frozen digest must never be restamped to match an edit; all 337 frozen rows stay intact and the reviewed entry shadows the stale one."
+    }
+  }
+}

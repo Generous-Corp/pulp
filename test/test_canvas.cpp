@@ -10,6 +10,7 @@
 #include <thread>
 #include <limits>
 #include <vector>
+#include <cmath>
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
@@ -22,6 +23,7 @@
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkImageInfo.h"
+#include "include/effects/SkImageFilters.h"
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
@@ -857,6 +859,240 @@ TEST_CASE("SDFStyle defaults are valid", "[canvas][sdf]") {
     REQUIRE(style.squircle_power == 4.0f);
     REQUIRE(style.inner_radius == 0.5f);
     REQUIRE(style.arm_width == Catch::Approx(0.3f));
+}
+
+TEST_CASE("SDF chart shader compiles against the shared geometry prelude", "[canvas][sdf][shader]") {
+    const auto valid = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::flat_arc,
+        "half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }");
+#ifdef PULP_HAS_SKIA
+    INFO(valid);
+    REQUIRE(valid.empty());
+#else
+    REQUIRE_FALSE(valid.empty());
+#endif
+    const auto invalid = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::flat_arc,
+        "half4 shade(PulpChart g) { return nope(g); }");
+    REQUIRE_FALSE(invalid.empty());
+}
+
+TEST_CASE("SDF chart prelude exposes analytic feathering and bounded operators",
+          "[canvas][sdf][shader][feather]") {
+    const auto error = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::flat_arc,
+        "half4 shade(PulpChart g) { "
+        "PulpSdf a = pulpLeaf(g.d, 0); "
+        "PulpSdf b = pulpLeaf(g.d + leaf0, 1); "
+        "PulpSdf c = pulpSmoothUnion(pulpUnion(a, b), pulpIntersect(a, b), leaf1); "
+        "return half4(pulpFeather(c.d, 1.0, 0, 0) + "
+        "pulpFeather(g, 1.0, 1, 5) + pulpFeather(g, 1.0, 0, 6)); }");
+    REQUIRE(error.empty());
+}
+
+TEST_CASE("SDF geometry composer exposes PulpGeom and PulpFragment",
+          "[canvas][sdf][shader]") {
+    const auto error = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::flat_arc,
+        "PulpFragment shade(PulpGeom g, float2 p) { "
+        "return PulpFragment(half4(g.uv.x, abs(g.sdf), g.coverage, 1), 0, 0); }");
+    INFO(error);
+    REQUIRE(error.empty());
+}
+
+TEST_CASE("SDF chart is absent for non-band shapes",
+          "[canvas][sdf][shader]") {
+    const auto error = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::circle,
+        "half4 shade(PulpChart g) { return half4(g.t); }");
+#ifdef PULP_HAS_SKIA
+    REQUIRE_FALSE(error.empty());
+    REQUIRE(error.find("no stroke chart") != std::string::npos);
+#else
+    REQUIRE_FALSE(error.empty());
+#endif
+}
+
+TEST_CASE("SDF chart draw rejects non-band geometry",
+          "[canvas][sdf][shader]") {
+#ifdef PULP_HAS_SKIA
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    Canvas::SDFStyle style;
+    Canvas::ShaderDrawOptions options;
+    REQUIRE_FALSE(canvas.draw_sdf_shape_with_shader(
+        Canvas::SDFShape::circle, 0, 0, 32, 32, style,
+        "half4 shade(PulpChart g) { return half4(g.t); }", options));
+#else
+    SUCCEED("Skia chart draw probe requires PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("SDF operator trees shade union subtract and intersect",
+          "[canvas][sdf][shader][geometry]") {
+#ifdef PULP_HAS_SKIA
+    auto render = [](const std::string& expression, int probe_x = 32) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::ShaderGeometry geometry;
+        geometry.sdf_expression = expression;
+        Canvas::ShaderDrawOptions options;
+        options.geometry = geometry;
+        REQUIRE(canvas.draw_with_sksl(
+            "PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1,1,1,1), 0, 0); }",
+            0, 0, 64, 64, options));
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        return static_cast<unsigned>(SkColorGetA(pixels.getColor(probe_x, 32)));
+    };
+    REQUIRE(render("pulp_smooth_union(sdCircle(p - float2(-7, 0), 5), sdCircle(p - float2(7, 0), 5), 16)") > 200);
+    REQUIRE(render("min(sdCircle(p - float2(-7, 0), 5), sdCircle(p - float2(7, 0), 5))") == 0);
+    REQUIRE(render("max(sdCircle(p, 18), -sdCircle(p, 8))") == 0);
+    REQUIRE(render("max(sdCircle(p, 18), -sdCircle(p, 8))", 47) > 200);
+    REQUIRE(render("max(sdCircle(p, 12), sdBox(p, float2(8, 20)))", 39) > 200);
+    REQUIRE(render("max(sdCircle(p, 12), sdBox(p, float2(8, 20)))", 42) == 0);
+#else
+    SUCCEED("Skia raster operator probes require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("analytic SDF feather modes render finite chart coverage",
+          "[canvas][sdf][shader][feather]") {
+#ifdef PULP_HAS_SKIA
+    for (int mode = 0; mode <= 6; ++mode) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::SDFStyle style;
+        style.stroke_width = 8.0f;
+        style.arc_start = 0.0f;
+        style.arc_sweep = 4.0f;
+        style.feather_sigma = 1.0f;
+        style.feather_curve = mode == 1 ? 1 : 0;
+        style.feather_mode = mode;
+        Canvas::ShaderDrawOptions options;
+        REQUIRE(canvas.draw_sdf_shape_with_shader(
+            Canvas::SDFShape::flat_arc, 0, 0, 64, 64, style,
+            "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }", options));
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        const auto alpha = SkColorGetA(pixels.getColor(32, 32));
+        REQUIRE(alpha <= 255);
+    }
+#else
+    SUCCEED("Skia feather probes require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("analytic SDF feather tracks a Gaussian blur edge",
+          "[canvas][sdf][shader][feather][measurement]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int kSize = 64;
+    constexpr float kSigma = 1.0f;
+    constexpr float kRingRadius = 22.5f;
+    constexpr float kRingHalfWidth = 7.5f;
+    auto make_surface = [] {
+        return SkSurfaces::Raster(SkImageInfo::MakeN32Premul(kSize, kSize));
+    };
+    auto analytic = make_surface();
+    auto blurred = make_surface();
+    REQUIRE(analytic != nullptr);
+    REQUIRE(blurred != nullptr);
+
+    SkiaCanvas analytic_canvas(analytic->getCanvas());
+    Canvas::SDFStyle style;
+    style.arc_start = 0.0f;
+    style.arc_sweep = 6.28318530718f;
+    style.inner_radius = 0.5f;
+    style.feather_sigma = kSigma;
+    REQUIRE(analytic_canvas.draw_sdf_shape_with_shader(
+        Canvas::SDFShape::flat_arc, 0, 0, kSize, kSize, style,
+        "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }", {}));
+
+    SkPaint blur_paint;
+    blur_paint.setImageFilter(SkImageFilters::Blur(kSigma, kSigma,
+                                                   SkTileMode::kClamp, nullptr));
+    auto* blur_canvas = blurred->getCanvas();
+    blur_canvas->clear(SK_ColorTRANSPARENT);
+    blur_canvas->saveLayer(nullptr, &blur_paint);
+    SkPathBuilder ring_builder;
+    ring_builder.addCircle(kSize * 0.5f, kSize * 0.5f,
+                           kRingRadius + kRingHalfWidth);
+    ring_builder.addCircle(kSize * 0.5f, kSize * 0.5f,
+                           kRingRadius - kRingHalfWidth,
+                           SkPathDirection::kCCW);
+    SkPath ring = ring_builder.detach();
+    SkPaint ring_paint;
+    ring_paint.setColor(SK_ColorWHITE);
+    ring_paint.setAntiAlias(true);
+    blur_canvas->drawPath(ring, ring_paint);
+    blur_canvas->restore();
+
+    SkPixmap analytic_pixels;
+    SkPixmap blur_pixels;
+    REQUIRE(analytic->peekPixels(&analytic_pixels));
+    REQUIRE(blurred->peekPixels(&blur_pixels));
+    double analytic_error = 0.0;
+    double blur_error = 0.0;
+    int samples = 0;
+    for (int y = 1; y < kSize - 1; ++y) {
+        for (int x = 1; x < kSize - 1; ++x) {
+            const float dx = static_cast<float>(x) - kSize * 0.5f;
+            const float dy = static_cast<float>(y) - kSize * 0.5f;
+            const float distance = std::abs(std::sqrt(dx * dx + dy * dy) - kRingRadius)
+                                   - kRingHalfWidth;
+            const float expected = 0.5f * std::erfc(distance /
+                                                     (kSigma * 1.41421356237f));
+            const float a = SkColorGetA(analytic_pixels.getColor(x, y)) / 255.0f;
+            const float b = SkColorGetA(blur_pixels.getColor(x, y)) / 255.0f;
+            analytic_error += std::abs(a - expected);
+            blur_error += std::abs(b - expected);
+            ++samples;
+        }
+    }
+    analytic_error /= samples;
+    blur_error /= samples;
+    INFO("analytic MAE=" << analytic_error << ", SkImageFilters::Blur MAE="
+                          << blur_error);
+    // The rasterized shader is slightly closer to the ideal Gaussian profile
+    // than SkImageFilters::Blur at this one-pixel sample grid.
+    REQUIRE(analytic_error < 0.04);
+    REQUIRE(analytic_error <= blur_error + 0.01);
+#else
+    SUCCEED("Skia feather measurement requires PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("SDF tree leaf uniforms drive the composed field",
+          "[canvas][sdf][shader][geometry]") {
+#ifdef PULP_HAS_SKIA
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    Canvas::ShaderGeometry geometry;
+    geometry.leaf_count = 1;
+    geometry.sdf_expression =
+        "sdCircle(p - float2(pulp_leaf0_x, 0), pulp_leaf0_w)";
+    Canvas::NamedUniform x;
+    x.name = "pulp_leaf0_x"; x.count = 1; x.v[0] = 0.0f;
+    geometry.leaf_uniforms.push_back(x);
+    Canvas::NamedUniform radius;
+    radius.name = "pulp_leaf0_w"; radius.count = 1; radius.v[0] = 10.0f;
+    geometry.leaf_uniforms.push_back(radius);
+    Canvas::ShaderDrawOptions options;
+    options.geometry = geometry;
+    REQUIRE(canvas.draw_with_sksl(
+        "PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1,1,1,1), 0, 0); }",
+        0, 0, 64, 64, options));
+    SkPixmap pixels;
+    REQUIRE(surface->peekPixels(&pixels));
+    REQUIRE(SkColorGetA(pixels.getColor(32, 32)) > 200);
+    REQUIRE(SkColorGetA(pixels.getColor(50, 32)) == 0);
+#else
+    SUCCEED("Skia leaf-uniform probe requires PULP_HAS_SKIA");
+#endif
 }
 
 TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
@@ -1709,6 +1945,35 @@ TEST_CASE("SkiaCanvas sksl post-effect binds arbitrary named uniforms",
     // so a bright pixel proves the arbitrary uniform was actually bound.
     REQUIRE(SkColorGetR(c) > 180);
     REQUIRE(SkColorGetR(c) < 230);
+}
+
+TEST_CASE("Shader scope texture preserves sub-8-bit F16 precision",
+          "[canvas][skia][shader][value-channel]") {
+    const auto info = SkImageInfo::Make(2, 1, kRGBA_F16_SkColorType,
+                                        kPremul_SkAlphaType,
+                                        SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    auto data = std::make_shared<Canvas::ShaderDataTexture>();
+    data->name = "scope";
+    data->samples = {0.5f, 0.5f + 1.0f / 1024.0f};
+    data->count = 2;
+    data->live = true;
+    Canvas::ShaderDrawOptions options;
+    options.data_texture = data;
+    REQUIRE(canvas.draw_with_sksl(
+        "uniform float2 resolution; uniform shader scope; uniform float scope_count; "
+        "half4 main(float2 p) { float x = (p.x + 0.5) / resolution.x; "
+        "return half4(scope.eval(float2(x, 0.5)).r, 0, 0, 1); }",
+        0, 0, 2, 1, options));
+    SkPixmap pixels;
+    REQUIRE(surface->peekPixels(&pixels));
+    const auto left = pixels.getColor4f(0, 0).fR;
+    const auto right = pixels.getColor4f(1, 0).fR;
+    REQUIRE(right > left);
+    const auto quantize8 = [](float value) { return static_cast<int>(value * 255.0f + 0.5f); };
+    REQUIRE(quantize8(data->samples[0]) == quantize8(data->samples[1]));
 }
 
 // The post-effect layer must support a composite blend mode — the additive glow

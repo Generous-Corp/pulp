@@ -45,6 +45,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use super::aax_sdk;
+use crate::build_context::{inspect_cmake_build_context, mismatch_message, CMakeBuildContext};
 use crate::build_parallelism;
 use crate::config::pulp_home;
 use crate::error::{CliError, Result};
@@ -359,6 +360,9 @@ fn build_with_dependency_policy<S: Spawner>(
     } else {
         proj.build_dir.clone()
     };
+    if reject_stale_cmake_context(proj, &build_dir, out)? {
+        return Ok(1);
+    }
     let configured = if args.trace {
         // Only a cache that really says PULP_TRACING=ON counts as configured.
         // Reusing a stale untraced cache under this path is exactly how a
@@ -572,6 +576,9 @@ fn build_web<S: Spawner>(
     };
 
     let build_dir = proj.root.join(build_subdir);
+    if reject_stale_cmake_context(proj, &build_dir, out)? {
+        return Ok(1);
+    }
     if !build_dir.join("CMakeCache.txt").exists() {
         writeln!(out, "Configuring {} ({fmt})", proj.root.display()).map_err(io_err)?;
         let rc = spawner.run(&configure)?;
@@ -587,6 +594,27 @@ fn build_web<S: Spawner>(
         &args.passthrough,
     );
     spawner.run(&build)
+}
+
+/// Refuse to reuse a cache that CMake created for a different checkout.
+///
+/// Missing or malformed source metadata remains non-gating so old caches and
+/// lightweight fixtures retain their existing behavior.  An explicit mismatch
+/// is different: letting the build proceed would compile the other checkout's
+/// generated graph while reporting success for the current one.
+fn reject_stale_cmake_context(
+    proj: &ActiveProject,
+    build_dir: &Path,
+    out: &mut impl Write,
+) -> Result<bool> {
+    let context = inspect_cmake_build_context(&proj.root, build_dir);
+    if !matches!(context, CMakeBuildContext::Mismatch { .. }) {
+        return Ok(false);
+    }
+    if let Some(message) = mismatch_message(&context) {
+        writeln!(out, "Error: {message}").map_err(io_err)?;
+    }
+    Ok(true)
 }
 
 // ── test ─────────────────────────────────────────────────────────────
@@ -625,6 +653,9 @@ pub fn test_with<S: Spawner>(
     spawner: &S,
     out: &mut impl Write,
 ) -> Result<i32> {
+    if reject_stale_cmake_context(proj, &proj.build_dir, out)? {
+        return Ok(1);
+    }
     if !proj.is_configured() || (!proj.standalone && !proj.checkout_dependencies_enabled()) {
         writeln!(
             out,
@@ -1764,6 +1795,18 @@ mod tests {
         std::fs::write(proj.build_dir.join("CMakeCache.txt"), "").unwrap();
     }
 
+    fn configure_build_for_source(build_dir: &Path, source_root: &Path) {
+        std::fs::create_dir_all(build_dir).unwrap();
+        std::fs::write(
+            build_dir.join("CMakeCache.txt"),
+            format!(
+                "CMAKE_HOME_DIRECTORY:INTERNAL={}\n",
+                source_root.display()
+            ),
+        )
+        .unwrap();
+    }
+
     fn write_setup_scripts(root: &Path) {
         std::fs::write(root.join("setup.sh"), "#!/bin/bash\n").unwrap();
         std::fs::write(root.join("setup.ps1"), "# fixture\n").unwrap();
@@ -2073,6 +2116,18 @@ mod tests {
     }
 
     #[test]
+    fn build_preserves_governed_child_failure_status() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        configure_build(&proj);
+        let spawner = RecordingSpawner::with_codes(vec![23]);
+        let mut out = Vec::new();
+        let rc = build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+        assert_eq!(rc, 23);
+        assert_eq!(spawner.calls.borrow().len(), 1);
+    }
+
+    #[test]
     fn source_tree_build_prepares_dependencies_before_required_configure() {
         let td = tempfile::tempdir().unwrap();
         source_tree_fixture(td.path());
@@ -2204,6 +2259,21 @@ mod tests {
     }
 
     #[test]
+    fn build_wam_preserves_build_failure_status_and_parallel_env() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let spawner = RecordingSpawner::with_codes(vec![0, 17]);
+        let mut out = Vec::new();
+        let args = BuildArgs { web_format: Some("wam".to_owned()), ..Default::default() };
+        let rc = build_with(&proj, &args, &spawner, &mut out).unwrap();
+        assert_eq!(rc, 17);
+        let calls = spawner.calls.borrow();
+        assert!(calls[1].envs.iter().any(|(key, value)| {
+            key == "CMAKE_BUILD_PARALLEL_LEVEL" && value.parse::<u32>().unwrap() > 0
+        }));
+    }
+
+    #[test]
     fn build_wclap_configures_with_wasi_toolchain_into_build_wclap() {
         let td = tempfile::tempdir().unwrap();
         let proj = standalone_project(td.path());
@@ -2280,6 +2350,88 @@ mod tests {
     }
 
     #[test]
+    fn build_rejects_cache_from_another_checkout_before_spawning_cmake() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let old_checkout = td.path().join("old-checkout");
+        configure_build_for_source(&proj.build_dir, &old_checkout);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+
+        let rc = build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 1);
+        assert!(spawner.calls.borrow().is_empty());
+        let report = String::from_utf8(out).unwrap();
+        assert!(report.contains("stale CMake build context"), "{report}");
+        assert!(report.contains(&old_checkout.display().to_string()), "{report}");
+        assert!(report.contains(&proj.root.display().to_string()), "{report}");
+        assert!(report.contains("Reconfigure"), "{report}");
+    }
+
+    #[test]
+    fn trace_build_rejects_cache_from_another_checkout() {
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let proj = ActiveProject::new(td.path().to_path_buf(), false);
+        let old_checkout = td.path().join("old-trace-checkout");
+        configure_build_for_source(&proj.trace_build_dir(), &old_checkout);
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(proj.trace_build_dir().join("CMakeCache.txt"))
+            .unwrap()
+            .write_all(b"PULP_TRACING:BOOL=ON\n")
+            .unwrap();
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+
+        let rc = build_with(
+            &proj,
+            &BuildArgs {
+                trace: true,
+                ..Default::default()
+            },
+            &spawner,
+            &mut out,
+        )
+        .unwrap();
+
+        assert_eq!(rc, 1);
+        assert!(spawner.calls.borrow().is_empty());
+        assert!(String::from_utf8(out)
+            .unwrap()
+            .contains("stale CMake build context"));
+    }
+
+    #[test]
+    fn web_build_rejects_cache_from_another_checkout_before_spawning_cmake() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let old_checkout = td.path().join("old-web-checkout");
+        let web_build = proj.root.join("build-wam");
+        configure_build_for_source(&web_build, &old_checkout);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+
+        let rc = build_with(
+            &proj,
+            &BuildArgs {
+                web_format: Some("wam".to_owned()),
+                ..Default::default()
+            },
+            &spawner,
+            &mut out,
+        )
+        .unwrap();
+
+        assert_eq!(rc, 1);
+        assert!(spawner.calls.borrow().is_empty());
+        assert!(String::from_utf8(out)
+            .unwrap()
+            .contains("stale CMake build context"));
+    }
+
+    #[test]
     fn build_watch_errors() {
         let _guard = EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let td = tempfile::tempdir().unwrap();
@@ -2353,6 +2505,24 @@ mod tests {
         // configure + build + ctest
         assert_eq!(calls.len(), 3);
         assert_eq!(calls[2].program, "ctest");
+    }
+
+    #[test]
+    fn test_rejects_cache_from_another_checkout_before_ctest() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        let old_checkout = td.path().join("old-test-checkout");
+        configure_build_for_source(&proj.build_dir, &old_checkout);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+
+        let rc = test_with(&proj, &[], &spawner, &mut out).unwrap();
+
+        assert_eq!(rc, 1);
+        assert!(spawner.calls.borrow().is_empty());
+        assert!(String::from_utf8(out)
+            .unwrap()
+            .contains("stale CMake build context"));
     }
 
     #[test]

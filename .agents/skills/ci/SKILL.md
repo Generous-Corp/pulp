@@ -514,6 +514,44 @@ line and let the push through, putting the blind spot back one layer out from
 the script that just closed it. Map every non-zero code a gate can return, and
 when you add an outcome to a gate, add its arm to the hook in the same change.
 
+### The Vellum watch-event hint is ADVISORY, and that is load-bearing
+
+`gates.sh` and `.githooks/pre-push` both run
+`tools/scripts/vellum_watch_preflight.py`, which prints — and never blocks — a
+warning when the pushed range owes a `.github/vellum-expansion-watch-events/*.json`
+file that it does not carry. Three pull requests discovered that requirement the
+expensive way in one evening, each by failing the required `Vellum freeze`
+check after a push.
+
+The trigger is **changed paths, not intent**: the checker globs the changed-file
+list against pinned capability-family selectors and reads nothing of the diff,
+so a one-line `#include` under `test/test_browser_capture*`, or an ordinary edit
+under `tools/import-design/**`, owes a hand-authored event.
+
+**Do not promote this to a blocking gate, and do not move the authoritative
+check local.** `.github/workflows/vellum-trusted-gate.yml` runs the checker from
+a *trusted root* rather than from the pull request's copy, and
+`.github/CODEOWNERS` locks the events directory, the checker and the checker's
+test. A local gate would execute the branch's own copy of a script that exists
+precisely so the branch's copy is not trusted. Two required contexts
+(`Vellum freeze`, `Vellum trusted freeze`) stay the authority; this only moves
+discovery earlier.
+
+Two things the hint must keep doing, both asserted by
+`tools/scripts/test_vellum_watch_preflight.py`:
+
+- **It compares against the MERGE-BASE, never `origin/main`'s tip.** Using the
+  tip manufactures `watch events are append-only` on any branch that is merely
+  stale — a false red on a required gate's surface, which is worse than the
+  friction being fixed.
+- **Neither call site may set `fail`.** The test resolves the `$VELLUM_HINT`
+  variable rather than grepping for the filename, because the literal path
+  appears only in the assignment: a scan for the filename finds no invocation
+  line at all and passes whatever the call sites do.
+
+Its exit codes (0 nothing owed · 10 event owed · 20 no verdict) are
+informational; both callers discard them with `|| true`.
+
 ### `gates.sh` and the pre-push hook are two lists, not one
 
 `gates.sh` describes itself as running the gates `.githooks/pre-push` runs, and
@@ -9694,3 +9732,22 @@ Related: a GraphQL page asking for 50 per-PR check rollups times out (HTTP 504)
 under normal load on this repo. If a collector reads open PRs with their
 rollups, keep the page small and give transient 5xx a bounded retry — a
 terminal failure must still fail closed rather than retry.
+
+## The macOS gate is build-only on a pull request; tests run in the merge queue
+
+`build.yml`'s `Test (non-Windows)` step is skipped when `github.event_name == 'pull_request'`.
+The merge queue runs the same workflow on `merge_group` against the exact commit that will
+land, so `main` keeps full build-and-test protection while a pull request only pays for the
+build.
+
+Two consequences worth knowing:
+
+- **A green `macos` check on a pull request does not mean the tests passed.** It means the
+  build succeeded. The tests run when the pull request is validated in the queue.
+- **A test failure blocks in the queue rather than on the pull request.** Under `ALLGREEN`
+  grouping a red entry forces its neighbours in that batch to rebuild, so a genuinely broken
+  test is more expensive there than it was on the head. Fix a known-bad test before enqueueing
+  rather than letting the queue find it.
+
+This mirrors Windows, which has been merge-queue gated rather than pull-request-head gated in
+the same file for longer.

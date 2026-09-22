@@ -825,6 +825,111 @@ TEST_CASE("UMP conversion carries both MIDI 2.0 pressure axes into MIDI 1.0", "[
     REQUIRE(out.data()[2] == 1);
 }
 
+TEST_CASE("UMP MIDI 2.0 program change converts to a two-byte MIDI 1.0 event", "[midi][ump]") {
+    // MIDI 2.0 Program Change UMP: word 0 low byte is the option-flag field
+    // (bit 0 = Bank Valid); word 1's TOP byte is the program.
+    auto make_pc = [](uint8_t channel, uint8_t program) {
+        UmpPacket p{};
+        p.word_count = 2;
+        p.words[0] = (0x4u << 28) | (uint32_t(7) << 24) | (uint32_t(0xC0 | (channel & 0x0F)) << 16);
+        p.words[1] = uint32_t(program) << 24;
+        return p;
+    };
+
+    for (uint8_t program : {uint8_t(0), uint8_t(1), uint8_t(42), uint8_t(126), uint8_t(127)}) {
+        MidiEvent out = MidiEvent::note_on(0, 60, 100);
+        REQUIRE(ump_to_midi1_event(make_pc(9, program), out));
+        REQUIRE(out.is_program_change());
+        REQUIRE(out.channel() == 9);
+        // Literal emitted bytes and length: program change is 2 bytes.
+        REQUIRE(out.size() == 2);
+        REQUIRE(out.data()[0] == uint8_t(0xC9));
+        REQUIRE(out.data()[1] == program);
+    }
+}
+
+TEST_CASE("UMP program change fields decode program and bank separately", "[midi][ump]") {
+    UmpPacket p{};
+    p.word_count = 2;
+    p.words[0] = (0x4u << 28) | (uint32_t(0xC3) << 16) | 0x01u; // bank valid
+    p.words[1] = (uint32_t(70) << 24) | (uint32_t(5) << 8) | uint32_t(33);
+
+    const auto fields = ump_program_change_fields(p);
+    REQUIRE(fields.program == 70);
+    REQUIRE(fields.bank_valid);
+    REQUIRE(fields.bank_msb == 5);
+    REQUIRE(fields.bank_lsb == 33);
+    REQUIRE(ump_is_bank_valid_program_change(p));
+
+    // Same packet with the option flag clear: the bank bytes are reserved.
+    p.words[0] &= ~0x01u;
+    REQUIRE_FALSE(ump_program_change_fields(p).bank_valid);
+    REQUIRE_FALSE(ump_is_bank_valid_program_change(p));
+
+    // The single-event entry point converts the program change. It emits one
+    // event, so it cannot also carry the bank; `ump_to_midi1` does that.
+    p.words[0] |= 0x01u;
+    MidiEvent out;
+    REQUIRE(ump_to_midi1_event(p, out));
+    REQUIRE(out.is_program_change());
+    REQUIRE(out.size() == 2);
+    REQUIRE(out.data()[1] == 70);
+}
+
+TEST_CASE("UMP flatten expands a bank-valid program change to bank plus program",
+          "[midi][ump][buffer]") {
+    UmpPacket p{};
+    p.word_count = 2;
+    p.words[0] = (0x4u << 28) | (uint32_t(0xC4) << 16) | 0x01u;
+    p.words[1] = (uint32_t(12) << 24) | (uint32_t(2) << 8) | uint32_t(64);
+
+    UmpBuffer ump;
+    ump.add({p, 512});
+
+    MidiBuffer midi;
+    ump_to_midi1(ump, midi);
+
+    REQUIRE(midi.size() == 3);
+    auto it = midi.begin();
+    const MidiEvent msb = *it++;
+    const MidiEvent lsb = *it++;
+    const MidiEvent pc = *it;
+
+    REQUIRE(msb.data()[0] == uint8_t(0xB4));
+    REQUIRE(msb.data()[1] == 0); // CC 0 = bank MSB
+    REQUIRE(msb.data()[2] == 2);
+    REQUIRE(msb.sample_offset == 512);
+
+    REQUIRE(lsb.data()[0] == uint8_t(0xB4));
+    REQUIRE(lsb.data()[1] == 32); // CC 32 = bank LSB
+    REQUIRE(lsb.data()[2] == 64);
+    REQUIRE(lsb.sample_offset == 512);
+
+    REQUIRE(pc.is_program_change());
+    REQUIRE(pc.size() == 2);
+    REQUIRE(pc.data()[0] == uint8_t(0xC4));
+    REQUIRE(pc.data()[1] == 12);
+    REQUIRE(pc.sample_offset == 512);
+}
+
+TEST_CASE("UMP flatten emits one event for a program change without a bank",
+          "[midi][ump][buffer]") {
+    UmpPacket p{};
+    p.word_count = 2;
+    p.words[0] = (0x4u << 28) | (uint32_t(0xC4) << 16); // option flags clear
+    p.words[1] = (uint32_t(12) << 24) | (uint32_t(2) << 8) | uint32_t(64);
+
+    UmpBuffer ump;
+    ump.add({p, 0});
+
+    MidiBuffer midi;
+    ump_to_midi1(ump, midi);
+
+    REQUIRE(midi.size() == 1);
+    REQUIRE(midi.begin()->is_program_change());
+    REQUIRE(midi.begin()->data()[1] == 12);
+}
+
 TEST_CASE("UMP conversion preserves MIDI 1.0 fallback bytes",
           "[midi][ump]") {
     auto program = midi1_event_to_ump2(MidiEvent::program_change(5, 42), 15);

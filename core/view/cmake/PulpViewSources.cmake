@@ -31,6 +31,7 @@ target_sources(pulp-view-core PRIVATE
     src/repaint_damage.cpp
     src/pointer_coalescer.cpp
     src/overlay_dismissal.cpp
+    src/plugin_key_routing.cpp
     src/pointer_dispatch.cpp
     src/caret.cpp
     src/continuous_frames.cpp
@@ -186,6 +187,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/value_channel_binding_service.cpp
     src/widget_bridge/storage_assets_api.cpp
     src/widget_bridge/shader_api.cpp
+    src/widget_bridge/retained_shader_geometry.cpp
     src/widget_bridge/svg_api.cpp
     src/widget_bridge/theme_api.cpp
     src/widget_bridge/tokens_api.cpp
