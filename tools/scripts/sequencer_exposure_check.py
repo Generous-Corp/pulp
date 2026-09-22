@@ -108,12 +108,11 @@ E0_INFRASTRUCTURE_PATHS = {
     "tools/scripts/sequencer_exposure_check.py",
     "tools/scripts/test_sequencer_exposure_check.py",
 }
-# Files a repo tool rewrites wholesale. The gpu-handoff pin-freshness gate
-# *requires* the refresh whenever a pinned path changes, so watching one of
-# these whole would leave the author no way to satisfy both gates at once:
-# this gate would reject the refreshed file for lacking a pending row. They are
-# excluded from the whole-file watch below; sequencer semantics newly added to
-# one of them is still governed by the semantic check.
+# Files a repo tool rewrites wholesale, in edits that carry no sequencer
+# decision to record. Watching one of these whole would reject a mechanical
+# regeneration for lacking a pending row, which no author could supply.
+# They are excluded from the whole-file watch below; sequencer semantics newly
+# added to one of them is still governed by the semantic check.
 GENERATED_ARTIFACT_PATHS = {
     "docs/status/gpu-vellum-handoff.yaml",
     "docs/validation/gpu-handoff-provenance/receipt.json",

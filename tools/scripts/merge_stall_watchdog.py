@@ -49,6 +49,32 @@ observation, so it never trips. The cross-tick memory is the set of PR numbers
 that qualified last sweep, persisted as a workflow artifact (crash-safe: GitHub
 holds it independently of this repo or any host).
 
+The outcome heartbeat
+---------------------
+Every predicate above infers health from a component: a PR's merge state, a
+queue head's age, a batch having been dispatched. Each can read healthy while
+the thing that actually matters has stopped. ``analyze_merge_throughput`` asks
+the outcome question instead — has anything landed on the base branch — and so
+it survives causes nobody has enumerated: a routing typo, an exhausted pool, a
+label no runner advertises, a host that went down.
+
+Its denominator is what keeps it honest: zero merges is the CORRECT reading of
+a quiet repository, so the alarm requires the merge queue to be non-empty.
+Capacity is recorded on the finding and drives the diagnosis text but is
+deliberately NOT a condition — requiring "capacity is online" would let a total
+fleet outage silence the outcome alarm, which is the very substitution of a
+component for the outcome this check exists to stop.
+
+Why a blind sweep must alarm
+----------------------------
+A sweep whose collection failed produces zero findings, which every downstream
+consumer reads identically to a sweep that looked and found nothing wrong. That
+is not hypothetical: on 2026-09-21 both reads failed, this guard rendered
+"Merges are flowing", and its run went green — while nothing had merged for
+four hours. ``analyze_blindness`` closes that by making a failed read a
+first-class finding that names the verdicts it could not reach. Silence is
+evidence of health only when the instrument demonstrably ran.
+
 ``analyze()`` is pure: snapshot + previous-tick set + now -> (findings, this-tick
 set). ``--snapshot`` / ``--prev-state`` feed recorded inputs (tests, replay); the
 default path collects a live snapshot via ``gh api graphql``.
@@ -61,6 +87,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from typing import Any
 
 THRESHOLD_MINUTES = 45
@@ -84,6 +111,21 @@ GREEN_CONCLUSIONS = {"SUCCESS", "SKIPPED", "NEUTRAL"}
 
 # The merge verdicts that mean "ready; only the merger has to act."
 READY_MERGE_STATES = {"CLEAN", "BEHIND"}
+
+# Outcome-heartbeat threshold: minutes with zero merges onto the base branch
+# while the merge queue is non-empty. Merge-group validation on this repo runs
+# ~40 min, so a healthy queue still lands something well inside this window.
+MERGE_THROUGHPUT_THRESHOLD_MINUTES = 90
+
+# Which alarm each collection stage feeds. A stage that FAILED is not a stage
+# that found nothing: every alarm downstream of it goes silent, and that
+# silence carries no information. Naming the dependency is what lets a blind
+# sweep say which verdicts it was unable to reach instead of reporting calm.
+BLINDING_STAGES: dict[str, tuple[str, ...]] = {
+    "graphql": ("alarm",),
+    "merge-queue": ("queue_alarm", "throughput_alarm"),
+    "merge-throughput": ("throughput_alarm",),
+}
 
 
 def parse_ts(value: str) -> dt.datetime:
@@ -199,6 +241,101 @@ def analyze(
     return findings, stuck_now
 
 
+def analyze_merge_throughput(
+    snapshot: dict[str, Any],
+    now: dt.datetime,
+    threshold_minutes: float = MERGE_THROUGHPUT_THRESHOLD_MINUTES,
+) -> list[dict[str, Any]]:
+    """Alarm on the OUTCOME: nothing is merging while work is waiting to merge.
+
+    Every other predicate in this module infers health from a component — a
+    PR's merge state, a queue head's age, a batch having been dispatched. Each
+    one can report healthy while the thing that actually matters, commits
+    landing on the base branch, has stopped. This check asks the outcome
+    question directly, so it survives causes nobody has thought of yet.
+
+    The denominator is what makes it safe. Zero merges is the CORRECT reading
+    of a quiet repo, so the alarm requires demand: the merge queue must be
+    non-empty. An idle repo with an empty queue can never trip this no matter
+    how long it has been since the last merge.
+
+    Capacity is recorded on the finding and drives the diagnosis text, but is
+    deliberately NOT a condition. Requiring "capacity is online" would mean a
+    total fleet outage silences the outcome alarm — reintroducing exactly the
+    measure-a-component-and-infer-the-outcome failure this exists to replace.
+    """
+    throughput = snapshot.get("merge_throughput")
+    queue = snapshot.get("merge_queue")
+    # Either input missing is BLINDNESS, not calm; analyze_blindness owns it.
+    if not isinstance(throughput, dict) or not isinstance(queue, dict):
+        return []
+    last_merge_at = throughput.get("last_merge_at")
+    if not last_merge_at:
+        return []
+
+    depth = int(queue.get("depth") or 0)
+    if depth <= 0:
+        return []  # denominator: nothing is waiting, so nothing is stuck
+
+    minutes = _minutes_between(now, parse_ts(last_merge_at))
+    if minutes < threshold_minutes:
+        return []
+
+    capacity = snapshot.get("runner_capacity") or {}
+    online = capacity.get("online")
+    return [
+        {
+            "level": "throughput_alarm",
+            "minutes_since_last_merge": round(minutes, 1),
+            "last_merge_at": last_merge_at,
+            "last_merge_sha": throughput.get("last_merge_sha", ""),
+            "queue_depth": depth,
+            "runners_online": online,
+            "threshold_minutes": threshold_minutes,
+        }
+    ]
+
+
+def failed_stages(snapshot: dict[str, Any]) -> list[str]:
+    """Names of collection stages that errored on this sweep."""
+    return sorted(
+        {
+            str(err.get("stage"))
+            for err in (snapshot.get("errors") or [])
+            if err.get("stage")
+        }
+    )
+
+
+def analyze_blindness(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Alarm when the sweep could not see the things it claims are fine.
+
+    A watchdog whose collection failed reports zero findings, which is
+    indistinguishable in every downstream consumer from a watchdog that looked
+    and found nothing wrong. That is how this guard printed "merges are
+    flowing" during a total merge stall: both of its reads had failed, so it
+    had no observations at all, and zero findings rendered as calm.
+
+    Silence is only evidence of health when the instrument demonstrably ran.
+    """
+    stages = failed_stages(snapshot)
+    if not stages:
+        return []
+    silenced: set[str] = set()
+    for stage in stages:
+        silenced.update(BLINDING_STAGES.get(stage, ()))
+    return [
+        {
+            "level": "blind_alarm",
+            "failed_stages": stages,
+            "silenced_alarms": sorted(silenced),
+            "detail": (
+                snapshot.get("errors") or []
+            ),
+        }
+    ]
+
+
 def analyze_merge_queue(
     snapshot: dict[str, Any],
     now: dt.datetime,
@@ -254,20 +391,48 @@ def analyze_merge_queue(
 # --------------------------------------------------------------------------
 
 
+# Transient upstream failures a retry can clear. A 502/503/504 is GitHub
+# declining to answer in time, not a verdict about the repository, and the
+# whole guard is worthless if a slow minute blinds it. Terminal failures are
+# NOT retried — only interruptions, bounded, exactly as the recovery contract
+# requires.
+_TRANSIENT_MARKERS = ("HTTP 502", "HTTP 503", "HTTP 504", "couldn't respond")
+_GH_RETRIES = 3
+_GH_RETRY_SLEEP_SECONDS = 4.0
+
+
+def _is_transient(stderr: str) -> bool:
+    return any(marker in stderr for marker in _TRANSIENT_MARKERS)
+
+
 def _gh(args: list[str]) -> str:
     # In Actions this is `gh` on GITHUB_TOKEN. Locally, PULP_GH_BIN=ghapp routes
     # through the Shipyard GitHub App's own rate-limit bucket.
     gh_bin = os.environ.get("PULP_GH_BIN") or "gh"
-    proc = subprocess.run(
-        [gh_bin, *args], capture_output=True, text=True, check=True
-    )
-    return proc.stdout
+    last: subprocess.CalledProcessError | None = None
+    for attempt in range(_GH_RETRIES):
+        proc = subprocess.run([gh_bin, *args], capture_output=True, text=True)
+        if proc.returncode == 0:
+            return proc.stdout
+        last = subprocess.CalledProcessError(
+            proc.returncode, [gh_bin, *args], proc.stdout, proc.stderr
+        )
+        if not _is_transient(proc.stderr or ""):
+            break
+        if attempt < _GH_RETRIES - 1:
+            time.sleep(_GH_RETRY_SLEEP_SECONDS * (attempt + 1))
+    assert last is not None
+    raise last
 
 
+# The page size is load-bearing. At 50 this query asks GitHub for 50 check
+# rollups at once and times out (HTTP 504) under normal load, which blinded
+# every sweep for days. The cost is dominated by the per-PR rollup, so a
+# smaller page trades round trips for a read that completes.
 _PR_QUERY = """
 query($owner:String!, $name:String!, $cursor:String) {
   repository(owner:$owner, name:$name) {
-    pullRequests(states: OPEN, first: 50, after: $cursor,
+    pullRequests(states: OPEN, first: 25, after: $cursor,
                  orderBy: {field: CREATED_AT, direction: ASC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -514,6 +679,45 @@ def _commit_rollup(repo: str, sha: str) -> dict[str, Any]:
     )
 
 
+def collect_merge_throughput(repo: str, base: str) -> dict[str, Any]:
+    """Read when something last landed on the base branch.
+
+    This is the outcome the whole guard exists to protect, and it is one cheap
+    REST call. Deliberately REST rather than GraphQL: the shared GraphQL quota
+    is regularly exhausted by agent PR polling, and the outcome heartbeat must
+    keep working when the richer reads cannot.
+    """
+    commits = json.loads(
+        _gh(["api", f"/repos/{repo}/commits?sha={base}&per_page=1"])
+    )
+    if not commits:
+        raise KeyError(f"no commits returned for {repo}@{base}")
+    head = commits[0]
+    committed = (head.get("commit") or {}).get("committer") or {}
+    when = committed.get("date")
+    if not when:
+        raise KeyError("head commit carries no committer date")
+    return {"last_merge_at": when, "last_merge_sha": head.get("sha", "")}
+
+
+def collect_runner_capacity(repo: str) -> dict[str, Any]:
+    """Count self-hosted runners currently registered and online.
+
+    Context for the diagnosis only — never a condition on any alarm. A runner
+    registration is not proof of usable capacity (an offline registration still
+    advertises its labels), so this answers "was anything even registered",
+    not "could this job have run".
+    """
+    payload = json.loads(_gh(["api", f"/repos/{repo}/actions/runners?per_page=100"]))
+    runners = payload.get("runners") or []
+    online = [r for r in runners if str(r.get("status")) == "online"]
+    return {
+        "registered": len(runners),
+        "online": len(online),
+        "busy": sum(1 for r in online if r.get("busy")),
+    }
+
+
 def collect_merge_queue(repo: str, base: str, required: list[str]) -> dict[str, Any]:
     """Collect queue depth/head plus the last merge-group run start time."""
     owner, _, name = repo.partition("/")
@@ -641,8 +845,22 @@ def collect_snapshot(repo: str, base: str, now: dt.datetime) -> dict[str, Any]:
             {"stage": "merge-queue", "error": str(exc)[:200]}
         )
 
+    try:
+        snapshot["merge_throughput"] = collect_merge_throughput(repo, base)
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as exc:
+        snapshot["errors"].append(
+            {"stage": "merge-throughput", "error": str(exc)[:200]}
+        )
+
+    try:
+        snapshot["runner_capacity"] = collect_runner_capacity(repo)
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as exc:
+        # Diagnosis context only, so its loss blinds no alarm and is recorded
+        # outside `errors` to keep the blindness verdict precise.
+        snapshot["runner_capacity_error"] = str(exc)[:200]
+
     cursor: str | None = None
-    for _ in range(50):  # hard page cap; 50 * 50 = 2500 open PRs
+    for _ in range(100):  # hard page cap; 100 * 25 = 2500 open PRs
         args = [
             "api",
             "graphql",
@@ -712,12 +930,65 @@ def render_body(
 ) -> str:
     alarms = [f for f in findings if f["level"] == "alarm"]
     queue_alarms = [f for f in findings if f["level"] == "queue_alarm"]
+    throughput_alarms = [f for f in findings if f["level"] == "throughput_alarm"]
+    blind_alarms = [f for f in findings if f["level"] == "blind_alarm"]
     lines: list[str] = []
     lines.append(
         "_Auto-generated by `.github/workflows/merge-stall-check.yml` on "
         f"{now.strftime('%Y-%m-%d %H:%M UTC')}._"
     )
     lines.append("")
+    if blind_alarms:
+        lines.append("**This sweep could not observe the repository.**")
+        lines.append("")
+        for f in blind_alarms:
+            lines.append(
+                f"- Collection stage(s) `{'`, `'.join(f['failed_stages'])}` "
+                "failed, so this sweep has no observation to report."
+            )
+            if f["silenced_alarms"]:
+                lines.append(
+                    "  - Verdicts it could NOT reach: "
+                    f"`{'`, `'.join(f['silenced_alarms'])}`. Their silence is "
+                    "not evidence of health."
+                )
+            for err in f.get("detail") or []:
+                lines.append(
+                    f"  - `{err.get('stage')}`: {str(err.get('error'))[:160]}"
+                )
+        lines.append("")
+        lines.append(
+            "A read that fails and a repository that is healthy produce the same "
+            "zero findings. Fix the read before trusting any quiet sweep."
+        )
+        lines.append("")
+    if throughput_alarms:
+        lines.append("**Nothing is merging while the queue is non-empty.**")
+        lines.append("")
+        for f in throughput_alarms:
+            lines.append(
+                f"- No commit has landed on the base branch for "
+                f"**{f['minutes_since_last_merge']:g} min** "
+                f"(last: `{f['last_merge_sha'][:12]}` at {f['last_merge_at']}), "
+                f"while **{f['queue_depth']}** entr"
+                f"{'y is' if f['queue_depth'] == 1 else 'ies are'} queued."
+            )
+            online = f.get("runners_online")
+            if online is not None:
+                lines.append(
+                    f"  - Self-hosted runners online: **{online}**."
+                    + (
+                        " Capacity is registered, so this is a routing or"
+                        " scheduling failure rather than an empty fleet."
+                        if online
+                        else " No runner is registered — start with the fleet."
+                    )
+                )
+            else:
+                lines.append(
+                    "  - Runner capacity could not be read; treat the cause as unknown."
+                )
+        lines.append("")
     if queue_alarms:
         lines.append("**The GitHub merge queue is not advancing.**")
         lines.append("")
@@ -795,6 +1066,8 @@ def render_summary(
     alarms = [f for f in findings if f["level"] == "alarm"]
     pendings = [f for f in findings if f["level"] == "pending"]
     queue_alarms = [f for f in findings if f["level"] == "queue_alarm"]
+    throughput_alarms = [f for f in findings if f["level"] == "throughput_alarm"]
+    blind_alarms = [f for f in findings if f["level"] == "blind_alarm"]
     lines = ["## Merge-stall watchdog", ""]
     if errors:
         lines.append(
@@ -803,6 +1076,8 @@ def render_summary(
         )
         lines.append("")
     if not findings:
+        # Only a sweep that actually observed something may report calm. A
+        # blind sweep produces a blind_alarm above and never lands here.
         lines.append(
             "No PR is merge-ready-and-stuck. Merges are flowing (or nothing is ready)."
         )
@@ -816,18 +1091,32 @@ def render_summary(
         "sweep if it persists)"
     )
     lines.append(f"- **{len(queue_alarms)}** stalled merge queue")
+    lines.append(f"- **{len(throughput_alarms)}** zero-merge-throughput")
+    lines.append(f"- **{len(blind_alarms)}** blind sweep (could not observe)")
     lines.append("")
-    lines.append("| level | PR | merge state | ready (min) |")
+    lines.append("| level | subject | state | minutes |")
     lines.append("| --- | --- | --- | --- |")
     for f in findings:
-        if f["level"] == "queue_alarm":
+        level = f["level"]
+        if level == "queue_alarm":
             lines.append(
                 f"| queue alarm | #{f['number']} | {f['queue_state']} | "
                 f"{f['queue_minutes']:g} |"
             )
+        elif level == "throughput_alarm":
+            lines.append(
+                f"| throughput alarm | base branch | "
+                f"queue depth {f['queue_depth']} | "
+                f"{f['minutes_since_last_merge']:g} |"
+            )
+        elif level == "blind_alarm":
+            lines.append(
+                f"| blind alarm | {', '.join(f['failed_stages'])} | "
+                f"silenced: {', '.join(f['silenced_alarms']) or 'none'} | - |"
+            )
         else:
             lines.append(
-                f"| {f['level']} | #{f['number']} | {f['merge_state_status']} | "
+                f"| {level} | #{f['number']} | {f['merge_state_status']} | "
                 f"{f['ready_minutes']:g} |"
             )
     return "\n".join(lines)
@@ -844,6 +1133,11 @@ def main(argv: list[str] | None = None) -> int:
         "--queue-threshold-minutes",
         type=float,
         default=MERGE_QUEUE_THRESHOLD_MINUTES,
+    )
+    ap.add_argument(
+        "--throughput-threshold-minutes",
+        type=float,
+        default=MERGE_THROUGHPUT_THRESHOLD_MINUTES,
     )
     ap.add_argument("--findings-out", default="findings.json")
     ap.add_argument("--snapshot-out", default="")
@@ -876,8 +1170,15 @@ def main(argv: list[str] | None = None) -> int:
     findings.extend(
         analyze_merge_queue(snapshot, now, args.queue_threshold_minutes)
     )
+    findings.extend(
+        analyze_merge_throughput(snapshot, now, args.throughput_threshold_minutes)
+    )
+    findings.extend(analyze_blindness(snapshot))
     alarms = [f for f in findings if f["level"] == "alarm"]
     queue_alarms = [f for f in findings if f["level"] == "queue_alarm"]
+    throughput_alarms = [f for f in findings if f["level"] == "throughput_alarm"]
+    blind_alarms = [f for f in findings if f["level"] == "blind_alarm"]
+    actionable = alarms + queue_alarms + throughput_alarms + blind_alarms
     # An incomplete observation must never erase the prior sweep's memory.
     # Keep any newly observed stuck PRs too, but only a complete sweep may
     # remove a PR from the persisted two-sweep set.
@@ -898,7 +1199,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.snapshot_out:
         with open(args.snapshot_out, "w", encoding="utf-8") as fh:
             json.dump(snapshot, fh, indent=2)
-    if alarms or queue_alarms:
+    if actionable:
         with open(args.body_out, "w", encoding="utf-8") as fh:
             fh.write(render_body(findings, args.threshold_minutes, now))
 
@@ -916,7 +1217,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Exit 0 regardless of findings: the workflow decides what to do with them.
     # A watchdog that reddens its own run gets ignored.
-    print(f"alarm_count={len(alarms) + len(queue_alarms)}")
+    print(f"alarm_count={len(actionable)}")
     return 0
 
 

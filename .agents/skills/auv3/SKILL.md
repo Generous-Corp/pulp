@@ -151,6 +151,22 @@ containment stay identical to CLAP/VST3/AUv2/AAX.
 - `implementorValueProvider` reads current values back from the store.
 - `implementorStringFromValueCallback` delegates to
   `ParamInfo::to_string` when provided, otherwise a `%.2f` fallback.
+- `flags` is no longer the hard-coded `IsWritable | IsReadable`. It is derived
+  per parameter from the shared predicates `state::is_hidden_param` /
+  `is_read_only_param` / `is_automatable_param`, using the **same AU flag
+  mapping as the v2 adapter** (`au_v2_common.cpp` documents why each flag was
+  chosen): read-only withholds `IsWritable` and adds `MeterReadOnly`, hidden
+  adds the `ExpertMode` display hint, non-automatable adds `NonRealTime`. AU has
+  no literal hidden/readonly/automatable triple, so `ExpertMode` in particular
+  is a hint a host may ignore — do not describe it as hiding the parameter.
+
+  Keep the two AU adapters' mappings identical: they are separate code (this
+  tree vs `fill_parameter_info`) reading one model, and the whole point of the
+  shared predicates is that a plugin's parameters describe themselves the same
+  way in v2 and v3. Test: `test/test_au_param_visibility.mm` asserts both.
+  Worth knowing for the next flag: this was a `core/state` gap, not an AU one —
+  VST3 and CLAP could not express these either, because `ParamInfo` had no
+  field, so the fix was one model change rather than three adapter patches.
 
 `__weak` capture + `strongSelf` null-check pattern is deliberate —
 Obj-C blocks on `AUParameterTree` must not retain the audio unit.
@@ -222,8 +238,11 @@ not apply — `_bridge` is a C++ struct). The block:
    success, nulls out the slot on failure.
 5. Walks the realtime event list — parameter/ramp events append to
    `param_events` and call `store.set_value_rt`, short MIDI arrives via
-   `AURenderEventMIDI`, and long / sysex arrives via
-   `AURenderEventMIDIEventList`. See gotchas below.
+   `AURenderEventMIDI`, and UMP (sysex7 **and** channel voice) arrives via
+   `AURenderEventMIDIEventList`. A host sends that second form **only** to a
+   unit that negotiates a MIDI protocol, so it is live exactly when the
+   Processor declares `supports_ump` — see "MIDI protocol negotiation" in the
+   gotchas below before assuming the sysex path runs at all.
    The sorted `param_events` queue is attached to the processor via
    `set_param_events(&param_events)` before render, so
    `Processor::param_events()` exposes the same sample offsets.
@@ -259,7 +278,17 @@ same way CLAP/VST3 do — via the shared `boundary::MpeSidecar` (in
 `processor->process()` and **after** the bypass early-return (a bypassed plugin
 gets no MPE). AU delivers MIDI already time-ordered, so pass it in host order
 (no sort) — matching CLAP. Non-MPE plugins get `set_mpe_input(nullptr)` each
-block. Unlike bypass, MPE routing IS unit-tested headlessly: the AU v3 MPE case
+block.
+
+**The sidecar is unreachable unless the unit says so.** Logic (and every other
+MPE-aware host) decides whether to route an MPE zone's per-member-channel
+stream from the `supportsMPE` property; a unit that leaves it unanswered is
+simply never offered MPE input, however complete its tracker. `PulpAudioUnit`
+overrides `-supportsMPE` to return `_bridge.mpe.enabled` — the same descriptor
+opt-in the render block gates on, so what the host is told and what the adapter
+does cannot drift. The v2 bridge of the same property is
+`kAudioUnitProperty_SupportsMPE`; keep both answering or an MPE plug-in works
+in one adapter and not the other. Unlike bypass, MPE routing IS unit-tested headlessly: the AU v3 MPE case
 in `test_au_plugin_state.mm` drives `internalRenderBlock` with a channel-wide
 MIDI list and asserts per-note NoteOn/PitchBend/Timbre/Pressure routing.
 
@@ -942,7 +971,11 @@ itself remain unchanged and important:
    the adapter checks `mt == 0x3` before calling. Don't push the
    type check into the reassembler; both call sites already need the
    nibble for cursor advance and re-checking would be redundant in
-   the hot path.
+   the hot path. The same visitor now also handles types 0x1 (system),
+   0x2 (MIDI 1.0 channel voice) and 0x4 (MIDI 2.0 channel voice); anything
+   else is skipped by its true word length. Do not narrow it back to
+   sysex-only — that is what silently discarded every note a MIDI
+   2.0 host delivered.
 
 Sysex7 size is still 0..6 bytes per 2-word packet; preserve message
 boundaries. The reassembler clamps to 6
@@ -953,6 +986,63 @@ Both invariants are tested by
 contrived packet whose word1 begins with a nibble matching sysex7
 to prove word1 is never reparsed as a fresh word0). Touch the
 reassembler → add a test that exercises the boundary.
+
+### MIDI protocol negotiation — an AU that says nothing gets 7-bit MIDI
+
+`AUAudioUnit.h` is explicit: an AU that does not override
+`AudioUnitMIDIProtocol` "will default to receiving legacy MIDI". That is not a
+transport detail — the host performs the narrowing, so 16-bit velocity and
+32-bit controller values are already 7-bit by the time the render block runs.
+No amount of UMP machinery downstream can recover them.
+
+`PulpAudioUnit` overrides it:
+
+```objc
+- (MIDIProtocolID)AudioUnitMIDIProtocol {
+    if (_bridge.ump_enabled) return kMIDIProtocol_2_0;
+    return [super AudioUnitMIDIProtocol];
+}
+```
+
+`ump_enabled` is latched once at init from
+`descriptor().effective_capabilities().supports_ump`. Three consequences worth
+knowing before touching this:
+
+1. **It decides whether `AURenderEventMIDIEventList` arrives at all.** A host
+   delivers event lists only to a unit that negotiated a protocol. Before this
+   override existed the whole event-list branch — sysex7 reassembly included —
+   was code no conforming host reached.
+2. **Negotiating without decoding channel voice loses notes.** Once the unit
+   says MIDI 2.0, the host routes *everything* through event lists as type 0x4.
+   The walk must decode 0x2/0x4, not just 0x3.
+3. **Publish both transports.** The render block appends channel-voice packets
+   to `AUBridge::ump_buffer` (pre-reserved + capacity-limited, published via
+   `set_ump_input()` for the duration of `process()`) *and* projects each to
+   MIDI 1.0 into `midi_in` via `ump_to_midi1_event`. The projection is what
+   keeps every existing `MidiBuffer` reader — and the MPE sidecar, which runs
+   off `midi_in` — working under MIDI 2.0. Packets with no MIDI 1.0 form
+   (per-note pitch bend, per-note CC) reach an opted-in Processor through the
+   UMP buffer only. `set_ump_input(nullptr)` for a Processor that did not opt
+   in, so its behaviour is byte-for-byte what it was.
+
+Gate every new behaviour here on the descriptor flag. A plug-in that does not
+declare `supports_ump` must negotiate nothing and see exactly today's stream.
+
+Coverage: `test_au_plugin_state.mm` drives `internalRenderBlock` with a real
+`MIDIEventList` of type-0x4 messages and asserts a 16-bit velocity survives
+intact, that per-note pitch bend arrives (it has no MIDI 1.0 form, so it proves
+native delivery rather than a round trip), and that a non-declaring plug-in
+still reports a non-2.0 protocol, gets a null `ump_input()`, and keeps its
+notes.
+
+### AUv3 MIDI *output* is still short-message only
+
+`MIDIOutputEventBlock` is packed from `uint8_t bytes[3]`, so a Processor's
+output sysex does not reach an AUv3 host — while the AU v2 adapter carries it
+(`MidiOutputPacketBuilder` in `au_v2_common.hpp`). Closing the gap means
+`MIDIOutputEventListBlock` plus an outbound UMP sysex7 **packetizer**, which
+`core/midi` does not have (it has a reassembler, the inbound half only). Don't
+"fix" it by truncating; it is an unimplemented path, not a bug in this one.
 
 ### Short-MIDI length must be validated
 

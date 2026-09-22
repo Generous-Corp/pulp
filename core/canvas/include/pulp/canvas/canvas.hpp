@@ -8,10 +8,11 @@
 #include <pulp/canvas/canvas_capability.hpp>
 #include <pulp/canvas/path.hpp>
 #include <pulp/canvas/scene_recording.hpp>
-#include <memory>
 #include <pulp/canvas/text_utf8.hpp>
 #include <string>
 #include <vector>
+#include <memory>
+#include <optional>
 #include <variant>
 #include <functional>
 
@@ -236,6 +237,7 @@ enum class TextDirection { left_to_right, right_to_left, top_to_bottom, bottom_t
 // software) implement the virtual methods.
 class Canvas {
 public:
+    struct ShaderDrawOptions;
     virtual ~Canvas() = default;
 
     /// Identity of the renderer this canvas actually wraps.
@@ -1399,6 +1401,11 @@ public:
         float arm_width = 0.3f;       ///< For cross (fraction of half-size)
         float bezier_cx = 0.0f;       ///< For quadratic_bezier: control point X (normalized -1..1)
         float bezier_cy = -1.0f;      ///< For quadratic_bezier: control point Y (normalized -1..1)
+        // Analytic chart feathering. 0=uniform, 1=glow, 2=inner,
+        // 3=outer, 4=inset, 5=radial, 6=sweep.
+        float feather_sigma = 0.0f;
+        int feather_curve = 0;        ///< 0=gaussian, 1=linear
+        int feather_mode = 0;
     };
 
     virtual void draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
@@ -1422,6 +1429,20 @@ public:
             else
                 fill_rounded_rect(x, y, w, h, 0);
         }
+    }
+
+    /// Draw a shape through an author-supplied geometry chart shader. The
+    /// shader must define `half4 shade(PulpChart g)`. `g.valid` is zero for
+    /// shapes without a chart (and for degenerate geometry); callers must not
+    /// interpret chart fields when it is zero.
+    virtual bool draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
+                                             float w, float h,
+                                             const SDFStyle& style,
+                                             const std::string& sksl,
+                                             const ShaderDrawOptions& options) {
+        (void)sksl; (void)options;
+        draw_sdf_shape(shape, x, y, w, h, style);
+        return false;
     }
 
     // ── Blur / Backdrop filter ─────────────────────────────────────────
@@ -1608,11 +1629,50 @@ public:
         float v[4] = {0, 0, 0, 0};
     };
 
+    /// Latest-wins audio/vector payload exposed to an SkSL child shader. The
+    /// host keeps this object stable between publications; a backend may retain
+    /// the corresponding GPU texture until `publish_sequence` changes.
+    struct ShaderDataTexture {
+        std::string name;
+        std::vector<float> samples;
+        std::uint32_t count = 0;
+        bool live = false;
+        float neutral = 0.0f;
+        std::uint32_t publish_sequence = 0;
+    };
+
+    struct ShaderGeometry {
+        SDFShape shape = SDFShape::rect;
+        SDFStyle style{};
+        // Optional generated SDF expression for a bounded operator tree.
+        // It is emitted from validated geometry JSON and evaluated per
+        // fragment alongside the primitive prelude.
+        std::string sdf_expression;
+        std::uint64_t topology_hash = 0;
+        // Parameters for a validated operator tree. The expression refers
+        // to pulp_leafN_* uniforms; keeping the values separate lets a
+        // same-topology update avoid recompiling the composed shader.
+        std::vector<NamedUniform> leaf_uniforms;
+        std::uint32_t leaf_count = 0;
+    };
+
+    struct ShaderDrawOptions {
+        ShaderUniforms uniforms;
+        std::vector<NamedUniform> named_uniforms;
+        float reach = 0.0f;
+        std::shared_ptr<const ShaderDataTexture> data_texture;
+        std::optional<ShaderGeometry> geometry;
+    };
+
     /// Validate and compile an SkSL shader without drawing. Returns error string (empty = success).
     /// Static so it can be called without a Canvas instance.
     /// Non-Skia builds return a non-empty "Skia not available" error rather than
     /// reporting a false success — there is no compiler to ask.
     static std::string compile_sksl(const std::string& sksl);
+
+    /// Compile an author chart shader against the geometry prelude used by
+    /// draw_sdf_shape_with_shader. The author source must define shade(PulpChart).
+    static std::string compile_sdf_chart_sksl(SDFShape shape, const std::string& sksl);
 
     /// Whether an SkSL shader declares a uniform of the given name. Compiles via
     /// the same process-lifetime cache as `compile_sksl`, so repeat queries are
@@ -1635,6 +1695,12 @@ public:
         set_fill_color(uniforms.fill_color.a > 0.0f ? uniforms.fill_color : Color::rgba(0.314f, 0.314f, 0.392f, 0.784f));
         fill_rect(x, y, w, h);
         return false; // shader not rendered
+    }
+
+    virtual bool draw_with_sksl(const std::string& sksl,
+                                float x, float y, float w, float h,
+                                const ShaderDrawOptions& options) {
+        return draw_with_sksl(sksl, x, y, w, h, options.uniforms);
     }
 
     /// Save a compositing layer whose ALREADY-PAINTED content is post-processed

@@ -509,6 +509,26 @@ public:
 
     float scroll_x() const { return smooth_scroll_x_.value(); }
     float scroll_y() const { return smooth_scroll_y_.value(); }
+
+    // ScrollView is the richer widget over View's scrollable-overflow notion:
+    // it answers the same queries so one call site works for either, and
+    // reports its ANIMATED offset so the generic paint/hit-test pair and a
+    // bounds walk all read the position it is actually drawn at.
+    bool is_scroll_container() const override {
+        return true;
+    }
+    float scroll_offset_x() const override {
+        return smooth_scroll_x_.value();
+    }
+    float scroll_offset_y() const override {
+        return smooth_scroll_y_.value();
+    }
+    bool set_scroll_offset(float x, float y) override {
+        const float before_x = smooth_scroll_x_.value();
+        const float before_y = smooth_scroll_y_.value();
+        set_scroll(x, y);
+        return smooth_scroll_x_.value() != before_x || smooth_scroll_y_.value() != before_y;
+    }
     bool scroll_animating() const {
         return smooth_scroll_x_.animating() || smooth_scroll_y_.animating();
     }

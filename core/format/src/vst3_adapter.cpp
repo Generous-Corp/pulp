@@ -186,9 +186,20 @@ pulp::format::ProcessContext build_process_context(
     return ctx;
 }
 
-// Bridge the processor's outbound MIDI back to the host's event list. Only note
-// on/off cross this boundary; other message types the processor emits have no
-// VST3 Event representation here and are not forwarded.
+// Bridge the processor's outbound MIDI back to the host's event list.
+//
+// Notes travel as VST3's first-class kNoteOnEvent / kNoteOffEvent. Every other
+// channel-voice message crosses as a single kLegacyMIDICCOutEvent, whose
+// `controlNumber` selects which message it carries: 0..127 are ordinary CC
+// numbers and the Vst::ControllerNumbers extras name the rest (kAfterTouch,
+// kPitchBend, kCtrlPolyPressure, kCtrlProgramChange). `value` / `value2` are
+// per-message, documented in ivstmidicontrollers.h and mirrored below.
+//
+// Direction matters and is asymmetric: inbound controllers reach the plug-in as
+// *parameter changes* via IMidiMapping (detail/vst3_midi_mapping.hpp), because
+// VST3 has no inbound raw-CC event. Outbound has no such indirection — the
+// event goes straight onto data.outputEvents from the processor, exactly like a
+// note (see the SDK's own legacymidiccout sample).
 void write_midi_output(const ProcessData& data, const midi::MidiBuffer& midi_out) {
     if (!data.outputEvents || midi_out.empty()) return;
     for (const auto& me : midi_out) {
@@ -203,13 +214,63 @@ void write_midi_output(const ProcessData& data, const midi::MidiBuffer& midi_out
             evt.noteOn.pitch = me.note();
             evt.noteOn.velocity = me.velocity() / 127.0f;
             data.outputEvents->addEvent(evt);
-        } else if (me.is_note_off()) {
+            continue;
+        }
+        if (me.is_note_off()) {
             evt.type = Event::kNoteOffEvent;
             evt.noteOff.channel = me.channel();
             evt.noteOff.pitch = me.note();
             evt.noteOff.velocity = me.velocity() / 127.0f;
             data.outputEvents->addEvent(evt);
+            continue;
         }
+
+        // A two- or three-byte channel-voice message. Anything shorter (a bare
+        // realtime byte) has no LegacyMIDICCOutEvent representation.
+        const auto* bytes = me.data();
+        if (bytes == nullptr || me.size() < 2)
+            continue;
+        const auto status = static_cast<uint8_t>(bytes[0] & 0xF0u);
+        const auto data1 = static_cast<uint8_t>(bytes[1] & 0x7Fu);
+        const auto data2 = me.size() > 2 ? static_cast<uint8_t>(bytes[2] & 0x7Fu) : uint8_t{0};
+
+        uint8_t control_number = 0;
+        int8_t value = 0;
+        int8_t value2 = 0;
+        switch (status) {
+        case 0xA0: // Poly key pressure: value = key, value2 = pressure.
+            control_number = static_cast<uint8_t>(kCtrlPolyPressure);
+            value = static_cast<int8_t>(data1);
+            value2 = static_cast<int8_t>(data2);
+            break;
+        case 0xB0: // Control change: the CC number IS the control number.
+            control_number = data1;
+            value = static_cast<int8_t>(data2);
+            break;
+        case 0xC0: // Program change: value only.
+            control_number = static_cast<uint8_t>(kCtrlProgramChange);
+            value = static_cast<int8_t>(data1);
+            break;
+        case 0xD0: // Channel pressure: value only.
+            control_number = static_cast<uint8_t>(kAfterTouch);
+            value = static_cast<int8_t>(data1);
+            break;
+        case 0xE0: // Pitch bend: value = LSB, value2 = MSB (14-bit).
+            control_number = static_cast<uint8_t>(kPitchBend);
+            value = static_cast<int8_t>(data1);
+            value2 = static_cast<int8_t>(data2);
+            break;
+        default:
+            // SysEx and system-common messages are not carried here; SysEx
+            // would need a kDataEvent with host-visible payload lifetime.
+            continue;
+        }
+        evt.type = Event::kLegacyMIDICCOutEvent;
+        evt.midiCCOut.controlNumber = control_number;
+        evt.midiCCOut.channel = static_cast<int8_t>(me.channel());
+        evt.midiCCOut.value = value;
+        evt.midiCCOut.value2 = value2;
+        data.outputEvents->addEvent(evt);
     }
 }
 
@@ -768,7 +829,16 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
 
     // Register Pulp parameters with the VST3 parameter system
     for (const auto& param : store_.all_params()) {
-        int32 flags = ParameterInfo::kCanAutomate;
+        // Automation is opt-out: an ordinary parameter keeps the kCanAutomate
+        // it has always carried, and only a parameter declared non-automatable
+        // (or read-only, which the host must not write) withholds it.
+        int32 flags = 0;
+        if (state::is_automatable_param(param))
+            flags |= ParameterInfo::kCanAutomate;
+        if (state::is_hidden_param(param))
+            flags |= ParameterInfo::kIsHidden;
+        if (state::is_read_only_param(param))
+            flags |= ParameterInfo::kIsReadOnly;
 
         int32 step_count = 0;
         if (state::is_discrete_param(param)) {
@@ -1256,14 +1326,15 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
 // idle tick is one relaxed atomic load and an early return.
 namespace { constexpr int kRestartPollIntervalMs = 33; }
 
-// Main-thread drain of the restart publisher. process() only accumulates the
-// pending restart flags into restart_publisher_ (RT-safe); the host callback
-// fires here, off the audio thread. Called from the paced poll tick and from
-// main-thread host entrypoints (setActive / getLatencySamples /
-// getTailSamples / getState).
+// Main-thread drain of the deferred host callbacks. process() only accumulates
+// pending restart flags into restart_publisher_ (RT-safe), and a Processor only
+// raises an atomic state-dirty flag; both host callbacks fire here, off the
+// audio thread. Called from the paced poll tick and from main-thread host
+// entrypoints (setActive / getLatencySamples / getTailSamples / getState).
 void PulpVst3Processor::drain_pending_restart() {
-    // Nothing armed — cheap early-out (one acquire atomic load).
-    if (!restart_publisher_.dispatch_armed()) return;
+    // Nothing pending — cheap early-out (two acquire atomic loads).
+    if (!restart_publisher_.dispatch_armed() && !(processor_ && processor_->state_dirty_pending()))
+        return;
 
     // If a main-thread backend is registered, only deliver when we are
     // genuinely on the main thread. When no backend is registered, VST3's
@@ -1280,12 +1351,12 @@ void PulpVst3Processor::drain_pending_restart() {
         auto alive = drain_alive_;
         pulp::events::MainThreadDispatcher::call_async([this, alive] {
             if (alive && alive->load(std::memory_order_acquire))
-                deliver_pending_restart();
+                deliver_pending_host_notifications();
         });
         return;
     }
 
-    deliver_pending_restart();
+    deliver_pending_host_notifications();
 }
 
 void PulpVst3Processor::deliver_pending_restart() {
@@ -1295,6 +1366,29 @@ void PulpVst3Processor::deliver_pending_restart() {
         // Safe here because this only ever runs on the main thread.
         if (handler) handler->restartComponent(flags);
     });
+}
+
+void PulpVst3Processor::deliver_pending_dirty() {
+    if (!processor_)
+        return;
+    // Consume unconditionally: an edge that cannot be delivered (no handler, or
+    // a host that predates IComponentHandler2) must not be left latched, or the
+    // next drain would re-deliver a stale dirty long after the change.
+    if (!processor_->consume_state_dirty_flag())
+        return;
+    // setDirty lives on IComponentHandler2, not IComponentHandler, so it has to
+    // be queried off the handler the host gave us. Hosts that only implement the
+    // v1 interface return null here and the edge is dropped.
+    Steinberg::FUnknownPtr<Steinberg::Vst::IComponentHandler2> handler2(getComponentHandler());
+    // A host callback: may lock / allocate / re-enter. Safe here because this
+    // only ever runs on the main thread.
+    if (handler2)
+        handler2->setDirty(true);
+}
+
+void PulpVst3Processor::deliver_pending_host_notifications() {
+    deliver_pending_restart();
+    deliver_pending_dirty();
 }
 
 void PulpVst3Processor::start_restart_poll() {
@@ -1316,7 +1410,7 @@ void PulpVst3Processor::schedule_restart_poll_tick() {
         [this, alive, active] {
             if (!alive || !alive->load(std::memory_order_acquire)) return;
             if (!active || !active->load(std::memory_order_acquire)) return;
-            deliver_pending_restart();
+            deliver_pending_host_notifications();
             // Re-post only while still active. Stopping is cooperative: when
             // setActive(false)/terminate() clears `active`, the next tick
             // returns early above and the chain ends.
@@ -1858,8 +1952,23 @@ void PulpVst3Processor::process_decode_input_events(ProcessData& data) {
                     if (mpe_.enabled) {
                         note_id_map_erase(evt.noteOff.noteId);
                     }
-                } else if (evt.type == Event::kNoteExpressionValueEvent &&
-                           mpe_.enabled) {
+                } else if (evt.type == Event::kPolyPressureEvent) {
+                    // Poly (per-key) aftertouch. VST3 gives this its own event
+                    // type rather than routing it through IMidiMapping, whose
+                    // controller space only spans CC + channel aftertouch +
+                    // pitch bend, so it is decoded here alongside the notes.
+                    // Pressure arrives normalized; scale to the 7-bit MIDI 1.0
+                    // value the Processor sees from every other adapter.
+                    // Rounds rather than truncates so a host's exact 1.0 / 0.5
+                    // land on 127 / 64 instead of drifting a step low.
+                    const auto& pp = evt.polyPressure;
+                    const float pressure = std::clamp(pp.pressure, 0.0f, 1.0f) * 127.0f + 0.5f;
+                    auto me = midi::MidiEvent::poly_pressure(
+                        static_cast<uint8_t>(pp.channel & 0x0F),
+                        static_cast<uint8_t>(pp.pitch & 0x7F), static_cast<uint8_t>(pressure));
+                    me.sample_offset = evt.sampleOffset;
+                    midi_in_.add(me);
+                } else if (evt.type == Event::kNoteExpressionValueEvent && mpe_.enabled) {
                     // Per-note expression. The event references the noteId of a
                     // live note-on; look up its (channel, note) and synthesize
                     // the channel-wide MIDI message the MpeVoiceTracker narrows
@@ -1920,8 +2029,8 @@ void PulpVst3Processor::process_decode_input_events(ProcessData& data) {
                             midi_in_.add(me);
                         }
                     }
-                } else if (evt.type == Event::kDataEvent
-                           && evt.data.type == DataEvent::kMidiSysEx) {
+                } else if (evt.type == Event::kDataEvent &&
+                           evt.data.type == DataEvent::kMidiSysEx) {
                     // Route kData/kMidiSysEx payloads into MidiBuffer's
                     // variable-length sidecar. VST3 delivers the raw
                     // F0..F7 bytes in evt.data.bytes with length in

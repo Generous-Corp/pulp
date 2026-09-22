@@ -60,6 +60,9 @@ ureq       = { version = "2", default-features = false, features = ["tls", "json
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
+
 [dev-dependencies]
 assert_cmd = "2"
 criterion  = { version = "0.5", features = ["html_reports"] }
