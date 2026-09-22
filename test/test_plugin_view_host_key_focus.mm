@@ -52,6 +52,23 @@ using namespace pulp::view;
 }
 @end
 
+// The DAW's own view, one level up from the embedded editor. Counting what
+// lands here is the only way to tell "the editor consumed it" apart from
+// "the editor dropped it" — both look identical from inside the editor, and
+// only one of them kills the host's spacebar.
+@interface PulpTestForwardRecorder : NSView
+@property(nonatomic, assign) int forwardedKeyDowns;
+@end
+@implementation PulpTestForwardRecorder
+- (BOOL)acceptsFirstResponder {
+    return YES;
+}
+- (void)keyDown:(NSEvent*)event {
+    (void)event;
+    _forwardedKeyDowns++;
+}
+@end
+
 // The focus-sync entry point is an internal method on the embedded NSView;
 // declare it so the test can drive the exact code path mouseDown/mouseUp/
 // keyDown use, without synthesizing NSEvents.
@@ -136,6 +153,21 @@ void ReusedAddressTextEditor::operator delete(void* ptr) noexcept {
     if (ptr == reused_text_editor_storage)
         reused_text_editor_in_use = false;
 }
+
+// A focused text field whose consumption answers the test dictates, so a case
+// can pin what happens to a key the field DECLINED — the half that breaks.
+class ScriptedTextInputView : public View {
+  public:
+    void paint(pulp::canvas::Canvas&) override {}
+    bool accepts_text_input() const override {
+        return true;
+    }
+    bool on_key_event(const KeyEvent& e) override {
+        return e.key == claims && e.modifiers == claims_modifiers;
+    }
+    KeyCode claims = KeyCode::unknown;
+    std::uint16_t claims_modifiers = 0;
+};
 
 struct FocusGuard {
     FocusGuard() { View::focused_input_ = nullptr; }
@@ -1010,6 +1042,77 @@ TEST_CASE("PluginViewHost (mac CPU) — Escape dismisses a claimed overlay and "
         // -keyDown: re-syncs, so the keyboard goes straight back to the host.
         REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
         REQUIRE(window.firstResponder == host_field);
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+TEST_CASE("PluginViewHost (mac CPU) — keys the editor did not consume reach the DAW",
+          "[plugin-view-host][key-focus][mac][cpu][host-forward]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                                       styleMask:NSWindowStyleMaskBorderless
+                                                         backing:NSBackingStoreBuffered
+                                                           defer:NO];
+        if (!window || !window.contentView) {
+            SKIP("No Cocoa window — key-forwarding contract test skipped.");
+        }
+        // Stand in for the host view the editor is embedded in, so the
+        // forward path has somewhere real to hand a key back to.
+        PulpTestForwardRecorder* daw =
+            [[PulpTestForwardRecorder alloc] initWithFrame:NSMakeRect(0, 0, 400, 200)];
+        window.contentView = daw;
+
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        auto field_owned = std::make_unique<ScriptedTextInputView>();
+        auto* field = field_owned.get();
+        field->set_bounds({10, 10, 200, 40});
+        // The editor's own shortcut. Everything else it declines.
+        field->claims = KeyCode::z;
+        field->claims_modifiers = pulp::view::kModCmd;
+        root.add_child(std::move(field_owned));
+
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)daw);
+        NSView* pulp_view = find_pulp_plugin_view(daw);
+        REQUIRE(pulp_view != nil);
+
+        field->claim_input_focus();
+        [pulp_view syncKeyFocus];
+        REQUIRE([pulp_view acceptsFirstResponder]);
+
+        // ⌘Z is the editor's: it must NOT also reach the host.
+        [pulp_view keyDown:make_key_event(6, NSEventModifierFlagCommand, @"z")];
+        REQUIRE(daw.forwardedKeyDowns == 0);
+
+        // Space with a field focused is text, so the host must not get it
+        // either — this is the one the field genuinely wins.
+        [pulp_view keyDown:make_key_event(49, 0, @" ")];
+        REQUIRE(daw.forwardedKeyDowns == 0);
+
+        // ⌘S is nobody's here. A text field holding focus is not a licence to
+        // swallow every chord: the host owns its own shortcuts, and a key the
+        // field declined that cannot be text has nothing left to become.
+        [pulp_view keyDown:make_key_event(1, NSEventModifierFlagCommand, @"s")];
+        REQUIRE(daw.forwardedKeyDowns == 1);
+
+        // ⌃Space is a host chord too.
+        [pulp_view keyDown:make_key_event(49, NSEventModifierFlagControl, @" ")];
+        REQUIRE(daw.forwardedKeyDowns == 2);
+
+        // The one that matters most: with nothing focused, Space is transport.
+        field->release_input_focus();
+        [pulp_view keyDown:make_key_event(49, 0, @" ")];
+        REQUIRE(daw.forwardedKeyDowns == 3);
 
         host->detach();
         host.reset();

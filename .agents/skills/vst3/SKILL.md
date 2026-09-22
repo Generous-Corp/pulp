@@ -241,6 +241,29 @@ fire late on the next non-bypassed block. Incoming host param changes are
 applied at the top of `process()`, before either exit, so a trigger
 raised this block is always observed-then-settled within it.
 
+**`kIsHidden` / `kIsReadOnly` / withheld `kCanAutomate` come from the shared
+model, not from VST3.** `initialize()` reads `state::is_hidden_param`,
+`is_read_only_param` and `is_automatable_param` off each `ParamInfo`, so one
+author declaration projects identically here, in CLAP and in AU.
+
+This was a **shared-model** gap, and reading it as a VST3 one sends you to the
+wrong file. Before the attributes existed, `kIsHidden` appeared in this adapter
+only on the synthesised MIDI-CC proxy params above and `kIsReadOnly` appeared
+nowhere — but CLAP and AU were equally blind, because `ParamInfo` had no field
+to project. (A repo-wide count for `kIsReadOnly` returns 1 and looks like the
+adapter uses it once; that single hit is `plugin_slot_vst3.cpp`, the *host*
+reading the flag off a hosted plugin. Pulp consumed a concept it could not
+produce.) A per-format flag with no model field behind it is the signal to fix
+`core/state` instead.
+
+Two rules the predicates enforce, so do not re-derive them from the raw fields:
+
+- **Read-only withholds `kCanAutomate`** — automation is a host write, so
+  `kIsReadOnly | kCanAutomate` would be self-contradictory. Read-only also
+  suppresses CLAP's modulation flag for the same reason.
+- **A bypass control is never hidden or read-only** however it is declared:
+  the host owns bypass in its own chrome, and hiding it strands the user.
+
 ### Bypass routing — cached ParamID + render short-circuit
 
 `initialize()` caches the `ParamID` of the kIsBypass-tagged parameter

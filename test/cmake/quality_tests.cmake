@@ -525,6 +525,16 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_live_build_check.py")
     set_tests_properties(live-build-check-selftest PROPERTIES TIMEOUT 120)
 
+    # The advisory Vellum watch-event hint. Two things can rot independently:
+    # it can stop firing when an event IS owed (and the discovery goes back to
+    # costing a CI round trip), and it can start firing when one is not — which
+    # on a base-sensitive provenance checker means a false red on a required
+    # gate's surface. Both directions are asserted, in throwaway git repos
+    # seeded from this checkout's real acceptance artefact. No network.
+    add_test(NAME vellum-watch-preflight-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_watch_preflight.py")
+    set_tests_properties(vellum-watch-preflight-selftest PROPERTIES TIMEOUT 180)
+
     # Combined installer graph: fake the macOS signing/package tools and inspect
     # the generated Distribution XML. This pins unique plugin+format package IDs
     # and the multi-plugin nested outline without using credentials or bundles.
@@ -655,10 +665,14 @@ if(Python3_Interpreter_FOUND)
     # gate on timing alone.
     set_tests_properties(gpu-handoff-provenance-selftest PROPERTIES TIMEOUT 300)
 
-    # The pin-freshness guard runs in tools/scripts/gates.sh, so its own cover
-    # is the only thing standing between a silent parser drift and a guard that
-    # waves every stale pin through. It shipped unregistered, which meant it
-    # existed without ever executing.
+    # The pin-freshness guard decides which changes to the ledger are the
+    # generator's and which are a human's, and both of its answers can fail
+    # silently: too permissive and the re-pin collisions come back, too strict
+    # and an editorial edit or an ownership-projection correction becomes
+    # unlandable. Its own cover is the only thing that distinguishes them, and
+    # it runs from gates.sh and the pre-push hook rather than a required CI
+    # job. It shipped unregistered once, which meant it existed without ever
+    # executing.
     add_test(NAME gpu-handoff-pin-freshness-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_handoff_pin_freshness.py")
 

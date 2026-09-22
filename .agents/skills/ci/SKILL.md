@@ -514,6 +514,44 @@ line and let the push through, putting the blind spot back one layer out from
 the script that just closed it. Map every non-zero code a gate can return, and
 when you add an outcome to a gate, add its arm to the hook in the same change.
 
+### The Vellum watch-event hint is ADVISORY, and that is load-bearing
+
+`gates.sh` and `.githooks/pre-push` both run
+`tools/scripts/vellum_watch_preflight.py`, which prints — and never blocks — a
+warning when the pushed range owes a `.github/vellum-expansion-watch-events/*.json`
+file that it does not carry. Three pull requests discovered that requirement the
+expensive way in one evening, each by failing the required `Vellum freeze`
+check after a push.
+
+The trigger is **changed paths, not intent**: the checker globs the changed-file
+list against pinned capability-family selectors and reads nothing of the diff,
+so a one-line `#include` under `test/test_browser_capture*`, or an ordinary edit
+under `tools/import-design/**`, owes a hand-authored event.
+
+**Do not promote this to a blocking gate, and do not move the authoritative
+check local.** `.github/workflows/vellum-trusted-gate.yml` runs the checker from
+a *trusted root* rather than from the pull request's copy, and
+`.github/CODEOWNERS` locks the events directory, the checker and the checker's
+test. A local gate would execute the branch's own copy of a script that exists
+precisely so the branch's copy is not trusted. Two required contexts
+(`Vellum freeze`, `Vellum trusted freeze`) stay the authority; this only moves
+discovery earlier.
+
+Two things the hint must keep doing, both asserted by
+`tools/scripts/test_vellum_watch_preflight.py`:
+
+- **It compares against the MERGE-BASE, never `origin/main`'s tip.** Using the
+  tip manufactures `watch events are append-only` on any branch that is merely
+  stale — a false red on a required gate's surface, which is worse than the
+  friction being fixed.
+- **Neither call site may set `fail`.** The test resolves the `$VELLUM_HINT`
+  variable rather than grepping for the filename, because the literal path
+  appears only in the assignment: a scan for the filename finds no invocation
+  line at all and passes whatever the call sites do.
+
+Its exit codes (0 nothing owed · 10 event owed · 20 no verdict) are
+informational; both callers discard them with `|| true`.
+
 ### `gates.sh` and the pre-push hook are two lists, not one
 
 `gates.sh` describes itself as running the gates `.githooks/pre-push` runs, and
@@ -1271,12 +1309,22 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    building**: it stays `in_progress`, goes on holding the group, and every newer
    head sits at `pending` with zero jobs.
 
+   Two readings that mislead here. A superseded run reporting `cancelled` with
+   `jobs.total_count` of **0** proves nothing about `cancel-in-progress`: GitHub
+   keeps at most one *pending* run per group and evicts the previous one
+   unconditionally, so those cancellations happen even when nothing else works.
+   And a self-hosted runner is rarely the culprit: a tartci macOS job that
+   receives a real cancellation cancels its step and completes in seconds.
+
    **Check the predecessor's `conclusion`, not its `status` or its timing** —
    that is the discriminating field:
    ```bash
    ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>" --jq '.status, .conclusion'
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>/jobs?per_page=100" \
+     --jq '[.jobs[] | select(.status != "completed")] | map(.name)'
    ```
-   A wedged predecessor reads `in_progress` / `cancelled`. Reading only `status`
+   A wedged predecessor reads `in_progress` / `cancelled`, and the second call
+   names the jobs still going after the cancel was delivered. Reading only `status`
    invites the wrong mechanism: an earlier revision of this entry claimed GitHub
    never cancels a queued predecessor, which is false — it is cancelled, it just
    does not stop.

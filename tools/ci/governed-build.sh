@@ -292,6 +292,11 @@ acquire_lease() {
 
 jobs=""
 qos=""
+# A caller may request a lower cap (for example, `pulp build -j2`).  Apply it
+# only after lease admission: it can reduce the granted share, never enlarge
+# it.  The value is deliberately read before this script exports its own
+# resolved PULP_BUILD_JOBS below.
+requested_jobs="${PULP_BUILD_JOBS:-}"
 
 if [ "${PULP_TARTCI_LEASES:-}" != "0" ]; then
   TARTCI_BIN="$(find_tartci)"
@@ -305,6 +310,14 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
   jobs="$(printf '%s\n' "$profile" | awk -F= '/^PULP_BUILD_JOBS=/{print $2; exit}')"
   qos="$(printf '%s\n' "$profile" | awk -F= '/^TARTCI_AGENT_QOS=/{print $2; exit}')"
   [ -n "$jobs" ] && [ "$jobs" -ge 1 ] 2>/dev/null || jobs="$(tier0_jobs)"
+  # Apply a caller's lower cap before admission so it does not reserve a
+  # profile-sized lease that the build will never use. A cap can reduce the
+  # requested share, never widen it; the store remains the authority.
+  if [ -n "$requested_jobs" ] && [ "$requested_jobs" -ge 1 ] 2>/dev/null \
+      && [ "$requested_jobs" -lt "$jobs" ]; then
+    jobs="$requested_jobs"
+    log "applying requested lower parallelism cap before lease admission -j$jobs"
+  fi
   LEASE_ID="pulp-shipyard-local-$$-$(date +%s 2>/dev/null || echo 0)"
   if acquire_lease "$jobs"; then
     log "lease acquired id=$LEASE_ID cores=$jobs (host profile)"
@@ -342,8 +355,21 @@ else
   log "no tartci host profile — bounded local build at -j$jobs"
 fi
 
+# The no-profile and lease-denied fallbacks never pass through the admission
+# branch above, so enforce the caller's lower cap here as well. This is a cap,
+# never a widening: an invalid value is ignored and the safe bound remains.
+if [ -n "$requested_jobs" ] && [ "$requested_jobs" -ge 1 ] 2>/dev/null \
+    && [ "$requested_jobs" -lt "$jobs" ]; then
+  jobs="$requested_jobs"
+  log "applying requested lower parallelism cap -j$jobs"
+fi
+
 export CMAKE_BUILD_PARALLEL_LEVEL="$jobs"
 export CTEST_PARALLEL_LEVEL="$jobs"
+# Cargo does not consume CMake's parallel-level variables. Export the same
+# governed share explicitly so Rust custom targets cannot fan out across every
+# host core inside an otherwise bounded CMake build.
+export CARGO_BUILD_JOBS="$jobs"
 
 # Name an unresolvable build command before running it.
 #
