@@ -152,6 +152,62 @@ Debugging rule: if a plugin's text field drops a key, first determine **whether
 the key even reaches the NSView** (log in `keyDown:`). If it never arrives, the
 fix belongs at the format layer (`onKeyDown`), not the view host.
 
+### One policy answers "did the editor consume this key?" for every format
+
+`pulp::view::route_plugin_key` (`core/view/include/pulp/view/plugin_key_routing.hpp`)
+is the shared answer, and every format seam asks it rather than deciding for
+itself: the macOS `-keyDown:` path in `plugin_view_host_mac.mm` (AU v2/v3, CLAP,
+and VST3's NSView) and `PulpPlugView::onKeyDown` (VST3's own pipeline) both route
+through it. It takes no platform type, because the three seams share no code —
+only the policy.
+
+It answers in this order: an open overlay's Escape, then the focused view under
+**this** root, then `root.on_global_key`. Anything none of them claimed is
+`forward_to_host`. Forwarding is the DEFAULT and consumption is what has to be
+earned; there is no allowlist of "keys the host wants" anywhere in the policy,
+because such a list is always incomplete and fails silently when it is.
+
+Three things are easy to get wrong here, and each one is invisible until a
+musician hits it:
+
+- **A focused text field does not consume everything.** A Command/Control chord
+  or a function key it declined is not text, so there is nothing left for the
+  FIELD to do with it: the key falls through to `on_global_key` and, unclaimed
+  there, to the host. The old macOS path returned
+  "handled" unconditionally once a field held focus, which killed host chords
+  and F-key transport for exactly as long as a type-in happened to be open.
+  `PluginKeyOffer::is_function_key` is how the platform tells the policy that a
+  key carries no character (AppKit's 0xF700-0xF8FF private-use range).
+- **A merely focusable widget must not become a keyboard sink.** A view that
+  accepts navigation but not text is offered only `is_plugin_navigation_key`
+  (arrows, Home/End, Enter, Escape, and never with a chord modifier) and its own
+  `on_key_event` decides from there. That floor is not a claim about what the
+  host wants — it is what stops a focused knob from swallowing Space.
+- **AppKit delivers one press twice.** `-performKeyEquivalent:` runs before
+  `-keyDown:`, and on macOS that override owns `root.on_global_key`. So
+  `PluginKeyOffer::offer_global_hook` is OFF by default and the NSView seam
+  leaves it off: consulting the hook from both passes fires an editor-wide
+  shortcut — and the script `keydown` listener behind it — twice for one press.
+  A seam with a single delivery point (VST3 `onKeyDown`) sets it, and is then
+  the only place the hook is consulted for that press.
+
+One documented place the macOS seam does NOT forward what the policy calls
+unclaimed: a view holding the focus slot that claims neither text nor
+navigation. `acceptsFirstResponder` is already false for it, so the DAW owns
+the keyboard and there is nothing to hand back — but forwarding would still
+move first responder to the host view, and `resignFirstResponder` ends that
+widget's focus out from under it. A custom control that uses Escape for its own
+purpose would lose focus on the first press. That is a first-responder fact, so
+it lives in the platform file rather than in the policy.
+
+`plugin_key_focus(root)` is the scoped focus read every seam must use:
+`View::focused_input_` is process-global, so with two editors open it may name
+the *other* editor's field, and answering from it reports the key handled — so
+the host never sees it either and the spacebar dies with no visible cause.
+
+Pinned headlessly by `test/test_plugin_key_routing.cpp`, where every case that
+asserts consumption has a sibling asserting the key it must hand back.
+
 ## `release_view()` — for containers that own the view
 
 `TabPanel::add_tab` and similar widgets take `std::unique_ptr<view::View>`.
@@ -445,6 +501,29 @@ like every other Pulp ObjC class. ObjC class names are process-global, and an
 `NSApplication` delegate is the most dangerous kind to have shadowed across two
 co-loaded Pulp binaries.
 
+## Editor-only state changes must tell the host, or the user loses them
+
+A parameter edit from the editor reaches the host through the parameter system,
+so the host knows the project changed and will offer to save. Anything the
+editor changes *outside* that system leaves no such trace — a loaded sample or
+impulse response, an imported wavetable, a UI-only setting that rides in the
+plugin's own `getState` payload. The editor looks like it worked, the state
+round-trips correctly through save/load, and the user still loses the work by
+closing a project the host believed was clean.
+
+`Processor::flag_state_dirty()` raises that edge. It is an atomic with the same
+shape as `flag_latency_changed()` / `flag_note_names_changed()` — safe to call
+from `process()`, though an editor or a file load on the main thread is the
+usual caller. The adapter republishes it by whatever route the format
+sanctions; the VST3 adapter is wired (`IComponentHandler2::setDirty(true)`,
+delivered on its main-thread drain), CLAP's equivalent is
+`clap_host_state::mark_dirty`, and the other adapters do not consume the flag
+today — raising it there is harmless but inert.
+
+The habit worth forming: whenever an editor writes something that only exists
+in the plugin's own state payload, raise the flag in the same code path. It is
+cheap, and the failure it prevents is silent and unrecoverable.
+
 ## Secondary views
 
 ```cpp
@@ -680,6 +759,52 @@ returns `nullptr` by default, so a processor that declares nothing costs nothing
 `BindingOutcome::unknown_value_channel`; it does NOT fall back to a parameter of
 the same name. Resolving across the two would bind a meter to the wrong signal
 and look like it worked.
+
+## Drag input is held per presented frame — do not dispatch raw AppKit events
+
+Both macOS plug-in editor hosts (`MacPluginViewHost` CPU, `MacGpuPluginViewHost`
+GPU, in `core/view/platform/mac/plugin_view_host_mac.mm`) run a CVDisplayLink,
+so `-mouseDragged:` HOLDS its sample in a `pulp::view::HostDragCoalescer` and
+the link callback releases at most one per presented frame. A pointer device
+emits samples at its own rate; the editor presents at the display's, or slower
+when a frame is expensive, and every extra sample between two frames costs a
+full delivery — hit test, handler invocation (entering the JS engine for a
+scripted UI), and an invalidation whose only effect is to re-dirty an
+already-dirty surface. None of it reaches the screen.
+
+Four rules ride with this. They live in `host_drag_coalescer.hpp` so a host
+supplies only delivery, and a new host gets them by construction:
+
+- **One dirty signal per HELD RUN, not per event.** `pulp_plugin_mouse_drag`
+  returns whether to arm a repaint; it is true exactly on the idle→pending
+  edge. That one request both marks the surface dirty and keeps the display
+  link's dispatch gate open, which is all a flush needs. Calling
+  `request_repaint()` / `-setNeedsDisplay:` per sample is precisely the
+  O(events) cost coalescing removes.
+- **Flush before any handoff.** A gesture-recognizer claim and `-mouseUp:` both
+  END the captured target's bracket, so motion held from before them belongs
+  inside it and must be delivered while the capture still resolves. Flushing
+  after the reset drops it; not flushing strands it until a later frame hands it
+  to a target whose gesture already ended.
+- **A relative movement delta must be SUMMED across merged samples.** The
+  surviving sample's absolute position is already the whole displacement, but
+  `pointer.movement_x/y` is per-event. Keeping only the survivor's delta
+  shortens every relative drag in proportion to how many samples merged — it
+  reads as "the knob feels sluggish", never as dropped input.
+- **A lost opt-in is invisible.** `HostDragCoalescer` fails safe: with no frame
+  driver running it dispatches immediately, so a host that starts a driver
+  without calling `-setCoalescePointerInput:YES` simply runs at the old rate —
+  no crash, no log, no red test. Both link callbacks therefore assert
+  `-coalescingPointerInput` out loud once per process. If you add a third frame
+  driver, opt it in there, not in whichever start function you happened to edit.
+
+What you can measure: `HostDragCoalescer::stats()` carries `raw_samples`,
+`delivered_samples`, `merged_samples` and `flushes`, and the same quantities go
+out as the `state` trace counters `raw_drag_samples`, `delivered_drag_samples`,
+`pointer_samples_merged` and `pointer_coalescer_flushes` — the same names the
+standalone window host emits, so one query covers both. The plug-in hosts still
+emit no `frame` / `paint` / `gpu_acquire` spans, so a trace cannot profile their
+frame loop; these counters are pointer-path evidence only.
 
 ## Common pitfalls
 

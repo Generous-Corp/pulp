@@ -1301,11 +1301,17 @@ View* View::hit_test(Point local_point) {
     // to siblings beneath it.
     if (pointer_events_ != PointerEvents::box_only) {
         // Test one child; returns the hit (or nullptr to keep looking).
+        // An `overflow: scroll` container offsets its children's paint; the
+        // hit-test must undo the SAME offset, read from the SAME function
+        // paint_children_in_order() uses, or a scrolled row responds where it
+        // used to be rather than where it is drawn.
+        const bool offsets_children = applies_child_paint_offset();
         auto try_child = [&](View* child) -> View* {
             if (!child->visible_) return nullptr;
 
-            Point child_point = {local_point.x - child->bounds_.x,
-                                local_point.y - child->bounds_.y};
+            const Point offset = offsets_children ? child_paint_offset(*child) : Point{0.0f, 0.0f};
+            Point child_point = {local_point.x - offset.x - child->bounds_.x,
+                                 local_point.y - offset.y - child->bounds_.y};
 
             // Paint scales a child around its transform origin. Hit testing
             // must apply the inverse before descending, or a fitted subtree
@@ -1554,6 +1560,115 @@ void accumulate_overflow_extent(const View* v,
         accumulate_overflow_extent(v->child_at(i), abs_x, abs_y,
                                    min_x, min_y, max_x, max_y);
     }
+}
+
+// ── Scrollable overflow ──────────────────────────────────────────────────────
+//
+// See view.hpp's "Scrollable overflow" block. The paint/hit-test pair routes
+// through View::child_paint_offset(), so everything here is range arithmetic:
+// measure the content, clamp the offset into it.
+
+void accumulate_scroll_content_extent(const View& parent, float parent_x, float parent_y,
+                                      float& right, float& bottom, bool& found) {
+    for (size_t i = 0; i < parent.child_count(); ++i) {
+        const auto* child = parent.child_at(i);
+        if (!child || !child->visible())
+            continue;
+
+        const auto bounds = child->bounds();
+        const float child_x = parent_x + bounds.x;
+        const float child_y = parent_y + bounds.y;
+        right = std::max(right, child_x + std::max(0.0f, bounds.width));
+        bottom = std::max(bottom, child_y + std::max(0.0f, bounds.height));
+        found = true;
+        // A nested scroll container owns its private overflow extent. The
+        // outer container measures the nested viewport box, not descendants
+        // that the nested container clips and scrolls independently.
+        if (child->is_scroll_container())
+            continue;
+        accumulate_scroll_content_extent(*child, child_x, child_y, right, bottom, found);
+    }
+}
+
+namespace {
+/// Content is only "overflowing" past a 1px slack, so a viewport and a content
+/// box that differ by a rounding crumb do not advertise a scrollable range
+/// nobody can use. Matches ScrollView::kOverflowEpsilon.
+constexpr float kScrollOverflowEpsilon = 1.0f;
+} // namespace
+
+Size View::scroll_content_size() const {
+    const auto viewport = local_bounds();
+    // Only a scroll container pays for the walk; every other view answers
+    // from its own box with a single enum compare.
+    if (!is_scroll_container())
+        return Size{viewport.width, viewport.height};
+
+    float right = 0.0f;
+    float bottom = 0.0f;
+    bool found = false;
+    accumulate_scroll_content_extent(*this, 0.0f, 0.0f, right, bottom, found);
+
+    if (found) {
+        // The container's own bottom/right padding is part of the scrollable
+        // content in CSS — without it the last row butts against the edge.
+        const auto& style = flex();
+        right += style.padding_right >= 0.0f ? style.padding_right : style.padding;
+        bottom += style.padding_bottom >= 0.0f ? style.padding_bottom : style.padding;
+    }
+
+    Size derived{std::max(viewport.width, right), std::max(viewport.height, bottom)};
+    if (derived.width - viewport.width <= kScrollOverflowEpsilon)
+        derived.width = viewport.width;
+    if (derived.height - viewport.height <= kScrollOverflowEpsilon)
+        derived.height = viewport.height;
+    return derived;
+}
+
+float View::max_scroll_offset_x() const {
+    const float overflow = scroll_content_size().width - local_bounds().width;
+    return overflow > kScrollOverflowEpsilon ? overflow : 0.0f;
+}
+
+float View::max_scroll_offset_y() const {
+    const float overflow = scroll_content_size().height - local_bounds().height;
+    return overflow > kScrollOverflowEpsilon ? overflow : 0.0f;
+}
+
+bool View::set_scroll_offset(float x, float y) {
+    // Clamping is the whole contract: a container that fits has a max of 0, so
+    // it pins to 0 and cannot scroll, and a wheel past either end stops at the
+    // edge instead of running the content off into empty space.
+    const float clamped_x = std::clamp(x, 0.0f, max_scroll_offset_x());
+    const float clamped_y = std::clamp(y, 0.0f, max_scroll_offset_y());
+    if (clamped_x == scroll_offset_x_ && clamped_y == scroll_offset_y_)
+        return false;
+    scroll_offset_x_ = clamped_x;
+    scroll_offset_y_ = clamped_y;
+    // The subtree now paints somewhere else; a bounded invalidation keyed off
+    // the old position would repaint the wrong rect.
+    invalidate_subtree_caches_up();
+    request_repaint();
+    return true;
+}
+
+bool View::wants_wheel_scroll() const {
+    if (!is_scroll_container())
+        return false;
+    return max_scroll_offset_x() > 0.0f || max_scroll_offset_y() > 0.0f;
+}
+
+bool View::handle_scroll_wheel(const MouseEvent& event) {
+    // A scroll container with nothing to scroll is not a wheel boundary: it
+    // must let the tick reach its own pointer callback (and bubble on) exactly
+    // like any other box. Only a container with real range consumes.
+    if (!wants_wheel_scroll())
+        return false;
+    // Having range, it consumes the tick even when the offset is already
+    // clamped at an edge — letting an edge tick fall through would scroll an
+    // ancestor instead, which is not what a browser does here.
+    scroll_offset_by(event.scroll_delta_x, event.scroll_delta_y);
+    return true;
 }
 
 bool View::overlay_contains(Point window_pt) const {

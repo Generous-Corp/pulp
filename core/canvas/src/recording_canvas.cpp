@@ -1024,6 +1024,10 @@ std::string Canvas::compile_sksl(const std::string& sksl) {
     return "Skia not available — shader compilation requires GPU build";
 }
 
+std::string Canvas::compile_sdf_chart_sksl(SDFShape, const std::string& sksl) {
+    return sksl.empty() ? "Empty shader code" : "Skia not available: SDF chart shaders require Skia";
+}
+
 // Without Skia there is no compiler to ask, so scan the declarations directly.
 // This answers the same question the Skia path answers via findUniform() — does
 // the source declare a uniform of this name — so the two backends agree.

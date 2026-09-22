@@ -154,12 +154,15 @@ COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 TERMS_LINT="$ROOT/tools/scripts/processing_model_terms_lint.py"
 SINGLE_BACKEND_GUARD="$ROOT/tools/scripts/single_backend_guard.py"
 CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
+GPU_PIN_FRESHNESS="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 GPU_LEDGER_SENTINEL="$ROOT/tools/scripts/gpu_ledger_sentinel_check.py"
 GPU_PROVENANCE_VERIFY="$ROOT/tools/scripts/hydrate_gpu_provenance_commits.py"
 YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
+VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
+CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
 BASE="${PULP_PREPUSH_BASE:-origin/main}"
 
@@ -341,6 +344,21 @@ if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; 
     esac
 fi
 
+# Vellum watch-event hint — ADVISORY: warns, never blocks, and is deliberately
+# not demotable because it has nothing to demote. The required `Vellum freeze`
+# check wants a hand-authored event under .github/vellum-expansion-watch-events/
+# whenever the pushed range touches a pinned capability-family path glob; the
+# trigger is the path list, not the diff's meaning, so an ordinary edit under a
+# watched tree qualifies with no warning anywhere else.
+#
+# The authoritative run stays in CI, executed from a trusted root rather than
+# from this branch's copy of the checker — that is the whole point of the gate,
+# and giving the branch's copy a local veto would undo it. This prints what CI
+# will say and the command that reproduces it, then gets out of the way.
+if [ -f "$VELLUM_HINT" ]; then
+    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" || true
+fi
+
 # Docs-noise lint (advisory-demotable in v1). Forward-looking: scans added
 # lines in changed docs/reference files, shared skills, and source-tree comments
 # and test tags (core/examples/tools/test/apple/inspect/ship), with ci/SKILL.md
@@ -513,6 +531,29 @@ if [ -f "$CONFLICT_MARKER_GUARD" ]; then
     esac
 fi
 
+# GPU-handoff pin freshness. The version bot's bump commit now regenerates
+# docs/status/gpu-vellum-handoff.yaml and its receipt
+# (version_at_land._refresh_derived), so a PR that re-pins them by hand is
+# redoing work main is about to redo — and re-creating the collision that
+# motivated the move, because the pulp-gpu-ledger merge driver cannot run on
+# github.com. This rejects an identity-only re-pin, and separately rejects a
+# pinned path deleted or renamed while the inventory still lists it, which is
+# the one shape that still turns the required gate red. Diff-scoped,
+# sub-second; PULP_DISABLE_PREPUSH_GATES=1 demotes it like the rest.
+if [ -f "$GPU_PIN_FRESHNESS" ]; then
+    run_gate_captured "$PYTHON" "$GPU_PIN_FRESHNESS" --base "$BASE" --root "$ROOT" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        # 2 is "git could not answer, so nothing was checked" — not a pass.
+        # Leaving it unmapped would land it in the message below, which prints
+        # a line and lets the push through, restoring the blind spot one layer
+        # out from the script that just closed it.
+        2) fail=1 ;;
+        *) echo "[pre-push] gpu_handoff_pin_freshness: internal error" >&2 ;;
+    esac
+fi
+
 # GPU-ledger sentinel. The pulp-gpu-ledger merge driver resolves a generated
 # ledger collision to an identity that is invalid on purpose, because a merged
 # value that still looks like an identity passes the always-on provenance tier
@@ -605,6 +646,35 @@ if [ -f "$LABEL_EXCLUSION" ]; then
         1) echo "[pre-push] ctest label-exclusion guard: a Catch2 suite reaches neither the required gate nor coverage — run \`python3 tools/scripts/ctest_label_exclusion_guard.py\` for the target list." >&2; fail=1 ;;
         *) echo "[pre-push] ctest_label_exclusion_guard: internal error" >&2 ;;
     esac
+fi
+
+# Agent-capability contract — the two counters a branch RESERVES while the base
+# keeps moving. This is the only gate here whose failure cannot be repaired
+# after the fact: it is detectable solely in the merge group, and a PR that has
+# entered the merge queue refuses a push with GH006, so the fix is locked out by
+# the same queue that will reject it. The worst shape is silent — two branches
+# holding the same SURFACE_INVENTORY_VERSION over different surfaces write
+# byte-identical counter lines, so git merges them with no conflict and each
+# passes --check alone. Only a run against the CURRENT base sees it.
+#
+# The base is passed explicitly because a bare run resolves `merge_base` while
+# CI forces `exact_base`, and the two disagree by enough to matter.
+# ~15s, and only when the diff touches an installed public header or the
+# capability registry/manifest — a branch that adds no surface cannot take a
+# counter.
+if [ -f "$CAPABILITY_CONTRACT" ]; then
+    capability_base="$(git rev-parse --verify --quiet "$BASE^{commit}" || true)"
+    if [ -z "$capability_base" ]; then
+        echo "[pre-push] agent-capability contract: SKIPPED — base '$BASE' does not resolve. A skip is not a pass." >&2
+    elif git diff --name-only "$capability_base"...HEAD 2>/dev/null | grep -qE '^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/agent-capabilities/|docs/status/agent-capabilit)'; then
+        run_gate_captured env PULP_AGENT_CAPABILITY_BASE_REF="$capability_base" \
+            "$PYTHON" "$CAPABILITY_CONTRACT" --check
+        case $? in
+            0) ;;
+            1) echo "[pre-push] agent-capability contract: the surface or its counters are stale against $BASE. Re-derive rather than picking a number — \`PULP_AGENT_CAPABILITY_BASE_REF=$capability_base python3 tools/scripts/agent_capability_rederive.py\`. Landing this unfixed costs a merge-group eviction AND locks the branch against the repair." >&2; fail=1 ;;
+            *) echo "[pre-push] agent_capability_manifest --check: internal error" >&2 ;;
+        esac
+    fi
 fi
 
 # Local diff-coverage check — mirror the CI `Diff coverage required` gate

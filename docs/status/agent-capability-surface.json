@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 81,
+  "inventory_version": 90,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,15 +42,15 @@
     }
   ],
   "counts": {
-    "public_headers": 495,
-    "reviewed_headers": 206,
-    "legacy_unreviewed_headers": 289,
+    "public_headers": 496,
+    "reviewed_headers": 209,
+    "legacy_unreviewed_headers": 287,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 116,
+      "capability_entrypoint": 117,
       "capability_support": 44,
-      "infrastructure": 44,
-      "legacy_unreviewed": 289,
+      "infrastructure": 46,
+      "legacy_unreviewed": 287,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -62,8 +62,8 @@
       },
       "midi": {
         "public_headers": 50,
-        "reviewed_headers": 21,
-        "legacy_unreviewed_headers": 29,
+        "reviewed_headers": 23,
+        "legacy_unreviewed_headers": 27,
         "unsupported_headers": 0
       },
       "music": {
@@ -91,8 +91,8 @@
         "unsupported_headers": 2
       },
       "timebase": {
-        "public_headers": 12,
-        "reviewed_headers": 9,
+        "public_headers": 13,
+        "reviewed_headers": 10,
         "legacy_unreviewed_headers": 3,
         "unsupported_headers": 0
       }
@@ -1200,7 +1200,7 @@
     {
       "domain": "signal",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:c348a20011297911cb028596abb74c56a032b805fdf51653f7151b3c247668e7",
+      "fingerprint": "sha256:496fe972e35ef658fee935911104f23fd63d07c3d09fe342f22b6c494f2ad44d",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1368,11 +1368,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/message.hpp",
-      "fingerprint": "sha256:ebc97204af0cf9bedd352776d8f22dfc958b4df193ebe20377013b91b4c5590d",
+      "fingerprint": "sha256:3b3e65207b2467e835cade6fd5ed82d9c22c5ac5515715528cb85dcdf62ee716",
       "include": "pulp/midi/message.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "The shared MIDI message value type every format adapter builds and reads. It underpins the whole midi.* capability family rather than any single member, so it carries no installed capability claim of its own: a capability is a behavior, and this is the vocabulary those behaviors are written in."
     },
     {
       "domain": "midi",
@@ -1651,11 +1651,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/ump_conversion.hpp",
-      "fingerprint": "sha256:43f1ec9ddadc0ce7921d04348a74b4c58b65d04cf7566145dea199988e10b179",
+      "fingerprint": "sha256:195165e672d94148898e03111e1a0fa9fa95b5b91997920bb64889f9067d3e50",
       "include": "pulp/midi/ump_conversion.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Bidirectional MIDI 1.0 / MIDI 2.0 UMP translation and the spec data-value scaling it rests on; it is shared plumbing beneath the bound MIDI kernels rather than a capability of its own."
     },
     {
       "domain": "midi",
@@ -4854,6 +4854,17 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "timebase.groove-kernel"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "timebase",
+      "source": "core/timebase/include/pulp/timebase/inline_groove_projector.hpp",
+      "fingerprint": "sha256:1008649e2c45404205bb6f525a32b6c91dd7c881e97bb768c4037fbf0253c4cb",
+      "include": "pulp/timebase/inline_groove_projector.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.inline-groove-projector"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },

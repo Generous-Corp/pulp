@@ -243,6 +243,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME thread-safe-assertions COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/thread_assert_check.py")
 
+    # The selftest is the load-bearing half. The guard's lexical scan once
+    # exited 0 on a vector<std::thread> + emplace_back body holding a REQUIRE
+    # while correctly flagging the direct std::thread form, so a clean tree and
+    # an unchecked shape produced identical output. These fixtures pair every
+    # unsafe spelling with its safe twin, so the guard is proven to distinguish
+    # them rather than proven to be quiet.
+    add_test(NAME thread-safe-assertions-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_thread_assert_check.py")
+
     # Unbounded-wait lint: a test wait that cannot time out turns a real
     # regression into a CI job timeout with no output. The selftest is the
     # load-bearing part — it scans the SAME wait unbounded and bounded, so the
@@ -337,6 +346,21 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/ctest_label_exclusion_guard.py")
     add_test(NAME ctest-label-exclusion-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_label_exclusion_guard.py")
+
+    # Capability-contract gate wiring: `agent_capability_manifest.py --check`
+    # answers a different question depending on which base it resolves -- left
+    # alone it takes the merge base, CI forces the base tip, and the two have
+    # disagreed by enough to send a pull request into the merge queue holding a
+    # counter that was already taken. This is also the one push gate whose
+    # failure cannot be repaired afterwards: it is visible only once the merge
+    # group builds, and a queued pull request refuses a push with GH006, so the
+    # fix is locked out by the queue that is about to reject the branch. The
+    # test asserts both push surfaces run the check against a resolved commit
+    # and share one relevance predicate, because a surface silently narrowing
+    # its predicate stops covering installed headers while still printing a
+    # gate line.
+    add_test(NAME capability-contract-gate-wiring COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_capability_contract_gate.py")
 
     # GPU span categories: a span named `gpu_*` must be emitted under the `gpu`
     # category. The trace-SQL GPU queries select `category GLOB 'gpu*'`, so a
@@ -516,6 +540,16 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_live_build_check.py")
     set_tests_properties(live-build-check-selftest PROPERTIES TIMEOUT 120)
 
+    # The advisory Vellum watch-event hint. Two things can rot independently:
+    # it can stop firing when an event IS owed (and the discovery goes back to
+    # costing a CI round trip), and it can start firing when one is not — which
+    # on a base-sensitive provenance checker means a false red on a required
+    # gate's surface. Both directions are asserted, in throwaway git repos
+    # seeded from this checkout's real acceptance artefact. No network.
+    add_test(NAME vellum-watch-preflight-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_vellum_watch_preflight.py")
+    set_tests_properties(vellum-watch-preflight-selftest PROPERTIES TIMEOUT 180)
+
     # Combined installer graph: fake the macOS signing/package tools and inspect
     # the generated Distribution XML. This pins unique plugin+format package IDs
     # and the multi-plugin nested outline without using credentials or bundles.
@@ -646,10 +680,14 @@ if(Python3_Interpreter_FOUND)
     # gate on timing alone.
     set_tests_properties(gpu-handoff-provenance-selftest PROPERTIES TIMEOUT 300)
 
-    # The pin-freshness guard runs in tools/scripts/gates.sh, so its own cover
-    # is the only thing standing between a silent parser drift and a guard that
-    # waves every stale pin through. It shipped unregistered, which meant it
-    # existed without ever executing.
+    # The pin-freshness guard decides which changes to the ledger are the
+    # generator's and which are a human's, and both of its answers can fail
+    # silently: too permissive and the re-pin collisions come back, too strict
+    # and an editorial edit or an ownership-projection correction becomes
+    # unlandable. Its own cover is the only thing that distinguishes them, and
+    # it runs from gates.sh and the pre-push hook rather than a required CI
+    # job. It shipped unregistered once, which meant it existed without ever
+    # executing.
     add_test(NAME gpu-handoff-pin-freshness-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_handoff_pin_freshness.py")
 

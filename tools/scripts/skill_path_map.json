@@ -432,6 +432,14 @@
         "docs/status/cli-commands.yaml"
       ]
     },
+    "lv2": {
+      "paths": [
+        "core/format/src/lv2_adapter.cpp",
+        "core/format/include/pulp/format/lv2_adapter.hpp",
+        "core/format/include/pulp/format/lv2_entry.hpp",
+        ".agents/skills/lv2/**"
+      ]
+    },
     "moonbase": {
       "paths": [
         "examples/moonbase-activation/**"
@@ -548,6 +556,8 @@
         ".github/workflows/vellum-routing-contract.yml",
         "tools/scripts/generate_vellum_ownership_projection.py",
         "tools/scripts/vellum_freeze_check.py",
+        "tools/scripts/vellum_watch_preflight.py",
+        "tools/scripts/test_vellum_watch_preflight.py",
         "docs/status/gpu-vellum-handoff.yaml",
         "tools/scripts/gpu_handoff_provenance.py",
         "tools/scripts/test_gpu_handoff_provenance.py",
@@ -635,7 +645,8 @@
         "tools/scripts/release-cli-local.sh",
         ".github/workflows/sign-and-release.yml",
         ".github/workflows/release-cli.yml",
-        "tools/scripts/build_combined_installer.sh"
+        "tools/scripts/build_combined_installer.sh",
+        "tools/scripts/lib/heartbeat_wait.sh"
       ]
     },
     "render-toolchain-update": {
