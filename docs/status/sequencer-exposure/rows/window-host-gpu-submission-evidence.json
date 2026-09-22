@@ -1,0 +1,72 @@
+{
+  "id": "window-host-gpu-submission-evidence",
+  "title": "A window host can report whether its last frame reached its intended output",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "c59346ae-73b6-487a-b566-730daf0197aa",
+  "owned_paths": [
+    "core/view/include/pulp/view/window_host.hpp",
+    "docs/status/sequencer-exposure/rows/window-host-gpu-submission-evidence.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/view/include/pulp/view/window_host.hpp",
+      "needles": [
+        "virtual bool supports_gpu_submission_evidence() const",
+        "virtual bool last_frame_gpu_submission_observed() const"
+      ]
+    },
+    {
+      "path": "core/view/platform/mac/window_host_mac.mm",
+      "needles": [
+        "last_submission_observed_",
+        "bool last_frame_gpu_submission_observed() const override"
+      ]
+    },
+    {
+      "path": "test/test_control_gpu_health_provider.cpp",
+      "needles": [
+        "GPU health provider follows the window host's submission evidence",
+        "class SubmissionEvidenceHost final"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "Both queries are public virtuals on the installed WindowHost header, appended at the public vtable tail so a downstream subclass keeps its slot layout. A host that does not override them keeps the false default, so an SDK consumer that never implements them reports no evidence rather than a wrong claim. The delivery stays pending its installed-consumer proof.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/view/include/pulp/view/window_host.hpp",
+          "needles": [
+            "virtual bool supports_gpu_submission_evidence() const",
+            "virtual bool last_frame_gpu_submission_observed() const"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler, or accepted document shape changes. The queries are answered inside a live window host, which the offline timeline CLI never constructs."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema entry, or handler changes. Nothing in tools/mcp reads a window host's frame outcome."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, grant, or profile policy changes. The Development Inspector's existing gpu_submission_observed field gains a producer; the operation that reports it, its grants, and its profile policy are unchanged."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged. A host reporting whether its last frame reached an output is runtime control plumbing, not a generator-facing design capability."
+    }
+  }
+}

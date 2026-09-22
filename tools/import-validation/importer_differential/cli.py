@@ -10,8 +10,15 @@ import statistics
 import sys
 from pathlib import Path
 
+# The development wrapper is invoked by path, so the repository root is not
+# otherwise guaranteed to be importable.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from .core import (
     LabError,
+    TIMING_BUDGET_KEYS,
     aggregate_reports,
     compare_one,
     sha256_file,
@@ -19,6 +26,7 @@ from .core import (
     write_json,
 )
 from .reports import format_corpus_summary, format_summary
+from tools.harness.differential.contract import normalize_report
 
 
 def positive_int(value: str) -> int:
@@ -30,11 +38,12 @@ def positive_int(value: str) -> int:
 
 def command_compare(args: argparse.Namespace) -> int:
     try:
+        budgets = read_timing_budgets(getattr(args, "timing_budget", None))
         report = compare_one(
             args.importer.resolve(), args.observer.resolve(),
             args.file.resolve(), args.output.resolve(), args.timeout_seconds,
             args.from_source, args.browser.resolve() if args.browser else None,
-            cache_state=args.cache_state)
+            cache_state=args.cache_state, timing_budgets_ms=budgets)
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -42,14 +51,14 @@ def command_compare(args: argparse.Namespace) -> int:
         print(f"importer_differential_lab: {error}", file=sys.stderr)
         return 2
     print(format_summary(report))
-    return 0
+    return 1 if report["timing_budget"]["status"] == "fail" else 0
 
 
 def command_corpus(args: argparse.Namespace) -> int:
     if args.manifest:
         manifest_path = args.manifest.resolve()
         manifest = json.loads(manifest_path.read_text())
-        if manifest.get("schema") != "pulp-importer-differential-manifest-v1":
+        if manifest.get("schema") not in {"pulp-importer-differential-manifest-v1", "pulp-canvas-svg-differential-manifest-v1"}:
             print("importer_differential_lab: unsupported manifest schema",
                   file=sys.stderr)
             return 2
@@ -67,6 +76,11 @@ def command_corpus(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
     output = args.output.resolve()
+    try:
+        budgets = read_timing_budgets(getattr(args, "timing_budget", None))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"importer_differential_lab: {exc}", file=sys.stderr)
+        return 2
     output.mkdir(parents=True, exist_ok=True)
     reports: list[dict] = []
     failures: list[dict[str, str]] = []
@@ -81,7 +95,8 @@ def command_corpus(args: argparse.Namespace) -> int:
                 fixture_output, args.timeout_seconds,
                 metadata.get("from", args.from_source) if metadata else args.from_source,
                 args.browser.resolve() if args.browser else None, metadata,
-                metadata.get("cache_state", args.cache_state) if metadata else args.cache_state))
+                metadata.get("cache_state", args.cache_state) if metadata else args.cache_state,
+                budgets))
         except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
             failures.append({
                 "fixture_id": fixture_id,
@@ -94,11 +109,41 @@ def command_corpus(args: argparse.Namespace) -> int:
     aggregate = aggregate_reports(reports, len(failures))
     aggregate["failures"] = failures
     write_json(output / "report.json", aggregate)
+    # P1-B consumes the existing execution artifacts; this is an additional
+    # stable receipt, never a second renderer or comparison implementation.
+    if args.manifest:
+        manifest_path = args.manifest.resolve()
+        manifest_doc = json.loads(manifest_path.read_text())
+        if manifest_doc.get("schema") == "pulp-canvas-svg-differential-manifest-v1":
+            browser_observations = {}
+            native_observations = {}
+            for report in reports:
+                fixture_id = (report.get("fixture") or {}).get("id")
+                if not fixture_id:
+                    continue
+                evidence = ["browser/browser.png", "browser/dom-snapshot.json"]
+                browser_observations[fixture_id] = {"status": "pass", "evidence": evidence}
+                findings = []
+                for classification in report.get("classifications", []):
+                    kind = classification.get("kind")
+                    mapping = {"dropped-material": "dropped-material", "geometry": "wrong-geometry", "visual": "wrong-pixels", "unsupported-behavior": "unsupported-behavior"}
+                    if kind in mapping:
+                        findings.append({"kind": mapping[kind], "message": classification.get("detail", kind)})
+                native_observations[fixture_id] = {
+                    "status": "fail" if findings else "pass",
+                    "findings": findings,
+                    "evidence": ["candidate/render.png", "comparison/report.json"] if not findings else ["comparison/report.json"],
+                }
+            contract = normalize_report(manifest_path, browser=browser_observations, native=native_observations)
+            (output / "differential-report.json").write_text(contract.to_json(), encoding="utf-8")
     (output / "summary.md").write_text(format_corpus_summary(aggregate))
     print(format_corpus_summary(aggregate))
     if failures:
         print(f"{len(failures)} fixture(s) failed; see report.json", file=sys.stderr)
-    return 1 if failures else 0
+    budget_failed = any(
+        report.get("timing_budget", {}).get("status") == "fail"
+        for report in reports)
+    return 1 if failures or budget_failed else 0
 
 
 def percentile(values: list[int], fraction: float) -> int:
@@ -117,6 +162,7 @@ def command_benchmark(args: argparse.Namespace) -> int:
     output = args.output.resolve()
     reports = []
     try:
+        budgets = read_timing_budgets(getattr(args, "timing_budget", None))
         for index in range(args.runs):
             print(f"[{index + 1}/{args.runs}] benchmark", flush=True)
             reports.append(compare_one(
@@ -124,7 +170,8 @@ def command_benchmark(args: argparse.Namespace) -> int:
                 args.file.resolve(), output / "runs" / str(index + 1),
                 args.timeout_seconds, args.from_source,
                 args.browser.resolve() if args.browser else None,
-                cache_state="cold" if index == 0 else "warm"))
+                cache_state="cold" if index == 0 else "warm",
+                timing_budgets_ms=budgets))
     except (LabError, OSError, ValueError, json.JSONDecodeError) as exc:
         error = sanitized_error(
             exc, [args.importer.resolve(), args.observer.resolve(),
@@ -158,10 +205,37 @@ def command_benchmark(args: argparse.Namespace) -> int:
             "ifnf": {"value_ms": None, "status": "readback-only"},
             "cache_states": [report["observability"]["cache_state"]["identity"] for report in reports],
         },
+        "timing_budget": {
+            "status": "fail" if any(
+                report["timing_budget"]["status"] == "fail" for report in reports)
+                else ("pass" if budgets else "not-requested"),
+            "budgets_ms": budgets or {},
+            "failed_runs": [index + 1 for index, report in enumerate(reports)
+                            if report["timing_budget"]["status"] == "fail"],
+        },
     }
     write_json(output / "benchmark.json", benchmark)
     print(json.dumps(benchmark, indent=2))
-    return 0
+    return 1 if benchmark["timing_budget"]["status"] == "fail" else 0
+
+
+def read_timing_budgets(path: Path | None) -> dict[str, int] | None:
+    if path is None:
+        return None
+    document = json.loads(path.resolve().read_text())
+    if not isinstance(document, dict):
+        raise ValueError("timing budget must be a JSON object")
+    unknown = sorted(set(document) - set(TIMING_BUDGET_KEYS))
+    if unknown:
+        raise ValueError(f"timing budget has unknown metric(s): {', '.join(unknown)}")
+    budgets: dict[str, int] = {}
+    for key, value in document.items():
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError(f"timing budget {key} must be a positive integer in milliseconds")
+        budgets[key] = value
+    if not budgets:
+        raise ValueError("timing budget must contain at least one metric")
+    return budgets
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -180,6 +254,9 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument(
             "--cache-state", choices=("cold", "warm", "unknown"), default="unknown",
             help="caller-declared cache state; never inferred from timing")
+        subparser.add_argument(
+            "--timing-budget", type=Path,
+            help="JSON object of caller-supplied importer timing budgets in milliseconds")
 
     compare = subparsers.add_parser("compare")
     shared(compare)

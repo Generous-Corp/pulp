@@ -11,19 +11,20 @@
 #include "mac_window_harness.hpp"
 
 #include <catch2/catch_test_macros.hpp>
-#include <pulp/view/input_events.hpp>
-#include <pulp/view/script_engine.hpp>
+#include <pulp/render/gpu_surface.hpp>
+#include <pulp/state/store.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/design_import.hpp>
-#include <pulp/view/gesture.hpp>
 #include <pulp/view/design_sources.hpp>
+#include <pulp/view/gesture.hpp>
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/screenshot_compare.hpp>
+#include <pulp/view/script_engine.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/view.hpp>
-#include <pulp/view/widgets.hpp>
-#include <pulp/view/buttons.hpp>
-#include <pulp/view/window_host.hpp>
 #include <pulp/view/widget_bridge.hpp>
-#include <pulp/state/store.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -717,6 +718,29 @@ TEST_CASE("mac harness back-buffer capture returns non-empty PNG bytes",
     REQUIRE(png[3] == 0x47);  // 'G'
 
     require_content_floor("single-frame gpu capture", png);
+}
+
+TEST_CASE("mac GPU host reports submission evidence only after it presents a frame",
+          "[mac][platform-harness][gpu][submission-evidence]") {
+    View root;
+    configure_gpu_capture_fixture(root);
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    // Control for the whole case: the evidence rule under test separates a
+    // PRESENTED frame from an offscreen one, so the fixture must actually own a
+    // presentable drawable. A host without one could never report evidence at
+    // all, and every assertion below would pass for the wrong reason.
+    REQUIRE(host->supports_gpu_submission_evidence());
+    REQUIRE(host->gpu_surface() != nullptr);
+    REQUIRE(host->gpu_surface()->has_surface());
+
+    // A rendered frame on a presentable host is `presented`, so the flag goes
+    // true. This is the direction the narrowed rule must NOT regress: excluding
+    // `offscreen` must not also exclude the ordinary healthy frame.
+    const auto png = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(png.empty());
+    REQUIRE(host->last_frame_gpu_submission_observed());
 }
 
 class ResizePaintProbe final : public View {

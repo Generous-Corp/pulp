@@ -186,6 +186,12 @@ pulp_add_test_suite(pulp-test-tracing-badge LIBRARIES pulp::view)
 # soft-skips without Dawn; foundation for CLAP/VST3 resize negotiation)
 # and the keyboard-focus host-etiquette contract (prior-responder
 # restore, host-grab ends text input — keeps Musical Typing alive).
+# Embedded-plugin key routing: which keys the editor consumes, and which it
+# must hand back to the DAW (transport, Musical Typing, host shortcuts). The
+# policy is portable, so this suite runs on every lane; the macOS NSView seam
+# that consumes it is pinned by the [host-forward] case below.
+pulp_add_test_suite(pulp-test-plugin-key-routing LIBRARIES pulp::view)
+
 if(APPLE AND NOT PULP_IOS)
     add_executable(pulp-test-plugin-view-host-design-viewport
         test_plugin_view_host_design_viewport.mm
@@ -409,6 +415,11 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 pulp_add_test_suite(pulp-test-pointer-focus-lifecycle LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-coordinate-mapping LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-coalescer LIBRARIES pulp::view)
+# The host-side half of coalescing — fail-safe, one-dirty-edge-per-run, the
+# flush-before-transition ordering, and the summed relative delta. Portable, so
+# the rules the macOS plug-in editor host relies on are covered on the required
+# gate without a window.
+pulp_add_test_suite(pulp-test-host-drag-coalescer LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-delivery LIBRARIES pulp::view)
 pulp_add_test_suite(pulp-test-pointer-gestures LIBRARIES pulp::view)
 # The Windows editor's input state machine. Deliberately NOT gated on WIN32:

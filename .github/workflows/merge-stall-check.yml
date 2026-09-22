@@ -35,6 +35,21 @@ name: Merge-stall check
 # readings under load — which is exactly how the motivating incident's state
 # looked wrong — so collection is GraphQL, in tools/scripts/merge_stall_watchdog.py.
 #
+# The outcome heartbeat, and why a blind sweep alarms
+# ---------------------------------------------------
+# The per-PR predicate above still infers health from components. A third
+# check asks the outcome directly: nothing has merged for
+# `throughput_threshold_minutes` WHILE the merge queue is non-empty. The
+# non-empty queue is the denominator — a quiet repository merging nothing is
+# correct and must never alarm.
+#
+# A fourth check reports the sweep's own blindness. A collection failure yields
+# zero findings, which reads exactly like a clean bill of health; this guard
+# once printed "Merges are flowing" with both of its reads failed, during a
+# total merge stall, and finished green. So a failed read is now itself an
+# alarm that names the verdicts it could not reach, and a degraded sweep may
+# never close a tracker on the strength of an observation it did not make.
+#
 # Issue lifecycle mirrors auto-release-watchdog.yml / runner-health-check.yml:
 # one tracking issue, edited in place each sweep, closed automatically on
 # recovery. REST search rather than GraphQL for the issue lookup — the shared
@@ -54,6 +69,10 @@ on:
         description: 'Merge-queue head age (min) without a new batch that opens an issue'
         required: false
         default: '30'
+      throughput_threshold_minutes:
+        description: 'Minutes with zero merges, while the queue is non-empty, that opens an issue'
+        required: false
+        default: '90'
       dry_run:
         description: 'Log findings but do not touch the tracking issue'
         required: false
@@ -78,6 +97,7 @@ jobs:
     env:
       THRESHOLD_MINUTES: ${{ github.event.inputs.threshold_minutes || '45' }}
       QUEUE_THRESHOLD_MINUTES: ${{ github.event.inputs.queue_threshold_minutes || '30' }}
+      THROUGHPUT_THRESHOLD_MINUTES: ${{ github.event.inputs.throughput_threshold_minutes || '90' }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
       TRACKING_TITLE: 'Merge stall: green PRs are not merging'
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -130,6 +150,7 @@ jobs:
               --base main \
               --threshold-minutes "${THRESHOLD_MINUTES}" \
               --queue-threshold-minutes "${QUEUE_THRESHOLD_MINUTES}" \
+              --throughput-threshold-minutes "${THROUGHPUT_THRESHOLD_MINUTES}" \
               --prev-state prev/state.json \
               --findings-out findings.json \
               --snapshot-out snapshot.json \
@@ -138,7 +159,7 @@ jobs:
               --summary-out "${GITHUB_STEP_SUMMARY}" \
               | tee scan.log
 
-          count=$(python3 -c "import json; print(sum(1 for f in json.load(open('findings.json')) if f['level'] in ('alarm', 'queue_alarm')))")
+          count=$(python3 -c "import json; print(sum(1 for f in json.load(open('findings.json')) if f['level'] in ('alarm', 'queue_alarm', 'throughput_alarm', 'blind_alarm')))")
           echo "count=${count}" >> "$GITHUB_OUTPUT"
           degraded=$(python3 -c "import json; print('true' if json.load(open('snapshot.json')).get('errors') else 'false')")
           echo "degraded=${degraded}" >> "$GITHUB_OUTPUT"
@@ -179,6 +200,10 @@ jobs:
 
           if [ "$COUNT" -eq 0 ]; then
               if [ "$DEGRADED" = "true" ]; then
+                  # Unreachable while the scan emits a blind_alarm for every
+                  # degraded sweep (which COUNT now includes), and kept as a
+                  # backstop: a degraded sweep must never close a tracker on
+                  # the strength of an observation it did not make.
                   echo "Collection was degraded — preserving any existing tracker until a complete sweep proves recovery."
                   exit 0
               fi

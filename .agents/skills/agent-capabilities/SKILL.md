@@ -69,6 +69,16 @@ acceptance tooling, not an installed SDK capability: do not add its adapter
 request/receipt schemas, 10+10 lifecycle ledger, or source-binding receipt to
 the design-time capability catalog.
 
+The same classification holds when that surface grows a producer.
+`FrameObservation::gpu_submission_observed` is now fed by two `WindowHost`
+queries (`supports_gpu_submission_evidence()`,
+`last_frame_gpu_submission_observed()`). Those are public installed-header
+additions and get a public-header ledger classification like any other, but
+they stay OUT of `agent-capabilities.json`: a host telling the inspector whether
+its last frame reached an output is runtime control plumbing, not a
+generator-facing design capability, and a plausible `WindowHost::` prefix is not
+evidence otherwise.
+
 ## Classify the change
 
 For a new public header or symbol:
@@ -161,6 +171,16 @@ For an existing capability change:
 
   Skip past any claimed integer rather than racing for it; the values only have
   to be distinct and increasing, not contiguous.
+- A byte change to a header still classified `legacy_unreviewed` cannot be
+  repaired by restamping `tools/agent-capabilities/legacy-unreviewed-baseline.json`.
+  `FROZEN_LEGACY_COUNT` and `FROZEN_LEGACY_DIGEST` in
+  `agent_capability_surface.py` pin that file, so editing a fingerprint there
+  and moving the constants to match is exactly the laundering the frozen
+  baseline exists to prevent. Graduate the header instead: add a reviewed
+  disposition for it to `agent_capability_registry.py` with the measured
+  fingerprint and a durable rationale, and leave the baseline untouched. The
+  reviewed branch is consulted ahead of the baseline, so the stale baseline
+  entry is simply no longer read; dozens of headers already sit in both.
 - `--write` also appends a full snapshot to
   `tools/agent-capabilities/contract-history.json` — tens of thousands of lines
   that dwarf the change that caused them. `--check` does not require it, so for
@@ -418,6 +438,34 @@ and its fingerprints must be refreshed first. Counters are decided LAST.
 Re-running it is idempotent: the counter a tree currently holds is not evidence
 of anything, so a tree already carrying a stale reservation is derived back
 down to what its material justifies.
+
+### The push gate runs `--check` for you — but only against a resolved base
+
+`gates.sh` and `.githooks/pre-push` both run `--check` before a push, whenever
+the diff touches an installed public header or a capability registry/manifest
+path. Both pass `PULP_AGENT_CAPABILITY_BASE_REF` set to a **resolved commit**,
+never the base's name, because a bare run resolves the *merge base* while CI
+forces the *base tip*, and those disagree: measured on one tree in one second,
+80 against the merge base and 82 against the tip — and 80 was exactly the
+number a branch had already carried into the merge queue. Reproduce a CI
+verdict the same way rather than trusting a bare local run.
+
+Two things the gate deliberately does not hide:
+
+- A base that does not resolve prints `SKIPPED` and says a skip is not a pass.
+  Nothing green is implied by silence there.
+- A branch touching none of those paths is skipped with its reason printed. It
+  cannot take a counter, so there is nothing to go stale.
+
+This matters more than the other push gates because the failure is
+**unrepairable after the fact**. The merge group is the only place that sees a
+stale counter, and a pull request that has entered the merge queue refuses a
+push with `GH006: … Branches that are queued for merging cannot be updated` —
+so the fix is locked out by the same queue that is about to reject the branch.
+Removing it from the queue is itself gated (`queue-removal-guard: refusing
+unaudited merge-queue removal`), which leaves waiting for eviction as the only
+unprivileged route. Fifteen seconds before the push replaces roughly an hour of
+merge-group time plus a queue lockout.
 
 **Commit the merge before you run it.** During an uncommitted merge the incoming
 tip is not yet an ancestor of `HEAD`, so base resolution steps back to the *merge
@@ -810,6 +858,60 @@ PULP_AGENT_CAPABILITY_BASE_REF=<sha> python3 tools/scripts/agent_capability_mani
 That path is deliberately literal: an explicit ref is used as given, without the
 ancestry fallback.
 
+## `gates.sh` runs one check the capability transaction never mentions: the exposure ledger
+
+The inverse of the section below is also true and catches people going the other
+way. While an `agent_capability_catalog_*.py` file is an *exclusively owned* path
+in `docs/status/sequencer-exposure`, adding a `capability(...)` block to it makes
+`gates.sh` fail with
+
+    transition: sequencer-owned changed path is not covered by an added or
+    materially changed pending row: tools/scripts/agent_capability_catalog_<domain>.py
+
+Nothing in `agent_capability_manifest.py --check` predicts this — it reports
+`fresh` while the push is still blocked — and the four-edit checklist below is
+silent about it because the fifth edit lives in a different gate entirely. The
+fix is a **new** `pending` row under `docs/status/sequencer-exposure/rows/`
+owning that catalog file and its own row file; an existing row that already owns
+the path does not satisfy the transition rule. A capability published on an
+installed header fills `installed_sdk` and `design_time_agent_manifest` as
+`exposed` and the three timeline surfaces as `not_applicable`; measure
+`installed_sdk` against the per-subsystem `install(DIRECTORY …)` loop in
+`tools/cmake/PulpInstallRules.cmake` rather than assuming it.
+
+**Do not generalise that to "every catalog is watched" — most are not, and the
+owner count is what decides.** `_exclusively_owned_paths` in
+`tools/scripts/sequencer_exposure_check.py` watches a path only while *exactly
+one* row or tombstone declares it, in **both** the base and the resulting ledger
+state. Zero owners is not watched, and two or more are shared by construction and
+are not watched either. So the recorded fix is self-limiting: the row added to
+satisfy the gate is another owner, and once a catalog has two, the next
+`capability(...)` block added to it passes this gate silently. Measured on this
+tree, only `agent_capability_catalog_performance.py` is watched at all;
+`agent_capability_catalog_timing.py` already carried two owners before this row
+existed, and `foundations`/`signal` carry none.
+
+Count the owners of the file you are about to touch, and **count them through the
+checker's own loader**. A glob over `docs/status/sequencer-exposure/rows/*.json`
+gives the wrong answer three ways: one file can carry several rows, released rows
+do not all live there, and tombstones declare `owned_paths` too. `_declared_owners`
+is the authority:
+
+```sh
+python3 - <<'EOF'
+import pathlib, sys
+sys.path.insert(0, "tools/scripts")
+import sequencer_exposure_check as check
+root = pathlib.Path(".").resolve()
+ledger = check.load_ledger_from_worktree(root)
+owners = check._declared_owners(ledger[0] if isinstance(ledger, tuple) else ledger)
+for path in sorted(p for p in owners if "agent_capability_catalog_" in p):
+    print(len(owners[path]), path, sorted(owners[path]))
+EOF
+```
+
+A catalog printing `1` is watched by this gate; `0`, or `2` and up, is not.
+
 ## `gates.sh` does NOT run the capability check — adding a public header passes pre-push and fails in CI
 
 The pre-push gates cover skill-sync, version-bump, compat, deps and friends. They do **not**
@@ -881,6 +983,43 @@ regression that asserts both sides: the portable method remains advertised and t
 implementation signature is absent. Do not raise the global method cap to hide this local
 classification error.
 
+### `SURFACE_INVENTORY_VERSION` is a shared ledger too — pick it by survey, not by increment
+
+Every branch that moves a public header has to raise it, so concurrent branches
+contend for the same integer. The obvious move — read main's value and add one —
+is wrong whenever anyone else is mid-flight, and it fails in the quietest
+possible way: two branches that both write the same number produce *identical*
+text, so git finds nothing to conflict on and both auto-merge clean. The
+collision surfaces later, at the merge commit, as an inventory version that did
+not actually increase over the branch that landed first.
+
+Choose `max(all live branches) + 1`, not `main + 1`:
+
+```sh
+git for-each-ref --format='%(refname)' refs/remotes/origin \
+  | grep -v -- '--help\|/HEAD$' > /tmp/refs.txt
+xargs -n 300 sh -c \
+  'git grep -h "^SURFACE_INVENTORY_VERSION" "$@" -- tools/scripts/agent_capability_manifest.py' _ \
+  < /tmp/refs.txt | grep -o '[0-9][0-9]*$' | sort -n | uniq -c | tail
+```
+
+Two details that are load-bearing, because getting either wrong returns an empty
+result rather than an error — and an empty survey reads exactly like "nobody
+holds a number", which is the answer that makes you collide:
+
+- **The refs must land in revision position, before `--`.** Anything after `--`
+  is a pathspec, so `git grep PATTERN -- path ref1 ref2` searches no revisions
+  and matches nothing.
+- **macOS `xargs` has no `-a`.** `xargs -a file …` aborts with `invalid option`;
+  redirect the file in with `<` instead. BSD and GNU differ here and the BSD
+  failure is easy to miss inside a pipeline.
+
+So pair the survey with a control that must return non-zero — `git grep` the
+same constant on `origin/main` alone, which is known to carry it. If the control
+is silent the instrument is broken and the survey proved nothing. A gap in the
+observed numbers is not an invitation to fill it: prefer one above the maximum,
+since a gap usually means that branch already landed or was deleted.
+
 ### `test_signal_no_exceptions.cpp` is a shared ledger — three hazards, not two
 
 Nearly every signal capability appends to it, and it assigns a **unique non-zero exit code per
@@ -925,6 +1064,68 @@ Extract codes from every return form, including ternaries (`return c ? 0 : N;`) 
 `grep -oE "return [0-9]+;"` misses those and manufactures phantom collisions.
 
 For A3 v2 terminal acceptance, never treat receipt fields as publication or trace proof. The verifier must derive protected `main`, the canonical receipt blob, required check identities/results, and artifact digests live, then replay the pinned analyzer over the exact trace bytes.
+
+## Graduating a frozen legacy header: add to the registry, never restamp the baseline
+
+Editing the bytes of a header carried in
+`tools/agent-capabilities/legacy-unreviewed-baseline.json` fails the check with
+`public header fingerprint changed`. The baseline is pinned twice over —
+`FROZEN_LEGACY_COUNT` and `FROZEN_LEGACY_DIGEST` in
+`agent_capability_surface.py` — so editing that file to match is the laundering
+the pin exists to prevent, and it fails anyway.
+
+The supported move is to **graduate** the header: add an entry to
+`REVIEWED_HEADERS` in `agent_capability_registry.py` with the header's new
+fingerprint, a `disposition` (`infrastructure` when it binds no capability of
+its own), and a rationale. `build_surface_document` consults `reviewed` **before**
+`baseline_entries`, so the baseline row is simply never reached — leave that file
+byte-identical. The frozen count stays 337 and its digest stays valid.
+
+### The version bump compares against the snapshot on disk, not against main
+
+`SURFACE_INVENTORY_VERSION` must increase relative to
+`docs/status/agent-capability-surface.json` **as it currently sits in the working
+tree** — which your own previous `--write` already moved. So a second round of
+source edits (a `format_changed.sh` reflow is enough, since it changes the
+header's bytes and therefore its fingerprint) makes `--write` exit 1 with
+`public surface changed without an inventory_version increase`, even though you
+already bumped. Bumping again burns a second published identity for one change.
+
+Reset the snapshot to the base and write once instead:
+
+```sh
+git checkout origin/main -- docs/status/agent-capability-surface.json
+python3 tools/scripts/agent_capability_manifest.py --write
+```
+
+Corollary: run `format_changed.sh` **before** deriving the fingerprint, or
+re-derive after it. A fingerprint pasted from a pre-format read is stale.
+
+### Pick the version above every branch in flight, not above main
+
+Identical bumps on two branches merge cleanly and silently reuse one published
+identity, so incrementing main's value is not enough. Survey the remote branches
+first — and note that in zsh a `"$ref:tools/..."` expansion applies the `:t`
+history modifier and silently mangles the path, so the survey loop returns
+nothing while looking like a clean negative. Drive it from Python, or verify the
+loop against a ref you know carries the constant:
+
+```sh
+python3 - <<'EOF'
+import subprocess, re
+refs = subprocess.run(["git","for-each-ref","--sort=-committerdate",
+                       "--format=%(refname)","refs/remotes/origin","--count=250"],
+                      capture_output=True, text=True).stdout.split()
+seen = {}
+for ref in refs:
+    r = subprocess.run(["git","show",f"{ref}:tools/scripts/agent_capability_manifest.py"],
+                       capture_output=True, text=True)
+    m = re.search(r"^SURFACE_INVENTORY_VERSION\s*=\s*(\d+)", r.stdout, re.M) if not r.returncode else None
+    if m: seen[ref] = int(m.group(1))
+assert seen, "instrument dead - no branch yielded the constant"
+print("branches read:", len(seen), "max:", max(seen.values()))
+EOF
+```
 
 ## `PulpInstallRules.cmake` fires this gate for reasons that have nothing to do with capabilities
 

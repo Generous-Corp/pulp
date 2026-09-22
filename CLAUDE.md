@@ -979,6 +979,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **import-roundtrip** — validate an import lane end to end
 - Check the importer's IR actually captured the UI text the reference shows. → `tools/import-validation/check_label_coverage.sh`
 - Check the import source-contract registry for drift. → `tools/import-validation/check-source-contracts.py`
+- Normalize a Canvas/SVG differential report into the stable receipt shape, so a browser run and a native run can be compared field-by-field instead of eyeballed. → `python3 -m tools.harness.differential`
 - Confirm the live host really drives JS timers (setInterval/setTimeout not queuing forever). → `tools/import-validation/live-host-pump-smoke.sh`
 - Validate the DESIGN.md import lane end to end. → `tools/import-validation/designmd-roundtrip.sh`
 - Validate the Figma Make runtime-import lane end to end before pushing. → `tools/import-validation/figma-roundtrip.sh`
@@ -989,6 +990,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Validate the Stitch import lane end to end. → `tools/import-validation/stitch-roundtrip.sh`
 - Validate the v0 import lane end to end. → `tools/import-validation/v0-roundtrip.sh`
 - A render "looks right" but you need to know it actually mounted and settled. → `tools/import-validation/semantic_probes.sh`
+- Prove the native text selection geometry actually agrees with the browser's, rather than trusting that it does. → `tools/import-design/browser_capture/text_diagnostics_native_proof.mjs`
 
 **harness** — coverage + deterministic visual harness
 - The visual-harness Dockerfile's Skia pin may have drifted from the manifest. → `tools/harness/visual/check_skia_pin.py`
@@ -1883,6 +1885,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `ios` | iOS platform development for Pulp — iPhone/iPad AUv3 app extensions, iOS Simulator builds, UIKit window host, CoreAudio IO audio, touch & Apple Pencil input, XcodeBuildMCP automation. |
 | `jsfx-subset` | Work in Pulp's bounded JSFX lane using source-only examples, subset validation, and explicit exclusions like no `@gfx`. |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp package manifests. |
+| `lv2` | LV2 format adapter for Pulp — the generated Turtle manifest nothing ships, port indices as a saved-session wire format, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep. |
 | `moonbase` | Optional Moonbase license-activation integration for Pulp — load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, audio-thread gating + click-free fade, async start/pump, the interactive native (no-WebView) activation editor (frame-tick polling + the don't-rebuild-mid-event trap), loadable plugin/standalone formats, and headless screenshots. |
 | `motion` | Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. |
 | `mpe` | Build an MPE-aware Pulp synth — opt into MPE via PluginDescriptor, consume per-note pitch bend / pressure / timbre from MpeBuffer, and route voices through MpeVoiceAllocator without reinventing channel tracking. |
@@ -1905,7 +1908,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
 | `text-metrics` | Baseline, half-leading, and font-face resolution for Label and captured (browser-imported) text — the arithmetic that decides where a glyph lands and how wide the box must be, plus the measure-vs-paint divergences that make text clip or sit low without any test going red. |
 | `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
-| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, order-preserving groove kernels, coordinate randomness, streaming cursors, and quantization arithmetic. |
+| `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, inline and order-preserving groove projection, coordinate randomness, streaming cursors, and quantization arithmetic. |
 | `timeline` | Build, edit, validate, explain, render, import, or integrate Pulp timeline projects through the CLI, MCP tools, or C++ SDK. |
 | `trace-analysis` | The investigation harness for "why is this slow?" over a Pulp Perfetto trace (.pftrace). |
 | `trace-sql` | SQL discipline for querying Pulp Perfetto traces (.pftrace) with trace_processor — idempotent CREATE OR REPLACE PERFETTO views, GLOB not LIKE, dur = -1 incomplete-slice handling, EXTRACT_ARG for span args, joining on stable utid/upid, SPAN_JOIN PARTITIONED, and the draft→validate→execute loop. |
@@ -1917,7 +1920,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-This table of 66 skills is GENERATED from each
+This table of 67 skills is GENERATED from each
 `.agents/skills/<name>/SKILL.md` frontmatter by
 `tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
 <!-- generated:end id=skills-digest -->

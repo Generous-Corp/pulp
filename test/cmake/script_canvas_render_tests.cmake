@@ -396,6 +396,12 @@ pulp_add_test_suite(pulp-test-view-corner-radius LIBRARIES pulp::view)
 # extension.
 pulp_add_test_suite(pulp-test-view-zindex-overflow LIBRARIES pulp::view)
 
+# Scrollable overflow (`overflow: scroll` / CSS `auto`). Covers the scrollable
+# range, wheel input, clamping at both ends, the clip, and — the load-bearing
+# one — that a row owns its own PAINTED centre at a non-zero scroll offset, so
+# paint and hit-testing cannot drift apart.
+pulp_add_test_suite(pulp-test-overflow-scroll LIBRARIES pulp::view)
+
 # View CSS mask + overflow:visible hit-test extension. Covers the
 # symmetric overflow:visible hit-test extension
 # (500px in each direction so absolutely-positioned popovers protrude

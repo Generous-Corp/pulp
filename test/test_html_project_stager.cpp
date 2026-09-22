@@ -179,6 +179,25 @@ TEST_CASE("HTML staging scans transitive imports in extensionless modules",
     CHECK(fs::exists(staged.root / "modules/child.js"));
 }
 
+TEST_CASE("HTML staging copies literal Vite import.meta URL assets",
+          "[import-design][browser-capture][staging][vite]") {
+    TempTree tree;
+    tree.write("index.html", R"(<script type="module" src="assets/index.js"></script>)");
+    tree.write("assets/index.js",
+               R"(const hero = new URL('./hero.png', import.meta.url);
+           const dynamic = new URL(`./${name}.png`, import.meta.url);)");
+    tree.write("assets/hero.png", "generated-vite-asset");
+
+    auto staged = stage_html_project(tree.root / "index.html",
+                                     R"(<script type="module" src="assets/index.js"></script>)");
+
+    INFO(staged.error);
+    REQUIRE(staged);
+    CHECK(fs::exists(staged.root / "assets/index.js"));
+    CHECK(fs::exists(staged.root / "assets/hero.png"));
+    CHECK_FALSE(fs::exists(staged.root / "assets/${name}.png"));
+}
+
 TEST_CASE("HTML staging upgrades an already copied extensionless dependency",
           "[import-design][browser-capture][staging]") {
     TempTree tree;

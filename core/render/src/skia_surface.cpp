@@ -421,12 +421,15 @@ public:
             source = offscreen_surface_.get();
         if (!source) return false;
 
-        // Callers such as MacGpuWindowHost::capture_back_buffer_png() read
-        // during the current frame, before SkiaSurface::end_frame(). Graphite
-        // has not submitted the recording yet in that state, so an async
-        // readback can see a valid but cleared texture. Submit pending canvas
-        // work first while keeping frame_surface_ alive for the readback; the
-        // later end_frame() call will simply find no additional recording.
+        // Callers such as PluginFrameRenderer read DURING the current frame,
+        // before SkiaSurface::end_frame(). Graphite has not submitted the
+        // recording yet in that state, so an async readback can see a valid but
+        // cleared texture. Submit pending canvas work first while keeping
+        // frame_surface_ alive for the readback; the later end_frame() call
+        // will simply find no additional recording. A caller that reads AFTER
+        // end_frame() instead — MacGpuWindowHost::render_frame() does, between
+        // the Skia submit and the Metal present — finds nothing pending here
+        // and pays nothing for the guard.
         if (canvas_ && recorder_ && context_) {
             canvas_.reset();
             auto recording = recorder_->snap();

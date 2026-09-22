@@ -203,7 +203,10 @@ View::~View() {
     // teardown. (~ComboBox does the same for active_popup.)
     if (RootInteractionState* s = existing_interaction()) {
         if (s->focused_input == this) s->focused_input = nullptr;
-        if (s->active_overlay == this) s->active_overlay = nullptr;
+        // Stack-aware: a dying overlay may sit UNDER an open submenu, in which
+        // case clearing only the active slot would leave a freed pointer on
+        // the stack for the next press to walk.
+        detach_overlay(*s, this);
     }
     if (active_overlay_ == this) active_overlay_ = nullptr;
     if (focused_input_ == this) focused_input_ = nullptr;
@@ -987,10 +990,14 @@ std::unique_ptr<View> View::remove_child(View* child) {
         focused->View::on_focus_changed(false);
     }
     if (RootInteractionState* state = structure_root->interaction_state_.get();
-        state && belongs_to_removed_subtree(state->active_overlay)) {
-        View* overlay = state->active_overlay;
-        state->active_overlay = nullptr;
-        if (active_overlay_ == overlay) active_overlay_ = nullptr;
+        state != nullptr) {
+        // Top-down over the whole stack, not just the active slot: a nest of
+        // menus can be removed as one subtree, and an entry left behind under
+        // a retired one is a dangling pointer the next press would walk.
+        for (std::size_t i = state->overlay_stack.size(); i > 0; --i) {
+            View* overlay = state->overlay_stack[i - 1];
+            if (belongs_to_removed_subtree(overlay)) detach_overlay(*state, overlay);
+        }
         // Structural removal is already the dismissal outcome. Do not invoke
         // on_overlay_dismissed here: that callback may synchronously mutate the
         // same tree while remove_child owns its iterators. Clearing the root
@@ -1029,19 +1036,17 @@ std::unique_ptr<View> View::remove_child(View* child) {
     // its old ancestry. Once parent_ is severed, its destructor resolves the
     // detached fallback state and cannot clear the former root's slot.
     if (RootInteractionState* state = structure_root->existing_interaction();
-        state && state->active_overlay) {
-        bool overlay_is_removed = false;
-        for (View* current = state->active_overlay; current;
-             current = current->parent_) {
-            if (current == child) {
-                overlay_is_removed = true;
-                break;
+        state != nullptr) {
+        for (std::size_t i = state->overlay_stack.size(); i > 0; --i) {
+            View* overlay = state->overlay_stack[i - 1];
+            bool overlay_is_removed = false;
+            for (View* current = overlay; current; current = current->parent_) {
+                if (current == child) {
+                    overlay_is_removed = true;
+                    break;
+                }
             }
-        }
-        if (overlay_is_removed) {
-            if (active_overlay_ == state->active_overlay)
-                active_overlay_ = nullptr;
-            state->active_overlay = nullptr;
+            if (overlay_is_removed) detach_overlay(*state, overlay);
         }
     }
     // Any lifecycle/drag callback above may mutate this parent's children.
@@ -1194,6 +1199,12 @@ void View::retire_interaction_state_for_realm_reset(
             focused_input_ = nullptr;
         if (active_overlay_ == interaction_state_->active_overlay)
             active_overlay_ = nullptr;
+        // The whole realm leaves with the state block, so its claims are no
+        // longer live. Leaving them counted would only cost the paint path its
+        // slower branch, but an honest count is what keeps that branch rare.
+        const std::size_t retired = interaction_state_->overlay_stack.size();
+        overlay_claims_live_ -= static_cast<std::uint32_t>(
+            std::min<std::size_t>(retired, overlay_claims_live_));
         retired_interaction = std::move(interaction_state_);
     }
 }
@@ -1290,11 +1301,17 @@ View* View::hit_test(Point local_point) {
     // to siblings beneath it.
     if (pointer_events_ != PointerEvents::box_only) {
         // Test one child; returns the hit (or nullptr to keep looking).
+        // An `overflow: scroll` container offsets its children's paint; the
+        // hit-test must undo the SAME offset, read from the SAME function
+        // paint_children_in_order() uses, or a scrolled row responds where it
+        // used to be rather than where it is drawn.
+        const bool offsets_children = applies_child_paint_offset();
         auto try_child = [&](View* child) -> View* {
             if (!child->visible_) return nullptr;
 
-            Point child_point = {local_point.x - child->bounds_.x,
-                                local_point.y - child->bounds_.y};
+            const Point offset = offsets_children ? child_paint_offset(*child) : Point{0.0f, 0.0f};
+            Point child_point = {local_point.x - offset.x - child->bounds_.x,
+                                 local_point.y - offset.y - child->bounds_.y};
 
             // Paint scales a child around its transform origin. Hit testing
             // must apply the inverse before descending, or a fitted subtree
@@ -1487,8 +1504,10 @@ void View::dismiss_claimed_overlay() {
     // destroy this view or claim a replacement overlay.
     RootInteractionState* state = existing_interaction();
     if (!state || state->active_overlay != this) return;
-    state->active_overlay = nullptr;
-    if (active_overlay_ == this) active_overlay_ = nullptr;
+    // Pops exactly one level: the overlay below (a parent menu, when this is a
+    // submenu) becomes active again, so the next Escape or outside press acts
+    // on it instead of finding nothing open.
+    detach_overlay(*state, this);
     auto dismissed = on_overlay_dismissed;
     if (dismissed) dismissed();
 }
@@ -1497,8 +1516,7 @@ void View::dismiss_active_overlay(View& scope) {
     RootInteractionState* state = scope.existing_interaction();
     View* victim = state ? state->active_overlay : nullptr;
     if (!victim) return;
-    state->active_overlay = nullptr;
-    if (active_overlay_ == victim) active_overlay_ = nullptr;
+    detach_overlay(*state, victim);
     // Copy the callback before invoking it, matching dismiss_claimed_overlay().
     // `on_overlay_dismissed` is a std::function whose storage lives inside the
     // victim View, and the callback may synchronously destroy that view (a
@@ -1542,6 +1560,115 @@ void accumulate_overflow_extent(const View* v,
         accumulate_overflow_extent(v->child_at(i), abs_x, abs_y,
                                    min_x, min_y, max_x, max_y);
     }
+}
+
+// ── Scrollable overflow ──────────────────────────────────────────────────────
+//
+// See view.hpp's "Scrollable overflow" block. The paint/hit-test pair routes
+// through View::child_paint_offset(), so everything here is range arithmetic:
+// measure the content, clamp the offset into it.
+
+void accumulate_scroll_content_extent(const View& parent, float parent_x, float parent_y,
+                                      float& right, float& bottom, bool& found) {
+    for (size_t i = 0; i < parent.child_count(); ++i) {
+        const auto* child = parent.child_at(i);
+        if (!child || !child->visible())
+            continue;
+
+        const auto bounds = child->bounds();
+        const float child_x = parent_x + bounds.x;
+        const float child_y = parent_y + bounds.y;
+        right = std::max(right, child_x + std::max(0.0f, bounds.width));
+        bottom = std::max(bottom, child_y + std::max(0.0f, bounds.height));
+        found = true;
+        // A nested scroll container owns its private overflow extent. The
+        // outer container measures the nested viewport box, not descendants
+        // that the nested container clips and scrolls independently.
+        if (child->is_scroll_container())
+            continue;
+        accumulate_scroll_content_extent(*child, child_x, child_y, right, bottom, found);
+    }
+}
+
+namespace {
+/// Content is only "overflowing" past a 1px slack, so a viewport and a content
+/// box that differ by a rounding crumb do not advertise a scrollable range
+/// nobody can use. Matches ScrollView::kOverflowEpsilon.
+constexpr float kScrollOverflowEpsilon = 1.0f;
+} // namespace
+
+Size View::scroll_content_size() const {
+    const auto viewport = local_bounds();
+    // Only a scroll container pays for the walk; every other view answers
+    // from its own box with a single enum compare.
+    if (!is_scroll_container())
+        return Size{viewport.width, viewport.height};
+
+    float right = 0.0f;
+    float bottom = 0.0f;
+    bool found = false;
+    accumulate_scroll_content_extent(*this, 0.0f, 0.0f, right, bottom, found);
+
+    if (found) {
+        // The container's own bottom/right padding is part of the scrollable
+        // content in CSS — without it the last row butts against the edge.
+        const auto& style = flex();
+        right += style.padding_right >= 0.0f ? style.padding_right : style.padding;
+        bottom += style.padding_bottom >= 0.0f ? style.padding_bottom : style.padding;
+    }
+
+    Size derived{std::max(viewport.width, right), std::max(viewport.height, bottom)};
+    if (derived.width - viewport.width <= kScrollOverflowEpsilon)
+        derived.width = viewport.width;
+    if (derived.height - viewport.height <= kScrollOverflowEpsilon)
+        derived.height = viewport.height;
+    return derived;
+}
+
+float View::max_scroll_offset_x() const {
+    const float overflow = scroll_content_size().width - local_bounds().width;
+    return overflow > kScrollOverflowEpsilon ? overflow : 0.0f;
+}
+
+float View::max_scroll_offset_y() const {
+    const float overflow = scroll_content_size().height - local_bounds().height;
+    return overflow > kScrollOverflowEpsilon ? overflow : 0.0f;
+}
+
+bool View::set_scroll_offset(float x, float y) {
+    // Clamping is the whole contract: a container that fits has a max of 0, so
+    // it pins to 0 and cannot scroll, and a wheel past either end stops at the
+    // edge instead of running the content off into empty space.
+    const float clamped_x = std::clamp(x, 0.0f, max_scroll_offset_x());
+    const float clamped_y = std::clamp(y, 0.0f, max_scroll_offset_y());
+    if (clamped_x == scroll_offset_x_ && clamped_y == scroll_offset_y_)
+        return false;
+    scroll_offset_x_ = clamped_x;
+    scroll_offset_y_ = clamped_y;
+    // The subtree now paints somewhere else; a bounded invalidation keyed off
+    // the old position would repaint the wrong rect.
+    invalidate_subtree_caches_up();
+    request_repaint();
+    return true;
+}
+
+bool View::wants_wheel_scroll() const {
+    if (!is_scroll_container())
+        return false;
+    return max_scroll_offset_x() > 0.0f || max_scroll_offset_y() > 0.0f;
+}
+
+bool View::handle_scroll_wheel(const MouseEvent& event) {
+    // A scroll container with nothing to scroll is not a wheel boundary: it
+    // must let the tick reach its own pointer callback (and bubble on) exactly
+    // like any other box. Only a container with real range consumes.
+    if (!wants_wheel_scroll())
+        return false;
+    // Having range, it consumes the tick even when the offset is already
+    // clamped at an edge — letting an edge tick fall through would scroll an
+    // ancestor instead, which is not what a browser does here.
+    scroll_offset_by(event.scroll_delta_x, event.scroll_delta_y);
+    return true;
 }
 
 bool View::overlay_contains(Point window_pt) const {
@@ -1710,15 +1837,79 @@ void View::release_input_focus() {
     if (focused_input_ == this) focused_input_ = nullptr;  // shim mirror
 }
 
+std::uint32_t View::overlay_claims_live_ = 0;
+
+bool View::detach_overlay(RootInteractionState& state, View* victim) {
+    auto& stack = state.overlay_stack;
+    auto it = std::find(stack.begin(), stack.end(), victim);
+    if (it == stack.end()) return false;
+    stack.erase(it);
+    if (overlay_claims_live_ > 0) --overlay_claims_live_;
+    republish_overlay(state);
+    return true;
+}
+
+void View::republish_overlay(RootInteractionState& state) {
+    View* const previous = state.active_overlay;
+    View* const top =
+        state.overlay_stack.empty() ? nullptr : state.overlay_stack.back();
+    state.active_overlay = top;
+    // Only follow the shim when it was already tracking THIS root's overlay.
+    // Two editors in one host process each own their stack, and re-pointing a
+    // shim that belongs to the other editor is exactly the cross-editor bleed
+    // the per-root state exists to prevent.
+    if (active_overlay_ == previous) active_overlay_ = top;
+}
+
+bool View::is_overlay_descendant_of(const View* ancestor) const {
+    for (const View* v = parent_; v != nullptr; v = v->parent_)
+        if (v == ancestor) return true;
+    return false;
+}
+
+std::size_t View::overlay_depth() const {
+    RootInteractionState* s = const_cast<View*>(this)->existing_interaction();
+    return s ? s->overlay_stack.size() : 0;
+}
+
 void View::claim_overlay() {
-    interaction().active_overlay = this;
+    // Close every overlay this claim is not allowed to sit on top of.
+    //
+    // A claim that DESCENDS from the open overlay is a submenu and stacks on
+    // it, which is what makes dismissing the submenu restore its parent. Any
+    // other claim is a different menu, so the open one closes — the reported
+    // "open submenu B and submenu A stays on screen". Re-claiming a view that
+    // is already open closes only the submenus above it.
+    //
+    // Re-resolves the state block every pass because `on_overlay_dismissed` is
+    // author code: it may unmount the popover it is closing, open a
+    // replacement, or tear down the whole editor realm.
+    for (;;) {
+        RootInteractionState* s = existing_interaction();
+        if (s == nullptr || s->overlay_stack.empty()) break;
+        View* const top = s->overlay_stack.back();
+        if (top == this || is_overlay_descendant_of(top)) break;
+        if (!detach_overlay(*s, top)) break;
+        // Fired AFTER the pop, matching dismiss_claimed_overlay(), so a
+        // callback that claims a replacement is not immediately undone.
+        auto dismissed = top->on_overlay_dismissed;
+        if (dismissed) dismissed();
+    }
+
+    RootInteractionState& s = interaction();
+    if (std::find(s.overlay_stack.begin(), s.overlay_stack.end(), this) ==
+        s.overlay_stack.end()) {
+        s.overlay_stack.push_back(this);
+        ++overlay_claims_live_;
+    }
+    // Already present means the loop above left it on top; re-claiming an open
+    // overlay is idempotent rather than a second copy of the same view.
+    republish_overlay(s);
     active_overlay_ = this;  // process-global shim mirror
 }
 
 void View::release_overlay() {
-    if (RootInteractionState* s = existing_interaction();
-        s && s->active_overlay == this)
-        s->active_overlay = nullptr;
+    if (RootInteractionState* s = existing_interaction()) detach_overlay(*s, this);
     if (active_overlay_ == this) active_overlay_ = nullptr;  // shim mirror
     overlay_consumes_outside_click_ = false;
 }

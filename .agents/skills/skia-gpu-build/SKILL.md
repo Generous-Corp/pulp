@@ -592,17 +592,25 @@ pins all three executables and fails closed on missing configuration or
 protocol drift. It does not provide generic present/cache instrumentation and
 must not be used to relabel capture completion as native presentation.
 
-There is a second, likelier relabel, and it fails in the opposite direction.
-`window_host_mac.mm` wraps `gpu_surface_->end_frame()` in a `gpu_present` trace
-scope, which reads like a presentation bracket, so a `steady_clock::now()` after
-it looks like the present endpoint. It is not. `DawnGpuSurface::end_frame()` is
-`surface_.Present()` plus `instance_.ProcessEvents()` -- no fence, no wait, no
-presented callback -- so it hands the drawable to the compositor, which displays
-it at a later vsync, so returning precedes display by up to a refresh interval.
-Back-buffer capture is not the safer choice either: `read_current_rgba` runs
-BEFORE that present call, so capture completion precedes display by even more.
-Both candidates land early, which makes a late frame look on time and a budget
-miss look like a pass. Nothing on any Pulp backend can currently satisfy
+There is a second, likelier relabel. `DawnGpuSurface::end_frame()` emits a
+`gpu_present` span, which reads like a presentation bracket, so a
+`steady_clock::now()` after it looks like the present endpoint. It is not. That
+call is `surface_.Present()` plus `instance_.ProcessEvents()` -- no fence, no
+wait, no presented callback -- so it hands the drawable to the compositor, which
+displays it at a later vsync. Returning therefore precedes display by up to a
+refresh interval and UNDER-reports first-visible latency, making a late frame
+look on time.
+
+Back-buffer capture is not the safer choice either, and the two candidates are
+not the same error with different magnitudes -- **they miss in OPPOSITE
+directions, so neither bounds the other.** `read_current_rgba` does run before
+the present call, but the health adapter stamps its timestamp after
+`capture_back_buffer_png()` RETURNS, which is after that present call plus PNG
+encode. Worse, the readback blocks on `context_->submit(SyncToCpu::kYes)` and
+then spins for up to five seconds waiting on the GPU, BETWEEN submit and
+present -- delaying the very present it claims to measure. Capture completion
+therefore OVER-reports first-visible latency, so it fails frames that met their
+budget instead of passing frames that did not. Nothing on any Pulp backend can currently satisfy
 `native_presented_at`: Pulp never acquires the `CAMetalDrawable` (no
 `nextDrawable`, `presentDrawable`, `addPresentedHandler`, or `presentedTime`
 anywhere in `core/`, `inspect/`, or `apple/`), so the only home for a real

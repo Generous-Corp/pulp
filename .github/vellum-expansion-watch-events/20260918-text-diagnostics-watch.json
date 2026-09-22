@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260918-text-diagnostics-watch",
+  "created_at": "2026-09-19T00:11:02Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Consume existing Label selection geometry in the Pulp DesignIR observer and add a bounded browser/native diagnostic adapter and sensitivity experiment. No generic rendering paths, DesignIR payload or source authority changes.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/native_text_diagnostics.test.mjs tools/import-design/browser_capture/text_diagnostics.test.mjs",
+    "pulp-design-ir-observe compiler syntax check",
+    "text_diagnostics_native_proof.mjs requires a built observer; receipt only after real native renders"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

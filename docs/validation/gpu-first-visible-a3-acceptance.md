@@ -819,9 +819,12 @@ startup trial existed, and retained the response and fixture digests.
 
 This observation confirms that the shipped host can report an authentic
 Metal-backed Dawn adapter, completed back-buffer readback, and nonblank content.
-It also demonstrates the intended fail-closed boundary: `command_submitted` is
-null, the submit event and aggregate health are `unverified`, startup is
-`incomplete`, the budget is `unratified`, and frame-lifecycle and A2T
+It also demonstrates the intended fail-closed boundary: at the pinned revision
+above `command_submitted` is null and the submit event and aggregate health are
+`unverified`, because no host producer answered for the submit stage. A host
+that supplies submission evidence now reports that stage as observed, so the
+aggregate follows the host; the remaining boundary holds either way -- startup
+is `incomplete`, the budget is `unratified`, and frame-lifecycle and A2T
 correlation categories are missing. It therefore advances product plumbing
 without satisfying a campaign, terminal acceptance, or B4 disposition gate.
 
@@ -832,7 +835,7 @@ observation in a temporary location with:
 PULP_A3_EVIDENCE_SOURCE_REVISION=c568198f356d4b961b4fb6bb68caa3d3ccebd3c4 \
 PULP_A3_EVIDENCE_RESPONSE_PATH=/private/tmp/gpu-first-visible-a3-standalone-product-response.json \
 build-a3-release/test/a3-product/pulp-test-control-gpu-health-standalone-product \
-  "exact Standalone product instance publishes capture-only GPU health"
+  "exact Standalone product instance publishes host-evidenced GPU health"
 ```
 
 The response is intentionally a single product observation. The ratified

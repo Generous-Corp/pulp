@@ -240,7 +240,41 @@ function materializedOptionalTextNode(binding, values) {
   });
   return matches.length === 1 ? matches[0] : null;
 }
-function applyMaterializedImportMetadata(metadata) {
+// A commit's dirty scope is a list of native ids whose subtrees may have
+// moved. A binding is in scope when its node is that node or a descendant of
+// it, which is exactly "walk up the parent chain until an id matches".
+//
+// The direction matters. Walking UP from the binding is O(depth) of pure JS;
+// the work it avoids is bridge traffic -- getLayoutBoxMetrics forces a whole
+// root layout pass, and setCapturedLineBoxes / setFontFamily re-shape text --
+// so a scope that skips one binding saves far more than the walk costs.
+function materializedScopeSet(scopeIds) {
+  if (!Array.isArray(scopeIds) || scopeIds.length === 0) return null;
+  const set = new Set();
+  for (const id of scopeIds) {
+    if (id === null || id === undefined) continue;
+    const text = String(id);
+    if (text) set.add(text);
+  }
+  return set.size > 0 ? set : null;
+}
+function materializedNodeInScope(node, scopeSet) {
+  let current = node;
+  // A detached-but-still-registered node can in principle cycle; bound the
+  // walk rather than hang the commit. The bound is far above any real DOM.
+  for (let depth = 0; current && depth < 4096; ++depth) {
+    const id = current.__pulpId || current.id;
+    if (id && scopeSet.has(String(id))) return true;
+    current = current.parentElement || current._parentElement || null;
+  }
+  return false;
+}
+// scopeIds is optional and null/empty means "apply everything". Every caller
+// that is not the per-commit hook -- bootstrap, and a captured-state change --
+// deliberately passes nothing: a state flip replaces the whole binding table,
+// so nothing about the previous commit's dirty set describes it.
+function applyMaterializedImportMetadata(metadata, scopeIds) {
+  const scopeSet = materializedScopeSet(scopeIds);
   const values = materializedDomRegistryValues();
   const pathIndex = materializedPathIndex(values);
   const activeLayoutBindings = Array.isArray(metadata && metadata.layout_bindings)
@@ -266,6 +300,7 @@ function applyMaterializedImportMetadata(metadata) {
     layout_expected: activeLayoutBindings.length,
     layout_applied: 0,
     layout_node_miss: 0,
+    layout_out_of_scope: 0,
     layout_dynamic_nodes: dynamicNodes.size,
     text_expected: activeTextBindings.filter(binding =>
       !binding.runtime_optional).length,
@@ -273,6 +308,7 @@ function applyMaterializedImportMetadata(metadata) {
     text_node_miss: 0,
     text_content_mismatch: 0,
     text_target_miss: 0,
+    text_out_of_scope: 0,
     text_optional_expected: activeTextBindings.filter(binding =>
       binding.runtime_optional).length,
     text_optional_applied: 0,
@@ -280,6 +316,7 @@ function applyMaterializedImportMetadata(metadata) {
     paint_expected: activePaintBindings.length,
     paint_applied: 0,
     paint_node_miss: 0,
+    paint_out_of_scope: 0,
     paint_unsupported: 0,
     paint_nodes: [],
   };
@@ -294,6 +331,10 @@ function applyMaterializedImportMetadata(metadata) {
       const id = node && (node.__pulpId || node.id);
       if (!id) {
         ++diagnostics.layout_node_miss;
+        continue;
+      }
+      if (scopeSet && !materializedNodeInScope(node, scopeSet)) {
+        ++diagnostics.layout_out_of_scope;
         continue;
       }
       // Browser capture stores each child border box relative to its parent's
@@ -330,6 +371,10 @@ function applyMaterializedImportMetadata(metadata) {
     const id = node && (node.__pulpId || node.id);
     if (!id) {
       ++diagnostics.paint_node_miss;
+      continue;
+    }
+    if (scopeSet && !materializedNodeInScope(node, scopeSet)) {
+      ++diagnostics.paint_out_of_scope;
       continue;
     }
     diagnostics.paint_nodes.push({
@@ -375,6 +420,10 @@ function applyMaterializedImportMetadata(metadata) {
     if (!node) {
       if (optional) ++diagnostics.text_optional_miss;
       else ++diagnostics.text_node_miss;
+      continue;
+    }
+    if (scopeSet && !materializedNodeInScope(node, scopeSet)) {
+      ++diagnostics.text_out_of_scope;
       continue;
     }
     // HTML controls remain semantic/styled containers in the native tree.
@@ -461,11 +510,23 @@ function applyMaterializedImportMetadata(metadata) {
     if (optional) ++diagnostics.text_optional_applied;
     else ++diagnostics.text_applied;
   }
-  g.__pulpMaterializedMetadataDiagnostics__ = diagnostics;
+  // A scoped pass deliberately skips most of the document, so its counts are
+  // not comparable to a full one. Publishing them under the same key would
+  // make every import validator that reads applied-vs-expected report a mass
+  // miss on a pass that was correct by construction. Keep the shipped key
+  // holding the last FULL application and publish the scoped pass beside it.
+  if (scopeSet) {
+    diagnostics.scoped = true;
+    diagnostics.scope_size = scopeSet.size;
+    g.__pulpMaterializedScopedApplyDiagnostics__ = diagnostics;
+  } else {
+    g.__pulpMaterializedMetadataDiagnostics__ = diagnostics;
+  }
   return applied;
 }
-g.__pulpApplyMaterializedImportMetadata__ = function () {
-  const applied = applyMaterializedImportMetadata(activeMaterializedMetadata);
+g.__pulpApplyMaterializedImportMetadata__ = function (scopeIds) {
+  const applied = applyMaterializedImportMetadata(
+    activeMaterializedMetadata, scopeIds);
   if (typeof syncMaterializedCanvasBehaviorsAfterCommit === 'function')
     syncMaterializedCanvasBehaviorsAfterCommit();
   return applied;

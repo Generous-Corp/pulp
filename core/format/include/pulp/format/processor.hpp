@@ -416,6 +416,36 @@ public:
         return note_names_changed_.load(std::memory_order_acquire);
     }
 
+    /// Non-parameter state-change notification, same shape as the latency /
+    /// tail / note-name flags above.
+    ///
+    /// Parameter edits already reach the host through the parameter system, so
+    /// a host knows the project changed. State that lives *outside* that system
+    /// leaves no such trace: a loaded sample or impulse response, an imported
+    /// wavetable, an editor-only setting carried in the plugin's own state
+    /// payload. Without a signal the host has no reason to believe anything
+    /// changed, and a user can close the project and lose that work without
+    /// ever being offered a save prompt. A Processor raises this whenever such
+    /// state changes.
+    ///
+    /// The adapter republishes it by whatever route the format sanctions.
+    /// VST3 is wired: `IComponentHandler2::setDirty(true)`, delivered on the
+    /// main thread. CLAP's equivalent is `clap_host_state::mark_dirty`; the
+    /// other adapters do not consume the flag, so raising it is harmless but
+    /// inert there.
+    ///
+    /// **Audio-thread-safe**, so a processor may raise it from `process()`,
+    /// though the usual caller is the editor or a file-load on the main thread.
+    void flag_state_dirty() noexcept {
+        state_dirty_.store(true, std::memory_order_release);
+    }
+    bool consume_state_dirty_flag() noexcept {
+        return state_dirty_.exchange(false, std::memory_order_acq_rel);
+    }
+    bool state_dirty_pending() const noexcept {
+        return state_dirty_.load(std::memory_order_acquire);
+    }
+
     /// Process one buffer of audio. Called on the real-time audio thread.
     ///
     /// @param audio_output  Output buffer to fill (main bus)
@@ -1029,6 +1059,7 @@ private:
     std::atomic<bool> latency_changed_{false};
     std::atomic<bool> tail_changed_{false};
     std::atomic<bool> note_names_changed_{false};
+    std::atomic<bool> state_dirty_{false};
 };
 
 /// Factory function type — plugins provide this to create processor instances.

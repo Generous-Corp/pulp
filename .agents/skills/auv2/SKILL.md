@@ -208,6 +208,27 @@ from the cause. The shared helpers sit directly in `pulp::format::au`.
 
 `AUMIDIBase::HandleSysEx(data, length)` does not carry a per-event sample offset at this SDK layer. We enqueue the payload with `sample_offset == 0` so it is delivered at the leading edge of the current `ProcessBufferLists()` block.
 
+### MPE capability: `kAudioUnitProperty_SupportsMPE`
+
+MPE is a **negotiated** capability, not something a plug-in can just handle.
+Logic (and every other MPE-aware host) reads `kAudioUnitProperty_SupportsMPE`
+(property ID 58, the v2 bridge of AUv3's `supportsMPE`) to decide whether to
+route an MPE zone's per-member-channel stream to this unit at all. A unit that
+leaves the property unimplemented is simply never offered MPE input, however
+complete its handling — so an MPE plug-in looks broken in Logic's MPE mode with
+nothing in the adapter to point at.
+
+All three AU v2 classes (`PulpAUEffect`, `PulpAUInstrument`,
+`PulpAUMidiProcessor`) answer it through the shared helpers
+`fill_supports_mpe_property_info` / `fill_supports_mpe` in
+`au_v2_common.hpp`, reading `descriptor_.effective_capabilities().supports_mpe`
+— the same opt-in the AUv3 adapter's `-supportsMPE` returns, so the two cannot
+disagree. A plug-in that did not opt in gets `kAudioUnitErr_InvalidProperty`,
+which is what a host reads as "no" and matches leaving it unimplemented.
+
+Add the property to **all three** classes when touching this. A helper wired
+into only the instrument leaves an `aumf`/`aumi` MPE plug-in silently
+unreachable, and no test that exercises one class catches it.
 ## Factory presets
 
 All three adapters override `AUBase::GetPresets` and
@@ -1015,6 +1036,26 @@ Two host-conformance surfaces beyond the display-string path above:
   Boolean, else Generic). A wrong range/unit silently mis-scales every host
   automation lane — assert the numeric metadata, not just the
   ValuesHaveStrings flag. Test: `test/test_au_v2_param_display.mm`.
+- **Hidden / read-only / non-automatable come from the shared model, and AU has
+  no literal flag for any of the three.** `fill_parameter_info` reads
+  `state::is_hidden_param` / `is_read_only_param` / `is_automatable_param` (the
+  same predicates VST3, CLAP and AUv3 read), then maps each to the AU flag whose
+  *documented* meaning matches — deliberately, from `AudioUnitProperties.h`, not
+  by copying another framework:
+  - read-only → withhold `IsWritable` (the host's only write path, so also its
+    automation path) and add `MeterReadOnly`, which Apple defines for exactly
+    this plugin-published display value. `IsReadable` stays set.
+  - hidden → `ExpertMode` ("the parameter is obscure — hint to UI to only
+    display in expert mode"). **This is a hint, not a guarantee**; AU has no
+    true hide, so do not promise a host will honour it.
+  - non-automatable → `NonRealTime` ("changing the parameter in real-time will
+    cause a glitch or otherwise undesirable effect"), which is the documented
+    reason not to drive something from an automation lane.
+
+  Because one helper serves `aufx`, `aumu` and `aumi`, this is a single site for
+  all three v2 variants. Note it was **never an AU gap**: `ParamInfo` simply had
+  no field, so VST3 and CLAP were blind in the same release. Test:
+  `test/test_au_param_visibility.mm`.
 - Generated or repurposed macro slots may update only their host-facing name
   through `StateStore::set_parameter_display_name()`. AUv2 observes the
   presentation names from an adaptive host-main-thread publisher and republishes

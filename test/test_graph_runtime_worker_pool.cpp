@@ -70,7 +70,12 @@ void square_task(void* ctx, std::uint32_t i) noexcept {
 // replaced already used, so what changed is the waiting mechanism and not the
 // length of the fuse.
 constexpr auto kParkTimeout = std::chrono::seconds(2);
-constexpr auto kFirstBatchTimeout = std::chrono::seconds(2);
+// A loaded gate VM (12 cores, two VMs per host) can take seconds to schedule
+// the first batch, and a tight bound turns that scheduling delay into a failed
+// race assertion on unrelated pull requests. The bound is a failsafe against a
+// pool that never progresses, which no timeout length rescues, so it is sized
+// for the slowest machine rather than the fastest.
+constexpr auto kFirstBatchTimeout = std::chrono::seconds(30);
 constexpr auto kBatchProgressTimeout = std::chrono::seconds(10);
 // A pool that can park does so within a few milliseconds, so this bounds a wait
 // that must NOT be satisfied by one that easily could have been.

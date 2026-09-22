@@ -2402,6 +2402,21 @@ public:
     }
     bool supports_back_buffer_capture() const override { return true; }
 
+    bool supports_gpu_submission_evidence() const override {
+        return true;
+    }
+
+    // True only for a `presented` outcome. `offscreen` is excluded even though
+    // it retires damage: on this host the CAMetalLayer is always the intended
+    // output, so offscreen means the surface is missing and nothing is shown.
+    // `recreate` reports false even though the recording was submitted, because
+    // the drawable's contents are undefined. Failing closed is the safe
+    // direction here — an unproven frame must never read as submission
+    // evidence.
+    bool last_frame_gpu_submission_observed() const override {
+        return last_submission_observed_.load(std::memory_order_relaxed);
+    }
+
     void invalidate_input_state() override {
         [metal_view_ clearInteractionState];
     }
@@ -2669,6 +2684,11 @@ private:
     pulp::view::mac_frame_timing::MacDisplayLinkDriver display_link_;
     NSTimer* hidden_frame_timer_ = nil;
     std::atomic<bool> needs_repaint_{true};
+    // Whether the last frame rendered by render_frame() reached its intended
+    // output. Written on the main thread by render_frame() and read by the
+    // inspector's frame-evidence producer, also on the main thread; atomic so
+    // an off-main reader can never observe a torn value.
+    std::atomic<bool> last_submission_observed_{false};
     std::atomic<bool> continuous_frames_{false};
     std::atomic<bool> render_dispatch_queued_{false};
     std::shared_ptr<std::atomic<bool>> render_dispatch_alive_ =
@@ -3024,6 +3044,14 @@ private:
         PULP_TRACE_SCOPE_NAMED_ARGS("render", "frame", "frame_index",
                                     frame_clock_.frame());
 
+        // Clear before anything can return, so none of the three early returns
+        // below can leave a PREVIOUS frame's verdict standing as this frame's
+        // evidence. Each of them returns false, and one of them presents an
+        // undrawn drawable, so none of them produced output worth claiming.
+        // Reset first rather than per-return: the invariant is then a property
+        // of the function, not of whoever edits its exits next.
+        last_submission_observed_.store(false, std::memory_order_relaxed);
+
         if (!gpu_surface_ || !skia_surface_) return false;
 
         // Emit the per-frame dirty-rect decision the host would use for
@@ -3148,7 +3176,18 @@ private:
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
         // Retire damage only for a frame that REACHED the drawable (see render::FrameOutcome).
-        if (pulp::render::frame_reached_output(outcome)) {
+        const bool reached_output = pulp::render::frame_reached_output(outcome);
+        // Submission evidence is NARROWER than damage retirement, and
+        // deliberately so. `offscreen` is a legitimate output for a host that
+        // has no presentable surface by design, so it retires damage; but THIS
+        // host always intends the CAMetalLayer, so an `offscreen` outcome here
+        // means the Metal surface was never created, Present() is a no-op, and
+        // the window is black while offscreen readback still returns a correct
+        // frame. Counting it would make the flag agree with the exact failure
+        // it exists to expose.
+        last_submission_observed_.store(outcome == render::FrameOutcome::presented,
+                                        std::memory_order_relaxed);
+        if (reached_output) {
             tracker_.clear();  // next frame starts clean
             if (partial_repaint_enabled_) clear_pending_dirty();  // FU-2: no paint_root here
         } else if (partial_repaint_enabled_) {

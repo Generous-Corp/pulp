@@ -48,8 +48,11 @@ width; its default viewport remains an automatically correctable initial width.
 state before the same-frame evidence capture. Plans use
 `pulp-browser-interactions-v1` and contain only bounded `click`,
 `context-click`, `type`, `wait-for`, and `wait-ms` actions. `context-click`
-uses a real secondary-button press/release. The helper records selectors and typed-text
-length in `interaction-report.json`; it persists neither typed plaintext nor a
+uses a real secondary-button press/release. A mutating action may include a
+bounded `expect` object (`selector`, `state`, and optional timeout) to require a
+post-action visible, hidden, attached, or detached state delta; the observed
+state is recorded in `interaction-report.json`. The helper records selectors
+and typed-text length in `interaction-report.json`; it persists neither typed plaintext nor a
 per-action text hash. The published plan identity hashes a canonical redacted
 plan in which typed text is replaced by its length, so short private values
 cannot be recovered by hashing candidate plans. Same-document history and
@@ -115,3 +118,130 @@ detail is written to `capture-error.json`.
 Arbitrary JavaScript evaluation is intentionally not a CLI escape hatch: it
 would weaken the source/evidence boundary and make captures difficult to
 reproduce or audit.
+
+## Offline text mismatch evidence
+
+From a source checkout, build an optional diagnostic sidecar from an existing
+capture (no browser launch, capture instrumentation, or DesignIR change):
+
+```sh
+node tools/import-design/browser_capture/text_diagnostics.mjs \
+  /path/to/capture/dom-snapshot.json /path/to/capture/platform-fonts.json \
+  > /path/to/text-diagnostics.json
+```
+
+`pulp-text-diagnostics-v1` records the requested font, resolved owner-element
+face census and glyph counts, snapshot text-fragment rectangles and UTF-16
+ranges, and computed CSS line-height. Face counts are deliberately not summed
+across runs: sibling text runs can repeat the same owner census. Multiple faces
+show participation, but do not identify which character used which face or
+prove that a CSS family alias failed. The report preserves the census rather
+than declaring a guessed fallback. `normal` remains a CSS value, not a guessed
+pixel height.
+
+Every metric has `status: observed` with `source` and `value`, or
+`status: unavailable` with `reason`. Current CDP snapshots do not provide
+per-glyph ink bounds/advances, laid-out baselines, face ascent/descent, or full
+CSS inline line boxes. These fields remain explicitly unavailable. Snapshot
+text-fragment rectangles are not glyph ink bounds or full CSS line boxes;
+fragment width is not an advance. Do not infer a baseline from font size or
+clamp negative half-leading to manufacture measured evidence.
+
+The report covers the primary document and preserves the font census's
+truncation summary. Run IDs are capture-local `document:0/layout:N`; rectangles
+remain in primary-document snapshot CSS pixels, independent of screenshot DPR.
+`capture_basis` is SHA-256 of the concatenated ASCII SHA-256 digests of the two
+input files, snapshot first. It identifies retained inputs, not a native render
+or proof that independently supplied inputs were captured together. Supply
+both files from the same retained capture directory.
+
+`compareTextDiagnostics(reference, candidate, tolerance = 0.25)` is an exported
+adapter seam. A future native producer must explicitly join reference run IDs,
+text, capture basis and coordinate space, and report the same metric meanings.
+Use arrays for glyph metrics and baselines, numbers for ascent/descent, and
+`{bounds: [x,y,width,height], start, length}` records for fragment/line boxes;
+keep run-relative UTF-16 ranges exact. Metrics requiring additional conventions
+(such as glyph order and font-metric units) need an agreed producer contract
+before comparison. This helper does not collect native metrics or establish
+native parity. It returns per-metric `match`, `mismatch`, or `unavailable`, and
+`incomparable` for missing/extra runs or changed text. Different capture bases
+or coordinates are rejected. Geometry uses CSS-pixel tolerance; ranges, font
+counts, identities, and CSS strings compare exactly. Missing metrics never
+count as matches, including in a self-comparison. Coverage accompanies findings;
+there is no overall pass that could hide truncation or missing instrumentation.
+
+The diagnostic module is a source-checkout analysis tool, not a shipped capture
+runtime dependency. Its tests join the existing `pulp-browser-capture-node-unit`
+CTest glob and can also run with `node --test` directly.
+
+### Native observation and the bounded coordinate join
+
+`pulp-design-ir-observe --text-diagnostics <json>` enables selectable geometry
+on its disposable imported tree before the normal Skia render, then emits
+`pulp-native-selection-diagnostics-v1` after paint. With the option absent the
+observer does not enable selection or emit this sidecar. The data comes from
+`Label::selectable_layout()`: UTF-8 ranges, shaped caret X positions, selection
+band top/height, anchor, and the effective font request. It never calls a font
+request a resolved face. Unpainted layouts, transformed/hidden ancestors,
+child paint offsets, transformed text, attributed text, and non-LTR labels do
+not produce comparable coordinates.
+
+`compareNativeSelection` in `native_text_diagnostics.mjs` requires an explicit
+one-to-one browser-run/native-anchor join, exact source text, capture basis,
+native input path, and native root origin in browser CSS pixels. Correspondence
+is caller-owned; matching strings alone is not an identity or transform proof.
+The caller must establish an untransformed horizontal LTR single-line fixture.
+The initial adapter accepts only complete printable ASCII ranges without
+leading/trailing spaces, with a single CDP fragment and a single painted native
+selection line. UTF-8 and UTF-16 ranges therefore coincide in this bounded lane.
+It rejects partial, unpainted, reversed, ambiguous, or unsupported ranges.
+
+Only full-range horizontal endpoints are compared. Native selection bands and
+CDP fragment heights have different meanings, so their vertical coordinates
+are never scored against each other. The font diagnostic compares the native
+paint request to exact names in the browser's resolved census. A name mismatch
+is actionable request evidence, but aliases can differ and it does not prove
+a native fallback. This report does not establish arbitrary import parity.
+
+Run the retained browser/native experiment from the source checkout:
+
+```sh
+node tools/import-design/browser_capture/text_diagnostics_native_proof.mjs \
+  /path/to/pulp-design-ir-observe /path/to/chromium /path/to/new-evidence-dir
+```
+
+It captures a known HTML fixture, builds explicitly paired DesignIR fixtures,
+then uses the observer for three actual native Skia renders: reference, a font
+intervention, and a +12 logical-pixel translation. The proof requires the font
+intervention to change measured native geometry and the translation to shift
+both range endpoints by 12 relative to the native reference. An existing
+browser/native reference mismatch is retained rather than asserted away.
+Artifacts include source HTML, IR inputs, screenshots, raw observations, joins,
+comparisons, and a receipt with executable/input hashes. A receipt is emitted
+only after all three native renders and sensitivity assertions succeed.
+
+The fixture also retains an independent browser Canvas2D `measureText` probe:
+whole-string advance/ink bounds and font-box ascent/descent, with missing fields
+represented by null. The font-ready probe uses the fixture's computed font.
+These are **probe metrics**, not a DOM baseline, per-glyph ink, or the metrics of
+every fallback face. Measuring isolated characters would alter shaping and
+cannot manufacture per-glyph evidence for the laid-out string.
+
+Producer limits requiring separate work:
+
+- The Label selection seam does not expose painted baselines, resolved native
+  faces, or per-glyph ink. `baseline_y()` is a layout baseline and can differ
+  from paint after vertical alignment; it is not a substitute.
+- `TextShaper::PreparedText` exposes ascent/descent with a real-metric flag, but
+  a new prepare call is an independent probe, not the Label's painted run.
+- `SkiaCanvas::measure_text_full` can return estimates without a validity flag;
+  its whole-string font bounds also do not identify fallback glyphs. Calling it
+  separately must not be promoted to an observed painted-glyph census.
+- CDP text boxes and owner face counts do not expose actual DOM baselines or
+  character-to-face attribution. A DOM range rectangle remains layout geometry.
+- General joins need producer-owned DOM-to-native identity and full transform,
+  scroll, bidi, wrapping, shaping, and UTF-8/UTF-16 correspondence. The bounded
+  fixture adapter refuses to stand in for those contracts.
+
+The generic implementations owning any new painted-run instrumentation are
+outside this observer change. The observer consumes existing APIs only.

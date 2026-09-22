@@ -120,3 +120,22 @@ emits a `canvas*` bridge call must call `this._fp()` first, or its command
 would land ahead of the buffered points and silently reorder the path.
 `tools/scripts/check_canvas_path_flush.py` (ctest `canvas-path-flush-lint`)
 enforces that for every bridge-emitting method in the shim.
+
+## Native SDF shading commands are outside the Canvas2D inventory
+
+`canvasDrawSdf` is registered alongside the `canvas*` bridge functions in
+`core/view/src/widget_bridge_api_manifest.tsv` and
+`core/view/src/widget_bridge/canvas2d_api.cpp`, but it is a Pulp-native
+command, not a Canvas2D API. It takes a signed-distance-field geometry tree
+(bounded to depth 8 and 16 leaves) plus author SkSL, and it is replayed from
+retained storage rather than from the recorded Canvas2D command stream.
+
+The same applies to the shader-uniform surface —
+`setWidgetShaderUniforms`, `getWidgetShaderUniforms` and
+`setWidgetShaderReach`. These reach a widget's installed SkSL shader; the
+web Canvas2D specification has no counterpart, so none of them appear in the
+`canvas2d/*` catalog and none of them move the counts above.
+
+Nothing here changes the Canvas2D drawing inventory, the recorded command
+stream, or any existing backend status: a host that never calls these
+commands renders identically.

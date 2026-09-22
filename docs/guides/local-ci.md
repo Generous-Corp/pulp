@@ -1474,6 +1474,16 @@ Push runs are also exempt from `cancel-in-progress`: they share the
 `refs/heads/main` concurrency group, so cancelling a superseded one would kill
 its cache-save step exactly when main is busiest. PR runs still cancel.
 
+**Keep job-level `if:` gates on `!cancelled()`, never `always()`.** A job gated on
+`always()` runs even when its run has been cancelled, so a superseded run keeps
+building, stays `in_progress`, and goes on holding its group. Every newer head of
+that PR then sits at `pending` with zero jobs, which is indistinguishable from
+runner starvation from the outside, and an ordinary `POST .../cancel` will not
+free it: only `force-cancel` bypasses `always()`. `!cancelled()` buys what these
+gates actually need, since it still evaluates when an upstream need failed or was
+skipped. Step-level `always()` is fine and is used deliberately for log upload.
+`tools/scripts/test_build_workflow.py` enforces the job-level rule.
+
 The `classify` job diffs an **event-dependent base**
 (`tools/scripts/resolve_classify_base.py`): a PR diffs
 `github.event.pull_request.base.sha`, a merge group diffs
@@ -2574,6 +2584,54 @@ gh workflow run runner-health-check.yml -f alarm_minutes=60
 python3 tools/scripts/queue_age_watchdog.py --snapshot snapshot.json
 ```
 
+#### Label reconciliation: *why* a stalled job is not being picked up
+
+Queue age answers *is the lane alive*. When the answer is no, it does not say
+why, and the reader is left guessing among a wedged worker, an expired token,
+an asleep host, and a label nothing serves. On 2026-09-21 it was the label: three
+queued `macos` jobs each requested `pulp-build-merge-group` while every online
+runner advertised `pulp-build-pr-head`. Those jobs were unschedulable from the
+moment they queued, the merge queue head sat in `AWAITING_CHECKS` behind them,
+and 5 h 30 min passed with zero merges and no alarm anywhere.
+
+The same sweep now reconciles the two. For each **distinct label set some job has
+already been queued on past `alarm_minutes`**, it compares the request against
+the labels online self-hosted runners advertise — across **both** the repo and
+org scopes, because runners in an org runner group are invisible to the repo
+endpoint and this org keeps online ones.
+
+| finding | level | means |
+|---|---|---|
+| `unschedulable_labels` | alarm | No online runner, busy or idle, advertises the full requested set. The finding names the labels nothing carries. |
+| `runner_census_blind` | warn | The census could not be completed (a scope refused, a listing came back short, or nothing was online), so no label can be called unserved this sweep. It reports the unconfirmed diff as a lead, never a verdict. |
+
+Three properties make this safe, and each is pinned by a test:
+
+- **Demand-gated, so an idle fleet is silent by construction.** This is *not* the
+  scheduled label-satisfiability census argued against above. That census asks
+  "does anything advertise label X?" of the whole fleet on a timer, and because
+  these runners are JIT — registered only while serving — a healthy lane answers
+  "no" every idle night until the alarm is muted. This check has nothing to
+  evaluate unless a real job is stalled on a real label set. The JIT objection is
+  bounded rather than ignored: a healthy lane mints a runner in seconds to
+  minutes, so a missing label has had 45 minutes to appear before anything fires.
+- **Saturation is not unschedulable.** GitHub places a job on one runner that
+  carries *every* requested label, so "schedulable" means some online runner's
+  label set is a superset of the request. A busy superset is a deep queue on a
+  working lane and stays silent at any age.
+- **Fails closed on blindness.** A failed or empty runner read reports an
+  evidence gap — never "unschedulable", and never a clean bill of health either.
+  That gap is scoped to this finding: it deliberately does not use the sweep-wide
+  degraded predicate, because neither a truncated run listing nor a failed jobs
+  call can falsify a queued job's own requested labels, and sharing the predicate
+  would leave the check permanently degraded on a repo busy enough to truncate.
+
+The org-scoped runners API needs `Administration: Read`, which `GITHUB_TOKEN`
+does not carry, so the workflow passes `secrets.RELEASE_BOT_TOKEN` when it is
+configured (the same fallback `runner-topology-check.yml` uses). Without it the
+org scope refuses, the census records the refusal, and every reconciliation
+reports `runner_census_blind` instead of naming a label — honest, and disarmed.
+
 #### Contribution: the host that goes quiet while the lane stays healthy
 
 Queue age answers *is the lane alive*. It cannot answer *is every host still in
@@ -2805,18 +2863,53 @@ stuck merge-ready — the same open/update/auto-close contract as the release
 watchdogs (see [release-watchdog.md](release-watchdog.md)). A degraded API sweep
 never closes an existing tracker; only a complete snapshot can prove recovery.
 
+**Third condition — the outcome heartbeat.** The two predicates above both
+infer health from a component: a PR's merge state, a queue head's age, a batch
+having been dispatched. Each can read healthy while the thing that matters has
+stopped. So a third condition asks the outcome directly: **nothing has landed
+on `main` for `throughput_threshold_minutes` (default 90) while the merge queue
+is non-empty.** The non-empty queue is the denominator — a quiet repository
+merging nothing is correct and never alarms, no matter how long it has been.
+Runner capacity is reported on the finding and shapes the diagnosis text, but
+is deliberately *not* a condition: requiring "capacity is online" would let a
+total fleet outage silence the outcome alarm, which is the substitution of a
+component for the outcome this condition exists to stop. Because it is
+cause-agnostic, it catches deadlocks nobody has enumerated — a routing typo, an
+exhausted pool, a label no runner advertises, a host that went down.
+
+**Fourth condition — the sweep's own blindness.** A collection failure yields
+zero findings, which every consumer reads exactly like a clean bill of health.
+This guard once ran four hours into a total merge stall with both of its reads
+failed, printed "Merges are flowing", and finished green; twenty consecutive
+sweeps were degraded with the merge-queue read failing every time, so the queue
+alarm had been structurally unable to fire for days while reporting success
+every 30 minutes. A failed read is therefore now itself an alarm that names the
+stages that failed and the verdicts they silenced. **Silence is evidence of
+health only when the instrument demonstrably ran** — so when reading a quiet
+sweep, confirm its snapshot shows a non-zero open-PR count and queue depth
+rather than trusting the absence of findings.
+
+Reads are kept inside the budget that completes: the open-PR query pages 25 at
+a time (50 asks GitHub for 50 check rollups at once and times out with HTTP 504
+under normal load), and transient 502/503/504 responses get a bounded retry.
+Terminal failures are never retried.
+
 Analysis and the predicate live in `tools/scripts/merge_stall_watchdog.py`,
 tested by `tools/scripts/test_merge_stall_watchdog.py` — which pins the
 must-stay-quiet cases (young PR, DIRTY, BLOCKED, no auto-merge, single-sweep
 blip) as regressions so a future edit that would make the guard cry wolf fails
 at PR time. Queue-specific tests pin empty/young/recent-batch cases quiet and an
-old head plus old batch as an immediate alarm.
+old head plus old batch as an immediate alarm. Throughput tests pin the empty
+queue and a recent merge quiet, and prove a dead fleet does not suppress the
+alarm; blindness tests replay the real degraded sweep and assert it can no
+longer render as calm.
 
 ```bash
 # Dry-run a sweep by hand (log findings, do not touch the issue)
 gh workflow run merge-stall-check.yml -f dry_run=true
 gh workflow run merge-stall-check.yml -f threshold_minutes=60
 gh workflow run merge-stall-check.yml -f queue_threshold_minutes=30
+gh workflow run merge-stall-check.yml -f throughput_threshold_minutes=90
 
 # Replay a recorded snapshot offline (no API calls, verdict pinned to capture time)
 python3 tools/scripts/merge_stall_watchdog.py --snapshot snapshot.json --prev-state state.json
@@ -5200,3 +5293,19 @@ Use `launchctl print`, never `launchctl list`, when checking any of this by
 hand: `list` renders a `KeepAlive` job in a crash loop as `- 0`, byte-identical
 to a healthy idle service, which is exactly how the M5 preamble runner stayed
 invisible through 3,684 respawns.
+
+## What the required `macos` check covers, per event
+
+| event | build | tests |
+|---|---|---|
+| `pull_request` | yes | **no** |
+| `merge_group` | yes | yes |
+| `push` / `workflow_dispatch` | yes | yes |
+
+The test phase is roughly forty percent of the gate, and every open pull request queues behind
+the same small pool of self-hosted macOS runners. Running the tests once, in the queue, against
+the commit that will actually land, keeps `main` fully protected and returns that time to the
+pull requests waiting for a slot.
+
+So a green `macos` on a pull request means it **built**. Test results arrive when the queue
+validates it.

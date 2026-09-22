@@ -467,8 +467,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/src/view.cpp",
           "state": "pulp-owned-retained",
-          "revision": "0767819b6008171adacaa3075192e30f9d068660",
-          "object_id": "176babd25f4e9551a6e9dbcaca8fa4d3f9ea36bf",
+          "revision": "66c0af7b32667849b490d06ac5ab20ff16a128a5",
+          "object_id": "e6edfa0237da3ee1ef1f3f4910d5b263308f5d7a",
           "object_type": "blob"
         },
         {
@@ -2711,16 +2711,16 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/daw-smoke/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "2ed59c32fde47c9315d3bbe8dde88a32b7395e06",
-          "object_id": "1f753e7d3bab59cae1c33b93ac13f5de96c237e0",
+          "revision": "cdbf748193c28790d4edb973346d76da9e100fcf",
+          "object_id": "a66f6ceb2012061f881e5fe43b1d6455dec1667b",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/forge-app-delivery/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "778872d7a26e059266599ac1ed55188071f75d56",
-          "object_id": "9745c1d683d37b39dd8d5a47cc514777c995270a",
+          "revision": "5b5c7f0c40a355e756748933458af8a25dcdb7c5",
+          "object_id": "a643a2114d5b612cd5209783ea1edd1155473d7f",
           "object_type": "blob"
         },
         {
@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "c388dedf513a6c731d66988a369a322bb516890e",
-          "object_id": "9aea6f3d3a3c56e906f7305b6599351a6810d61b",
+          "revision": "b3569fd948d54ea850dbc8b29c1f5f08f4e1d949",
+          "object_id": "d6ecc53fa22b0cedcbdd671086f3f77b1908e724",
           "object_type": "blob"
         },
         {
@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "c017adf4ab74efc7c37a3c11be92fab3327cd535",
-          "object_id": "f8a3aa023ab36fd696faad58043dc67d34261a52",
+          "revision": "f6fae2aed2cee6a7ce41bf043e971d834dbc68f0",
+          "object_id": "60a950a880d28366d546e031068cdb3b34f537dc",
           "object_type": "blob"
         },
         {

@@ -230,12 +230,16 @@ behaviour. Both are re-evaluated immediately on `setAttribute` /
 is honoured identically: any token other than absent or `"false"`
 (`true` / `menu` / `listbox` / `tree` / `grid` / `dialog`) marks the control
 as an overlay trigger, and removing the attribute clears the mark. It is the
-exact counterpart of the ARIA the overlay side already reads —
-`role="dialog" | "alertdialog" | "menu" | "listbox"` and `aria-modal="true"`
-claim the slot — so a document that has already described its menus for
-assistive technology needs no Pulp-specific attribute to get one-press menu
-switching. Honouring only the claim half is what made a correctly-authored
-document pay two presses. `data-overlay-trigger` remains available for
+exact counterpart of the claim half: `role="menu" | "listbox" | "tree" |
+"grid" | "dialog" | "alertdialog"` and `aria-modal="true"` say the element IS a
+dismissable overlay, and claim the slot with the same outside-click consumption
+`data-overlay="true"` uses. So a document that has already described its menus
+for assistive technology needs no Pulp-specific attribute, for either half.
+Both halves are read at mount as well as on a later attribute write, because
+React commits `setAttribute` before `appendChild` and an immediate
+re-evaluation is a no-op on an unmounted node. Honouring only one half is what
+made a correctly-authored document pay two presses to switch menus, and left
+the panel itself to the CSS-shape inference, which claims click-through. `data-overlay-trigger` remains available for
 documents that do not author ARIA. (`@pulp/react` reads the same
 `aria-haspopup` prop, plus an explicit `overlayTrigger` prop.)
 

@@ -124,10 +124,49 @@ inline void midi1_to_ump(const MidiBuffer& src, UmpBuffer& dst, uint8_t group = 
 
 // ── UMP → MIDI 1.0 ──────────────────────────────────────────────────────
 
+/// Decoded fields of a MIDI 2.0 Channel Voice Program Change (status 0xC).
+///
+/// UMP layout (MIDI 2.0 UMP spec, MIDI 2.0 Program Change Message):
+///   word 0: [mt=0x4][group][status=0xC][channel][reserved][option flags]
+///   word 1: [program][reserved][bank MSB][bank LSB]
+/// Option-flag bit 0 is "Bank Valid"; when it is clear the bank bytes are
+/// reserved and carry no meaning. Each of program / bank MSB / bank LSB
+/// occupies the low 7 bits of its byte.
+struct Midi2ProgramChange {
+    uint8_t program = 0;     ///< 0..127
+    bool bank_valid = false; ///< option-flag bit 0
+    uint8_t bank_msb = 0;    ///< 0..127, meaningful only when bank_valid
+    uint8_t bank_lsb = 0;    ///< 0..127, meaningful only when bank_valid
+};
+
+/// Decode a MIDI 2.0 Program Change packet's fields without converting it.
+/// Pure: depends only on @p p. Callers that need the complete MIDI 1.0
+/// rendering of a bank-valid program change (CC 0, CC 32, then the program
+/// change) can build it from this, which `ump_to_midi1_event` alone cannot
+/// express through its single-event out-parameter.
+inline Midi2ProgramChange ump_program_change_fields(const UmpPacket& p) {
+    Midi2ProgramChange f;
+    f.program = static_cast<uint8_t>((p.words[1] >> 24) & 0x7F);
+    f.bank_valid = (p.words[0] & 0x01u) != 0;
+    f.bank_msb = static_cast<uint8_t>((p.words[1] >> 8) & 0x7F);
+    f.bank_lsb = static_cast<uint8_t>(p.words[1] & 0x7F);
+    return f;
+}
+
+/// MIDI 1.0 controller numbers carrying Bank Select for a program change.
+inline constexpr uint8_t kBankSelectMsbCc = 0;
+inline constexpr uint8_t kBankSelectLsbCc = 32;
+
 /// Convert a UMP Channel Voice packet into a MIDI 1.0 event when possible.
 /// Returns true on success and writes to @p out. Returns false for packets
 /// that have no MIDI 1.0 equivalent (e.g. per-note pitch bend, per-note CC),
 /// which callers typically route via the MPE sidecar instead.
+///
+/// Emits at most one event. The one message whose faithful MIDI 1.0 rendering
+/// needs more than that is a bank-valid MIDI 2.0 program change (CC 0, CC 32,
+/// program change); here it converts to the program change alone. Use
+/// `ump_program_change_fields` to read the bank, or `ump_to_midi1`, which
+/// emits the complete sequence.
 inline bool ump_to_midi1_event(const UmpPacket& p, MidiEvent& out) {
     const auto mt = p.message_type();
     const uint8_t ch = p.channel();
@@ -172,9 +211,45 @@ inline bool ump_to_midi1_event(const UmpPacket& p, MidiEvent& out) {
             out = MidiEvent::note_on(ch, p.note_number(), v7);
             return true;
         }
+        case 0xA0:
+            // Poly key pressure: note in word 0 bits 8-15, 32-bit value in
+            // word 1 (same >> 25 narrowing the CC case uses).
+            out = {choc::midi::ShortMessage(static_cast<uint8_t>(0xA0 | (ch & 0x0F)),
+                                            p.note_number(),
+                                            static_cast<uint8_t>(p.data_32() >> 25)),
+                   0, 0.0};
+            return true;
         case 0xB0:
             out = MidiEvent::cc(ch, static_cast<uint8_t>((p.words[0] >> 8) & 0x7F),
                                 static_cast<uint8_t>(p.data_32() >> 25));
+            return true;
+        case 0xC0: {
+            // Program change is NOT shaped like the CC or pressure cases: the
+            // program lives in the TOP byte of word 1, not in a 32-bit data
+            // value, and word 0's low byte is an option-flag field rather than
+            // a controller index.
+            //
+            // Known limit: a bank-valid program change is three MIDI 1.0
+            // messages (CC 0 bank MSB, CC 32 bank LSB, then the program
+            // change). This function has a single MidiEvent out-parameter and
+            // so can only emit the program change; the bank is not
+            // representable here. It is not silently discarded — the bytes
+            // stay readable via `ump_program_change_fields`, and the
+            // buffer-level `ump_to_midi1` emits the full three-message
+            // sequence. A caller using this single-event entry point directly
+            // must consult `ump_program_change_fields` if it needs the bank.
+            const auto fields = ump_program_change_fields(p);
+            out = MidiEvent::program_change(ch, fields.program);
+            return true;
+        }
+        case 0xD0:
+            // Channel pressure carries no note byte; the 32-bit value in word 1
+            // narrows to the single MIDI 1.0 data byte. This is the MPE
+            // pressure axis, so dropping it leaves an MPE plug-in reading a
+            // stream with no pressure the moment a host speaks MIDI 2.0.
+            out = {choc::midi::ShortMessage(static_cast<uint8_t>(0xD0 | (ch & 0x0F)),
+                                            static_cast<uint8_t>(p.data_32() >> 25), 0),
+                   0, 0.0};
             return true;
         case 0xE0:
             out = MidiEvent::pitch_bend(ch, scale_32_to_14(p.data_32()));
@@ -184,10 +259,37 @@ inline bool ump_to_midi1_event(const UmpPacket& p, MidiEvent& out) {
     }
 }
 
+/// True when @p p is a MIDI 2.0 Program Change carrying a valid bank, i.e.
+/// one whose faithful MIDI 1.0 rendering needs more than a single event.
+inline bool ump_is_bank_valid_program_change(const UmpPacket& p) {
+    if (p.message_type() != UmpMessageType::Midi2ChannelVoice)
+        return false;
+    if ((static_cast<uint8_t>((p.words[0] >> 16) & 0xF0)) != 0xC0)
+        return false;
+    return ump_program_change_fields(p).bank_valid;
+}
+
 /// Flatten a UmpBuffer into a MidiBuffer. Packets that have no MIDI 1.0
 /// equivalent are skipped; if you care about them, use the MPE sidecar.
+///
+/// One packet is not always one event: a MIDI 2.0 program change whose
+/// Bank Valid option flag is set expands to the three MIDI 1.0 messages that
+/// carry the same meaning — CC 0 (bank MSB), CC 32 (bank LSB), then the
+/// program change — all at the source packet's sample offset and in that
+/// order, because a MIDI 1.0 receiver latches the bank bytes and applies them
+/// on the following program change.
 inline void ump_to_midi1(const UmpBuffer& src, MidiBuffer& dst) {
     for (const auto& ue : src) {
+        if (ump_is_bank_valid_program_change(ue.packet)) {
+            const auto fields = ump_program_change_fields(ue.packet);
+            const uint8_t ch = ue.packet.channel();
+            auto msb = MidiEvent::cc(ch, kBankSelectMsbCc, fields.bank_msb);
+            msb.sample_offset = ue.sample_offset;
+            dst.add(msb);
+            auto lsb = MidiEvent::cc(ch, kBankSelectLsbCc, fields.bank_lsb);
+            lsb.sample_offset = ue.sample_offset;
+            dst.add(lsb);
+        }
         MidiEvent ev{};
         if (ump_to_midi1_event(ue.packet, ev)) {
             ev.sample_offset = ue.sample_offset;
