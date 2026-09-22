@@ -1,4 +1,6 @@
+#include "../core/view/src/design_ir_helpers.hpp"
 #include "test_design_import_shared.hpp"
+#include <pulp/runtime/crypto.hpp>
 
 // ── Design source parsing ───────────────────────────────────────────────
 
@@ -1125,6 +1127,90 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
         runtime_ir.root.children.push_back(std::move(runtime_link));
         CHECK(collect_design_ir_assets(runtime_ir, options).assets.empty());
     }
+
+    SECTION("literal Vite import.meta URL edges enter the asset manifest") {
+        TempDir tmp("pulp-design-ir-vite-assets");
+        write_text(tmp.path / "hero.png", "vite-image-bytes");
+        auto ir = parse_claude_html(read_fixture("test/fixtures/imports/claude/vite-assets.html"));
+
+        DesignIrAssetOptions options;
+        options.base_directory = tmp.path;
+        refresh_design_ir_asset_manifest(ir, options);
+
+        REQUIRE(ir.asset_manifest.assets.size() == 2);
+        const auto hero =
+            std::find_if(ir.asset_manifest.assets.begin(), ir.asset_manifest.assets.end(),
+                         [](const auto& asset) { return asset.original_uri == "./hero.png"; });
+        REQUIRE(hero != ir.asset_manifest.assets.end());
+        CHECK(hero->diagnostics.empty());
+        CHECK_FALSE(hero->content_hash.empty());
+        const auto dynamic =
+            std::find_if(ir.asset_manifest.assets.begin(), ir.asset_manifest.assets.end(),
+                         [](const auto& asset) { return asset.original_uri == "./${name}.png"; });
+        REQUIRE(dynamic != ir.asset_manifest.assets.end());
+        REQUIRE_FALSE(dynamic->diagnostics.empty());
+        CHECK(dynamic->diagnostics.front().kind == ImportDiagnosticKind::unresolved_asset);
+    }
+
+    SECTION("serialized relative asset paths survive relocation") {
+        TempDir source("pulp-design-ir-package-source");
+        TempDir relocated("pulp-design-ir-package-relocated");
+        write_text(source.path / "assets/hero.png", "portable-vite-asset");
+        write_text(relocated.path / "assets/hero.png", "portable-vite-asset");
+        std::ifstream package_input;
+
+        DesignIR ir =
+            parse_claude_html(R"html(<html><body><img src="./assets/hero.png"></body></html>)html");
+        DesignIrAssetOptions options;
+        options.base_directory = source.path;
+        refresh_design_ir_asset_manifest(ir, options);
+        REQUIRE(ir.asset_manifest.assets.size() == 1);
+        REQUIRE(ir.asset_manifest.assets.front().local_path ==
+                std::optional<std::string>("assets/hero.png"));
+
+        const auto serialized = serialize_design_ir(ir);
+        write_text(relocated.path / "scene.pulp.json", serialized);
+        package_input.open(relocated.path / "scene.pulp.json", std::ios::binary);
+        std::ostringstream package_bytes;
+        package_bytes << package_input.rdbuf();
+        const auto reloaded = parse_design_ir_json(package_bytes.str());
+        REQUIRE(reloaded.asset_manifest.assets.size() == 1);
+        const auto resolved =
+            resolve_asset_file(reloaded.asset_manifest.assets.front(), relocated.path);
+        REQUIRE(resolved.has_value());
+        CHECK(resolved->lexically_normal() ==
+              (relocated.path / "assets/hero.png").lexically_normal());
+        CHECK(reloaded.asset_manifest.assets.front().local_path ==
+              std::optional<std::string>("assets/hero.png"));
+    }
+}
+
+TEST_CASE("Vite URL intake ignores lexical false positives and malformed calls",
+          "[view][import][assets][vite]") {
+    auto ir = parse_claude_html(R"html(
+        <html><body><script>
+          // new URL('./comment.png', import.meta.url)
+          /* new URL('./block.png', import.meta.url) */
+          const quoted = "new URL('./string.png', import.meta.url)";
+          const escaped = 'skip\\\' quote';
+          new Nope('./wrong-constructor.png', import.meta.url);
+          new URL;
+          new URL foo;
+          new URL(123);
+          new URL('./valid.png', import.meta.url);
+          new URL('./unterminated.png, import.meta.url);
+          new URL('./missing-comma.png' import.meta.url);
+          new URL('./wrong-meta.png', other.url);
+          new URL('./missing-close.png', import.meta.url;
+        </script></body></html>
+    )html");
+
+    DesignIrAssetOptions options;
+    refresh_design_ir_asset_manifest(ir, options);
+
+    REQUIRE(ir.asset_manifest.assets.size() == 1);
+    CHECK(ir.asset_manifest.assets.front().original_uri == "./valid.png");
+    CHECK_FALSE(ir.asset_manifest.assets.front().diagnostics.empty());
 }
 
 TEST_CASE("DesignIR asset manifest preserves top-level asset refs and writes asset ids",

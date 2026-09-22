@@ -9,20 +9,22 @@
 #include "pulp_mac_objc_names.h"
 #include "accessibility_mac_host_lifetime.hpp"
 
+#import <Cocoa/Cocoa.h>
 #include <pulp/canvas/cg_canvas.hpp>
 #include <pulp/runtime/log.hpp>
-#include <pulp/view/input_events.hpp>
-#include <pulp/view/text_editor.hpp>  // focus-release affordance: single-line check
-#include <pulp/view/widgets.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/script_event_dispatch.hpp>
-#include <pulp/view/continuous_frames.hpp>  // needs_continuous_frames (CPU + GPU host repaint gate)
-#include <pulp/view/platform/ns_role_mapping.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <pulp/view/accessibility.hpp>
-#include <pulp/view/window_host.hpp>  // compute_design_viewport_transform
+#include <pulp/view/continuous_frames.hpp> // needs_continuous_frames (CPU + GPU host repaint gate)
+#include <pulp/view/host_drag_coalescer.hpp> // per-presented-frame drag coalescing
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/overlay_dismissal.hpp>
-#include <pulp/view/pointer_dispatch.hpp>  // dispatch_context_menu (no-Skia builds too)
-#import <Cocoa/Cocoa.h>
+#include <pulp/view/platform/ns_role_mapping.hpp>
+#include <pulp/view/pointer_dispatch.hpp> // dispatch_context_menu (no-Skia builds too)
+#include <pulp/view/script_event_dispatch.hpp>
+#include <pulp/view/text_editor.hpp> // focus-release affordance: single-line check
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp> // compute_design_viewport_transform
 // CoreVideo is used unconditionally now: the CPU (CoreGraphics, no-Skia)
 // plugin host also drives a CVDisplayLink for continuous frames + the idle
 // pump, not just the GPU host. Must be outside the PULP_HAS_SKIA guard.
@@ -37,6 +39,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 
 // Reuse the standalone window host's coordinate/event helpers (to_local,
 // view_is_in_tree, modifiers_from_ns_flags) — same pulp-view-core lib.
@@ -50,6 +53,7 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/hover_cursor.hpp>
+#include <pulp/view/plugin_key_routing.hpp>
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/gpu_surface.hpp>
@@ -111,6 +115,30 @@ extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
 // when the pointer MOVES and never because content moved under a still pointer,
 // so this is what makes a hovered region change update the cursor immediately.
 - (void)refreshHoverCursor;
+
+/// Opt IN to per-presented-frame drag coalescing, and out again.
+///
+/// Default NO, and that default is load bearing: a host that does not drive
+/// -flushCoalescedPointerInput every frame would strand held motion forever,
+/// so holding is enabled only by a host that has committed to flushing. Both
+/// plug-in hosts run a CVDisplayLink, so both opt in while their link runs.
+/// Turning it off flushes.
+- (void)setCoalescePointerInput:(BOOL)enabled;
+
+/// Deliver drag motion held since the last presented frame. The host MUST call
+/// this once per presented frame, BEFORE the frame's render decision: a frame
+/// that decides not to paint must still release input, or latency grows without
+/// bound while the editor is visually idle. Safe when nothing is held.
+- (void)flushCoalescedPointerInput;
+
+/// Drop held motion WITHOUT delivering it. For a host tearing down mid-gesture,
+/// where the drag target may already be gone.
+- (void)discardCoalescedPointerInput;
+
+/// Whether the opt-in above is currently set. A host's frame path asserts this
+/// out loud: the fail-safe makes a silently-lost opt-in look correct and merely
+/// slow, which is the hardest failure of this mechanism to notice.
+- (BOOL)coalescingPointerInput;
 @end
 
 // ── Accessibility element wrapping a Pulp View ──────────────────────────────
@@ -396,116 +424,186 @@ pulp::view::ContextPressResult pulp_plugin_context_press(
     return pulp::view::route_context_press(*root, point);
 }
 
+// Delivery half of a drag tick, shared by the immediate (fail-safe) path and
+// by the per-presented-frame flush. The captured target is re-resolved HERE,
+// not by the caller, so a view unmounted between submit and flush is handled
+// by the same liveness check on both paths rather than by two of them.
+//
+// Routing itself is the portable pulp::view::deliver_mouse_drag (shared with
+// the window host, and headlessly testable) — see pointer_dispatch.hpp for the
+// ordering contract.
+void pulp_plugin_deliver_drag(pulp::view::View* root, const pulp::view::PointerSample& sample,
+                              pulp::view::ViewCapture* drag_target) {
+    try {
+        if (!root || !drag_target)
+            return;
+        auto* live_target = drag_target->live_in(*root);
+        if (!live_target)
+            return;
+        pulp::view::deliver_mouse_drag(*root, live_target, sample.position, sample.modifiers,
+                                       sample.click_count, sample.button, sample.pointer);
+        if (auto* target = drag_target->live_in(*root))
+            pulp::view::mac_geometry::set_ns_cursor_for_style(target->cursor());
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[plugin-view-host] drag delivery threw: %s\n", e.what());
+    } catch (...) {
+        std::fprintf(stderr, "[plugin-view-host] drag delivery threw (unknown)\n");
+    }
+}
+
+// Build the deliver callback a HostDragCoalescer hands each released sample.
+pulp::view::HostDragCoalescer::Deliver
+pulp_plugin_drag_deliverer(pulp::view::View* root, pulp::view::ViewCapture* drag_target) {
+    return [root, drag_target](const pulp::view::PointerSample& s) {
+        pulp_plugin_deliver_drag(root, s, drag_target);
+    };
+}
+
 // `event` supplies the modifier flags and click count the drag carries. They
 // used to be dropped on the floor: the drag phase was delivered on the legacy
 // `on_mouse_drag(Point)` channel ONLY, so a view could read Shift/Cmd on press
-// and on release but never DURING the drag. Delivery itself now lives in the
-// portable pulp::view::deliver_mouse_drag (shared with the window host, and
-// headlessly testable) — see pointer_dispatch.hpp for the ordering contract.
-void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
-                            pulp::view::Point pt,
-                            pulp::view::ViewCapture* drag_target) {
-  try {
-    using namespace pulp::view::mac_geometry;
-    if (!root) return;
-    const uint16_t mods = modifiers_from_ns_flags(event.modifierFlags);
-    pulp::view::MouseEvent gesture_event;
-    gesture_event.position = pt;
-    gesture_event.window_position = pt;
-    gesture_event.button = pulp::view::MouseButton::left;
-    gesture_event.modifiers = mods;
-    gesture_event.is_down = true;
-    gesture_event.phase = pulp::view::MousePhase::drag;
-    if (!drag_target->live_in(*root)) drag_target->reset();
-    if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
-        // Claim landed mid-drag: hand the pointer to the gesture, but close the
-        // bracket the delivered press opened, and drop the target so the widget
-        // cannot silently resume dragging (with a position jump) if the gesture
-        // later goes terminal.
-        //
-        auto* handoff_target = drag_target->live_in(*root);
-        drag_target->reset();
-        pulp::view::deliver_gesture_handoff(*root, handoff_target, pt, mods,
-                                            static_cast<int>(event.clickCount));
-        return;
+// and on release but never DURING the drag.
+//
+// The sample is HELD for the next presented frame rather than delivered now
+// (see host_drag_coalescer.hpp). Returns whether the caller should arm a
+// repaint: exactly once per held run, not once per raw AppKit event. One
+// request per frame marks the surface dirty and keeps the frame driver's
+// dispatch gate open, which is all a flush needs; one per sample is precisely
+// the O(events) cost coalescing exists to remove.
+bool pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event, pulp::view::Point pt,
+                            pulp::view::ViewCapture* drag_target,
+                            pulp::view::HostDragCoalescer* coalescer) {
+    try {
+        using namespace pulp::view::mac_geometry;
+        if (!root)
+            return false;
+        const uint16_t mods = modifiers_from_ns_flags(event.modifierFlags);
+        pulp::view::MouseEvent gesture_event;
+        gesture_event.position = pt;
+        gesture_event.window_position = pt;
+        gesture_event.button = pulp::view::MouseButton::left;
+        gesture_event.modifiers = mods;
+        gesture_event.is_down = true;
+        gesture_event.phase = pulp::view::MousePhase::drag;
+        if (!drag_target->live_in(*root))
+            drag_target->reset();
+        if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
+            // Claim landed mid-drag: hand the pointer to the gesture, but close the
+            // bracket the delivered press opened, and drop the target so the widget
+            // cannot silently resume dragging (with a position jump) if the gesture
+            // later goes terminal.
+            //
+            // FLUSH BEFORE THE HANDOFF, and specifically before the capture is
+            // reset below. The handoff CLOSES this target's bracket; motion held
+            // from before the claim belongs inside it, so it has to be delivered
+            // while the capture still resolves. Flushing after the reset would drop
+            // it; not flushing would strand it until a later frame delivered it to
+            // a target whose gesture had already ended.
+            if (coalescer)
+                coalescer->flush_frame(pulp_plugin_drag_deliverer(root, drag_target));
+            auto* handoff_target = drag_target->live_in(*root);
+            drag_target->reset();
+            pulp::view::deliver_gesture_handoff(*root, handoff_target, pt, mods,
+                                                static_cast<int>(event.clickCount));
+            return true;
+        }
+        pulp::view::PointerSample sample;
+        sample.position = pt;
+        sample.modifiers = mods;
+        sample.click_count = static_cast<int>(event.clickCount);
+        sample.phase = pulp::view::MousePhase::drag;
+        sample.button = pulp::view::MouseButton::left;
+        sample.pointer.movement_x = static_cast<float>(event.deltaX);
+        // Preserve the established macOS relative-input contract: AppKit's raw
+        // deltaY is already the signed movement Pulp widgets consume. Negating it
+        // here makes bottom-right resize handles shrink on a physical downward
+        // drag and disagrees with MacWindowHost's relative-mouse path.
+        sample.pointer.movement_y = static_cast<float>(event.deltaY);
+        sample.pointer.has_movement_delta = true;
+        if (!coalescer) {
+            pulp_plugin_deliver_drag(root, sample, drag_target);
+            return true;
+        }
+        return coalescer->submit(sample, pulp_plugin_drag_deliverer(root, drag_target)).arm_repaint;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw: %s\n", e.what());
+        return true;
+    } catch (...) {
+        std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw (unknown)\n");
+        return true;
     }
-    auto* live_target = drag_target->live_in(*root);
-    if (!live_target) return;
-    pulp::view::PointerAttributes pointer;
-    pointer.movement_x = static_cast<float>(event.deltaX);
-    // Preserve the established macOS relative-input contract: AppKit's raw
-    // deltaY is already the signed movement Pulp widgets consume. Negating it
-    // here makes bottom-right resize handles shrink on a physical downward
-    // drag and disagrees with MacWindowHost's relative-mouse path.
-    pointer.movement_y = static_cast<float>(event.deltaY);
-    pointer.has_movement_delta = true;
-    pulp::view::deliver_mouse_drag(*root, live_target, pt, mods,
-                                   static_cast<int>(event.clickCount),
-                                   pulp::view::MouseButton::left, pointer);
-    if (auto* target = drag_target->live_in(*root))
-        set_ns_cursor_for_style(target->cursor());
-  } catch (const std::exception& e) {
-    std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw: %s\n", e.what());
-  } catch (...) {
-    std::fprintf(stderr, "[plugin-view-host] mouseDragged handler threw (unknown)\n");
-  }
 }
 
-void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
-                          pulp::view::Point pt, pulp::view::ViewCapture* drag_target) {
-  try {
-    using namespace pulp::view::mac_geometry;
-    if (!root) return;
-    pulp::view::MouseEvent gesture_event;
-    gesture_event.position = pt;
-    gesture_event.window_position = pt;
-    gesture_event.button = pulp::view::MouseButton::left;
-    gesture_event.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-    gesture_event.is_down = false;
-    gesture_event.phase = pulp::view::MousePhase::release;
-    gesture_event.click_count = static_cast<int>(event.clickCount);
-    if (!drag_target->live_in(*root)) drag_target->reset();
-    if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
-        // A recognizer can only claim on this release (a double-tap reaches
-        // `ended` on the SECOND release), by which point the press was already
-        // delivered — the widget is mid-gesture. Dropping the up here leaves
-        // that bracket open: Knob::on_mouse_down fired on_gesture_begin and
-        // enabled relative-mouse mode, and only on_mouse_up clears them, so the
-        // host keeps beginEdit open with no endEdit and the DAW holds an
-        // automation touch. Close it before bailing.
-        auto* handoff_target = drag_target->live_in(*root);
+void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event, pulp::view::Point pt,
+                          pulp::view::ViewCapture* drag_target,
+                          pulp::view::HostDragCoalescer* coalescer) {
+    try {
+        using namespace pulp::view::mac_geometry;
+        if (!root)
+            return;
+        // A release must never reach a handler before the motion that preceded it,
+        // and must never swallow it. Flush FIRST — ahead of the gesture-yield check
+        // below — so every consumer sees the same order regardless of which path
+        // claims the release. A widget whose gesture protocol rejects a terminal
+        // that arrives without its preceding motion then fails loudly rather than
+        // silently.
+        if (coalescer)
+            coalescer->flush_frame(pulp_plugin_drag_deliverer(root, drag_target));
+        pulp::view::MouseEvent gesture_event;
+        gesture_event.position = pt;
+        gesture_event.window_position = pt;
+        gesture_event.button = pulp::view::MouseButton::left;
+        gesture_event.modifiers = modifiers_from_ns_flags(event.modifierFlags);
+        gesture_event.is_down = false;
+        gesture_event.phase = pulp::view::MousePhase::release;
+        gesture_event.click_count = static_cast<int>(event.clickCount);
+        if (!drag_target->live_in(*root))
+            drag_target->reset();
+        if (pulp::view::should_yield_to_gesture(*root, gesture_event)) {
+            // A recognizer can only claim on this release (a double-tap reaches
+            // `ended` on the SECOND release), by which point the press was already
+            // delivered — the widget is mid-gesture. Dropping the up here leaves
+            // that bracket open: Knob::on_mouse_down fired on_gesture_begin and
+            // enabled relative-mouse mode, and only on_mouse_up clears them, so the
+            // host keeps beginEdit open with no endEdit and the DAW holds an
+            // automation touch. Close it before bailing.
+            auto* handoff_target = drag_target->live_in(*root);
+            drag_target->reset();
+            pulp::view::deliver_gesture_handoff(*root, handoff_target, pt,
+                                                modifiers_from_ns_flags(event.modifierFlags),
+                                                static_cast<int>(event.clickCount));
+            return;
+        }
+        auto* live_target = drag_target->live_in(*root);
+        if (!live_target)
+            return;
+        // Routing — legacy up, modern release, the W3C pointerup bubble, and the
+        // same-target click-suppression decision — is the portable
+        // pulp::view::deliver_mouse_up, shared with the standalone host. The plug-in
+        // host fires the click SYNCHRONOUSLY (no deferred liveness token) and has no
+        // global-click report; both differences live entirely in this fire_click
+        // hook, so the routing stays identical across hosts.
+        pulp::view::MouseUpHost up_host;
+        up_host.fire_click = [](const std::function<void()>& click_handler,
+                                const std::string& /*clicked_id*/, uint16_t /*mods*/) {
+            if (click_handler)
+                click_handler();
+        };
+        pulp::view::deliver_mouse_up(*root, live_target, pt,
+                                     modifiers_from_ns_flags(event.modifierFlags),
+                                     static_cast<int>(event.clickCount), up_host);
+        if (auto* target = drag_target->live_in(*root))
+            set_ns_cursor_for_style(target->cursor());
         drag_target->reset();
-        pulp::view::deliver_gesture_handoff(
-            *root, handoff_target, pt, modifiers_from_ns_flags(event.modifierFlags),
-            static_cast<int>(event.clickCount));
-        return;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw: %s\n", e.what());
+        if (drag_target)
+            drag_target->reset();
+    } catch (...) {
+        std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw (unknown)\n");
+        if (drag_target)
+            drag_target->reset();
     }
-    auto* live_target = drag_target->live_in(*root);
-    if (!live_target) return;
-    // Routing — legacy up, modern release, the W3C pointerup bubble, and the
-    // same-target click-suppression decision — is the portable
-    // pulp::view::deliver_mouse_up, shared with the standalone host. The plug-in
-    // host fires the click SYNCHRONOUSLY (no deferred liveness token) and has no
-    // global-click report; both differences live entirely in this fire_click
-    // hook, so the routing stays identical across hosts.
-    pulp::view::MouseUpHost up_host;
-    up_host.fire_click = [](const std::function<void()>& click_handler,
-                            const std::string& /*clicked_id*/, uint16_t /*mods*/) {
-        if (click_handler) click_handler();
-    };
-    pulp::view::deliver_mouse_up(*root, live_target, pt,
-                                 modifiers_from_ns_flags(event.modifierFlags),
-                                 static_cast<int>(event.clickCount), up_host);
-    if (auto* target = drag_target->live_in(*root))
-        set_ns_cursor_for_style(target->cursor());
-    drag_target->reset();
-  } catch (const std::exception& e) {
-    std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw: %s\n", e.what());
-    if (drag_target) drag_target->reset();
-  } catch (...) {
-    std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw (unknown)\n");
-    if (drag_target) drag_target->reset();
-  }
 }
 
 void pulp_plugin_wheel(pulp::view::View* root, pulp::view::Point pt, NSEvent* event) {
@@ -624,17 +722,6 @@ static bool pulp_editor_should_hold_keyboard(pulp::view::View* root) {
     return root != nullptr && pulp::view::root_overlay_owns_keyboard(*root);
 }
 
-static bool pulp_is_navigation_key(pulp::view::KeyCode key,
-                                   std::uint16_t modifiers) {
-    using K = pulp::view::KeyCode;
-    constexpr std::uint16_t kHostChordModifiers = pulp::view::kModCtrl |
-        pulp::view::kModAlt | pulp::view::kModMeta | pulp::view::kModCmd;
-    if ((modifiers & kHostChordModifiers) != 0) return false;
-    return key == K::left || key == K::right || key == K::up ||
-        key == K::down || key == K::home || key == K::end_ ||
-        key == K::enter || key == K::escape;
-}
-
 bool pulp_plugin_event_has_private_use_function_character(NSEvent* event) {
     NSString* chars = event.charactersIgnoringModifiers;
     if (!chars) chars = event.characters;
@@ -650,64 +737,79 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event,
     try {
         if (!root)
             return false;
-        // Escape first, before any focus gate. A plugin editor hands the keyboard
-        // back to the DAW whenever nothing in its tree holds focus — which is the
-        // ordinary state while a `<View overlay>` popover is open — so an Escape
-        // path placed after the early-out below can never run, and such a popover
-        // had no keyboard dismissal inside a DAW at all. The ordering (modal, open
-        // ComboBox dropdown, generalized overlay) is the shared policy's, not this
-        // host's.
-        if (pulp::view::mac_geometry::key_code_from_ns(event.keyCode) ==
-            pulp::view::KeyCode::escape) {
-            if (pulp::view::route_escape_to_active_overlay(
-                    *root, pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags),
-                    event.isARepeat) != pulp::view::OverlayEscapeResult::none) {
-                root->request_repaint();
-                return true;
-            }
-        }
-        // Only dispatch to a focused widget that belongs to THIS editor's tree —
-        // never another open plugin editor's focused field (focused_input_ is
-        // process-global).
-        auto* fv = pulp_focus_under_root(root);
-        // Native editing and bounded navigation take priority. With neither
-        // focused, the caller offers document shortcuts, then forwards any key
-        // JavaScript did not consume back to the host.
-        if (!fv)
-            return false;
-        const auto handled_focus = pulp_focus_identity(fv);
 
-        pulp::view::KeyEvent ke;
-        ke.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
-        ke.modifiers = pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
-        ke.is_down = true;
-        ke.is_repeat = event.isARepeat;
-
-        // A navigation-capable control borrows the DAW keyboard only for this
-        // narrow allowlist. Everything else returns to the host unchanged.
-        // Text input takes the richer IME/editing path below and always has
-        // priority when it owns this root's focus slot.
-        if (!fv->accepts_text_input() && fv->accepts_navigation_input()) {
-            if (!pulp_is_navigation_key(ke.key, ke.modifiers))
-                return false;
-            const bool consumed = fv->on_key_event(ke) || script_keys.dispatch(root, event);
-            if (consumed)
-                root->request_repaint();
-            return consumed;
-        }
-
-        if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
-            if (te->has_marked_text()) {
+        pulp::view::PluginKeyOffer offer;
+        offer.key.key = pulp::view::mac_geometry::key_code_from_ns(event.keyCode);
+        offer.key.modifiers =
+            pulp::view::mac_geometry::modifiers_from_ns_flags(event.modifierFlags);
+        offer.key.is_down = true;
+        offer.key.is_repeat = event.isARepeat;
+        // AppKit's 0xF700-0xF8FF private-use range is how a function / arrow key
+        // arrives; such a key carries no character, so a text field that declines
+        // it has genuinely not consumed it.
+        offer.is_function_key = pulp_plugin_event_has_private_use_function_character(event);
+        // The root's global hook belongs to -performKeyEquivalent: on this
+        // platform: AppKit offers every key-down there BEFORE -keyDown:, so
+        // consulting it from both would fire an editor-wide shortcut — and the
+        // script keydown listener behind it — twice for one press. So
+        // `offer_global_hook` stays off here.
+        //
+        // An open IME composition owns the key outright: the policy must not run
+        // on_key_event underneath a half-composed character.
+        if (auto* composing = pulp_focus_under_root(root)) {
+            if (auto* te = dynamic_cast<pulp::view::TextEditor*>(composing);
+                te && te->has_marked_text()) {
                 [host interpretKeyEvents:@[ event ]];
                 root->request_repaint();
                 return true;
             }
         }
 
-        // Navigation / editing commands first (arrows, backspace, enter, escape, …).
-        // The return value tells us whether the editor already handled this key as a
-        // command — if so it must NOT also be inserted as text.
-        const bool consumed = fv->on_key_event(ke);
+        // Remember who held focus BEFORE the policy runs: on_key_event can commit
+        // and blur (Return on a single-line field), and the identity check below
+        // is what tells a moved focus apart from a stale pointer.
+        auto* fv = pulp_focus_under_root(root);
+        const bool text_focused = fv != nullptr && fv->accepts_text_input();
+        const bool nav_focused = fv != nullptr && !text_focused && fv->accepts_navigation_input();
+        const auto handled_focus = pulp_focus_identity(fv);
+
+        // Who consumes this key is the shared policy's answer, not this host's:
+        // overlay Escape, then the focused view. Anything neither claimed is
+        // the DAW's.
+        const auto disposition = pulp::view::route_plugin_key(*root, offer);
+
+        if (!text_focused) {
+            if (disposition == pulp::view::PluginKeyDisposition::forward_to_host) {
+                // A scripted document that claimed navigation focus answers last,
+                // through the per-press de-duplicating dispatcher (AppKit offers
+                // one press to both performKeyEquivalent: and keyDown:).
+                if (nav_focused)
+                    return script_keys.dispatch(root, event);
+                // A view holding the focus slot while claiming NEITHER keyboard
+                // is not why this editor has the key: acceptsFirstResponder is
+                // false for it, so the DAW already owns the keyboard and there
+                // is nothing to hand back. Forwarding anyway would still move
+                // first responder to the host view, and THAT ends the widget's
+                // focus out from under it — a custom control that uses Escape
+                // for its own purpose would lose focus on the first press.
+                if (fv != nullptr) {
+                    root->request_repaint();
+                    return true;
+                }
+                return false;
+            }
+            root->request_repaint();
+            return true;
+        }
+
+        // ── A text field holds focus ────────────────────────────────────────
+        // A key it declined that cannot be text — a Command/Control chord, a
+        // function key — is NOT consumed. Reporting it handled here is what
+        // makes host shortcuts and F-key transport die for as long as a type-in
+        // happens to be open, which reads as "the plugin ate my keyboard".
+        if (disposition == pulp::view::PluginKeyDisposition::forward_to_host)
+            return false;
+
         fv = pulp_focus_under_root(root);
         if (!handled_focus.matches(fv)) {
             root->request_repaint();
@@ -715,22 +817,17 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event,
         }
 
         // Text insertion is offered to AppKit's text input manager so dead keys and
-        // IME composition reach insertText:/setMarkedText:. Command/control chords
-        // stay on the key-command path above and must not also insert text.
-        if (!consumed) {
-            const NSEventModifierFlags cmd_ctrl =
-                NSEventModifierFlagCommand | NSEventModifierFlagControl;
-            if ((event.modifierFlags & cmd_ctrl) == 0 && ke.key != pulp::view::KeyCode::tab &&
-                !pulp_plugin_event_has_private_use_function_character(event)) {
-                [host interpretKeyEvents:@[ event ]];
-                fv = pulp_focus_under_root(root);
-                if (!handled_focus.matches(fv)) {
-                    root->request_repaint();
-                    return true;
-                }
+        // IME composition reach insertText:/setMarkedText:. Tab is excluded because
+        // it is the focus-release affordance below, never a literal tab character.
+        if (disposition == pulp::view::PluginKeyDisposition::insert_as_text &&
+            offer.key.key != pulp::view::KeyCode::tab) {
+            [host interpretKeyEvents:@[ event ]];
+            fv = pulp_focus_under_root(root);
+            if (!handled_focus.matches(fv)) {
+                root->request_repaint();
+                return true;
             }
         }
-
         // Focus-release affordance — hand the keyboard back to the DAW. While a text
         // field holds focus the editor view is first responder, so transport keys
         // (Space, R, …) go to the field, not the host. Escape blurs a focused TEXT
@@ -741,9 +838,9 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event,
         // that uses Escape for its own purpose) is never force-blurred out from
         // under itself. (pulp: AU hosted-view key routing.)
         if (auto* te = dynamic_cast<pulp::view::TextEditor*>(fv)) {
-            const bool blur = (ke.key == pulp::view::KeyCode::escape) ||
-                              (!te->multi_line && (ke.key == pulp::view::KeyCode::tab ||
-                                                   ke.key == pulp::view::KeyCode::enter));
+            const bool blur = (offer.key.key == pulp::view::KeyCode::escape) ||
+                              (!te->multi_line && (offer.key.key == pulp::view::KeyCode::tab ||
+                                                   offer.key.key == pulp::view::KeyCode::enter));
             if (blur) {
                 auto* current = pulp_plugin_cancel_marked_text_and_revalidate(root, host, te);
                 if (current) {
@@ -999,6 +1096,9 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     // reads it rather than re-hit-testing a root-space point it cannot convert
     // back once a design viewport is in effect.
     BOOL _pointerOverNativeChild;
+    // Holds raw AppKit drag motion between presented frames. Ordering rules and
+    // the fail-safe live in the shared type, not here.
+    pulp::view::HostDragCoalescer _dragCoalescer;
 }
 
 - (BOOL)isFlipped { return NO; }
@@ -1124,12 +1224,31 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     [self setNeedsDisplay:YES];
     [self syncKeyFocus];
 }
+
+- (void)setCoalescePointerInput:(BOOL)enabled {
+    _dragCoalescer.set_frame_driver_running(
+        enabled ? true : false, pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
+}
+- (void)flushCoalescedPointerInput {
+    _dragCoalescer.flush_frame(pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
+}
+- (void)discardCoalescedPointerInput {
+    _dragCoalescer.discard();
+}
+- (BOOL)coalescingPointerInput {
+    return _dragCoalescer.frame_driver_running() ? YES : NO;
+}
 - (void)mouseDragged:(NSEvent*)event {
-    pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget);
-    [self setNeedsDisplay:YES];
+    // One dirty signal per HELD RUN, not per raw AppKit event: -setNeedsDisplay:
+    // both marks the surface dirty and re-opens the display link's dispatch
+    // gate, and one request per frame is enough for both.
+    if (pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget,
+                               &_dragCoalescer))
+        [self setNeedsDisplay:YES];
 }
 - (void)mouseUp:(NSEvent*)event {
-    pulp_plugin_mouse_up(self.rootView, event, [self localPoint:event], &_dragTarget);
+    pulp_plugin_mouse_up(self.rootView, event, [self localPoint:event], &_dragTarget,
+                         &_dragCoalescer);
     [self setNeedsDisplay:YES];
     [self syncKeyFocus];  // a tap may have entered (or left) type-in
 }
@@ -1364,6 +1483,9 @@ public:
         // shared token is flipped first so any block already in flight on the
         // main queue (or a reentrant one) bails out before touching `this`.
         link_state_->alive.store(false, std::memory_order_release);
+        // Drop held motion rather than delivering it: the drag target may
+        // already be unmounted, and a teardown is not a frame.
+        [view_ discardCoalescedPointerInput];
         stop_render_link();
         root_.set_frame_clock(nullptr);
         root_.set_plugin_view_host(nullptr);
@@ -1457,6 +1579,11 @@ public:
     void start_render_link() {
         if (!render_link_.open(&render_link_callback, this)) return;
         render_link_.resume();
+        // A frame driver is now running, so drag motion may be HELD until the
+        // next presented frame. The opt-in belongs to "a driver is running",
+        // not to this function — see the flush in render_link_callback, which
+        // is the only thing that releases it.
+        [view_ setCoalescePointerInput:YES];
         if (const float nominal = render_link_.nominal_dt(); nominal > 0.0f) {
             frame_pump_.set_nominal_dt(nominal);
         }
@@ -1465,6 +1592,11 @@ public:
         frame_pump_.suspend();
     }
     void stop_render_link() {
+        // Clear the opt-in (which flushes) BEFORE the link stops, so held
+        // motion is delivered by something that is still running and a later
+        // sample takes the immediate fail-safe path instead of joining a batch
+        // nobody is left to release.
+        [view_ setCoalescePointerInput:NO];
         frame_pump_.suspend();
         render_link_.stop();   // Stop is synchronous: no callback after this
     }
@@ -1508,6 +1640,32 @@ public:
                     state->queued.store(false, std::memory_order_release);
                     return;
                 }
+                // Release drag motion held since the last frame, BEFORE the
+                // idle pump and before the frame decision below.
+                //
+                // Before the idle pump: a JS rAF callback that reads pointer
+                // state must see THIS frame's position, not the previous one.
+                //
+                // Before the frame decision: a frame that decides not to paint
+                // must still release input, or latency grows without bound
+                // while the editor is visually idle.
+                //
+                // DETECTION. Reaching this block means a frame driver is
+                // running, so the view must be holding motion. If it is not,
+                // coalescing has silently degraded to per-event dispatch — the
+                // fail-safe restores the OLD behaviour, so there is no crash,
+                // no red test and no log, and the only symptom is the old frame
+                // rate. That is how the standalone host lost it once; state the
+                // invariant out loud instead of rediscovering it.
+                if (self->view_ && ![self->view_ coalescingPointerInput]) {
+                    static std::once_flag warned_no_coalescing;
+                    std::call_once(warned_no_coalescing, [] {
+                        std::fprintf(stderr, "[plugin-view-host] pointer coalescing is OFF "
+                                             "while a frame driver is running — drag motion "
+                                             "will dispatch per event.\n");
+                    });
+                }
+                [self->view_ flushCoalescedPointerInput];
                 // Copy the idle callback locally so running it can't free the
                 // std::function out from under its own call; then drain
                 // host-automation listeners to the UI (bind_parameter widgets
@@ -1774,6 +1932,30 @@ private:
 // when the pointer MOVES and never because content moved under a still pointer,
 // so this is what makes a hovered region change update the cursor immediately.
 - (void)refreshHoverCursor;
+
+/// Opt IN to per-presented-frame drag coalescing, and out again.
+///
+/// Default NO, and that default is load bearing: a host that does not drive
+/// -flushCoalescedPointerInput every frame would strand held motion forever,
+/// so holding is enabled only by a host that has committed to flushing. Both
+/// plug-in hosts run a CVDisplayLink, so both opt in while their link runs.
+/// Turning it off flushes.
+- (void)setCoalescePointerInput:(BOOL)enabled;
+
+/// Deliver drag motion held since the last presented frame. The host MUST call
+/// this once per presented frame, BEFORE the frame's render decision: a frame
+/// that decides not to paint must still release input, or latency grows without
+/// bound while the editor is visually idle. Safe when nothing is held.
+- (void)flushCoalescedPointerInput;
+
+/// Drop held motion WITHOUT delivering it. For a host tearing down mid-gesture,
+/// where the drag target may already be gone.
+- (void)discardCoalescedPointerInput;
+
+/// Whether the opt-in above is currently set. A host's frame path asserts this
+/// out loud: the fail-safe makes a silently-lost opt-in look correct and merely
+/// slow, which is the hardest failure of this mechanism to notice.
+- (BOOL)coalescingPointerInput;
 @end
 
 @implementation PulpGpuPluginView {
@@ -1788,6 +1970,9 @@ private:
     // reads it rather than re-hit-testing a root-space point it cannot convert
     // back once a design viewport is in effect.
     BOOL _pointerOverNativeChild;
+    // Holds raw AppKit drag motion between presented frames. Ordering rules and
+    // the fail-safe live in the shared type, not here.
+    pulp::view::HostDragCoalescer _dragCoalescer;
 }
 
 // Match the CPU host's bounded responder ownership and consume-or-forward routing.
@@ -1921,12 +2106,34 @@ private:
               << [[exception name] UTF8String] << "\n";
   }
 }
+
+- (void)setCoalescePointerInput:(BOOL)enabled {
+    _dragCoalescer.set_frame_driver_running(
+        enabled ? true : false, pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
+}
+- (void)flushCoalescedPointerInput {
+    _dragCoalescer.flush_frame(pulp_plugin_drag_deliverer(self.rootView, &_dragTarget));
+}
+- (void)discardCoalescedPointerInput {
+    _dragCoalescer.discard();
+}
+- (BOOL)coalescingPointerInput {
+    return _dragCoalescer.frame_driver_running() ? YES : NO;
+}
 - (void)mouseDragged:(NSEvent*)event {
-    pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget);
-    if (self.rootView) self.rootView->request_repaint();
+    // One repaint per HELD RUN, not per raw AppKit event. It marks the editor
+    // dirty AND keeps the display link's dispatch gate open, so a flush is
+    // guaranteed to come; issuing one per sample is the O(events) cost this
+    // exists to remove.
+    if (pulp_plugin_mouse_drag(self.rootView, event, [self localPoint:event], &_dragTarget,
+                               &_dragCoalescer)) {
+        if (self.rootView)
+            self.rootView->request_repaint();
+    }
 }
 - (void)mouseUp:(NSEvent*)event {
-    pulp_plugin_mouse_up(self.rootView, event, [self localPoint:event], &_dragTarget);
+    pulp_plugin_mouse_up(self.rootView, event, [self localPoint:event], &_dragTarget,
+                         &_dragCoalescer);
     if (self.rootView) self.rootView->request_repaint();
     [self syncKeyFocus];
 }
@@ -2102,6 +2309,9 @@ public:
         // (mirrors the #2502 deferred-click token).
         alive_->store(false, std::memory_order_release);
         root_.set_plugin_view_host(nullptr);
+        // Drop held motion rather than delivering it: the drag target may
+        // already be unmounted, and a teardown is not a frame.
+        [metal_view_ discardCoalescedPointerInput];
         stop_display_link();
         // CRITICAL: clear pointTransform BEFORE the host C++ object is freed.
         // The block captures `this` by raw pointer; if the DAW retains the
@@ -2594,6 +2804,28 @@ private:
             dispatch_async(dispatch_get_main_queue(), ^{
                 @autoreleasepool {
                     if (!alive->load(std::memory_order_acquire)) return;
+                    // Release drag motion held since the last frame, BEFORE the
+                    // idle pump and before the frame decision below.
+                    //
+                    // Before the idle pump: a JS rAF callback that reads pointer
+                    // state must see THIS frame's position, not the previous one.
+                    //
+                    // Before the frame decision: a frame that decides not to
+                    // paint must still release input, or latency grows without
+                    // bound while the editor is visually idle.
+                    //
+                    // DETECTION — see the identical note in
+                    // MacPluginViewHost::render_link_callback. The fail-safe
+                    // makes a lost opt-in look correct and merely slow.
+                    if (self->metal_view_ && ![self->metal_view_ coalescingPointerInput]) {
+                        static std::once_flag warned_no_coalescing;
+                        std::call_once(warned_no_coalescing, [] {
+                            std::fprintf(stderr, "[plugin-gpu-host] pointer coalescing is OFF "
+                                                 "while a frame driver is running — drag motion "
+                                                 "will dispatch per event.\n");
+                        });
+                    }
+                    [self->metal_view_ flushCoalescedPointerInput];
                     // Copy the idle callback locally so running it can't free the
                     // std::function out from under its own call; pump idle
                     // (scripted poll: async results, timers, rAF) FIRST so any
@@ -2681,6 +2913,11 @@ private:
             bind_to_window_screen();
             return;
         }
+        // A frame driver is now running, so drag motion may be HELD until the
+        // next presented frame. The opt-in belongs to "a driver is running",
+        // not to this function — see the flush in display_link_callback, which
+        // is the only thing that releases it.
+        [metal_view_ setCoalescePointerInput:YES];
         display_link_.open(display_link_callback, this);
         bind_to_window_screen();
         display_link_.resume();
@@ -2707,6 +2944,11 @@ private:
     }
 
     void stop_display_link() {
+        // Clear the opt-in (which flushes) BEFORE the link stops, so held
+        // motion is delivered by something that is still running and a later
+        // sample takes the immediate fail-safe path instead of joining a batch
+        // nobody is left to release.
+        [metal_view_ setCoalescePointerInput:NO];
         frame_pump_.suspend();
         display_link_.stop();
     }

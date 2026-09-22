@@ -17,6 +17,14 @@
       "review_after": "2026-12-15",
       "evidence": "Repeated empty PIPESTATUS reports in zsh SSH sessions",
       "regression": "tools/scripts/test_shell_portability_check.py"
+    },
+    {
+      "id": "build-test-pipeline-status-masking",
+      "owner": "Pulp CI",
+      "introduced": "2026-09-18",
+      "review_after": "2026-12-17",
+      "evidence": "M3/M5 sessions reported successful builds after cmake/ctest output was piped to tail or another final consumer",
+      "regression": "tools/scripts/test_shell_portability_check.py"
     }
   ]
 }

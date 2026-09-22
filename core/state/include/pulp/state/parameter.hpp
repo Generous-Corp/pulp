@@ -336,6 +336,40 @@ struct ParamInfo {
     /// rules this field cannot override.
     bool modulatable = true;
 
+    /// Hide this parameter from the host's generic parameter list.
+    ///
+    /// A hidden parameter still exists, still serializes, and is still
+    /// reachable from the plugin's own editor — it simply does not clutter the
+    /// host's automation lanes and generic UI. Use it for internal or
+    /// developer-facing controls.
+    ///
+    /// Opt-in: defaults false, so every existing parameter stays visible.
+    /// `is_hidden_param()` additionally refuses to hide a bypass control,
+    /// which hosts require to remain reachable.
+    bool hidden = false;
+
+    /// Advertise this parameter as readable but not host-writable.
+    ///
+    /// The canonical case is a meter-style value the Processor publishes for
+    /// display (output level, gain reduction, detected pitch): the host should
+    /// render it, never drive it. A read-only parameter is also not
+    /// automatable, because automation is a host write.
+    ///
+    /// Opt-in: defaults false, so every existing parameter stays writable.
+    /// `is_read_only_param()` additionally refuses a bypass control and a
+    /// trigger, both of which are defined by the host writing to them.
+    bool read_only = false;
+
+    /// Whether the host may record and play back automation for this
+    /// parameter.
+    ///
+    /// Unlike `hidden` and `read_only`, the *attribute* here is the negative
+    /// one — authors opt in to NON-automatable by declaring false — so the
+    /// default of true keeps every existing parameter automatable exactly as
+    /// it is today. `is_automatable_param()` additionally refuses automation
+    /// for a read-only parameter.
+    bool automatable = true;
+
     /// True when this parameter should auto-reset to its default after each
     /// process block — i.e. it is an explicit trigger or carries the `Reset`
     /// designation (which is defined to behave as a trigger).
@@ -433,7 +467,56 @@ inline bool is_modulatable_param(const ParamInfo& info) {
         return false;
     if (is_discrete_param(info))
         return false;
+    // A host may not offset a value it may not write. Without this the CLAP
+    // adapter would advertise READONLY and MODULATABLE on the same parameter.
+    if (info.read_only)
+        return false;
     return !info.auto_resets();
+}
+
+/// Whether the host should omit this parameter from its generic parameter
+/// list and automation lanes.
+///
+/// Refuses to hide a bypass control: hosts surface bypass in their own chrome
+/// and a plugin that hides it becomes un-bypassable from the host.
+///
+/// This is the single predicate every format adapter consults, so one
+/// declaration projects identically to VST3 `kIsHidden`, CLAP
+/// `CLAP_PARAM_IS_HIDDEN` and the AU expert-mode hint.
+inline bool is_hidden_param(const ParamInfo& info) {
+    if (!info.hidden)
+        return false;
+    return !is_bypass_param(info);
+}
+
+/// Whether the host may read this parameter but must not write it.
+///
+/// Refuses a bypass control and a trigger: both are defined by the host
+/// writing to them, so a read-only one could never be operated.
+///
+/// This is the single predicate every format adapter consults, so one
+/// declaration projects identically to VST3 `kIsReadOnly`, CLAP
+/// `CLAP_PARAM_IS_READONLY` and AU's withheld `IsWritable`.
+inline bool is_read_only_param(const ParamInfo& info) {
+    if (!info.read_only)
+        return false;
+    if (is_bypass_param(info))
+        return false;
+    return !info.auto_resets();
+}
+
+/// Whether the host may record and play back automation for this parameter.
+///
+/// Automation is a host write, so a parameter the host must not write is not
+/// automatable regardless of how `automatable` was declared.
+///
+/// This is the single predicate every format adapter consults, so one
+/// declaration withholds VST3 `kCanAutomate`, CLAP
+/// `CLAP_PARAM_IS_AUTOMATABLE` and AU's writability together.
+inline bool is_automatable_param(const ParamInfo& info) {
+    if (!info.automatable)
+        return false;
+    return !is_read_only_param(info);
 }
 
 /// Thread-safe atomic parameter value for lock-free audio/UI communication.

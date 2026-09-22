@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "event_id": "20260921-sdf-shading-substrate",
+  "kind": "change",
+  "created_at": "2026-09-21T22:00:00Z",
+  "slices": [
+    "canvas-kernel",
+    "retained-ui-kernel"
+  ],
+  "rationale": "Pulp's existing SkSL widget path already compiles and paints custom shaders, but agents cannot provide named uniforms, an explicit damage reach, or a reusable geometry chart. This additive slice carries validated scalar and vector uniform values plus reach through the retained widget host, and adds the Skia SDF chart contract with arc-length, signed cross-stroke distance, side, tangent, pixel scale, and validity. It preserves existing shader and fallback behavior, does not change generic framework authority or add an alternate renderer, and has no counterpart Vellum commit to backport. The capability is Pulp-only because Pulp still builds and ships this implementation independently.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-canvas SDF chart shader",
+    "pulp-test-widget-bridge",
+    "pulp-test-widget-bridge-animation"
+  ],
+  "disposition": "pulp-only"
+}

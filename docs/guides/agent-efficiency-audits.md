@@ -7,7 +7,8 @@ real defects without adding noise. Retire a rule when its evidence disappears;
 do not preserve it merely because it is already installed.
 
 The current shell portability checks cover two silent zsh hazards: unbraced
-`$name:path` expansions, and Bash-only `${PIPESTATUS[...]}` in zsh sessions.
+`$name:path` expansions, and Bash-only `${PIPESTATUS[...]}` in zsh sessions;
+they also flag build/test pipeline status masking.
 Run them with:
 
 ```sh
@@ -19,9 +20,24 @@ repository-local Codex/Claude PreToolUse hooks use that advisory mode, so a
 command typed directly by an agent receives the same warning as a tracked
 script. It follows `PULP_AGENT_SHELL` or `SHELL` (`zsh`/`bash`) and stays
 silent for unknown shells, so a valid Bash command is not reported as a zsh
-defect. It is quote-aware and
-does not treat single-quoted query data as shell syntax. The hooks always
+defect. It is quote-aware for quoted data and does not treat quoted query or
+log text as shell syntax. The hooks always
 return success; the regression gate and the user's shell remain authoritative.
+
+The checker also catches a narrower reporting failure: a `cmake --build` or
+`ctest` command whose result is sent through a final output consumer such as
+`tail`, `head`, `grep`, `sed`, `awk`, or `tee`. Without `pipefail`, that
+consumer's zero exit code can make a failed build or test run look successful;
+this was observed in recent M3/M5 agent sessions. The advisory points to two
+small repairs: enable `set -o pipefail` immediately before the pipeline, or capture Bash
+`${PIPESTATUS[0]}` / zsh `${pipestatus[1]}` on the immediately following line
+before running another command. It recognizes an immediately preceding or
+same-line `pipefail` and the direct status-capture pattern, so it does not nag
+about a pipeline
+whose producer status is being preserved. It intentionally does not attempt
+to prove arbitrary shell control flow, and it does not flag unrelated command
+output filters. Prefer retaining the full build/test log and filtering it only
+after the command's status has been recorded when a short summary is useful.
 
 Recent M5 evidence included a zsh `${PIPESTATUS[0]}` test that surfaced as
 `unknown condition: -eq`, and `$base:core/...` / `$base:test/...` expansions
@@ -63,3 +79,49 @@ The recommended audit prompt is:
 > merge-queue delays, permission loops, and false human blockers. Do not export
 > transcript text or secrets. Recommend implementation only when the pattern
 > appears in at least three independent root families and has a clear owner.
+
+## Current next-goal slices
+
+The Rust-native `pulp build` path now uses the same governed-build owner as the
+source checkout's Shipyard lane. In a source checkout it invokes
+`tools/ci/governed-build.sh`, which owns TartCI lease admission, heartbeat, and
+release; in a generated or consumer checkout it applies the existing tier-0
+memory/CPU bound and honors an inherited `PULP_BUILD_JOBS` share. Explicit
+`-j`/`--parallel` values are caps, never permission to exceed the host share,
+and are removed from the raw CMake invocation. Native and WAM/WCLAP builds use
+the same planner and preserve child exit codes. This reuses the existing
+governor rather than creating a second lease implementation.
+
+The M3/M5 Shipyard handoff wedge is evidence-only for now. Pulp does not own
+the canonical `GEN-*` validator, and changing `auto_handoff` before that
+upstream validator is fixed would recreate unmanaged PRs. The bounded evidence
+and canary requirements live in
+`planning/friction/2026-09-18-shipyard-workstream-validator-evidence.md`.
+
+The Rust-native orchestrators also reject one high-cost form of stale build
+reuse: a configured `CMakeCache.txt` whose `CMAKE_HOME_DIRECTORY` names a
+different checkout. M5 sessions repeatedly showed the adjacent failure class
+(CMake source-root and generator mismatches, followed by missing generated Dawn
+headers) when agents reused or copied build directories. The Rust check is
+deliberately narrower than a cache fingerprint: canonical/symlink-equivalent
+roots pass; a missing cache or absent legacy metadata remains non-gating; an
+explicit root mismatch stops before CMake/CTest and prints the exact
+reconfigure/removal command. It covers native, trace, WAM, WCLAP, and `pulp
+test` build directories without silently deleting or repairing anything.
+
+This is an owner-local guard, not a second `pulp doctor`, Shipyard receipt, or
+runner authority. Review it on 2026-12-19 against a three-month M3/M5 sample:
+retain only if it catches real wrong-root reuse with no matching-path false
+positives and negligible preflight cost; retire it if the evidence disappears
+or the canonical C++ producer makes it redundant.
+
+The M5 release-lane incident is recorded as a measured future experiment, not
+another queue checker. The existing off-fleet `queue_age_watchdog.py` remains
+the owner for queue stalls. A possible additive INFO annotation would require
+all of the following before implementation: the exact `Release CLI` workflow
+and Darwin matrix job is currently queued past threshold, the effective
+dedicated route is resolved through the real variable precedence, and a
+timestamped TartCI/assignment receipt proves fallback capacity. API errors,
+empty JIT census, old service history, or an online-but-busy runner must yield
+unknown/no finding. The annotation must not unset variables, reroute, dispatch,
+cancel, retry, create a second issue, or change required-check status.
