@@ -10,6 +10,7 @@
 #include <thread>
 #include <limits>
 #include <vector>
+#include <cmath>
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
@@ -22,6 +23,7 @@
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkImageInfo.h"
+#include "include/effects/SkImageFilters.h"
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
@@ -981,6 +983,85 @@ TEST_CASE("analytic SDF feather modes render finite chart coverage",
     }
 #else
     SUCCEED("Skia feather probes require PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("analytic SDF feather tracks a Gaussian blur edge",
+          "[canvas][sdf][shader][feather][measurement]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int kSize = 64;
+    constexpr float kSigma = 1.0f;
+    constexpr float kRingRadius = 22.5f;
+    constexpr float kRingHalfWidth = 7.5f;
+    auto make_surface = [] {
+        return SkSurfaces::Raster(SkImageInfo::MakeN32Premul(kSize, kSize));
+    };
+    auto analytic = make_surface();
+    auto blurred = make_surface();
+    REQUIRE(analytic != nullptr);
+    REQUIRE(blurred != nullptr);
+
+    SkiaCanvas analytic_canvas(analytic->getCanvas());
+    Canvas::SDFStyle style;
+    style.arc_start = 0.0f;
+    style.arc_sweep = 6.28318530718f;
+    style.inner_radius = 0.5f;
+    style.feather_sigma = kSigma;
+    REQUIRE(analytic_canvas.draw_sdf_shape_with_shader(
+        Canvas::SDFShape::flat_arc, 0, 0, kSize, kSize, style,
+        "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }", {}));
+
+    SkPaint blur_paint;
+    blur_paint.setImageFilter(SkImageFilters::Blur(kSigma, kSigma,
+                                                   SkTileMode::kClamp, nullptr));
+    auto* blur_canvas = blurred->getCanvas();
+    blur_canvas->clear(SK_ColorTRANSPARENT);
+    blur_canvas->saveLayer(nullptr, &blur_paint);
+    SkPathBuilder ring_builder;
+    ring_builder.addCircle(kSize * 0.5f, kSize * 0.5f,
+                           kRingRadius + kRingHalfWidth);
+    ring_builder.addCircle(kSize * 0.5f, kSize * 0.5f,
+                           kRingRadius - kRingHalfWidth,
+                           SkPathDirection::kCCW);
+    SkPath ring = ring_builder.detach();
+    SkPaint ring_paint;
+    ring_paint.setColor(SK_ColorWHITE);
+    ring_paint.setAntiAlias(true);
+    blur_canvas->drawPath(ring, ring_paint);
+    blur_canvas->restore();
+
+    SkPixmap analytic_pixels;
+    SkPixmap blur_pixels;
+    REQUIRE(analytic->peekPixels(&analytic_pixels));
+    REQUIRE(blurred->peekPixels(&blur_pixels));
+    double analytic_error = 0.0;
+    double blur_error = 0.0;
+    int samples = 0;
+    for (int y = 1; y < kSize - 1; ++y) {
+        for (int x = 1; x < kSize - 1; ++x) {
+            const float dx = static_cast<float>(x) - kSize * 0.5f;
+            const float dy = static_cast<float>(y) - kSize * 0.5f;
+            const float distance = std::abs(std::sqrt(dx * dx + dy * dy) - kRingRadius)
+                                   - kRingHalfWidth;
+            const float expected = 0.5f * std::erfc(distance /
+                                                     (kSigma * 1.41421356237f));
+            const float a = SkColorGetA(analytic_pixels.getColor(x, y)) / 255.0f;
+            const float b = SkColorGetA(blur_pixels.getColor(x, y)) / 255.0f;
+            analytic_error += std::abs(a - expected);
+            blur_error += std::abs(b - expected);
+            ++samples;
+        }
+    }
+    analytic_error /= samples;
+    blur_error /= samples;
+    INFO("analytic MAE=" << analytic_error << ", SkImageFilters::Blur MAE="
+                          << blur_error);
+    // The rasterized shader is slightly closer to the ideal Gaussian profile
+    // than SkImageFilters::Blur at this one-pixel sample grid.
+    REQUIRE(analytic_error < 0.04);
+    REQUIRE(analytic_error <= blur_error + 0.01);
+#else
+    SUCCEED("Skia feather measurement requires PULP_HAS_SKIA");
 #endif
 }
 
