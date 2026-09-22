@@ -151,6 +151,22 @@ containment stay identical to CLAP/VST3/AUv2/AAX.
 - `implementorValueProvider` reads current values back from the store.
 - `implementorStringFromValueCallback` delegates to
   `ParamInfo::to_string` when provided, otherwise a `%.2f` fallback.
+- `flags` is no longer the hard-coded `IsWritable | IsReadable`. It is derived
+  per parameter from the shared predicates `state::is_hidden_param` /
+  `is_read_only_param` / `is_automatable_param`, using the **same AU flag
+  mapping as the v2 adapter** (`au_v2_common.cpp` documents why each flag was
+  chosen): read-only withholds `IsWritable` and adds `MeterReadOnly`, hidden
+  adds the `ExpertMode` display hint, non-automatable adds `NonRealTime`. AU has
+  no literal hidden/readonly/automatable triple, so `ExpertMode` in particular
+  is a hint a host may ignore — do not describe it as hiding the parameter.
+
+  Keep the two AU adapters' mappings identical: they are separate code (this
+  tree vs `fill_parameter_info`) reading one model, and the whole point of the
+  shared predicates is that a plugin's parameters describe themselves the same
+  way in v2 and v3. Test: `test/test_au_param_visibility.mm` asserts both.
+  Worth knowing for the next flag: this was a `core/state` gap, not an AU one —
+  VST3 and CLAP could not express these either, because `ParamInfo` had no
+  field, so the fix was one model change rather than three adapter patches.
 
 `__weak` capture + `strongSelf` null-check pattern is deliberate —
 Obj-C blocks on `AUParameterTree` must not retain the audio unit.
