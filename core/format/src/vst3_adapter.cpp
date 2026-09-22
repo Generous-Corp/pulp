@@ -1820,8 +1820,8 @@ void PulpVst3Processor::process_wire_buffers(
                     // be in-bounds and non-null.
                     const auto idx = static_cast<std::size_t>(ch);
                     if (!f64_input_scratch_.empty()) {
-                        auto& silent = f64_input_scratch_[
-                            idx < f64_input_scratch_.size() ? idx : 0];
+                        auto& silent =
+                            f64_input_scratch_[idx < f64_input_scratch_.size() ? idx : 0];
                         std::fill_n(silent.begin(), num_samples, 0.0f);
                         input_ptrs_[ch] = silent.data();
                     } else {

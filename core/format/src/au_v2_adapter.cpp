@@ -587,11 +587,10 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // and fails closed, exactly as the output side does.
     const bool input_silent = inBuffer.mNumberBuffers == 0;
     const bool valid_input =
-        input_silent ||
-        (detail::audio_buffer_list_shape_matches(&inBuffer, expected_input_buffers,
-                                                 input_channels_per_buffer) &&
-         detail::audio_buffer_list_has_storage(&inBuffer, inFramesToProcess,
-                                               input_format.mBytesPerFrame));
+        input_silent || (detail::audio_buffer_list_shape_matches(&inBuffer, expected_input_buffers,
+                                                                 input_channels_per_buffer) &&
+                         detail::audio_buffer_list_has_storage(&inBuffer, inFramesToProcess,
+                                                               input_format.mBytesPerFrame));
     const bool valid_output = detail::audio_buffer_list_shape_matches(
                                   &outBuffer, expected_output_buffers,
                                   output_channels_per_buffer) &&

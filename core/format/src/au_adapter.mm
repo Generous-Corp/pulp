@@ -1191,15 +1191,15 @@ struct ScopedAuV3HostWriting {
                 // run DSP over it.
                 if (!silent_pull &&
                     (!pulp::format::detail::audio_buffer_list_shape_matches(inputAbl, inChans) ||
-                     !pulp::format::detail::audio_buffer_list_has_storage(
-                         inputAbl, frameCount, sizeof(float)))) {
+                     !pulp::format::detail::audio_buffer_list_has_storage(inputAbl, frameCount,
+                                                                          sizeof(float)))) {
                     return failClosed();
                 }
                 for (UInt32 i = 0; i < inChans; ++i) {
-                    bridge->input_ptrs[i] =
-                        silent_pull ? bridge->input_storage.data() +
-                                          static_cast<std::size_t>(i) * frameCount
-                                    : static_cast<const float*>(abl.mBuffers[i].mData);
+                    bridge->input_ptrs[i] = silent_pull
+                                                ? bridge->input_storage.data() +
+                                                      static_cast<std::size_t>(i) * frameCount
+                                                : static_cast<const float*>(abl.mBuffers[i].mData);
                 }
                 input_view = pulp::audio::BufferView<const float>(
                     bridge->input_ptrs, inChans, frameCount);
