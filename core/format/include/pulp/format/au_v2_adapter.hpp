@@ -351,10 +351,6 @@ private:
     boundary::LatencyCompensatedBypass bypass_;
     std::vector<const float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
-    // Adapter-owned zero input for AU hosts that publish a silent pull block
-    // with null mData. Stateful effects must still process that zero block to
-    // emit recursive tails; storage is allocated during Initialize().
-    std::vector<float> silent_input_storage_;
 
     // Previous-block transport snapshot used to derive change flags on
     // `ProcessContext`. Default-constructed so the first process() call

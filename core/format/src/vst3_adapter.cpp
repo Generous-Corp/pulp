@@ -1809,9 +1809,24 @@ void PulpVst3Processor::process_wire_buffers(
                 if (src) {
                     input_ptrs_[ch] = src;
                 } else {
-                    auto& silent = f64_input_scratch_[static_cast<std::size_t>(ch)];
-                    std::fill_n(silent.begin(), num_samples, 0.0f);
-                    input_ptrs_[ch] = silent.data();
+                    // The f32 path does not clamp in_channels to the scratch
+                    // width (only the f64 path above does), and the scratch is
+                    // sized to the PREPARED input width — which is narrower
+                    // than the host width whenever a strict mono Processor is
+                    // accepted on a stereo host bus. Index it defensively and
+                    // reuse channel zero's zeros for any surplus host channel:
+                    // the Processor view is clamped to the prepared width, so a
+                    // surplus channel is never read, but its pointer must still
+                    // be in-bounds and non-null.
+                    const auto idx = static_cast<std::size_t>(ch);
+                    if (!f64_input_scratch_.empty()) {
+                        auto& silent = f64_input_scratch_[
+                            idx < f64_input_scratch_.size() ? idx : 0];
+                        std::fill_n(silent.begin(), num_samples, 0.0f);
+                        input_ptrs_[ch] = silent.data();
+                    } else {
+                        input_ptrs_[ch] = nullptr;
+                    }
                 }
             }
         }

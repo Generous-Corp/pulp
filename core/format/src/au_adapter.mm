@@ -1179,18 +1179,27 @@ struct ScopedAuV3HostWriting {
                 reinterpret_cast<AudioBufferList*>(&abl));
             if (status == noErr) {
                 auto* inputAbl = reinterpret_cast<AudioBufferList*>(&abl);
+                // Declaring zero buffers is a pull source publishing an
+                // explicitly silent block: a signal, not storage to validate.
+                // The pre-zeroed adapter scratch stands in for it so a
+                // stateful Processor still sees an explicit zero input.
                 const bool silent_pull = inputAbl->mNumberBuffers == 0;
+                // Anything else is a declared active main input, and both its
+                // shape and its backing storage must be real. A buffer the
+                // source declared but left null or undersized is a malformed
+                // render, not an invitation to substitute adapter scratch and
+                // run DSP over it.
                 if (!silent_pull &&
-                    !pulp::format::detail::audio_buffer_list_shape_matches(inputAbl, inChans)) {
+                    (!pulp::format::detail::audio_buffer_list_shape_matches(inputAbl, inChans) ||
+                     !pulp::format::detail::audio_buffer_list_has_storage(
+                         inputAbl, frameCount, sizeof(float)))) {
                     return failClosed();
                 }
                 for (UInt32 i = 0; i < inChans; ++i) {
-                    auto& buffer = abl.mBuffers[i];
-                    const bool usable =
-                        buffer.mData && buffer.mDataByteSize >= frameCount * sizeof(float);
-                    bridge->input_ptrs[i] = usable ? static_cast<const float*>(buffer.mData)
-                                                   : bridge->input_storage.data() +
-                                                         static_cast<std::size_t>(i) * frameCount;
+                    bridge->input_ptrs[i] =
+                        silent_pull ? bridge->input_storage.data() +
+                                          static_cast<std::size_t>(i) * frameCount
+                                    : static_cast<const float*>(abl.mBuffers[i].mData);
                 }
                 input_view = pulp::audio::BufferView<const float>(
                     bridge->input_ptrs, inChans, frameCount);

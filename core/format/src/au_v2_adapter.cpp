@@ -500,10 +500,6 @@ OSStatus PulpAUEffect::Initialize()
     // it up front turns the first render / reconfig resize into a no-op realloc.
     input_ptrs_.reserve(static_cast<std::size_t>(Input(0).GetStreamFormat().mChannelsPerFrame));
     output_ptrs_.reserve(static_cast<std::size_t>(Output(0).GetStreamFormat().mChannelsPerFrame));
-    silent_input_storage_.assign(
-        static_cast<std::size_t>(Input(0).GetStreamFormat().mChannelsPerFrame) *
-            GetMaxFramesPerSlice(),
-        0.0f);
 
     runtime::log_info("AU v2: initialized with {} channels at {} Hz",
                       GetNumberOfChannels(), GetSampleRate());
@@ -584,19 +580,24 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         ? UInt32{1} : input_format.mChannelsPerFrame;
     const UInt32 output_channels_per_buffer = output_noninterleaved
         ? UInt32{1} : output_format.mChannelsPerFrame;
-    // A silent AU pull may legally leave input mData null (or publish zero
-    // buffers). Shape is still checked when buffers are present; storage is
-    // supplied from silent_input_storage_ below. Output storage remains strict.
+    // Declaring zero input buffers is a host publishing an explicitly silent
+    // block: a signal, not storage to validate. Any buffer the host does
+    // declare is a declared active input, so both its shape and its backing
+    // storage must be real — a null or undersized mData is a malformed render
+    // and fails closed, exactly as the output side does.
     const bool input_silent = inBuffer.mNumberBuffers == 0;
-    const bool valid_input_shape =
-        input_silent || detail::audio_buffer_list_shape_matches(&inBuffer, expected_input_buffers,
-                                                                input_channels_per_buffer);
+    const bool valid_input =
+        input_silent ||
+        (detail::audio_buffer_list_shape_matches(&inBuffer, expected_input_buffers,
+                                                 input_channels_per_buffer) &&
+         detail::audio_buffer_list_has_storage(&inBuffer, inFramesToProcess,
+                                               input_format.mBytesPerFrame));
     const bool valid_output = detail::audio_buffer_list_shape_matches(
                                   &outBuffer, expected_output_buffers,
                                   output_channels_per_buffer) &&
         detail::audio_buffer_list_has_storage(
             &outBuffer, inFramesToProcess, output_format.mBytesPerFrame);
-    if (!valid_input_shape || !valid_output) {
+    if (!valid_input || !valid_output) {
         detail::zero_audio_buffer_list(&outBuffer);
         ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
         processor_->set_sidechain(nullptr);
@@ -622,20 +623,11 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     input_ptrs_.resize(in_channels);
     output_ptrs_.resize(out_channels);
 
-    const auto silent_channel = [&](UInt32 i) -> const float* {
-        const std::size_t offset = static_cast<std::size_t>(i) * GetMaxFramesPerSlice();
-        return offset < silent_input_storage_.size() ? silent_input_storage_.data() + offset
-                                                     : nullptr;
-    };
+    // in_channels is inBuffer.mNumberBuffers, and validation above proved every
+    // declared buffer carries at least inFramesToProcess frames of storage, so
+    // each pointer here is non-null by construction.
     for (UInt32 i = 0; i < in_channels; ++i) {
-        const bool present = !input_silent && i < inBuffer.mNumberBuffers;
-        const auto* data =
-            present ? static_cast<const float*>(inBuffer.mBuffers[i].mData) : nullptr;
-        const auto usable = data && inBuffer.mBuffers[i].mDataByteSize >=
-                                        inFramesToProcess * input_format.mBytesPerFrame;
-        input_ptrs_[i] = usable ? data : silent_channel(i);
-        if (!usable && input_ptrs_[i])
-            std::fill_n(const_cast<float*>(input_ptrs_[i]), inFramesToProcess, 0.0f);
+        input_ptrs_[i] = static_cast<const float*>(inBuffer.mBuffers[i].mData);
     }
     for (UInt32 i = 0; i < out_channels; ++i) {
         output_ptrs_[i] = static_cast<float*>(outBuffer.mBuffers[i].mData);
