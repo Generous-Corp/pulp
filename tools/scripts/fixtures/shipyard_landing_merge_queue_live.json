@@ -1,0 +1,39 @@
+{
+  "_comment": "Captured read-only with `shipyard landing --json` (shipyard 0.207.0) from Generous-Corp/pulp on 2026-09-22, then trimmed to the fields decision probes read (merge_queue, strict, enqueue). The shapes and values are real; decisions_contract.py --mode probe evaluates the contract's probed rows against it.",
+  "schema_version": 1,
+  "repo": "Generous-Corp/pulp",
+  "base": "main",
+  "merge_queue": {
+    "verdict": {
+      "verdict": "present",
+      "value": {
+        "ruleset_name": "main-merge-queue",
+        "ruleset_id": 19431100,
+        "enforcement": "active",
+        "grouping_strategy": "ALLGREEN",
+        "max_entries_to_merge": 5,
+        "max_entries_to_build": 3,
+        "min_entries_to_merge": 1,
+        "merge_method": "MERGE",
+        "check_response_timeout_minutes": 120,
+        "observed_by": [
+          "rulesets",
+          "graphql_merge_queue"
+        ]
+      }
+    },
+    "disagreements": []
+  },
+  "strict": {
+    "verdict": {
+      "verdict": "present",
+      "value": true
+    },
+    "implication": "Strict is ON and a merge queue is live. Every merge makes every other open pull request `behind`, so merging one at a time is a treadmill: each landing forces a full-gate revalidation of the rest. Enqueue instead and let the queue batch them."
+  },
+  "enqueue": {
+    "action": "enqueue",
+    "command": "gh pr merge <number> --auto --merge",
+    "rationale": "A merge queue is live on this branch and uses MERGE. Enabling auto-merge adds the pull request to the queue; the queue builds and merges batches of up to 5 entries. Do not merge directly, and do not pass a method other than --merge: the queue's method is the one the repository's downstream automation was built around."
+  }
+}

@@ -19,7 +19,13 @@ Asserts:
     interpreter that is present and executable but fails every invocation (a
     lapsed Xcode licence makes /usr/bin/python3 exit 69) must be rejected;
   * with no capable interpreter the failure is LOUD and names the remedy;
-  * the candidate list has not drifted from the hook script's.
+  * the candidate list has not drifted from the hook script's;
+  * `--mode probe` confirms the probed rows against a checked-in, real
+    `shipyard landing --json` capture, and FAILS (never passes) on a missing
+    path, an UNKNOWN verdict, a bool/int confusion, or a row that claims the
+    opposite of the observation: the stale-row class that once left row 11
+    saying the queue was blocked months after it went live;
+  * malformed probes fail `validate`.
 
 Pure stdlib; no Catch2, no build. Run directly or via ctest.
 """
@@ -39,6 +45,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CHECKER = REPO_ROOT / "tools" / "scripts" / "decisions_contract.py"
 CONTRACT = REPO_ROOT / ".agents" / "contract.toml"
 HINT_HOOK = REPO_ROOT / "hooks" / "scripts" / "decisions-contract-hint.sh"
+LANDING_FIXTURE = (REPO_ROOT / "tools" / "scripts" / "fixtures"
+                   / "shipyard_landing_merge_queue_live.json")
 
 import decisions_contract as dc  # noqa: E402  (same directory)
 
@@ -374,6 +382,81 @@ def test_candidate_list_matches_the_hook() -> None:
               f"(hook={hook_list} checker={dc._PYTHON_CANDIDATES})")
 
 
+_MINIMAL = (
+    '[schema]\nversion = 1\nkind = "pulp.decisions-contract"\n'
+    'config_paths = [".github/workflows/**"]\n\n'
+    '[[decision]]\nid = 11\nlayer = "pulp"\ntags = ["merge-queue"]\n'
+    'title = "t"\nwhy = "w"\ndo_not = "d"\nguards = [".github/workflows/**"]\n'
+)
+
+
+def _probe_contract(td: Path, probe: str) -> Path:
+    path = td / "probe.toml"
+    path.write_text(_MINIMAL + probe + "\n", encoding="utf-8")
+    return path
+
+
+def test_probe_mode() -> None:
+    print("test_probe_mode")
+    landing = json.loads(LANDING_FIXTURE.read_text())
+    check(landing["merge_queue"]["verdict"]["verdict"] == "present",
+          "the landing fixture records a live merge queue (control)")
+
+    proc = run_checker("--mode", "probe", "--landing-json", str(LANDING_FIXTURE))
+    check(proc.returncode == 0,
+          f"shipped probed rows are confirmed by the real capture (rc={proc.returncode}: "
+          f"{proc.stdout}{proc.stderr})")
+    shipped = dc.load_contract(CONTRACT)
+    probed = {d["id"] for d in shipped["decision"] if dc.probes_of(d)}
+    check({11, 17} <= probed, f"rows 11 and 17 carry probes (got {sorted(probed)})")
+    check("confirmed" in proc.stdout and "FAIL" not in proc.stdout,
+          "probe output reports every probe confirmed")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        td = Path(tmp)
+        stale = _probe_contract(td, 'probe = { source = "shipyard-landing", '
+                                    'path = ".merge_queue.verdict.verdict", equals = "absent" }')
+        proc = run_checker("--mode", "probe", "--contract", str(stale),
+                           "--landing-json", str(LANDING_FIXTURE))
+        check(proc.returncode == 1 and "FAIL #11" in proc.stdout,
+              "a row claiming the queue absent fails against a present observation")
+
+        missing = _probe_contract(td, 'probe = { source = "shipyard-landing", '
+                                      'path = ".merge_queue.nope.verdict", equals = "present" }')
+        proc = run_checker("--mode", "probe", "--contract", str(missing),
+                           "--landing-json", str(LANDING_FIXTURE))
+        check(proc.returncode == 1 and "absent from the observation" in proc.stdout,
+              "a missing path FAILS, never passes")
+
+        unknown = dict(landing)
+        unknown["merge_queue"] = {"verdict": {"verdict": "unknown", "reason": "403"}}
+        unknown_path = td / "unknown.json"
+        unknown_path.write_text(json.dumps(unknown), encoding="utf-8")
+        proc = run_checker("--mode", "probe", "--landing-json", str(unknown_path))
+        check(proc.returncode == 1, "an UNKNOWN verdict fails the shipped probes")
+
+        truthy = _probe_contract(td, 'probe = { source = "shipyard-landing", '
+                                     'path = ".merge_queue.verdict.value.min_entries_to_merge", '
+                                     'equals = true }')
+        proc = run_checker("--mode", "probe", "--contract", str(truthy),
+                           "--landing-json", str(LANDING_FIXTURE))
+        check(proc.returncode == 1, "integer 1 does not confirm a row claiming true")
+
+        proc = run_checker("--mode", "probe", "--contract", str(stale))
+        check(proc.returncode == 2, "probe without an observation source exits 2")
+
+        for bad, why in (
+            ('probe = { source = "gh", path = ".a", equals = "x" }', "unknown source"),
+            ('probe = { source = "shipyard-landing", path = "a.b", equals = "x" }', "path without a leading dot"),
+            ('probe = { source = "shipyard-landing", path = ".a..b", equals = "x" }', "empty path segment"),
+            ('probe = { source = "shipyard-landing", path = ".a", equals = ["x"] }', "non-scalar equals"),
+            ('probe = { source = "shipyard-landing", path = ".a" }', "missing equals"),
+            ('probe = []', "empty probe array"),
+        ):
+            proc = run_checker("--mode", "validate", "--contract", str(_probe_contract(td, bad)))
+            check(proc.returncode == 2, f"validate rejects a probe with {why}")
+
+
 def main() -> int:
     test_shipped_contract_is_valid()
     test_surface_matches_and_noops()
@@ -384,6 +467,7 @@ def main() -> int:
     test_runs_on_an_interpreter_without_tomllib()
     test_no_capable_interpreter_fails_loudly()
     test_candidate_list_matches_the_hook()
+    test_probe_mode()
     print()
     if _failures:
         print(f"FAILED: {len(_failures)} assertion(s)")

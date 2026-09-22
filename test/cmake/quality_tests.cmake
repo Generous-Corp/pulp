@@ -807,8 +807,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME decisions-contract-validate COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/decisions_contract.py" --mode validate)
     # Self-test: the read surface (surface/list/validate), the external-contributor
-    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, and
-    # the AGENTS.md + CLAUDE.md pointers.
+    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, the
+    # AGENTS.md + CLAUDE.md pointers, and `--mode probe` against a checked-in
+    # `shipyard landing --json` capture (never the live API).
     add_test(NAME decisions-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_decisions_contract.py")
 
