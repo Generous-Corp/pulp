@@ -4726,6 +4726,10 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
         globalThis.reach = setWidgetShaderReach('knob', 12);
         globalThis.badReach = setWidgetShaderReach('knob', -1);
         globalThis.chart = setWidgetShaderChart('knob', 'half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }');
+        globalThis.feathered = setWidgetShader('knob',
+          'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }',
+          { geometry: { shape: 'flat_arc' }, reach: 0,
+            feather: { sigma: 2, curve: 'gaussian', mode: 'outer' } });
         globalThis.bad = setWidgetShaderUniforms('knob', { tooWide: [1, 2, 3, 4, 5] });
     )");
     REQUIRE(engine.evaluate("set.success").getWithDefault<bool>(false));
@@ -4734,10 +4738,11 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
     REQUIRE(engine.evaluate("reach.success").getWithDefault<bool>(false));
     REQUIRE_FALSE(engine.evaluate("badReach.success").getWithDefault<bool>(true));
     REQUIRE(engine.evaluate("chart.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("feathered.success").getWithDefault<bool>(false));
     REQUIRE_FALSE(engine.evaluate("bad.success").getWithDefault<bool>(true));
     auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
     REQUIRE(knob != nullptr);
-    REQUIRE(knob->shader_reach() == Catch::Approx(12.0f));
+    REQUIRE(knob->shader_reach() == Catch::Approx(6.0f));
     REQUIRE(knob->shader_uniforms().size() == 2);
     REQUIRE_FALSE(knob->chart_shader().empty());
 }
