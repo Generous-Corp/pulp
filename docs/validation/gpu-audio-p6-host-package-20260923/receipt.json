@@ -1,0 +1,171 @@
+{
+  "build": {
+    "build_dir": "/private/tmp/p6-sdk-smoke-build-20260923-clap",
+    "command": "tools/ci/governed-build.sh cmake --build /private/tmp/p6-sdk-smoke-build-20260923-clap --config Release",
+    "exit_code": 0,
+    "log": "/private/tmp/p6-sdk-smoke-build-clap-20260923.log",
+    "log_sha256": "f46949f40c399764302aa5e41e00a98edd638a09731b6df1db679512dee32c9c"
+  },
+  "configure": {
+    "command": "cmake -S tools/validation/sdk-smoke -B /private/tmp/p6-sdk-smoke-build-20260923-clap -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/private/tmp/pulp-sdk-gpu-6640-prefix-runtime-eval.FK7xqK -DPULP_SDK_SMOKE_INCLUDE_AUV3=OFF -DPULP_SDK_SMOKE_REQUIRE_FORMATS=Standalone;CLAP",
+    "detected_formats": [
+      "Standalone",
+      "CLAP",
+      "LV2"
+    ],
+    "log": "/private/tmp/p6-sdk-smoke-configure-clap-20260923.log",
+    "log_sha256": "638bfadbc196c0b47d02c271091d6fb02676c8df03d065e0d280c5bf599218dd",
+    "missing_reason": "Pulp::vst3-sdk and Pulp::ausdk are not exported by this SDK prefix",
+    "missing_requested_formats": [
+      "VST3",
+      "AU",
+      "AUv3"
+    ],
+    "required_formats": [
+      "Standalone",
+      "CLAP"
+    ]
+  },
+  "plugin": {
+    "artifact": "/private/tmp/p6-sdk-smoke-build-20260923-clap/CLAP/PulpSDKSmokeProbe.clap/Contents/MacOS/PulpSDKSmokeProbe",
+    "artifact_sha256": "540c320c1f9588cba4f9136d56d27e57f6d3040d521d9957e8d2be6a98bd610b",
+    "artifact_size_bytes": 40702272,
+    "bundle": "/private/tmp/p6-sdk-smoke-build-20260923-clap/CLAP/PulpSDKSmokeProbe.clap",
+    "bundled_webgpu": "/private/tmp/p6-sdk-smoke-build-20260923-clap/CLAP/PulpSDKSmokeProbe.clap/Contents/MacOS/libwgpu_native.dylib",
+    "bundled_webgpu_sha256": "315e83473e19dcfac60f613bcecb183b7baaadd8c70b59cf9e83addfd49ac5ac",
+    "clap_validator": {
+      "command": "clap-validator validate /private/tmp/p6-sdk-smoke-build-20260923-clap/CLAP/PulpSDKSmokeProbe.clap",
+      "exit_code": 0,
+      "failed": 0,
+      "passed": 15,
+      "skipped": 5,
+      "tests_run": 20,
+      "warning": "scan-time 1614 ms (>100 ms)",
+      "warnings": 1
+    },
+    "codesign_verification": {
+      "command": "codesign --verify --deep --strict /private/tmp/p6-sdk-smoke-build-20260923-clap/CLAP/PulpSDKSmokeProbe.clap",
+      "exit_code": 1,
+      "reason": "development smoke bundle unsigned; not a release-signing result"
+    },
+    "control_shipping_report": "/private/tmp/p6-sdk-smoke-build-20260923-clap/CLAP/PulpSDKSmokeProbe.clap/Contents/MacOS/PulpSDKSmokeProbe.CLAP.control-shipping-report.json",
+    "control_shipping_report_sha256": "4e65e1f38e36f6f49a95de52c986b674071fed647a1b434771927ea1bfe065ce",
+    "control_shipping_verdict": "pass",
+    "format": "CLAP",
+    "otool_rpath": "@rpath/libwgpu_native.dylib; bundled libwgpu_native.dylib present next to CLAP binary",
+    "portable_path_scan": {
+      "consumer_build_tree_paths": "none observed by CMake check",
+      "interpretation": "embedded __FILE__ assertion string from SDK static code; no effect on loader resolution, but release hygiene follow-up",
+      "sdk_source_path_strings": [
+        "/private/tmp/pulp-sdk-gpu-6640/core/format/src/plugin_state_io.cpp"
+      ]
+    },
+    "self_contained_relocatable": "pass (CMake pulp_validate_bundle_relocatable; build log)"
+  },
+  "probes": [
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeAudioIoTimingProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeDesignMdProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeGpuAudioLifecycleProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeGpuAudioProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeHostProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeModalSpecProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokePlaybackProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeSignalCxx20Probe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeSpectralBandMaskProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeSpectralMaskProcessorProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeTimebaseProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeTimelineAgentViewProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeTimelineCxx20Probe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeTimelineProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeUnitDelayProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeWavDecoderProbe"
+    },
+    {
+      "exit_code": 0,
+      "path": "/private/tmp/p6-sdk-smoke-build-20260923-clap/PulpSDKSmokeWavetableAuthoringProbe"
+    }
+  ],
+  "recorded_at_utc": "2026-09-22T23:11:34.488105+00:00",
+  "schema": "dev.pulp.p6.host-package-acceptance@1",
+  "scope": {
+    "does_not_prove": [
+      "realtime scheduling or deadline reliability",
+      "AU/VST3/AUv3 packaging for this prefix",
+      "release signing/notarization",
+      "GPU provider identity under realtime load"
+    ],
+    "proves": [
+      "installed Pulp::gpu-audio/Pulp::render headers and archive linkability",
+      "public GPU transport/lifecycle probes",
+      "installed-SDK pulp_add_plugin CLAP packaging",
+      "bundled WebGPU runtime and @loader_path relocatability",
+      "CLAP host/plugin behavior via clap-validator",
+      "host/state/dsl export probes"
+    ]
+  },
+  "sdk": {
+    "build_type": "Release",
+    "dawn_asset_sha256": "0ebfe03a209ceefe47edfeae70c3cc6c499583b74f35a26140ea55bad7f1e5a9",
+    "gpu_audio_archive": "/private/tmp/pulp-sdk-gpu-6640-prefix-runtime-eval.FK7xqK/lib/libpulp-gpu-audio.a",
+    "gpu_audio_archive_sha256": "199993f67d5abce10ee4a71adf3d0afd6d426d8f4dcacc2abfdfae58e47db291",
+    "prefix": "/private/tmp/pulp-sdk-gpu-6640-prefix-runtime-eval.FK7xqK",
+    "provenance": "development/unmarked (sdk-provenance.json absent; not distribution eligible)",
+    "pulp_config": "/private/tmp/pulp-sdk-gpu-6640-prefix-runtime-eval.FK7xqK/lib/cmake/Pulp/PulpConfig.cmake",
+    "pulp_config_sha256": "4e30fcc649bfb19fdf0fc68b476be5d009bde4d5d6dd6a836f90da5b67711448",
+    "render_archive": "/private/tmp/pulp-sdk-gpu-6640-prefix-runtime-eval.FK7xqK/lib/libpulp-render.a",
+    "render_archive_sha256": "b736fcfa0163681e9b4a9e2f227220b4f4c0b2509151417f2f88cdf006fb01a3"
+  },
+  "source": {
+    "sdk_source_head": "6640de3c0a9e796ca1ccf8993c317ed35696b82f",
+    "sdk_source_worktree": "/private/tmp/pulp-sdk-gpu-6640",
+    "source_head": "b3fe2b511efb6d99a489271e430de8448f89fc5c",
+    "worktree": "/private/tmp/pulp-p6-host-package-20260923"
+  }
+}
