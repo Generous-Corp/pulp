@@ -1596,6 +1596,50 @@ jobs:
           fi
         shell: bash
 
+      - name: Install visual-analysis Python dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Seven ctest registrations import numpy, Pillow or scikit-image and
+          # skip themselves when one of those is missing. A ctest SKIP reads
+          # exactly like a PASS, so a lane that quietly lost a wheel reports
+          # green without running the checks it was built for. Installing the
+          # declared set on every platform that runs ctest keeps the
+          # non-skippable visual-python-deps-present check answerable
+          # everywhere, rather than red on the platforms the install misses.
+          #
+          # The interpreter must be the one CMake configured, not whatever this
+          # shell resolves: ctest invokes Python3_EXECUTABLE, so installing into
+          # a different interpreter would leave every one of those tests
+          # skipping while this step reported success.
+          #
+          # find_package(Python3 COMPONENTS Interpreter) records the interpreter
+          # it resolved in the INTERNAL cache entry _Python3_EXECUTABLE and
+          # leaves the public Python3_EXECUTABLE a normal variable, so the
+          # public name reaches the cache only when a configure passes
+          # -DPython3_EXECUTABLE. The local Shipyard lane passes it; this
+          # workflow does not. Read the internal entry first — it holds the
+          # value the public variable expanded to when test/cmake registered
+          # these tests, which is exactly what ctest launches — and fall back to
+          # the public entry for a configure that pinned one explicitly.
+          cache="$PULP_BUILD_DIR/CMakeCache.txt"
+          py="$(sed -n 's/^_Python3_EXECUTABLE:[^=]*=//p' "$cache" | head -1)"
+          if [ -z "$py" ]; then
+            py="$(sed -n 's/^Python3_EXECUTABLE:[^=]*=//p' "$cache" | head -1)"
+          fi
+          if [ -z "$py" ]; then
+            echo "No Python3 interpreter is recorded in $cache" >&2
+            echo "(looked for _Python3_EXECUTABLE, then Python3_EXECUTABLE)." >&2
+            echo "The visual-analysis tests resolve their interpreter from that cache entry," >&2
+            echo "so installing into any other interpreter would leave them skipping." >&2
+            exit 1
+          fi
+          echo "Installing the declared visual-analysis set into $py"
+          # PEP 668 hosts (Homebrew, Debian) refuse a plain --user install; the
+          # second form is the sanctioned override for those hosts.
+          "$py" -m pip install --user --upgrade -r tools/motion/visual/requirements.txt || \
+            "$py" -m pip install --break-system-packages --user --upgrade -r tools/motion/visual/requirements.txt
+
       - name: Build
         shell: bash
         env:
