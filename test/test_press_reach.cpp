@@ -18,8 +18,8 @@
 // rather than from where the control paints.
 
 #include <catch2/catch_test_macros.hpp>
-#include <pulp/view/press_reach.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/press_reach.hpp>
 #include <pulp/view/view.hpp>
 
 #include <memory>
@@ -36,7 +36,7 @@ using pulp::view::View;
 namespace {
 
 class TestView : public View {
-public:
+  public:
     void paint(pulp::canvas::Canvas&) override {}
 };
 
@@ -58,12 +58,11 @@ TestView* add_child(View& parent, const char* id, pulp::view::Rect bounds) {
     return raw;
 }
 
-}  // namespace
+} // namespace
 
 // ── The instrument resolves, and can report nothing ──────────────────────
 
-TEST_CASE("reach_of_press resolves a press to the control under it",
-          "[view][press-reach]") {
+TEST_CASE("reach_of_press resolves a press to the control under it", "[view][press-reach]") {
     auto root = make_root();
     auto* button = add_child(*root, "close", {893, 73, 32, 32});
     bool fired = false;
@@ -72,7 +71,7 @@ TEST_CASE("reach_of_press resolves a press to the control under it",
     const auto reach = reach_of_press(*root, Point{909, 89});
     REQUIRE(reach.hit == button);
     REQUIRE(reach.handler == button);
-    REQUIRE_FALSE(fired);  // resolution only — a gate must not fire handlers
+    REQUIRE_FALSE(fired); // resolution only — a gate must not fire handlers
 }
 
 TEST_CASE("reach_of_press reports nothing where nothing is — negative control",
@@ -85,8 +84,8 @@ TEST_CASE("reach_of_press reports nothing where nothing is — negative control"
     // answer here is the instrument saying "nothing owns this point" rather
     // than the probe falling off the window.
     const auto reach = reach_of_press(*root, Point{200, 500});
-    REQUIRE(reach.hit == root.get());   // the root itself owns the pixel
-    REQUIRE(reach.handler == nullptr);  // and no click handler resolves there
+    REQUIRE(reach.hit == root.get());  // the root itself owns the pixel
+    REQUIRE(reach.handler == nullptr); // and no click handler resolves there
 }
 
 TEST_CASE("reach_of_press bubbles the context-menu channel to the wrapper",
@@ -105,16 +104,14 @@ TEST_CASE("reach_of_press bubbles the context-menu channel to the wrapper",
     REQUIRE(click.hit == cap);
     REQUIRE(click.handler == nullptr);
 
-    const auto menu =
-        reach_of_press(*root, Point{378, 204}, PressChannel::context_menu);
+    const auto menu = reach_of_press(*root, Point{378, 204}, PressChannel::context_menu);
     REQUIRE(menu.hit == cap);
     REQUIRE(menu.handler == band);
-    REQUIRE(menu.local.y == 4.0f);  // local to the band the handler sits on
+    REQUIRE(menu.local.y == 4.0f); // local to the band the handler sits on
 
     // Negative control on the same instrument: outside the band, the same
     // channel resolves to nothing.
-    const auto away =
-        reach_of_press(*root, Point{900, 204}, PressChannel::context_menu);
+    const auto away = reach_of_press(*root, Point{900, 204}, PressChannel::context_menu);
     REQUIRE(away.handler == nullptr);
 }
 
@@ -134,8 +131,7 @@ TEST_CASE("rect_in_root composes nested offsets", "[view][press-reach]") {
     (void)header;
 }
 
-TEST_CASE("rect_in_root refuses to guess rather than answering wrongly",
-          "[view][press-reach]") {
+TEST_CASE("rect_in_root refuses to guess rather than answering wrongly", "[view][press-reach]") {
     auto root = make_root();
     auto* scaled = add_child(*root, "scaled", {100, 100, 200, 200});
     auto* inner = add_child(*scaled, "inner", {10, 10, 40, 40});
@@ -150,8 +146,7 @@ TEST_CASE("rect_in_root refuses to guess rather than answering wrongly",
 
 // ── The audit, and the defect it exists to catch ────────────────────────
 
-TEST_CASE("audit_press_reach passes a healthy tree, having examined it",
-          "[view][press-reach]") {
+TEST_CASE("audit_press_reach passes a healthy tree, having examined it", "[view][press-reach]") {
     auto root = make_root();
     auto* anchor = add_child(*root, "guide-anchor", {0, 0, 1320, 860});
     auto* panel = add_child(*anchor, "guide-panel", {380, 57, 560, 700});
@@ -160,7 +155,7 @@ TEST_CASE("audit_press_reach passes a healthy tree, having examined it",
 
     const auto audit = audit_press_reach(*root);
     INFO(pulp::view::format_press_reach_audit(audit));
-    REQUIRE(audit.examined == 1);  // a clean audit over 0 targets is a blind one
+    REQUIRE(audit.examined == 1); // a clean audit over 0 targets is a blind one
     REQUIRE(audit.clean());
     (void)panel;
 }
@@ -185,12 +180,12 @@ TEST_CASE("audit_press_reach reports a control sealed off by a 0x0 ancestor",
 
     bool named_the_close_button = false;
     for (const auto& finding : audit.unreachable)
-        if (finding.id == "guide-close") named_the_close_button = true;
+        if (finding.id == "guide-close")
+            named_the_close_button = true;
     REQUIRE(named_the_close_button);
 }
 
-TEST_CASE("audit_press_reach reports a zero-area press target itself",
-          "[view][press-reach]") {
+TEST_CASE("audit_press_reach reports a zero-area press target itself", "[view][press-reach]") {
     auto root = make_root();
     auto* ghost = add_child(*root, "ghost", {400, 400, 0, 0});
     ghost->on_click = [] {};
@@ -260,11 +255,14 @@ TEST_CASE("simulate_context_click opens the menu a right-click should",
     auto* band = add_child(*root, "band-32", {370, 200, 16, 400});
     int opened = 0;
     Point where{-1, -1};
-    band->on_context_menu = [&](Point p) { ++opened; where = p; };
+    band->on_context_menu = [&](Point p) {
+        ++opened;
+        where = p;
+    };
 
     REQUIRE(root->simulate_context_click(Point{378, 300}));
     REQUIRE(opened == 1);
-    REQUIRE(where.x == 8.0f);    // local to the band, not the window
+    REQUIRE(where.x == 8.0f); // local to the band, not the window
     REQUIRE(where.y == 100.0f);
 
     // Negative control on the same instrument and the same tree: a press where

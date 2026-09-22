@@ -89,8 +89,7 @@ struct PressReach {
 ///
 /// `root_pt` is in `root`-local (window) coordinates, the same space the
 /// platform hosts hand to `route_context_press` and `View::simulate_click`.
-PressReach reach_of_press(View& root, Point root_pt,
-                          PressChannel channel = PressChannel::click);
+PressReach reach_of_press(View& root, Point root_pt, PressChannel channel = PressChannel::click);
 
 /// `view`'s painted rect in `root`-local coordinates, or `std::nullopt` when
 /// that cannot be established exactly.
@@ -141,7 +140,9 @@ struct PressReachAudit {
 
     /// True when nothing was found unreachable. Meaningless on its own — a
     /// caller must also require `examined > 0`.
-    bool clean() const { return unreachable.empty(); }
+    bool clean() const {
+        return unreachable.empty();
+    }
 };
 
 /// Tuning for `audit_press_reach`. The defaults audit both channels over the
@@ -169,4 +170,4 @@ PressReachAudit audit_press_reach(View& root, const PressReachOptions& options =
 /// census, including when there are no findings.
 std::string format_press_reach_audit(const PressReachAudit& audit);
 
-}  // namespace pulp::view
+} // namespace pulp::view
