@@ -122,6 +122,7 @@ class GovernedBuildTests(unittest.TestCase):
             ["bash", str(SCRIPT), "sh", "-c",
              'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL '
              'CTEST=$CTEST_PARALLEL_LEVEL '
+             'CARGO=$CARGO_BUILD_JOBS '
              'TARTCI=${PULP_GOVERNED_TARTCI_BIN:-}"'],
             capture_output=True, text=True, check=False, env=env,
         )
@@ -137,6 +138,12 @@ class GovernedBuildTests(unittest.TestCase):
             if tok.startswith("CTEST="):
                 return int(tok.split("=", 1)[1])
         self.fail(f"wrapper never exported CTest parallelism\n{r.stdout}\n{r.stderr}")
+
+    def _cargo_granted(self, r: subprocess.CompletedProcess) -> int:
+        for tok in r.stdout.split():
+            if tok.startswith("CARGO="):
+                return int(tok.split("=", 1)[1])
+        self.fail(f"wrapper never exported Cargo parallelism\n{r.stdout}\n{r.stderr}")
 
     # --- the denial path (the reason this wrapper exists) --------------------
 
@@ -266,11 +273,23 @@ class GovernedBuildTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._granted(r), PROFILE_JOBS, r.stderr)
 
+    def test_requested_lower_cap_never_widens_or_bypasses_lease(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                      STUB_MAX_GRANT=str(PROFILE_JOBS), PULP_BUILD_JOBS="3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), 3, r.stderr)
+
     def test_ctest_parallelism_uses_the_granted_lease_size(self) -> None:
         r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
                       STUB_MAX_GRANT=str(PROFILE_JOBS))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._ctest_granted(r), PROFILE_JOBS, r.stderr)
+
+    def test_cargo_parallelism_uses_the_granted_lease_size(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                      STUB_MAX_GRANT=str(PROFILE_JOBS))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._cargo_granted(r), PROFILE_JOBS, r.stderr)
 
     def test_detected_tartci_path_is_exported_to_validation(self) -> None:
         r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
