@@ -20,6 +20,7 @@
 #include <cstring>
 #include <vector>
 #include <cstdint>
+#include <regex>
 
 #ifdef PULP_HAS_SKIA
 
@@ -467,6 +468,7 @@ float pulpErfc(float x) {
     float e = p * exp(-ax * ax);
     return x >= 0.0 ? e : 2.0 - e;
 }
+
 float pulpFeather(float sd, float sigma, int curve, int mode) {
     float s = max(abs(sigma), 0.0001);
     float coverage = curve == 0
@@ -531,6 +533,41 @@ half4 main(float2 coord) {
 )";
 }
 
+// RuntimeEffect reports diagnostics against the composed source. Keep author
+// feedback stable by translating the two formats SkSL has used in practice
+// ("error: N:" and "line N") back to the author's source line.
+static std::string remap_sksl_author_lines(const std::string& error,
+                                           const std::string& composed,
+                                           const std::string& author) {
+    const auto at = composed.find(author);
+    if (at == std::string::npos || at == 0) return error;
+    const auto prefix = composed.substr(0, at);
+    const auto offset = static_cast<int>(std::count(prefix.begin(), prefix.end(), '\n'));
+    if (offset <= 0) return error;
+
+    auto remap = [offset](const std::string& input, const std::regex& pattern,
+                          bool has_suffix) {
+        std::string output;
+        std::size_t cursor = 0;
+        for (std::sregex_iterator it(input.begin(), input.end(), pattern), end;
+             it != end; ++it) {
+            const auto& match = *it;
+            output.append(input, cursor, static_cast<std::size_t>(match.position()) - cursor);
+            const int line = std::stoi(match[2].str());
+            output += match[1].str();
+            output += std::to_string(std::max(1, line - offset));
+            if (has_suffix) output += match[3].str();
+            cursor = static_cast<std::size_t>(match.position() + match.length());
+        }
+        output.append(input, cursor, std::string::npos);
+        return output;
+    };
+    const std::regex error_line(R"((error:\s*)([0-9]+)(:))");
+    auto mapped = remap(error, error_line, true);
+    const std::regex line_number(R"((\bline\s+)([0-9]+))");
+    return remap(mapped, line_number, false);
+}
+
 std::string Canvas::compile_sdf_chart_sksl(SDFShape shape, const std::string& sksl) {
     if (sksl.empty()) return "Empty shader code";
     if (!sdf_shape_has_chart(shape) &&
@@ -543,7 +580,7 @@ std::string Canvas::compile_sdf_chart_sksl(SDFShape shape, const std::string& sk
                             ? compose_sdf_geometry_shader(SDFShape::flat_arc, sksl)
                             : compose_sdf_chart_shader(sksl);
     auto effect = RuntimeEffectCache::instance().get_or_compile(source, error);
-    return effect ? std::string() : error;
+    return effect ? std::string() : remap_sksl_author_lines(error, source, sksl);
 }
 
 bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
