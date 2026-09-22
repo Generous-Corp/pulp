@@ -169,4 +169,33 @@ if(Python3_Interpreter_FOUND)
         LABELS "motion;visual"
         TIMEOUT 60
     )
+
+    # The one registration in this set that must not skip. Every test above
+    # exits 3 when a declared dependency is absent, and a ctest SKIP is
+    # indistinguishable from a PASS in a green run — so a host that quietly
+    # lost a wheel reports success while the checks it was built for never
+    # execute. This one fails instead, and names the missing distributions.
+    # Deliberately carries no SKIP_RETURN_CODE.
+    add_test(
+        NAME visual-python-deps-present
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/check_visual_python_deps.py
+    )
+    set_tests_properties(visual-python-deps-present PROPERTIES
+        LABELS "motion;visual"
+        TIMEOUT 60
+    )
+
+    # Coverage for the check above. Pure stdlib by construction: this is the
+    # selftest of the one check that must not skip, so it must not acquire a
+    # dependency that could make it skip.
+    add_test(
+        NAME visual-python-deps-selftest
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_check_visual_python_deps.py
+    )
+    set_tests_properties(visual-python-deps-selftest PROPERTIES
+        LABELS "motion;visual"
+        TIMEOUT 60
+    )
 endif()

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260922-pr8698-visual-python-deps-watch",
+  "created_at": "2026-09-22T00:34:31Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record that a CI dependency-presence fix crosses two families' selectors without touching anything either family is about. The three motion visual-analysis ctests all carry SKIP_RETURN_CODE 3 and exit 3 when numpy, Pillow or scikit-image is absent, and a ctest SKIP is indistinguishable from a PASS in a green summary, so a lane that quietly lost a wheel reported success while the checks it was built for never executed. The change installs tools/motion/visual/requirements.txt in the build workflow and adds one registration that deliberately carries no SKIP_RETURN_CODE: it fails and names every missing distribution instead of skipping, with a pure-stdlib selftest beside it so the one check that must not skip cannot itself acquire a dependency that could make it skip. visual-proof-harness is crossed by the two new files tools/scripts/check_visual_python_deps.py and tools/scripts/test_check_visual_python_deps.py under the tools/**/*visual* selector, and by nothing else. design-source-ingest is crossed by exactly one file, test/test_importer_differential_lab.py, under the test/test_import* selector, and by one edit in it that makes its own dependency guard report the same way. No importer, DesignIR schema, browser capture path, renderer, codegen output, fixture, threshold, packaging artifact or Vellum-owned source changes, and no existing test's verdict changes. Registered as watch-only so each family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "visual-python-deps-present",
+    "visual-python-deps-selftest",
+    "python3 -B tools/scripts/test_check_visual_python_deps.py",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

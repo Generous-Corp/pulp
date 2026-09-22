@@ -960,6 +960,58 @@ Note when reasoning about persistence: the required macOS gate is an
 destroyed after one job, so nothing a job writes to `$HOME` — a fetched
 `~/.pulp/tools/...` included — survives into the next run.
 
+## Installing a test's dependencies proves nothing unless one test refuses to skip
+
+The section above says a ctest SKIP reads as a PASS. The corollary bites on the
+other side: *installing* the dependency those tests skip on is also invisible.
+An install step that silently targets the wrong interpreter, or covers less than
+the declared set, exits 0 and leaves every dependent test skipping — so the lane
+reports green twice, once for the install and once for the tests that never ran.
+
+Three things make that failure mode concrete, and the third is the only real fix.
+
+**The interpreter must be the one CMake configured, not the one the shell
+resolves.** ctest launches a Python test through `Python3_EXECUTABLE`, which
+`find_package(Python3 COMPONENTS Interpreter)` baked into the cache at configure
+time. A runner can easily carry several interpreters, and `python3 -m pip
+install` in a workflow step resolves whichever is first on `PATH`. Read the
+cache entry instead and install into that:
+
+```bash
+py="$(sed -n 's/^Python3_EXECUTABLE:[^=]*=//p' "$PULP_BUILD_DIR/CMakeCache.txt" | head -1)"
+```
+
+Fail the step when that comes back empty rather than falling back to `python3`:
+a fallback is exactly the silent no-op this is guarding against. Note also that
+nothing in `build.yml` runs `setup-python`, so the interpreter is the runner's
+own — there is no pinned version to reason from, only the cache entry.
+
+**The declared set is wider than any single skip message admits.** A skip
+message names the dependency its *guard* checked, which is the first guard, not
+the last. The motion visual self-checks guard on Pillow and say so, then call an
+analyzer that imports numpy, Pillow **and** `skimage.metrics.structural_similarity`
+before it will run. Installing what the message named moves them from a Pillow
+skip to a scikit-image skip: still `notrun`, new message, no progress. Install
+from the declared file (`tools/motion/visual/requirements.txt`, which
+`tools/deps/manifest.json` already carries and audits) rather than from a
+hand-listed pair read off a skip line.
+
+**One registration in the set must not be allowed to skip.** Everything above is
+still unfalsifiable on its own — a wrong interpreter and a short dependency list
+both produce a green step. `visual-python-deps-present` exists for that: it
+imports every distribution the requirements file declares, carries **no**
+`SKIP_RETURN_CODE`, fails when any are missing, and names all of them in one run
+rather than one per round trip. It also fails when the requirements file is
+absent or declares nothing, so an emptied file cannot pass it vacuously. Its own
+coverage (`visual-python-deps-selftest`) is deliberately pure stdlib: the
+selftest of the one check that must not skip must not acquire a dependency that
+could make it skip.
+
+The general shape, worth reaching for whenever a lane's health depends on
+something being installed: pair the provisioning step with one non-skippable
+test that asserts the provisioning worked. The install step reports that it ran;
+only the test reports that it landed.
+
 ## A gate that could not RUN must block — `.githooks/pre-push` used to pass it
 
 Every gate script here fails closed on its own: a missing or unreadable config
@@ -1422,6 +1474,19 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    behind a wedged predecessor while capacity was demonstrably draining
    (in-flight runs fell 16 to 10 and other PRs merged). Before blaming the pool,
    check whether **this PR** has more than one live run.
+
+   Two structural details decide whether this state is reachable at all. A
+   **`workflow_dispatch` run is not in the PR's group**: the group keys on
+   `github.ref`, which is `refs/heads/<branch>` for a dispatch but
+   `refs/pull/N/merge` for a `pull_request`, so the two coexist and neither
+   cancels the other. Never read a dispatch run as the squatter, and never let
+   a duplicate-run sweeper treat the pair as duplicates — it would cancel a
+   deliberate manual dispatch. Second, a job guarded `if: always()` **keeps
+   running through a cancellation**, so a workflow that sets
+   `cancel-in-progress` while holding an `always()` job at JOB level can be
+   cancelled and still hold its group until that job ends — which is the wedge
+   itself. Job-level guards in a cancelling workflow use `!cancelled()`;
+   step-level `always()` is unaffected and should stay.
 
    The source fix landed in pulp#8644; the population was far larger than it
    looked from one PR — 46 wedged supersessions across three sampled weeks. The

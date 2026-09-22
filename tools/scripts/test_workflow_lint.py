@@ -204,6 +204,10 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             step,
         )
         self.assertIn(
+            "python3 tools/scripts/test_visual_python_deps_step.py",
+            step,
+        )
+        self.assertIn(
             "python3 tools/scripts/test_build_macos_workflow_dispatch.py",
             step,
         )

@@ -1187,6 +1187,47 @@ here removes a flake without removing any coverage.
 When triaging a red `macos`, `Error: Failed to download` in the brew step is
 therefore no longer a cause — read past it to the build and ctest output.
 
+## The visual-analysis Python dependencies are installed, then proved
+
+`build.yml` installs `tools/motion/visual/requirements.txt` into the
+interpreter CMake configured, in a step that sits between `Configure` and
+`Build` on every platform that runs ctest. It reads `Python3_EXECUTABLE` out of
+`$PULP_BUILD_DIR/CMakeCache.txt` rather than trusting whatever `python3` the
+shell resolves, because ctest launches the visual tests through that cache
+entry. Installing into a different interpreter would leave every one of them
+skipping while the install step reported success, so a missing cache entry
+fails the step outright instead of falling back.
+
+The install is retried with `--break-system-packages` because PEP 668 hosts
+(Homebrew on the self-hosted Macs, Debian on the Linux legs) refuse a plain
+`--user` install.
+
+Seven ctest registrations import `numpy`, `Pillow` or `scikit-image` and skip
+themselves when one is absent. A ctest SKIP is indistinguishable from a PASS in
+a green run, so before this step existed a lane that quietly lost a wheel
+reported success while the checks it was built for never executed. The
+`visual-python-deps-present` ctest closes that hole: it is the one registration
+in the set that deliberately carries no `SKIP_RETURN_CODE`, so an incomplete
+dependency set fails the suite and names the gap.
+
+It reads the declared set from the requirements file rather than restating it,
+so adding a dependency there is enough to have it checked. Note that the
+declared set is wider than any single skip message admits: the two motion
+self-checks guard on Pillow and report only Pillow, but the analyzer they call
+also needs `scikit-image`, so installing `numpy` and `Pillow` alone moves them
+from one skip to another.
+
+Running the suite locally without those wheels now produces one failing test
+with the install command in its output:
+
+```bash
+python3 -m pip install --user -r tools/motion/visual/requirements.txt
+```
+
+`requirements-optional.txt` pins `opencv-python` for full affine estimation.
+The analyzer falls back to a translation-only estimator without it, so it stays
+optional and is not part of the checked set.
+
 ## Lane timeouts — and why a timeout looks like a broken PR
 
 `[targets.<name>] timeout_secs` in `.shipyard/config.toml` bounds how long a
@@ -1484,6 +1525,13 @@ gates actually need, since it still evaluates when an upstream need failed or wa
 skipped. Step-level `always()` is fine and is used deliberately for log upload.
 `tools/scripts/test_build_workflow.py` enforces the job-level rule.
 
+A `workflow_dispatch` run of `build.yml` does **not** share a group with that
+branch's PR runs. The group keys on `github.ref`, which is
+`refs/heads/<branch>` for a dispatch but `refs/pull/<n>/merge` for a
+`pull_request`, so the two coexist and neither cancels the other. Anything that
+sweeps duplicate runs must key on the event as well as the branch, or it will
+cancel a deliberate manual dispatch as a phantom duplicate.
+
 The `classify` job diffs an **event-dependent base**
 (`tools/scripts/resolve_classify_base.py`): a PR diffs
 `github.event.pull_request.base.sha`, a merge group diffs
@@ -1751,7 +1799,11 @@ The alias lane makes that worse than a slow check. It is the **last** job in a
 run and does one terminal jobs-API read, so a starved alias means the run never
 reaches a terminal state, holds its ref's `concurrency` group, and leaves the
 next push's run at `pending` with **zero jobs** — a wedge that survives
-re-pushes and clears only by cancelling the older run by hand.
+re-pushes and clears only by cancelling the older run by hand. Cancel the run
+on the *stale* head, the one that still has jobs: a plain
+`POST /actions/runs/<id>/cancel` returns an empty `{}` either way and will not
+move a run whose jobs were never assigned, so use `.../force-cancel` and read
+the run status back instead of trusting the response.
 
 This is the failure mode decision 4 of [`.agents/contract.toml`](../../.agents/contract.toml)
 already names: *self-hosted runner names are EPHEMERAL, never static; a
