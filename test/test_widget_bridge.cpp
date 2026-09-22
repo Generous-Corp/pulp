@@ -4721,16 +4721,20 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
     WidgetBridge bridge(engine, root, store);
     bridge.load_script(R"(
         createKnob('knob', 'Drive', 0.5);
+        setWidgetShader('knob', 'uniform float gain; uniform float4 tint; half4 main(float2 p) { return half4(gain + tint.x); }');
         globalThis.set = setWidgetShaderUniforms('knob', { gain: 0.75, tint: [1, 0.5, 0.25, 1] });
         globalThis.read = getWidgetShaderUniforms('knob');
         globalThis.reach = setWidgetShaderReach('knob', 12);
         globalThis.badReach = setWidgetShaderReach('knob', -1);
         globalThis.chart = setWidgetShaderChart('knob', 'half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }');
+        globalThis.badName = setWidgetShaderUniforms('knob', { missing: 1 });
+        globalThis.badArity = setWidgetShaderUniforms('knob', { gain: [1, 2] });
+        globalThis.badReserved = setWidgetShaderUniforms('knob', { time: 1 });
+        globalThis.bad = setWidgetShaderUniforms('knob', { tooWide: [1, 2, 3, 4, 5] });
         globalThis.feathered = setWidgetShader('knob',
           'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }',
           { geometry: { shape: 'flat_arc' }, reach: 0,
             feather: { sigma: 2, curve: 'gaussian', mode: 'outer' } });
-        globalThis.bad = setWidgetShaderUniforms('knob', { tooWide: [1, 2, 3, 4, 5] });
     )");
     REQUIRE(engine.evaluate("set.success").getWithDefault<bool>(false));
     REQUIRE(engine.evaluate("read.gain").getWithDefault<double>(0.0) == Catch::Approx(0.75));
@@ -4739,6 +4743,9 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
     REQUIRE_FALSE(engine.evaluate("badReach.success").getWithDefault<bool>(true));
     REQUIRE(engine.evaluate("chart.success").getWithDefault<bool>(false));
     REQUIRE(engine.evaluate("feathered.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("badName.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("badArity.success").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("badReserved.success").getWithDefault<bool>(true));
     REQUIRE_FALSE(engine.evaluate("bad.success").getWithDefault<bool>(true));
     auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
     REQUIRE(knob != nullptr);
