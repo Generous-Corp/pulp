@@ -1802,6 +1802,15 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
 
+Before editing a lane, run `runner_topology_check.py --mode=static` (offline,
+no token). Its `REACHABLE` means *declared* supply from the checked-in
+advertised-labels snapshot, not live service, so a drifted installed profile
+still needs `--mode=report`. Never judge the required gate by its raw variable:
+build.yml swaps `pulp-gate-fast` for an event-class label before dispatch, and
+the static mode projects that for you. A temporary lane value belongs in the
+contract's `overrides` array with an owner and an expiry; an expired override
+fails every mode.
+
 ## `Error: Failed to download` in the required macOS gate is brew, not you
 
 A red `macos` whose log dies between `gpu-provenance-hydration: PASS` and

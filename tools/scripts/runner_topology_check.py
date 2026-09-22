@@ -53,6 +53,9 @@ THREE RUNNER STATES, NOT TWO
 
     python3 tools/scripts/runner_topology_check.py --mode=report   # exit 1 on error
     python3 tools/scripts/runner_topology_check.py --mode=hint     # advisory
+    python3 tools/scripts/runner_topology_check.py --mode=static   # offline:
+        # every lane vs the checked-in advertised-labels snapshot (declared
+        # supply, never live) + routing-override expiry; no network
     python3 tools/scripts/runner_topology_check.py --runners-json fixtures/r.json \
         --variables-json fixtures/v.json --jobs-json fixtures/j.json   # offline
     python3 tools/scripts/runner_topology_check.py \
@@ -77,6 +80,11 @@ from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import workflow_runner_selector_audit  # noqa: E402
+import runner_topology_static as static_audit  # noqa: E402
+
+# Run as a script this module is `__main__`; the static audit resolves it by
+# name, so alias it rather than letting that import load a second copy.
+sys.modules.setdefault("runner_topology_check", sys.modules[__name__])
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONTRACT = HERE / "runner_topology.json"
@@ -109,6 +117,10 @@ class Lane:
     unset_fallback: Any = None
     require_explicit_value: bool = False
     dispatch_only: bool = False
+    # Cites an entry in the contract's `overrides` array when the contracted
+    # value is a deliberate temporary state rather than the steady design.
+    override_id: str | None = None
+    supervisor: str | None = None
 
     @property
     def is_self_hosted(self) -> bool:
@@ -152,6 +164,13 @@ class Contract:
     host_max_runs: int = 900
     host_severity: str = INFO
     host_workflow: str = "build.yml"
+    # Declared-supply inputs for --mode=static. A self-hosted lane whose
+    # supervisor is not covered by the snapshot is reported UNKNOWN, never
+    # judged against registrations that could not have served it anyway.
+    static_snapshot: str | None = None
+    static_covered_supervisors: set[str] = field(default_factory=set)
+    static_default_supervisor: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -214,6 +233,8 @@ def load_contract(path: Path) -> Contract:
             unset_fallback=raw.get("unset_fallback"),
             require_explicit_value=bool(raw.get("require_explicit_value", False)),
             dispatch_only=bool(raw.get("dispatch_only", False)),
+            override_id=raw.get("override_id"),
+            supervisor=raw.get("supervisor"),
         )
         for raw in data.get("lanes", [])
     ]
@@ -236,6 +257,7 @@ def load_contract(path: Path) -> Contract:
                 expect=raw["expect"],
                 unset_fallback=raw.get("unset_fallback"),
             )
+    supply = data.get("static_supply", {}) or {}
     return Contract(
         lanes=lanes,
         github_hosted_labels=set(data.get("github_hosted_labels", [])),
@@ -254,6 +276,10 @@ def load_contract(path: Path) -> Contract:
         host_max_runs=int(host_block.get("max_runs", 900)),
         host_severity=str(host_block.get("severity", INFO)),
         host_workflow=str(host_block.get("workflow", "build.yml")),
+        static_snapshot=supply.get("snapshot"),
+        static_covered_supervisors=set(supply.get("covered_supervisors", [])),
+        static_default_supervisor=supply.get("default_supervisor"),
+        raw=data,
     )
 
 
@@ -1897,14 +1923,68 @@ def render(findings: list[Finding]) -> str:
     return "\n".join(lines)
 
 
+# ── Overrides + static mode ─────────────────────────────────────────────
+
+
+def _iso_date(value: str):
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD, got {value!r}") from exc
+
+
+def override_findings(contract: Contract, today) -> list[Finding]:
+    """Override problems as findings, plus one INFO line per active override.
+
+    Every mode reports these, so an override that outlives its expiry turns
+    the hourly live sweep red as well as the offline audit.
+    """
+    statuses, problems = static_audit.check_overrides(contract.raw, contract, today)
+    findings = [Finding(ERROR, kind, subject, detail)
+                for kind, subject, detail in problems]
+    for st in statuses:
+        findings.append(Finding(
+            INFO, "override", st.subject,
+            f"{st.id}: {json.dumps(st.value)} owned by {st.owner}, since "
+            f"{st.since} ({st.age_days}d), expires {st.expires} "
+            f"({st.days_left}d left)"))
+    return findings
+
+
+def run_static(contract: Contract, contract_path: Path, snapshot_path: Path | None,
+               workflows_dir: Path, repo: str, today, as_json: bool) -> int:
+    if snapshot_path is None:
+        if not contract.static_snapshot:
+            print("runner-topology: --mode=static needs --snapshot or "
+                  "static_supply.snapshot in the contract", file=sys.stderr)
+            return 2
+        snapshot_path = contract_path.resolve().parent / contract.static_snapshot
+    try:
+        snapshot = static_audit.load_snapshot(snapshot_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"runner-topology: snapshot unreadable: {exc}", file=sys.stderr)
+        return 2
+    rows = static_audit.evaluate(contract, snapshot, workflows_dir, repo)
+    statuses, problems = static_audit.check_overrides(contract.raw, contract, today)
+    if as_json:
+        print(static_audit.rows_json(rows, statuses, problems))
+    else:
+        print(static_audit.render_table(rows, snapshot, statuses, problems))
+    return static_audit.exit_code(rows, problems)
+
+
 # ── Entry point ─────────────────────────────────────────────────────────
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--mode", choices=["hint", "report"], default="report",
-                    help="report: exit 1 on error. hint: advisory, always exit 0.")
+    ap.add_argument("--mode", choices=["hint", "report", "static"], default="report",
+                    help="report: exit 1 on error. hint: advisory, always exit 0. "
+                         "static: offline reachability against the checked-in "
+                         "advertised-labels snapshot (declared supply, no network); "
+                         "exit 1 when a required lane is UNSERVED or an override "
+                         "is expired/invalid.")
     ap.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     ap.add_argument("--repo", default=DEFAULT_REPO)
     ap.add_argument("--runners-json", type=Path,
@@ -1925,6 +2005,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="Read-only installed-profile receipt fixture (repeatable).")
     ap.add_argument("--fleet-source-manifest", type=Path,
                     help="Read-only private desired-fleet manifest fixture.")
+    ap.add_argument("--snapshot", type=Path,
+                    help="Advertised-labels snapshot for --mode=static (defaults "
+                         "to the contract's static_supply.snapshot).")
+    ap.add_argument("--today", type=_iso_date,
+                    help="Clock for override expiry (YYYY-MM-DD); tests pin it.")
     ap.add_argument("--json", action="store_true", help="Emit findings as JSON.")
     args = ap.parse_args(argv)
 
@@ -1947,6 +2032,11 @@ def main(argv: list[str] | None = None) -> int:
     workflows_dir = args.workflows_dir or (
         HERE.parent.parent / ".github" / "workflows"
     )
+    today = args.today or datetime.now(timezone.utc).date()
+
+    if args.mode == "static":
+        return run_static(contract, args.contract, args.snapshot, workflows_dir,
+                          args.repo, today, args.json)
 
     offline_inputs = bool(args.runners_json and args.variables_json)
     unread_scopes: list[str] = []
@@ -2009,6 +2099,7 @@ def main(argv: list[str] | None = None) -> int:
 
     findings = check(contract, runners, variables, evidence, workflows_dir,
                      unread_scopes, queued_ages, service_records)
+    findings.extend(override_findings(contract, today))
     if profile_inputs or receipt_inputs or source_manifest:
         findings.extend(
             finding for finding in check_event_class_evidence(

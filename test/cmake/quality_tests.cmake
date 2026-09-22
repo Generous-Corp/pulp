@@ -621,6 +621,12 @@ if(Python3_Interpreter_FOUND)
     # that invariant breaks with no commit involved.
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+    # Offline reachability of every lane against the checked-in
+    # advertised-labels snapshot (declared supply), plus routing-override
+    # validation. The clock is pinned inside the test; live expiry is enforced
+    # by the hourly sweep, never by a ctest that would redden unrelated PRs.
+    add_test(NAME runner-topology-static-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_static.py")
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     add_test(NAME linux-runner-group-selftest COMMAND ${Python3_EXECUTABLE}

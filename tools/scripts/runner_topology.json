@@ -1,5 +1,5 @@
 {
-  "$schema": "Declarative runner-routing contract. Each lane binds a GitHub repo variable (`*_RUNS_ON_JSON`) to the label set it is INTENDED to route to, and to the kind of runner expected to serve it. Consumed by tools/scripts/runner_topology_check.py, which reconciles this file against the LIVE repo variables and LIVE registered runners, plus optional read-only TartCI profile/receipt/private-manifest fixtures. A lane whose labels no runner can satisfy is a routing black hole: jobs queue forever and GitHub reports no error. Editing a repo variable without editing its lane here is drift, and the checker fails on it. Docs: docs/guides/local-ci.md.",
+  "$schema": "Declarative runner-routing contract. Each lane binds a GitHub repo variable (`*_RUNS_ON_JSON`) to the label set it is INTENDED to route to, and to the kind of runner expected to serve it. Consumed by tools/scripts/runner_topology_check.py, which reconciles this file against the LIVE repo variables and LIVE registered runners, plus optional read-only TartCI profile/receipt/private-manifest fixtures. A lane whose labels no runner can satisfy is a routing black hole: jobs queue forever and GitHub reports no error. Editing a repo variable without editing its lane here is drift, and the checker fails on it. `--mode=static` judges every lane offline against `static_supply.snapshot` (declared supply, not live). A lane whose contracted value is a deliberate temporary state cites an `overrides` entry by `override_id`; each override carries id, subject (the variable), value, owner, reason, revert_condition, since and expires (ISO dates), and an expired or dangling override fails every mode. Docs: docs/guides/local-ci.md.",
   "_note_expect": "`expect` records the label set or declared off-switch sentinel the lane is CONTRACTED to use. It is the reviewed artifact: changing a repo variable is only legitimate when this file changes with it. `expect` is not automatically correct — a lane can be contracted to labels nothing serves, which is exactly the failure this checker exists to surface.",
   "github_hosted_labels": [
     "ubuntu-latest",
@@ -18,6 +18,25 @@
   "sentinels": [
     "local-only"
   ],
+  "static_supply": {
+    "snapshot": "fleet_advertised_labels.json",
+    "covered_supervisors": ["tartci-macos-fleet"],
+    "default_supervisor": "tartci-macos-fleet",
+    "_why": "The snapshot lists what each runner registration advertises (labels + the workflow names it mints for), generated from the fleet's checked-in macOS profiles. It says nothing about supply behind other supervisors (the Proxmox Linux pool, the native-Intel Mac mini), so a self-hosted lane declaring one of those is reported UNKNOWN rather than UNSERVED. Lanes that declare no supervisor are tartci macOS fleet lanes."
+  },
+  "overrides": [
+    {
+      "id": "macos-overflow-local-only",
+      "subject": "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
+      "value": "local-only",
+      "owner": "daniel",
+      "reason": "Hosted macos-15 overflow is disabled for cost and control (CLAUDE.md 'Runner priority'); the sentinel keeps saturated required work on the local JIT pool.",
+      "revert_condition": "Hosted overflow is re-approved, or local gate capacity proves insufficient under measured queue age.",
+      "since": "2026-09-05",
+      "expires": "2026-12-04"
+    }
+  ],
+  "_note_overrides": "An override is a reviewed, dated exception, not a lane. `since` is when the lane was contracted to this value (git log -S on this file); `expires` forces a re-decision rather than letting a temporary state become permanent by silence. Renewing is an edit of `expires` with a reason in the commit.",
   "_note_sentinels": "Magic values that mean 'this lane is deliberately switched off', not a label to route to. `build.yml` documents `local-only` as the explicit off switch for macOS overflow — emptiness cannot disable it, because GitHub treats unset and empty identically and the workflow's `||` default re-fills it.",
   "routing_controls": {
     "PULP_LOCAL_MAC_RUNNER_LABEL": {
@@ -138,6 +157,7 @@
       "variable": "PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON",
       "purpose": "macOS build overflow for saturated required work. CONTRACTED OFF: the operative value is the `local-only` sentinel, which pins overflow work to the local pool and is the documented off-switch in build.yml. Hosted `macos-15` overflow stays disabled for cost control (CLAUDE.md), so the sentinel is the intended steady state rather than a deviation from it. UNSETTING the variable is NOT the way to disable this lane: unset restores the `macos-15` hosted fallback recorded in unset_fallback, which is the opposite of the intent. Previously this lane contracted [\"macos-15\"] while the live value was the sentinel, so a severity:required lane sat at a permanent ERROR [drift] for an intended state -- a standing red that teaches readers to skim past the report and lets a genuine drift hide in the noise.",
       "expect": "local-only",
+      "override_id": "macos-overflow-local-only",
       "unset_fallback": [
         "macos-15"
       ],

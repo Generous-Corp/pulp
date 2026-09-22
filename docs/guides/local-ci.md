@@ -2187,6 +2187,9 @@ call to an operator.
 - **`runner-topology-selftest`** (ctest) — the diff-shaped half: contract
   well-formedness and the reconciliation logic. No network, so it runs on every
   PR for free and never adds an API call to the required macOS gate.
+- **`runner-topology-static-selftest`** (ctest) — `--mode=static` on the real
+  contract, workflows, and snapshot: the required gate must read `REACHABLE`,
+  and a typo'd label must read `UNSERVED`.
 
 The checker exits `2` when live state cannot be read, distinct from pass (`0`)
 and violation (`1`), so a missing token scope fails loudly instead of reporting
@@ -2228,6 +2231,50 @@ reload, enable, or inspect a runner. They compare the checked-in TartCI profile,
 its installation receipt, and the private desired-fleet manifest. Keep
 repo-specific labels and host declarations in those Pulp/private inputs; generic
 Shipyard and TartCI code must not grow a second Pulp host table.
+
+### Offline reachability (`--mode=static`)
+
+`--mode=static` answers the diff-shaped half of "can this lane be served" with
+no network: every lane's contracted value (and its `unset_fallback`) is judged
+against `tools/scripts/fleet_advertised_labels.json`, a snapshot of what each
+runner registration advertises, generated from the fleet's checked-in macOS
+profiles (schema `tartci.advertised-labels/v1`). A job is reachable only when
+all three hold: the registration advertises every requested label, it mints
+runners for the job's workflow `name:`, and the repository matches.
+
+```bash
+python3 tools/scripts/runner_topology_check.py --mode=static          # table, exit 1 on a required UNSERVED
+python3 tools/scripts/runner_topology_check.py --mode=static --json
+```
+
+Verdicts: `REACHABLE` (names the host/lane/class that serves it), `UNSERVED`
+(names the labels no registration advertises, or the workflow mismatch),
+`HOSTED`, `SENTINEL`, `UNKNOWN` (workflow name not statically knowable, no
+consuming workflow, or a supervisor the snapshot does not cover, such as the
+Proxmox Linux pool), and `UNDECLARED` (a `*_RUNS_ON_JSON` variable a workflow
+reads with no lane, info only).
+
+Read `REACHABLE` as **declared supply**, never as live service. A host whose
+installed profile has drifted from its checked-in one reads reachable here and
+serves nothing; that is what `--mode=report` exists for. The required macOS
+gate is judged on its *dispatched* label set (build.yml's event-class rewrite,
+via the same `_event_projection` the live checker uses), not the raw variable,
+which still carries a label the event-class registrations deliberately omit.
+Regenerate the snapshot whenever a fleet profile changes lanes, labels, tiers,
+or workflows.
+
+### Routing overrides
+
+A lane whose contracted value is a deliberate temporary state cites an entry in
+`runner_topology.json`'s `overrides` array by `override_id`. Each override
+records `subject` (the variable), `value`, `owner`, `reason`,
+`revert_condition`, `since`, and `expires`. Every mode lists active overrides
+with their age, and fails on an expired override, an override whose subject is
+not a declared lane or routing control, an override whose value no longer
+matches its lane, or a lane citing an override that does not exist. The hourly
+live sweep enforces expiry against the real clock; the ctest pins its clock so
+an expiry date never reddens unrelated PRs. Renewing is an edit of `expires`
+with the reason in the commit.
 
 ### An unset variable is not automatically a gap
 
