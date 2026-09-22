@@ -68,6 +68,18 @@ tools:
     skill: ci
     docs: guides/local-ci.md
 
+  - name: pr-flow-audit
+    path: tools/scripts/pr_flow_audit.py
+    category: test-evidence
+    use_when: A backlog has stopped draining, or before assuming the fleet is starved — classify every open PR as moving, auto-fixable, waiting on a named human, or unknown, and optionally perform the mechanical fixes.
+    invocation: python3 tools/scripts/pr_flow_audit.py [--json] [--fix [--dry-run]] [--unstable-hours N]
+    inputs: Live GitHub state via the `gh`/`ghapp` CLI, plus the base branch's build workflow; `--snapshot` replays a recorded sweep instead.
+    outputs: Every open PR in exactly one bucket with the evidence for it, conflicted-but-green PRs first as the cheapest wins, and a `stalled_count=` handoff line.
+    caveat: Reports where flow has STOPPED; it never certifies health. Step reachability is evaluated against the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix` refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
+    availability: always
+    skill: ci
+    docs: guides/local-ci.md
+
   # ── Visual comparison — the tools the hand-roll incident was about ────────
   - name: fidelity-diff
     path: tools/import-design/fidelity_diff.py
