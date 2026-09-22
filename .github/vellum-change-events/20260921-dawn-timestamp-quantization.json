@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260921-dawn-timestamp-quantization",
+  "kind": "change",
+  "created_at": "2026-09-21T00:00:00Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "Dawn defaults the timestamp_quantization toggle to ON in native builds, not only in Chrome, and it ANDs every resolved timestamp with 0xFFFF0000, truncating each endpoint to a multiple of 65536 ns. The toggle exists to stop untrusted web content constructing a high-resolution timer, which buys a native host running its own shaders in its own process nothing. Measured on the reference machine, the identical workload resolves to 41.67 ns once the toggle is disabled, against a physical GPU jitter floor of roughly 0.3 to 3.6 microseconds, so the reported value was dominated by an artifact 18 to 200 times larger than the signal. The same masking also breaks the zero-sample guard in gpu_render_time.hpp: both endpoints truncate independently, so a frame faster than 65536 ns reports exactly 0 and is discarded as no-sample, which preferentially drops the fast frames and biases the retained value upward. This change adds the toggle to the device descriptor's disabled list when timestamp queries were requested, corrects the header contract comment that described the path as a passthrough, and adds a pure unit-tested seam for the toggle policy. It changes no adapter selection, device creation, generic rendering, presentation, or ownership boundary. Recorded honestly: this is generic rendering-correctness capability that a framework consumer would also want, not a Pulp product specialization. It lands in Pulp because Pulp still builds from its own in-tree implementation and no framework commit exists to backport from; the disposition reflects where the code sits, not a claim that the concern is audio-specific.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "ctest --test-dir build -R GpuRenderTime",
+    "pulp-test-gpu-render-time"
+  ],
+  "disposition": "pulp-only"
+}
